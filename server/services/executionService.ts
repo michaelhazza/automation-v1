@@ -107,7 +107,7 @@ export class ExecutionService {
   async createExecution(
     userId: string,
     organisationId: string,
-    data: { taskId: string; inputData?: unknown }
+    data: { taskId: string; inputData?: unknown; notifyOnComplete?: boolean }
   ) {
     // Verify task is accessible and active
     const [task] = await db
@@ -152,6 +152,7 @@ export class ExecutionService {
         engineType: task.engineType,
         taskSnapshot: task as unknown as Record<string, unknown>,
         isTestExecution: false,
+        notifyOnComplete: data.notifyOnComplete ?? false,
         retryCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),

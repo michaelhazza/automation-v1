@@ -30,6 +30,7 @@ export const executions = pgTable(
     outboundPayload: jsonb('outbound_payload'),         // full payload we sent to the engine (for audit)
     callbackReceivedAt: timestamp('callback_received_at'), // when the engine called us back
     callbackPayload: jsonb('callback_payload'),         // raw payload the engine sent back
+    notifyOnComplete: boolean('notify_on_complete').notNull().default(false), // user opted in to email on completion
     queuedAt: timestamp('queued_at'),                  // when the job was placed on the queue
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
