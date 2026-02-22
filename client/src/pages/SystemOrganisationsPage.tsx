@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User, setActiveOrg } from '../lib/auth';
 
@@ -53,8 +53,12 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
 
   const handleAdminister = (org: Organisation) => {
     setActiveOrg(org.id, org.name);
-    // Store role so the API interceptor picks it up immediately (already set on login, but ensure it)
     navigate('/');
+  };
+
+  const handleViewUsers = (org: Organisation) => {
+    setActiveOrg(org.id, org.name);
+    navigate('/admin/users');
   };
 
   const handleDelete = async (id: string) => {
@@ -72,9 +76,17 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Organisations</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage all organisations on the platform</p>
         </div>
-        <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
-          + Create organisation
-        </button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Link
+            to="/system/users"
+            style={{ padding: '10px 20px', background: '#f8fafc', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500, textDecoration: 'none', display: 'inline-block' }}
+          >
+            System Admins
+          </Link>
+          <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+            + Create organisation
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -131,6 +143,12 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
                 <td style={{ padding: '12px 16px', color: '#64748b', fontSize: 13 }}>{new Date(org.createdAt).toLocaleDateString()}</td>
                 <td style={{ padding: '12px 16px' }}>
                   <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      onClick={() => handleViewUsers(org)}
+                      style={{ padding: '4px 10px', background: '#f0fdf4', color: '#16a34a', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                    >
+                      Users
+                    </button>
                     <button
                       onClick={() => handleAdminister(org)}
                       style={{ padding: '4px 10px', background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}

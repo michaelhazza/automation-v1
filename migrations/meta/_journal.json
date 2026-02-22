@@ -1,1 +1,13 @@
-{"version":"5","dialect":"pg","entries":[]}
+{
+  "version": "5",
+  "dialect": "pg",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1771744831581,
+      "tag": "0000_wandering_firedrake",
+      "breakpoints": true
+    }
+  ]
+}

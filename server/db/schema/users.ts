@@ -18,6 +18,8 @@ export const users = pgTable(
     inviteToken: text('invite_token'),
     inviteExpiresAt: timestamp('invite_expires_at'),
     invitedByUserId: uuid('invited_by_user_id'),
+    passwordResetToken: text('password_reset_token'),
+    passwordResetExpiresAt: timestamp('password_reset_expires_at'),
     lastLoginAt: timestamp('last_login_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),

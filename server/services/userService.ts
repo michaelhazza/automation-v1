@@ -2,7 +2,7 @@ import { eq, and, isNull } from 'drizzle-orm';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { db } from '../db/index.js';
-import { users, permissionGroupMembers } from '../db/schema/index.js';
+import { users, organisations, permissionGroupMembers } from '../db/schema/index.js';
 import { emailService } from './emailService.js';
 import { env } from '../lib/env.js';
 
@@ -50,6 +50,11 @@ export class UserService {
       throw { statusCode: 403, message: 'Cannot assign system_admin role' };
     }
 
+    // system_admin inviting another system_admin must use the dedicated endpoint
+    if (data.role === 'system_admin') {
+      throw { statusCode: 403, message: 'Use the system admin invite endpoint to create system admin accounts' };
+    }
+
     const existing = await db
       .select()
       .from(users)
@@ -58,6 +63,14 @@ export class UserService {
     if (existing.length > 0) {
       throw { statusCode: 409, message: 'User with this email already exists in organisation' };
     }
+
+    // Look up the org name for the invitation email
+    const [org] = await db
+      .select({ name: organisations.name })
+      .from(organisations)
+      .where(eq(organisations.id, organisationId));
+
+    const orgName = org?.name ?? 'your organisation';
 
     const inviteToken = crypto.randomBytes(32).toString('hex');
     const inviteExpiresAt = new Date(Date.now() + env.INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
@@ -71,7 +84,7 @@ export class UserService {
         passwordHash: tempHash,
         firstName: data.firstName ?? '',
         lastName: data.lastName ?? '',
-        role: data.role as 'org_admin' | 'manager' | 'user',
+        role: data.role as 'org_admin' | 'manager' | 'user' | 'client_user',
         status: 'pending',
         inviteToken,
         inviteExpiresAt,
@@ -82,7 +95,7 @@ export class UserService {
       .returning();
 
     try {
-      await emailService.sendInvitationEmail(data.email, inviteToken, organisationId);
+      await emailService.sendInvitationEmail(data.email, inviteToken, orgName);
     } catch (err) {
       console.error('[EMAIL] Failed to send invitation email to', data.email, ':', err instanceof Error ? err.message : 'Unknown error');
     }
