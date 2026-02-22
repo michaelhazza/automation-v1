@@ -69,6 +69,7 @@ export default function Layout({ user, children }: LayoutProps) {
     ...(isSystemAdmin ? [
       { path: '/system/organisations', label: 'Organisations' },
       { path: '/system/users', label: 'System Admins' },
+      { path: '/system/settings', label: 'System Settings' },
     ] : []),
   ];
 

@@ -21,6 +21,7 @@ import permissionGroupsRouter from './routes/permissionGroups.js';
 import executionsRouter from './routes/executions.js';
 import filesRouter from './routes/files.js';
 import systemUsersRouter from './routes/systemUsers.js';
+import systemSettingsRouter from './routes/systemSettings.js';
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use(permissionGroupsRouter);
 app.use(executionsRouter);
 app.use(filesRouter);
 app.use(systemUsersRouter);
+app.use(systemSettingsRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

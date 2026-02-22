@@ -8,3 +8,4 @@ export * from './permissionGroupMembers';
 export * from './permissionGroupCategories';
 export * from './executions';
 export * from './executionFiles';
+export * from './systemSettings';
