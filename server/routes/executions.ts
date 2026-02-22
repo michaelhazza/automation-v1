@@ -8,7 +8,7 @@ const router = Router();
 // Export must be before :id route
 router.get('/api/executions/export', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await executionService.exportExecutions(req.user!.organisationId, {
+    const result = await executionService.exportExecutions(req.orgId!, {
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
       taskId: req.query.taskId as string | undefined,
@@ -25,7 +25,7 @@ router.get('/api/executions/export', authenticate, requireRole('org_admin'), asy
 
 router.get('/api/executions', authenticate, async (req, res) => {
   try {
-    const result = await executionService.listExecutions(req.user!.id, req.user!.organisationId, req.user!.role, {
+    const result = await executionService.listExecutions(req.user!.id, req.orgId!, req.user!.role, {
       taskId: req.query.taskId as string | undefined,
       userId: req.query.userId as string | undefined,
       status: req.query.status as string | undefined,
@@ -49,7 +49,7 @@ router.post('/api/executions', authenticate, validateMultipart, async (req, res)
       return;
     }
     const parsedInputData = inputData ? (typeof inputData === 'string' ? JSON.parse(inputData) : inputData) : undefined;
-    const result = await executionService.createExecution(req.user!.id, req.user!.organisationId, { taskId, inputData: parsedInputData });
+    const result = await executionService.createExecution(req.user!.id, req.orgId!, { taskId, inputData: parsedInputData });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -59,7 +59,7 @@ router.post('/api/executions', authenticate, validateMultipart, async (req, res)
 
 router.get('/api/executions/:id', authenticate, async (req, res) => {
   try {
-    const result = await executionService.getExecution(req.params.id, req.user!.id, req.user!.organisationId, req.user!.role);
+    const result = await executionService.getExecution(req.params.id, req.user!.id, req.orgId!, req.user!.role);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -69,7 +69,7 @@ router.get('/api/executions/:id', authenticate, async (req, res) => {
 
 router.get('/api/executions/:id/files', authenticate, async (req, res) => {
   try {
-    const result = await executionService.listExecutionFiles(req.params.id, req.user!.id, req.user!.organisationId, req.user!.role);
+    const result = await executionService.listExecutionFiles(req.params.id, req.user!.id, req.orgId!, req.user!.role);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
