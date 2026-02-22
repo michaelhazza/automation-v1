@@ -17,7 +17,7 @@ export default function LoginPage() {
     try {
       const { data } = await api.post('/api/auth/login', { email, password });
       setToken(data.token);
-      navigate('/');
+      window.location.href = '/';
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Login failed');
