@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userService } from '../services/userService.js';
+import { parsePositiveInt } from '../middleware/validate.js';
 
 const router = Router();
 
@@ -10,8 +11,8 @@ router.get('/api/users', authenticate, requireRole('manager'), async (req, res) 
     const result = await userService.listUsers(req.orgId!, {
       role: req.query.role as string | undefined,
       status: req.query.status as string | undefined,
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
-      offset: req.query.offset ? Number(req.query.offset) : undefined,
+      limit: parsePositiveInt(req.query.limit),
+      offset: parsePositiveInt(req.query.offset),
     });
     res.json(result);
   } catch (err: unknown) {

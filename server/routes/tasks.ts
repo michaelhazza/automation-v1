@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { taskService } from '../services/taskService.js';
-import { validateMultipart } from '../middleware/validate.js';
+import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
 
 const router = Router();
 
@@ -11,8 +11,8 @@ router.get('/api/tasks', authenticate, async (req, res) => {
       categoryId: req.query.categoryId as string | undefined,
       status: req.query.status as string | undefined,
       search: req.query.search as string | undefined,
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
-      offset: req.query.offset ? Number(req.query.offset) : undefined,
+      limit: parsePositiveInt(req.query.limit),
+      offset: parsePositiveInt(req.query.offset),
     });
     res.json(result);
   } catch (err: unknown) {

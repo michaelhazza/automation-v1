@@ -29,7 +29,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInviteForm, setShowInviteForm] = useState(false);
-  const [form, setForm] = useState({ email: '', role: isManager ? 'user' : 'user', firstName: '', lastName: '' });
+  const [form, setForm] = useState({ email: '', role: 'user', firstName: '', lastName: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 

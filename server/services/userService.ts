@@ -222,7 +222,7 @@ export class UserService {
     const [updated] = await db
       .update(users)
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(users.id, id))
+      .where(and(eq(users.id, id), eq(users.organisationId, organisationId)))
       .returning();
 
     return {
@@ -252,7 +252,7 @@ export class UserService {
     }
 
     const now = new Date();
-    await db.update(users).set({ deletedAt: now, updatedAt: now }).where(eq(users.id, id));
+    await db.update(users).set({ deletedAt: now, updatedAt: now }).where(and(eq(users.id, id), eq(users.organisationId, organisationId)));
 
     // Hard delete permission group memberships
     await db.delete(permissionGroupMembers).where(eq(permissionGroupMembers.userId, id));

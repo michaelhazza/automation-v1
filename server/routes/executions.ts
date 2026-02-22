@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { executionService } from '../services/executionService.js';
-import { validateMultipart } from '../middleware/validate.js';
+import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
 
 const router = Router();
 
@@ -31,8 +31,8 @@ router.get('/api/executions', authenticate, async (req, res) => {
       status: req.query.status as string | undefined,
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
-      offset: req.query.offset ? Number(req.query.offset) : undefined,
+      limit: parsePositiveInt(req.query.limit),
+      offset: parsePositiveInt(req.query.offset),
     });
     res.json(result);
   } catch (err: unknown) {
