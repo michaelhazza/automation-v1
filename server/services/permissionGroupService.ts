@@ -1,4 +1,4 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   permissionGroups,
@@ -15,29 +15,29 @@ export class PermissionGroupService {
       .from(permissionGroups)
       .where(and(eq(permissionGroups.organisationId, organisationId), isNull(permissionGroups.deletedAt)));
 
-    const result = [];
-    for (const pg of rows) {
-      const members = await db
+    if (rows.length === 0) return [];
+
+    const groupIds = rows.map((pg) => pg.id);
+
+    const [allMembers, allCategories] = await Promise.all([
+      db
         .select()
         .from(permissionGroupMembers)
-        .where(eq(permissionGroupMembers.permissionGroupId, pg.id));
-
-      const categories = await db
+        .where(inArray(permissionGroupMembers.permissionGroupId, groupIds)),
+      db
         .select()
         .from(permissionGroupCategories)
-        .where(eq(permissionGroupCategories.permissionGroupId, pg.id));
+        .where(inArray(permissionGroupCategories.permissionGroupId, groupIds)),
+    ]);
 
-      result.push({
-        id: pg.id,
-        name: pg.name,
-        description: pg.description,
-        memberCount: members.length,
-        categoryCount: categories.length,
-        createdAt: pg.createdAt,
-      });
-    }
-
-    return result;
+    return rows.map((pg) => ({
+      id: pg.id,
+      name: pg.name,
+      description: pg.description,
+      memberCount: allMembers.filter((m) => m.permissionGroupId === pg.id).length,
+      categoryCount: allCategories.filter((c) => c.permissionGroupId === pg.id).length,
+      createdAt: pg.createdAt,
+    }));
   }
 
   async createPermissionGroup(organisationId: string, data: { name: string; description?: string }) {

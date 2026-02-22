@@ -1,4 +1,4 @@
-import { eq, and, isNull, ilike } from 'drizzle-orm';
+import { eq, and, isNull, ilike, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, workflowEngines, permissionGroupMembers, permissionGroupCategories, permissionGroups, executions } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
@@ -10,14 +10,24 @@ export class TaskService {
     role: string,
     params: { categoryId?: string; status?: string; search?: string; limit?: number; offset?: number }
   ) {
+    // Build DB-level conditions
+    const conditions = [eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)];
+    if (role === 'manager' || role === 'user') {
+      // Non-admin roles can only see active tasks
+      conditions.push(eq(tasks.status, 'active'));
+    } else if (params.status) {
+      conditions.push(eq(tasks.status, params.status as 'draft' | 'active' | 'inactive'));
+    }
+    if (params.categoryId) conditions.push(eq(tasks.categoryId, params.categoryId));
+    if (params.search) conditions.push(ilike(tasks.name, `%${params.search}%`));
+
     let rows = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(...conditions));
 
-    // For non-admin roles, filter to only active tasks they have permission to access
+    // For non-admin roles, further filter by permission group category access
     if (role === 'manager' || role === 'user') {
-      // Get user's accessible category IDs via permission groups
       const memberGroups = await db
         .select({ permissionGroupId: permissionGroupMembers.permissionGroupId })
         .from(permissionGroupMembers)
@@ -30,22 +40,11 @@ export class TaskService {
         const categoryAccess = await db
           .select({ categoryId: permissionGroupCategories.categoryId })
           .from(permissionGroupCategories)
-          .where(and(...groupIds.map((gid) => eq(permissionGroupCategories.permissionGroupId, gid))));
+          .where(inArray(permissionGroupCategories.permissionGroupId, groupIds));
         accessibleCategoryIds = [...new Set(categoryAccess.map((c) => c.categoryId))];
       }
 
-      rows = rows.filter(
-        (t) =>
-          t.status === 'active' &&
-          (t.categoryId === null || accessibleCategoryIds.includes(t.categoryId))
-      );
-    }
-
-    if (params.status) rows = rows.filter((t) => t.status === params.status);
-    if (params.categoryId) rows = rows.filter((t) => t.categoryId === params.categoryId);
-    if (params.search) {
-      const search = params.search.toLowerCase();
-      rows = rows.filter((t) => t.name.toLowerCase().includes(search) || (t.description ?? '').toLowerCase().includes(search));
+      rows = rows.filter((t) => t.categoryId === null || accessibleCategoryIds.includes(t.categoryId));
     }
 
     const limit = params.limit ?? 50;

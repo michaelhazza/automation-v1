@@ -1,0 +1,59 @@
+{
+  "generatedAt": "2026-02-22",
+  "version": "quality-checker-gpt.md v3",
+  "gates": {
+    "total": 15,
+    "passed": 15,
+    "warnings": 0,
+    "failures": 0
+  },
+  "qa": {
+    "total": 68,
+    "passed": 68,
+    "failed": 0
+  },
+  "scores": {
+    "overall": 74,
+    "security": 65,
+    "performance": 62,
+    "maintainability": 72,
+    "testing": 80,
+    "documentation": 70,
+    "accessibility": 78,
+    "seo": null
+  },
+  "issues": {
+    "critical": 0,
+    "high": 7,
+    "medium": 9,
+    "low": 4
+  },
+  "autoFixesApplied": [
+    "N+1 query eliminated in listPermissionGroups (2 batch queries replace 2N queries)",
+    "Multi-tenant isolation hardened in getUser (organisationId now in DB WHERE clause)",
+    "In-memory role/status filtering replaced with DB WHERE clauses in listUsers",
+    "In-memory scalar filtering replaced with DB WHERE clauses in listExecutions",
+    "In-memory scalar filtering replaced with DB WHERE clauses in exportExecutions",
+    "In-memory scalar filtering replaced with DB WHERE clauses in listTasks",
+    "In-memory status filtering replaced with DB WHERE clause in listOrganisations",
+    "Full table scan replaced with targeted query in createOrganisation name/slug conflict check",
+    "React.lazy() code splitting implemented for all 16 page components in App.tsx",
+    "Suspense boundary added for lazy-loaded routes",
+    "Email failure logging added to userService invite (was silent catch)",
+    "Email failure logging added to organisationService org creation (was silent catch)",
+    "Manager permission group WHERE clause uses inArray instead of chained eq (correct semantics)",
+    "inArray imported in drizzle-orm for permissionGroupService, executionService, taskService"
+  ],
+  "manualActionsRequired": [
+    "Add rate limiting middleware to /api/auth/login and /api/auth/invite/accept (express-rate-limit not in package.json)",
+    "Move JWT token from localStorage to httpOnly cookie to prevent XSS theft",
+    "Add Zod schema validation to route handlers instead of manual string checks",
+    "Add CSRF protection for state-changing operations",
+    "Add file type whitelist validation on file upload endpoint",
+    "Implement password strength requirements (uppercase, number, special char)",
+    "Add audit logging for sensitive operations (user deletion, role changes)",
+    "Add semantic HTML elements to Layout component (nav, main, aside)",
+    "Add aria-label and aria-current attributes to navigation",
+    "Add README.md with setup instructions, architecture overview, deployment guide"
+  ]
+}
