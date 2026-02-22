@@ -4,3 +4,11 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+JWT_SECRET = "b82aeeca8dd9809ac66d4055ea0af6a472a0deacd35bb508edf592cc642a00a5c32d74623ef2d1382849018b8f0de58f"
+EMAIL_FROM = "noreply@example.com"
+NODE_ENV = "development"
+PORT = "3000"
