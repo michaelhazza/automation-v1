@@ -82,6 +82,8 @@ export default function Layout({ user, children }: LayoutProps) {
     { path: '/admin/users', label: 'Users' },
     { path: '/admin/engines', label: 'Engines' },
     { path: '/admin/categories', label: 'Categories' },
+    { path: '/admin/subaccounts', label: 'Subaccounts' },
+    { path: '/admin/permission-sets', label: 'Permission Sets' },
   ] : [];
 
   return (
