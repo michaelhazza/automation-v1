@@ -61,6 +61,16 @@ function fileIcon(mimeType: string): string {
   return '📎';
 }
 
+const spinnerStyle: React.CSSProperties = {
+  width: 36,
+  height: 36,
+  border: '3px solid #e2e8f0',
+  borderTopColor: '#2563eb',
+  borderRadius: '50%',
+  animation: 'spin 0.8s linear infinite',
+  flexShrink: 0,
+};
+
 export default function TaskExecutionPage({ user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const [task, setTask] = useState<Task | null>(null);
@@ -74,6 +84,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
   const [error, setError] = useState('');
   const [maxUploadSizeMb, setMaxUploadSizeMb] = useState(200);
   const [dragOver, setDragOver] = useState(false);
+  const [notifyOnComplete, setNotifyOnComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
@@ -173,6 +184,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
       const { data: execData } = await api.post('/api/executions', {
         taskId: id,
         ...(parsedInput !== undefined ? { inputData: JSON.stringify(parsedInput) } : {}),
+        notifyOnComplete,
       });
 
       const execId = execData.id;
@@ -209,9 +221,11 @@ export default function TaskExecutionPage({ user }: { user: User }) {
   if (!task) return <div style={{ color: '#dc2626' }}>Task not found</div>;
 
   const hasInvalidFiles = stagedFiles.some((f) => f.error);
+  const isExecuting = execution && ['pending', 'running'].includes(execution.status);
 
   return (
     <>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={{ maxWidth: 760 }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{task.name}</h1>
         {task.description && <p style={{ color: '#64748b', marginBottom: 24 }}>{task.description}</p>}
@@ -228,7 +242,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
           </div>
         )}
 
-        {/* Input form */}
+        {/* Input form — hidden while executing or done */}
         {!execution && (
           <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24 }}>
             <div style={{ marginBottom: 20 }}>
@@ -318,6 +332,19 @@ export default function TaskExecutionPage({ user }: { user: User }) {
               )}
             </div>
 
+            {/* Email notification opt-in */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20, userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={notifyOnComplete}
+                onChange={(e) => setNotifyOnComplete(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#2563eb', flexShrink: 0 }}
+              />
+              <span style={{ fontSize: 13, color: '#374151' }}>
+                Email me when this task completes
+              </span>
+            </label>
+
             {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
             {uploadProgress && (
               <div style={{ fontSize: 13, color: '#2563eb', marginBottom: 16 }}>{uploadProgress}</div>
@@ -338,8 +365,39 @@ export default function TaskExecutionPage({ user }: { user: User }) {
           </div>
         )}
 
-        {/* Execution result */}
-        {execution && (
+        {/* Executing spinner — shown while pending or running */}
+        {isExecuting && (
+          <div style={{
+            background: '#fff',
+            borderRadius: 10,
+            padding: '32px 24px',
+            border: '1px solid #e2e8f0',
+            marginBottom: 24,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 16,
+            textAlign: 'center',
+          }}>
+            <div style={spinnerStyle} />
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 6 }}>
+                Executing... please wait
+              </div>
+              <div style={{ fontSize: 13, color: '#64748b' }}>
+                Status: <span style={{ color: STATUS_COLOR[execution.status] ?? '#6b7280', fontWeight: 600 }}>{execution.status}</span>
+                {notifyOnComplete && (
+                  <span style={{ display: 'block', marginTop: 6, color: '#64748b' }}>
+                    You will receive an email when this task completes.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Execution result — shown once terminal state reached */}
+        {execution && !isExecuting && (
           <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
@@ -350,10 +408,6 @@ export default function TaskExecutionPage({ user }: { user: User }) {
                 <span style={{ fontSize: 13, color: '#64748b' }}>{(execution.durationMs / 1000).toFixed(1)}s</span>
               )}
             </div>
-
-            {['pending', 'running'].includes(execution.status) && (
-              <div style={{ color: '#64748b', fontSize: 13 }}>Processing... (auto-refreshing)</div>
-            )}
 
             {execution.status === 'completed' && execution.outputData != null && (
               <div>
@@ -386,7 +440,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
             )}
 
             <button
-              onClick={() => { setExecution(null); setInputData(''); setStagedFiles([]); setExecFiles([]); if (pollRef.current) clearInterval(pollRef.current); }}
+              onClick={() => { setExecution(null); setInputData(''); setStagedFiles([]); setExecFiles([]); setNotifyOnComplete(false); if (pollRef.current) clearInterval(pollRef.current); }}
               style={{ marginTop: 16, padding: '8px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
             >
               Run again

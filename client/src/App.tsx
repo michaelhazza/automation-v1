@@ -24,6 +24,7 @@ const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
+const SystemTaskQueuePage = lazy(() => import('./pages/SystemTaskQueuePage'));
 
 function PageLoader() {
   return (
@@ -145,6 +146,7 @@ export default function App() {
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
             <Route path="/system/users" element={<SystemUsersPage user={user!} />} />
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
+            <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -43,13 +43,14 @@ router.get('/api/executions', authenticate, async (req, res) => {
 
 router.post('/api/executions', authenticate, validateMultipart, async (req, res) => {
   try {
-    const { taskId, inputData } = req.body;
+    const { taskId, inputData, notifyOnComplete } = req.body;
     if (!taskId) {
       res.status(400).json({ error: 'Validation failed', details: 'taskId is required' });
       return;
     }
     const parsedInputData = inputData ? (typeof inputData === 'string' ? JSON.parse(inputData) : inputData) : undefined;
-    const result = await executionService.createExecution(req.user!.id, req.orgId!, { taskId, inputData: parsedInputData });
+    const parsedNotify = notifyOnComplete === true || notifyOnComplete === 'true';
+    const result = await executionService.createExecution(req.user!.id, req.orgId!, { taskId, inputData: parsedInputData, notifyOnComplete: parsedNotify });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

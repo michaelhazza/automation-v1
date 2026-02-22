@@ -143,19 +143,21 @@ async function processExecution(executionId: string): Promise<void> {
         })
         .where(eq(executions.id, executionId));
 
-      // Send completion notification
-      try {
-        const [user] = await db.select().from(users).where(eq(users.id, execution.userId));
-        if (user) {
-          await emailService.sendExecutionCompletionEmail(
-            user.email,
-            task.name as string,
-            executionId,
-            'completed'
-          );
+      // Send completion notification only if user opted in
+      if (execution.notifyOnComplete) {
+        try {
+          const [user] = await db.select().from(users).where(eq(users.id, execution.userId));
+          if (user) {
+            await emailService.sendExecutionCompletionEmail(
+              user.email,
+              task.name as string,
+              executionId,
+              'completed'
+            );
+          }
+        } catch {
+          /* Email failures don't affect execution */
         }
-      } catch {
-        /* Email failures don't affect execution */
       }
 
       return;
