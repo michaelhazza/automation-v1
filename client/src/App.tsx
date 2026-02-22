@@ -6,6 +6,8 @@ import Layout from './components/Layout';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'));
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const TasksPage = lazy(() => import('./pages/TasksPage'));
 const TaskExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
@@ -20,6 +22,7 @@ const AdminPermissionGroupsPage = lazy(() => import('./pages/AdminPermissionGrou
 const AdminPermissionGroupDetailPage = lazy(() => import('./pages/AdminPermissionGroupDetailPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
+const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 
 function PageLoader() {
   return (
@@ -103,6 +106,16 @@ export default function App() {
             <AcceptInvitePage />
           </Suspense>
         } />
+        <Route path="/forgot-password" element={
+          <Suspense fallback={<PageLoader />}>
+            <ForgotPasswordPage />
+          </Suspense>
+        } />
+        <Route path="/reset-password" element={
+          <Suspense fallback={<PageLoader />}>
+            <ResetPasswordPage />
+          </Suspense>
+        } />
 
         <Route element={<ProtectedLayout user={user} loading={loading} />}>
           <Route path="/" element={<DashboardPage user={user!} />} />
@@ -129,6 +142,7 @@ export default function App() {
 
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
+            <Route path="/system/users" element={<SystemUsersPage user={user!} />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

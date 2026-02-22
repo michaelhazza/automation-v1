@@ -15,8 +15,9 @@ const envSchema = z.object({
   S3_ACCESS_KEY_ID: z.string().optional(),
   S3_SECRET_ACCESS_KEY: z.string().optional(),
   S3_BUCKET_NAME: z.string().optional(),
-  EMAIL_PROVIDER: z.enum(['sendgrid', 'smtp']).default('sendgrid'),
+  EMAIL_PROVIDER: z.enum(['sendgrid', 'smtp', 'resend']).default('sendgrid'),
   SENDGRID_API_KEY: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional().default(587),
   SMTP_USER: z.string().optional(),
@@ -29,6 +30,7 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
   CORS_ORIGINS: z.string().optional().default('*'),
   INVITE_TOKEN_EXPIRY_HOURS: z.coerce.number().optional().default(72),
+  PASSWORD_RESET_TOKEN_EXPIRY_HOURS: z.coerce.number().optional().default(1),
 });
 
 export const env = envSchema.parse(process.env);
