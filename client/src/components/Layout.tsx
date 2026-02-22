@@ -62,23 +62,26 @@ export default function Layout({ user, children }: LayoutProps) {
     }
   };
 
+  const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
+
   const navItems = [
     { path: '/', label: 'Dashboard' },
+    ...(isSystemAdmin ? [
+      { path: '/system/organisations', label: 'Organisations' },
+    ] : []),
+  ];
+
+  const orgNavItems = [
     { path: '/tasks', label: 'Tasks' },
     { path: '/executions', label: 'Executions' },
-    // Manager+ can manage tasks and users
     ...(isManagerOrAbove ? [
       { path: '/admin/tasks', label: 'Manage Tasks' },
       { path: '/admin/users', label: 'Users' },
     ] : []),
-    // Admin-only infrastructure config
     ...(isAdmin ? [
       { path: '/admin/engines', label: 'Engines' },
       { path: '/admin/categories', label: 'Categories' },
       { path: '/admin/permission-groups', label: 'Permissions' },
-    ] : []),
-    ...(isSystemAdmin ? [
-      { path: '/system/organisations', label: 'Organisations' },
     ] : []),
   ];
 
@@ -185,6 +188,30 @@ export default function Layout({ user, children }: LayoutProps) {
             {item.label}
           </Link>
         ))}
+
+        {hasOrgContext && orgNavItems.length > 0 && (
+          <>
+            <div style={{ padding: '12px 20px 4px', fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid #334155', marginTop: 4 }}>
+              Organisation
+            </div>
+            {orgNavItems.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                style={{
+                  display: 'block',
+                  padding: '10px 20px',
+                  color: location.pathname === item.path ? '#38bdf8' : '#94a3b8',
+                  textDecoration: 'none',
+                  background: location.pathname === item.path ? '#0f172a' : 'transparent',
+                  fontSize: 14,
+                }}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </>
+        )}
 
         <div style={{ flex: 1 }} />
         <div style={{ padding: '16px 20px', borderTop: '1px solid #334155' }}>
