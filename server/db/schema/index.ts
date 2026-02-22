@@ -9,3 +9,12 @@ export * from './permissionGroupCategories';
 export * from './executions';
 export * from './executionFiles';
 export * from './systemSettings';
+// New: subaccounts feature
+export * from './subaccounts';
+export * from './subaccountCategories';
+export * from './subaccountTaskLinks';
+export * from './permissions';
+export * from './permissionSets';
+export * from './permissionSetItems';
+export * from './orgUserRoles';
+export * from './subaccountUserAssignments';
