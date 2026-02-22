@@ -16,7 +16,7 @@ api.interceptors.request.use((config) => {
   // scopes data to that org rather than the system_admin's own (system) org.
   const userRole = localStorage.getItem('userRole');
   const activeOrgId = localStorage.getItem('activeOrgId');
-  if (userRole === 'system_admin' && activeOrgId) {
+  if (userRole === 'system_admin' && activeOrgId && !config.headers['X-Organisation-Id']) {
     config.headers['X-Organisation-Id'] = activeOrgId;
   }
 
