@@ -25,6 +25,12 @@ export const executions = pgTable(
     taskSnapshot: jsonb('task_snapshot'),
     isTestExecution: boolean('is_test_execution').notNull().default(false),
     retryCount: integer('retry_count').notNull().default(0),
+    // Webhook / queue tracking fields
+    returnWebhookUrl: text('return_webhook_url'),      // the URL we told the engine to POST results back to
+    outboundPayload: jsonb('outbound_payload'),         // full payload we sent to the engine (for audit)
+    callbackReceivedAt: timestamp('callback_received_at'), // when the engine called us back
+    callbackPayload: jsonb('callback_payload'),         // raw payload the engine sent back
+    queuedAt: timestamp('queued_at'),                  // when the job was placed on the queue
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
     durationMs: integer('duration_ms'),

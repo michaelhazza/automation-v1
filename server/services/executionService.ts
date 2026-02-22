@@ -71,8 +71,17 @@ export class ExecutionService {
       completedAt: e.completedAt,
       durationMs: e.durationMs,
       createdAt: e.createdAt,
-      // Error detail only for admins
-      ...(role === 'org_admin' || role === 'system_admin' ? { errorDetail: e.errorDetail } : {}),
+      // Admin-only audit fields
+      ...(role === 'org_admin' || role === 'system_admin'
+        ? {
+            errorDetail: e.errorDetail,
+            returnWebhookUrl: e.returnWebhookUrl,
+            outboundPayload: e.outboundPayload,
+            callbackReceivedAt: e.callbackReceivedAt,
+            callbackPayload: e.callbackPayload,
+            queuedAt: e.queuedAt,
+          }
+        : {}),
     }));
   }
 
@@ -130,7 +139,7 @@ export class ExecutionService {
       })
       .returning();
 
-    // Enqueue background job
+    // Enqueue background job (stamps queuedAt and dispatches processing)
     try {
       await queueService.enqueueExecution(execution.id);
     } catch {
@@ -171,7 +180,17 @@ export class ExecutionService {
       completedAt: execution.completedAt,
       durationMs: execution.durationMs,
       createdAt: execution.createdAt,
-      ...(role === 'org_admin' || role === 'system_admin' ? { errorDetail: execution.errorDetail } : {}),
+      // Admin-only audit fields
+      ...(role === 'org_admin' || role === 'system_admin'
+        ? {
+            errorDetail: execution.errorDetail,
+            returnWebhookUrl: execution.returnWebhookUrl,
+            outboundPayload: execution.outboundPayload,
+            callbackReceivedAt: execution.callbackReceivedAt,
+            callbackPayload: execution.callbackPayload,
+            queuedAt: execution.queuedAt,
+          }
+        : {}),
     };
   }
 
