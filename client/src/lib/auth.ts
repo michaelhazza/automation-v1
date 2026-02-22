@@ -22,3 +22,35 @@ export function removeToken(): void {
 export function isAuthenticated(): boolean {
   return !!getToken();
 }
+
+// Store the user's role so the API interceptor can read it without importing React state
+export function setUserRole(role: string): void {
+  localStorage.setItem('userRole', role);
+}
+
+export function getUserRole(): string | null {
+  return localStorage.getItem('userRole');
+}
+
+export function removeUserRole(): void {
+  localStorage.removeItem('userRole');
+}
+
+// Active organisation context — used by system_admin to operate within a specific org
+export function getActiveOrgId(): string | null {
+  return localStorage.getItem('activeOrgId');
+}
+
+export function getActiveOrgName(): string | null {
+  return localStorage.getItem('activeOrgName');
+}
+
+export function setActiveOrg(id: string, name: string): void {
+  localStorage.setItem('activeOrgId', id);
+  localStorage.setItem('activeOrgName', name);
+}
+
+export function removeActiveOrg(): void {
+  localStorage.removeItem('activeOrgId');
+  localStorage.removeItem('activeOrgName');
+}

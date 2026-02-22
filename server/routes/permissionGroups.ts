@@ -6,7 +6,7 @@ const router = Router();
 
 router.get('/api/permission-groups', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await permissionGroupService.listPermissionGroups(req.user!.organisationId);
+    const result = await permissionGroupService.listPermissionGroups(req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -21,7 +21,7 @@ router.post('/api/permission-groups', authenticate, requireRole('org_admin'), as
       res.status(400).json({ error: 'Validation failed', details: 'name is required' });
       return;
     }
-    const result = await permissionGroupService.createPermissionGroup(req.user!.organisationId, { name, description });
+    const result = await permissionGroupService.createPermissionGroup(req.orgId!, { name, description });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -31,7 +31,7 @@ router.post('/api/permission-groups', authenticate, requireRole('org_admin'), as
 
 router.get('/api/permission-groups/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await permissionGroupService.getPermissionGroup(req.params.id, req.user!.organisationId);
+    const result = await permissionGroupService.getPermissionGroup(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -41,7 +41,7 @@ router.get('/api/permission-groups/:id', authenticate, requireRole('org_admin'),
 
 router.patch('/api/permission-groups/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await permissionGroupService.updatePermissionGroup(req.params.id, req.user!.organisationId, req.body);
+    const result = await permissionGroupService.updatePermissionGroup(req.params.id, req.orgId!, req.body);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -51,7 +51,7 @@ router.patch('/api/permission-groups/:id', authenticate, requireRole('org_admin'
 
 router.delete('/api/permission-groups/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await permissionGroupService.deletePermissionGroup(req.params.id, req.user!.organisationId);
+    const result = await permissionGroupService.deletePermissionGroup(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -66,7 +66,7 @@ router.post('/api/permission-groups/:id/members', authenticate, requireRole('org
       res.status(400).json({ error: 'Validation failed', details: 'userId is required' });
       return;
     }
-    const result = await permissionGroupService.addMember(req.params.id, req.user!.organisationId, userId);
+    const result = await permissionGroupService.addMember(req.params.id, req.orgId!, userId);
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -76,7 +76,7 @@ router.post('/api/permission-groups/:id/members', authenticate, requireRole('org
 
 router.delete('/api/permission-groups/:id/members/:userId', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await permissionGroupService.removeMember(req.params.id, req.user!.organisationId, req.params.userId);
+    const result = await permissionGroupService.removeMember(req.params.id, req.orgId!, req.params.userId);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -91,7 +91,7 @@ router.post('/api/permission-groups/:id/categories', authenticate, requireRole('
       res.status(400).json({ error: 'Validation failed', details: 'categoryId is required' });
       return;
     }
-    const result = await permissionGroupService.addCategory(req.params.id, req.user!.organisationId, categoryId);
+    const result = await permissionGroupService.addCategory(req.params.id, req.orgId!, categoryId);
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -101,7 +101,7 @@ router.post('/api/permission-groups/:id/categories', authenticate, requireRole('
 
 router.delete('/api/permission-groups/:id/categories/:categoryId', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await permissionGroupService.removeCategory(req.params.id, req.user!.organisationId, req.params.categoryId);
+    const result = await permissionGroupService.removeCategory(req.params.id, req.orgId!, req.params.categoryId);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

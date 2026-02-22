@@ -18,7 +18,14 @@ const STATUS_COLORS: Record<string, string> = {
   pending: '#d97706',
 };
 
+// Roles that managers can assign; admins/system_admin can assign all non-system roles
+const MANAGER_ASSIGNABLE_ROLES = ['user', 'client_user'];
+const ADMIN_ASSIGNABLE_ROLES = ['org_admin', 'manager', 'user', 'client_user'];
+
 export default function AdminUsersPage({ user }: { user: User }) {
+  const isManager = user.role === 'manager';
+  const assignableRoles = isManager ? MANAGER_ASSIGNABLE_ROLES : ADMIN_ASSIGNABLE_ROLES;
+
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -50,19 +57,37 @@ export default function AdminUsersPage({ user }: { user: User }) {
   };
 
   const handleUpdateRole = async (userId: string, role: string) => {
-    await api.patch(`/api/users/${userId}`, { role });
-    load();
+    setError('');
+    try {
+      await api.patch(`/api/users/${userId}`, { role });
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to update role');
+    }
   };
 
   const handleUpdateStatus = async (userId: string, status: string) => {
-    await api.patch(`/api/users/${userId}`, { status });
-    load();
+    setError('');
+    try {
+      await api.patch(`/api/users/${userId}`, { status });
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to update status');
+    }
   };
 
   const handleDelete = async (userId: string) => {
     if (!confirm('Remove this user?')) return;
-    await api.delete(`/api/users/${userId}`);
-    load();
+    setError('');
+    try {
+      await api.delete(`/api/users/${userId}`);
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to remove user');
+    }
   };
 
   if (loading) return <div>Loading...</div>;
@@ -80,6 +105,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
       </div>
 
       {success && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#16a34a', fontSize: 14 }}>{success}</div>}
+      {error && !showInviteForm && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>{error}</div>}
 
       {showInviteForm && (
         <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24, maxWidth: 520 }}>
@@ -101,7 +127,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Role *</label>
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
-                {['org_admin', 'manager', 'user'].map((r) => <option key={r} value={r}>{r}</option>)}
+                {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
           </div>
@@ -130,11 +156,11 @@ export default function AdminUsersPage({ user }: { user: User }) {
                 <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>{u.firstName} {u.lastName}</td>
                 <td style={{ padding: '12px 16px', color: '#64748b' }}>{u.email}</td>
                 <td style={{ padding: '12px 16px' }}>
-                  {u.role === 'system_admin' ? (
-                    <span style={{ color: '#7c3aed' }}>system_admin</span>
+                  {u.role === 'system_admin' || (isManager && !assignableRoles.includes(u.role)) ? (
+                    <span style={{ color: u.role === 'system_admin' ? '#7c3aed' : '#374151' }}>{u.role}</span>
                   ) : (
                     <select value={u.role} onChange={(e) => handleUpdateRole(u.id, e.target.value)} style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}>
-                      {['org_admin', 'manager', 'user'].map((r) => <option key={r} value={r}>{r}</option>)}
+                      {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   )}
                 </td>

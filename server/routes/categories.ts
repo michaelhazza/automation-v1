@@ -6,7 +6,7 @@ const router = Router();
 
 router.get('/api/categories', authenticate, async (req, res) => {
   try {
-    const result = await categoryService.listCategories(req.user!.organisationId);
+    const result = await categoryService.listCategories(req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -21,7 +21,7 @@ router.post('/api/categories', authenticate, requireRole('org_admin'), async (re
       res.status(400).json({ error: 'Validation failed', details: 'name is required' });
       return;
     }
-    const result = await categoryService.createCategory(req.user!.organisationId, { name, description, colour });
+    const result = await categoryService.createCategory(req.orgId!, { name, description, colour });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -31,7 +31,7 @@ router.post('/api/categories', authenticate, requireRole('org_admin'), async (re
 
 router.patch('/api/categories/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await categoryService.updateCategory(req.params.id, req.user!.organisationId, req.body);
+    const result = await categoryService.updateCategory(req.params.id, req.orgId!, req.body);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -41,7 +41,7 @@ router.patch('/api/categories/:id', authenticate, requireRole('org_admin'), asyn
 
 router.delete('/api/categories/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await categoryService.deleteCategory(req.params.id, req.user!.organisationId);
+    const result = await categoryService.deleteCategory(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

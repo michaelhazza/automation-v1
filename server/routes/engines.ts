@@ -6,7 +6,7 @@ const router = Router();
 
 router.get('/api/engines', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await engineService.listEngines(req.user!.organisationId, {
+    const result = await engineService.listEngines(req.orgId!, {
       status: req.query.status as string | undefined,
     });
     res.json(result);
@@ -23,7 +23,7 @@ router.post('/api/engines', authenticate, requireRole('org_admin'), async (req, 
       res.status(400).json({ error: 'Validation failed', details: 'name, engineType, and baseUrl are required' });
       return;
     }
-    const result = await engineService.createEngine(req.user!.organisationId, { name, engineType, baseUrl, apiKey });
+    const result = await engineService.createEngine(req.orgId!, { name, engineType, baseUrl, apiKey });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -33,7 +33,7 @@ router.post('/api/engines', authenticate, requireRole('org_admin'), async (req, 
 
 router.get('/api/engines/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await engineService.getEngine(req.params.id, req.user!.organisationId);
+    const result = await engineService.getEngine(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -43,7 +43,7 @@ router.get('/api/engines/:id', authenticate, requireRole('org_admin'), async (re
 
 router.patch('/api/engines/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await engineService.updateEngine(req.params.id, req.user!.organisationId, req.body);
+    const result = await engineService.updateEngine(req.params.id, req.orgId!, req.body);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -53,7 +53,7 @@ router.patch('/api/engines/:id', authenticate, requireRole('org_admin'), async (
 
 router.delete('/api/engines/:id', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await engineService.deleteEngine(req.params.id, req.user!.organisationId);
+    const result = await engineService.deleteEngine(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -63,7 +63,7 @@ router.delete('/api/engines/:id', authenticate, requireRole('org_admin'), async 
 
 router.post('/api/engines/:id/test', authenticate, requireRole('org_admin'), async (req, res) => {
   try {
-    const result = await engineService.testEngineConnection(req.params.id, req.user!.organisationId);
+    const result = await engineService.testEngineConnection(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
