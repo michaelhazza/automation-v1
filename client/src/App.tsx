@@ -1,25 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './lib/api';
 import { isAuthenticated, User } from './lib/auth';
 
-// Pages
-import LoginPage from './pages/LoginPage';
-import AcceptInvitePage from './pages/AcceptInvitePage';
-import DashboardPage from './pages/DashboardPage';
-import TasksPage from './pages/TasksPage';
-import TaskExecutionPage from './pages/TaskExecutionPage';
-import ExecutionHistoryPage from './pages/ExecutionHistoryPage';
-import ExecutionDetailPage from './pages/ExecutionDetailPage';
-import ProfileSettingsPage from './pages/ProfileSettingsPage';
-import AdminEnginesPage from './pages/AdminEnginesPage';
-import AdminTasksPage from './pages/AdminTasksPage';
-import AdminTaskEditPage from './pages/AdminTaskEditPage';
-import AdminCategoriesPage from './pages/AdminCategoriesPage';
-import AdminPermissionGroupsPage from './pages/AdminPermissionGroupsPage';
-import AdminPermissionGroupDetailPage from './pages/AdminPermissionGroupDetailPage';
-import AdminUsersPage from './pages/AdminUsersPage';
-import SystemOrganisationsPage from './pages/SystemOrganisationsPage';
+// Lazy-loaded pages for code splitting
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const TasksPage = lazy(() => import('./pages/TasksPage'));
+const TaskExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
+const ExecutionHistoryPage = lazy(() => import('./pages/ExecutionHistoryPage'));
+const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
+const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
+const AdminEnginesPage = lazy(() => import('./pages/AdminEnginesPage'));
+const AdminTasksPage = lazy(() => import('./pages/AdminTasksPage'));
+const AdminTaskEditPage = lazy(() => import('./pages/AdminTaskEditPage'));
+const AdminCategoriesPage = lazy(() => import('./pages/AdminCategoriesPage'));
+const AdminPermissionGroupsPage = lazy(() => import('./pages/AdminPermissionGroupsPage'));
+const AdminPermissionGroupDetailPage = lazy(() => import('./pages/AdminPermissionGroupDetailPage'));
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
+const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 
 function ProtectedRoute({ user, loading, children }: { user: User | null; loading: boolean; children: React.ReactNode }) {
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#64748b' }}>Loading...</div>;
@@ -58,6 +58,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#64748b' }}>Loading...</div>}>
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
@@ -86,6 +87,7 @@ export default function App() {
         {/* Catch all */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

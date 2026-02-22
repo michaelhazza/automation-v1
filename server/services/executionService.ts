@@ -1,4 +1,4 @@
-import { eq, and, isNull, gte, lte, desc } from 'drizzle-orm';
+import { eq, and, isNull, gte, lte, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { executions, executionFiles, tasks, users, permissionGroupMembers, permissionGroupCategories } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
@@ -10,17 +10,23 @@ export class ExecutionService {
     role: string,
     params: { taskId?: string; userId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }
   ) {
+    // Build DB-level conditions for scalar filters
+    const conditions = [eq(executions.organisationId, organisationId)];
+    if (role === 'user') conditions.push(eq(executions.userId, userId));
+    if (params.taskId) conditions.push(eq(executions.taskId, params.taskId));
+    if (params.userId) conditions.push(eq(executions.userId, params.userId));
+    if (params.status) conditions.push(eq(executions.status, params.status as 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'));
+    if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
+    if (params.to) conditions.push(lte(executions.createdAt, new Date(params.to)));
+
     let rows = await db
       .select()
       .from(executions)
-      .where(eq(executions.organisationId, organisationId))
+      .where(and(...conditions))
       .orderBy(desc(executions.createdAt));
 
-    // Role-scoped visibility
-    if (role === 'user') {
-      rows = rows.filter((e) => e.userId === userId);
-    } else if (role === 'manager') {
-      // Manager sees executions for their accessible task categories
+    // Manager role requires additional filtering based on accessible task categories
+    if (role === 'manager') {
       const memberGroups = await db
         .select({ permissionGroupId: permissionGroupMembers.permissionGroupId })
         .from(permissionGroupMembers)
@@ -33,28 +39,21 @@ export class ExecutionService {
         const categoryAccess = await db
           .select({ categoryId: permissionGroupCategories.categoryId })
           .from(permissionGroupCategories)
-          .where(and(...groupIds.map((gid) => eq(permissionGroupCategories.permissionGroupId, gid))));
+          .where(inArray(permissionGroupCategories.permissionGroupId, groupIds));
         accessibleCategoryIds = [...new Set(categoryAccess.map((c) => c.categoryId))];
       }
 
-      // Get tasks in accessible categories
       const accessibleTasks = await db
-        .select({ id: tasks.id })
+        .select({ id: tasks.id, categoryId: tasks.categoryId })
         .from(tasks)
         .where(and(eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
 
       const accessibleTaskIds = accessibleTasks
-        .filter((t) => (t as unknown as { categoryId: string | null }).categoryId === null || accessibleCategoryIds.includes((t as unknown as { categoryId: string | null }).categoryId!))
+        .filter((t) => t.categoryId === null || accessibleCategoryIds.includes(t.categoryId))
         .map((t) => t.id);
 
       rows = rows.filter((e) => accessibleTaskIds.includes(e.taskId));
     }
-
-    if (params.taskId) rows = rows.filter((e) => e.taskId === params.taskId);
-    if (params.userId) rows = rows.filter((e) => e.userId === params.userId);
-    if (params.status) rows = rows.filter((e) => e.status === params.status);
-    if (params.from) rows = rows.filter((e) => e.createdAt >= new Date(params.from!));
-    if (params.to) rows = rows.filter((e) => e.createdAt <= new Date(params.to!));
 
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
@@ -210,16 +209,17 @@ export class ExecutionService {
     organisationId: string,
     params: { from?: string; to?: string; taskId?: string; userId?: string }
   ) {
-    let rows = await db
+    const exportConditions = [eq(executions.organisationId, organisationId)];
+    if (params.taskId) exportConditions.push(eq(executions.taskId, params.taskId));
+    if (params.userId) exportConditions.push(eq(executions.userId, params.userId));
+    if (params.from) exportConditions.push(gte(executions.createdAt, new Date(params.from)));
+    if (params.to) exportConditions.push(lte(executions.createdAt, new Date(params.to)));
+
+    const rows = await db
       .select()
       .from(executions)
-      .where(eq(executions.organisationId, organisationId))
+      .where(and(...exportConditions))
       .orderBy(desc(executions.createdAt));
-
-    if (params.taskId) rows = rows.filter((e) => e.taskId === params.taskId);
-    if (params.userId) rows = rows.filter((e) => e.userId === params.userId);
-    if (params.from) rows = rows.filter((e) => e.createdAt >= new Date(params.from!));
-    if (params.to) rows = rows.filter((e) => e.createdAt <= new Date(params.to!));
 
     const headers = ['id', 'taskId', 'userId', 'status', 'engineType', 'isTestExecution', 'retryCount', 'durationMs', 'startedAt', 'completedAt', 'createdAt'];
     const csvRows = rows.map((e) =>

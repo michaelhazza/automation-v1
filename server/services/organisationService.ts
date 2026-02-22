@@ -1,4 +1,4 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { organisations, users } from '../db/schema/index.js';
 import { userService } from './userService.js';
@@ -8,17 +8,14 @@ import { env } from '../lib/env.js';
 
 export class OrganisationService {
   async listOrganisations(params: { status?: string; limit?: number; offset?: number }) {
-    const query = db.select().from(organisations).where(isNull(organisations.deletedAt));
-    const rows = await query;
+    const conditions = [isNull(organisations.deletedAt)];
+    if (params.status) conditions.push(eq(organisations.status, params.status as 'active' | 'suspended'));
 
-    let result = rows;
-    if (params.status) {
-      result = result.filter((o) => o.status === params.status);
-    }
+    const rows = await db.select().from(organisations).where(and(...conditions));
 
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
-    return result.slice(offset, offset + limit);
+    return rows.slice(offset, offset + limit);
   }
 
   async createOrganisation(data: {
@@ -32,12 +29,9 @@ export class OrganisationService {
     const existing = await db
       .select()
       .from(organisations)
-      .where(and(isNull(organisations.deletedAt)));
+      .where(and(isNull(organisations.deletedAt), or(eq(organisations.name, data.name), eq(organisations.slug, data.slug))));
 
-    const nameTaken = existing.some((o) => o.name === data.name);
-    const slugTaken = existing.some((o) => o.slug === data.slug);
-
-    if (nameTaken || slugTaken) {
+    if (existing.length > 0) {
       throw { statusCode: 409, message: 'Organisation name or slug already in use' };
     }
 
@@ -76,8 +70,8 @@ export class OrganisationService {
 
     try {
       await emailService.sendInvitationEmail(data.adminEmail, inviteToken, org.name);
-    } catch {
-      // Email failure should not fail org creation
+    } catch (err) {
+      console.error('[EMAIL] Failed to send org admin invitation email to', data.adminEmail, ':', err instanceof Error ? err.message : 'Unknown error');
     }
 
     return {

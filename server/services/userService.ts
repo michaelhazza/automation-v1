@@ -8,18 +8,18 @@ import { env } from '../lib/env.js';
 
 export class UserService {
   async listUsers(organisationId: string, params: { role?: string; status?: string; limit?: number; offset?: number }) {
+    const conditions = [eq(users.organisationId, organisationId), isNull(users.deletedAt)];
+    if (params.role) conditions.push(eq(users.role, params.role as 'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user'));
+    if (params.status) conditions.push(eq(users.status, params.status as 'active' | 'inactive' | 'pending'));
+
     const rows = await db
       .select()
       .from(users)
-      .where(and(eq(users.organisationId, organisationId), isNull(users.deletedAt)));
-
-    let result = rows;
-    if (params.role) result = result.filter((u) => u.role === params.role);
-    if (params.status) result = result.filter((u) => u.status === params.status);
+      .where(and(...conditions));
 
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
-    return result.slice(offset, offset + limit).map((u) => ({
+    return rows.slice(offset, offset + limit).map((u) => ({
       id: u.id,
       email: u.email,
       firstName: u.firstName,
@@ -69,8 +69,8 @@ export class UserService {
 
     try {
       await emailService.sendInvitationEmail(data.email, inviteToken, organisationId);
-    } catch {
-      // Don't fail on email error
+    } catch (err) {
+      console.error('[EMAIL] Failed to send invitation email to', data.email, ':', err instanceof Error ? err.message : 'Unknown error');
     }
 
     return {
@@ -146,15 +146,12 @@ export class UserService {
   }
 
   async getUser(id: string, organisationId: string) {
-    const whereConditions = and(eq(users.id, id), isNull(users.deletedAt));
-    const [user] = await db.select().from(users).where(whereConditions);
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, id), eq(users.organisationId, organisationId), isNull(users.deletedAt)));
 
     if (!user) {
-      throw { statusCode: 404, message: 'User not found' };
-    }
-
-    // Ensure user belongs to the org (unless system admin, handled at route level)
-    if (user.organisationId !== organisationId) {
       throw { statusCode: 404, message: 'User not found' };
     }
 
