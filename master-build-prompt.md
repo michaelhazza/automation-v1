@@ -1,7 +1,7 @@
 # Master Build Prompt - Unified Specification Pipeline
 
 ## Version Reference
-- **This Document**: master-build-prompt-unified.md v48
+- **This Document**: master-build-prompt-unified.md v50
 - **Linked Documents**: 
   - spec-generator-unified.md
   - quality-checker-gpt.md
@@ -10,6 +10,8 @@
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 50 | 2026-02 | **Phase 2 Completion Gate added (Step 2.6) -- fixes missing post-build execution loop**: Gates and QA were generated and extracted in Step 2.5 but never executed against the completed implementation as a blocking pass/fix loop. Step 2.5.4 ran gates immediately after runner generation (mid-build, not post-build) to validate extraction only. The VALIDATION AND DEPLOYMENT section listed the right commands but as a reference block, not an imperative instruction -- Claude Code had no directive to execute it or fix failures. Added Step 2.6: Phase 2 Completion Gate as a mandatory, blocking step at the end of Phase 2. It runs the full sequence (install, type-check, extract, gates, QA, build) after all implementation is complete, with explicit fix-and-retry semantics: read the failing gate output, fix the implementation issue, re-run until exit code 0. Step 2.5.4 retained as extraction validation (proves splitters work); Step 2.6 is the post-implementation correctness gate. SUCCESS CRITERIA updated to reference Step 2.6 verification. VALIDATION AND DEPLOYMENT section updated to defer to Step 2.6 as authoritative rather than duplicating instructions. |
+| 49 | 2026-02 | **Cross-framework consistency audit against spec-generator v4.36 (3 fixes)**: (1) **False atomic write claim removed from Steps 2.5.1 and 2.5.2 (BLOCKER)**: Both the gate splitter description (Step 2.5.1) and QA splitter requirements (Step 2.5.2) stated splitters "use atomic write (temp file then move)". The actual spec-generator v4.36 splitter templates use direct awk writes with no temp file or mv operation. VERBATIM COPY MANDATE makes the template the authoritative implementation. Removed the atomic write bullet from 2.5.1 and replaced the atomic write requirement in 2.5.2 with an accurate description of the POSIX awk direct-write approach. (2) **Phase 1 CRITICAL OUTPUT RULES path made environment-aware (HIGH)**: Two instances of hardcoded `/mnt/user-data/outputs/docs/` replaced with `SPEC_OUTPUT_ROOT` following the same pattern established in spec-generator v4.25-v4.32. Parenthetical notes confirm Claude.ai default and alternative environments. Eliminates brittle path assumptions in a document consumed by Claude Code. (3) **APP_URL phantom env var removed from envSchema template (HIGH)**: envSchema example declared `APP_URL: z.string().url()` without an "Example only" label. APP_URL is not defined in spec-generator's env-manifest schema -- the CORS field is `CORS_ORIGINS`. Claude Code copying the template would generate `env.APP_URL` even when env-manifest declares nothing of the sort, producing an undefined env var at runtime. envSchema template replaced with explicit derive-from-env-manifest instruction and a generative comment pattern instead of specific variable names. `server/index.ts` CORS example updated to use `process.env.CORS_ORIGINS` directly rather than `env.APP_URL`. |
 | 48 | 2026-02 | **Cross-framework consistency audit (3 fixes)**: (1) **Non-ASCII em dashes replaced**: Two Unicode em dashes (U+2014) at Phase 1 step 7 and package.json Note replaced with ASCII double hyphens. Violates ASCII-only working standard. (2) **Success Criteria absolute guarantee softened**: "100% first-build success with zero manual intervention" replaced with language matching spec-generator v4.28 softening: "First-build success with minimal manual intervention through constitutional enforcement." Constitutional enforcement is the mechanism, not a guarantee. (3) **Final Test absolute guarantee softened**: Same pattern -- "100% functionality with zero manual intervention" replaced with "designed so that Claude Code can generate a working application on first build with minimal manual fixes." Aligns MBP operational text with spec-generator's established posture on success claims. |
 | 47 | 2026-02 | **Cross-framework consistency audit (3 fixes)**: (1) **`authRequired` phantom field replaced with `authentication` field**: 6 references throughout the document used legacy `authRequired` boolean flag which does not exist in spec-generator output. The actual field is `authentication: "required" | "optional" | "public"` at endpoint level. Claude Code following MBP literally would look for a field that doesn't exist, silently skipping auth middleware on protected endpoints. All references updated to match spec-generator schema. (2) **Orchestration runner scripts explicitly specified (Step 2.5.3)**: `run-all-gates.sh` and `run-all-qa-tests.sh` were expected to exist after splitter extraction but never generated -- splitters only extract individual gate/QA scripts. New Step 2.5.3 provides explicit generation requirements for both runners including discovery pattern, exit code aggregation, `build-gate-results.json` output format, and failure semantics. (3) **`drizzle.config.ts` generation explicitly specified (Step 2.2)**: `npm run db:generate` and `npm run migrate` require `drizzle.config.ts` but it was never instructed. Added explicit generation instruction with schema path, output directory, dialect, and database URL derivation from spec artifacts. |
 | 46 | 2026-02 | **Cross-framework consistency audit (6 fixes)**: (1) **Artifact count corrected 9->10 in 4 locations**: Phase 1 description, critical output format, Phase 2 critical note, and Success Criteria checklist all updated to match spec-generator OUTPUT MANIFEST (10 files). (2) **Phase 1 output format rules rewritten**: Removed ### FILE: delimiter approach which contradicted actual spec-generator tool-based output model (create_file/present_files to /mnt/user-data/outputs/docs/). Rules now describe actual mechanism. (3) **Step 2.5.1 gate extraction rewritten**: Replaced generate-your-own-extractor pattern with bash docs/gate-splitter.sh invocation, matching how QA scripts are extracted via docs/qa-splitter.sh. docs/gate-splitter.sh is a spec-generator artifact; creating a parallel extractor was redundant and introduced coupling. Step 2.5.3 validation block updated in parallel. (4) **Internal spec-generator rule counts removed from Phase 1**: "24-point coverage checklist" and "20 extraction discipline rules" were stale (count changed to 21 in Round 13) and create maintenance coupling across documents. Phase 1 now describes what the spec-generator does without enumerating internal rule counts. (5) **Major version pins removed from body Note**: "React 18, Vite 5, TypeScript 5" Note removed from package.json section; the example package.json already illustrates versions with Example Only labelling. (6) **Validation Date removed from PROMPT HYGIENE GATE**: Specific date in operational body text was already stale.
@@ -69,11 +71,11 @@ When `QUALITY_CHECKER_ENABLED: true`:
 ## PHASE 1: SPECIFICATION GENERATION
 
 **CRITICAL OUTPUT RULES (NON-NEGOTIABLE):**
-- The spec-generator produces files via create_file and present_files tool calls to /mnt/user-data/outputs/docs/
+- The spec-generator produces files via create_file and present_files tool calls to SPEC_OUTPUT_ROOT (defaults to /mnt/user-data/outputs/docs/ in Claude.ai; use ./docs/ in other environments)
 - Do not produce specification content as inline text output or code blocks
 - Do not produce explanatory text before or after artifact generation
 - No placeholder tokens in any generated file
-- All 10 artifacts must be present in /mnt/user-data/outputs/docs/ before proceeding to Phase 2
+- All 10 artifacts must be present in SPEC_OUTPUT_ROOT before proceeding to Phase 2
 
 Use the Universal SaaS Application Specification Generator (Freeze-Ready) to process the IDEA brief. The generator will:
 
@@ -247,17 +249,23 @@ Generate `server/lib/env.ts` with Zod validation for all environment variables f
 
 **Only include `DB_DRIVER` in `envSchema` if it exists in `docs/env-manifest.json`. Otherwise omit it entirely.**
 
+**ALL variables in envSchema MUST be derived from docs/env-manifest.json. Never hardcode variables not declared in env-manifest. The example below is illustrative structure only -- do not copy its variable names.**
+
 ```typescript
 import { z } from 'zod';
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().startsWith('postgresql://'),
-  // JWT_SECRET: include only if service contracts have endpoints with "authentication": "required"
-  APP_URL: z.string().url(),
-  PORT: z.coerce.number().optional(),
+  // DERIVE ALL FIELDS FROM docs/env-manifest.json
+  // For each variable in env-manifest:
+  //   required:true AND no defaultValue -> z.string() or z.coerce.number() etc.
+  //   required:false AND has defaultValue -> add .default(value)
+  //   requiredIf -> mark optional in schema, validate conditionally at runtime
+  // Example shape only -- replace with actual env-manifest variables:
+  DATABASE_URL: z.string(),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  // DB_DRIVER: include only if declared in docs/env-manifest.json
-  // Additional variables based on env-manifest.json
+  PORT: z.coerce.number().optional(),
+  // JWT_SECRET: include only if service contracts have endpoints with "authentication": "required"
+  // All other variables: read from env-manifest.json, do not invent
 });
 
 export const env = envSchema.parse(process.env);
@@ -354,7 +362,7 @@ const app = express();
 
 // Middleware stack
 app.use(helmet());
-app.use(cors({ origin: env.APP_URL }));
+app.use(cors({ origin: process.env.CORS_ORIGINS ?? '*' }));
 app.use(express.json());
 
 // Routes
@@ -489,13 +497,13 @@ bash docs/gate-splitter.sh
 The gate splitter (docs/gate-splitter.sh) is generated by the spec-generator as artifact #7. It:
 
 - Parses `#===== FILE: scripts/<n>.sh =====#` blocks from docs/gate-scripts-reference.md
-- Writes each block to `scripts/<n>.sh`
+- Extracts each block using POSIX awk with OUTPUT_DIR-passing for CWD-independent writes
+- Writes each extracted script directly to `scripts/<filename>` (path prefix stripped from marker)
 - Enforces the deterministic script count declared in `Total Scripts: N`
 - Sets executable permissions on all extracted scripts
 - Fails fast if extraction count does not match declared total
 - Creates scripts/ output directory if missing
 - Overwrites existing scripts (generated artifacts are source of truth)
-- Uses atomic write (temp file then move) to prevent half-written scripts on failure
 
 #### 2.5.2 Extract QA Scripts (using qa-splitter)
 
@@ -508,7 +516,7 @@ bash docs/qa-splitter.sh
 The QA splitter must:
 - Extraction output directory must be scripts/ and must be created if missing
 - If a target script already exists, overwrite it (generated artifacts are source of truth)
-- Extractor must write to a temp file and then move into place (atomic write). If extraction fails, do not leave half-written scripts
+- Extraction uses POSIX awk with OUTPUT_DIR-passing; writes directly to scripts/ (path prefix stripped from marker)
 
 #### 2.5.3 Generate Orchestration Runners
 
@@ -551,6 +559,65 @@ Generate comprehensive README.md with:
 - Development workflow
 - Deployment guide
 - API documentation from service contracts
+
+---
+
+### Step 2.6: Phase 2 Completion Gate
+
+**This step is MANDATORY and BLOCKING. Do not consider Phase 2 complete until all checks below pass.**
+
+All implementation is now written. Execute the full validation suite against it. If any step fails, diagnose the failure, apply fixes to the implementation, and re-run that step before continuing. Do not skip failures. Do not proceed to Phase 3 or declare the build complete while any gate or QA test is failing.
+
+#### 2.6.1 Install and type-check
+
+```bash
+npm install
+npm run db:generate
+npx tsc --noEmit
+```
+
+Fix any TypeScript errors before continuing. Type errors are implementation bugs, not warnings.
+
+#### 2.6.2 Extract scripts (re-run to ensure latest)
+
+```bash
+bash docs/gate-splitter.sh
+bash docs/qa-splitter.sh
+```
+
+#### 2.6.3 Run quality gates
+
+```bash
+bash scripts/run-all-gates.sh
+```
+
+**On failure**: Read the output of the failing gate script. Each gate checks a specific spec contract (schema completeness, FK coverage, multi-tenancy, env vars, etc.). Fix the implementation issue the gate identified. Re-run `bash scripts/run-all-gates.sh` after each fix. Do not continue until exit code is 0.
+
+#### 2.6.4 Run QA tests
+
+```bash
+bash scripts/run-all-qa-tests.sh
+```
+
+**On failure**: Read the output of the failing QA test. Fix the implementation issue it identified. Re-run `bash scripts/run-all-qa-tests.sh` after each fix. Do not continue until exit code is 0.
+
+#### 2.6.5 Build
+
+```bash
+npm run build
+```
+
+Fix any build errors before continuing.
+
+#### 2.6.6 Completion check
+
+Phase 2 is complete only when ALL of the following are true:
+- [ ] `npx tsc --noEmit` exits 0
+- [ ] `bash scripts/run-all-gates.sh` exits 0 (zero BLOCKING failures)
+- [ ] `bash scripts/run-all-qa-tests.sh` exits 0 (all tests pass)
+- [ ] `npm run build` exits 0
+
+If any check fails after attempting fixes, report what failed and why before stopping.
 
 ---
 
@@ -604,23 +671,19 @@ The Quality Checker validates implementation against all specification artifacts
 ## VALIDATION AND DEPLOYMENT
 
 ### Build Validation
+
+The mandatory build validation sequence is executed as part of **Step 2.6: Phase 2 Completion Gate** above. Refer to that step for the authoritative execution sequence and fix-and-retry loop requirements.
+
+For reference, the full validation sequence is:
+
 ```bash
-# Install dependencies
 npm install
-
-# Generate database migrations
 npm run db:generate
-
-# Run type checking
 npx tsc --noEmit
-
-# Run quality gates
-npm run test:gates
-
-# Run QA tests  
-npm run test:qa
-
-# Build application
+bash docs/gate-splitter.sh
+bash docs/qa-splitter.sh
+bash scripts/run-all-gates.sh
+bash scripts/run-all-qa-tests.sh
 npm run build
 ```
 
@@ -637,14 +700,15 @@ Verify all required files are generated:
 
 ## SUCCESS CRITERIA
 
-**Build succeeds when:**
+**Build is complete only when ALL of the following are true (verified by Step 2.6):**
 - [ ] All 10 specification artifacts generated with valid schemas
-- [ ] Complete, type-safe application code generated
-- [ ] All quality gates pass
-- [ ] Application builds without errors
+- [ ] Complete, type-safe application code generated (`npx tsc --noEmit` exits 0)
+- [ ] All quality gates pass (`bash scripts/run-all-gates.sh` exits 0)
+- [ ] All QA tests pass (`bash scripts/run-all-qa-tests.sh` exits 0)
+- [ ] Application builds without errors (`npm run build` exits 0)
 - [ ] Health endpoint responds successfully
 - [ ] Database connections work in both local and production modes
-- [ ] Authentication and RBAC implemented correctly
+- [ ] Authentication and RBAC implemented correctly (if applicable per specs)
 - [ ] UI pages load and connect to API endpoints
 
 **Final Test**: Deploy to Replit and verify functionality. This specification set is designed so that Claude Code can generate a working application on first build with minimal manual fixes.
