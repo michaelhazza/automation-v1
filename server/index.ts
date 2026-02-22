@@ -24,6 +24,7 @@ import systemUsersRouter from './routes/systemUsers.js';
 import systemSettingsRouter from './routes/systemSettings.js';
 import systemExecutionsRouter from './routes/systemExecutions.js';
 import webhooksRouter from './routes/webhooks.js';
+import subaccountsRouter from './routes/subaccounts.js';
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use(systemUsersRouter);
 app.use(systemSettingsRouter);
 app.use(systemExecutionsRouter);
 app.use(webhooksRouter);
+app.use(subaccountsRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
