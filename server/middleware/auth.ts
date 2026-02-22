@@ -191,6 +191,24 @@ export const requireSubaccountPermission = (permissionKey: string) => {
   };
 };
 
+// ─── checkOrgPermission utility ───────────────────────────────────────────────
+
+/**
+ * Programmatic permission check for use inside service/route handlers.
+ * Returns true if the user has the given permission key in their org-level
+ * permission set, or if they are system_admin.
+ */
+export async function checkOrgPermission(
+  userId: string,
+  organisationId: string,
+  role: string | null | undefined,
+  permissionKey: string
+): Promise<boolean> {
+  if (role === 'system_admin') return true;
+  const perms = await loadOrgPermissions(userId, organisationId);
+  return perms.has(permissionKey);
+}
+
 // ─── Legacy shim (temporary) ───────────────────────────────────────────────────
 // Routes that have not yet been migrated to requireOrgPermission still call
 // requireRole. This shim keeps them working by allowing system_admin through
