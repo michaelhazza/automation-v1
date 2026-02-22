@@ -78,6 +78,7 @@ export default function Layout({ user, children }: LayoutProps) {
   const orgNavItems = isOrgUser ? [
     { path: '/tasks', label: 'Tasks' },
     { path: '/executions', label: 'Executions' },
+    { path: '/portal', label: 'Portal' },
     { path: '/admin/tasks', label: 'Manage Tasks' },
     { path: '/admin/users', label: 'Users' },
     { path: '/admin/engines', label: 'Engines' },

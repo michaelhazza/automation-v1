@@ -26,6 +26,7 @@ import systemExecutionsRouter from './routes/systemExecutions.js';
 import webhooksRouter from './routes/webhooks.js';
 import subaccountsRouter from './routes/subaccounts.js';
 import permissionSetsRouter from './routes/permissionSets.js';
+import portalRouter from './routes/portal.js';
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use(systemExecutionsRouter);
 app.use(webhooksRouter);
 app.use(subaccountsRouter);
 app.use(permissionSetsRouter);
+app.use(portalRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

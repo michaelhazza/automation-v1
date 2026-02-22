@@ -26,6 +26,10 @@ const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPa
 const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const SystemTaskQueuePage = lazy(() => import('./pages/SystemTaskQueuePage'));
+const PortalLandingPage = lazy(() => import('./pages/PortalLandingPage'));
+const PortalPage = lazy(() => import('./pages/PortalPage'));
+const PortalExecutionPage = lazy(() => import('./pages/PortalExecutionPage'));
+const PortalExecutionHistoryPage = lazy(() => import('./pages/PortalExecutionHistoryPage'));
 
 function PageLoader() {
   return (
@@ -137,6 +141,12 @@ export default function App() {
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
           </Route>
+
+          {/* Client portal routes */}
+          <Route path="/portal" element={<PortalLandingPage user={user!} />} />
+          <Route path="/portal/:subaccountId" element={<PortalPage user={user!} />} />
+          <Route path="/portal/:subaccountId/tasks/:taskId" element={<PortalExecutionPage user={user!} />} />
+          <Route path="/portal/:subaccountId/executions" element={<PortalExecutionHistoryPage user={user!} />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
