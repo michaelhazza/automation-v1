@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { users } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
@@ -11,7 +11,7 @@ import { emailService } from '../services/emailService.js';
 const router = Router();
 
 // List all system admin users — system_admin only
-router.get('/api/system/users', authenticate, requireRole('system_admin'), async (req, res) => {
+router.get('/api/system/users', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const rows = await db
       .select({
@@ -35,8 +35,7 @@ router.get('/api/system/users', authenticate, requireRole('system_admin'), async
 });
 
 // Invite a new system admin — system_admin only
-// The new system admin is placed in the calling admin's organisation (the platform org)
-router.post('/api/system/users/invite', authenticate, requireRole('system_admin'), async (req, res) => {
+router.post('/api/system/users/invite', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const { email, firstName, lastName } = req.body;
     if (!email) {
@@ -44,7 +43,6 @@ router.post('/api/system/users/invite', authenticate, requireRole('system_admin'
       return;
     }
 
-    // Prevent duplicate: any non-deleted user with this email anywhere on the platform
     const existing = await db
       .select({ id: users.id })
       .from(users)
@@ -59,7 +57,6 @@ router.post('/api/system/users/invite', authenticate, requireRole('system_admin'
     const inviteExpiresAt = new Date(Date.now() + env.INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
     const tempHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
 
-    // Use the calling system_admin's organisationId as the "platform" org for the new system admin
     const callerOrgId = req.user!.organisationId;
 
     const [newUser] = await db

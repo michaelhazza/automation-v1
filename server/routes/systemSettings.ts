@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { systemSettingsService, SETTING_KEYS } from '../services/systemSettingsService.js';
 
 const router = Router();
 
 // Full settings — system_admin only
-router.get('/api/system/settings', authenticate, requireRole('system_admin'), async (req, res) => {
+router.get('/api/system/settings', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const settings = await systemSettingsService.getAll();
     res.json(settings);
@@ -15,7 +15,7 @@ router.get('/api/system/settings', authenticate, requireRole('system_admin'), as
   }
 });
 
-router.patch('/api/system/settings', authenticate, requireRole('system_admin'), async (req, res) => {
+router.patch('/api/system/settings', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const updates = req.body as Record<string, string>;
     const allowed = new Set(Object.values(SETTING_KEYS));

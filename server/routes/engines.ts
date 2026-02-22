@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { engineService } from '../services/engineService.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
-router.get('/api/engines', authenticate, requireRole('org_admin'), async (req, res) => {
+router.get('/api/engines', authenticate, requireOrgPermission(ORG_PERMISSIONS.ENGINES_VIEW), async (req, res) => {
   try {
     const result = await engineService.listEngines(req.orgId!, {
       status: req.query.status as string | undefined,
@@ -16,7 +17,7 @@ router.get('/api/engines', authenticate, requireRole('org_admin'), async (req, r
   }
 });
 
-router.post('/api/engines', authenticate, requireRole('org_admin'), async (req, res) => {
+router.post('/api/engines', authenticate, requireOrgPermission(ORG_PERMISSIONS.ENGINES_MANAGE), async (req, res) => {
   try {
     const { name, engineType, baseUrl, apiKey } = req.body;
     if (!name || !engineType || !baseUrl) {
@@ -31,7 +32,7 @@ router.post('/api/engines', authenticate, requireRole('org_admin'), async (req, 
   }
 });
 
-router.get('/api/engines/:id', authenticate, requireRole('org_admin'), async (req, res) => {
+router.get('/api/engines/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.ENGINES_VIEW), async (req, res) => {
   try {
     const result = await engineService.getEngine(req.params.id, req.orgId!);
     res.json(result);
@@ -41,7 +42,7 @@ router.get('/api/engines/:id', authenticate, requireRole('org_admin'), async (re
   }
 });
 
-router.patch('/api/engines/:id', authenticate, requireRole('org_admin'), async (req, res) => {
+router.patch('/api/engines/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.ENGINES_MANAGE), async (req, res) => {
   try {
     const result = await engineService.updateEngine(req.params.id, req.orgId!, req.body);
     res.json(result);
@@ -51,7 +52,7 @@ router.patch('/api/engines/:id', authenticate, requireRole('org_admin'), async (
   }
 });
 
-router.delete('/api/engines/:id', authenticate, requireRole('org_admin'), async (req, res) => {
+router.delete('/api/engines/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.ENGINES_MANAGE), async (req, res) => {
   try {
     const result = await engineService.deleteEngine(req.params.id, req.orgId!);
     res.json(result);
@@ -61,7 +62,7 @@ router.delete('/api/engines/:id', authenticate, requireRole('org_admin'), async 
   }
 });
 
-router.post('/api/engines/:id/test', authenticate, requireRole('org_admin'), async (req, res) => {
+router.post('/api/engines/:id/test', authenticate, requireOrgPermission(ORG_PERMISSIONS.ENGINES_VIEW), async (req, res) => {
   try {
     const result = await engineService.testEngineConnection(req.params.id, req.orgId!);
     res.json(result);

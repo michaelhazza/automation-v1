@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { organisationService } from '../services/organisationService.js';
 import { parsePositiveInt } from '../middleware/validate.js';
 
 const router = Router();
 
-router.get('/api/organisations', authenticate, requireRole('system_admin'), async (req, res) => {
+router.get('/api/organisations', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const result = await organisationService.listOrganisations({
       status: req.query.status as string | undefined,
@@ -19,7 +19,7 @@ router.get('/api/organisations', authenticate, requireRole('system_admin'), asyn
   }
 });
 
-router.post('/api/organisations', authenticate, requireRole('system_admin'), async (req, res) => {
+router.post('/api/organisations', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const { name, slug, plan, adminEmail, adminFirstName, adminLastName } = req.body;
     if (!name || !slug || !plan || !adminEmail || !adminFirstName || !adminLastName) {
@@ -34,7 +34,7 @@ router.post('/api/organisations', authenticate, requireRole('system_admin'), asy
   }
 });
 
-router.get('/api/organisations/:id', authenticate, requireRole('system_admin'), async (req, res) => {
+router.get('/api/organisations/:id', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const result = await organisationService.getOrganisation(req.params.id);
     res.json(result);
@@ -44,7 +44,7 @@ router.get('/api/organisations/:id', authenticate, requireRole('system_admin'), 
   }
 });
 
-router.patch('/api/organisations/:id', authenticate, requireRole('system_admin'), async (req, res) => {
+router.patch('/api/organisations/:id', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const result = await organisationService.updateOrganisation(req.params.id, req.body);
     res.json(result);
@@ -54,7 +54,7 @@ router.patch('/api/organisations/:id', authenticate, requireRole('system_admin')
   }
 });
 
-router.delete('/api/organisations/:id', authenticate, requireRole('system_admin'), async (req, res) => {
+router.delete('/api/organisations/:id', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const result = await organisationService.deleteOrganisation(req.params.id);
     res.json(result);

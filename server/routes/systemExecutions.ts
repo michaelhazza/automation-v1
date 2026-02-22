@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { db } from '../db/index.js';
 import { executions, organisations, tasks, users } from '../db/schema/index.js';
-import { eq, and, gte, lte, desc, ilike, SQL } from 'drizzle-orm';
+import { eq, and, gte, lte, desc, SQL } from 'drizzle-orm';
 import { parsePositiveInt } from '../middleware/validate.js';
 
 const router = Router();
@@ -10,9 +10,8 @@ const router = Router();
 /**
  * GET /api/system/executions
  * System-admin-only: list executions across ALL organisations with diagnostic fields.
- * Supports filters: organisationId, status, engineType, taskName, userId, from, to
  */
-router.get('/api/system/executions', authenticate, requireRole('system_admin'), async (req, res) => {
+router.get('/api/system/executions', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const {
       organisationId,
@@ -38,7 +37,6 @@ router.get('/api/system/executions', authenticate, requireRole('system_admin'), 
 
     const rows = await db
       .select({
-        // Execution core fields
         id: executions.id,
         status: executions.status,
         engineType: executions.engineType,
@@ -46,30 +44,23 @@ router.get('/api/system/executions', authenticate, requireRole('system_admin'), 
         retryCount: executions.retryCount,
         errorMessage: executions.errorMessage,
         errorDetail: executions.errorDetail,
-        // Diagnostic / webhook fields
         returnWebhookUrl: executions.returnWebhookUrl,
         outboundPayload: executions.outboundPayload,
         callbackReceivedAt: executions.callbackReceivedAt,
         callbackPayload: executions.callbackPayload,
-        // Timing
         queuedAt: executions.queuedAt,
         startedAt: executions.startedAt,
         completedAt: executions.completedAt,
         durationMs: executions.durationMs,
         createdAt: executions.createdAt,
-        // FK ids for joins
         organisationId: executions.organisationId,
         taskId: executions.taskId,
-        userId: executions.userId,
-        // Notify flag
+        triggeredByUserId: executions.triggeredByUserId,
+        subaccountId: executions.subaccountId,
         notifyOnComplete: executions.notifyOnComplete,
-        // Task snapshot for task name
         taskSnapshot: executions.taskSnapshot,
-        // Joined: org name
         organisationName: organisations.name,
-        // Joined: task name (live)
         taskName: tasks.name,
-        // Joined: user email / name
         userEmail: users.email,
         userFirstName: users.firstName,
         userLastName: users.lastName,
@@ -77,7 +68,7 @@ router.get('/api/system/executions', authenticate, requireRole('system_admin'), 
       .from(executions)
       .leftJoin(organisations, eq(executions.organisationId, organisations.id))
       .leftJoin(tasks, eq(executions.taskId, tasks.id))
-      .leftJoin(users, eq(executions.userId, users.id))
+      .leftJoin(users, eq(executions.triggeredByUserId, users.id))
       .where(whereClause)
       .orderBy(desc(executions.createdAt))
       .limit(limit)
@@ -94,7 +85,7 @@ router.get('/api/system/executions', authenticate, requireRole('system_admin'), 
  * GET /api/system/executions/:id
  * System-admin-only: full diagnostic detail for a single execution.
  */
-router.get('/api/system/executions/:id', authenticate, requireRole('system_admin'), async (req, res) => {
+router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async (req, res) => {
   try {
     const [row] = await db
       .select({
@@ -120,7 +111,8 @@ router.get('/api/system/executions/:id', authenticate, requireRole('system_admin
         taskSnapshot: executions.taskSnapshot,
         organisationId: executions.organisationId,
         taskId: executions.taskId,
-        userId: executions.userId,
+        triggeredByUserId: executions.triggeredByUserId,
+        subaccountId: executions.subaccountId,
         organisationName: organisations.name,
         taskName: tasks.name,
         userEmail: users.email,
@@ -130,7 +122,7 @@ router.get('/api/system/executions/:id', authenticate, requireRole('system_admin
       .from(executions)
       .leftJoin(organisations, eq(executions.organisationId, organisations.id))
       .leftJoin(tasks, eq(executions.taskId, tasks.id))
-      .leftJoin(users, eq(executions.userId, users.id))
+      .leftJoin(users, eq(executions.triggeredByUserId, users.id))
       .where(eq(executions.id, req.params.id));
 
     if (!row) {

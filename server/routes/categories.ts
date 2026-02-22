@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { categoryService } from '../services/categoryService.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
@@ -14,7 +15,7 @@ router.get('/api/categories', authenticate, async (req, res) => {
   }
 });
 
-router.post('/api/categories', authenticate, requireRole('org_admin'), async (req, res) => {
+router.post('/api/categories', authenticate, requireOrgPermission(ORG_PERMISSIONS.CATEGORIES_MANAGE), async (req, res) => {
   try {
     const { name, description, colour } = req.body;
     if (!name) {
@@ -29,7 +30,7 @@ router.post('/api/categories', authenticate, requireRole('org_admin'), async (re
   }
 });
 
-router.patch('/api/categories/:id', authenticate, requireRole('org_admin'), async (req, res) => {
+router.patch('/api/categories/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.CATEGORIES_MANAGE), async (req, res) => {
   try {
     const result = await categoryService.updateCategory(req.params.id, req.orgId!, req.body);
     res.json(result);
@@ -39,7 +40,7 @@ router.patch('/api/categories/:id', authenticate, requireRole('org_admin'), asyn
   }
 });
 
-router.delete('/api/categories/:id', authenticate, requireRole('org_admin'), async (req, res) => {
+router.delete('/api/categories/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.CATEGORIES_MANAGE), async (req, res) => {
   try {
     const result = await categoryService.deleteCategory(req.params.id, req.orgId!);
     res.json(result);

@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { userService } from '../services/userService.js';
 import { parsePositiveInt } from '../middleware/validate.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
-// Managers and above can list and manage users within the active org
-router.get('/api/users', authenticate, requireRole('manager'), async (req, res) => {
+router.get('/api/users', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_VIEW), async (req, res) => {
   try {
     const result = await userService.listUsers(req.orgId!, {
       role: req.query.role as string | undefined,
@@ -21,7 +21,7 @@ router.get('/api/users', authenticate, requireRole('manager'), async (req, res) 
   }
 });
 
-router.post('/api/users/invite', authenticate, requireRole('manager'), async (req, res) => {
+router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), async (req, res) => {
   try {
     const { email, role, firstName, lastName } = req.body;
     if (!email || !role) {
@@ -56,7 +56,7 @@ router.patch('/api/users/me', authenticate, async (req, res) => {
   }
 });
 
-router.get('/api/users/:id', authenticate, requireRole('manager'), async (req, res) => {
+router.get('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_VIEW), async (req, res) => {
   try {
     const result = await userService.getUser(req.params.id, req.orgId!);
     res.json(result);
@@ -66,7 +66,7 @@ router.get('/api/users/:id', authenticate, requireRole('manager'), async (req, r
   }
 });
 
-router.patch('/api/users/:id', authenticate, requireRole('manager'), async (req, res) => {
+router.patch('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_EDIT), async (req, res) => {
   try {
     const result = await userService.updateUser(req.params.id, req.orgId!, req.user!.role, req.body);
     res.json(result);
@@ -76,7 +76,7 @@ router.patch('/api/users/:id', authenticate, requireRole('manager'), async (req,
   }
 });
 
-router.delete('/api/users/:id', authenticate, requireRole('manager'), async (req, res) => {
+router.delete('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_DELETE), async (req, res) => {
   try {
     const result = await userService.deleteUser(req.params.id, req.orgId!, req.user!.id, req.user!.role);
     res.json(result);
