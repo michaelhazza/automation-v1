@@ -1,5 +1,5 @@
 import { pgTable, uuid, text, bigint, timestamp, index } from 'drizzle-orm/pg-core';
-import { executions } from './executions.js';
+import { executions } from './executions';
 
 export const executionFiles = pgTable(
   'execution_files',

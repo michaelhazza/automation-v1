@@ -1,6 +1,6 @@
 import { pgTable, uuid, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
-import { permissionGroups } from './permissionGroups.js';
-import { taskCategories } from './taskCategories.js';
+import { permissionGroups } from './permissionGroups';
+import { taskCategories } from './taskCategories';
 
 export const permissionGroupCategories = pgTable(
   'permission_group_categories',

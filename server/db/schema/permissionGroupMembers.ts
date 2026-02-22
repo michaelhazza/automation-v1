@@ -1,6 +1,6 @@
 import { pgTable, uuid, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
-import { permissionGroups } from './permissionGroups.js';
-import { users } from './users.js';
+import { permissionGroups } from './permissionGroups';
+import { users } from './users';
 
 export const permissionGroupMembers = pgTable(
   'permission_group_members',

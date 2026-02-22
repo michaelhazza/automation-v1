@@ -1,7 +1,7 @@
 import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
-import { organisations } from './organisations.js';
-import { workflowEngines } from './workflowEngines.js';
-import { taskCategories } from './taskCategories.js';
+import { organisations } from './organisations';
+import { workflowEngines } from './workflowEngines';
+import { taskCategories } from './taskCategories';
 
 export const tasks = pgTable(
   'tasks',

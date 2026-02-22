@@ -2,7 +2,12 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Routes
 import healthRouter from './routes/health.js';
@@ -41,6 +46,18 @@ app.use(permissionGroupsRouter);
 app.use(executionsRouter);
 app.use(filesRouter);
 
+// Serve static files in production
+if (env.NODE_ENV === 'production') {
+  const clientDistPath = path.resolve(__dirname, '../dist/client');
+  app.use(express.static(clientDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/health')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+}
+
 // 404 handler for API routes
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });
@@ -53,8 +70,8 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
   res.status(e.status ?? e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
 });
 
-const PORT = env.PORT;
-app.listen(PORT, () => {
+const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
 });
 

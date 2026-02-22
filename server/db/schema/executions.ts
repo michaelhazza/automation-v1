@@ -1,7 +1,7 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
-import { organisations } from './organisations.js';
-import { tasks } from './tasks.js';
-import { users } from './users.js';
+import { organisations } from './organisations';
+import { tasks } from './tasks';
+import { users } from './users';
 
 export const executions = pgTable(
   'executions',
