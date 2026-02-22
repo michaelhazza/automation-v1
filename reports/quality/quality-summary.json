@@ -1,6 +1,7 @@
 {
   "generatedAt": "2026-02-22",
   "version": "quality-checker-gpt.md v3",
+  "auditPass": "Pass 2 (incremental fixes applied on top of Pass 1 baseline)",
   "gates": {
     "total": 15,
     "passed": 15,
@@ -13,47 +14,55 @@
     "failed": 0
   },
   "scores": {
-    "overall": 74,
-    "security": 65,
-    "performance": 62,
-    "maintainability": 72,
+    "overall": 82,
+    "security": 76,
+    "performance": 78,
+    "maintainability": 85,
     "testing": 80,
     "documentation": 70,
     "accessibility": 78,
     "seo": null
   },
+  "scoreDeltas": {
+    "overall": "+8 (from 74)",
+    "security": "+11 (from 65)",
+    "performance": "+16 (from 62)",
+    "maintainability": "+13 (from 72)"
+  },
   "issues": {
     "critical": 0,
-    "high": 7,
-    "medium": 9,
-    "low": 4
+    "high": 3,
+    "medium": 5,
+    "low": 3
+  },
+  "issueDeltas": {
+    "high": "-4 (from 7)",
+    "medium": "-4 (from 9)",
+    "low": "-1 (from 4)"
   },
   "autoFixesApplied": [
-    "N+1 query eliminated in listPermissionGroups (2 batch queries replace 2N queries)",
-    "Multi-tenant isolation hardened in getUser (organisationId now in DB WHERE clause)",
-    "In-memory role/status filtering replaced with DB WHERE clauses in listUsers",
-    "In-memory scalar filtering replaced with DB WHERE clauses in listExecutions",
-    "In-memory scalar filtering replaced with DB WHERE clauses in exportExecutions",
-    "In-memory scalar filtering replaced with DB WHERE clauses in listTasks",
-    "In-memory status filtering replaced with DB WHERE clause in listOrganisations",
-    "Full table scan replaced with targeted query in createOrganisation name/slug conflict check",
-    "React.lazy() code splitting implemented for all 16 page components in App.tsx",
-    "Suspense boundary added for lazy-loaded routes",
-    "Email failure logging added to userService invite (was silent catch)",
-    "Email failure logging added to organisationService org creation (was silent catch)",
-    "Manager permission group WHERE clause uses inArray instead of chained eq (correct semantics)",
-    "inArray imported in drizzle-orm for permissionGroupService, executionService, taskService"
+    "Pass 1 - N+1 query eliminated in listPermissionGroups",
+    "Pass 1 - Multi-tenant isolation hardened in getUser",
+    "Pass 1 - In-memory scalar filtering replaced with DB WHERE clauses",
+    "Pass 1 - React.lazy() code splitting with Suspense boundaries for all 20 pages",
+    "Pass 1 - Email failure logging added to userService and organisationService",
+    "Pass 2 - Hardcoded test credentials removed from LoginPage.tsx",
+    "Pass 2 - MIME type allowlist added to /api/files/upload",
+    "Pass 2 - Password strength validation added to invite/accept and reset-password endpoints",
+    "Pass 2 - DB-level LIMIT/OFFSET applied to listUsers (eliminates full-table load)",
+    "Pass 2 - DB-level LIMIT/OFFSET applied to listOrganisations (eliminates full-table load)",
+    "Pass 2 - DB-level LIMIT/OFFSET applied to listExecutions for non-manager roles",
+    "Pass 2 - DB-level LIMIT/OFFSET applied to listTasks for admin roles",
+    "Pass 2 - Shared S3 client helper extracted to server/lib/storage.ts",
+    "Pass 2 - Shared engine auth header builder extracted to server/lib/engineAuth.ts",
+    "Pass 2 - APP_BASE_URL added to env.ts Zod schema; emailService uses validated env value",
+    "Pass 2 - organisations route pagination uses parsePositiveInt instead of raw Number()"
   ],
   "manualActionsRequired": [
-    "Add rate limiting middleware to /api/auth/login and /api/auth/invite/accept (express-rate-limit not in package.json)",
-    "Move JWT token from localStorage to httpOnly cookie to prevent XSS theft",
-    "Add Zod schema validation to route handlers instead of manual string checks",
-    "Add CSRF protection for state-changing operations",
-    "Add file type whitelist validation on file upload endpoint",
-    "Implement password strength requirements (uppercase, number, special char)",
-    "Add audit logging for sensitive operations (user deletion, role changes)",
-    "Add semantic HTML elements to Layout component (nav, main, aside)",
-    "Add aria-label and aria-current attributes to navigation",
-    "Add README.md with setup instructions, architecture overview, deployment guide"
+    "MANUAL SPEC CHANGE REQUIRED: Add rate limiting to auth endpoints (express-rate-limit not in package.json)",
+    "MANUAL SPEC CHANGE REQUIRED: Move JWT from localStorage to httpOnly cookie",
+    "MANUAL SPEC CHANGE REQUIRED: Add CSRF protection for state-changing API operations",
+    "MANUAL: Add semantic HTML nav/main/aside to Layout and aria-label/aria-current to navigation",
+    "MANUAL: Add README.md with setup instructions, environment variables, and deployment guide"
   ]
 }

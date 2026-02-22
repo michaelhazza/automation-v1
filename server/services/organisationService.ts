@@ -11,11 +11,10 @@ export class OrganisationService {
     const conditions = [isNull(organisations.deletedAt)];
     if (params.status) conditions.push(eq(organisations.status, params.status as 'active' | 'suspended'));
 
-    const rows = await db.select().from(organisations).where(and(...conditions));
-
     const limit = params.limit ?? 50;
     const offset = params.offset ?? 0;
-    return rows.slice(offset, offset + limit);
+
+    return db.select().from(organisations).where(and(...conditions)).limit(limit).offset(offset);
   }
 
   async createOrganisation(data: {

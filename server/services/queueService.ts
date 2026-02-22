@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
 import { env } from '../lib/env.js';
+import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -108,7 +109,7 @@ async function processExecution(executionId: string): Promise<void> {
   const maxRetries = 3;
 
   // Build engine-specific auth headers
-  const authHeaders = buildAuthHeaders(engine.engineType, engine.apiKey ?? undefined);
+  const authHeaders = buildEngineAuthHeaders(engine.engineType, engine.apiKey ?? undefined);
 
   while (retryCount <= maxRetries) {
     try {
@@ -202,34 +203,6 @@ async function processExecution(executionId: string): Promise<void> {
         .where(eq(executions.id, executionId));
       return;
     }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Engine-specific header builder
-// Different engines use different auth header conventions.
-// ---------------------------------------------------------------------------
-function buildAuthHeaders(
-  engineType: string,
-  apiKey?: string
-): Record<string, string> {
-  if (!apiKey) return {};
-
-  switch (engineType) {
-    case 'n8n':
-      return { 'X-N8N-API-KEY': apiKey };
-    case 'make':
-      // Make.com webhooks don't use an API key in headers — the secret is baked
-      // into the webhook URL itself. We still include it as a Bearer token when
-      // configured so self-hosted instances can validate.
-      return { Authorization: `Bearer ${apiKey}` };
-    case 'zapier':
-      return { Authorization: `Bearer ${apiKey}` };
-    case 'ghl':
-      return { Authorization: `Bearer ${apiKey}` };
-    case 'custom_webhook':
-    default:
-      return { Authorization: `Bearer ${apiKey}` };
   }
 }
 

@@ -1,6 +1,6 @@
 import { env } from '../lib/env.js';
 
-const APP_BASE_URL = process.env.APP_BASE_URL ?? 'http://localhost:5173';
+const APP_BASE_URL = env.APP_BASE_URL;
 
 function brandedHtml(title: string, preheader: string, bodyHtml: string): string {
   return `<!DOCTYPE html>

@@ -4,6 +4,15 @@ import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
 
+// Validates password strength: min 8 chars, uppercase, number, special character
+function validatePasswordStrength(password: string): string | null {
+  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
+  if (!/[0-9]/.test(password)) return 'Password must contain at least one number';
+  if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one special character';
+  return null;
+}
+
 router.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -24,6 +33,11 @@ router.post('/api/auth/invite/accept', async (req, res) => {
     const { token, password, firstName, lastName } = req.body;
     if (!token || !password || !firstName || !lastName) {
       res.status(400).json({ error: 'Validation failed', details: 'token, password, firstName, lastName are required' });
+      return;
+    }
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      res.status(400).json({ error: 'Validation failed', details: passwordError });
       return;
     }
     const result = await authService.acceptInvite(token, password, firstName, lastName);
@@ -56,8 +70,9 @@ router.post('/api/auth/reset-password', async (req, res) => {
       res.status(400).json({ error: 'Validation failed', details: 'token and password are required' });
       return;
     }
-    if (password.length < 8) {
-      res.status(400).json({ error: 'Validation failed', details: 'Password must be at least 8 characters' });
+    const passwordError = validatePasswordStrength(password);
+    if (passwordError) {
+      res.status(400).json({ error: 'Validation failed', details: passwordError });
       return;
     }
     const result = await authService.resetPassword(token, password);

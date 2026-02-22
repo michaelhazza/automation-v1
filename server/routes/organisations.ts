@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { organisationService } from '../services/organisationService.js';
+import { parsePositiveInt } from '../middleware/validate.js';
 
 const router = Router();
 
@@ -8,8 +9,8 @@ router.get('/api/organisations', authenticate, requireRole('system_admin'), asyn
   try {
     const result = await organisationService.listOrganisations({
       status: req.query.status as string | undefined,
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
-      offset: req.query.offset ? Number(req.query.offset) : undefined,
+      limit: parsePositiveInt(req.query.limit),
+      offset: parsePositiveInt(req.query.offset),
     });
     res.json(result);
   } catch (err: unknown) {
