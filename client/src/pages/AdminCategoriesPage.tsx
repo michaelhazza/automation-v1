@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Category {
   id: string;
@@ -16,6 +18,7 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', description: '', colour: '#6366f1' });
   const [error, setError] = useState('');
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = async () => {
     const { data } = await api.get('/api/categories');
@@ -46,12 +49,14 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
   const handleEdit = (cat: Category) => {
     setEditId(cat.id);
     setForm({ name: cat.name, description: cat.description ?? '', colour: cat.colour ?? '#6366f1' });
+    setError('');
     setShowForm(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this category?')) return;
-    await api.delete(`/api/categories/${id}`);
+  const handleDeleteConfirm = async () => {
+    if (!deleteId) return;
+    await api.delete(`/api/categories/${deleteId}`);
+    setDeleteId(null);
     load();
   };
 
@@ -64,14 +69,13 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Task Categories</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Organise tasks and control access via categories</p>
         </div>
-        <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
           + Add category
         </button>
       </div>
 
       {showForm && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24, maxWidth: 500 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>{editId ? 'Edit category' : 'New category'}</h2>
+        <Modal title={editId ? 'Edit category' : 'New category'} onClose={() => setShowForm(false)} maxWidth={480}>
           {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
@@ -81,7 +85,7 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
             <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
             <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
           </div>
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 24 }}>
             <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Colour</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <input type="color" value={form.colour} onChange={(e) => setForm({ ...form, colour: e.target.value })} style={{ width: 40, height: 32, border: 'none', cursor: 'pointer' }} />
@@ -89,10 +93,20 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleSave} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Save</button>
+            <button onClick={handleSave} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Save</button>
             <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           </div>
-        </div>
+        </Modal>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete category"
+          message="Are you sure you want to delete this category? This action cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
@@ -109,7 +123,7 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
             {cat.description && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>{cat.description}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => handleEdit(cat)} style={{ padding: '4px 12px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Edit</button>
-              <button onClick={() => handleDelete(cat.id)} style={{ padding: '4px 12px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+              <button onClick={() => setDeleteId(cat.id)} style={{ padding: '4px 12px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
             </div>
           </div>
         ))}

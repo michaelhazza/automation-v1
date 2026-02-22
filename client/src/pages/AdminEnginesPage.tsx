@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Engine {
   id: string;
@@ -18,6 +20,7 @@ export default function AdminEnginesPage({ user }: { user: User }) {
   const [form, setForm] = useState({ name: '', engineType: 'n8n', baseUrl: '', apiKey: '' });
   const [error, setError] = useState('');
   const [testResults, setTestResults] = useState<Record<string, string>>({});
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = async () => {
     const { data } = await api.get('/api/engines');
@@ -52,9 +55,10 @@ export default function AdminEnginesPage({ user }: { user: User }) {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this engine?')) return;
-    await api.delete(`/api/engines/${id}`);
+  const handleDeleteConfirm = async () => {
+    if (!deleteId) return;
+    await api.delete(`/api/engines/${deleteId}`);
+    setDeleteId(null);
     load();
   };
 
@@ -73,16 +77,15 @@ export default function AdminEnginesPage({ user }: { user: User }) {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Workflow Engines</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage automation engine connections</p>
         </div>
-        <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
           + Add engine
         </button>
       </div>
 
       {showForm && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>New engine</h2>
+        <Modal title="New engine" onClose={() => setShowForm(false)} maxWidth={560}>
           {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
@@ -103,10 +106,20 @@ export default function AdminEnginesPage({ user }: { user: User }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Create</button>
+            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
             <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           </div>
-        </div>
+        </Modal>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete engine"
+          message="Are you sure you want to delete this engine? This action cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -126,7 +139,7 @@ export default function AdminEnginesPage({ user }: { user: User }) {
               <button onClick={() => handleToggle(engine)} style={{ padding: '6px 14px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
                 {engine.status === 'active' ? 'Deactivate' : 'Activate'}
               </button>
-              <button onClick={() => handleDelete(engine.id)} style={{ padding: '6px 14px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Delete</button>
+              <button onClick={() => setDeleteId(engine.id)} style={{ padding: '6px 14px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Delete</button>
             </div>
           </div>
         ))}

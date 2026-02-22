@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import Modal from '../components/Modal';
 
 interface SystemUser {
   id: string;
@@ -84,15 +85,14 @@ export default function SystemUsersPage({ user }: { user: User }) {
       )}
 
       {showInviteForm && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24, maxWidth: 520 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>Invite system admin</h2>
+        <Modal title="Invite system admin" onClose={() => { setShowInviteForm(false); setError(''); }} maxWidth={520}>
           <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px' }}>
             The invited person will receive full platform admin access.
           </p>
           {error && (
             <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Email *</label>
               <input
@@ -123,7 +123,7 @@ export default function SystemUsersPage({ user }: { user: User }) {
           <div style={{ display: 'flex', gap: 12 }}>
             <button
               onClick={handleInvite}
-              style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+              style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
             >
               Send invitation
             </button>
@@ -134,7 +134,7 @@ export default function SystemUsersPage({ user }: { user: User }) {
               Cancel
             </button>
           </div>
-        </div>
+        </Modal>
       )}
 
       <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>

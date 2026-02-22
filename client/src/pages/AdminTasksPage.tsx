@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Task {
   id: string;
@@ -39,6 +41,7 @@ export default function AdminTasksPage({ user }: { user: User }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', workflowEngineId: '', categoryId: '', endpointUrl: '', httpMethod: 'POST', inputGuidance: '', expectedOutput: '', timeoutSeconds: 300 });
   const [error, setError] = useState('');
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = async () => {
     const [taskRes, catRes, engRes] = await Promise.all([
@@ -76,9 +79,10 @@ export default function AdminTasksPage({ user }: { user: User }) {
     load();
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this task?')) return;
-    await api.delete(`/api/tasks/${id}`);
+  const handleDeleteConfirm = async () => {
+    if (!deleteId) return;
+    await api.delete(`/api/tasks/${deleteId}`);
+    setDeleteId(null);
     load();
   };
 
@@ -93,16 +97,15 @@ export default function AdminTasksPage({ user }: { user: User }) {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Manage Tasks</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Create and configure automation tasks</p>
         </div>
-        <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
           + Create task
         </button>
       </div>
 
       {showForm && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>New task</h2>
+        <Modal title="New task" onClose={() => setShowForm(false)} maxWidth={640}>
           {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name *</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Engine *</label>
@@ -131,10 +134,20 @@ export default function AdminTasksPage({ user }: { user: User }) {
               <textarea value={form.expectedOutput} onChange={(e) => setForm({ ...form, expectedOutput: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Create</button>
+            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
             <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           </div>
-        </div>
+        </Modal>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete task"
+          message="Are you sure you want to delete this task? This action cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
 
       <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
@@ -166,7 +179,7 @@ export default function AdminTasksPage({ user }: { user: User }) {
                     {task.status === 'active' && (
                       <button onClick={() => handleDeactivate(task.id)} style={{ padding: '4px 10px', background: '#fef9c3', color: '#a16207', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Deactivate</button>
                     )}
-                    <button onClick={() => handleDelete(task.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+                    <button onClick={() => setDeleteId(task.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
                   </td>
                 </tr>
               ))}
