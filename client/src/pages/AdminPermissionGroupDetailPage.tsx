@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Member {
   id: string;
@@ -38,6 +40,8 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
   const [editMode, setEditMode] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+  const [removeMemberId, setRemoveMemberId] = useState<string | null>(null);
+  const [removeCategoryId, setRemoveCategoryId] = useState<string | null>(null);
 
   const load = async () => {
     const [groupRes, usersRes, catRes] = await Promise.all([
@@ -62,8 +66,10 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
     } catch { /* ignore duplicate etc */ }
   };
 
-  const handleRemoveMember = async (userId: string) => {
-    await api.delete(`/api/permission-groups/${id}/members/${userId}`);
+  const handleRemoveMemberConfirm = async () => {
+    if (!removeMemberId) return;
+    await api.delete(`/api/permission-groups/${id}/members/${removeMemberId}`);
+    setRemoveMemberId(null);
     load();
   };
 
@@ -76,8 +82,10 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
     } catch { /* ignore */ }
   };
 
-  const handleRemoveCategory = async (categoryId: string) => {
-    await api.delete(`/api/permission-groups/${id}/categories/${categoryId}`);
+  const handleRemoveCategoryConfirm = async () => {
+    if (!removeCategoryId) return;
+    await api.delete(`/api/permission-groups/${id}/categories/${removeCategoryId}`);
+    setRemoveCategoryId(null);
     load();
   };
 
@@ -94,6 +102,13 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
   const availableUsers = allUsers.filter((u) => !memberUserIds.has(u.id));
   const availableCategories = allCategories.filter((c) => !memberCategoryIds.has(c.id));
 
+  const removeMemberName = removeMemberId
+    ? group.members.find((m) => m.userId === removeMemberId)
+    : null;
+  const removeCategoryName = removeCategoryId
+    ? group.categories.find((c) => c.categoryId === removeCategoryId)
+    : null;
+
   return (
     <>
       <div style={{ marginBottom: 16 }}>
@@ -101,27 +116,51 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32 }}>
-        {editMode ? (
-          <div style={{ flex: 1 }}>
-            <input value={editName} onChange={(e) => setEditName(e.target.value)} style={{ width: '100%', fontSize: 22, fontWeight: 700, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 8, marginBottom: 8, boxSizing: 'border-box' }} />
-            <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} style={{ width: '100%', fontSize: 14, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 8, boxSizing: 'border-box' }} placeholder="Description" />
-            <div style={{ marginTop: 12, display: 'flex', gap: 10 }}>
-              <button onClick={handleSaveEdit} style={{ padding: '6px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Save</button>
-              <button onClick={() => setEditMode(false)} style={{ padding: '6px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', margin: 0 }}>{group.name}</h1>
-            {group.description && <p style={{ color: '#64748b', marginTop: 4 }}>{group.description}</p>}
-          </div>
-        )}
-        {!editMode && (
-          <button onClick={() => { setEditName(group.name); setEditDesc(group.description ?? ''); setEditMode(true); }} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', marginLeft: 16 }}>
-            Edit
-          </button>
-        )}
+        <div>
+          <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', margin: 0 }}>{group.name}</h1>
+          {group.description && <p style={{ color: '#64748b', marginTop: 4 }}>{group.description}</p>}
+        </div>
+        <button onClick={() => { setEditName(group.name); setEditDesc(group.description ?? ''); setEditMode(true); }} style={{ padding: '8px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', marginLeft: 16 }}>
+          Edit
+        </button>
       </div>
+
+      {editMode && (
+        <Modal title="Edit permission group" onClose={() => setEditMode(false)} maxWidth={480}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
+            <input value={editName} onChange={(e) => setEditName(e.target.value)} style={{ width: '100%', fontSize: 14, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
+            <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} style={{ width: '100%', fontSize: 14, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, boxSizing: 'border-box' }} placeholder="Description" />
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={handleSaveEdit} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Save</button>
+            <button onClick={() => setEditMode(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {removeMemberId && (
+        <ConfirmDialog
+          title="Remove member"
+          message={`Remove ${removeMemberName ? `${removeMemberName.firstName} ${removeMemberName.lastName}` : 'this member'} from the group?`}
+          confirmLabel="Remove"
+          onConfirm={handleRemoveMemberConfirm}
+          onCancel={() => setRemoveMemberId(null)}
+        />
+      )}
+
+      {removeCategoryId && (
+        <ConfirmDialog
+          title="Remove category access"
+          message={`Remove access to "${removeCategoryName?.name ?? 'this category'}" from the group?`}
+          confirmLabel="Remove"
+          onConfirm={handleRemoveCategoryConfirm}
+          onCancel={() => setRemoveCategoryId(null)}
+        />
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         {/* Members */}
@@ -142,7 +181,7 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
                 <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>{member.firstName} {member.lastName}</div>
                 <div style={{ fontSize: 12, color: '#64748b' }}>{member.email} · {member.role}</div>
               </div>
-              <button onClick={() => handleRemoveMember(member.userId)} style={{ padding: '3px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+              <button onClick={() => setRemoveMemberId(member.userId)} style={{ padding: '3px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
             </div>
           ))}
         </div>
@@ -165,7 +204,7 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
                 {cat.colour && <span style={{ width: 10, height: 10, borderRadius: '50%', background: cat.colour }} />}
                 <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>{cat.name}</span>
               </div>
-              <button onClick={() => handleRemoveCategory(cat.categoryId)} style={{ padding: '3px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+              <button onClick={() => setRemoveCategoryId(cat.categoryId)} style={{ padding: '3px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
             </div>
           ))}
         </div>

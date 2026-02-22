@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface OrgUser {
   id: string;
@@ -32,6 +34,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
   const [form, setForm] = useState({ email: '', role: 'user', firstName: '', lastName: '' });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
   const load = async () => {
     const { data } = await api.get('/api/users');
@@ -78,17 +81,23 @@ export default function AdminUsersPage({ user }: { user: User }) {
     }
   };
 
-  const handleDelete = async (userId: string) => {
-    if (!confirm('Remove this user?')) return;
+  const handleDeleteConfirm = async () => {
+    if (!deleteUserId) return;
     setError('');
     try {
-      await api.delete(`/api/users/${userId}`);
+      await api.delete(`/api/users/${deleteUserId}`);
+      setDeleteUserId(null);
       load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to remove user');
+      setDeleteUserId(null);
     }
   };
+
+  const deleteUserName = deleteUserId
+    ? users.find((u) => u.id === deleteUserId)
+    : null;
 
   if (loading) return <div>Loading...</div>;
 
@@ -99,19 +108,18 @@ export default function AdminUsersPage({ user }: { user: User }) {
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Users</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage team members and their access</p>
         </div>
-        <button onClick={() => setShowInviteForm(true)} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button onClick={() => { setShowInviteForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
           + Invite user
         </button>
       </div>
 
       {success && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#16a34a', fontSize: 14 }}>{success}</div>}
-      {error && !showInviteForm && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>{error}</div>}
+      {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>{error}</div>}
 
       {showInviteForm && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24, maxWidth: 520 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Invite new user</h2>
+        <Modal title="Invite new user" onClose={() => setShowInviteForm(false)} maxWidth={520}>
           {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Email *</label>
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
@@ -132,10 +140,20 @@ export default function AdminUsersPage({ user }: { user: User }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleInvite} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Send invitation</button>
+            <button onClick={handleInvite} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Send invitation</button>
             <button onClick={() => setShowInviteForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           </div>
-        </div>
+        </Modal>
+      )}
+
+      {deleteUserId && (
+        <ConfirmDialog
+          title="Remove user"
+          message={`Remove ${deleteUserName ? `${deleteUserName.firstName} ${deleteUserName.lastName} (${deleteUserName.email})` : 'this user'} from the organisation? This action cannot be undone.`}
+          confirmLabel="Remove"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteUserId(null)}
+        />
       )}
 
       <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
@@ -175,7 +193,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
                 </td>
                 <td style={{ padding: '12px 16px' }}>
                   {u.id !== user.id && (
-                    <button onClick={() => handleDelete(u.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+                    <button onClick={() => setDeleteUserId(u.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
                   )}
                 </td>
               </tr>

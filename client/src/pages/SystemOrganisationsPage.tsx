@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User, setActiveOrg } from '../lib/auth';
+import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Organisation {
   id: string;
@@ -19,6 +21,7 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', slug: '', plan: 'starter', adminEmail: '', adminFirstName: '', adminLastName: '' });
   const [error, setError] = useState('');
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = async () => {
     const { data } = await api.get('/api/organisations');
@@ -61,11 +64,14 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
     navigate('/admin/users');
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this organisation?')) return;
-    await api.delete(`/api/organisations/${id}`);
+  const handleDeleteConfirm = async () => {
+    if (!deleteId) return;
+    await api.delete(`/api/organisations/${deleteId}`);
+    setDeleteId(null);
     load();
   };
+
+  const deleteOrgName = deleteId ? orgs.find((o) => o.id === deleteId) : null;
 
   if (loading) return <div>Loading...</div>;
 
@@ -83,17 +89,16 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
           >
             System Admins
           </Link>
-          <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+          <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
             + Create organisation
           </button>
         </div>
       </div>
 
       {showForm && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24, maxWidth: 600 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>New organisation</h2>
+        <Modal title="New organisation" onClose={() => setShowForm(false)} maxWidth={600}>
           {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name *</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Slug *</label><input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Plan *</label>
@@ -106,10 +111,20 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Admin last name *</label><input value={form.adminLastName} onChange={(e) => setForm({ ...form, adminLastName: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Create</button>
+            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
             <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
           </div>
-        </div>
+        </Modal>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete organisation"
+          message={`Are you sure you want to delete "${deleteOrgName?.name ?? 'this organisation'}"? This action cannot be undone and will remove all associated data.`}
+          confirmLabel="Delete"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
 
       <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
@@ -155,7 +170,7 @@ export default function SystemOrganisationsPage({ user }: { user: User }) {
                     >
                       Administer
                     </button>
-                    <button onClick={() => handleDelete(org.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+                    <button onClick={() => setDeleteId(org.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
                   </div>
                 </td>
               </tr>
