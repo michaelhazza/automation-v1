@@ -15,14 +15,17 @@ export class UserService {
     if (params.role) conditions.push(eq(users.role, params.role as 'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user'));
     if (params.status) conditions.push(eq(users.status, params.status as 'active' | 'inactive' | 'pending'));
 
+    const limit = params.limit ?? 50;
+    const offset = params.offset ?? 0;
+
     const rows = await db
       .select()
       .from(users)
-      .where(and(...conditions));
+      .where(and(...conditions))
+      .limit(limit)
+      .offset(offset);
 
-    const limit = params.limit ?? 50;
-    const offset = params.offset ?? 0;
-    return rows.slice(offset, offset + limit).map((u) => ({
+    return rows.map((u) => ({
       id: u.id,
       email: u.email,
       firstName: u.firstName,

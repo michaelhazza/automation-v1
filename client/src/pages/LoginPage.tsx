@@ -1,10 +1,9 @@
 import { useState, FormEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { setToken } from '../lib/auth';
 
 export default function LoginPage() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -73,20 +72,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div style={{ marginTop: 24, padding: '14px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#0369a1', marginBottom: 6 }}>Test credentials</div>
-          <div style={{ fontSize: 13, color: '#0c4a6e' }}>
-            <div>Email: <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>admin@automation.os</code></div>
-            <div style={{ marginTop: 2 }}>Password: <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>Admin123!</code></div>
-          </div>
-          <button
-            type="button"
-            onClick={() => { setEmail('admin@automation.os'); setPassword('Admin123!'); }}
-            style={{ marginTop: 8, background: 'none', border: '1px solid #7dd3fc', borderRadius: 6, color: '#0284c7', fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
-          >
-            Fill credentials
-          </button>
-        </div>
       </div>
     </div>
   );

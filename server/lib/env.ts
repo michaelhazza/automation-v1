@@ -38,6 +38,9 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().optional().default('*'),
   INVITE_TOKEN_EXPIRY_HOURS: z.coerce.number().optional().default(72),
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS: z.coerce.number().optional().default(1),
+  // Publicly reachable frontend URL — used to build invite and password reset links in emails.
+  // Example: https://app.youragency.com
+  APP_BASE_URL: z.string().optional().default('http://localhost:5173'),
 });
 
 export const env = envSchema.parse(process.env);

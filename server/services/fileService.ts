@@ -2,37 +2,10 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { executionFiles, executions } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
-
-function getS3Client(): S3Client {
-  if (env.FILE_STORAGE_BACKEND === 'r2') {
-    return new S3Client({
-      region: 'auto',
-      endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID ?? '',
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY ?? '',
-      },
-    });
-  } else {
-    return new S3Client({
-      region: env.S3_REGION ?? 'ap-southeast-2',
-      credentials: {
-        accessKeyId: env.S3_ACCESS_KEY_ID ?? '',
-        secretAccessKey: env.S3_SECRET_ACCESS_KEY ?? '',
-      },
-    });
-  }
-}
-
-function getBucketName(): string {
-  if (env.FILE_STORAGE_BACKEND === 'r2') {
-    return env.R2_BUCKET_NAME ?? '';
-  }
-  return env.S3_BUCKET_NAME ?? '';
-}
+import { getS3Client, getBucketName } from '../lib/storage.js';
 
 export class FileService {
   async uploadFile(

@@ -2,6 +2,35 @@ import { eq, and, isNull, gte, lte, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { executions, executionFiles, tasks, users, permissionGroupMembers, permissionGroupCategories } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
+import type { Execution } from '../db/schema/executions.js';
+
+function mapExecution(e: Execution, role: string) {
+  return {
+    id: e.id,
+    taskId: e.taskId,
+    userId: e.userId,
+    status: e.status,
+    inputData: e.inputData,
+    outputData: e.outputData,
+    errorMessage: e.errorMessage,
+    isTestExecution: e.isTestExecution,
+    startedAt: e.startedAt,
+    completedAt: e.completedAt,
+    durationMs: e.durationMs,
+    createdAt: e.createdAt,
+    // Admin-only audit fields
+    ...(role === 'org_admin' || role === 'system_admin'
+      ? {
+          errorDetail: e.errorDetail,
+          returnWebhookUrl: e.returnWebhookUrl,
+          outboundPayload: e.outboundPayload,
+          callbackReceivedAt: e.callbackReceivedAt,
+          callbackPayload: e.callbackPayload,
+          queuedAt: e.queuedAt,
+        }
+      : {}),
+  };
+}
 
 export class ExecutionService {
   async listExecutions(
@@ -19,14 +48,18 @@ export class ExecutionService {
     if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
     if (params.to) conditions.push(lte(executions.createdAt, new Date(params.to)));
 
-    let rows = await db
-      .select()
-      .from(executions)
-      .where(and(...conditions))
-      .orderBy(desc(executions.createdAt));
+    const limit = params.limit ?? 50;
+    const offset = params.offset ?? 0;
 
-    // Manager role requires additional filtering based on accessible task categories
+    // Manager role requires additional in-memory filtering based on accessible task categories.
+    // All other roles use DB-level pagination directly.
     if (role === 'manager') {
+      const allRows = await db
+        .select()
+        .from(executions)
+        .where(and(...conditions))
+        .orderBy(desc(executions.createdAt));
+
       const memberGroups = await db
         .select({ permissionGroupId: permissionGroupMembers.permissionGroupId })
         .from(permissionGroupMembers)
@@ -52,37 +85,23 @@ export class ExecutionService {
         .filter((t) => t.categoryId === null || accessibleCategoryIds.includes(t.categoryId))
         .map((t) => t.id);
 
-      rows = rows.filter((e) => accessibleTaskIds.includes(e.taskId));
+      const rows = allRows
+        .filter((e) => accessibleTaskIds.includes(e.taskId))
+        .slice(offset, offset + limit);
+
+      return rows.map((e) => mapExecution(e, role));
     }
 
-    const limit = params.limit ?? 50;
-    const offset = params.offset ?? 0;
+    // For all other roles (user, org_admin, system_admin): DB-level pagination
+    const rows = await db
+      .select()
+      .from(executions)
+      .where(and(...conditions))
+      .orderBy(desc(executions.createdAt))
+      .limit(limit)
+      .offset(offset);
 
-    return rows.slice(offset, offset + limit).map((e) => ({
-      id: e.id,
-      taskId: e.taskId,
-      userId: e.userId,
-      status: e.status,
-      inputData: e.inputData,
-      outputData: e.outputData,
-      errorMessage: e.errorMessage,
-      isTestExecution: e.isTestExecution,
-      startedAt: e.startedAt,
-      completedAt: e.completedAt,
-      durationMs: e.durationMs,
-      createdAt: e.createdAt,
-      // Admin-only audit fields
-      ...(role === 'org_admin' || role === 'system_admin'
-        ? {
-            errorDetail: e.errorDetail,
-            returnWebhookUrl: e.returnWebhookUrl,
-            outboundPayload: e.outboundPayload,
-            callbackReceivedAt: e.callbackReceivedAt,
-            callbackPayload: e.callbackPayload,
-            queuedAt: e.queuedAt,
-          }
-        : {}),
-    }));
+    return rows.map((e) => mapExecution(e, role));
   }
 
   async createExecution(

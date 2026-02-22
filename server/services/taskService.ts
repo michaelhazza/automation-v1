@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { tasks, workflowEngines, permissionGroupMembers, permissionGroupCategories, permissionGroups, executions } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { webhookService } from './webhookService.js';
+import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 
 export class TaskService {
   async listTasks(
@@ -22,13 +23,16 @@ export class TaskService {
     if (params.categoryId) conditions.push(eq(tasks.categoryId, params.categoryId));
     if (params.search) conditions.push(ilike(tasks.name, `%${params.search}%`));
 
-    let rows = await db
-      .select()
-      .from(tasks)
-      .where(and(...conditions));
+    const limit = params.limit ?? 50;
+    const offset = params.offset ?? 0;
 
-    // For non-admin roles, further filter by permission group category access
+    // Non-admin roles need in-memory permission filtering; admin roles use DB pagination directly
     if (role === 'manager' || role === 'user') {
+      const allRows = await db
+        .select()
+        .from(tasks)
+        .where(and(...conditions));
+
       const memberGroups = await db
         .select({ permissionGroupId: permissionGroupMembers.permissionGroupId })
         .from(permissionGroupMembers)
@@ -45,13 +49,32 @@ export class TaskService {
         accessibleCategoryIds = [...new Set(categoryAccess.map((c) => c.categoryId))];
       }
 
-      rows = rows.filter((t) => t.categoryId === null || accessibleCategoryIds.includes(t.categoryId));
+      const rows = allRows
+        .filter((t) => t.categoryId === null || accessibleCategoryIds.includes(t.categoryId))
+        .slice(offset, offset + limit);
+
+      return rows.map((t) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        categoryId: t.categoryId,
+        status: t.status,
+        inputGuidance: t.inputGuidance,
+        expectedOutput: t.expectedOutput,
+        timeoutSeconds: t.timeoutSeconds,
+        createdAt: t.createdAt,
+      }));
     }
 
-    const limit = params.limit ?? 50;
-    const offset = params.offset ?? 0;
+    // Admin roles: DB-level pagination
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(and(...conditions))
+      .limit(limit)
+      .offset(offset);
 
-    return rows.slice(offset, offset + limit).map((t) => ({
+    return rows.map((t) => ({
       id: t.id,
       name: t.name,
       description: t.description,
@@ -370,21 +393,3 @@ export class TaskService {
 }
 
 export const taskService = new TaskService();
-
-// Engine-specific auth header builder (mirrors queueService)
-function buildEngineAuthHeaders(
-  engineType: string,
-  apiKey?: string
-): Record<string, string> {
-  if (!apiKey) return {};
-  switch (engineType) {
-    case 'n8n':
-      return { 'X-N8N-API-KEY': apiKey };
-    case 'make':
-    case 'zapier':
-    case 'ghl':
-    case 'custom_webhook':
-    default:
-      return { Authorization: `Bearer ${apiKey}` };
-  }
-}
