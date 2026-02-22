@@ -1,0 +1,183 @@
+import { eq, and, isNull } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { workflowEngines, tasks } from '../db/schema/index.js';
+
+export class EngineService {
+  async listEngines(organisationId: string, params: { status?: string }) {
+    const rows = await db
+      .select()
+      .from(workflowEngines)
+      .where(and(eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+
+    let result = rows;
+    if (params.status) result = result.filter((e) => e.status === params.status);
+
+    return result.map((e) => ({
+      id: e.id,
+      name: e.name,
+      engineType: e.engineType,
+      status: e.status,
+      lastTestedAt: e.lastTestedAt,
+      lastTestStatus: e.lastTestStatus,
+    }));
+  }
+
+  async createEngine(
+    organisationId: string,
+    data: { name: string; engineType: string; baseUrl: string; apiKey?: string }
+  ) {
+    const [engine] = await db
+      .insert(workflowEngines)
+      .values({
+        organisationId,
+        name: data.name,
+        engineType: data.engineType as 'n8n',
+        baseUrl: data.baseUrl,
+        apiKey: data.apiKey,
+        status: 'inactive',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return {
+      id: engine.id,
+      name: engine.name,
+      engineType: engine.engineType,
+      status: engine.status,
+    };
+  }
+
+  async getEngine(id: string, organisationId: string) {
+    const [engine] = await db
+      .select()
+      .from(workflowEngines)
+      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+
+    if (!engine) {
+      throw { statusCode: 404, message: 'Workflow engine not found' };
+    }
+
+    return {
+      id: engine.id,
+      name: engine.name,
+      engineType: engine.engineType,
+      baseUrl: engine.baseUrl,
+      status: engine.status,
+      lastTestedAt: engine.lastTestedAt,
+      lastTestStatus: engine.lastTestStatus,
+    };
+  }
+
+  async updateEngine(
+    id: string,
+    organisationId: string,
+    data: { name?: string; baseUrl?: string; apiKey?: string; status?: string }
+  ) {
+    const [engine] = await db
+      .select()
+      .from(workflowEngines)
+      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+
+    if (!engine) {
+      throw { statusCode: 404, message: 'Workflow engine not found' };
+    }
+
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (data.name !== undefined) update.name = data.name;
+    if (data.baseUrl !== undefined) update.baseUrl = data.baseUrl;
+    if (data.apiKey !== undefined) update.apiKey = data.apiKey;
+    if (data.status !== undefined) update.status = data.status;
+
+    const [updated] = await db
+      .update(workflowEngines)
+      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .where(eq(workflowEngines.id, id))
+      .returning();
+
+    // If deactivated, deactivate all tasks using this engine
+    if (data.status === 'inactive') {
+      await db
+        .update(tasks)
+        .set({ status: 'inactive', updatedAt: new Date() })
+        .where(and(eq(tasks.workflowEngineId, id), isNull(tasks.deletedAt)));
+    }
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      status: updated.status,
+    };
+  }
+
+  async deleteEngine(id: string, organisationId: string) {
+    const [engine] = await db
+      .select()
+      .from(workflowEngines)
+      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+
+    if (!engine) {
+      throw { statusCode: 404, message: 'Workflow engine not found' };
+    }
+
+    const now = new Date();
+    await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(eq(workflowEngines.id, id));
+
+    // Deactivate tasks using this engine
+    await db
+      .update(tasks)
+      .set({ status: 'inactive', deletedAt: now, updatedAt: now })
+      .where(and(eq(tasks.workflowEngineId, id), isNull(tasks.deletedAt)));
+
+    return { message: 'Workflow engine deleted successfully' };
+  }
+
+  async testEngineConnection(id: string, organisationId: string) {
+    const [engine] = await db
+      .select()
+      .from(workflowEngines)
+      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
+
+    if (!engine) {
+      throw { statusCode: 404, message: 'Workflow engine not found' };
+    }
+
+    const start = Date.now();
+    try {
+      const response = await fetch(engine.baseUrl, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10000),
+        headers: engine.apiKey ? { 'X-N8N-API-KEY': engine.apiKey } : {},
+      });
+      const responseTimeMs = Date.now() - start;
+      const success = response.ok || response.status < 500;
+
+      await db
+        .update(workflowEngines)
+        .set({
+          lastTestedAt: new Date(),
+          lastTestStatus: success ? 'success' : 'failed',
+          status: success ? 'active' : engine.status,
+          updatedAt: new Date(),
+        })
+        .where(eq(workflowEngines.id, id));
+
+      return {
+        success,
+        responseTimeMs,
+        message: success ? 'Connection successful' : `Connection failed with status ${response.status}`,
+      };
+    } catch (err: unknown) {
+      const responseTimeMs = Date.now() - start;
+      await db
+        .update(workflowEngines)
+        .set({ lastTestedAt: new Date(), lastTestStatus: 'failed', updatedAt: new Date() })
+        .where(eq(workflowEngines.id, id));
+
+      const message = err instanceof Error ? err.message : 'Connection failed';
+      throw { statusCode: 503, message: `Engine connection test failed: ${message}` };
+    }
+  }
+}
+
+export const engineService = new EngineService();

@@ -1,0 +1,164 @@
+import { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import Layout from '../components/Layout';
+import api from '../lib/api';
+import { User } from '../lib/auth';
+
+interface Task {
+  id: string;
+  name: string;
+  description: string;
+  status: string;
+  categoryId: string | null;
+  workflowEngineId: string;
+  endpointUrl: string;
+  httpMethod: string;
+  inputGuidance: string | null;
+  expectedOutput: string | null;
+  timeoutSeconds: number;
+}
+
+export default function AdminTaskEditPage({ user }: { user: User }) {
+  const { id } = useParams<{ id: string }>();
+  const [task, setTask] = useState<Task | null>(null);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [engines, setEngines] = useState<{ id: string; name: string; status: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
+  const [testInput, setTestInput] = useState('');
+  const [testResult, setTestResult] = useState<unknown>(null);
+  const [testLoading, setTestLoading] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      const [taskRes, catRes, engRes] = await Promise.all([
+        api.get(`/api/tasks/${id}`),
+        api.get('/api/categories'),
+        api.get('/api/engines'),
+      ]);
+      setTask(taskRes.data);
+      setCategories(catRes.data);
+      setEngines(engRes.data);
+      setLoading(false);
+    };
+    load();
+  }, [id]);
+
+  const handleSave = async () => {
+    setError('');
+    setSuccess('');
+    setSaving(true);
+    try {
+      await api.patch(`/api/tasks/${id}`, task);
+      setSuccess('Task saved successfully');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTestResult(null);
+    setTestLoading(true);
+    try {
+      let parsedInput: unknown = undefined;
+      if (testInput.trim()) {
+        try { parsedInput = JSON.parse(testInput); } catch { parsedInput = { text: testInput }; }
+      }
+      const form = new FormData();
+      if (parsedInput !== undefined) form.append('inputData', JSON.stringify(parsedInput));
+      const { data } = await api.post(`/api/tasks/${id}/test`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setTestResult(data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: unknown } };
+      setTestResult({ error: e.response?.data });
+    } finally {
+      setTestLoading(false);
+    }
+  };
+
+  if (loading || !task) return <Layout user={user}><div>Loading...</div></Layout>;
+
+  return (
+    <Layout user={user}>
+      <div style={{ marginBottom: 16 }}>
+        <Link to="/admin/tasks" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to tasks</Link>
+      </div>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 24 }}>Edit Task: {task.name}</h1>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>
+        {/* Edit form */}
+        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0' }}>
+          {success && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#16a34a', fontSize: 13 }}>{success}</div>}
+          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
+              <input type="text" value={task.name ?? ''} onChange={(e) => setTask({ ...task, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Endpoint URL</label>
+              <input type="text" value={task.endpointUrl ?? ''} onChange={(e) => setTask({ ...task, endpointUrl: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>HTTP Method</label>
+              <select value={task.httpMethod} onChange={(e) => setTask({ ...task, httpMethod: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
+                {['GET', 'POST', 'PUT', 'PATCH'].map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Category</label>
+              <select value={task.categoryId ?? ''} onChange={(e) => setTask({ ...task, categoryId: e.target.value || null })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
+                <option value="">No category</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
+              <textarea value={task.description ?? ''} onChange={(e) => setTask({ ...task, description: e.target.value })} rows={3} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input guidance</label>
+              <textarea value={task.inputGuidance ?? ''} onChange={(e) => setTask({ ...task, inputGuidance: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Expected output</label>
+              <textarea value={task.expectedOutput ?? ''} onChange={(e) => setTask({ ...task, expectedOutput: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Timeout (seconds)</label>
+              <input type="number" value={task.timeoutSeconds} onChange={(e) => setTask({ ...task, timeoutSeconds: Number(e.target.value) })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+            </div>
+          </div>
+          <button onClick={handleSave} disabled={saving} style={{ marginTop: 20, padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
+            {saving ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
+
+        {/* Test panel */}
+        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', alignSelf: 'start' }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#1e293b' }}>Test mode</h2>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Test input (JSON)</label>
+            <textarea value={testInput} onChange={(e) => setTestInput(e.target.value)} rows={4} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 12, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }} placeholder='{ "key": "value" }' />
+          </div>
+          <button onClick={handleTest} disabled={testLoading} style={{ width: '100%', padding: '9px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: testLoading ? 'not-allowed' : 'pointer', opacity: testLoading ? 0.7 : 1 }}>
+            {testLoading ? 'Running...' : 'Run test'}
+          </button>
+          {testResult !== null && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Result</div>
+              <pre style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#1e293b', border: '1px solid #e2e8f0', margin: 0 }}>
+                {JSON.stringify(testResult, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      </div>
+    </Layout>
+  );
+}

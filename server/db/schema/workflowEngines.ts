@@ -1,0 +1,31 @@
+import { pgTable, uuid, text, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { organisations } from './organisations.js';
+
+export const workflowEngines = pgTable(
+  'workflow_engines',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id')
+      .notNull()
+      .references(() => organisations.id),
+    name: text('name').notNull(),
+    engineType: text('engine_type').notNull().$type<'n8n' | 'ghl' | 'make' | 'zapier' | 'custom_webhook'>(),
+    baseUrl: text('base_url').notNull(),
+    apiKey: text('api_key'),
+    status: text('status').notNull().default('inactive').$type<'active' | 'inactive'>(),
+    lastTestedAt: timestamp('last_tested_at'),
+    lastTestStatus: text('last_test_status'),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at'),
+  },
+  (table) => ({
+    orgStatusIdx: index('workflow_engines_org_status_idx').on(table.organisationId, table.status),
+    orgIdIdx: index('workflow_engines_org_id_idx').on(table.organisationId),
+    statusIdx: index('workflow_engines_status_idx').on(table.status),
+  })
+);
+
+export type WorkflowEngine = typeof workflowEngines.$inferSelect;
+export type NewWorkflowEngine = typeof workflowEngines.$inferInsert;
