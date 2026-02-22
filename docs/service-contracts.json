@@ -1,0 +1,1568 @@
+{
+  "$schema": "service-contracts-v2",
+  "application": "Automation OS",
+  "basePath": "/api",
+  "basePathNote": "The /health endpoint sits outside /api as an infrastructure health check. All other endpoints use the /api basePath.",
+  "exceptions": ["/health"],
+  "endpoints": [
+    {
+      "path": "/health",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "public",
+      "category": "infrastructure",
+      "entitiesReferenced": [],
+      "middleware": [],
+      "routeFile": "server/routes/health.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/healthService.ts",
+        "methodName": "checkHealth"
+      },
+      "parameters": [],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "status": {"type": "string"},
+          "timestamp": {"type": "string"},
+          "version": {"type": "string"}
+        }
+      },
+      "throws": []
+    },
+    {
+      "path": "/api/auth/login",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "public",
+      "category": "auth",
+      "entitiesReferenced": [],
+      "middleware": ["validateBody"],
+      "routeFile": "server/routes/auth.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/authService.ts",
+        "methodName": "login"
+      },
+      "parameters": [
+        {"name": "email", "type": "string", "required": true, "source": "req.body"},
+        {"name": "password", "type": "string", "required": true, "source": "req.body"}
+      ],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "token": {"type": "string"},
+          "user": {"type": "object"}
+        }
+      },
+      "throws": [
+        {"statusCode": 401, "message": "Invalid email or password"},
+        {"statusCode": 403, "message": "Account is inactive or suspended"}
+      ]
+    },
+    {
+      "path": "/api/auth/invite/accept",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "public",
+      "category": "auth",
+      "entitiesReferenced": [],
+      "middleware": ["validateBody"],
+      "routeFile": "server/routes/auth.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/authService.ts",
+        "methodName": "acceptInvite"
+      },
+      "parameters": [
+        {"name": "token", "type": "string", "required": true, "source": "req.body"},
+        {"name": "password", "type": "string", "required": true, "source": "req.body"},
+        {"name": "firstName", "type": "string", "required": true, "source": "req.body"},
+        {"name": "lastName", "type": "string", "required": true, "source": "req.body"}
+      ],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "token": {"type": "string"},
+          "user": {"type": "object"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Invalid or expired invitation token"},
+        {"statusCode": 400, "message": "Validation failed"}
+      ]
+    },
+    {
+      "path": "/api/auth/me",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "auth",
+      "entitiesReferenced": [],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/auth.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/authService.ts",
+        "methodName": "getCurrentUser"
+      },
+      "parameters": [],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "email": {"type": "string"},
+          "firstName": {"type": "string"},
+          "lastName": {"type": "string"},
+          "role": {"type": "string"},
+          "organisationId": {"type": "uuid"}
+        }
+      },
+      "throws": [
+        {"statusCode": 401, "message": "Authentication required"}
+      ]
+    },
+    {
+      "path": "/api/auth/logout",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "auth",
+      "entitiesReferenced": [],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/auth.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/authService.ts",
+        "methodName": "logout"
+      },
+      "parameters": [],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": []
+    },
+    {
+      "path": "/api/organisations",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["organisations"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/organisations.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/organisationService.ts",
+        "methodName": "listOrganisations"
+      },
+      "parameters": [
+        {"name": "status", "type": "enum", "required": false, "source": "req.query", "typeCoercion": "none", "allowedValues": ["active", "suspended"]},
+        {"name": "limit", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"},
+        {"name": "offset", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"}
+      ],
+      "requiredRole": "system_admin",
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": [
+        {"statusCode": 403, "message": "system_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/organisations",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["organisations"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/organisations.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/organisationService.ts",
+        "methodName": "createOrganisation"
+      },
+      "parameters": [
+        {"name": "name", "type": "string", "required": true, "source": "req.body"},
+        {"name": "slug", "type": "string", "required": true, "source": "req.body"},
+        {"name": "plan", "type": "enum", "required": true, "source": "req.body", "allowedValues": ["starter", "pro", "agency"]},
+        {"name": "adminEmail", "type": "string", "required": true, "source": "req.body"},
+        {"name": "adminFirstName", "type": "string", "required": true, "source": "req.body"},
+        {"name": "adminLastName", "type": "string", "required": true, "source": "req.body"}
+      ],
+      "requiredRole": "system_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "slug": {"type": "string"},
+          "plan": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Validation failed"},
+        {"statusCode": 409, "message": "Organisation name or slug already in use"},
+        {"statusCode": 403, "message": "system_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/organisations/:id",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["organisations"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/organisations.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/organisationService.ts",
+        "methodName": "getOrganisation"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "system_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "slug": {"type": "string"},
+          "plan": {"type": "string"},
+          "status": {"type": "string"},
+          "createdAt": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Organisation not found"},
+        {"statusCode": 403, "message": "system_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/organisations/:id",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["organisations"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/organisations.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/organisationService.ts",
+        "methodName": "updateOrganisation"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "name", "type": "string", "required": false, "source": "req.body"},
+        {"name": "plan", "type": "enum", "required": false, "source": "req.body", "allowedValues": ["starter", "pro", "agency"]},
+        {"name": "status", "type": "enum", "required": false, "source": "req.body", "allowedValues": ["active", "suspended"]},
+        {"name": "settings", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "system_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "plan": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Organisation not found"},
+        {"statusCode": 403, "message": "system_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/organisations/:id",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["organisations"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/organisations.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/organisationService.ts",
+        "methodName": "deleteOrganisation"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "system_admin",
+      "deleteStrategy": "soft",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Organisation not found"},
+        {"statusCode": 403, "message": "system_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/users",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "listUsers"
+      },
+      "parameters": [
+        {"name": "role", "type": "enum", "required": false, "source": "req.query", "typeCoercion": "none", "allowedValues": ["system_admin", "org_admin", "manager", "user", "client_user"]},
+        {"name": "status", "type": "enum", "required": false, "source": "req.query", "typeCoercion": "none", "allowedValues": ["active", "inactive", "pending"]},
+        {"name": "limit", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"},
+        {"name": "offset", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": [
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/users/invite",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "inviteUser"
+      },
+      "parameters": [
+        {"name": "email", "type": "string", "required": true, "source": "req.body"},
+        {"name": "role", "type": "enum", "required": true, "source": "req.body", "allowedValues": ["org_admin", "manager", "user"]},
+        {"name": "firstName", "type": "string", "required": false, "source": "req.body"},
+        {"name": "lastName", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "email": {"type": "string"},
+          "status": {"type": "string"},
+          "inviteExpiresAt": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Validation failed"},
+        {"statusCode": 409, "message": "User with this email already exists in organisation"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/users/me",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "getCurrentUserProfile"
+      },
+      "parameters": [],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "email": {"type": "string"},
+          "firstName": {"type": "string"},
+          "lastName": {"type": "string"},
+          "role": {"type": "string"},
+          "status": {"type": "string"},
+          "lastLoginAt": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 401, "message": "Authentication required"}
+      ]
+    },
+    {
+      "path": "/api/users/me",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate", "validateBody"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "updateCurrentUserProfile"
+      },
+      "parameters": [
+        {"name": "firstName", "type": "string", "required": false, "source": "req.body"},
+        {"name": "lastName", "type": "string", "required": false, "source": "req.body"},
+        {"name": "currentPassword", "type": "string", "required": false, "source": "req.body"},
+        {"name": "newPassword", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "firstName": {"type": "string"},
+          "lastName": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Current password incorrect"},
+        {"statusCode": 400, "message": "Validation failed"}
+      ]
+    },
+    {
+      "path": "/api/users/:id",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "getUser"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "email": {"type": "string"},
+          "firstName": {"type": "string"},
+          "lastName": {"type": "string"},
+          "role": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "User not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/users/:id",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "updateUser"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "role", "type": "enum", "required": false, "source": "req.body", "allowedValues": ["org_admin", "manager", "user"]},
+        {"name": "status", "type": "enum", "required": false, "source": "req.body", "allowedValues": ["active", "inactive"]},
+        {"name": "firstName", "type": "string", "required": false, "source": "req.body"},
+        {"name": "lastName", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "role": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "User not found"},
+        {"statusCode": 403, "message": "org_admin role required"},
+        {"statusCode": 400, "message": "Cannot modify system_admin role via this endpoint"}
+      ]
+    },
+    {
+      "path": "/api/users/:id",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["users"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/users.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/userService.ts",
+        "methodName": "deleteUser"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "soft",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "User not found"},
+        {"statusCode": 403, "message": "org_admin role required"},
+        {"statusCode": 400, "message": "Cannot delete your own account"}
+      ]
+    },
+    {
+      "path": "/api/engines",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["workflow_engines"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/engines.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/engineService.ts",
+        "methodName": "listEngines"
+      },
+      "parameters": [
+        {"name": "status", "type": "enum", "required": false, "source": "req.query", "typeCoercion": "none", "allowedValues": ["active", "inactive"]}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": [
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/engines",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["workflow_engines"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/engines.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/engineService.ts",
+        "methodName": "createEngine"
+      },
+      "parameters": [
+        {"name": "name", "type": "string", "required": true, "source": "req.body"},
+        {"name": "engineType", "type": "enum", "required": true, "source": "req.body", "allowedValues": ["n8n", "ghl", "make", "zapier", "custom_webhook"]},
+        {"name": "baseUrl", "type": "string", "required": true, "source": "req.body"},
+        {"name": "apiKey", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "engineType": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Validation failed"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/engines/:id",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["workflow_engines"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/engines.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/engineService.ts",
+        "methodName": "getEngine"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "engineType": {"type": "string"},
+          "baseUrl": {"type": "string"},
+          "status": {"type": "string"},
+          "lastTestedAt": {"type": "string"},
+          "lastTestStatus": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Workflow engine not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/engines/:id",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["workflow_engines"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/engines.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/engineService.ts",
+        "methodName": "updateEngine"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "name", "type": "string", "required": false, "source": "req.body"},
+        {"name": "baseUrl", "type": "string", "required": false, "source": "req.body"},
+        {"name": "apiKey", "type": "string", "required": false, "source": "req.body"},
+        {"name": "status", "type": "enum", "required": false, "source": "req.body", "allowedValues": ["active", "inactive"]}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Workflow engine not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/engines/:id",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["workflow_engines"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/engines.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/engineService.ts",
+        "methodName": "deleteEngine"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "soft",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Workflow engine not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/engines/:id/test",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["workflow_engines"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/engines.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/engineService.ts",
+        "methodName": "testEngineConnection"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "success": {"type": "boolean"},
+          "responseTimeMs": {"type": "number"},
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Workflow engine not found"},
+        {"statusCode": 503, "message": "Engine connection test failed"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/categories",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["task_categories"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/categories.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/categoryService.ts",
+        "methodName": "listCategories"
+      },
+      "parameters": [],
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": []
+    },
+    {
+      "path": "/api/categories",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["task_categories"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/categories.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/categoryService.ts",
+        "methodName": "createCategory"
+      },
+      "parameters": [
+        {"name": "name", "type": "string", "required": true, "source": "req.body"},
+        {"name": "description", "type": "string", "required": false, "source": "req.body"},
+        {"name": "colour", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "colour": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Validation failed"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/categories/:id",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["task_categories"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/categories.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/categoryService.ts",
+        "methodName": "updateCategory"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "name", "type": "string", "required": false, "source": "req.body"},
+        {"name": "description", "type": "string", "required": false, "source": "req.body"},
+        {"name": "colour", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "colour": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Category not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/categories/:id",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["task_categories"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/categories.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/categoryService.ts",
+        "methodName": "deleteCategory"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "soft",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Category not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/tasks",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "listTasks"
+      },
+      "parameters": [
+        {"name": "categoryId", "type": "uuid", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "status", "type": "enum", "required": false, "source": "req.query", "typeCoercion": "none", "allowedValues": ["draft", "active", "inactive"]},
+        {"name": "search", "type": "string", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "limit", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"},
+        {"name": "offset", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"}
+      ],
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": []
+    },
+    {
+      "path": "/api/tasks",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "createTask"
+      },
+      "parameters": [
+        {"name": "name", "type": "string", "required": true, "source": "req.body"},
+        {"name": "description", "type": "string", "required": false, "source": "req.body"},
+        {"name": "workflowEngineId", "type": "uuid", "required": true, "source": "req.body"},
+        {"name": "categoryId", "type": "uuid", "required": false, "source": "req.body"},
+        {"name": "endpointUrl", "type": "string", "required": true, "source": "req.body"},
+        {"name": "httpMethod", "type": "enum", "required": true, "source": "req.body", "allowedValues": ["GET", "POST", "PUT", "PATCH"]},
+        {"name": "inputGuidance", "type": "string", "required": false, "source": "req.body"},
+        {"name": "expectedOutput", "type": "string", "required": false, "source": "req.body"},
+        {"name": "timeoutSeconds", "type": "number", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Validation failed"},
+        {"statusCode": 404, "message": "Workflow engine not found or inactive"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/tasks/:id",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "getTask"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "categoryId": {"type": "uuid"},
+          "status": {"type": "string"},
+          "inputGuidance": {"type": "string"},
+          "expectedOutput": {"type": "string"},
+          "timeoutSeconds": {"type": "number"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found or not accessible"}
+      ]
+    },
+    {
+      "path": "/api/tasks/:id",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "updateTask"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "name", "type": "string", "required": false, "source": "req.body"},
+        {"name": "description", "type": "string", "required": false, "source": "req.body"},
+        {"name": "categoryId", "type": "uuid", "required": false, "source": "req.body"},
+        {"name": "endpointUrl", "type": "string", "required": false, "source": "req.body"},
+        {"name": "httpMethod", "type": "enum", "required": false, "source": "req.body", "allowedValues": ["GET", "POST", "PUT", "PATCH"]},
+        {"name": "inputGuidance", "type": "string", "required": false, "source": "req.body"},
+        {"name": "expectedOutput", "type": "string", "required": false, "source": "req.body"},
+        {"name": "timeoutSeconds", "type": "number", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/tasks/:id",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "deleteTask"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "soft",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/tasks/:id/test",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks", "executions"],
+      "middleware": ["authenticate", "requireRole", "validateMultipart"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "testTask"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "inputData", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "executionId": {"type": "uuid"},
+          "status": {"type": "string"},
+          "outputData": {"type": "object"},
+          "errorMessage": {"type": "string"},
+          "durationMs": {"type": "number"},
+          "isTestExecution": {"type": "boolean"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found"},
+        {"statusCode": 503, "message": "Engine execution failed"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/tasks/:id/activate",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "activateTask"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found"},
+        {"statusCode": 400, "message": "Task cannot be activated: engine is inactive"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/tasks/:id/deactivate",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["tasks"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/tasks.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/taskService.ts",
+        "methodName": "deactivateTask"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "status": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "listPermissionGroups"
+      },
+      "parameters": [],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": [
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "createPermissionGroup"
+      },
+      "parameters": [
+        {"name": "name", "type": "string", "required": true, "source": "req.body"},
+        {"name": "description", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "Validation failed"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups", "permission_group_members", "permission_group_categories"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "getPermissionGroup"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"},
+          "members": {"type": "array"},
+          "categories": {"type": "array"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Permission group not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id",
+      "method": "PATCH",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "updatePermissionGroup"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "name", "type": "string", "required": false, "source": "req.body"},
+        {"name": "description", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "name": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Permission group not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "deletePermissionGroup"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "soft",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Permission group not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id/members",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups", "permission_group_members"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "addMember"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "userId", "type": "uuid", "required": true, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "permissionGroupId": {"type": "uuid"},
+          "userId": {"type": "uuid"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Permission group or user not found"},
+        {"statusCode": 409, "message": "User is already a member of this group"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id/members/:userId",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_group_members"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "removeMember"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "userId", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "hard",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Membership record not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id/categories",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_groups", "permission_group_categories"],
+      "middleware": ["authenticate", "requireRole", "validateBody"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "addCategory"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "categoryId", "type": "uuid", "required": true, "source": "req.body"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "permissionGroupId": {"type": "uuid"},
+          "categoryId": {"type": "uuid"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Permission group or category not found"},
+        {"statusCode": 409, "message": "Category is already added to this group"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/permission-groups/:id/categories/:categoryId",
+      "method": "DELETE",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["permission_group_categories"],
+      "middleware": ["authenticate", "requireRole"],
+      "routeFile": "server/routes/permissionGroups.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/permissionGroupService.ts",
+        "methodName": "removeCategory"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"},
+        {"name": "categoryId", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiredRole": "org_admin",
+      "deleteStrategy": "hard",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Category access record not found"},
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/executions",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["executions"],
+      "middleware": ["authenticate", "validateQuery"],
+      "routeFile": "server/routes/executions.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/executionService.ts",
+        "methodName": "listExecutions"
+      },
+      "parameters": [
+        {"name": "taskId", "type": "uuid", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "userId", "type": "uuid", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "status", "type": "enum", "required": false, "source": "req.query", "typeCoercion": "none", "allowedValues": ["pending", "running", "completed", "failed", "timeout", "cancelled"]},
+        {"name": "from", "type": "string", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "to", "type": "string", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "limit", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"},
+        {"name": "offset", "type": "number", "required": false, "source": "req.query", "typeCoercion": "runtime"}
+      ],
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": []
+    },
+    {
+      "path": "/api/executions",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["executions"],
+      "middleware": ["authenticate", "validateMultipart"],
+      "routeFile": "server/routes/executions.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/executionService.ts",
+        "methodName": "createExecution"
+      },
+      "parameters": [
+        {"name": "taskId", "type": "uuid", "required": true, "source": "req.body"},
+        {"name": "inputData", "type": "string", "required": false, "source": "req.body"}
+      ],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "status": {"type": "string"},
+          "taskId": {"type": "uuid"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Task not found or not accessible"},
+        {"statusCode": 400, "message": "Task is not active"},
+        {"statusCode": 429, "message": "Duplicate execution: this task was already triggered recently. Please wait before retrying."}
+      ]
+    },
+    {
+      "path": "/api/executions/export",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "derived",
+      "entitiesReferenced": ["executions"],
+      "middleware": ["authenticate", "requireRole", "validateQuery"],
+      "routeFile": "server/routes/executions.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/executionService.ts",
+        "methodName": "exportExecutions"
+      },
+      "parameters": [
+        {"name": "from", "type": "string", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "to", "type": "string", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "taskId", "type": "uuid", "required": false, "source": "req.query", "typeCoercion": "none"},
+        {"name": "userId", "type": "uuid", "required": false, "source": "req.query", "typeCoercion": "none"}
+      ],
+      "requiredRole": "org_admin",
+      "returns": {
+        "type": "object",
+        "properties": {
+          "contentType": {"type": "string"},
+          "filename": {"type": "string"},
+          "data": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 403, "message": "org_admin role required"}
+      ]
+    },
+    {
+      "path": "/api/executions/:id",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["executions"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/executions.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/executionService.ts",
+        "methodName": "getExecution"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "taskId": {"type": "uuid"},
+          "status": {"type": "string"},
+          "inputData": {"type": "object"},
+          "outputData": {"type": "object"},
+          "errorMessage": {"type": "string"},
+          "startedAt": {"type": "string"},
+          "completedAt": {"type": "string"},
+          "durationMs": {"type": "number"},
+          "isTestExecution": {"type": "boolean"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Execution not found or not accessible"}
+      ]
+    },
+    {
+      "path": "/api/executions/:id/files",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["execution_files"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/executions.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/executionService.ts",
+        "methodName": "listExecutionFiles"
+      },
+      "parameters": [
+        {"name": "id", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "returns": {
+        "type": "array",
+        "items": {"type": "object"}
+      },
+      "throws": [
+        {"statusCode": 404, "message": "Execution not found or not accessible"}
+      ]
+    },
+    {
+      "path": "/api/files/upload",
+      "method": "POST",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["execution_files"],
+      "middleware": ["authenticate", "validateMultipart"],
+      "routeFile": "server/routes/files.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/fileService.ts",
+        "methodName": "uploadFile"
+      },
+      "parameters": [
+        {"name": "executionId", "type": "uuid", "required": true, "source": "req.body"},
+        {"name": "file", "type": "string", "required": true, "source": "req.body"}
+      ],
+      "requiresEnvironment": ["FILE_STORAGE_BACKEND", "R2_BUCKET_NAME"],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "uuid"},
+          "fileName": {"type": "string"},
+          "fileType": {"type": "string"},
+          "fileSizeBytes": {"type": "number"},
+          "expiresAt": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 400, "message": "File too large or unsupported type"},
+        {"statusCode": 404, "message": "Execution not found"}
+      ]
+    },
+    {
+      "path": "/api/files/:fileId/download",
+      "method": "GET",
+      "status": "implemented",
+      "authentication": "required",
+      "category": "entity",
+      "entitiesReferenced": ["execution_files"],
+      "middleware": ["authenticate"],
+      "routeFile": "server/routes/files.ts",
+      "serviceContract": {
+        "serviceFile": "server/services/fileService.ts",
+        "methodName": "downloadFile"
+      },
+      "parameters": [
+        {"name": "fileId", "type": "uuid", "required": true, "source": "req.params"}
+      ],
+      "requiresEnvironment": ["FILE_STORAGE_BACKEND", "R2_BUCKET_NAME"],
+      "returns": {
+        "type": "object",
+        "properties": {
+          "downloadUrl": {"type": "string"},
+          "expiresAt": {"type": "string"},
+          "fileName": {"type": "string"}
+        }
+      },
+      "throws": [
+        {"statusCode": 404, "message": "File not found or not accessible"},
+        {"statusCode": 410, "message": "File has expired and is no longer available"}
+      ]
+    }
+  ]
+}
