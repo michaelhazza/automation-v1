@@ -1,5 +1,4 @@
 import { useEffect, useState, FormEvent } from 'react';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -39,10 +38,10 @@ export default function ProfileSettingsPage({ user }: { user: User }) {
     }
   };
 
-  if (loading) return <Layout user={user}><div>Loading...</div></Layout>;
+  if (loading) return <div>Loading...</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ maxWidth: 480 }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Profile Settings</h1>
         <p style={{ color: '#64748b', marginBottom: 32 }}>Update your personal information and password.</p>
@@ -83,6 +82,6 @@ export default function ProfileSettingsPage({ user }: { user: User }) {
           </button>
         </form>
       </div>
-    </Layout>
+    </>
   );
 }

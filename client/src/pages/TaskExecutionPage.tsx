@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -107,11 +106,11 @@ export default function TaskExecutionPage({ user }: { user: User }) {
     window.open(data.downloadUrl, '_blank');
   };
 
-  if (loading) return <Layout user={user}><div>Loading...</div></Layout>;
-  if (!task) return <Layout user={user}><div style={{ color: '#dc2626' }}>Task not found</div></Layout>;
+  if (loading) return <div>Loading...</div>;
+  if (!task) return <div style={{ color: '#dc2626' }}>Task not found</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ maxWidth: 760 }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{task.name}</h1>
         {task.description && <p style={{ color: '#64748b', marginBottom: 24 }}>{task.description}</p>}
@@ -212,6 +211,6 @@ export default function TaskExecutionPage({ user }: { user: User }) {
           </div>
         )}
       </div>
-    </Layout>
+    </>
   );
 }

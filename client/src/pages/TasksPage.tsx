@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -47,10 +46,10 @@ export default function TasksPage({ user }: { user: User }) {
     return matchSearch && matchCat;
   });
 
-  if (loading) return <Layout user={user}><div>Loading...</div></Layout>;
+  if (loading) return <div>Loading...</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Tasks</h1>
       <p style={{ color: '#64748b', marginBottom: 28 }}>Select a task to run an automation.</p>
 
@@ -110,6 +109,6 @@ export default function TasksPage({ user }: { user: User }) {
           )}
         </div>
       </div>
-    </Layout>
+    </>
   );
 }

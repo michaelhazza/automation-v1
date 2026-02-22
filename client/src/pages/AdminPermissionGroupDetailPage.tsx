@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -88,7 +87,7 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
     load();
   };
 
-  if (loading || !group) return <Layout user={user}><div>Loading...</div></Layout>;
+  if (loading || !group) return <div>Loading...</div>;
 
   const memberUserIds = new Set(group.members.map((m) => m.userId));
   const memberCategoryIds = new Set(group.categories.map((c) => c.categoryId));
@@ -96,7 +95,7 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
   const availableCategories = allCategories.filter((c) => !memberCategoryIds.has(c.id));
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ marginBottom: 16 }}>
         <Link to="/admin/permission-groups" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to groups</Link>
       </div>
@@ -171,6 +170,6 @@ export default function AdminPermissionGroupDetailPage({ user }: { user: User })
           ))}
         </div>
       </div>
-    </Layout>
+    </>
   );
 }

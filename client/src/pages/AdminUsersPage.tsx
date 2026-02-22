@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -66,10 +65,10 @@ export default function AdminUsersPage({ user }: { user: User }) {
     load();
   };
 
-  if (loading) return <Layout user={user}><div>Loading...</div></Layout>;
+  if (loading) return <div>Loading...</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Users</h1>
@@ -158,6 +157,6 @@ export default function AdminUsersPage({ user }: { user: User }) {
           </tbody>
         </table>
       </div>
-    </Layout>
+    </>
   );
 }

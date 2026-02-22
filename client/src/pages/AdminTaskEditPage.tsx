@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -81,10 +80,10 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
     }
   };
 
-  if (loading || !task) return <Layout user={user}><div>Loading...</div></Layout>;
+  if (loading || !task) return <div>Loading...</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ marginBottom: 16 }}>
         <Link to="/admin/tasks" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to tasks</Link>
       </div>
@@ -159,6 +158,6 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
           )}
         </div>
       </div>
-    </Layout>
+    </>
   );
 }

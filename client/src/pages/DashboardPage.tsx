@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -56,10 +55,10 @@ export default function DashboardPage({ user }: DashboardPageProps) {
     load();
   }, []);
 
-  if (loading) return <Layout user={user}><div>Loading...</div></Layout>;
+  if (loading) return <div>Loading...</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, color: '#1e293b' }}>
           Welcome back, {user.firstName}
@@ -131,6 +130,6 @@ export default function DashboardPage({ user }: DashboardPageProps) {
           </div>
         )}
       </div>
-    </Layout>
+    </>
   );
 }

@@ -1,9 +1,9 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import api from './lib/api';
 import { isAuthenticated, User } from './lib/auth';
+import Layout from './components/Layout';
 
-// Lazy-loaded pages for code splitting
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -21,24 +21,42 @@ const AdminPermissionGroupDetailPage = lazy(() => import('./pages/AdminPermissio
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 
-function ProtectedRoute({ user, loading, children }: { user: User | null; loading: boolean; children: React.ReactNode }) {
+function PageLoader() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300, color: '#64748b' }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{
+          width: 32, height: 32, border: '3px solid #e2e8f0', borderTopColor: '#3b82f6',
+          borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px'
+        }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    </div>
+  );
+}
+
+function ProtectedLayout({ user, loading }: { user: User | null; loading: boolean }) {
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#64748b' }}>Loading...</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return (
+    <Layout user={user}>
+      <Suspense fallback={<PageLoader />}>
+        <Outlet />
+      </Suspense>
+    </Layout>
+  );
 }
 
-function AdminRoute({ user, loading, children }: { user: User | null; loading: boolean; children: React.ReactNode }) {
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>Loading...</div>;
+function AdminGuard({ user }: { user: User | null }) {
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== 'org_admin' && user.role !== 'system_admin') return <Navigate to="/" replace />;
-  return <>{children}</>;
+  return <Outlet />;
 }
 
-function SystemAdminRoute({ user, loading, children }: { user: User | null; loading: boolean; children: React.ReactNode }) {
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>Loading...</div>;
+function SystemAdminGuard({ user }: { user: User | null }) {
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== 'system_admin') return <Navigate to="/" replace />;
-  return <>{children}</>;
+  return <Outlet />;
 }
 
 export default function App() {
@@ -58,36 +76,43 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#64748b' }}>Loading...</div>}>
       <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
-        <Route path="/invite/accept" element={<AcceptInvitePage />} />
+        <Route path="/login" element={
+          <Suspense fallback={<PageLoader />}>
+            {user ? <Navigate to="/" replace /> : <LoginPage />}
+          </Suspense>
+        } />
+        <Route path="/invite/accept" element={
+          <Suspense fallback={<PageLoader />}>
+            <AcceptInvitePage />
+          </Suspense>
+        } />
 
-        {/* Authenticated routes */}
-        <Route path="/" element={<ProtectedRoute user={user} loading={loading}><DashboardPage user={user!} /></ProtectedRoute>} />
-        <Route path="/tasks" element={<ProtectedRoute user={user} loading={loading}><TasksPage user={user!} /></ProtectedRoute>} />
-        <Route path="/tasks/:id" element={<ProtectedRoute user={user} loading={loading}><TaskExecutionPage user={user!} /></ProtectedRoute>} />
-        <Route path="/executions" element={<ProtectedRoute user={user} loading={loading}><ExecutionHistoryPage user={user!} /></ProtectedRoute>} />
-        <Route path="/executions/:id" element={<ProtectedRoute user={user} loading={loading}><ExecutionDetailPage user={user!} /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute user={user} loading={loading}><ProfileSettingsPage user={user!} /></ProtectedRoute>} />
+        <Route element={<ProtectedLayout user={user} loading={loading} />}>
+          <Route path="/" element={<DashboardPage user={user!} />} />
+          <Route path="/tasks" element={<TasksPage user={user!} />} />
+          <Route path="/tasks/:id" element={<TaskExecutionPage user={user!} />} />
+          <Route path="/executions" element={<ExecutionHistoryPage user={user!} />} />
+          <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
+          <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
 
-        {/* Admin routes */}
-        <Route path="/admin/engines" element={<AdminRoute user={user} loading={loading}><AdminEnginesPage user={user!} /></AdminRoute>} />
-        <Route path="/admin/tasks" element={<AdminRoute user={user} loading={loading}><AdminTasksPage user={user!} /></AdminRoute>} />
-        <Route path="/admin/tasks/:id" element={<AdminRoute user={user} loading={loading}><AdminTaskEditPage user={user!} /></AdminRoute>} />
-        <Route path="/admin/categories" element={<AdminRoute user={user} loading={loading}><AdminCategoriesPage user={user!} /></AdminRoute>} />
-        <Route path="/admin/permission-groups" element={<AdminRoute user={user} loading={loading}><AdminPermissionGroupsPage user={user!} /></AdminRoute>} />
-        <Route path="/admin/permission-groups/:id" element={<AdminRoute user={user} loading={loading}><AdminPermissionGroupDetailPage user={user!} /></AdminRoute>} />
-        <Route path="/admin/users" element={<AdminRoute user={user} loading={loading}><AdminUsersPage user={user!} /></AdminRoute>} />
+          <Route element={<AdminGuard user={user} />}>
+            <Route path="/admin/engines" element={<AdminEnginesPage user={user!} />} />
+            <Route path="/admin/tasks" element={<AdminTasksPage user={user!} />} />
+            <Route path="/admin/tasks/:id" element={<AdminTaskEditPage user={user!} />} />
+            <Route path="/admin/categories" element={<AdminCategoriesPage user={user!} />} />
+            <Route path="/admin/permission-groups" element={<AdminPermissionGroupsPage user={user!} />} />
+            <Route path="/admin/permission-groups/:id" element={<AdminPermissionGroupDetailPage user={user!} />} />
+            <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
+          </Route>
 
-        {/* System admin routes */}
-        <Route path="/system/organisations" element={<SystemAdminRoute user={user} loading={loading}><SystemOrganisationsPage user={user!} /></SystemAdminRoute>} />
+          <Route element={<SystemAdminGuard user={user} />}>
+            <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
+          </Route>
 
-        {/* Catch all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
       </Routes>
-      </Suspense>
     </BrowserRouter>
   );
 }

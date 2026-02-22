@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import Layout from '../components/Layout';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -61,11 +60,11 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
     window.open(data.downloadUrl, '_blank');
   };
 
-  if (loading) return <Layout user={user}><div>Loading...</div></Layout>;
-  if (!execution) return <Layout user={user}><div style={{ color: '#dc2626' }}>Execution not found</div></Layout>;
+  if (loading) return <div>Loading...</div>;
+  if (!execution) return <div style={{ color: '#dc2626' }}>Execution not found</div>;
 
   return (
-    <Layout user={user}>
+    <>
       <div style={{ marginBottom: 16 }}>
         <Link to="/executions" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to executions</Link>
       </div>
@@ -137,6 +136,6 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
           ))}
         </div>
       )}
-    </Layout>
+    </>
   );
 }
