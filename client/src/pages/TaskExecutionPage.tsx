@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -28,6 +28,12 @@ interface ExecFile {
   fileSizeBytes: number | null;
 }
 
+interface StagedFile {
+  file: File;
+  id: string;
+  error?: string;
+}
+
 const STATUS_COLOR: Record<string, string> = {
   completed: '#16a34a',
   failed: '#dc2626',
@@ -36,22 +42,97 @@ const STATUS_COLOR: Record<string, string> = {
   timeout: '#ea580c',
 };
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileIcon(mimeType: string): string {
+  if (mimeType.startsWith('audio/')) return '🎵';
+  if (mimeType.startsWith('video/')) return '🎬';
+  if (mimeType.startsWith('image/')) return '🖼️';
+  if (mimeType === 'application/pdf') return '📄';
+  if (mimeType.includes('word') || mimeType.includes('document')) return '📝';
+  if (mimeType.includes('sheet') || mimeType.includes('excel')) return '📊';
+  if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📑';
+  if (mimeType.includes('zip') || mimeType.includes('tar') || mimeType.includes('gzip') || mimeType.includes('7z')) return '🗜️';
+  if (mimeType.startsWith('text/')) return '📃';
+  return '📎';
+}
+
 export default function TaskExecutionPage({ user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const [task, setTask] = useState<Task | null>(null);
   const [inputData, setInputData] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [execution, setExecution] = useState<Execution | null>(null);
   const [execFiles, setExecFiles] = useState<ExecFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [error, setError] = useState('');
+  const [maxUploadSizeMb, setMaxUploadSizeMb] = useState(200);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.get(`/api/tasks/${id}`).then(({ data }) => setTask(data)).finally(() => setLoading(false));
+    Promise.all([
+      api.get(`/api/tasks/${id}`),
+      api.get('/api/settings/upload').catch(() => ({ data: { maxUploadSizeMb: 200 } })),
+    ]).then(([taskRes, settingsRes]) => {
+      setTask(taskRes.data);
+      setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
+    }).finally(() => setLoading(false));
+
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [id]);
+
+  const addFiles = useCallback((newFiles: FileList | File[]) => {
+    const maxBytes = maxUploadSizeMb * 1024 * 1024;
+    const toAdd: StagedFile[] = Array.from(newFiles).map((file) => ({
+      file,
+      id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
+      error: file.size > maxBytes ? `Exceeds ${maxUploadSizeMb} MB limit` : undefined,
+    }));
+    setStagedFiles((prev) => [...prev, ...toAdd]);
+  }, [maxUploadSizeMb]);
+
+  const removeFile = (fileId: string) => {
+    setStagedFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) {
+      setDragOver(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files.length > 0) {
+      addFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handleBrowse = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      addFiles(e.target.files);
+      e.target.value = '';
+    }
+  };
 
   const pollExecution = (execId: string) => {
     pollRef.current = setInterval(async () => {
@@ -71,6 +152,12 @@ export default function TaskExecutionPage({ user }: { user: User }) {
 
   const handleSubmit = async () => {
     setError('');
+    const invalidFiles = stagedFiles.filter((f) => f.error);
+    if (invalidFiles.length > 0) {
+      setError('Remove files that exceed the size limit before submitting.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       let parsedInput: unknown = undefined;
@@ -82,21 +169,33 @@ export default function TaskExecutionPage({ user }: { user: User }) {
         }
       }
 
-      const formData = new FormData();
-      formData.append('taskId', id!);
-      if (parsedInput !== undefined) formData.append('inputData', JSON.stringify(parsedInput));
-      if (file) formData.append('file', file);
-
-      const { data } = await api.post('/api/executions', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // Step 1: Create the execution
+      const { data: execData } = await api.post('/api/executions', {
+        taskId: id,
+        ...(parsedInput !== undefined ? { inputData: JSON.stringify(parsedInput) } : {}),
       });
 
-      setExecution({ id: data.id, status: data.status, outputData: null, errorMessage: null, durationMs: null, isTestExecution: false });
-      pollExecution(data.id);
+      const execId = execData.id;
+      setExecution({ id: execId, status: execData.status, outputData: null, errorMessage: null, durationMs: null, isTestExecution: false });
+
+      // Step 2: Upload staged files sequentially
+      for (let i = 0; i < stagedFiles.length; i++) {
+        const { file } = stagedFiles[i];
+        setUploadProgress(`Uploading file ${i + 1} of ${stagedFiles.length}: ${file.name}`);
+        const formData = new FormData();
+        formData.append('executionId', execId);
+        formData.append('file', file);
+        await api.post('/api/files/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      setUploadProgress('');
+
+      pollExecution(execId);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to submit task');
-    } finally {
+      setUploadProgress('');
       setSubmitting(false);
     }
   };
@@ -108,6 +207,8 @@ export default function TaskExecutionPage({ user }: { user: User }) {
 
   if (loading) return <div>Loading...</div>;
   if (!task) return <div style={{ color: '#dc2626' }}>Task not found</div>;
+
+  const hasInvalidFiles = stagedFiles.some((f) => f.error);
 
   return (
     <>
@@ -130,7 +231,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
         {/* Input form */}
         {!execution && (
           <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24 }}>
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Input Data (JSON or plain text)</label>
               <textarea
                 value={inputData}
@@ -140,17 +241,99 @@ export default function TaskExecutionPage({ user }: { user: User }) {
                 style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
               />
             </div>
+
+            {/* Drag-and-drop file zone */}
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Attach file (optional)</label>
-              <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ fontSize: 13 }} />
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+                Attach files (optional)
+              </label>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={handleFileInputChange}
+                style={{ display: 'none' }}
+              />
+
+              <div
+                ref={dropZoneRef}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={handleBrowse}
+                style={{
+                  border: `2px dashed ${dragOver ? '#2563eb' : '#d1d5db'}`,
+                  borderRadius: 10,
+                  padding: '28px 20px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: dragOver ? '#eff6ff' : '#fafafa',
+                  transition: 'border-color 0.15s, background 0.15s',
+                  userSelect: 'none',
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 8 }}>📁</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: dragOver ? '#2563eb' : '#374151', marginBottom: 4 }}>
+                  {dragOver ? 'Drop files here' : 'Drag & drop files here, or click to browse'}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Audio, video, documents, PDFs, images and more · Max {maxUploadSizeMb} MB per file
+                </div>
+              </div>
+
+              {/* Staged files list */}
+              {stagedFiles.length > 0 && (
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {stagedFiles.map((sf) => (
+                    <div
+                      key={sf.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 12px',
+                        background: sf.error ? '#fef2f2' : '#f8fafc',
+                        border: `1px solid ${sf.error ? '#fecaca' : '#e2e8f0'}`,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: 18, flexShrink: 0 }}>{fileIcon(sf.file.type)}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {sf.file.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: sf.error ? '#dc2626' : '#64748b', marginTop: 1 }}>
+                          {sf.error ? sf.error : formatBytes(sf.file.size)}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeFile(sf.id); }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 18, padding: '0 4px', lineHeight: 1, flexShrink: 0 }}
+                        title="Remove file"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
             {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            {uploadProgress && (
+              <div style={{ fontSize: 13, color: '#2563eb', marginBottom: 16 }}>{uploadProgress}</div>
+            )}
+
             <button
               onClick={handleSubmit}
-              disabled={submitting}
-              style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1 }}
+              disabled={submitting || hasInvalidFiles}
+              style={{
+                padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none',
+                borderRadius: 8, fontSize: 14, fontWeight: 600,
+                cursor: (submitting || hasInvalidFiles) ? 'not-allowed' : 'pointer',
+                opacity: (submitting || hasInvalidFiles) ? 0.7 : 1,
+              }}
             >
-              {submitting ? 'Submitting...' : 'Run Task'}
+              {submitting ? (uploadProgress ? 'Uploading...' : 'Submitting...') : 'Run Task'}
             </button>
           </div>
         )}
@@ -193,7 +376,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
                 {execFiles.map((f) => (
                   <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid #f1f5f9' }}>
                     <span style={{ fontSize: 13, color: '#1e293b', flex: 1 }}>{f.fileName}</span>
-                    {f.fileSizeBytes != null && <span style={{ fontSize: 12, color: '#64748b' }}>{Math.round(f.fileSizeBytes / 1024)}KB</span>}
+                    {f.fileSizeBytes != null && <span style={{ fontSize: 12, color: '#64748b' }}>{formatBytes(f.fileSizeBytes)}</span>}
                     <button onClick={() => handleDownload(f.id)} style={{ padding: '4px 12px', background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>
                       Download
                     </button>
@@ -203,7 +386,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
             )}
 
             <button
-              onClick={() => { setExecution(null); setInputData(''); setFile(null); setExecFiles([]); if (pollRef.current) clearInterval(pollRef.current); }}
+              onClick={() => { setExecution(null); setInputData(''); setStagedFiles([]); setExecFiles([]); if (pollRef.current) clearInterval(pollRef.current); }}
               style={{ marginTop: 16, padding: '8px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
             >
               Run again

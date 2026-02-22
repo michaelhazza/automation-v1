@@ -14,7 +14,7 @@ export function parsePositiveInt(value: unknown): number | undefined {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB absolute ceiling; configurable limit enforced in file route
 });
 
 export const validateBody = (req: Request, res: Response, next: NextFunction): void => {
