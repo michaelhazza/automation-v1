@@ -2,6 +2,7 @@ import { eq, and, isNull, ilike, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, workflowEngines, permissionGroupMembers, permissionGroupCategories, permissionGroups, executions } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
+import { webhookService } from './webhookService.js';
 
 export class TaskService {
   async listTasks(
@@ -288,19 +289,41 @@ export class TaskService {
         isTestExecution: true,
         retryCount: 0,
         startedAt: new Date(),
+        queuedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       })
       .returning();
+
+    // Build return webhook URL and outbound payload (same as production jobs)
+    const returnWebhookUrl = webhookService.buildReturnUrl(execution.id);
+    const outboundPayload = await webhookService.buildOutboundPayload(
+      execution.id,
+      inputData ?? null,
+      returnWebhookUrl
+    );
+
+    // Persist audit fields before calling external engine
+    await db
+      .update(executions)
+      .set({
+        returnWebhookUrl,
+        outboundPayload: outboundPayload as unknown as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(eq(executions.id, execution.id));
+
+    // Engine-specific auth headers
+    const authHeaders = buildEngineAuthHeaders(task.engineType, engine.apiKey ?? undefined);
 
     try {
       const response = await fetch(task.endpointUrl, {
         method: task.httpMethod,
         headers: {
           'Content-Type': 'application/json',
-          ...(engine.apiKey ? { 'X-N8N-API-KEY': engine.apiKey } : {}),
+          ...authHeaders,
         },
-        body: inputData ? JSON.stringify(inputData) : undefined,
+        body: JSON.stringify(outboundPayload),
         signal: AbortSignal.timeout(task.timeoutSeconds * 1000),
       });
 
@@ -347,3 +370,21 @@ export class TaskService {
 }
 
 export const taskService = new TaskService();
+
+// Engine-specific auth header builder (mirrors queueService)
+function buildEngineAuthHeaders(
+  engineType: string,
+  apiKey?: string
+): Record<string, string> {
+  if (!apiKey) return {};
+  switch (engineType) {
+    case 'n8n':
+      return { 'X-N8N-API-KEY': apiKey };
+    case 'make':
+    case 'zapier':
+    case 'ghl':
+    case 'custom_webhook':
+    default:
+      return { Authorization: `Bearer ${apiKey}` };
+  }
+}

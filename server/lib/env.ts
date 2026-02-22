@@ -25,6 +25,13 @@ const envSchema = z.object({
   JOB_QUEUE_BACKEND: z.enum(['pg-boss', 'bullmq']).default('pg-boss'),
   REDIS_URL: z.string().optional(),
   QUEUE_CONCURRENCY: z.coerce.number().optional().default(5),
+  // Webhook return URL base — the publicly reachable root URL of this server.
+  // The callback path is appended automatically; users never configure per-task URLs.
+  // Example: https://myapp.example.com
+  WEBHOOK_BASE_URL: z.string().optional().default(''),
+  // Optional HMAC secret to sign/verify callback tokens. Set this to a long
+  // random string in production so spoofed callbacks are rejected.
+  WEBHOOK_SECRET: z.string().optional(),
   FILE_RETENTION_DAYS: z.coerce.number().optional().default(30),
   EXECUTION_TIMEOUT_DEFAULT_SECONDS: z.coerce.number().optional().default(300),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'debug']).default('info'),
