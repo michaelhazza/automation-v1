@@ -19,8 +19,9 @@ export default function Layout({ user, children }: LayoutProps) {
   const location = useLocation();
 
   const isSystemAdmin = user.role === 'system_admin';
-  const isAdmin = user.role === 'org_admin' || isSystemAdmin;
-  const isManagerOrAbove = user.role === 'manager' || isAdmin;
+  // All non-system-admin users are org users governed by permission sets.
+  // The sidebar shows all org sections; the API enforces fine-grained access.
+  const isOrgUser = !isSystemAdmin;
 
   // Active org context — only relevant for system_admin
   const [activeOrgId, setActiveOrgIdState] = useState<string | null>(getActiveOrgId);
@@ -74,19 +75,14 @@ export default function Layout({ user, children }: LayoutProps) {
     ] : []),
   ];
 
-  const orgNavItems = [
+  const orgNavItems = isOrgUser ? [
     { path: '/tasks', label: 'Tasks' },
     { path: '/executions', label: 'Executions' },
-    ...(isManagerOrAbove ? [
-      { path: '/admin/tasks', label: 'Manage Tasks' },
-      { path: '/admin/users', label: 'Users' },
-    ] : []),
-    ...(isAdmin ? [
-      { path: '/admin/engines', label: 'Engines' },
-      { path: '/admin/categories', label: 'Categories' },
-      { path: '/admin/permission-groups', label: 'Permissions' },
-    ] : []),
-  ];
+    { path: '/admin/tasks', label: 'Manage Tasks' },
+    { path: '/admin/users', label: 'Users' },
+    { path: '/admin/engines', label: 'Engines' },
+    { path: '/admin/categories', label: 'Categories' },
+  ] : [];
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
@@ -95,7 +91,7 @@ export default function Layout({ user, children }: LayoutProps) {
         <div style={{ padding: '0 20px 20px', borderBottom: '1px solid #334155', marginBottom: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 18, color: '#f8fafc' }}>Automation OS</div>
           <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{user.firstName} {user.lastName}</div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>{user.role}</div>
+          {user.role && <div style={{ fontSize: 11, color: '#64748b' }}>{user.role}</div>}
 
           {/* Org context picker — system_admin only */}
           {isSystemAdmin && (

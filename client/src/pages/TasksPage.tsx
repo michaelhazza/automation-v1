@@ -7,8 +7,8 @@ interface Task {
   id: string;
   name: string;
   description: string;
-  categoryId: string | null;
-  inputGuidance: string | null;
+  orgCategoryId: string | null;
+  inputSchema: string | null;
 }
 
 interface Category {
@@ -42,7 +42,7 @@ export default function TasksPage({ user }: { user: User }) {
 
   const filtered = tasks.filter((t) => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || (t.description ?? '').toLowerCase().includes(search.toLowerCase());
-    const matchCat = !selectedCategory || t.categoryId === selectedCategory;
+    const matchCat = !selectedCategory || t.orgCategoryId === selectedCategory;
     return matchSearch && matchCat;
   });
 
@@ -97,9 +97,9 @@ export default function TasksPage({ user }: { user: User }) {
                   <div style={{ background: '#fff', borderRadius: 10, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', height: '100%', boxSizing: 'border-box' }}>
                     <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 8, fontSize: 16 }}>{task.name}</div>
                     {task.description && <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, marginBottom: 12 }}>{task.description}</div>}
-                    {task.inputGuidance && (
+                    {task.inputSchema && (
                       <div style={{ fontSize: 12, color: '#0284c7', background: '#f0f9ff', padding: '6px 10px', borderRadius: 6 }}>
-                        {task.inputGuidance.substring(0, 80)}{task.inputGuidance.length > 80 ? '...' : ''}
+                        {task.inputSchema.substring(0, 80)}{task.inputSchema.length > 80 ? '...' : ''}
                       </div>
                     )}
                   </div>

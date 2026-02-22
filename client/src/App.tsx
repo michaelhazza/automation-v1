@@ -18,8 +18,6 @@ const AdminEnginesPage = lazy(() => import('./pages/AdminEnginesPage'));
 const AdminTasksPage = lazy(() => import('./pages/AdminTasksPage'));
 const AdminTaskEditPage = lazy(() => import('./pages/AdminTaskEditPage'));
 const AdminCategoriesPage = lazy(() => import('./pages/AdminCategoriesPage'));
-const AdminPermissionGroupsPage = lazy(() => import('./pages/AdminPermissionGroupsPage'));
-const AdminPermissionGroupDetailPage = lazy(() => import('./pages/AdminPermissionGroupDetailPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
@@ -52,18 +50,9 @@ function ProtectedLayout({ user, loading }: { user: User | null; loading: boolea
   );
 }
 
-// Admin-only routes: engines, categories, permission groups (org_admin / system_admin)
-function AdminGuard({ user }: { user: User | null }) {
+// Org admin routes — any authenticated user may attempt these; API enforces permission-set checks.
+function OrgAdminGuard({ user }: { user: User | null }) {
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'org_admin' && user.role !== 'system_admin') return <Navigate to="/" replace />;
-  return <Outlet />;
-}
-
-// Manager+ routes: task management and user management
-function ManagerGuard({ user }: { user: User | null }) {
-  if (!user) return <Navigate to="/login" replace />;
-  const allowed = ['manager', 'org_admin', 'system_admin'];
-  if (!allowed.includes(user.role)) return <Navigate to="/" replace />;
   return <Outlet />;
 }
 
@@ -127,19 +116,13 @@ export default function App() {
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
 
-          {/* Manager+ routes: task management and user management */}
-          <Route element={<ManagerGuard user={user} />}>
+          {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
+          <Route element={<OrgAdminGuard user={user} />}>
             <Route path="/admin/tasks" element={<AdminTasksPage user={user!} />} />
             <Route path="/admin/tasks/:id" element={<AdminTaskEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
-          </Route>
-
-          {/* Admin-only routes: infrastructure configuration */}
-          <Route element={<AdminGuard user={user} />}>
             <Route path="/admin/engines" element={<AdminEnginesPage user={user!} />} />
             <Route path="/admin/categories" element={<AdminCategoriesPage user={user!} />} />
-            <Route path="/admin/permission-groups" element={<AdminPermissionGroupsPage user={user!} />} />
-            <Route path="/admin/permission-groups/:id" element={<AdminPermissionGroupDetailPage user={user!} />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
