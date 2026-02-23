@@ -2,6 +2,7 @@ import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from '
 import { organisations } from './organisations';
 import { tasks } from './tasks';
 import { users } from './users';
+import { subaccounts } from './subaccounts';
 
 export const executions = pgTable(
   'executions',
@@ -13,9 +14,11 @@ export const executions = pgTable(
     taskId: uuid('task_id')
       .notNull()
       .references(() => tasks.id),
-    userId: uuid('user_id')
+    triggeredByUserId: uuid('triggered_by_user_id')
       .notNull()
       .references(() => users.id),
+    subaccountId: uuid('subaccount_id')
+      .references(() => subaccounts.id),
     status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'>(),
     inputData: jsonb('input_data'),
     outputData: jsonb('output_data'),
@@ -41,12 +44,13 @@ export const executions = pgTable(
   (table) => ({
     orgStatusIdx: index('executions_org_status_idx').on(table.organisationId, table.status),
     orgTaskIdx: index('executions_org_task_idx').on(table.organisationId, table.taskId),
-    orgUserIdx: index('executions_org_user_idx').on(table.organisationId, table.userId),
+    orgUserIdx: index('executions_org_user_idx').on(table.organisationId, table.triggeredByUserId),
     orgCreatedAtIdx: index('executions_org_created_at_idx').on(table.organisationId, table.createdAt),
-    userTaskCreatedAtIdx: index('executions_user_task_created_at_idx').on(table.userId, table.taskId, table.createdAt),
+    userTaskCreatedAtIdx: index('executions_user_task_created_at_idx').on(table.triggeredByUserId, table.taskId, table.createdAt),
     orgIdIdx: index('executions_org_id_idx').on(table.organisationId),
     taskIdx: index('executions_task_idx').on(table.taskId),
-    userIdx: index('executions_user_idx').on(table.userId),
+    userIdx: index('executions_user_idx').on(table.triggeredByUserId),
+    subaccountIdx: index('executions_subaccount_idx').on(table.subaccountId),
     statusIdx: index('executions_status_idx').on(table.status),
   })
 );

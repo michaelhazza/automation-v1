@@ -7,9 +7,8 @@ interface Task {
   id: string;
   name: string;
   description: string;
-  inputGuidance: string | null;
-  expectedOutput: string | null;
-  timeoutSeconds: number;
+  inputSchema: string | null;
+  outputSchema: string | null;
 }
 
 interface Execution {
@@ -230,15 +229,15 @@ export default function TaskExecutionPage({ user }: { user: User }) {
         <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{task.name}</h1>
         {task.description && <p style={{ color: '#64748b', marginBottom: 24 }}>{task.description}</p>}
 
-        {task.expectedOutput && (
+        {task.outputSchema && (
           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#166534' }}>
-            <strong>Expected output:</strong> {task.expectedOutput}
+            <strong>Expected output:</strong> {task.outputSchema}
           </div>
         )}
 
-        {task.inputGuidance && (
+        {task.inputSchema && (
           <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#0c4a6e' }}>
-            <strong>Input guidance:</strong> {task.inputGuidance}
+            <strong>Input guidance:</strong> {task.inputSchema}
           </div>
         )}
 

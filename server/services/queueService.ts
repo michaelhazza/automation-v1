@@ -113,14 +113,18 @@ async function processExecution(executionId: string): Promise<void> {
 
   while (retryCount <= maxRetries) {
     try {
-      const response = await fetch(task.endpointUrl as string, {
-        method: task.httpMethod as string,
+      const baseUrl = (engine.baseUrl ?? '').replace(/\/$/, '');
+      const webhookPath = (task.webhookPath as string) ?? '';
+      const fullEndpointUrl = `${baseUrl}${webhookPath}`;
+
+      const response = await fetch(fullEndpointUrl, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...authHeaders,
         },
         body: JSON.stringify(outboundPayload),
-        signal: AbortSignal.timeout((task.timeoutSeconds as number) * 1000),
+        signal: AbortSignal.timeout(30_000),
       });
 
       const durationMs = Date.now() - start;
@@ -146,7 +150,7 @@ async function processExecution(executionId: string): Promise<void> {
       // Send completion notification only if user opted in
       if (execution.notifyOnComplete) {
         try {
-          const [user] = await db.select().from(users).where(eq(users.id, execution.userId));
+          const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
           if (user) {
             await emailService.sendExecutionCompletionEmail(
               user.email,
@@ -170,7 +174,7 @@ async function processExecution(executionId: string): Promise<void> {
           .update(executions)
           .set({
             status: 'timeout',
-            errorMessage: `Execution timed out after ${task.timeoutSeconds} seconds`,
+            errorMessage: `Execution timed out after 30 seconds`,
             completedAt: new Date(),
             durationMs: Date.now() - start,
             retryCount,

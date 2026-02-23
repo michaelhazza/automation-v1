@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
+import { seedPermissions } from './services/permissionSeedService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,13 +18,15 @@ import usersRouter from './routes/users.js';
 import enginesRouter from './routes/engines.js';
 import categoriesRouter from './routes/categories.js';
 import tasksRouter from './routes/tasks.js';
-import permissionGroupsRouter from './routes/permissionGroups.js';
 import executionsRouter from './routes/executions.js';
 import filesRouter from './routes/files.js';
 import systemUsersRouter from './routes/systemUsers.js';
 import systemSettingsRouter from './routes/systemSettings.js';
 import systemExecutionsRouter from './routes/systemExecutions.js';
 import webhooksRouter from './routes/webhooks.js';
+import subaccountsRouter from './routes/subaccounts.js';
+import permissionSetsRouter from './routes/permissionSets.js';
+import portalRouter from './routes/portal.js';
 
 const app = express();
 
@@ -50,13 +53,15 @@ app.use(usersRouter);
 app.use(enginesRouter);
 app.use(categoriesRouter);
 app.use(tasksRouter);
-app.use(permissionGroupsRouter);
 app.use(executionsRouter);
 app.use(filesRouter);
 app.use(systemUsersRouter);
 app.use(systemSettingsRouter);
 app.use(systemExecutionsRouter);
 app.use(webhooksRouter);
+app.use(subaccountsRouter);
+app.use(permissionSetsRouter);
+app.use(portalRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
@@ -82,9 +87,17 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
   res.status(e.status ?? e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
 });
 
-const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
+async function start() {
+  await seedPermissions();
+  const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
+  });
+}
+
+start().catch((err) => {
+  console.error('[SERVER] Startup failed', err);
+  process.exit(1);
 });
 
 export default app;

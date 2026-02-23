@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { taskService } from '../services/taskService.js';
 import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
@@ -21,16 +22,15 @@ router.get('/api/tasks', authenticate, async (req, res) => {
   }
 });
 
-// Managers and above can create/manage tasks
-router.post('/api/tasks', authenticate, requireRole('manager'), async (req, res) => {
+router.post('/api/tasks', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_CREATE), async (req, res) => {
   try {
-    const { name, description, workflowEngineId, categoryId, endpointUrl, httpMethod, inputGuidance, expectedOutput, timeoutSeconds } = req.body;
-    if (!name || !workflowEngineId || !endpointUrl || !httpMethod) {
-      res.status(400).json({ error: 'Validation failed', details: 'name, workflowEngineId, endpointUrl, httpMethod are required' });
+    const { name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId } = req.body;
+    if (!name || !workflowEngineId || !webhookPath) {
+      res.status(400).json({ error: 'Validation failed', details: 'name, workflowEngineId, and webhookPath are required' });
       return;
     }
     const result = await taskService.createTask(req.orgId!, {
-      name, description, workflowEngineId, categoryId, endpointUrl, httpMethod, inputGuidance, expectedOutput, timeoutSeconds,
+      name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId,
     });
     res.status(201).json(result);
   } catch (err: unknown) {
@@ -49,7 +49,7 @@ router.get('/api/tasks/:id', authenticate, async (req, res) => {
   }
 });
 
-router.patch('/api/tasks/:id', authenticate, requireRole('manager'), async (req, res) => {
+router.patch('/api/tasks/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_EDIT), async (req, res) => {
   try {
     const result = await taskService.updateTask(req.params.id, req.orgId!, req.body);
     res.json(result);
@@ -59,7 +59,7 @@ router.patch('/api/tasks/:id', authenticate, requireRole('manager'), async (req,
   }
 });
 
-router.delete('/api/tasks/:id', authenticate, requireRole('manager'), async (req, res) => {
+router.delete('/api/tasks/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_DELETE), async (req, res) => {
   try {
     const result = await taskService.deleteTask(req.params.id, req.orgId!);
     res.json(result);
@@ -69,7 +69,7 @@ router.delete('/api/tasks/:id', authenticate, requireRole('manager'), async (req
   }
 });
 
-router.post('/api/tasks/:id/test', authenticate, requireRole('manager'), validateMultipart, async (req, res) => {
+router.post('/api/tasks/:id/test', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_TEST), validateMultipart, async (req, res) => {
   try {
     const inputData = req.body.inputData ? JSON.parse(req.body.inputData) : undefined;
     const result = await taskService.testTask(req.params.id, req.orgId!, req.user!.id, inputData);
@@ -80,7 +80,7 @@ router.post('/api/tasks/:id/test', authenticate, requireRole('manager'), validat
   }
 });
 
-router.post('/api/tasks/:id/activate', authenticate, requireRole('manager'), async (req, res) => {
+router.post('/api/tasks/:id/activate', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_ACTIVATE), async (req, res) => {
   try {
     const result = await taskService.activateTask(req.params.id, req.orgId!);
     res.json(result);
@@ -90,7 +90,7 @@ router.post('/api/tasks/:id/activate', authenticate, requireRole('manager'), asy
   }
 });
 
-router.post('/api/tasks/:id/deactivate', authenticate, requireRole('manager'), async (req, res) => {
+router.post('/api/tasks/:id/deactivate', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_ACTIVATE), async (req, res) => {
   try {
     const result = await taskService.deactivateTask(req.params.id, req.orgId!);
     res.json(result);

@@ -8,13 +8,11 @@ interface Task {
   name: string;
   description: string;
   status: string;
-  categoryId: string | null;
+  orgCategoryId: string | null;
   workflowEngineId: string;
-  endpointUrl: string;
-  httpMethod: string;
-  inputGuidance: string | null;
-  expectedOutput: string | null;
-  timeoutSeconds: number;
+  webhookPath: string;
+  inputSchema: string | null;
+  outputSchema: string | null;
 }
 
 export default function AdminTaskEditPage({ user }: { user: User }) {
@@ -100,18 +98,12 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
               <input type="text" value={task.name ?? ''} onChange={(e) => setTask({ ...task, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Endpoint URL</label>
-              <input type="text" value={task.endpointUrl ?? ''} onChange={(e) => setTask({ ...task, endpointUrl: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>HTTP Method</label>
-              <select value={task.httpMethod} onChange={(e) => setTask({ ...task, httpMethod: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
-                {['GET', 'POST', 'PUT', 'PATCH'].map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Webhook path</label>
+              <input type="text" value={task.webhookPath ?? ''} onChange={(e) => setTask({ ...task, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Category</label>
-              <select value={task.categoryId ?? ''} onChange={(e) => setTask({ ...task, categoryId: e.target.value || null })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
+              <select value={task.orgCategoryId ?? ''} onChange={(e) => setTask({ ...task, orgCategoryId: e.target.value || null })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
                 <option value="">No category</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -121,16 +113,12 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
               <textarea value={task.description ?? ''} onChange={(e) => setTask({ ...task, description: e.target.value })} rows={3} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input guidance</label>
-              <textarea value={task.inputGuidance ?? ''} onChange={(e) => setTask({ ...task, inputGuidance: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input schema / guidance</label>
+              <textarea value={task.inputSchema ?? ''} onChange={(e) => setTask({ ...task, inputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Expected output</label>
-              <textarea value={task.expectedOutput ?? ''} onChange={(e) => setTask({ ...task, expectedOutput: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Timeout (seconds)</label>
-              <input type="number" value={task.timeoutSeconds} onChange={(e) => setTask({ ...task, timeoutSeconds: Number(e.target.value) })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Output schema / description</label>
+              <textarea value={task.outputSchema ?? ''} onChange={(e) => setTask({ ...task, outputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
             </div>
           </div>
           <button onClick={handleSave} disabled={saving} style={{ marginTop: 20, padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>

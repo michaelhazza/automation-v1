@@ -10,7 +10,7 @@ interface Task {
   name: string;
   description: string;
   status: string;
-  categoryId: string | null;
+  orgCategoryId: string | null;
   workflowEngineId: string;
 }
 
@@ -39,7 +39,7 @@ export default function AdminTasksPage({ user }: { user: User }) {
   const [engines, setEngines] = useState<Engine[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', workflowEngineId: '', categoryId: '', endpointUrl: '', httpMethod: 'POST', inputGuidance: '', expectedOutput: '', timeoutSeconds: 300 });
+  const [form, setForm] = useState({ name: '', description: '', workflowEngineId: '', orgCategoryId: '', webhookPath: '', inputSchema: '', outputSchema: '' });
   const [error, setError] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -60,7 +60,7 @@ export default function AdminTasksPage({ user }: { user: User }) {
   const handleCreate = async () => {
     setError('');
     try {
-      await api.post('/api/tasks', { ...form, categoryId: form.categoryId || undefined });
+      await api.post('/api/tasks', { ...form, orgCategoryId: form.orgCategoryId || undefined });
       setShowForm(false);
       load();
     } catch (err: unknown) {
@@ -115,23 +115,17 @@ export default function AdminTasksPage({ user }: { user: User }) {
               </select></div>
             <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
               <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
-            <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Endpoint URL *</label>
-              <input value={form.endpointUrl} onChange={(e) => setForm({ ...form, endpointUrl: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
-            <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>HTTP Method *</label>
-              <select value={form.httpMethod} onChange={(e) => setForm({ ...form, httpMethod: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
-                {['GET', 'POST', 'PUT', 'PATCH'].map((m) => <option key={m} value={m}>{m}</option>)}
-              </select></div>
+            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Webhook path *</label>
+              <input value={form.webhookPath} onChange={(e) => setForm({ ...form, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
             <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Category</label>
-              <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+              <select value={form.orgCategoryId} onChange={(e) => setForm({ ...form, orgCategoryId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
                 <option value="">No category</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select></div>
-            <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Timeout (seconds)</label>
-              <input type="number" value={form.timeoutSeconds} onChange={(e) => setForm({ ...form, timeoutSeconds: Number(e.target.value) })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input guidance</label>
-              <textarea value={form.inputGuidance} onChange={(e) => setForm({ ...form, inputGuidance: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Expected output</label>
-              <textarea value={form.expectedOutput} onChange={(e) => setForm({ ...form, expectedOutput: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
+            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input schema / guidance</label>
+              <textarea value={form.inputSchema} onChange={(e) => setForm({ ...form, inputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
+            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Output schema / description</label>
+              <textarea value={form.outputSchema} onChange={(e) => setForm({ ...form, outputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
             <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
@@ -167,7 +161,7 @@ export default function AdminTasksPage({ user }: { user: User }) {
               {tasks.map((task) => (
                 <tr key={task.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>{task.name}</td>
-                  <td style={{ padding: '12px 16px', color: '#64748b' }}>{task.categoryId ? catMap[task.categoryId]?.name : '-'}</td>
+                  <td style={{ padding: '12px 16px', color: '#64748b' }}>{task.orgCategoryId ? catMap[task.orgCategoryId]?.name : '-'}</td>
                   <td style={{ padding: '12px 16px' }}>
                     <span style={{ color: STATUS_COLORS[task.status] ?? '#6b7280', fontWeight: 500 }}>{task.status}</span>
                   </td>

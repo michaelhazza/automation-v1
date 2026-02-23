@@ -3,7 +3,8 @@ export interface User {
   email: string;
   firstName: string;
   lastName: string;
-  role: 'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user';
+  /** Only set for system_admin users. Org users have no role; access is controlled by permission sets. */
+  role?: 'system_admin';
   organisationId: string;
 }
 

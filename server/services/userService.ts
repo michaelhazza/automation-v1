@@ -2,12 +2,9 @@ import { eq, and, isNull } from 'drizzle-orm';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { db } from '../db/index.js';
-import { users, organisations, permissionGroupMembers } from '../db/schema/index.js';
+import { users, organisations } from '../db/schema/index.js';
 import { emailService } from './emailService.js';
 import { env } from '../lib/env.js';
-
-// Roles that managers are NOT permitted to assign or modify
-const MANAGER_RESTRICTED_ROLES = ['system_admin', 'org_admin', 'manager'];
 
 export class UserService {
   async listUsers(organisationId: string, params: { role?: string; status?: string; limit?: number; offset?: number }) {
@@ -40,19 +37,8 @@ export class UserService {
   async inviteUser(
     organisationId: string,
     invitedByUserId: string,
-    callerRole: string,
     data: { email: string; role: string; firstName?: string; lastName?: string }
   ) {
-    // Managers can only invite users at the user/client_user level
-    if (callerRole === 'manager' && MANAGER_RESTRICTED_ROLES.includes(data.role)) {
-      throw { statusCode: 403, message: 'Managers can only invite users with role: user or client_user' };
-    }
-
-    // org_admin cannot create system_admin accounts
-    if (callerRole === 'org_admin' && data.role === 'system_admin') {
-      throw { statusCode: 403, message: 'Cannot assign system_admin role' };
-    }
-
     // system_admin inviting another system_admin must use the dedicated endpoint
     if (data.role === 'system_admin') {
       throw { statusCode: 403, message: 'Use the system admin invite endpoint to create system admin accounts' };
@@ -198,7 +184,6 @@ export class UserService {
   async updateUser(
     id: string,
     organisationId: string,
-    callerRole: string,
     data: { role?: string; status?: string; firstName?: string; lastName?: string }
   ) {
     const [user] = await db
@@ -212,21 +197,6 @@ export class UserService {
 
     if (user.role === 'system_admin') {
       throw { statusCode: 400, message: 'Cannot modify system_admin role via this endpoint' };
-    }
-
-    // Managers cannot modify other managers, org_admins, or system_admins
-    if (callerRole === 'manager' && MANAGER_RESTRICTED_ROLES.includes(user.role)) {
-      throw { statusCode: 403, message: 'Managers cannot modify users with admin or manager roles' };
-    }
-
-    // Managers cannot promote a user to manager or above
-    if (callerRole === 'manager' && data.role && MANAGER_RESTRICTED_ROLES.includes(data.role)) {
-      throw { statusCode: 403, message: 'Managers can only assign role: user or client_user' };
-    }
-
-    // org_admin cannot assign system_admin
-    if (callerRole === 'org_admin' && data.role === 'system_admin') {
-      throw { statusCode: 403, message: 'Cannot assign system_admin role' };
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -248,7 +218,7 @@ export class UserService {
     };
   }
 
-  async deleteUser(id: string, organisationId: string, requestingUserId: string, callerRole: string) {
+  async deleteUser(id: string, organisationId: string, requestingUserId: string) {
     if (id === requestingUserId) {
       throw { statusCode: 400, message: 'Cannot delete your own account' };
     }
@@ -262,16 +232,8 @@ export class UserService {
       throw { statusCode: 404, message: 'User not found' };
     }
 
-    // Managers can only delete users with role user or client_user
-    if (callerRole === 'manager' && MANAGER_RESTRICTED_ROLES.includes(user.role)) {
-      throw { statusCode: 403, message: 'Managers cannot remove users with admin or manager roles' };
-    }
-
     const now = new Date();
     await db.update(users).set({ deletedAt: now, updatedAt: now }).where(and(eq(users.id, id), eq(users.organisationId, organisationId)));
-
-    // Hard delete permission group memberships
-    await db.delete(permissionGroupMembers).where(eq(permissionGroupMembers.userId, id));
 
     return { message: 'User deleted successfully' };
   }

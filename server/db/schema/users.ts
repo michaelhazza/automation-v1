@@ -13,7 +13,9 @@ export const users = pgTable(
     passwordHash: text('password_hash').notNull(),
     firstName: text('first_name').notNull(),
     lastName: text('last_name').notNull(),
-    role: text('role').notNull().$type<'system_admin' | 'org_admin' | 'manager' | 'user' | 'client_user'>(),
+    // Only 'system_admin' is stored here; all other access is controlled via
+    // org_user_roles and subaccount_user_assignments with permission sets.
+    role: text('role').$type<'system_admin'>(),
     status: text('status').notNull().default('pending').$type<'active' | 'inactive' | 'pending'>(),
     inviteToken: text('invite_token'),
     inviteExpiresAt: timestamp('invite_expires_at'),
