@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { taskCategories, permissionGroupCategories } from '../db/schema/index.js';
+import { taskCategories } from '../db/schema/index.js';
 
 export class CategoryService {
   async listCategories(organisationId: string) {
@@ -85,9 +85,6 @@ export class CategoryService {
 
     const now = new Date();
     await db.update(taskCategories).set({ deletedAt: now, updatedAt: now }).where(eq(taskCategories.id, id));
-
-    // Hard delete permission group category access records
-    await db.delete(permissionGroupCategories).where(eq(permissionGroupCategories.categoryId, id));
 
     return { message: 'Category deleted successfully' };
   }
