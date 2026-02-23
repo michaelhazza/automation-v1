@@ -75,7 +75,7 @@ export default function Layout({ user, children }: LayoutProps) {
     ] : []),
   ];
 
-  const orgNavItems = isOrgUser ? [
+  const orgNavItems = [
     { path: '/tasks', label: 'Tasks' },
     { path: '/executions', label: 'Executions' },
     { path: '/portal', label: 'Portal' },
@@ -85,7 +85,7 @@ export default function Layout({ user, children }: LayoutProps) {
     { path: '/admin/categories', label: 'Categories' },
     { path: '/admin/subaccounts', label: 'Subaccounts' },
     { path: '/admin/permission-sets', label: 'Permission Sets' },
-  ] : [];
+  ];
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
