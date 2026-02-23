@@ -28,7 +28,7 @@ router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSI
       res.status(400).json({ error: 'Validation failed', details: 'email and role are required' });
       return;
     }
-    const result = await userService.inviteUser(req.orgId!, req.user!.id, req.user!.role, { email, role, firstName, lastName });
+    const result = await userService.inviteUser(req.orgId!, req.user!.id, { email, role, firstName, lastName });
     res.status(201).json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -68,7 +68,7 @@ router.get('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.
 
 router.patch('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_EDIT), async (req, res) => {
   try {
-    const result = await userService.updateUser(req.params.id, req.orgId!, req.user!.role, req.body);
+    const result = await userService.updateUser(req.params.id, req.orgId!, req.body);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -78,7 +78,7 @@ router.patch('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSION
 
 router.delete('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_DELETE), async (req, res) => {
   try {
-    const result = await userService.deleteUser(req.params.id, req.orgId!, req.user!.id, req.user!.role);
+    const result = await userService.deleteUser(req.params.id, req.orgId!, req.user!.id);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

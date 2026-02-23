@@ -41,11 +41,10 @@ export class ExecutionService {
   async listExecutions(
     userId: string,
     organisationId: string,
-    role: string,
+    viewAll: boolean,
+    viewFullAudit: boolean,
     params: { taskId?: string; userId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }
   ) {
-    const viewAll = role === 'system_admin';
-    const viewFullAudit = role === 'system_admin';
 
     const conditions = [eq(executions.organisationId, organisationId)];
     if (!viewAll) conditions.push(eq(executions.triggeredByUserId, userId));
@@ -128,9 +127,7 @@ export class ExecutionService {
     return { id: execution.id, status: execution.status, taskId: execution.taskId };
   }
 
-  async getExecution(id: string, userId: string, organisationId: string, role: string) {
-    const viewFullAudit = role === 'system_admin';
-
+  async getExecution(id: string, userId: string, organisationId: string, canViewAll: boolean, viewFullAudit: boolean) {
     const [execution] = await db
       .select()
       .from(executions)
@@ -138,15 +135,15 @@ export class ExecutionService {
 
     if (!execution) throw { statusCode: 404, message: 'Execution not found or not accessible' };
 
-    // Non-admin can only see own executions (unless they have org.executions.view — handled at route level)
-    if (role !== 'system_admin' && execution.triggeredByUserId !== userId) {
+    // Users without view-all permission can only see their own executions
+    if (!canViewAll && execution.triggeredByUserId !== userId) {
       throw { statusCode: 404, message: 'Execution not found or not accessible' };
     }
 
     return mapExecution(execution, viewFullAudit);
   }
 
-  async listExecutionFiles(executionId: string, userId: string, organisationId: string, role: string) {
+  async listExecutionFiles(executionId: string, userId: string, organisationId: string, canViewAll: boolean) {
     const [execution] = await db
       .select()
       .from(executions)
@@ -154,7 +151,7 @@ export class ExecutionService {
 
     if (!execution) throw { statusCode: 404, message: 'Execution not found or not accessible' };
 
-    if (role !== 'system_admin' && execution.triggeredByUserId !== userId) {
+    if (!canViewAll && execution.triggeredByUserId !== userId) {
       throw { statusCode: 404, message: 'Execution not found or not accessible' };
     }
 

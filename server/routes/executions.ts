@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, checkOrgPermission } from '../middleware/auth.js';
 import { executionService } from '../services/executionService.js';
 import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -26,7 +26,9 @@ router.get('/api/executions/export', authenticate, requireOrgPermission(ORG_PERM
 
 router.get('/api/executions', authenticate, async (req, res) => {
   try {
-    const result = await executionService.listExecutions(req.user!.id, req.orgId!, req.user!.role, {
+    const canViewAll = await checkOrgPermission(req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.EXECUTIONS_VIEW);
+    const viewFullAudit = req.user!.role === 'system_admin';
+    const result = await executionService.listExecutions(req.user!.id, req.orgId!, canViewAll, viewFullAudit, {
       taskId: req.query.taskId as string | undefined,
       userId: req.query.userId as string | undefined,
       status: req.query.status as string | undefined,
@@ -66,7 +68,9 @@ router.post('/api/executions', authenticate, validateMultipart, async (req, res)
 
 router.get('/api/executions/:id', authenticate, async (req, res) => {
   try {
-    const result = await executionService.getExecution(req.params.id, req.user!.id, req.orgId!, req.user!.role);
+    const canViewAll = await checkOrgPermission(req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.EXECUTIONS_VIEW);
+    const viewFullAudit = req.user!.role === 'system_admin';
+    const result = await executionService.getExecution(req.params.id, req.user!.id, req.orgId!, canViewAll, viewFullAudit);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -76,7 +80,8 @@ router.get('/api/executions/:id', authenticate, async (req, res) => {
 
 router.get('/api/executions/:id/files', authenticate, async (req, res) => {
   try {
-    const result = await executionService.listExecutionFiles(req.params.id, req.user!.id, req.orgId!, req.user!.role);
+    const canViewAll = await checkOrgPermission(req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.EXECUTIONS_VIEW);
+    const result = await executionService.listExecutionFiles(req.params.id, req.user!.id, req.orgId!, canViewAll);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
