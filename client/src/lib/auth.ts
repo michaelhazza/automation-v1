@@ -54,3 +54,22 @@ export function removeActiveOrg(): void {
   localStorage.removeItem('activeOrgId');
   localStorage.removeItem('activeOrgName');
 }
+
+// Active subaccount context — used by org users / system_admin to scope view to a subaccount
+export function getActiveSubaccountId(): string | null {
+  return localStorage.getItem('activeSubaccountId');
+}
+
+export function getActiveSubaccountName(): string | null {
+  return localStorage.getItem('activeSubaccountName');
+}
+
+export function setActiveSubaccount(id: string, name: string): void {
+  localStorage.setItem('activeSubaccountId', id);
+  localStorage.setItem('activeSubaccountName', name);
+}
+
+export function removeActiveSubaccount(): void {
+  localStorage.removeItem('activeSubaccountId');
+  localStorage.removeItem('activeSubaccountName');
+}
