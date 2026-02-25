@@ -380,13 +380,30 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
               </h3>
               <div style={{ marginBottom: 10 }}>
                 <label style={labelStyle}>New password *</label>
-                <input
-                  type="text"
-                  value={resetPasswordValue}
-                  onChange={(e) => setResetPasswordValue(e.target.value)}
-                  placeholder="Minimum 8 characters"
-                  style={inputStyle}
-                />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="text"
+                    value={resetPasswordValue}
+                    onChange={(e) => setResetPasswordValue(e.target.value)}
+                    placeholder="Minimum 8 characters"
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+                      const specials = '!@#$%&*';
+                      let pw = '';
+                      for (let i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+                      pw += specials[Math.floor(Math.random() * specials.length)];
+                      pw += String(Math.floor(Math.random() * 10));
+                      setResetPasswordValue(pw);
+                    }}
+                    style={{ padding: '8px 14px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #7dd3fc', borderRadius: 8, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 500 }}
+                  >
+                    Generate
+                  </button>
+                </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
