@@ -74,17 +74,26 @@ export default function LoginPage() {
 
         <div style={{ marginTop: 24, padding: '14px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: '#0369a1', marginBottom: 6 }}>Test credentials</div>
-          <div style={{ fontSize: 13, color: '#0c4a6e' }}>
-            <div>Email: <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>admin@automation.os</code></div>
-            <div style={{ marginTop: 2 }}>Password: <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>Admin123!</code></div>
+          <div style={{ fontSize: 13, color: '#0c4a6e', marginBottom: 6 }}>
+            <div>System Admin: <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>admin@automation.os</code> / <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>Admin123!</code></div>
+            <div style={{ marginTop: 4 }}>Org Admin: <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>michael@breakoutsolutions.com</code> / <code style={{ background: '#e0f2fe', padding: '1px 4px', borderRadius: 3 }}>Zu5QzB5vG8!2</code></div>
           </div>
-          <button
-            type="button"
-            onClick={() => { setEmail('admin@automation.os'); setPassword('Admin123!'); }}
-            style={{ marginTop: 8, background: 'none', border: '1px solid #7dd3fc', borderRadius: 6, color: '#0284c7', fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
-          >
-            Fill credentials
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => { setEmail('admin@automation.os'); setPassword('Admin123!'); }}
+              style={{ background: 'none', border: '1px solid #7dd3fc', borderRadius: 6, color: '#0284c7', fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+            >
+              System Admin
+            </button>
+            <button
+              type="button"
+              onClick={() => { setEmail('michael@breakoutsolutions.com'); setPassword('Zu5QzB5vG8!2'); }}
+              style={{ background: 'none', border: '1px solid #7dd3fc', borderRadius: 6, color: '#0284c7', fontSize: 12, padding: '4px 10px', cursor: 'pointer' }}
+            >
+              Org Admin
+            </button>
+          </div>
         </div>
       </div>
     </div>
