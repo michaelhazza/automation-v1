@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../db/schema/index.js';
+import { users as usersTable, orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 
 export interface JwtPayload {
@@ -130,6 +130,16 @@ export const requireOrgPermission = (permissionKey: string) => {
     const organisationId = req.orgId ?? req.user.organisationId;
 
     try {
+      // org_admin users get full access to their own organisation
+      const [userRecord] = await db
+        .select({ role: usersTable.role })
+        .from(usersTable)
+        .where(and(eq(usersTable.id, req.user.id), eq(usersTable.organisationId, organisationId), isNull(usersTable.deletedAt)));
+
+      if (userRecord?.role === 'org_admin') {
+        return next();
+      }
+
       // Use request-scoped cache to avoid redundant DB lookups within the same request
       if (!req._orgPermissionCache) {
         req._orgPermissionCache = await loadOrgPermissions(req.user.id, organisationId);
