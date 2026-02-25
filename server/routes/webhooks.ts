@@ -17,8 +17,9 @@
 import { Router } from 'express';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions } from '../db/schema/index.js';
+import { executions, users } from '../db/schema/index.js';
 import { webhookService } from '../services/webhookService.js';
+import { emailService } from '../services/emailService.js';
 
 const router = Router();
 
@@ -91,7 +92,27 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
     .where(eq(executions.id, executionId));
 
   // ------------------------------------------------------------------
-  // 5. Acknowledge immediately so the engine doesn't retry
+  // 5. Send completion notification if the user opted in
+  // ------------------------------------------------------------------
+  if (execution.notifyOnComplete && execution.triggeredByUserId) {
+    try {
+      const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
+      if (user) {
+        const taskName = (execution.taskSnapshot as Record<string, unknown> | null)?.name as string | undefined ?? 'Task';
+        await emailService.sendExecutionCompletionEmail(
+          user.email,
+          taskName,
+          executionId,
+          isErrorPayload ? 'failed' : 'completed'
+        );
+      }
+    } catch {
+      /* Email failures don't affect the webhook acknowledgement */
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 6. Acknowledge immediately so the engine doesn't retry
   // ------------------------------------------------------------------
   res.status(200).json({ received: true, executionId, status: isErrorPayload ? 'failed' : 'completed' });
 });

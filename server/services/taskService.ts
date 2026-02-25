@@ -8,7 +8,7 @@ const DEFAULT_TIMEOUT_SECONDS = 300;
 
 export class TaskService {
   /**
-   * List org-level tasks. For non-system-admin users only active tasks are returned.
+   * List org-level tasks. For non-admin users only active tasks are returned.
    */
   async listTasks(
     userId: string,
@@ -16,7 +16,7 @@ export class TaskService {
     role: string,
     params: { categoryId?: string; status?: string; search?: string; limit?: number; offset?: number }
   ) {
-    const isAdmin = role === 'system_admin';
+    const isAdmin = role === 'system_admin' || role === 'org_admin';
     const conditions = [eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)];
 
     if (!isAdmin) {
@@ -85,7 +85,7 @@ export class TaskService {
   }
 
   async getTask(id: string, organisationId: string, role: string) {
-    const isAdmin = role === 'system_admin';
+    const isAdmin = role === 'system_admin' || role === 'org_admin';
 
     const [task] = await db
       .select()
