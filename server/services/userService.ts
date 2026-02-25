@@ -2,8 +2,9 @@ import { eq, and, isNull } from 'drizzle-orm';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { db } from '../db/index.js';
-import { users, organisations } from '../db/schema/index.js';
+import { users, organisations, orgUserRoles } from '../db/schema/index.js';
 import { emailService } from './emailService.js';
+import { assignOrgUserRole } from './permissionSeedService.js';
 import { env } from '../lib/env.js';
 
 export class UserService {
@@ -82,6 +83,10 @@ export class UserService {
         updatedAt: new Date(),
       })
       .returning();
+
+    // Assign the corresponding org-level permission set so the user passes
+    // org permission checks as soon as they accept their invite.
+    await assignOrgUserRole(organisationId, user.id, data.role);
 
     try {
       await emailService.sendInvitationEmail(data.email, inviteToken, orgName);
@@ -210,6 +215,17 @@ export class UserService {
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
       .where(and(eq(users.id, id), eq(users.organisationId, organisationId)))
       .returning();
+
+    // Keep org_user_roles in sync when the role changes
+    if (data.role !== undefined) {
+      // Always remove the existing entry first so demotions to 'user'/'client_user'
+      // don't leave stale org-admin access behind.
+      await db
+        .delete(orgUserRoles)
+        .where(and(eq(orgUserRoles.userId, id), eq(orgUserRoles.organisationId, organisationId)));
+      // Re-assign if the new role maps to an org-level permission set
+      await assignOrgUserRole(organisationId, id, data.role);
+    }
 
     return {
       id: updated.id,

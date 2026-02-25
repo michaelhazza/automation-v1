@@ -1,6 +1,6 @@
 import { db } from '../db';
-import { permissions, permissionSets, permissionSetItems } from '../db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { permissions, permissionSets, permissionSetItems, orgUserRoles, users } from '../db/schema';
+import { eq, and, isNull, isNotNull, ne } from 'drizzle-orm';
 import { ALL_PERMISSIONS, DEFAULT_PERMISSION_SET_TEMPLATES } from '../lib/permissions';
 
 /**
@@ -77,4 +77,98 @@ export async function seedDefaultPermissionSetsForOrg(
   }
 
   return result;
+}
+
+// Maps users.role values to the corresponding default permission set name.
+// 'user' and 'client_user' are intentionally absent — they have no org-level
+// assignment and access the system only through subaccount_user_assignments.
+const ROLE_TO_PERMISSION_SET_NAME: Readonly<Record<string, string>> = {
+  org_admin: 'Org Admin',
+  manager: 'Org Manager',
+};
+
+/**
+ * Ensures the default permission sets exist for the org, then upserts an
+ * org_user_roles entry for the given user based on their role string.
+ *
+ * Roles that don't map to an org-level permission set ('user', 'client_user')
+ * are silently skipped — the caller is responsible for deleting any stale entry
+ * when downgrading a user to one of those roles.
+ */
+export async function assignOrgUserRole(
+  organisationId: string,
+  userId: string,
+  role: string
+): Promise<void> {
+  const permSetName = ROLE_TO_PERMISSION_SET_NAME[role];
+  if (!permSetName) return;
+
+  const permSetsByName = await seedDefaultPermissionSetsForOrg(organisationId);
+  const permissionSetId = permSetsByName[permSetName];
+  if (!permissionSetId) return;
+
+  await db
+    .insert(orgUserRoles)
+    .values({ organisationId, userId, permissionSetId })
+    .onConflictDoUpdate({
+      target: [orgUserRoles.organisationId, orgUserRoles.userId],
+      set: { permissionSetId, updatedAt: new Date() },
+    });
+}
+
+/**
+ * One-time startup backfill. Finds all non-system-admin users who have a role
+ * stored in users.role but no org_user_roles entry, and creates the missing
+ * entries using the default permission set templates.
+ *
+ * Safe to run on every boot — only touches rows that are missing entries.
+ */
+export async function backfillOrgUserRoles(): Promise<void> {
+  const rows = await db
+    .select({ id: users.id, organisationId: users.organisationId, role: users.role })
+    .from(users)
+    .leftJoin(
+      orgUserRoles,
+      and(eq(orgUserRoles.userId, users.id), eq(orgUserRoles.organisationId, users.organisationId))
+    )
+    .where(
+      and(
+        isNull(users.deletedAt),
+        isNotNull(users.role),
+        ne(users.role, 'system_admin' as 'system_admin'),
+        isNull(orgUserRoles.id)
+      )
+    );
+
+  if (rows.length === 0) {
+    console.log('[BACKFILL] org_user_roles: nothing to backfill');
+    return;
+  }
+
+  console.log(`[BACKFILL] org_user_roles: backfilling ${rows.length} user(s)`);
+
+  // Group by org so we only call seedDefaultPermissionSetsForOrg once per org
+  const byOrg = new Map<string, Array<{ id: string; role: string }>>();
+  for (const row of rows) {
+    if (!row.role) continue;
+    const list = byOrg.get(row.organisationId) ?? [];
+    list.push({ id: row.id, role: row.role as string });
+    byOrg.set(row.organisationId, list);
+  }
+
+  for (const [orgId, orgUsers] of byOrg) {
+    const permSetsByName = await seedDefaultPermissionSetsForOrg(orgId);
+    for (const u of orgUsers) {
+      const permSetName = ROLE_TO_PERMISSION_SET_NAME[u.role];
+      if (!permSetName) continue;
+      const permissionSetId = permSetsByName[permSetName];
+      if (!permissionSetId) continue;
+      await db
+        .insert(orgUserRoles)
+        .values({ organisationId: orgId, userId: u.id, permissionSetId })
+        .onConflictDoNothing();
+    }
+  }
+
+  console.log('[BACKFILL] org_user_roles: complete');
 }
