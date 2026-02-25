@@ -8,6 +8,7 @@ import {
   subaccountTaskLinks,
   subaccountUserAssignments,
   tasks,
+  workflowEngines,
   users,
   permissionSets,
 } from '../db/schema/index.js';
@@ -545,6 +546,242 @@ router.delete(
 
       await db.delete(subaccountTaskLinks).where(eq(subaccountTaskLinks.id, link.id));
       res.json({ message: 'Task link removed' });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ─── Subaccount-native task management ───────────────────────────────────────
+// These routes operate on tasks that were created directly inside a subaccount
+// (tasks.subaccount_id = subaccountId). Distinct from the link-management routes above.
+
+/**
+ * GET /api/subaccounts/:subaccountId/tasks/native/:taskId
+ * Fetch a single native task for editing.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/tasks/native/:taskId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+      const [task] = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.id, req.params.taskId),
+            eq(tasks.organisationId, req.orgId!),
+            eq(tasks.subaccountId, req.params.subaccountId),
+            isNull(tasks.deletedAt)
+          )
+        );
+
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      res.json(task);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * PATCH /api/subaccounts/:subaccountId/tasks/native/:taskId
+ * Update a native subaccount task's fields.
+ */
+router.patch(
+  '/api/subaccounts/:subaccountId/tasks/native/:taskId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+      const [task] = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.id, req.params.taskId),
+            eq(tasks.organisationId, req.orgId!),
+            eq(tasks.subaccountId, req.params.subaccountId),
+            isNull(tasks.deletedAt)
+          )
+        );
+
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      const { name, description, webhookPath, inputSchema, outputSchema, subaccountCategoryId } = req.body as {
+        name?: string;
+        description?: string;
+        webhookPath?: string;
+        inputSchema?: string;
+        outputSchema?: string;
+        subaccountCategoryId?: string | null;
+      };
+
+      const update: Record<string, unknown> = { updatedAt: new Date() };
+      if (name !== undefined) update.name = name;
+      if (description !== undefined) update.description = description;
+      if (webhookPath !== undefined) update.webhookPath = webhookPath;
+      if (inputSchema !== undefined) update.inputSchema = inputSchema;
+      if (outputSchema !== undefined) update.outputSchema = outputSchema;
+      if (subaccountCategoryId !== undefined) update.subaccountCategoryId = subaccountCategoryId;
+
+      const [updated] = await db
+        .update(tasks)
+        .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+        .where(eq(tasks.id, task.id))
+        .returning();
+
+      res.json(updated);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/tasks/native/:taskId/activate
+ * Activate a native subaccount task.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/tasks/native/:taskId/activate',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+      const [task] = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.id, req.params.taskId),
+            eq(tasks.organisationId, req.orgId!),
+            eq(tasks.subaccountId, req.params.subaccountId),
+            isNull(tasks.deletedAt)
+          )
+        );
+
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      const [engine] = await db
+        .select()
+        .from(workflowEngines)
+        .where(and(eq(workflowEngines.id, task.workflowEngineId), isNull(workflowEngines.deletedAt)));
+
+      if (!engine || engine.status !== 'active') {
+        res.status(400).json({ error: 'Task cannot be activated: engine is inactive' });
+        return;
+      }
+
+      const [updated] = await db
+        .update(tasks)
+        .set({ status: 'active', updatedAt: new Date() })
+        .where(eq(tasks.id, task.id))
+        .returning();
+
+      res.json({ id: updated.id, status: updated.status });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/tasks/native/:taskId/deactivate
+ * Deactivate a native subaccount task.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/tasks/native/:taskId/deactivate',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+      const [task] = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.id, req.params.taskId),
+            eq(tasks.organisationId, req.orgId!),
+            eq(tasks.subaccountId, req.params.subaccountId),
+            isNull(tasks.deletedAt)
+          )
+        );
+
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      const [updated] = await db
+        .update(tasks)
+        .set({ status: 'inactive', updatedAt: new Date() })
+        .where(eq(tasks.id, task.id))
+        .returning();
+
+      res.json({ id: updated.id, status: updated.status });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/subaccounts/:subaccountId/tasks/native/:taskId
+ * Soft-delete a native subaccount task.
+ */
+router.delete(
+  '/api/subaccounts/:subaccountId/tasks/native/:taskId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+      const [task] = await db
+        .select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.id, req.params.taskId),
+            eq(tasks.organisationId, req.orgId!),
+            eq(tasks.subaccountId, req.params.subaccountId),
+            isNull(tasks.deletedAt)
+          )
+        );
+
+      if (!task) {
+        res.status(404).json({ error: 'Task not found' });
+        return;
+      }
+
+      const now = new Date();
+      await db.update(tasks).set({ deletedAt: now, updatedAt: now }).where(eq(tasks.id, task.id));
+      res.json({ message: 'Task deleted' });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });

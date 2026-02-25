@@ -17,7 +17,7 @@ export class TaskService {
     params: { categoryId?: string; status?: string; search?: string; limit?: number; offset?: number }
   ) {
     const isAdmin = role === 'system_admin' || role === 'org_admin';
-    const conditions = [eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)];
+    const conditions = [eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)];
 
     if (!isAdmin) {
       conditions.push(eq(tasks.status, 'active'));
@@ -90,7 +90,7 @@ export class TaskService {
     const [task] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)));
 
     if (!task) throw { statusCode: 404, message: 'Task not found or not accessible' };
     if (!isAdmin && task.status !== 'active') throw { statusCode: 404, message: 'Task not found or not accessible' };
@@ -114,7 +114,7 @@ export class TaskService {
     const [task] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)));
 
     if (!task) throw { statusCode: 404, message: 'Task not found' };
 
@@ -140,7 +140,7 @@ export class TaskService {
     const [task] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)));
 
     if (!task) throw { statusCode: 404, message: 'Task not found' };
 
@@ -153,7 +153,7 @@ export class TaskService {
     const [task] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)));
 
     if (!task) throw { statusCode: 404, message: 'Task not found' };
 
@@ -179,7 +179,7 @@ export class TaskService {
     const [task] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)));
 
     if (!task) throw { statusCode: 404, message: 'Task not found' };
 
@@ -196,7 +196,7 @@ export class TaskService {
     const [task] = await db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .where(and(eq(tasks.id, id), eq(tasks.organisationId, organisationId), isNull(tasks.subaccountId), isNull(tasks.deletedAt)));
 
     if (!task) throw { statusCode: 404, message: 'Task not found' };
 

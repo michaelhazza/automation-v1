@@ -158,18 +158,18 @@ export default function AdminSubaccountTasksPage({ user }: { user: User }) {
   };
 
   const handleActivateNative = async (id: string) => {
-    await api.post(`/api/tasks/${id}/activate`);
+    await api.post(`/api/subaccounts/${subaccountId}/tasks/native/${id}/activate`);
     load();
   };
 
   const handleDeactivateNative = async (id: string) => {
-    await api.post(`/api/tasks/${id}/deactivate`);
+    await api.post(`/api/subaccounts/${subaccountId}/tasks/native/${id}/deactivate`);
     load();
   };
 
   const handleDeleteNative = async () => {
     if (!deleteNativeId) return;
-    await api.delete(`/api/tasks/${deleteNativeId}`);
+    await api.delete(`/api/subaccounts/${subaccountId}/tasks/native/${deleteNativeId}`);
     setDeleteNativeId(null);
     load();
   };
@@ -401,7 +401,7 @@ export default function AdminSubaccountTasksPage({ user }: { user: User }) {
                     </td>
                     <td style={{ padding: '12px 16px', display: 'flex', gap: 8 }}>
                       <Link
-                        to={`/admin/tasks/${task.id}`}
+                        to={`/admin/subaccounts/${subaccountId}/tasks/${task.id}/edit`}
                         style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', textDecoration: 'none' }}
                       >
                         Edit

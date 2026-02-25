@@ -22,6 +22,7 @@ const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
 const AdminSubaccountTasksPage = lazy(() => import('./pages/AdminSubaccountTasksPage'));
+const AdminSubaccountTaskEditPage = lazy(() => import('./pages/AdminSubaccountTaskEditPage'));
 const AdminPermissionSetsPage = lazy(() => import('./pages/AdminPermissionSetsPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
@@ -134,6 +135,7 @@ export default function App() {
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/tasks" element={<AdminSubaccountTasksPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/tasks/:taskId/edit" element={<AdminSubaccountTaskEditPage user={user!} />} />
             <Route path="/admin/permission-sets" element={<AdminPermissionSetsPage user={user!} />} />
           </Route>
 
