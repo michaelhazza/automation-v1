@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
-import { removeToken, removeUserRole, removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg } from '../lib/auth';
+import {
+  removeToken, removeUserRole,
+  removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
+  getActiveSubaccountId, getActiveSubaccountName, setActiveSubaccount, removeActiveSubaccount,
+} from '../lib/auth';
 
 interface LayoutProps {
   user: User;
@@ -14,16 +18,20 @@ interface OrgOption {
   name: string;
 }
 
+interface SubaccountOption {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+}
+
 export default function Layout({ user, children }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
   const isSystemAdmin = user.role === 'system_admin';
-  // All non-system-admin users are org users governed by permission sets.
-  // The sidebar shows all org sections; the API enforces fine-grained access.
-  const isOrgUser = !isSystemAdmin;
 
-  // Active org context — only relevant for system_admin
+  // ── Org context (system_admin only) ────────────────────────────────────────
   const [activeOrgId, setActiveOrgIdState] = useState<string | null>(getActiveOrgId);
   const [activeOrgName, setActiveOrgNameState] = useState<string | null>(getActiveOrgName);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
@@ -42,6 +50,10 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveOrgIdState(org.id);
     setActiveOrgNameState(org.name);
     setOrgPickerOpen(false);
+    // Clear subaccount context when switching orgs
+    removeActiveSubaccount();
+    setActiveSubaccountIdState(null);
+    setActiveSubaccountNameState(null);
     navigate('/');
   };
 
@@ -49,9 +61,46 @@ export default function Layout({ user, children }: LayoutProps) {
     removeActiveOrg();
     setActiveOrgIdState(null);
     setActiveOrgNameState(null);
+    // Clear subaccount too
+    removeActiveSubaccount();
+    setActiveSubaccountIdState(null);
+    setActiveSubaccountNameState(null);
     navigate('/');
   };
 
+  // ── Subaccount context ──────────────────────────────────────────────────────
+  const [activeSubaccountId, setActiveSubaccountIdState] = useState<string | null>(getActiveSubaccountId);
+  const [activeSubaccountName, setActiveSubaccountNameState] = useState<string | null>(getActiveSubaccountName);
+  const [subaccounts, setSubaccounts] = useState<SubaccountOption[]>([]);
+  const [subaccountPickerOpen, setSubaccountPickerOpen] = useState(false);
+
+  const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
+
+  useEffect(() => {
+    if (hasOrgContext) {
+      api.get('/api/subaccounts')
+        .then(({ data }) => setSubaccounts(data))
+        .catch(() => setSubaccounts([]));
+    } else {
+      setSubaccounts([]);
+    }
+  }, [hasOrgContext, activeOrgId]);
+
+  const handleSelectSubaccount = (sa: SubaccountOption) => {
+    setActiveSubaccount(sa.id, sa.name);
+    setActiveSubaccountIdState(sa.id);
+    setActiveSubaccountNameState(sa.name);
+    setSubaccountPickerOpen(false);
+  };
+
+  const handleClearSubaccount = () => {
+    removeActiveSubaccount();
+    setActiveSubaccountIdState(null);
+    setActiveSubaccountNameState(null);
+    setSubaccountPickerOpen(false);
+  };
+
+  // ── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = async () => {
     try {
       await api.post('/api/auth/logout');
@@ -59,13 +108,13 @@ export default function Layout({ user, children }: LayoutProps) {
       removeToken();
       removeUserRole();
       removeActiveOrg();
+      removeActiveSubaccount();
       navigate('/login');
     }
   };
 
-  const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
-
-  const navItems = [
+  // ── Navigation items ────────────────────────────────────────────────────────
+  const topNavItems = [
     { path: '/', label: 'Dashboard' },
     ...(isSystemAdmin ? [
       { path: '/system/organisations', label: 'Organisations' },
@@ -79,6 +128,9 @@ export default function Layout({ user, children }: LayoutProps) {
     { path: '/tasks', label: 'Tasks' },
     { path: '/executions', label: 'Executions' },
     { path: '/portal', label: 'Portal' },
+  ];
+
+  const adminNavItems = [
     { path: '/admin/tasks', label: 'Manage Tasks' },
     { path: '/admin/users', label: 'Users' },
     { path: '/admin/engines', label: 'Engines' },
@@ -87,16 +139,33 @@ export default function Layout({ user, children }: LayoutProps) {
     { path: '/admin/permission-sets', label: 'Permission Sets' },
   ];
 
+  const subaccountNavItems = activeSubaccountId ? [
+    { path: `/admin/subaccounts/${activeSubaccountId}`, label: 'Overview' },
+    { path: `/portal/${activeSubaccountId}`, label: 'Portal' },
+  ] : [];
+
+  // ── Shared link style helper ────────────────────────────────────────────────
+  const linkStyle = (path: string, activeColor = '#38bdf8') => ({
+    display: 'block',
+    padding: '9px 20px',
+    color: location.pathname === path ? activeColor : '#94a3b8',
+    textDecoration: 'none',
+    background: location.pathname === path ? '#0f172a' : 'transparent',
+    fontSize: 14,
+  });
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
       {/* Sidebar */}
       <nav style={{ width: 220, background: '#1e293b', color: '#f8fafc', padding: '24px 0', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+
+        {/* ── Header: branding + user info + pickers ── */}
         <div style={{ padding: '0 20px 20px', borderBottom: '1px solid #334155', marginBottom: 16 }}>
           <div style={{ fontWeight: 700, fontSize: 18, color: '#f8fafc' }}>Automation OS</div>
           <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{user.firstName} {user.lastName}</div>
           {user.role && <div style={{ fontSize: 11, color: '#64748b' }}>{user.role}</div>}
 
-          {/* Org context picker — system_admin only */}
+          {/* Org picker — system_admin only */}
           {isSystemAdmin && (
             <div style={{ marginTop: 12, position: 'relative' }}>
               <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
@@ -111,7 +180,7 @@ export default function Layout({ user, children }: LayoutProps) {
                   borderRadius: 6, padding: '5px 8px',
                   color: activeOrgId ? '#93c5fd' : '#94a3b8',
                   fontSize: 12, cursor: 'pointer',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}
               >
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
@@ -125,7 +194,7 @@ export default function Layout({ user, children }: LayoutProps) {
                   position: 'absolute', zIndex: 100, left: 0, top: '100%',
                   background: '#1e293b', border: '1px solid #334155',
                   borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                  marginTop: 4, width: 200, maxHeight: 260, overflowY: 'auto'
+                  marginTop: 4, width: 200, maxHeight: 260, overflowY: 'auto',
                 }}>
                   {orgs.length === 0 && (
                     <div style={{ padding: '10px 12px', color: '#64748b', fontSize: 12 }}>No organisations found</div>
@@ -140,7 +209,7 @@ export default function Layout({ user, children }: LayoutProps) {
                         background: org.id === activeOrgId ? '#1e3a5f' : 'transparent',
                         color: org.id === activeOrgId ? '#93c5fd' : '#cbd5e1',
                         border: 'none', borderBottom: '1px solid #334155',
-                        fontSize: 13, cursor: 'pointer'
+                        fontSize: 13, cursor: 'pointer',
                       }}
                     >
                       {org.name}
@@ -152,10 +221,80 @@ export default function Layout({ user, children }: LayoutProps) {
                       style={{
                         display: 'block', width: '100%', textAlign: 'left',
                         padding: '8px 12px', background: 'transparent',
-                        color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer'
+                        color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer',
                       }}
                     >
                       Clear org context
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Subaccount picker — shown whenever org context exists */}
+          {hasOrgContext && (
+            <div style={{ marginTop: 10, position: 'relative' }}>
+              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                Active subaccount
+              </div>
+              <button
+                onClick={() => setSubaccountPickerOpen(!subaccountPickerOpen)}
+                style={{
+                  width: '100%', textAlign: 'left',
+                  background: activeSubaccountId ? '#1a3535' : '#1a1f2e',
+                  border: `1px solid ${activeSubaccountId ? '#0d9488' : '#475569'}`,
+                  borderRadius: 6, padding: '5px 8px',
+                  color: activeSubaccountId ? '#5eead4' : '#94a3b8',
+                  fontSize: 12, cursor: 'pointer',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
+                  {activeSubaccountName ?? 'No subaccount selected'}
+                </span>
+                <span style={{ fontSize: 10, marginLeft: 4, flexShrink: 0 }}>{subaccountPickerOpen ? '▲' : '▼'}</span>
+              </button>
+
+              {subaccountPickerOpen && (
+                <div style={{
+                  position: 'absolute', zIndex: 100, left: 0, top: '100%',
+                  background: '#1e293b', border: '1px solid #334155',
+                  borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                  marginTop: 4, width: 200, maxHeight: 260, overflowY: 'auto',
+                }}>
+                  {subaccounts.length === 0 && (
+                    <div style={{ padding: '10px 12px', color: '#64748b', fontSize: 12 }}>No subaccounts found</div>
+                  )}
+                  {subaccounts.map((sa) => (
+                    <button
+                      key={sa.id}
+                      onClick={() => handleSelectSubaccount(sa)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '8px 12px',
+                        background: sa.id === activeSubaccountId ? '#1a3535' : 'transparent',
+                        color: sa.id === activeSubaccountId ? '#5eead4' : '#cbd5e1',
+                        border: 'none', borderBottom: '1px solid #334155',
+                        fontSize: 13, cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ fontWeight: 500 }}>{sa.name}</div>
+                      {sa.status !== 'active' && (
+                        <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 1 }}>{sa.status}</div>
+                      )}
+                    </button>
+                  ))}
+                  {activeSubaccountId && (
+                    <button
+                      onClick={handleClearSubaccount}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '8px 12px', background: 'transparent',
+                        color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer',
+                      }}
+                    >
+                      Clear subaccount
                     </button>
                   )}
                 </div>
@@ -174,41 +313,54 @@ export default function Layout({ user, children }: LayoutProps) {
           </div>
         )}
 
-        {navItems.map((item) => (
-          <Link
-            key={item.path}
-            to={item.path}
-            style={{
-              display: 'block',
-              padding: '10px 20px',
-              color: location.pathname === item.path ? '#38bdf8' : '#94a3b8',
-              textDecoration: 'none',
-              background: location.pathname === item.path ? '#0f172a' : 'transparent',
-              fontSize: 14,
-            }}
-          >
+        {/* ── Top-level nav ── */}
+        {topNavItems.map((item) => (
+          <Link key={item.path} to={item.path} style={linkStyle(item.path)}>
             {item.label}
           </Link>
         ))}
 
-        {hasOrgContext && orgNavItems.length > 0 && (
+        {/* ── Organisation section ── */}
+        {hasOrgContext && (
           <>
             <div style={{ padding: '12px 20px 4px', fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid #334155', marginTop: 4 }}>
               Organisation
             </div>
             {orgNavItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                style={{
-                  display: 'block',
-                  padding: '10px 20px',
-                  color: location.pathname === item.path ? '#38bdf8' : '#94a3b8',
-                  textDecoration: 'none',
-                  background: location.pathname === item.path ? '#0f172a' : 'transparent',
-                  fontSize: 14,
-                }}
-              >
+              <Link key={item.path} to={item.path} style={linkStyle(item.path)}>
+                {item.label}
+              </Link>
+            ))}
+          </>
+        )}
+
+        {/* ── Admin section ── */}
+        {hasOrgContext && (
+          <>
+            <div style={{ padding: '12px 20px 4px', fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid #334155', marginTop: 4 }}>
+              Admin
+            </div>
+            {adminNavItems.map((item) => (
+              <Link key={item.path} to={item.path} style={linkStyle(item.path)}>
+                {item.label}
+              </Link>
+            ))}
+          </>
+        )}
+
+        {/* ── Subaccount section (only when a subaccount is active) ── */}
+        {activeSubaccountId && subaccountNavItems.length > 0 && (
+          <>
+            <div style={{
+              padding: '12px 20px 4px',
+              fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em',
+              borderTop: '1px solid #334155', marginTop: 4,
+              color: '#0d9488',
+            }}>
+              {activeSubaccountName ?? 'Subaccount'}
+            </div>
+            {subaccountNavItems.map((item) => (
+              <Link key={item.path} to={item.path} style={linkStyle(item.path, '#2dd4bf')}>
                 {item.label}
               </Link>
             ))}

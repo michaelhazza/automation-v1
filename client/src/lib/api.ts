@@ -32,6 +32,8 @@ api.interceptors.response.use(
       localStorage.removeItem('userRole');
       localStorage.removeItem('activeOrgId');
       localStorage.removeItem('activeOrgName');
+      localStorage.removeItem('activeSubaccountId');
+      localStorage.removeItem('activeSubaccountName');
       window.location.href = '/login';
     }
     return Promise.reject(error);
