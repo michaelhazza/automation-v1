@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { organisations, users } from '../db/schema/index.js';
 import { userService } from './userService.js';
 import { emailService } from './emailService.js';
+import { assignOrgUserRole } from './permissionSeedService.js';
 import crypto from 'crypto';
 import { env } from '../lib/env.js';
 
@@ -54,7 +55,7 @@ export class OrganisationService {
     const bcrypt = bcryptModule.default ?? bcryptModule;
     const tempHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
 
-    await db.insert(users).values({
+    const [adminUser] = await db.insert(users).values({
       organisationId: org.id,
       email: data.adminEmail.toLowerCase(),
       passwordHash: tempHash,
@@ -66,7 +67,10 @@ export class OrganisationService {
       inviteExpiresAt,
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    }).returning({ id: users.id });
+
+    // Assign the org_admin permission set so the new admin passes org permission checks
+    await assignOrgUserRole(org.id, adminUser.id, 'org_admin');
 
     try {
       await emailService.sendInvitationEmail(data.adminEmail, inviteToken, org.name);
