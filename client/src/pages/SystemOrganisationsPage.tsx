@@ -74,6 +74,8 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'user', firstName: '', lastName: '' });
   const [removeUserId, setRemoveUserId] = useState<string | null>(null);
+  const [resetPasswordUserId, setResetPasswordUserId] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
 
   const loadOrgs = async () => {
     const { data } = await api.get('/api/organisations');
@@ -175,8 +177,26 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
     setOrgUsers([]);
     setShowInviteForm(false);
     setRemoveUserId(null);
+    setResetPasswordUserId(null);
+    setResetPasswordValue('');
     setUsersError('');
     setUsersSuccess('');
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetPasswordUserId || !usersOrg) return;
+    setUsersError('');
+    setUsersSuccess('');
+    try {
+      const { data } = await api.post(`/api/system/users/${resetPasswordUserId}/reset-password`, { newPassword: resetPasswordValue });
+      setUsersSuccess(`Password reset for ${data.email}`);
+      setResetPasswordUserId(null);
+      setResetPasswordValue('');
+      await loadOrgUsers(usersOrg.id);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setUsersError(e.response?.data?.error ?? 'Failed to reset password');
+    }
   };
 
   const handleInviteUser = async () => {
@@ -352,6 +372,40 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             />
           )}
 
+          {/* Reset password dialog */}
+          {resetPasswordUserId && (
+            <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px', color: '#0c4a6e' }}>
+                Reset password for {orgUsers.find(u => u.id === resetPasswordUserId)?.email}
+              </h3>
+              <div style={{ marginBottom: 10 }}>
+                <label style={labelStyle}>New password *</label>
+                <input
+                  type="text"
+                  value={resetPasswordValue}
+                  onChange={(e) => setResetPasswordValue(e.target.value)}
+                  placeholder="Minimum 8 characters"
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={handleResetPassword}
+                  disabled={resetPasswordValue.length < 8}
+                  style={{ padding: '7px 16px', background: resetPasswordValue.length < 8 ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: resetPasswordValue.length < 8 ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                >
+                  Reset password
+                </button>
+                <button
+                  onClick={() => { setResetPasswordUserId(null); setResetPasswordValue(''); }}
+                  style={{ padding: '7px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Invite user form */}
           {showInviteForm ? (
             <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginBottom: 16 }}>
@@ -449,7 +503,13 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
                       <td style={{ padding: '10px 14px', color: '#64748b', fontSize: 12 }}>
                         {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
                       </td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td style={{ padding: '10px 14px', display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => { setResetPasswordUserId(u.id); setResetPasswordValue(''); setUsersError(''); setUsersSuccess(''); }}
+                          style={{ padding: '3px 8px', background: '#f0f9ff', color: '#0284c7', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                        >
+                          Reset pw
+                        </button>
                         <button
                           onClick={() => setRemoveUserId(u.id)}
                           style={{ padding: '3px 8px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}

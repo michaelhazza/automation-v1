@@ -96,4 +96,36 @@ router.post('/api/system/users/invite', authenticate, requireSystemAdmin, async 
   }
 });
 
+// Reset any user's password — system_admin only
+router.post('/api/system/users/:id/reset-password', authenticate, requireSystemAdmin, async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    const [user] = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(and(eq(users.id, req.params.id), isNull(users.deletedAt)));
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await db
+      .update(users)
+      .set({ passwordHash, status: 'active', updatedAt: new Date() })
+      .where(eq(users.id, req.params.id));
+
+    res.json({ message: 'Password reset successfully', email: user.email });
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+  }
+});
+
 export default router;
