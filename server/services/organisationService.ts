@@ -50,7 +50,8 @@ export class OrganisationService {
     const inviteToken = crypto.randomBytes(32).toString('hex');
     const inviteExpiresAt = new Date(Date.now() + env.INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
 
-    const bcrypt = await import('bcryptjs');
+    const bcryptModule = await import('bcryptjs');
+    const bcrypt = bcryptModule.default ?? bcryptModule;
     const tempHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
 
     await db.insert(users).values({
