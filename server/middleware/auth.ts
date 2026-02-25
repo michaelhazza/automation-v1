@@ -8,8 +8,7 @@ import { env } from '../lib/env.js';
 export interface JwtPayload {
   id: string;
   organisationId: string;
-  /** Only set for system_admin users; undefined/null for all others. */
-  role?: 'system_admin';
+  role: string;
   email: string;
 }
 

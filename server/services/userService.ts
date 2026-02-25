@@ -144,7 +144,7 @@ export class UserService {
 
     if (data.newPassword) {
       if (!data.currentPassword) {
-        throw { statusCode: 400, message: 'Current password incorrect' };
+        throw { statusCode: 400, message: 'Current password is required to set a new password' };
       }
       const valid = await bcrypt.compare(data.currentPassword, user.passwordHash);
       if (!valid) {
