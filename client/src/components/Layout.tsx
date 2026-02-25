@@ -141,6 +141,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
   const subaccountNavItems = activeSubaccountId ? [
     { path: `/admin/subaccounts/${activeSubaccountId}`, label: 'Overview' },
+    { path: `/admin/subaccounts/${activeSubaccountId}/tasks`, label: 'Tasks' },
     { path: `/portal/${activeSubaccountId}`, label: 'Portal' },
   ] : [];
 
