@@ -50,8 +50,16 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
       setForm({ name: '', slug: '', status: 'active' });
       load();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to create subaccount');
+      const e = err as { response?: { status?: number; data?: { error?: string } } };
+      const status = e.response?.status;
+      const serverMessage = e.response?.data?.error;
+      if (status === 403) {
+        setError(serverMessage ?? 'You do not have permission to create subaccounts. Contact your organisation administrator.');
+      } else if (status === 409) {
+        setError(serverMessage ?? 'A subaccount with this slug already exists. Please choose a different slug.');
+      } else {
+        setError(serverMessage ?? 'Failed to create subaccount. Please try again.');
+      }
     }
   };
 

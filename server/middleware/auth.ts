@@ -146,7 +146,7 @@ export const requireOrgPermission = (permissionKey: string) => {
       }
 
       if (!req._orgPermissionCache.has(permissionKey)) {
-        res.status(403).json({ error: 'Forbidden' });
+        res.status(403).json({ error: 'You do not have permission to perform this action. Contact your organisation administrator if you believe this is a mistake.' });
         return;
       }
 
