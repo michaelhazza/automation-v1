@@ -62,6 +62,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
     const url = URL.createObjectURL(new Blob([res.data]));
     const a = document.createElement('a');
     a.href = url; a.download = 'executions.csv'; a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleClearFilters = () => {
