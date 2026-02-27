@@ -25,13 +25,73 @@ interface SubaccountOption {
   status: string;
 }
 
+// ── SVG icon helpers ───────────────────────────────────────────────────────
+const Ico = ({ children, size = 16 }: { children: React.ReactNode; size?: number }) => (
+  <svg
+    width={size} height={size}
+    viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="1.75"
+    strokeLinecap="round" strokeLinejoin="round"
+    style={{ flexShrink: 0 }}
+  >
+    {children}
+  </svg>
+);
+
+const Icons = {
+  dashboard: () => <Ico><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></Ico>,
+  tasks: () => <Ico><circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16 10 8" /></Ico>,
+  executions: () => <Ico><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Ico>,
+  portal: () => <Ico><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></Ico>,
+  manageTasks: () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="11" y2="17" /></Ico>,
+  users: () => <Ico><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Ico>,
+  engines: () => <Ico><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></Ico>,
+  categories: () => <Ico><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></Ico>,
+  subaccounts: () => <Ico><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></Ico>,
+  permissions: () => <Ico><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></Ico>,
+  organisations: () => <Ico><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></Ico>,
+  queue: () => <Ico><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></Ico>,
+  sysUsers: () => <Ico><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" /></Ico>,
+  settings: () => <Ico><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></Ico>,
+  logout: () => <Ico><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></Ico>,
+  chevronDown: () => (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  ),
+  chevronUp: () => (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="18 15 12 9 6 15" />
+    </svg>
+  ),
+};
+
+// ── Shared NavLink component ───────────────────────────────────────────────
+function NavLink({ to, icon, label, exact = false }: { to: string; icon: React.ReactNode; label: string; exact?: boolean }) {
+  const location = useLocation();
+  const isActive = exact ? location.pathname === to : location.pathname === to || location.pathname.startsWith(to + '/');
+  return (
+    <Link to={to} className={`nav-item${isActive ? ' active' : ''}`}>
+      {icon}
+      <span>{label}</span>
+    </Link>
+  );
+}
+
+// ── Section divider ────────────────────────────────────────────────────────
+function NavSection({ label }: { label: string }) {
+  return (
+    <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+      {label}
+    </div>
+  );
+}
+
 export default function Layout({ user, children }: LayoutProps) {
   const navigate = useNavigate();
-  const location = useLocation();
-
   const isSystemAdmin = user.role === 'system_admin';
 
-  // ── Org context (system_admin only) ────────────────────────────────────────
+  // ── Org context ────────────────────────────────────────────────────────
   const [activeOrgId, setActiveOrgIdState] = useState<string | null>(getActiveOrgId);
   const [activeOrgName, setActiveOrgNameState] = useState<string | null>(getActiveOrgName);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
@@ -50,7 +110,6 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveOrgIdState(org.id);
     setActiveOrgNameState(org.name);
     setOrgPickerOpen(false);
-    // Clear subaccount context when switching orgs
     removeActiveSubaccount();
     setActiveSubaccountIdState(null);
     setActiveSubaccountNameState(null);
@@ -61,14 +120,13 @@ export default function Layout({ user, children }: LayoutProps) {
     removeActiveOrg();
     setActiveOrgIdState(null);
     setActiveOrgNameState(null);
-    // Clear subaccount too
     removeActiveSubaccount();
     setActiveSubaccountIdState(null);
     setActiveSubaccountNameState(null);
     navigate('/');
   };
 
-  // ── Subaccount context ──────────────────────────────────────────────────────
+  // ── Subaccount context ─────────────────────────────────────────────────
   const [activeSubaccountId, setActiveSubaccountIdState] = useState<string | null>(getActiveSubaccountId);
   const [activeSubaccountName, setActiveSubaccountNameState] = useState<string | null>(getActiveSubaccountName);
   const [subaccounts, setSubaccounts] = useState<SubaccountOption[]>([]);
@@ -100,290 +158,317 @@ export default function Layout({ user, children }: LayoutProps) {
     setSubaccountPickerOpen(false);
   };
 
-  // ── Logout ──────────────────────────────────────────────────────────────────
+  // ── Logout ─────────────────────────────────────────────────────────────
   const handleLogout = async () => {
-    try {
-      await api.post('/api/auth/logout');
-    } finally {
-      removeToken();
-      removeUserRole();
-      removeActiveOrg();
-      removeActiveSubaccount();
+    try { await api.post('/api/auth/logout'); } finally {
+      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveSubaccount();
       navigate('/login');
     }
   };
 
-  // ── Navigation items ────────────────────────────────────────────────────────
-  const topNavItems = [
-    { path: '/', label: 'Dashboard' },
-    ...(isSystemAdmin ? [
-      { path: '/system/organisations', label: 'Organisations' },
-      { path: '/system/task-queue', label: 'Task Queue' },
-      { path: '/system/users', label: 'System Admins' },
-      { path: '/system/settings', label: 'System Settings' },
-    ] : []),
-  ];
+  // ── User avatar initials ───────────────────────────────────────────────
+  const initials = `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || '?';
 
-  const orgNavItems = [
-    { path: '/tasks', label: 'Tasks' },
-    { path: '/executions', label: 'Executions' },
-    { path: '/portal', label: 'Portal' },
-  ];
-
-  const adminNavItems = [
-    { path: '/admin/tasks', label: 'Manage Tasks' },
-    { path: '/admin/users', label: 'Users' },
-    { path: '/admin/engines', label: 'Engines' },
-    { path: '/admin/categories', label: 'Categories' },
-    { path: '/admin/subaccounts', label: 'Subaccounts' },
-    { path: '/admin/permission-sets', label: 'Permission Sets' },
-  ];
-
-  const subaccountNavItems = activeSubaccountId ? [
-    { path: `/admin/subaccounts/${activeSubaccountId}`, label: 'Overview' },
-    { path: `/portal/${activeSubaccountId}`, label: 'Portal' },
-  ] : [];
-
-  // ── Shared link style helper ────────────────────────────────────────────────
-  const linkStyle = (path: string, activeColor = '#38bdf8') => ({
-    display: 'block',
-    padding: '9px 20px',
-    color: location.pathname === path ? activeColor : '#94a3b8',
-    textDecoration: 'none',
-    background: location.pathname === path ? '#0f172a' : 'transparent',
-    fontSize: 14,
-  });
+  // ── Role display ───────────────────────────────────────────────────────
+  const roleLabel: Record<string, string> = {
+    system_admin: 'System Admin',
+    org_admin: 'Org Admin',
+    manager: 'Manager',
+    user: 'User',
+  };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
-      {/* Sidebar */}
-      <nav style={{ width: 220, background: '#1e293b', color: '#f8fafc', padding: '24px 0', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-
-        {/* ── Header: branding + user info + pickers ── */}
-        <div style={{ padding: '0 20px 20px', borderBottom: '1px solid #334155', marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 18, color: '#f8fafc' }}>Automation OS</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{user.firstName} {user.lastName}</div>
-          {user.role && <div style={{ fontSize: 11, color: '#64748b' }}>{user.role}</div>}
-
-          {/* Org picker — system_admin only */}
-          {isSystemAdmin && (
-            <div style={{ marginTop: 12, position: 'relative' }}>
-              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                Active org
-              </div>
-              <button
-                onClick={() => setOrgPickerOpen(!orgPickerOpen)}
-                style={{
-                  width: '100%', textAlign: 'left',
-                  background: activeOrgId ? '#1e3a5f' : '#1a1f2e',
-                  border: `1px solid ${activeOrgId ? '#3b82f6' : '#475569'}`,
-                  borderRadius: 6, padding: '5px 8px',
-                  color: activeOrgId ? '#93c5fd' : '#94a3b8',
-                  fontSize: 12, cursor: 'pointer',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-                  {activeOrgName ?? 'No org selected'}
-                </span>
-                <span style={{ fontSize: 10, marginLeft: 4, flexShrink: 0 }}>{orgPickerOpen ? '▲' : '▼'}</span>
-              </button>
-
-              {orgPickerOpen && (
-                <div style={{
-                  position: 'absolute', zIndex: 100, left: 0, top: '100%',
-                  background: '#1e293b', border: '1px solid #334155',
-                  borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                  marginTop: 4, width: 200, maxHeight: 260, overflowY: 'auto',
-                }}>
-                  {orgs.length === 0 && (
-                    <div style={{ padding: '10px 12px', color: '#64748b', fontSize: 12 }}>No organisations found</div>
-                  )}
-                  {orgs.map((org) => (
-                    <button
-                      key={org.id}
-                      onClick={() => handleSelectOrg(org)}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 12px',
-                        background: org.id === activeOrgId ? '#1e3a5f' : 'transparent',
-                        color: org.id === activeOrgId ? '#93c5fd' : '#cbd5e1',
-                        border: 'none', borderBottom: '1px solid #334155',
-                        fontSize: 13, cursor: 'pointer',
-                      }}
-                    >
-                      {org.name}
-                    </button>
-                  ))}
-                  {activeOrgId && (
-                    <button
-                      onClick={handleClearOrg}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 12px', background: 'transparent',
-                        color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer',
-                      }}
-                    >
-                      Clear org context
-                    </button>
-                  )}
-                </div>
-              )}
+    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: "'Inter', -apple-system, system-ui, sans-serif" }}>
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <nav
+        className="sidebar-scroll"
+        style={{
+          width: 240, background: '#0f172a', color: '#f8fafc',
+          display: 'flex', flexDirection: 'column',
+          position: 'sticky', top: 0, height: '100vh',
+          overflowY: 'auto', overflowX: 'hidden',
+          flexShrink: 0,
+        }}
+      >
+        {/* Brand */}
+        <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(99,102,241,0.5)',
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
             </div>
-          )}
-
-          {/* Subaccount picker — shown whenever org context exists */}
-          {hasOrgContext && (
-            <div style={{ marginTop: 10, position: 'relative' }}>
-              <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-                Active subaccount
-              </div>
-              <button
-                onClick={() => setSubaccountPickerOpen(!subaccountPickerOpen)}
-                style={{
-                  width: '100%', textAlign: 'left',
-                  background: activeSubaccountId ? '#1a3535' : '#1a1f2e',
-                  border: `1px solid ${activeSubaccountId ? '#0d9488' : '#475569'}`,
-                  borderRadius: 6, padding: '5px 8px',
-                  color: activeSubaccountId ? '#5eead4' : '#94a3b8',
-                  fontSize: 12, cursor: 'pointer',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-                  {activeSubaccountName ?? 'No subaccount selected'}
-                </span>
-                <span style={{ fontSize: 10, marginLeft: 4, flexShrink: 0 }}>{subaccountPickerOpen ? '▲' : '▼'}</span>
-              </button>
-
-              {subaccountPickerOpen && (
-                <div style={{
-                  position: 'absolute', zIndex: 100, left: 0, top: '100%',
-                  background: '#1e293b', border: '1px solid #334155',
-                  borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-                  marginTop: 4, width: 200, maxHeight: 260, overflowY: 'auto',
-                }}>
-                  {subaccounts.length === 0 && (
-                    <div style={{ padding: '10px 12px', color: '#64748b', fontSize: 12 }}>No subaccounts found</div>
-                  )}
-                  {subaccounts.map((sa) => (
-                    <button
-                      key={sa.id}
-                      onClick={() => handleSelectSubaccount(sa)}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 12px',
-                        background: sa.id === activeSubaccountId ? '#1a3535' : 'transparent',
-                        color: sa.id === activeSubaccountId ? '#5eead4' : '#cbd5e1',
-                        border: 'none', borderBottom: '1px solid #334155',
-                        fontSize: 13, cursor: 'pointer',
-                      }}
-                    >
-                      <div style={{ fontWeight: 500 }}>{sa.name}</div>
-                      {sa.status !== 'active' && (
-                        <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 1 }}>{sa.status}</div>
-                      )}
-                    </button>
-                  ))}
-                  {activeSubaccountId && (
-                    <button
-                      onClick={handleClearSubaccount}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 12px', background: 'transparent',
-                        color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer',
-                      }}
-                    >
-                      Clear subaccount
-                    </button>
-                  )}
-                </div>
-              )}
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: '#f1f5f9', letterSpacing: '-0.02em' }}>Automation OS</div>
             </div>
-          )}
+          </div>
+
+          {/* User info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              background: 'linear-gradient(135deg, #334155, #475569)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700, color: '#e2e8f0',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}>
+              {initials}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user.firstName} {user.lastName}
+              </div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>
+                {roleLabel[user.role ?? ''] ?? user.role}
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Nudge for system_admin with no active org */}
+        {/* Context pickers */}
+        {(isSystemAdmin || hasOrgContext) && (
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Org picker */}
+            {isSystemAdmin && (
+              <div style={{ position: 'relative' }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+                  Organisation
+                </div>
+                <button
+                  onClick={() => setOrgPickerOpen(!orgPickerOpen)}
+                  className="context-picker-btn"
+                  style={{
+                    background: activeOrgId ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${activeOrgId ? 'rgba(99,102,241,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                    color: activeOrgId ? '#a5b4fc' : '#64748b',
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150, fontSize: 12 }}>
+                    {activeOrgName ?? 'Select organisation'}
+                  </span>
+                  <span style={{ color: '#64748b', flexShrink: 0 }}>
+                    {orgPickerOpen ? <Icons.chevronUp /> : <Icons.chevronDown />}
+                  </span>
+                </button>
+
+                {orgPickerOpen && (
+                  <div style={{
+                    position: 'absolute', zIndex: 200, left: 0, top: 'calc(100% + 4px)',
+                    background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                    width: '100%', maxHeight: 240, overflowY: 'auto',
+                    animation: 'fadeInScale 0.12s ease-out both',
+                  }}>
+                    {orgs.length === 0 && (
+                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No organisations found</div>
+                    )}
+                    {orgs.map((org) => (
+                      <button
+                        key={org.id}
+                        onClick={() => handleSelectOrg(org)}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '9px 14px',
+                          background: org.id === activeOrgId ? 'rgba(99,102,241,0.14)' : 'transparent',
+                          color: org.id === activeOrgId ? '#a5b4fc' : '#cbd5e1',
+                          border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                          fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                          transition: 'background 0.1s',
+                        }}
+                      >
+                        {org.name}
+                      </button>
+                    ))}
+                    {activeOrgId && (
+                      <button
+                        onClick={handleClearOrg}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '9px 14px', background: 'transparent',
+                          color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        Clear organisation
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Subaccount picker */}
+            {hasOrgContext && (
+              <div style={{ position: 'relative' }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
+                  Workspace
+                </div>
+                <button
+                  onClick={() => setSubaccountPickerOpen(!subaccountPickerOpen)}
+                  className="context-picker-btn"
+                  style={{
+                    background: activeSubaccountId ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${activeSubaccountId ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    color: activeSubaccountId ? '#6ee7b7' : '#64748b',
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150, fontSize: 12 }}>
+                    {activeSubaccountName ?? 'Select workspace'}
+                  </span>
+                  <span style={{ color: '#64748b', flexShrink: 0 }}>
+                    {subaccountPickerOpen ? <Icons.chevronUp /> : <Icons.chevronDown />}
+                  </span>
+                </button>
+
+                {subaccountPickerOpen && (
+                  <div style={{
+                    position: 'absolute', zIndex: 200, left: 0, top: 'calc(100% + 4px)',
+                    background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                    width: '100%', maxHeight: 240, overflowY: 'auto',
+                    animation: 'fadeInScale 0.12s ease-out both',
+                  }}>
+                    {subaccounts.length === 0 && (
+                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No workspaces found</div>
+                    )}
+                    {subaccounts.map((sa) => (
+                      <button
+                        key={sa.id}
+                        onClick={() => handleSelectSubaccount(sa)}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '9px 14px',
+                          background: sa.id === activeSubaccountId ? 'rgba(16,185,129,0.1)' : 'transparent',
+                          color: sa.id === activeSubaccountId ? '#6ee7b7' : '#cbd5e1',
+                          border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
+                          fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                          transition: 'background 0.1s',
+                        }}
+                      >
+                        <div style={{ fontWeight: 500 }}>{sa.name}</div>
+                        {sa.status !== 'active' && (
+                          <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 2 }}>{sa.status}</div>
+                        )}
+                      </button>
+                    ))}
+                    {activeSubaccountId && (
+                      <button
+                        onClick={handleClearSubaccount}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left',
+                          padding: '9px 14px', background: 'transparent',
+                          color: '#f87171', border: 'none', fontSize: 12, cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        Clear workspace
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Nudge for system_admin without org */}
         {isSystemAdmin && !activeOrgId && (
-          <div style={{ padding: '8px 20px 10px', background: '#1a1f2e', borderBottom: '1px solid #334155', marginBottom: 8 }}>
-            <div style={{ fontSize: 11, color: '#f59e0b', lineHeight: 1.5 }}>
+          <div style={{ margin: '10px 14px', padding: '10px 12px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 8 }}>
+            <div style={{ fontSize: 11, color: '#fbbf24', lineHeight: 1.5 }}>
               Select an org above or visit{' '}
-              <Link to="/system/organisations" style={{ color: '#60a5fa', textDecoration: 'none' }}>Organisations</Link>.
+              <Link to="/system/organisations" style={{ color: '#93c5fd', textDecoration: 'underline' }}>Organisations</Link>.
             </div>
           </div>
         )}
 
-        {/* ── Top-level nav ── */}
-        {topNavItems.map((item) => (
-          <Link key={item.path} to={item.path} style={linkStyle(item.path)}>
-            {item.label}
-          </Link>
-        ))}
+        {/* ── Navigation ──────────────────────────────────────────────── */}
+        <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
+          {/* Top-level */}
+          <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-        {/* ── Organisation section ── */}
-        {hasOrgContext && (
-          <>
-            <div style={{ padding: '12px 20px 4px', fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid #334155', marginTop: 4 }}>
-              Organisation
-            </div>
-            {orgNavItems.map((item) => (
-              <Link key={item.path} to={item.path} style={linkStyle(item.path)}>
-                {item.label}
-              </Link>
-            ))}
-          </>
-        )}
+          {/* System admin nav */}
+          {isSystemAdmin && (
+            <>
+              <NavSection label="Platform" />
+              <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
+              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
+              <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
+              <NavLink to="/system/settings" icon={<Icons.settings />} label="System Settings" />
+            </>
+          )}
 
-        {/* ── Admin section ── */}
-        {hasOrgContext && (
-          <>
-            <div style={{ padding: '12px 20px 4px', fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', borderTop: '1px solid #334155', marginTop: 4 }}>
-              Admin
-            </div>
-            {adminNavItems.map((item) => (
-              <Link key={item.path} to={item.path} style={linkStyle(item.path)}>
-                {item.label}
-              </Link>
-            ))}
-          </>
-        )}
+          {/* Org workspace nav */}
+          {hasOrgContext && (
+            <>
+              <NavSection label="Workspace" />
+              <NavLink to="/tasks" icon={<Icons.tasks />} label="Tasks" />
+              <NavLink to="/executions" icon={<Icons.executions />} label="Executions" />
+              <NavLink to="/portal" icon={<Icons.portal />} label="Portal" />
+            </>
+          )}
 
-        {/* ── Subaccount section (only when a subaccount is active) ── */}
-        {activeSubaccountId && subaccountNavItems.length > 0 && (
-          <>
-            <div style={{
-              padding: '12px 20px 4px',
-              fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em',
-              borderTop: '1px solid #334155', marginTop: 4,
-              color: '#0d9488',
-            }}>
-              {activeSubaccountName ?? 'Subaccount'}
-            </div>
-            {subaccountNavItems.map((item) => (
-              <Link key={item.path} to={item.path} style={linkStyle(item.path, '#2dd4bf')}>
-                {item.label}
-              </Link>
-            ))}
-          </>
-        )}
+          {/* Admin nav */}
+          {hasOrgContext && (
+            <>
+              <NavSection label="Administration" />
+              <NavLink to="/admin/tasks" icon={<Icons.manageTasks />} label="Manage Tasks" />
+              <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
+              <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
+              <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
+              <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Subaccounts" />
+              <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permission Sets" />
+            </>
+          )}
 
-        <div style={{ flex: 1 }} />
-        <div style={{ padding: '16px 20px', borderTop: '1px solid #334155' }}>
-          <Link to="/settings" style={{ display: 'block', color: '#94a3b8', textDecoration: 'none', fontSize: 13, marginBottom: 8 }}>
-            Profile Settings
+          {/* Active subaccount nav */}
+          {activeSubaccountId && (
+            <>
+              <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                {activeSubaccountName ?? 'Workspace'}
+              </div>
+              <NavLink
+                to={`/admin/subaccounts/${activeSubaccountId}`}
+                icon={<Icons.subaccounts />}
+                label="Overview"
+              />
+              <NavLink
+                to={`/portal/${activeSubaccountId}`}
+                icon={<Icons.portal />}
+                label="Portal"
+              />
+            </>
+          )}
+        </div>
+
+        {/* ── Bottom user card ─────────────────────────────────────────── */}
+        <div style={{ padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.2)' }}>
+          <Link
+            to="/settings"
+            className="nav-item"
+            style={{ borderRadius: 8, marginBottom: 2, borderLeft: 'none', paddingLeft: 12 }}
+          >
+            <Icons.settings />
+            <span style={{ fontSize: 13 }}>Profile Settings</span>
           </Link>
           <button
             onClick={handleLogout}
-            style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 13, padding: 0 }}
+            className="nav-item"
+            style={{ borderRadius: 8, borderLeft: 'none', paddingLeft: 12 }}
           >
-            Logout
+            <Icons.logout />
+            <span style={{ fontSize: 13 }}>Sign out</span>
           </button>
         </div>
       </nav>
 
-      {/* Main content */}
-      <main style={{ flex: 1, background: '#f1f5f9', overflow: 'auto' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: 32 }}>
+      {/* ── Main content ────────────────────────────────────────────────── */}
+      <main style={{ flex: 1, background: '#f8fafc', overflow: 'auto', minHeight: '100vh' }}>
+        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '36px 32px' }} className="page-enter">
           {children}
         </div>
       </main>
