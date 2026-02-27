@@ -151,7 +151,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
         const formData = new FormData();
         formData.append('executionId', execId);
         formData.append('file', file);
-        await api.post('/api/files/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        await api.post('/api/files/upload', formData);
       }
       setUploadProgress('');
       pollExecution(execId);
