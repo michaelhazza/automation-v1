@@ -43,6 +43,7 @@ const Icons = {
   tasks: () => <Ico><circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16 10 8" /></Ico>,
   executions: () => <Ico><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Ico>,
   portal: () => <Ico><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></Ico>,
+  agents: () => <Ico><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /><circle cx="18" cy="8" r="3" /><path d="M21 6l-1 1-1-1" /></Ico>,
   manageTasks: () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="11" y2="17" /></Ico>,
   users: () => <Ico><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Ico>,
   engines: () => <Ico><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></Ico>,
@@ -407,6 +408,7 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Workspace" />
               <NavLink to="/tasks" icon={<Icons.tasks />} label="Tasks" />
+              <NavLink to="/agents" icon={<Icons.agents />} label="AI Employees" />
               <NavLink to="/executions" icon={<Icons.executions />} label="Executions" />
               <NavLink to="/portal" icon={<Icons.portal />} label="Portal" />
             </>
@@ -417,6 +419,7 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Administration" />
               <NavLink to="/admin/tasks" icon={<Icons.manageTasks />} label="Manage Tasks" />
+              <NavLink to="/admin/agents" icon={<Icons.agents />} label="AI Employees" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
               <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />

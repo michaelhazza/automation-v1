@@ -36,6 +36,12 @@ export const ORG_PERMISSIONS = {
   SUBACCOUNTS_DELETE: 'org.subaccounts.delete',
   // Permission sets
   PERMISSION_SETS_MANAGE: 'org.permission_sets.manage',
+  // AI Agents
+  AGENTS_VIEW: 'org.agents.view',
+  AGENTS_CREATE: 'org.agents.create',
+  AGENTS_EDIT: 'org.agents.edit',
+  AGENTS_DELETE: 'org.agents.delete',
+  AGENTS_CHAT: 'org.agents.chat',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -95,6 +101,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.SUBACCOUNTS_DELETE, description: 'Delete subaccounts',              groupName: 'org.subaccounts' },
   // org.permission_sets
   { key: ORG_PERMISSIONS.PERMISSION_SETS_MANAGE, description: 'Manage permission sets',      groupName: 'org.permission_sets' },
+  // org.agents
+  { key: ORG_PERMISSIONS.AGENTS_VIEW,   description: 'View AI agents',             groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.AGENTS_CREATE, description: 'Create AI agents',           groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.AGENTS_EDIT,   description: 'Edit AI agents',             groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.AGENTS_DELETE, description: 'Delete AI agents',           groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.AGENTS_CHAT,   description: 'Chat with AI agents',        groupName: 'org.agents' },
   // subaccount.tasks
   { key: SUBACCOUNT_PERMISSIONS.TASKS_VIEW,    description: 'View tasks in portal',                  groupName: 'subaccount.tasks' },
   { key: SUBACCOUNT_PERMISSIONS.TASKS_EXECUTE, description: 'Execute tasks in portal',                groupName: 'subaccount.tasks' },
@@ -143,6 +155,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.USERS_EDIT,
       ORG_PERMISSIONS.CATEGORIES_VIEW,
       ORG_PERMISSIONS.SUBACCOUNTS_VIEW,
+      ORG_PERMISSIONS.AGENTS_VIEW,
+      ORG_PERMISSIONS.AGENTS_CHAT,
     ],
   },
   {
@@ -154,6 +168,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.USERS_VIEW,
       ORG_PERMISSIONS.CATEGORIES_VIEW,
       ORG_PERMISSIONS.SUBACCOUNTS_VIEW,
+      ORG_PERMISSIONS.AGENTS_VIEW,
+      ORG_PERMISSIONS.AGENTS_CHAT,
     ],
   },
   {
