@@ -41,6 +41,10 @@ const envSchema = z.object({
   // Publicly reachable frontend URL — used to build invite and password reset links in emails.
   // Example: https://app.youragency.com
   APP_BASE_URL: z.string().optional().default('http://localhost:5173'),
+  // AI Agent / LLM configuration
+  ANTHROPIC_API_KEY: z.string().optional(),
+  // Maximum messages to include in chat context (recent N messages)
+  AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
 });
 
 export const env = envSchema.parse(process.env);

@@ -30,6 +30,10 @@ const PortalLandingPage = lazy(() => import('./pages/PortalLandingPage'));
 const PortalPage = lazy(() => import('./pages/PortalPage'));
 const PortalExecutionPage = lazy(() => import('./pages/PortalExecutionPage'));
 const PortalExecutionHistoryPage = lazy(() => import('./pages/PortalExecutionHistoryPage'));
+const AgentsPage = lazy(() => import('./pages/AgentsPage'));
+const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
+const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
+const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
 
 function PageLoader() {
   return (
@@ -137,6 +141,8 @@ export default function App() {
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} />} />
             <Route path="/admin/permission-sets" element={<AdminPermissionSetsPage user={user!} />} />
+            <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
+            <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
@@ -145,6 +151,10 @@ export default function App() {
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
           </Route>
+
+          {/* AI Agents */}
+          <Route path="/agents" element={<AgentsPage user={user!} />} />
+          <Route path="/agents/:id" element={<AgentChatPage user={user!} />} />
 
           {/* Client portal routes */}
           <Route path="/portal" element={<PortalLandingPage user={user!} />} />

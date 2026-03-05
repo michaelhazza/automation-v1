@@ -1,0 +1,382 @@
+import { eq, and, desc, asc } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { agents, agentConversations, agentMessages } from '../db/schema/index.js';
+import { isNull } from 'drizzle-orm';
+import { agentService } from './agentService.js';
+import {
+  callAnthropic,
+  buildSystemPrompt,
+  buildTaskTools,
+  getOrgTasksForTools,
+  executeTriggerredTask,
+  type LLMMessage,
+} from './llmService.js';
+import { env } from '../lib/env.js';
+
+// ---------------------------------------------------------------------------
+// Conversation CRUD
+// ---------------------------------------------------------------------------
+
+export const conversationService = {
+  async listConversations(agentId: string, userId: string, organisationId: string) {
+    // Verify agent
+    const [agent] = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+
+    const rows = await db
+      .select()
+      .from(agentConversations)
+      .where(and(
+        eq(agentConversations.agentId, agentId),
+        eq(agentConversations.userId, userId),
+      ))
+      .orderBy(desc(agentConversations.updatedAt));
+
+    return rows;
+  },
+
+  async getConversation(
+    conversationId: string,
+    agentId: string,
+    userId: string,
+    organisationId: string
+  ) {
+    const [conv] = await db
+      .select()
+      .from(agentConversations)
+      .where(and(
+        eq(agentConversations.id, conversationId),
+        eq(agentConversations.agentId, agentId),
+        eq(agentConversations.userId, userId),
+        eq(agentConversations.organisationId, organisationId),
+      ));
+
+    if (!conv) throw { statusCode: 404, message: 'Conversation not found' };
+
+    const messages = await db
+      .select()
+      .from(agentMessages)
+      .where(eq(agentMessages.conversationId, conversationId))
+      .orderBy(asc(agentMessages.createdAt));
+
+    return { ...conv, messages };
+  },
+
+  async createConversation(agentId: string, userId: string, organisationId: string) {
+    const [agent] = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+    if (agent.status !== 'active') throw { statusCode: 400, message: 'Agent is not active' };
+
+    const [conv] = await db
+      .insert(agentConversations)
+      .values({
+        agentId,
+        organisationId,
+        userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return conv;
+  },
+
+  async deleteConversation(
+    conversationId: string,
+    agentId: string,
+    userId: string,
+    organisationId: string
+  ) {
+    const [conv] = await db
+      .select()
+      .from(agentConversations)
+      .where(and(
+        eq(agentConversations.id, conversationId),
+        eq(agentConversations.agentId, agentId),
+        eq(agentConversations.userId, userId),
+        eq(agentConversations.organisationId, organisationId),
+      ));
+    if (!conv) throw { statusCode: 404, message: 'Conversation not found' };
+
+    // Cascades to messages via FK
+    await db.delete(agentConversations).where(eq(agentConversations.id, conversationId));
+    return { message: 'Conversation deleted' };
+  },
+
+  // ---------------------------------------------------------------------------
+  // Core: Send a message and get a response
+  // ---------------------------------------------------------------------------
+
+  async sendMessage(params: {
+    conversationId: string;
+    agentId: string;
+    userId: string;
+    organisationId: string;
+    content: string;
+    attachments?: Array<{
+      fileId: string;
+      fileName: string;
+      mimeType: string;
+      fileSizeBytes: number;
+      storagePath: string;
+    }>;
+  }) {
+    const { conversationId, agentId, userId, organisationId, content, attachments } = params;
+
+    // ── 1. Verify conversation and agent ──────────────────────────────────────
+    const [conv] = await db
+      .select()
+      .from(agentConversations)
+      .where(and(
+        eq(agentConversations.id, conversationId),
+        eq(agentConversations.agentId, agentId),
+        eq(agentConversations.userId, userId),
+        eq(agentConversations.organisationId, organisationId),
+      ));
+    if (!conv) throw { statusCode: 404, message: 'Conversation not found' };
+
+    const agent = await agentService.getAgent(agentId, organisationId);
+    if (agent.status !== 'active') throw { statusCode: 400, message: 'Agent is not active' };
+
+    // ── 2. Save user message ──────────────────────────────────────────────────
+    const [userMsg] = await db
+      .insert(agentMessages)
+      .values({
+        conversationId,
+        role: 'user',
+        content,
+        attachments: attachments ?? null,
+        createdAt: new Date(),
+      })
+      .returning();
+
+    // Auto-generate title from first user message
+    if (!conv.title) {
+      const title = content.length > 60 ? content.slice(0, 57) + '…' : content;
+      await db.update(agentConversations)
+        .set({ title, updatedAt: new Date() })
+        .where(eq(agentConversations.id, conversationId));
+    } else {
+      await db.update(agentConversations)
+        .set({ updatedAt: new Date() })
+        .where(eq(agentConversations.id, conversationId));
+    }
+
+    // ── 3. Fetch data sources (with cache) ────────────────────────────────────
+    const dataSourceContents = await agentService.fetchAgentDataSources(agentId);
+
+    // ── 4. Get available tasks for tool use ───────────────────────────────────
+    const orgTasks = await getOrgTasksForTools(organisationId);
+
+    // ── 5. Build system prompt ────────────────────────────────────────────────
+    const systemPrompt = buildSystemPrompt(
+      agent.masterPrompt,
+      dataSourceContents,
+      orgTasks,
+    );
+
+    // ── 6. Build message history (last N messages) ────────────────────────────
+    const maxContextMessages = env.AGENT_CONTEXT_MESSAGES;
+    const historyRows = await db
+      .select()
+      .from(agentMessages)
+      .where(eq(agentMessages.conversationId, conversationId))
+      .orderBy(asc(agentMessages.createdAt));
+
+    // Build LLM messages from history (exclude tool_result rows from raw history,
+    // they will be re-inserted inline after their corresponding tool_use)
+    const llmMessages: LLMMessage[] = [];
+    const recentRows = historyRows.slice(-maxContextMessages);
+
+    for (const row of recentRows) {
+      if (row.role === 'user') {
+        let msgContent = row.content ?? '';
+        if (row.attachments && Array.isArray(row.attachments) && row.attachments.length > 0) {
+          const fileList = (row.attachments as Array<{ fileName: string }>)
+            .map((f) => f.fileName)
+            .join(', ');
+          msgContent = `[Attached files: ${fileList}]\n\n${msgContent}`;
+        }
+        llmMessages.push({ role: 'user', content: msgContent });
+      } else if (row.role === 'assistant') {
+        if (row.toolCalls && Array.isArray(row.toolCalls) && row.toolCalls.length > 0) {
+          // Assistant message with tool calls
+          const blocks: LLMMessage['content'] = [];
+          if (row.content) blocks.push({ type: 'text', text: row.content });
+          for (const tc of row.toolCalls as Array<{ id: string; name: string; input: Record<string, unknown> }>) {
+            blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
+          }
+          llmMessages.push({ role: 'assistant', content: blocks });
+        } else {
+          llmMessages.push({ role: 'assistant', content: row.content ?? '' });
+        }
+      } else if (row.role === 'tool_result') {
+        // Tool result must follow the assistant message that had tool_use
+        const toolResult = {
+          type: 'tool_result' as const,
+          tool_use_id: row.toolCallId ?? '',
+          content: typeof row.toolResultContent === 'string'
+            ? row.toolResultContent
+            : JSON.stringify(row.toolResultContent),
+        };
+        // Append to a user message wrapping tool results
+        llmMessages.push({ role: 'user', content: [toolResult] });
+      }
+    }
+
+    // ── 7. Build tools ────────────────────────────────────────────────────────
+    const tools = buildTaskTools(orgTasks);
+
+    // ── 8. Call LLM ───────────────────────────────────────────────────────────
+    let llmResponse = await callAnthropic({
+      modelId: agent.modelId,
+      systemPrompt,
+      messages: llmMessages,
+      tools: tools.length > 0 ? tools : undefined,
+      temperature: agent.temperature,
+      maxTokens: agent.maxTokens,
+    });
+
+    // ── 9. Handle tool calls (agent-to-task chaining) ─────────────────────────
+    let triggeredExecutionId: string | undefined;
+
+    if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
+      // Save the assistant's tool-use message
+      const [assistantToolMsg] = await db
+        .insert(agentMessages)
+        .values({
+          conversationId,
+          role: 'assistant',
+          content: llmResponse.content || null,
+          toolCalls: llmResponse.toolCalls,
+          createdAt: new Date(),
+        })
+        .returning();
+
+      // Process each tool call
+      const toolResults: Array<{ tool_use_id: string; content: string }> = [];
+
+      for (const toolCall of llmResponse.toolCalls) {
+        if (toolCall.name === 'trigger_task') {
+          const input = toolCall.input as {
+            task_id: string;
+            task_name: string;
+            input_data: string;
+            reason: string;
+          };
+
+          let resultContent: string;
+          try {
+            const execResult = await executeTriggerredTask(
+              organisationId,
+              input.task_id,
+              userId,
+              input.input_data
+            );
+            triggeredExecutionId = execResult.executionId;
+            resultContent = JSON.stringify({
+              success: true,
+              executionId: execResult.executionId,
+              taskName: execResult.taskName,
+              status: execResult.status,
+              message: `Task "${execResult.taskName}" has been queued. Execution ID: ${execResult.executionId}`,
+            });
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            resultContent = JSON.stringify({ success: false, error: errMsg });
+          }
+
+          toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
+
+          // Persist tool result message
+          await db.insert(agentMessages).values({
+            conversationId,
+            role: 'tool_result',
+            toolCallId: toolCall.id,
+            toolResultContent: JSON.parse(resultContent),
+            triggeredExecutionId: triggeredExecutionId ?? null,
+            createdAt: new Date(),
+          });
+        }
+      }
+
+      // Continue conversation with tool results
+      const continuationMessages: LLMMessage[] = [
+        ...llmMessages,
+        {
+          role: 'assistant',
+          content: [
+            ...(llmResponse.content ? [{ type: 'text' as const, text: llmResponse.content }] : []),
+            ...llmResponse.toolCalls.map((tc) => ({
+              type: 'tool_use' as const,
+              id: tc.id,
+              name: tc.name,
+              input: tc.input,
+            })),
+          ],
+        },
+        {
+          role: 'user',
+          content: toolResults.map((tr) => ({
+            type: 'tool_result' as const,
+            tool_use_id: tr.tool_use_id,
+            content: tr.content,
+          })),
+        },
+      ];
+
+      // Get the final response after tool use
+      llmResponse = await callAnthropic({
+        modelId: agent.modelId,
+        systemPrompt,
+        messages: continuationMessages,
+        tools: tools.length > 0 ? tools : undefined,
+        temperature: agent.temperature,
+        maxTokens: agent.maxTokens,
+      });
+
+      // Save final assistant response
+      const [finalMsg] = await db
+        .insert(agentMessages)
+        .values({
+          conversationId,
+          role: 'assistant',
+          content: llmResponse.content,
+          triggeredExecutionId: triggeredExecutionId ?? null,
+          createdAt: new Date(),
+        })
+        .returning();
+
+      return {
+        userMessageId: userMsg.id,
+        assistantMessageId: finalMsg.id,
+        content: llmResponse.content,
+        triggeredExecutionId: triggeredExecutionId ?? null,
+      };
+    }
+
+    // ── 10. Save regular assistant response ───────────────────────────────────
+    const [assistantMsg] = await db
+      .insert(agentMessages)
+      .values({
+        conversationId,
+        role: 'assistant',
+        content: llmResponse.content,
+        createdAt: new Date(),
+      })
+      .returning();
+
+    return {
+      userMessageId: userMsg.id,
+      assistantMessageId: assistantMsg.id,
+      content: llmResponse.content,
+      triggeredExecutionId: null,
+    };
+  },
+};
