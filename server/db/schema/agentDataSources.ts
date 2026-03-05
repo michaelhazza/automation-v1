@@ -11,7 +11,7 @@ export const agentDataSources = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     // Where to fetch data from
-    sourceType: text('source_type').notNull().$type<'r2' | 's3' | 'http_url'>(),
+    sourceType: text('source_type').notNull().$type<'r2' | 's3' | 'http_url' | 'google_docs' | 'file_upload'>(),
     // For r2/s3: the object key/path. For http_url: the full URL
     sourcePath: text('source_path').notNull(),
     // Optional HTTP headers (e.g. auth) for http_url sources

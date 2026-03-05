@@ -2,8 +2,9 @@ import { eq, and, isNull, asc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agents, agentDataSources } from '../db/schema/index.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { approxTokens } from './llmService.js';
+import { v4 as uuidv4 } from 'uuid';
 
 // ---------------------------------------------------------------------------
 // In-memory data source content cache
@@ -39,6 +40,40 @@ function setCachedContent(sourceId: string, content: string, cacheMinutes: numbe
 // Fetch raw content from a data source
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Google Docs helpers
+// ---------------------------------------------------------------------------
+
+function extractGoogleDocId(urlOrId: string): string {
+  const match = urlOrId.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : urlOrId;
+}
+
+interface GoogleDocsContent {
+  body?: {
+    content?: Array<{
+      paragraph?: {
+        elements?: Array<{ textRun?: { content?: string } }>;
+      };
+    }>;
+  };
+}
+
+function extractGoogleDocText(doc: GoogleDocsContent): string {
+  const lines: string[] = [];
+  for (const item of doc.body?.content ?? []) {
+    if (item.paragraph?.elements) {
+      const line = item.paragraph.elements.map((el) => el.textRun?.content ?? '').join('');
+      lines.push(line);
+    }
+  }
+  return lines.join('');
+}
+
+// ---------------------------------------------------------------------------
+// Fetch raw content from a data source
+// ---------------------------------------------------------------------------
+
 async function fetchSourceContent(source: typeof agentDataSources.$inferSelect): Promise<string> {
   if (source.sourceType === 'http_url') {
     const headers: Record<string, string> = { Accept: 'text/plain, application/json, text/csv, */*' };
@@ -50,7 +85,28 @@ async function fetchSourceContent(source: typeof agentDataSources.$inferSelect):
     return await response.text();
   }
 
-  // S3 / R2
+  if (source.sourceType === 'google_docs') {
+    const docId = extractGoogleDocId(source.sourcePath);
+    const apiKey = source.sourceHeaders?.['x-google-api-key'];
+    if (apiKey) {
+      const url = `https://docs.googleapis.com/v1/documents/${docId}?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Google Docs API error ${response.status}: ${response.statusText}. Ensure the API key is valid and the document is accessible.`);
+      }
+      const doc = await response.json() as GoogleDocsContent;
+      return extractGoogleDocText(doc);
+    } else {
+      const url = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+      const response = await fetch(url, { redirect: 'follow' });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Google Doc (HTTP ${response.status}). Ensure the document is published or shared publicly, or provide a Google Docs API key.`);
+      }
+      return await response.text();
+    }
+  }
+
+  // S3 / R2 / file_upload all read from object storage
   const s3 = getS3Client();
   const bucket = getBucketName();
   const cmd = new GetObjectCommand({ Bucket: bucket, Key: source.sourcePath });
@@ -356,13 +412,38 @@ export const agentService = {
 
   // ── Data Source CRUD ───────────────────────────────────────────────────
 
+  async uploadDataSourceFile(
+    agentId: string,
+    organisationId: string,
+    file: Express.Multer.File
+  ) {
+    const [agent] = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+
+    const fileId = uuidv4();
+    const storagePath = `agent-data-sources/${agentId}/${fileId}-${file.originalname}`;
+
+    const s3 = getS3Client();
+    await s3.send(new PutObjectCommand({
+      Bucket: getBucketName(),
+      Key: storagePath,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    }));
+
+    return { storagePath, fileName: file.originalname, mimeType: file.mimetype, fileSizeBytes: file.size };
+  },
+
   async addDataSource(
     agentId: string,
     organisationId: string,
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url';
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'file_upload';
       sourcePath: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
