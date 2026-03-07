@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -45,6 +45,15 @@ interface DataSourceForm {
   priority: number;
   maxTokenBudget: number;
   cacheMinutes: number;
+  googleApiKey: string; // stored as sourceHeaders['x-google-api-key'] on submit
+}
+
+// Pending data source for new-agent creation flow (not yet saved to backend)
+interface PendingDataSource {
+  tempId: string;
+  form: DataSourceForm;
+  pendingFile: File | null;
+  fileName: string | null; // display name for file_upload
 }
 
 interface TestResult {
@@ -63,7 +72,14 @@ const MODEL_OPTIONS = [
   { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
 ];
 
-const SOURCE_TYPE_OPTIONS = ['r2', 's3', 'http_url'];
+const SOURCE_TYPE_OPTIONS = [
+  { value: 'r2', label: 'Cloudflare R2' },
+  { value: 's3', label: 'AWS S3' },
+  { value: 'http_url', label: 'HTTP URL' },
+  { value: 'google_docs', label: 'Google Docs' },
+  { value: 'file_upload', label: 'File Upload' },
+];
+
 const CONTENT_TYPE_OPTIONS = ['auto', 'json', 'csv', 'markdown', 'text'];
 
 const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
@@ -73,9 +89,11 @@ const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
 };
 
 const SOURCE_TYPE_BADGE: Record<string, { bg: string; color: string }> = {
-  r2:       { bg: '#eff6ff', color: '#1d4ed8' },
-  s3:       { bg: '#f0fdf4', color: '#15803d' },
-  http_url: { bg: '#faf5ff', color: '#7e22ce' },
+  r2:          { bg: '#eff6ff', color: '#1d4ed8' },
+  s3:          { bg: '#f0fdf4', color: '#15803d' },
+  http_url:    { bg: '#faf5ff', color: '#7e22ce' },
+  google_docs: { bg: '#fef9c3', color: '#854d0e' },
+  file_upload: { bg: '#fdf2f8', color: '#9d174d' },
 };
 
 const EMPTY_DS_FORM: DataSourceForm = {
@@ -87,6 +105,7 @@ const EMPTY_DS_FORM: DataSourceForm = {
   priority: 0,
   maxTokenBudget: 8000,
   cacheMinutes: 60,
+  googleApiKey: '',
 };
 
 const EMPTY_AGENT_FORM: AgentForm = {
@@ -121,6 +140,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function SourceTypeBadge({ type }: { type: string }) {
   const s = SOURCE_TYPE_BADGE[type] ?? { bg: '#f1f5f9', color: '#475569' };
+  const label = SOURCE_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;
   return (
     <span style={{
       display: 'inline-block',
@@ -131,7 +151,7 @@ function SourceTypeBadge({ type }: { type: string }) {
       background: s.bg,
       color: s.color,
     }}>
-      {type}
+      {label}
     </span>
   );
 }
@@ -192,7 +212,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
 
-  // Data sources state
+  // Data sources state (existing agent)
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [showDsForm, setShowDsForm] = useState(false);
   const [editingDsId, setEditingDsId] = useState<string | null>(null);
@@ -202,6 +222,14 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const [deleteDsId, setDeleteDsId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [testingId, setTestingId] = useState<string | null>(null);
+
+  // File upload state for data source form
+  const [dsFormFile, setDsFormFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Pending data sources for new-agent creation flow
+  const [pendingNewSources, setPendingNewSources] = useState<PendingDataSource[]>([]);
+  const [editingTempId, setEditingTempId] = useState<string | null>(null);
 
   // ── Load ──
 
@@ -242,8 +270,44 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     setSaving(true);
     try {
       if (isNew) {
+        // 1. Create the agent
         const { data } = await api.post('/api/agents', form);
-        navigate(`/admin/agents/${data.id}`);
+        const agentId: string = data.id;
+
+        // 2. Attach any pending data sources
+        for (const pending of pendingNewSources) {
+          let sourcePath = pending.form.sourcePath;
+
+          // For file_upload: upload the file first
+          if (pending.form.sourceType === 'file_upload' && pending.pendingFile) {
+            const fd = new FormData();
+            fd.append('file', pending.pendingFile);
+            const { data: uploadData } = await api.post(
+              `/api/agents/${agentId}/data-sources/upload`,
+              fd,
+              { headers: { 'Content-Type': 'multipart/form-data' } }
+            );
+            sourcePath = uploadData.storagePath;
+          }
+
+          const sourceHeaders = pending.form.googleApiKey
+            ? { 'x-google-api-key': pending.form.googleApiKey }
+            : undefined;
+
+          await api.post(`/api/agents/${agentId}/data-sources`, {
+            name: pending.form.name,
+            description: pending.form.description || undefined,
+            sourceType: pending.form.sourceType,
+            sourcePath,
+            sourceHeaders,
+            contentType: pending.form.contentType,
+            priority: pending.form.priority,
+            maxTokenBudget: pending.form.maxTokenBudget,
+            cacheMinutes: pending.form.cacheMinutes,
+          });
+        }
+
+        navigate(`/admin/agents/${agentId}`);
       } else {
         await api.patch(`/api/agents/${id}`, form);
         setSaveSuccess('Agent saved successfully.');
@@ -291,13 +355,16 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
   const openAddDs = () => {
     setEditingDsId(null);
+    setEditingTempId(null);
     setDsForm(EMPTY_DS_FORM);
+    setDsFormFile(null);
     setDsFormError('');
     setShowDsForm(true);
   };
 
   const openEditDs = (ds: DataSource) => {
     setEditingDsId(ds.id);
+    setEditingTempId(null);
     setDsForm({
       name: ds.name,
       description: ds.description ?? '',
@@ -307,7 +374,18 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       priority: ds.priority,
       maxTokenBudget: ds.maxTokenBudget,
       cacheMinutes: ds.cacheMinutes,
+      googleApiKey: '',
     });
+    setDsFormFile(null);
+    setDsFormError('');
+    setShowDsForm(true);
+  };
+
+  const openEditPending = (pending: PendingDataSource) => {
+    setEditingTempId(pending.tempId);
+    setEditingDsId(null);
+    setDsForm(pending.form);
+    setDsFormFile(pending.pendingFile);
     setDsFormError('');
     setShowDsForm(true);
   };
@@ -315,7 +393,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const cancelDsForm = () => {
     setShowDsForm(false);
     setEditingDsId(null);
+    setEditingTempId(null);
     setDsForm(EMPTY_DS_FORM);
+    setDsFormFile(null);
     setDsFormError('');
   };
 
@@ -324,13 +404,74 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       setDsFormError('Name is required.');
       return;
     }
+    if (dsForm.sourceType === 'file_upload' && !dsFormFile && !editingDsId && !editingTempId) {
+      setDsFormError('Please select a file to upload.');
+      return;
+    }
+    if (dsForm.sourceType !== 'file_upload' && !dsForm.sourcePath.trim()) {
+      setDsFormError('Source path / URL is required.');
+      return;
+    }
+
+    // ── New agent: add to pending list ──
+    if (isNew) {
+      const tempId = editingTempId ?? crypto.randomUUID();
+      const fileName = dsFormFile?.name ?? (editingTempId
+        ? pendingNewSources.find((p) => p.tempId === editingTempId)?.fileName ?? null
+        : null);
+      const pendingEntry: PendingDataSource = {
+        tempId,
+        form: { ...dsForm },
+        pendingFile: dsFormFile,
+        fileName,
+      };
+      setPendingNewSources((prev) =>
+        editingTempId
+          ? prev.map((p) => (p.tempId === editingTempId ? pendingEntry : p))
+          : [...prev, pendingEntry]
+      );
+      cancelDsForm();
+      return;
+    }
+
+    // ── Existing agent: call API ──
     setDsSaving(true);
     setDsFormError('');
     try {
+      let sourcePath = dsForm.sourcePath;
+
+      // For file_upload with a new file: upload first
+      if (dsForm.sourceType === 'file_upload' && dsFormFile) {
+        const fd = new FormData();
+        fd.append('file', dsFormFile);
+        const { data: uploadData } = await api.post(
+          `/api/agents/${id}/data-sources/upload`,
+          fd,
+          { headers: { 'Content-Type': 'multipart/form-data' } }
+        );
+        sourcePath = uploadData.storagePath;
+      }
+
+      const sourceHeaders = dsForm.googleApiKey
+        ? { 'x-google-api-key': dsForm.googleApiKey }
+        : undefined;
+
+      const payload = {
+        name: dsForm.name,
+        description: dsForm.description || undefined,
+        sourceType: dsForm.sourceType,
+        sourcePath,
+        sourceHeaders,
+        contentType: dsForm.contentType,
+        priority: dsForm.priority,
+        maxTokenBudget: dsForm.maxTokenBudget,
+        cacheMinutes: dsForm.cacheMinutes,
+      };
+
       if (editingDsId) {
-        await api.patch(`/api/agents/${id}/data-sources/${editingDsId}`, dsForm);
+        await api.patch(`/api/agents/${id}/data-sources/${editingDsId}`, payload);
       } else {
-        await api.post(`/api/agents/${id}/data-sources`, dsForm);
+        await api.post(`/api/agents/${id}/data-sources`, payload);
       }
       cancelDsForm();
       if (id) loadAgent(id);
@@ -369,10 +510,11 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     }
   };
 
-  const sourcePathHint = (type: string) =>
-    type === 'http_url'
-      ? 'Full URL e.g. https://example.com/data.json'
-      : 'S3/R2 object key e.g. data/report.json';
+  const sourcePathHint = (type: string) => {
+    if (type === 'http_url') return 'Full URL e.g. https://example.com/data.json';
+    if (type === 'google_docs') return 'Google Docs URL e.g. https://docs.google.com/document/d/...';
+    return 'S3/R2 object key e.g. data/report.json';
+  };
 
   // ── Render ──
 
@@ -383,6 +525,202 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       </div>
     );
   }
+
+  // Shared data source inline form
+  const renderDsForm = () => (
+    <div style={{ padding: '20px', borderBottom: '1px solid #e2e8f0', background: '#fafbff' }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', marginBottom: 16 }}>
+        {editingDsId || editingTempId ? 'Edit Data Source' : 'New Data Source'}
+      </div>
+      {dsFormError && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 14, color: '#dc2626', fontSize: 13 }}>
+          {dsFormError}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Field label="Name *">
+            <input
+              value={dsForm.name}
+              onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })}
+              style={inputStyle}
+              placeholder="e.g. Product Catalog"
+            />
+          </Field>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Field label="Description">
+            <input
+              value={dsForm.description}
+              onChange={(e) => setDsForm({ ...dsForm, description: e.target.value })}
+              style={inputStyle}
+              placeholder="Optional description"
+            />
+          </Field>
+        </div>
+        <Field label="Source Type">
+          <select
+            value={dsForm.sourceType}
+            onChange={(e) => {
+              setDsForm({ ...dsForm, sourceType: e.target.value, sourcePath: '' });
+              setDsFormFile(null);
+            }}
+            style={selectStyle}
+          >
+            {SOURCE_TYPE_OPTIONS.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Content Type">
+          <select
+            value={dsForm.contentType}
+            onChange={(e) => setDsForm({ ...dsForm, contentType: e.target.value })}
+            style={selectStyle}
+          >
+            {CONTENT_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </Field>
+
+        {/* Source path / file picker — conditional on type */}
+        {dsForm.sourceType === 'file_upload' ? (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Field label="File *" hint="Upload a file (PDF, CSV, TXT, JSON, Markdown, DOCX, etc.)">
+              <div
+                style={{
+                  border: '2px dashed #d1d5db',
+                  borderRadius: 8,
+                  padding: '16px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: dsFormFile ? '#f0fdf4' : '#fafafa',
+                  transition: 'background 0.15s',
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {dsFormFile ? (
+                  <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 500 }}>
+                    {dsFormFile.name} ({(dsFormFile.size / 1024).toFixed(1)} KB)
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 4, fontWeight: 400 }}>Click to change file</div>
+                  </div>
+                ) : editingDsId && dataSources.find((ds) => ds.id === editingDsId)?.sourcePath ? (
+                  <div style={{ fontSize: 13, color: '#64748b' }}>
+                    <div style={{ fontWeight: 500, color: '#1e293b', marginBottom: 4 }}>
+                      Current: {dataSources.find((ds) => ds.id === editingDsId)?.sourcePath.split('/').pop()}
+                    </div>
+                    Click to replace with a new file
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: '#64748b' }}>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>📁</div>
+                    Click to select a file
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  style={{ display: 'none' }}
+                  accept=".pdf,.csv,.txt,.json,.md,.markdown,.docx,.xlsx,.xml"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setDsFormFile(file);
+                  }}
+                />
+              </div>
+            </Field>
+          </div>
+        ) : (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Field label={dsForm.sourceType === 'google_docs' ? 'Google Docs URL *' : 'Source Path *'} hint={sourcePathHint(dsForm.sourceType)}>
+              <input
+                value={dsForm.sourcePath}
+                onChange={(e) => setDsForm({ ...dsForm, sourcePath: e.target.value })}
+                style={inputStyle}
+                placeholder={
+                  dsForm.sourceType === 'http_url'
+                    ? 'https://...'
+                    : dsForm.sourceType === 'google_docs'
+                    ? 'https://docs.google.com/document/d/...'
+                    : 'data/file.json'
+                }
+              />
+            </Field>
+          </div>
+        )}
+
+        {/* Google Docs API key (optional) */}
+        {dsForm.sourceType === 'google_docs' && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Field
+              label="Google Docs API Key (optional)"
+              hint="Required for private documents. Leave empty for publicly published docs."
+            >
+              <input
+                value={dsForm.googleApiKey}
+                onChange={(e) => setDsForm({ ...dsForm, googleApiKey: e.target.value })}
+                style={inputStyle}
+                type="password"
+                placeholder="AIza..."
+              />
+            </Field>
+          </div>
+        )}
+
+        <Field label="Priority" hint="0 = first, higher = later">
+          <input
+            type="number"
+            value={dsForm.priority}
+            onChange={(e) => setDsForm({ ...dsForm, priority: parseInt(e.target.value) || 0 })}
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="Max Token Budget" hint="Max tokens this source contributes to context">
+          <input
+            type="number"
+            value={dsForm.maxTokenBudget}
+            onChange={(e) => setDsForm({ ...dsForm, maxTokenBudget: parseInt(e.target.value) || 1000 })}
+            style={inputStyle}
+          />
+        </Field>
+        {!isNew && (
+          <Field label="Cache Minutes">
+            <input
+              type="number"
+              value={dsForm.cacheMinutes}
+              onChange={(e) => setDsForm({ ...dsForm, cacheMinutes: parseInt(e.target.value) || 0 })}
+              style={inputStyle}
+            />
+          </Field>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+        <button
+          onClick={handleSaveDs}
+          disabled={dsSaving}
+          style={{
+            padding: '8px 20px',
+            background: dsSaving ? '#a5b4fc' : '#6366f1',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: dsSaving ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {dsSaving ? 'Saving...' : editingDsId || editingTempId ? 'Update' : isNew ? 'Add to Agent' : 'Add Source'}
+        </button>
+        <button
+          onClick={cancelDsForm}
+          style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <>
@@ -532,6 +870,213 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </div>
       </SectionCard>
 
+      {/* ── Section 4: Data Sources ── */}
+      {!isNew && deleteDsId && (
+        <ConfirmDialog
+          title="Delete data source"
+          message="Are you sure you want to delete this data source? This action cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteDs}
+          onCancel={() => setDeleteDsId(null)}
+        />
+      )}
+
+      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 20 }}>
+        {/* Header */}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b', display: 'inline' }}>
+              Data Sources
+            </h2>
+            {(isNew ? pendingNewSources.length : dataSources.length) > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 999 }}>
+                {isNew ? pendingNewSources.length : dataSources.length}
+              </span>
+            )}
+            {isNew && (
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                Configure knowledge sources for this agent. Sources will be attached when you click "Create Agent".
+              </div>
+            )}
+          </div>
+          {!showDsForm && (
+            <button
+              onClick={openAddDs}
+              style={{ padding: '6px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+            >
+              + Add Data Source
+            </button>
+          )}
+        </div>
+
+        {/* Inline add/edit form */}
+        {showDsForm && renderDsForm()}
+
+        {/* Source type legend */}
+        {!showDsForm && (isNew ? pendingNewSources.length === 0 : dataSources.length === 0) && (
+          <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+              {SOURCE_TYPE_OPTIONS.map((t) => (
+                <SourceTypeBadge key={t.value} type={t.value} />
+              ))}
+            </div>
+            <div style={{ color: '#64748b', fontSize: 14, marginBottom: 8 }}>
+              No data sources configured yet.
+            </div>
+            <button
+              onClick={openAddDs}
+              style={{ color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, textDecoration: 'underline', padding: 0 }}
+            >
+              Add one
+            </button>
+          </div>
+        )}
+
+        {/* Pending data sources list (new agent mode) */}
+        {isNew && pendingNewSources.length > 0 && !showDsForm && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Name</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Type</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Source</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingNewSources.map((pending) => (
+                <tr key={pending.tempId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ fontWeight: 500, color: '#1e293b', fontSize: 13 }}>{pending.form.name}</div>
+                    {pending.form.description && (
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{pending.form.description}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <SourceTypeBadge type={pending.form.sourceType} />
+                  </td>
+                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {pending.form.sourceType === 'file_upload'
+                      ? (pending.fileName ?? 'File selected')
+                      : pending.form.sourcePath}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => openEditPending(pending)}
+                        style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => setPendingNewSources((prev) => prev.filter((p) => p.tempId !== pending.tempId))}
+                        style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {/* Existing data sources list (edit mode) */}
+        {!isNew && dataSources.length > 0 && !showDsForm && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Name</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Type</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Path</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Priority</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Last Status</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dataSources.map((ds) => (
+                <tr key={ds.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ fontWeight: 500, color: '#1e293b', fontSize: 13 }}>{ds.name}</div>
+                    {ds.description && (
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{ds.description}</div>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <SourceTypeBadge type={ds.sourceType} />
+                  </td>
+                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ds.sourceType === 'file_upload' ? ds.sourcePath.split('/').pop() : ds.sourcePath}
+                  </td>
+                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 13 }}>
+                    {ds.priority}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    {ds.lastFetchStatus ? (
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: ds.lastFetchStatus === 'ok' ? '#166534' : '#9a3412',
+                        background: ds.lastFetchStatus === 'ok' ? '#dcfce7' : '#fff7ed',
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                      }}>
+                        {ds.lastFetchStatus}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>
+                    )}
+                    {testResults[ds.id] && (
+                      <div style={{ marginTop: 6 }}>
+                        {testResults[ds.id].error ? (
+                          <div style={{ fontSize: 11, color: '#dc2626' }}>{testResults[ds.id].error}</div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: '#475569' }}>
+                            {testResults[ds.id].tokenCount != null && (
+                              <span style={{ fontWeight: 500, color: '#166534' }}>{testResults[ds.id].tokenCount} tokens</span>
+                            )}
+                            {testResults[ds.id].snippet && (
+                              <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 10, color: '#64748b', background: '#f8fafc', padding: '4px 6px', borderRadius: 4, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {testResults[ds.id].snippet}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        onClick={() => openEditDs(ds)}
+                        style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleTestDs(ds.id)}
+                        disabled={testingId === ds.id}
+                        style={{ padding: '4px 10px', background: '#f0f9ff', color: '#0284c7', border: 'none', borderRadius: 6, fontSize: 12, cursor: testingId === ds.id ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                      >
+                        {testingId === ds.id ? 'Testing...' : 'Test'}
+                      </button>
+                      <button
+                        onClick={() => setDeleteDsId(ds.id)}
+                        style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {/* Save button */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 28 }}>
         <button
@@ -548,7 +1093,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             cursor: saving ? 'not-allowed' : 'pointer',
           }}
         >
-          {saving ? 'Saving...' : isNew ? 'Create Agent' : 'Save Changes'}
+          {saving
+            ? (isNew ? 'Creating...' : 'Saving...')
+            : (isNew ? 'Create Agent' : 'Save Changes')}
         </button>
         <button
           onClick={() => navigate('/admin/agents')}
@@ -557,264 +1104,6 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           Cancel
         </button>
       </div>
-
-      {/* ── Section 4: Data Sources (edit mode only) ── */}
-      {!isNew && (
-        <>
-          {deleteDsId && (
-            <ConfirmDialog
-              title="Delete data source"
-              message="Are you sure you want to delete this data source? This action cannot be undone."
-              confirmLabel="Delete"
-              onConfirm={handleDeleteDs}
-              onCancel={() => setDeleteDsId(null)}
-            />
-          )}
-
-          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 20 }}>
-            {/* Header */}
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b' }}>
-                Data Sources
-                {dataSources.length > 0 && (
-                  <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 999 }}>
-                    {dataSources.length}
-                  </span>
-                )}
-              </h2>
-              {!showDsForm && (
-                <button
-                  onClick={openAddDs}
-                  style={{ padding: '6px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
-                >
-                  + Add Data Source
-                </button>
-              )}
-            </div>
-
-            {/* Inline add/edit form */}
-            {showDsForm && (
-              <div style={{ padding: '20px', borderBottom: '1px solid #e2e8f0', background: '#fafbff' }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', marginBottom: 16 }}>
-                  {editingDsId ? 'Edit Data Source' : 'New Data Source'}
-                </div>
-                {dsFormError && (
-                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 14, color: '#dc2626', fontSize: 13 }}>
-                    {dsFormError}
-                  </div>
-                )}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <Field label="Name *">
-                      <input
-                        value={dsForm.name}
-                        onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })}
-                        style={inputStyle}
-                        placeholder="e.g. Product Catalog"
-                      />
-                    </Field>
-                  </div>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <Field label="Description">
-                      <input
-                        value={dsForm.description}
-                        onChange={(e) => setDsForm({ ...dsForm, description: e.target.value })}
-                        style={inputStyle}
-                        placeholder="Optional description"
-                      />
-                    </Field>
-                  </div>
-                  <Field label="Source Type">
-                    <select
-                      value={dsForm.sourceType}
-                      onChange={(e) => setDsForm({ ...dsForm, sourceType: e.target.value })}
-                      style={selectStyle}
-                    >
-                      {SOURCE_TYPE_OPTIONS.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Content Type">
-                    <select
-                      value={dsForm.contentType}
-                      onChange={(e) => setDsForm({ ...dsForm, contentType: e.target.value })}
-                      style={selectStyle}
-                    >
-                      {CONTENT_TYPE_OPTIONS.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <div style={{ gridColumn: '1 / -1' }}>
-                    <Field label="Source Path" hint={sourcePathHint(dsForm.sourceType)}>
-                      <input
-                        value={dsForm.sourcePath}
-                        onChange={(e) => setDsForm({ ...dsForm, sourcePath: e.target.value })}
-                        style={inputStyle}
-                        placeholder={dsForm.sourceType === 'http_url' ? 'https://...' : 'data/file.json'}
-                      />
-                    </Field>
-                  </div>
-                  <Field label="Priority" hint="0 = first, higher = later">
-                    <input
-                      type="number"
-                      value={dsForm.priority}
-                      onChange={(e) => setDsForm({ ...dsForm, priority: parseInt(e.target.value) || 0 })}
-                      style={inputStyle}
-                    />
-                  </Field>
-                  <Field label="Max Token Budget" hint="Max tokens this source contributes to context">
-                    <input
-                      type="number"
-                      value={dsForm.maxTokenBudget}
-                      onChange={(e) => setDsForm({ ...dsForm, maxTokenBudget: parseInt(e.target.value) || 1000 })}
-                      style={inputStyle}
-                    />
-                  </Field>
-                  <Field label="Cache Minutes">
-                    <input
-                      type="number"
-                      value={dsForm.cacheMinutes}
-                      onChange={(e) => setDsForm({ ...dsForm, cacheMinutes: parseInt(e.target.value) || 0 })}
-                      style={inputStyle}
-                    />
-                  </Field>
-                </div>
-                <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-                  <button
-                    onClick={handleSaveDs}
-                    disabled={dsSaving}
-                    style={{
-                      padding: '8px 20px',
-                      background: dsSaving ? '#a5b4fc' : '#6366f1',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 8,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      cursor: dsSaving ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {dsSaving ? 'Saving...' : editingDsId ? 'Update' : 'Add Source'}
-                  </button>
-                  <button
-                    onClick={cancelDsForm}
-                    style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Data source list */}
-            {dataSources.length === 0 && !showDsForm ? (
-              <div style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b', fontSize: 14 }}>
-                No data sources configured yet.{' '}
-                <button
-                  onClick={openAddDs}
-                  style={{ color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, textDecoration: 'underline', padding: 0 }}
-                >
-                  Add one
-                </button>
-              </div>
-            ) : dataSources.length > 0 ? (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Name</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Type</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Path</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Priority</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Last Status</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dataSources.map((ds) => (
-                    <tr key={ds.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 500, color: '#1e293b', fontSize: 13 }}>{ds.name}</div>
-                        {ds.description && (
-                          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{ds.description}</div>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <SourceTypeBadge type={ds.sourceType} />
-                      </td>
-                      <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ds.sourcePath}
-                      </td>
-                      <td style={{ padding: '12px 16px', color: '#475569', fontSize: 13 }}>
-                        {ds.priority}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        {ds.lastFetchStatus ? (
-                          <span style={{
-                            fontSize: 11,
-                            fontWeight: 500,
-                            color: ds.lastFetchStatus === 'ok' ? '#166534' : '#9a3412',
-                            background: ds.lastFetchStatus === 'ok' ? '#dcfce7' : '#fff7ed',
-                            padding: '2px 8px',
-                            borderRadius: 999,
-                          }}>
-                            {ds.lastFetchStatus}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>
-                        )}
-                        {/* Test result */}
-                        {testResults[ds.id] && (
-                          <div style={{ marginTop: 6 }}>
-                            {testResults[ds.id].error ? (
-                              <div style={{ fontSize: 11, color: '#dc2626' }}>{testResults[ds.id].error}</div>
-                            ) : (
-                              <div style={{ fontSize: 11, color: '#475569' }}>
-                                {testResults[ds.id].tokenCount != null && (
-                                  <span style={{ fontWeight: 500, color: '#166534' }}>{testResults[ds.id].tokenCount} tokens</span>
-                                )}
-                                {testResults[ds.id].snippet && (
-                                  <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 10, color: '#64748b', background: '#f8fafc', padding: '4px 6px', borderRadius: 4, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {testResults[ds.id].snippet}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            onClick={() => openEditDs(ds)}
-                            style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleTestDs(ds.id)}
-                            disabled={testingId === ds.id}
-                            style={{ padding: '4px 10px', background: '#f0f9ff', color: '#0284c7', border: 'none', borderRadius: 6, fontSize: 12, cursor: testingId === ds.id ? 'not-allowed' : 'pointer', fontWeight: 500 }}
-                          >
-                            {testingId === ds.id ? 'Testing...' : 'Test'}
-                          </button>
-                          <button
-                            onClick={() => setDeleteDsId(ds.id)}
-                            style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
-          </div>
-        </>
-      )}
     </>
   );
 }
