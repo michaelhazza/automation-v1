@@ -30,6 +30,7 @@ interface DataSource {
   sourceType: string;
   sourcePath: string;
   contentType: string;
+  syncMode: string;
   priority: number;
   maxTokenBudget: number;
   cacheMinutes: number;
@@ -42,6 +43,7 @@ interface DataSourceForm {
   sourceType: string;
   sourcePath: string;
   contentType: string;
+  syncMode: 'lazy' | 'proactive';
   priority: number;
   maxTokenBudget: number;
   cacheMinutes: number;
@@ -77,7 +79,8 @@ const SOURCE_TYPE_OPTIONS = [
   { value: 's3', label: 'AWS S3' },
   { value: 'http_url', label: 'HTTP URL' },
   { value: 'google_docs', label: 'Google Docs' },
-  { value: 'file_upload', label: 'File Upload' },
+  { value: 'dropbox', label: 'Dropbox' },
+  { value: 'file_upload', label: 'File Upload (static)' },
 ];
 
 const CONTENT_TYPE_OPTIONS = ['auto', 'json', 'csv', 'markdown', 'text'];
@@ -93,8 +96,12 @@ const SOURCE_TYPE_BADGE: Record<string, { bg: string; color: string }> = {
   s3:          { bg: '#f0fdf4', color: '#15803d' },
   http_url:    { bg: '#faf5ff', color: '#7e22ce' },
   google_docs: { bg: '#fef9c3', color: '#854d0e' },
+  dropbox:     { bg: '#e0f2fe', color: '#0369a1' },
   file_upload: { bg: '#fdf2f8', color: '#9d174d' },
 };
+
+// Source types that support live sync (everything except file_upload)
+const LIVE_SOURCE_TYPES = new Set(['r2', 's3', 'http_url', 'google_docs', 'dropbox']);
 
 const EMPTY_DS_FORM: DataSourceForm = {
   name: '',
@@ -102,6 +109,7 @@ const EMPTY_DS_FORM: DataSourceForm = {
   sourceType: 'r2',
   sourcePath: '',
   contentType: 'auto',
+  syncMode: 'lazy',
   priority: 0,
   maxTokenBudget: 8000,
   cacheMinutes: 60,
@@ -301,6 +309,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             sourcePath,
             sourceHeaders,
             contentType: pending.form.contentType,
+            syncMode: pending.form.syncMode,
             priority: pending.form.priority,
             maxTokenBudget: pending.form.maxTokenBudget,
             cacheMinutes: pending.form.cacheMinutes,
@@ -371,6 +380,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       sourceType: ds.sourceType,
       sourcePath: ds.sourcePath,
       contentType: ds.contentType,
+      syncMode: (ds.syncMode as 'lazy' | 'proactive') ?? 'lazy',
       priority: ds.priority,
       maxTokenBudget: ds.maxTokenBudget,
       cacheMinutes: ds.cacheMinutes,
@@ -463,6 +473,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         sourcePath,
         sourceHeaders,
         contentType: dsForm.contentType,
+        syncMode: dsForm.syncMode,
         priority: dsForm.priority,
         maxTokenBudget: dsForm.maxTokenBudget,
         cacheMinutes: dsForm.cacheMinutes,
@@ -513,6 +524,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const sourcePathHint = (type: string) => {
     if (type === 'http_url') return 'Full URL e.g. https://example.com/data.json';
     if (type === 'google_docs') return 'Google Docs URL e.g. https://docs.google.com/document/d/...';
+    if (type === 'dropbox') return 'Dropbox public share URL e.g. https://www.dropbox.com/s/.../file.csv?dl=0';
     return 'S3/R2 object key e.g. data/report.json';
   };
 
@@ -633,17 +645,23 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </div>
         ) : (
           <div style={{ gridColumn: '1 / -1' }}>
-            <Field label={dsForm.sourceType === 'google_docs' ? 'Google Docs URL *' : 'Source Path *'} hint={sourcePathHint(dsForm.sourceType)}>
+            <Field
+              label={
+                dsForm.sourceType === 'google_docs' ? 'Google Docs URL *'
+                : dsForm.sourceType === 'dropbox' ? 'Dropbox Share URL *'
+                : 'Source Path *'
+              }
+              hint={sourcePathHint(dsForm.sourceType)}
+            >
               <input
                 value={dsForm.sourcePath}
                 onChange={(e) => setDsForm({ ...dsForm, sourcePath: e.target.value })}
                 style={inputStyle}
                 placeholder={
-                  dsForm.sourceType === 'http_url'
-                    ? 'https://...'
-                    : dsForm.sourceType === 'google_docs'
-                    ? 'https://docs.google.com/document/d/...'
-                    : 'data/file.json'
+                  dsForm.sourceType === 'http_url' ? 'https://...'
+                  : dsForm.sourceType === 'google_docs' ? 'https://docs.google.com/document/d/...'
+                  : dsForm.sourceType === 'dropbox' ? 'https://www.dropbox.com/s/...?dl=0'
+                  : 'data/file.json'
                 }
               />
             </Field>
@@ -668,6 +686,68 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </div>
         )}
 
+        {/* Sync mode — only for live source types */}
+        {LIVE_SOURCE_TYPES.has(dsForm.sourceType) && (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Field
+              label="Sync Mode"
+              hint={
+                dsForm.syncMode === 'proactive'
+                  ? 'Background job re-fetches this source on the refresh interval, keeping it always warm.'
+                  : 'Source is re-fetched the first time the agent is used after the refresh interval expires.'
+              }
+            >
+              <div style={{ display: 'flex', gap: 10 }}>
+                {(['lazy', 'proactive'] as const).map((mode) => (
+                  <label
+                    key={mode}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '8px 14px',
+                      border: `2px solid ${dsForm.syncMode === mode ? '#6366f1' : '#d1d5db'}`,
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      background: dsForm.syncMode === mode ? '#eef2ff' : '#fff',
+                      fontSize: 13,
+                      fontWeight: dsForm.syncMode === mode ? 600 : 400,
+                      color: dsForm.syncMode === mode ? '#4338ca' : '#374151',
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="syncMode"
+                      value={mode}
+                      checked={dsForm.syncMode === mode}
+                      onChange={() => setDsForm({ ...dsForm, syncMode: mode })}
+                      style={{ display: 'none' }}
+                    />
+                    {mode === 'lazy' ? 'Lazy (on demand)' : 'Proactive (background sync)'}
+                  </label>
+                ))}
+              </div>
+            </Field>
+          </div>
+        )}
+
+        {/* Refresh interval — hidden for file_upload */}
+        {LIVE_SOURCE_TYPES.has(dsForm.sourceType) && (
+          <Field
+            label="Refresh Interval (minutes)"
+            hint={dsForm.syncMode === 'proactive' ? 'How often the background job re-fetches this source' : 'How long to cache the fetched content before re-fetching'}
+          >
+            <input
+              type="number"
+              min={1}
+              value={dsForm.cacheMinutes}
+              onChange={(e) => setDsForm({ ...dsForm, cacheMinutes: parseInt(e.target.value) || 60 })}
+              style={inputStyle}
+            />
+          </Field>
+        )}
+
         <Field label="Priority" hint="0 = first, higher = later">
           <input
             type="number"
@@ -684,16 +764,6 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             style={inputStyle}
           />
         </Field>
-        {!isNew && (
-          <Field label="Cache Minutes">
-            <input
-              type="number"
-              value={dsForm.cacheMinutes}
-              onChange={(e) => setDsForm({ ...dsForm, cacheMinutes: parseInt(e.target.value) || 0 })}
-              style={inputStyle}
-            />
-          </Field>
-        )}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
         <button
@@ -989,8 +1059,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Name</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Type</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Sync</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Path</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Priority</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Last Status</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Actions</th>
               </tr>
@@ -1007,11 +1077,24 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                   <td style={{ padding: '12px 16px' }}>
                     <SourceTypeBadge type={ds.sourceType} />
                   </td>
-                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {ds.sourceType === 'file_upload' ? ds.sourcePath.split('/').pop() : ds.sourcePath}
+                  <td style={{ padding: '12px 16px' }}>
+                    {ds.sourceType === 'file_upload' ? (
+                      <span style={{ fontSize: 11, color: '#64748b' }}>Static</span>
+                    ) : (
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 500,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: ds.syncMode === 'proactive' ? '#ede9fe' : '#f1f5f9',
+                        color: ds.syncMode === 'proactive' ? '#5b21b6' : '#475569',
+                      }}>
+                        {ds.syncMode === 'proactive' ? `Proactive · ${ds.cacheMinutes}m` : `Lazy · ${ds.cacheMinutes}m`}
+                      </span>
+                    )}
                   </td>
-                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 13 }}>
-                    {ds.priority}
+                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {ds.sourceType === 'file_upload' ? ds.sourcePath.split('/').pop() : ds.sourcePath}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     {ds.lastFetchStatus ? (
