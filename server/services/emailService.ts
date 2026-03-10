@@ -130,6 +130,64 @@ export class EmailService {
     await this.send(to, subject, textBody, brandedHtml(subject, `Your task execution has ${status}.`, bodyHtml));
   }
 
+  async sendDataSourceSyncAlert(
+    to: string,
+    agentName: string,
+    sourceName: string,
+    errorMsg: string,
+    agentEditUrl: string
+  ): Promise<void> {
+    const subject = `Automation OS: Data source sync failed — ${agentName}`;
+    const bodyHtml = `
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:700;color:#1e293b;">Data source sync failed</h2>
+      <p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.6;">
+        A data source for agent <strong>${agentName}</strong> failed to sync. The agent is currently
+        serving the last successfully cached version of this data.
+      </p>
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin:24px 0;">
+        <p style="margin:0 0 8px;font-size:13px;color:#374151;"><strong>Source:</strong> ${sourceName}</p>
+        <p style="margin:0;font-size:13px;color:#dc2626;"><strong>Error:</strong> ${errorMsg}</p>
+      </div>
+      <div style="margin:28px 0;">
+        <a href="${agentEditUrl}" style="display:inline-block;padding:13px 28px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">
+          Review Agent Settings
+        </a>
+      </div>
+      <p style="margin:0;font-size:13px;color:#94a3b8;">
+        You will receive at most one alert per hour per data source while the issue persists.
+        A recovery notification will be sent automatically once the source is reachable again.
+      </p>
+    `;
+    const textBody = `Data source sync failed for agent "${agentName}".\n\nSource: ${sourceName}\nError: ${errorMsg}\n\nReview agent settings: ${agentEditUrl}`;
+    await this.send(to, subject, textBody, brandedHtml(subject, `Sync failed for ${sourceName}.`, bodyHtml));
+  }
+
+  async sendDataSourceSyncRecovery(
+    to: string,
+    agentName: string,
+    sourceName: string,
+    agentEditUrl: string
+  ): Promise<void> {
+    const subject = `Automation OS: Data source recovered — ${agentName}`;
+    const bodyHtml = `
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:700;color:#1e293b;">Data source recovered</h2>
+      <p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.6;">
+        Good news — the data source <strong>${sourceName}</strong> for agent <strong>${agentName}</strong>
+        is syncing successfully again.
+      </p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin:24px 0;">
+        <p style="margin:0;font-size:13px;color:#166534;">The agent is now serving fresh data from this source.</p>
+      </div>
+      <div style="margin:28px 0;">
+        <a href="${agentEditUrl}" style="display:inline-block;padding:13px 28px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">
+          View Agent
+        </a>
+      </div>
+    `;
+    const textBody = `Data source "${sourceName}" for agent "${agentName}" has recovered and is syncing successfully.\n\nView agent: ${agentEditUrl}`;
+    await this.send(to, subject, textBody, brandedHtml(subject, `${sourceName} is syncing again.`, bodyHtml));
+  }
+
   private async send(to: string, subject: string, text: string, html?: string): Promise<void> {
     if (env.EMAIL_PROVIDER === 'resend' && env.RESEND_API_KEY) {
       const { Resend } = await import('resend');

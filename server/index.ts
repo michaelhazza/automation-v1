@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
 import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeedService.js';
+import { agentService } from './services/agentService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,6 +93,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
 async function start() {
   await seedPermissions();
   await backfillOrgUserRoles();
+  await agentService.scheduleAllProactiveSources();
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);

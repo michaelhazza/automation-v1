@@ -1,12 +1,15 @@
 import { eq, and, isNull, asc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agents, agentDataSources } from '../db/schema/index.js';
+import { agents, agentDataSources, users } from '../db/schema/index.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { approxTokens } from './llmService.js';
+import { emailService } from './emailService.js';
+import { env } from '../lib/env.js';
+import { v4 as uuidv4 } from 'uuid';
 
 // ---------------------------------------------------------------------------
-// In-memory data source content cache
+// In-memory caches
 // ---------------------------------------------------------------------------
 
 interface CacheEntry {
@@ -15,7 +18,12 @@ interface CacheEntry {
   expiresAt: number;
 }
 
+// Expiring hot cache — populated on fetch, expired per cacheMinutes
 const dataSourceCache = new Map<string, CacheEntry>();
+
+// Last-good-content fallback — never expires, overwritten only on successful fetch
+// Served silently when a live fetch fails so end users are unaffected
+const lastGoodContentCache = new Map<string, string>();
 
 function getCachedContent(sourceId: string): string | null {
   const entry = dataSourceCache.get(sourceId);
@@ -36,6 +44,64 @@ function setCachedContent(sourceId: string, content: string, cacheMinutes: numbe
 }
 
 // ---------------------------------------------------------------------------
+// Proactive sync scheduler
+// ---------------------------------------------------------------------------
+
+class DataSyncScheduler {
+  private timers = new Map<string, ReturnType<typeof setInterval>>();
+
+  schedule(sourceId: string, intervalMs: number): void {
+    this.cancel(sourceId);
+    const timer = setInterval(() => void runProactiveSync(sourceId), intervalMs);
+    this.timers.set(sourceId, timer);
+  }
+
+  cancel(sourceId: string): void {
+    const timer = this.timers.get(sourceId);
+    if (timer) {
+      clearInterval(timer);
+      this.timers.delete(sourceId);
+    }
+  }
+
+  activeCount(): number {
+    return this.timers.size;
+  }
+}
+
+export const dataSyncScheduler = new DataSyncScheduler();
+
+// ---------------------------------------------------------------------------
+// Google Docs helpers
+// ---------------------------------------------------------------------------
+
+function extractGoogleDocId(urlOrId: string): string {
+  const match = urlOrId.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : urlOrId;
+}
+
+interface GoogleDocsContent {
+  body?: {
+    content?: Array<{
+      paragraph?: {
+        elements?: Array<{ textRun?: { content?: string } }>;
+      };
+    }>;
+  };
+}
+
+function extractGoogleDocText(doc: GoogleDocsContent): string {
+  const lines: string[] = [];
+  for (const item of doc.body?.content ?? []) {
+    if (item.paragraph?.elements) {
+      const line = item.paragraph.elements.map((el) => el.textRun?.content ?? '').join('');
+      lines.push(line);
+    }
+  }
+  return lines.join('');
+}
+
+// ---------------------------------------------------------------------------
 // Fetch raw content from a data source
 // ---------------------------------------------------------------------------
 
@@ -50,7 +116,43 @@ async function fetchSourceContent(source: typeof agentDataSources.$inferSelect):
     return await response.text();
   }
 
-  // S3 / R2
+  if (source.sourceType === 'google_docs') {
+    const docId = extractGoogleDocId(source.sourcePath);
+    const apiKey = source.sourceHeaders?.['x-google-api-key'];
+    if (apiKey) {
+      const url = `https://docs.googleapis.com/v1/documents/${docId}?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Google Docs API error ${response.status}: ${response.statusText}. Ensure the API key is valid and the document is accessible.`);
+      }
+      const doc = await response.json() as GoogleDocsContent;
+      return extractGoogleDocText(doc);
+    } else {
+      const url = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+      const response = await fetch(url, { redirect: 'follow' });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Google Doc (HTTP ${response.status}). Ensure the document is published or shared publicly, or provide a Google Docs API key.`);
+      }
+      return await response.text();
+    }
+  }
+
+  if (source.sourceType === 'dropbox') {
+    // Convert Dropbox share URL to a direct-download URL by ensuring dl=1
+    let url = source.sourcePath;
+    if (url.includes('dl=0')) {
+      url = url.replace('dl=0', 'dl=1');
+    } else if (!url.includes('dl=1')) {
+      url = url.includes('?') ? `${url}&dl=1` : `${url}?dl=1`;
+    }
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Dropbox file (HTTP ${response.status}). Ensure the link is a public share URL.`);
+    }
+    return await response.text();
+  }
+
+  // S3 / R2 / file_upload — all read from object storage
   const s3 = getS3Client();
   const bucket = getBucketName();
   const cmd = new GetObjectCommand({ Bucket: bucket, Key: source.sourcePath });
@@ -78,7 +180,127 @@ function formatContent(raw: string, contentType: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch all data sources for an agent, with caching
+// Admin alert helpers (failure notification with 1-hour cooldown)
+// ---------------------------------------------------------------------------
+
+const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+async function getOrgAdminEmails(organisationId: string): Promise<string[]> {
+  const orgUsers = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(and(eq(users.organisationId, organisationId), eq(users.status, 'active'), isNull(users.deletedAt)));
+  return orgUsers.map((u) => u.email);
+}
+
+async function maybeSendDataSourceAlert(
+  source: typeof agentDataSources.$inferSelect,
+  errorMsg: string
+): Promise<void> {
+  const now = new Date();
+  if (source.lastAlertSentAt && now.getTime() - source.lastAlertSentAt.getTime() < ALERT_COOLDOWN_MS) {
+    return; // Still within cooldown — suppress
+  }
+
+  const [agent] = await db
+    .select({ id: agents.id, name: agents.name, organisationId: agents.organisationId })
+    .from(agents)
+    .where(eq(agents.id, source.agentId));
+  if (!agent) return;
+
+  const emails = await getOrgAdminEmails(agent.organisationId);
+  const agentEditUrl = `${env.APP_BASE_URL}/admin/agents/${agent.id}`;
+
+  for (const email of emails) {
+    await emailService.sendDataSourceSyncAlert(email, agent.name, source.name, errorMsg, agentEditUrl).catch(() => {});
+  }
+
+  // Record alert time to enforce cooldown
+  await db
+    .update(agentDataSources)
+    .set({ lastAlertSentAt: now, updatedAt: now })
+    .where(eq(agentDataSources.id, source.id))
+    .catch(() => {});
+}
+
+async function maybeSendDataSourceRecovery(
+  source: typeof agentDataSources.$inferSelect,
+  wasError: boolean
+): Promise<void> {
+  if (!wasError) return;
+
+  const [agent] = await db
+    .select({ id: agents.id, name: agents.name, organisationId: agents.organisationId })
+    .from(agents)
+    .where(eq(agents.id, source.agentId));
+  if (!agent) return;
+
+  const emails = await getOrgAdminEmails(agent.organisationId);
+  const agentEditUrl = `${env.APP_BASE_URL}/admin/agents/${agent.id}`;
+
+  for (const email of emails) {
+    await emailService.sendDataSourceSyncRecovery(email, agent.name, source.name, agentEditUrl).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Proactive sync — runs on the scheduler interval
+// ---------------------------------------------------------------------------
+
+async function runProactiveSync(sourceId: string): Promise<void> {
+  const [source] = await db
+    .select()
+    .from(agentDataSources)
+    .where(eq(agentDataSources.id, sourceId));
+
+  // Source deleted or switched back to lazy — self-cancel
+  if (!source || source.syncMode !== 'proactive') {
+    dataSyncScheduler.cancel(sourceId);
+    return;
+  }
+
+  const wasError = source.lastFetchStatus === 'error';
+
+  try {
+    const raw = await fetchSourceContent(source);
+    const content = formatContent(raw, source.contentType);
+
+    // Update both caches
+    lastGoodContentCache.set(sourceId, content);
+    setCachedContent(sourceId, content, source.cacheMinutes);
+
+    await db
+      .update(agentDataSources)
+      .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
+      .where(eq(agentDataSources.id, sourceId))
+      .catch(() => {});
+
+    // Recovery email if this was previously in error
+    await maybeSendDataSourceRecovery(source, wasError);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : 'Unknown sync error';
+
+    await db
+      .update(agentDataSources)
+      .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
+      .where(eq(agentDataSources.id, sourceId))
+      .catch(() => {});
+
+    // Re-warm hot cache with last good content so lazy fetches still serve stale data
+    const fallback = lastGoodContentCache.get(sourceId);
+    if (fallback) {
+      setCachedContent(sourceId, fallback, source.cacheMinutes);
+    }
+
+    // Alert admins (rate-limited by ALERT_COOLDOWN_MS)
+    // Re-fetch source to get current lastAlertSentAt before deciding
+    const [fresh] = await db.select().from(agentDataSources).where(eq(agentDataSources.id, sourceId)).catch(() => [undefined]);
+    if (fresh) await maybeSendDataSourceAlert(fresh, errMsg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch all data sources for an agent (used by LLM context builder)
 // ---------------------------------------------------------------------------
 
 export async function fetchAgentDataSources(
@@ -92,6 +314,7 @@ export async function fetchAgentDataSources(
   tokenCount: number;
   maxTokenBudget: number;
   priority: number;
+  fetchOk: boolean;
 }>> {
   const sources = await db
     .select()
@@ -102,16 +325,23 @@ export async function fetchAgentDataSources(
   const results = [];
 
   for (const source of sources) {
-    let content = getCachedContent(source.id);
+    // file_upload is always read from storage — no expiry logic needed
+    const isStatic = source.sourceType === 'file_upload';
+
+    let content = isStatic ? null : getCachedContent(source.id);
     let fetchOk = true;
 
     if (!content) {
       try {
         const raw = await fetchSourceContent(source);
         content = formatContent(raw, source.contentType);
-        setCachedContent(source.id, content, source.cacheMinutes);
 
-        // Update last fetch status in DB (fire and forget)
+        // Update both caches for live sources
+        if (!isStatic) {
+          lastGoodContentCache.set(source.id, content);
+          setCachedContent(source.id, content, source.cacheMinutes);
+        }
+
         db.update(agentDataSources)
           .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
           .where(eq(agentDataSources.id, source.id))
@@ -119,11 +349,26 @@ export async function fetchAgentDataSources(
       } catch (err) {
         fetchOk = false;
         const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
+
         db.update(agentDataSources)
           .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
           .where(eq(agentDataSources.id, source.id))
           .catch(() => {});
-        content = `[Data source "${source.name}" could not be loaded: ${errMsg}]`;
+
+        // Use last good content as silent fallback (end users see no disruption)
+        const fallback = lastGoodContentCache.get(source.id);
+        if (fallback) {
+          content = fallback;
+        } else {
+          content = `[Data source "${source.name}" could not be loaded: ${errMsg}]`;
+        }
+
+        // Alert admins for lazy sources that fail (proactive sources alert via runProactiveSync)
+        if (source.syncMode === 'lazy') {
+          db.select().from(agentDataSources).where(eq(agentDataSources.id, source.id))
+            .then(([fresh]) => { if (fresh) return maybeSendDataSourceAlert(fresh, errMsg); })
+            .catch(() => {});
+        }
       }
     }
 
@@ -228,6 +473,7 @@ export const agentService = {
         sourceType: s.sourceType,
         sourcePath: s.sourcePath,
         contentType: s.contentType,
+        syncMode: s.syncMode,
         priority: s.priority,
         maxTokenBudget: s.maxTokenBudget,
         cacheMinutes: s.cacheMinutes,
@@ -356,27 +602,55 @@ export const agentService = {
 
   // ── Data Source CRUD ───────────────────────────────────────────────────
 
+  async uploadDataSourceFile(
+    agentId: string,
+    organisationId: string,
+    file: Express.Multer.File
+  ) {
+    const [agent] = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+    if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+
+    const fileId = uuidv4();
+    const storagePath = `agent-data-sources/${agentId}/${fileId}-${file.originalname}`;
+
+    const s3 = getS3Client();
+    await s3.send(new PutObjectCommand({
+      Bucket: getBucketName(),
+      Key: storagePath,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    }));
+
+    return { storagePath, fileName: file.originalname, mimeType: file.mimetype, fileSizeBytes: file.size };
+  },
+
   async addDataSource(
     agentId: string,
     organisationId: string,
     data: {
       name: string;
       description?: string;
-      sourceType: 'r2' | 's3' | 'http_url';
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
       sourcePath: string;
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
+      syncMode?: 'lazy' | 'proactive';
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
     }
   ) {
-    // Verify agent belongs to org
     const [agent] = await db
       .select()
       .from(agents)
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
     if (!agent) throw { statusCode: 404, message: 'Agent not found' };
+
+    // file_upload is always static — force lazy and ignore any syncMode provided
+    const syncMode = data.sourceType === 'file_upload' ? 'lazy' : (data.syncMode ?? 'lazy');
 
     const [source] = await db
       .insert(agentDataSources)
@@ -388,6 +662,7 @@ export const agentService = {
         sourcePath: data.sourcePath,
         sourceHeaders: data.sourceHeaders,
         contentType: data.contentType ?? 'auto',
+        syncMode,
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
@@ -395,6 +670,10 @@ export const agentService = {
         updatedAt: new Date(),
       })
       .returning();
+
+    if (source.syncMode === 'proactive') {
+      dataSyncScheduler.schedule(source.id, source.cacheMinutes * 60 * 1000);
+    }
 
     return source;
   },
@@ -409,12 +688,12 @@ export const agentService = {
       sourcePath: string;
       sourceHeaders: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
+      syncMode: 'lazy' | 'proactive';
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
     }>
   ) {
-    // Verify agent belongs to org
     const [agent] = await db
       .select()
       .from(agents)
@@ -436,10 +715,15 @@ export const agentService = {
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
     if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
+    // file_upload is always static
+    if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
+      update.syncMode = data.syncMode;
+    }
 
-    // Invalidate cache on path change
+    // Invalidate hot cache on path change
     if (data.sourcePath !== undefined) {
       dataSourceCache.delete(sourceId);
+      lastGoodContentCache.delete(sourceId);
     }
 
     const [updated] = await db
@@ -447,6 +731,13 @@ export const agentService = {
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
       .where(eq(agentDataSources.id, sourceId))
       .returning();
+
+    // Reschedule or cancel based on new sync mode / interval
+    if (updated.syncMode === 'proactive') {
+      dataSyncScheduler.schedule(updated.id, updated.cacheMinutes * 60 * 1000);
+    } else {
+      dataSyncScheduler.cancel(updated.id);
+    }
 
     return updated;
   },
@@ -464,7 +755,9 @@ export const agentService = {
       .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
     if (!existing) throw { statusCode: 404, message: 'Data source not found' };
 
+    dataSyncScheduler.cancel(sourceId);
     dataSourceCache.delete(sourceId);
+    lastGoodContentCache.delete(sourceId);
     await db.delete(agentDataSources).where(eq(agentDataSources.id, sourceId));
     return { message: 'Data source removed' };
   },
@@ -482,7 +775,7 @@ export const agentService = {
       .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
     if (!source) throw { statusCode: 404, message: 'Data source not found' };
 
-    // Force re-fetch (invalidate cache)
+    // Force re-fetch
     dataSourceCache.delete(sourceId);
 
     try {
@@ -490,6 +783,7 @@ export const agentService = {
       const content = formatContent(raw, source.contentType);
       const tokenCount = approxTokens(content);
 
+      lastGoodContentCache.set(sourceId, content);
       setCachedContent(sourceId, content, source.cacheMinutes);
       await db.update(agentDataSources)
         .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
@@ -506,6 +800,23 @@ export const agentService = {
         .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
         .where(eq(agentDataSources.id, sourceId));
       return { ok: false, error: errMsg };
+    }
+  },
+
+  // ── Startup: schedule all proactive sources ────────────────────────────
+
+  async scheduleAllProactiveSources(): Promise<void> {
+    const proactiveSources = await db
+      .select()
+      .from(agentDataSources)
+      .where(eq(agentDataSources.syncMode, 'proactive'));
+
+    for (const source of proactiveSources) {
+      dataSyncScheduler.schedule(source.id, source.cacheMinutes * 60 * 1000);
+    }
+
+    if (proactiveSources.length > 0) {
+      console.log(`[SYNC] Scheduled ${proactiveSources.length} proactive data source(s) for background sync`);
     }
   },
 

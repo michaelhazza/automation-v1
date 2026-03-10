@@ -3,6 +3,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { validateMultipart } from '../middleware/validate.js';
 
 const router = Router();
 
@@ -89,6 +90,21 @@ router.post('/api/agents/:id/deactivate', authenticate, requireOrgPermission(ORG
 });
 
 // ── Data Sources ───────────────────────────────────────────────────────────
+
+router.post('/api/agents/:id/data-sources/upload', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateMultipart, async (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[] | undefined;
+    if (!files || files.length === 0) {
+      res.status(400).json({ error: 'No file provided' });
+      return;
+    }
+    const result = await agentService.uploadDataSourceFile(req.params.id, req.orgId!, files[0]);
+    res.status(201).json(result);
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+  }
+});
 
 router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), async (req, res) => {
   try {
