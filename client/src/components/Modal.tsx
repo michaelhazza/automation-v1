@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   title: string;
@@ -16,7 +17,7 @@ export default function Modal({ title, onClose, children, maxWidth = 520 }: Moda
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
       onClick={onClose}
       style={{
@@ -59,6 +60,7 @@ export default function Modal({ title, onClose, children, maxWidth = 520 }: Moda
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
@@ -135,7 +136,7 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
     issues.push({ label: 'No issues detected', desc: 'Execution completed successfully with no diagnostic concerns.', severity: 'ok' });
   }
 
-  return (
+  return createPortal(
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000,
       background: 'rgba(0,0,0,0.5)',
@@ -242,7 +243,8 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
