@@ -392,17 +392,6 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* Top-level */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* System admin nav */}
-          {isSystemAdmin && (
-            <>
-              <NavSection label="Platform" />
-              <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
-              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
-              <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
-              <NavLink to="/system/settings" icon={<Icons.settings />} label="System Settings" />
-            </>
-          )}
-
           {/* Org workspace nav */}
           {hasOrgContext && (
             <>
@@ -444,6 +433,17 @@ export default function Layout({ user, children }: LayoutProps) {
                 icon={<Icons.portal />}
                 label="Portal"
               />
+            </>
+          )}
+
+          {/* System admin nav */}
+          {isSystemAdmin && (
+            <>
+              <NavSection label="System Admin" />
+              <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
+              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
+              <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
+              <NavLink to="/system/settings" icon={<Icons.settings />} label="System Settings" />
             </>
           )}
         </div>
