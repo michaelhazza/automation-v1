@@ -47,8 +47,8 @@ export default function PortalLandingPage({ user }: { user: User }) {
 
   return (
     <div style={{ maxWidth: 560, margin: '40px auto' }}>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Select workspace</h1>
-      <p style={{ color: '#64748b', marginBottom: 28 }}>Choose which workspace you'd like to access.</p>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Select subaccount</h1>
+      <p style={{ color: '#64748b', marginBottom: 28 }}>Choose which subaccount you'd like to access.</p>
       <div style={{ display: 'grid', gap: 12 }}>
         {subaccounts.map((sa) => (
           <button
