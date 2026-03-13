@@ -50,7 +50,7 @@ export default function AgentsPage({ user }: { user: User }) {
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.03em' }}>
-          AI Employees
+          Agents
         </h1>
         <p style={{ color: '#64748b', margin: 0, fontSize: 14 }}>
           Chat with AI employees trained on your data

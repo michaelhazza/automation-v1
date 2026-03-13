@@ -397,7 +397,7 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Subaccount" />
               <NavLink to="/tasks" icon={<Icons.tasks />} label="Tasks" />
-              <NavLink to="/agents" icon={<Icons.agents />} label="AI Employees" />
+              <NavLink to="/agents" icon={<Icons.agents />} label="Agents" />
               <NavLink to="/executions" icon={<Icons.executions />} label="Executions" />
               <NavLink to="/portal" icon={<Icons.portal />} label="Portal" />
             </>
@@ -408,7 +408,7 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Administration" />
               <NavLink to="/admin/tasks" icon={<Icons.manageTasks />} label="Manage Tasks" />
-              <NavLink to="/admin/agents" icon={<Icons.agents />} label="AI Employees" />
+              <NavLink to="/admin/agents" icon={<Icons.agents />} label="Agents" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
               <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
