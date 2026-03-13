@@ -43,7 +43,7 @@ export default function PortalExecutionHistoryPage({ user }: { user: User }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>My Executions</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Your task execution history in this workspace</p>
+          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Your task execution history in this subaccount</p>
         </div>
         <Link
           to={`/portal/${subaccountId}`}

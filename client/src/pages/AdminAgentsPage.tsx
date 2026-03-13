@@ -105,7 +105,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>AI Agents</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Agents</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Create and manage AI agent configurations</p>
         </div>
         <button

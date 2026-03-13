@@ -307,7 +307,7 @@ export default function Layout({ user, children }: LayoutProps) {
             {hasOrgContext && (
               <div style={{ position: 'relative' }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                  Workspace
+                  Subaccount
                 </div>
                 <button
                   onClick={() => setSubaccountPickerOpen(!subaccountPickerOpen)}
@@ -319,7 +319,7 @@ export default function Layout({ user, children }: LayoutProps) {
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150, fontSize: 12 }}>
-                    {activeSubaccountName ?? 'Select workspace'}
+                    {activeSubaccountName ?? 'Select subaccount'}
                   </span>
                   <span style={{ color: '#64748b', flexShrink: 0 }}>
                     {subaccountPickerOpen ? <Icons.chevronUp /> : <Icons.chevronDown />}
@@ -335,7 +335,7 @@ export default function Layout({ user, children }: LayoutProps) {
                     animation: 'fadeInScale 0.12s ease-out both',
                   }}>
                     {subaccounts.length === 0 && (
-                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No workspaces found</div>
+                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No subaccounts found</div>
                     )}
                     {subaccounts.map((sa) => (
                       <button
@@ -367,7 +367,7 @@ export default function Layout({ user, children }: LayoutProps) {
                           fontFamily: 'inherit',
                         }}
                       >
-                        Clear workspace
+                        Clear subaccount
                       </button>
                     )}
                   </div>
@@ -392,12 +392,12 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* Top-level */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* Org workspace nav */}
+          {/* Org subaccount nav */}
           {hasOrgContext && (
             <>
-              <NavSection label="Workspace" />
+              <NavSection label="Subaccount" />
               <NavLink to="/tasks" icon={<Icons.tasks />} label="Tasks" />
-              <NavLink to="/agents" icon={<Icons.agents />} label="AI Employees" />
+              <NavLink to="/agents" icon={<Icons.agents />} label="Agents" />
               <NavLink to="/executions" icon={<Icons.executions />} label="Executions" />
               <NavLink to="/portal" icon={<Icons.portal />} label="Portal" />
             </>
@@ -408,7 +408,7 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Administration" />
               <NavLink to="/admin/tasks" icon={<Icons.manageTasks />} label="Manage Tasks" />
-              <NavLink to="/admin/agents" icon={<Icons.agents />} label="AI Employees" />
+              <NavLink to="/admin/agents" icon={<Icons.agents />} label="Agents" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
               <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
@@ -421,7 +421,7 @@ export default function Layout({ user, children }: LayoutProps) {
           {activeSubaccountId && (
             <>
               <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                {activeSubaccountName ?? 'Workspace'}
+                {activeSubaccountName ?? 'Subaccount'}
               </div>
               <NavLink
                 to={`/admin/subaccounts/${activeSubaccountId}`}
