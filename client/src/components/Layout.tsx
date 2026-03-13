@@ -407,7 +407,7 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && (
             <>
               <NavSection label="Administration" />
-              <NavLink to="/admin/tasks" icon={<Icons.manageTasks />} label="Manage Tasks" />
+              <NavLink to="/admin/tasks" icon={<Icons.manageTasks />} label="Tasks" />
               <NavLink to="/admin/agents" icon={<Icons.agents />} label="Agents" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />

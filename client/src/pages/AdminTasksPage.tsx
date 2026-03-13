@@ -94,7 +94,7 @@ export default function AdminTasksPage({ user }: { user: User }) {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Manage Tasks</h1>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Tasks</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0' }}>Create and configure automation tasks</p>
         </div>
         <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
