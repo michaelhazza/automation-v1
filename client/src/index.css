@@ -481,3 +481,44 @@ body {
   border-bottom: 1px solid #f1f5f9;
   background: #fafbff;
 }
+
+/* ── Kanban board – mobile (Trello-style) ──────────────────────────────── */
+@media (max-width: 768px) {
+  /* Columns become fixed-width with horizontal snap scroll */
+  .kanban-board {
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scroll-padding-left: 16px;
+    gap: 8px !important;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .kanban-column {
+    flex: 0 0 85vw !important;
+    min-width: 0 !important;
+    scroll-snap-align: start;
+  }
+
+  /* Reduce page padding on mobile */
+  .page-enter {
+    padding: 16px 12px !important;
+  }
+}
+
+/* Tablet: slightly narrower columns but still fit more */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .kanban-column {
+    min-width: 140px !important;
+  }
+}
+
+/* Hide horizontal scrollbar on kanban board for cleaner look (still scrollable) */
+.kanban-board::-webkit-scrollbar {
+  height: 4px;
+}
+
+.kanban-board::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}

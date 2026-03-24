@@ -179,9 +179,10 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
 
       {/* Board */}
       <div
+        className="kanban-board"
         style={{
           display: 'flex',
-          gap: 12,
+          gap: 10,
           flex: 1,
           overflowX: 'auto',
           paddingBottom: 16,
@@ -192,10 +193,12 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
           return (
             <div
               key={col.key}
+              className="kanban-column"
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, col.key)}
               style={{
-                flex: '0 0 280px',
+                flex: '1 1 0',
+                minWidth: 160,
                 display: 'flex',
                 flexDirection: 'column',
                 background: '#f8fafc',
@@ -207,7 +210,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               {/* Column header */}
               <div
                 style={{
-                  padding: '10px 14px',
+                  padding: '8px 12px',
                   borderBottom: `3px solid ${col.colour}`,
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -232,7 +235,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               </div>
 
               {/* Cards */}
-              <div style={{ flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
+              <div style={{ flex: 1, padding: 6, display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
                 {colTasks.map(task => (
                   <div
                     key={task.id}

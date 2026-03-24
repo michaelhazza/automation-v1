@@ -478,7 +478,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
       {/* ── Main content ────────────────────────────────────────────────── */}
       <main style={{ flex: 1, background: '#f8fafc', overflow: 'auto', minHeight: '100vh' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '36px 32px' }} className="page-enter">
+        <div style={{ padding: '36px 32px' }} className="page-enter">
           {children}
         </div>
       </main>

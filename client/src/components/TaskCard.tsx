@@ -33,7 +33,7 @@ export default function TaskCard({ item, onClick, provided, isDragging }: TaskCa
       {...refProps}
       onClick={onClick}
       style={{
-        padding: '10px 12px',
+        padding: '8px 10px',
         background: '#fff',
         border: '1px solid #e2e8f0',
         borderRadius: 8,
