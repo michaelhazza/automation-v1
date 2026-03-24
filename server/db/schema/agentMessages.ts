@@ -12,7 +12,7 @@ export const agentMessages = pgTable(
     role: text('role').notNull().$type<'user' | 'assistant' | 'tool_result'>(),
     // Main text content
     content: text('content'),
-    // For assistant messages that made tool calls (trigger_task)
+    // For assistant messages that made tool calls (trigger_process)
     toolCalls: jsonb('tool_calls').$type<Array<{
       id: string;
       type: 'tool_use';

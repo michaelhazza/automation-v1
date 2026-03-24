@@ -98,7 +98,7 @@ export const agentExecutionService = {
       // ── 3. Load training data ───────────────────────────────────────────
       const dataSourceContents = await agentService.fetchAgentDataSources(request.agentId);
 
-      // ── 4. Load org processes for trigger_task skill ────────────────────
+      // ── 4. Load org processes for trigger_process skill ─────────────────
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
 
       // ── 5. Resolve skills → tools + instructions ────────────────────────
@@ -108,17 +108,17 @@ export const agentExecutionService = {
         request.organisationId
       );
 
-      // For trigger_task, inject the task enum dynamically
+      // For trigger_process, inject the process enum dynamically
       const enhancedTools = skillTools.map(tool => {
-        if (tool.name === 'trigger_task' && orgProcesses.length > 0) {
+        if (tool.name === 'trigger_process' && orgProcesses.length > 0) {
           return {
             ...tool,
             input_schema: {
               ...tool.input_schema,
               properties: {
                 ...tool.input_schema.properties,
-                task_id: {
-                  ...tool.input_schema.properties.task_id,
+                process_id: {
+                  ...tool.input_schema.properties.process_id,
                   enum: orgProcesses.map(t => t.id),
                 },
               },
