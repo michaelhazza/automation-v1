@@ -35,6 +35,8 @@ const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
 const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
 const AdminBoardConfigPage = lazy(() => import('./pages/AdminBoardConfigPage'));
+const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
+const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
 
@@ -146,6 +148,8 @@ export default function App() {
             <Route path="/admin/permission-sets" element={<AdminPermissionSetsPage user={user!} />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
+            <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
+            <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/board-config" element={<AdminBoardConfigPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
           </Route>

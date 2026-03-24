@@ -409,6 +409,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Administration" />
               <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Processes" />
               <NavLink to="/admin/agents" icon={<Icons.agents />} label="Agents" />
+              <NavLink to="/admin/skills" icon={<Icons.settings />} label="Skills" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
               <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
