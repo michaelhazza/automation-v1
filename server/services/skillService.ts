@@ -69,8 +69,12 @@ export const skillService = {
         });
       }
 
-      if (skill.instructions) {
-        instructions.push(skill.instructions);
+      // Combine instructions and methodology into a single guidance block
+      const parts: string[] = [];
+      if (skill.instructions) parts.push(skill.instructions);
+      if (skill.methodology) parts.push(skill.methodology);
+      if (parts.length > 0) {
+        instructions.push(parts.join('\n\n'));
       }
     }
 
@@ -86,6 +90,7 @@ export const skillService = {
     description?: string;
     definition: object;
     instructions?: string;
+    methodology?: string;
   }) {
     const [skill] = await db
       .insert(skills)
@@ -97,6 +102,7 @@ export const skillService = {
         skillType: 'custom',
         definition: data.definition,
         instructions: data.instructions ?? null,
+        methodology: data.methodology ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -110,6 +116,7 @@ export const skillService = {
     description: string;
     definition: object;
     instructions: string;
+    methodology: string;
     isActive: boolean;
   }>) {
     const [existing] = await db
@@ -125,6 +132,7 @@ export const skillService = {
     if (data.description !== undefined) update.description = data.description;
     if (data.definition !== undefined) update.definition = data.definition;
     if (data.instructions !== undefined) update.instructions = data.instructions;
+    if (data.methodology !== undefined) update.methodology = data.methodology;
     if (data.isActive !== undefined) update.isActive = data.isActive;
 
     const [updated] = await db.update(skills).set(update).where(eq(skills.id, id)).returning();
@@ -156,7 +164,17 @@ export const skillService = {
         .from(skills)
         .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)));
 
-      if (existing.length > 0) continue;
+      if (existing.length > 0) {
+        // Update existing built-in skill with latest methodology (if changed)
+        const current = existing[0];
+        if (current.methodology !== (def.methodology ?? null)) {
+          await db.update(skills).set({
+            methodology: def.methodology ?? null,
+            updatedAt: new Date(),
+          }).where(eq(skills.id, current.id));
+        }
+        continue;
+      }
 
       await db.insert(skills).values({
         organisationId: null,
@@ -166,6 +184,7 @@ export const skillService = {
         skillType: 'built_in',
         definition: def.definition,
         instructions: def.instructions,
+        methodology: def.methodology ?? null,
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -197,6 +216,27 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: 'You have access to web search. Use it to find current information, verify facts, research competitors, or gather data that may not be in your training data.',
+      methodology: `## Web Search Methodology
+
+### Phase 1: Broad Scan
+Start with a broad query to understand the landscape. Use general terms first to identify what information is available and what angles exist. Request 5-10 results to get a representative spread.
+
+### Phase 2: Targeted Deep-Dive
+Based on broad scan results, formulate 2-3 specific follow-up queries targeting the most relevant angles. Use precise terms, names, or phrases discovered in Phase 1. Reduce max_results to 3-5 for focused results.
+
+### Phase 3: Verification & Synthesis
+Cross-reference key claims across multiple search results. If a critical fact appears in only one source, run a verification query. Prefer recent results over older ones for time-sensitive information.
+
+### Decision Rules
+- **Always search** when: the question involves dates, prices, current events, competitor activity, or anything that changes over time.
+- **Search before asserting** when: you are not fully confident in a specific fact, statistic, or claim.
+- **Multiple queries** when: the topic has multiple dimensions (e.g. competitor research = products + pricing + reviews + news).
+- **Skip search** when: the information is clearly within your training data and does not change (e.g. general concepts, historical facts).
+
+### Quality Bar
+- Never present a single search result as authoritative. Always synthesise across results.
+- Clearly distinguish between facts found via search and your own analysis/interpretation.
+- Note when information may be outdated or when sources conflict.`,
     },
     {
       name: 'Read Workspace',
@@ -217,6 +257,27 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: 'You can read the shared board to see what tasks exist, their status, and what other agents have been working on. Check the board regularly to stay coordinated with the team.',
+      methodology: `## Read Workspace Methodology
+
+### Phase 1: Orientation
+At the start of every run, read the board without filters to understand the current state. Look at task distribution across columns, identify what has changed since your last run, and note any urgent or blocked items.
+
+### Phase 2: Focused Queries
+After orientation, use targeted filters:
+- Filter by \`assigned_to_me: true\` to see your current workload.
+- Filter by specific statuses to find tasks that need your attention (e.g. "inbox" for new items, "review" for items awaiting feedback).
+- Include activities for tasks you plan to work on, to understand their full history.
+
+### Phase 3: Pattern Recognition
+Look for patterns across the board:
+- Tasks stuck in the same status for a long time may need escalation.
+- Clusters of related tasks may indicate a larger initiative.
+- Recent activity from other agents may inform your own work.
+
+### Decision Rules
+- **Read before writing**: Always check the board state before creating new tasks or updating existing ones, to avoid duplicates.
+- **Limit scope**: Use the \`limit\` parameter to avoid pulling excessive data. Start with 20 tasks; only increase if needed.
+- **Include activities sparingly**: Only request activities for tasks you intend to act on. Activity logs add significant context volume.`,
     },
     {
       name: 'Write Workspace',
@@ -236,6 +297,23 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: 'Always log your progress and findings to tasks so other agents and the team can see what you have done.',
+      methodology: `## Write Workspace Methodology
+
+### When to Write
+- **Progress**: Log meaningful progress updates as you work, not just at the end. Other agents and team members monitor the activity feed.
+- **Findings**: When you discover something relevant to a task (research results, data points, insights), log it immediately so it is not lost.
+- **Blockers**: If you cannot complete something, log a "blocked" activity explaining why and what is needed to unblock.
+- **Completion**: Always log a "completed" activity with a summary of what was done before moving a task to review/done.
+
+### Quality Standards
+- Be specific and actionable. "Researched competitors" is too vague. "Identified 3 key competitors: X, Y, Z. X leads on pricing, Y on features, Z on brand recognition" is useful.
+- Include data and evidence, not just conclusions.
+- Write for your team — assume the reader has context on the task but not on what you just did.
+
+### Decision Rules
+- **One activity per logical step**: Do not batch everything into a single activity at the end. Multiple focused updates are more useful than one long dump.
+- **Do not duplicate**: Check existing activities before writing. If the information is already logged, do not re-log it.
+- **Link to deliverables**: If your work produced an output, add a deliverable (using add_deliverable) instead of pasting content into an activity message.`,
     },
     {
       name: 'Trigger Process',
@@ -256,6 +334,18 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: null,
+      methodology: `## Trigger Process Methodology
+
+### Before Triggering
+1. Confirm the process is the right one for this situation. Read the process name and description carefully.
+2. Validate your input data matches what the process expects. Use valid JSON in the input_data field.
+3. Document your reasoning — the \`reason\` field exists for audit trail. Be specific about why this process is being triggered now.
+
+### Decision Rules
+- **Trigger only when justified**: Each process execution has real-world effects (sending emails, updating CRMs, posting content). Never trigger a process "to test" or "just in case."
+- **One trigger per intent**: Do not trigger the same process multiple times for the same reason in a single run.
+- **Check workspace first**: Before triggering, check if another agent has already triggered this process recently for the same reason.
+- **Handle failures gracefully**: If a trigger returns an error, log the failure to the task board and move on. Do not retry automatically.`,
     },
     {
       name: 'Create Task',
@@ -278,6 +368,20 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: 'You can create new tasks to assign work, track new tasks, or flag issues for the team.',
+      methodology: `## Create Task Methodology
+
+### Task Quality Checklist
+Before creating a task, verify it meets these criteria:
+1. **Clear title**: Short, specific, action-oriented. "Draft Q1 competitor analysis report" not "Competitor stuff."
+2. **Actionable description**: What needs to be done, what the expected output is, and any relevant context or constraints.
+3. **Correct priority**: Use "urgent" only for time-sensitive items with real deadlines. Default to "normal."
+4. **Appropriate status**: Use "inbox" for unassigned new work, "assigned" if you are assigning to a specific agent, "todo" if it is planned but unassigned.
+
+### Decision Rules
+- **Check for duplicates first**: Always read the workspace before creating a task. If a similar task already exists, update it instead of creating a new one.
+- **One task per deliverable**: Each task should have a single clear outcome. If you are identifying multiple pieces of work, create separate tasks.
+- **Assign when possible**: If you know which agent should handle a task, assign it. Unassigned tasks may sit in inbox indefinitely.
+- **Include a brief for assigned tasks**: The brief field gives the assigned agent its instructions. Without a brief, the agent has to guess what to do.`,
     },
     {
       name: 'Move Task',
@@ -296,6 +400,22 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: 'Move tasks through the board as you work on them. Move to "in_progress" when starting, "review" when done and ready for human review.',
+      methodology: `## Move Task Methodology
+
+### Status Transitions
+Follow these standard workflow transitions:
+- **inbox → todo**: Task has been triaged and is ready to be planned.
+- **todo → assigned**: Task has been assigned to a specific agent.
+- **assigned → in_progress**: Agent has started working on the task.
+- **in_progress → review**: Work is complete and ready for human review.
+- **review → acceptance**: Human has reviewed and approved, pending final sign-off.
+- **acceptance → done**: Task is fully completed and closed.
+
+### Decision Rules
+- **Always log before moving**: Write a progress activity explaining what was accomplished before moving a task to the next status.
+- **Do not skip statuses**: Follow the workflow order. Do not jump from "inbox" to "done."
+- **Move to "in_progress" at the start of work**: This signals to other agents and the team that someone is actively working on it.
+- **Move to "review" only when there is a deliverable**: Do not move to review unless the task has an attached deliverable or a clear completion summary.`,
     },
     {
       name: 'Add Deliverable',
@@ -316,6 +436,23 @@ function getBuiltInSkillDefinitions() {
         },
       },
       instructions: 'When you complete work, always attach the output as a deliverable so it can be reviewed. Put the full content in the description field.',
+      methodology: `## Add Deliverable Methodology
+
+### Deliverable Types
+Choose the correct type for your output:
+- **artifact**: Full text content (reports, analysis, drafts, recommendations). The content goes in the description field. Use this for anything the agent produces as text.
+- **url**: A link to external content (Google Doc, published post, dashboard). The URL goes in the path field, with a description of what it links to.
+- **file**: A reference to a generated file. The file path goes in the path field.
+
+### Quality Standards
+- **Title must be descriptive**: "Q1 Competitor Analysis — March 2025" not "Report."
+- **Content must be complete**: Do not add a deliverable that says "see above" or references conversation context. The deliverable should stand alone.
+- **Structure long content**: Use headings, bullet points, and sections for artifacts longer than a few paragraphs. The deliverable will be read by humans who may not have context on the agent run.
+
+### Decision Rules
+- **One deliverable per output**: If your work produced a report and a data summary, create two separate deliverables.
+- **Always attach to the right task**: The deliverable must belong to the task it fulfills. Do not attach work to unrelated tasks.
+- **Add deliverable before moving to review**: A task in "review" status should always have at least one deliverable attached.`,
     },
   ];
 }

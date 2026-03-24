@@ -23,6 +23,9 @@ export const skills = pgTable(
     definition: jsonb('definition').notNull(),
     // Markdown instructions injected into the agent's system prompt when this skill is active
     instructions: text('instructions'),
+    // Extended methodology document — structured workflow phases, decision trees,
+    // quality criteria, and common mistakes. Injected after instructions for richer guidance.
+    methodology: text('methodology'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
