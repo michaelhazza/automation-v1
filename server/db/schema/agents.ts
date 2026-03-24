@@ -16,6 +16,8 @@ export const agents = pgTable(
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     description: text('description'),
+    // Display icon/emoji for the agent card UI
+    icon: text('icon'),
     // The system instruction / persona that defines this AI employee
     masterPrompt: text('master_prompt').notNull().default(''),
     // LLM configuration

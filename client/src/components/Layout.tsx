@@ -389,33 +389,30 @@ export default function Layout({ user, children }: LayoutProps) {
 
         {/* ── Navigation ──────────────────────────────────────────────── */}
         <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
-          {/* Top-level */}
+          {/* Top-level — user-facing, minimal */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* Org subaccount nav */}
           {hasOrgContext && (
             <>
-              <NavSection label="Subaccount" />
-              <NavLink to="/processes" icon={<Icons.tasks />} label="Processes" />
-              <NavLink to="/agents" icon={<Icons.agents />} label="Agents" />
-              <NavLink to="/executions" icon={<Icons.executions />} label="Executions" />
-              <NavLink to="/portal" icon={<Icons.portal />} label="Portal" />
+              <NavLink to="/agents" icon={<Icons.agents />} label="AI Team" />
+              <NavLink to="/executions" icon={<Icons.executions />} label="Activity" />
+              <NavLink to="/processes" icon={<Icons.tasks />} label="Automations" />
             </>
           )}
 
-          {/* Admin nav */}
+          {/* Admin section — collapsed under a clear heading */}
           {hasOrgContext && (
             <>
-              <NavSection label="Administration" />
-              <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Processes" />
-              <NavLink to="/admin/agents" icon={<Icons.agents />} label="Agents" />
-              <NavLink to="/admin/skills" icon={<Icons.settings />} label="Skills" />
-              <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
+              <NavSection label="Admin" />
+              <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage Agents" />
+              <NavLink to="/admin/skills" icon={<Icons.settings />} label="Agent Skills" />
+              <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Manage Automations" />
+              <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Clients" />
+              <NavLink to="/admin/users" icon={<Icons.users />} label="Team Access" />
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
               <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
-              <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Subaccounts" />
-              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
-              <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permission Sets" />
+              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Workspace Layout" />
+              <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permissions" />
             </>
           )}
 

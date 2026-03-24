@@ -6,3 +6,6 @@ ALTER TABLE "skills" ADD COLUMN "methodology" text;
 -- Add default skill slugs to agents table
 -- These get copied to subaccountAgents.skillSlugs when an agent is linked to a subaccount.
 ALTER TABLE "agents" ADD COLUMN "default_skill_slugs" jsonb;
+
+-- Add icon field to agents for visual identification in the UI
+ALTER TABLE "agents" ADD COLUMN "icon" text;

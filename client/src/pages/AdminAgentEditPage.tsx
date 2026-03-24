@@ -18,6 +18,7 @@ interface AvailableSkill {
 interface AgentForm {
   name: string;
   description: string;
+  icon: string;
   masterPrompt: string;
   modelProvider: string;
   modelId: string;
@@ -126,9 +127,17 @@ const EMPTY_DS_FORM: DataSourceForm = {
   googleApiKey: '',
 };
 
+const ICON_OPTIONS = [
+  '\u{1F50D}', '\u{1F4CA}', '\u{1F4DD}', '\u{1F4E3}', '\u{1F916}', '\u{2699}\uFE0F}',
+  '\u{1F4AC}', '\u{1F4C8}', '\u{2728}', '\u{1F3AF}', '\u{1F4A1}', '\u{1F4CB}',
+  '\u{1F4E7}', '\u{1F310}', '\u{1F4B0}', '\u{1F465}', '\u{1F4F1}', '\u{1F5A5}\uFE0F',
+  '\u{1F4DA}', '\u{1F3E2}', '\u{1F6E0}\uFE0F', '\u{1F4CC}', '\u{1F4CE}', '\u{1F512}',
+];
+
 const EMPTY_AGENT_FORM: AgentForm = {
   name: '',
   description: '',
+  icon: '',
   masterPrompt: '',
   modelProvider: 'anthropic',
   modelId: 'claude-sonnet-4-6',
@@ -262,6 +271,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       setForm({
         name: data.name ?? '',
         description: data.description ?? '',
+        icon: data.icon ?? '',
         masterPrompt: data.masterPrompt ?? '',
         modelProvider: data.modelProvider ?? 'anthropic',
         modelId: data.modelId ?? 'claude-sonnet-4-6',
@@ -869,6 +879,28 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Section 1: Basic Info ── */}
       <SectionCard title="Basic Info">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {/* Icon picker */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Field label="Icon" hint="Choose an icon that represents this agent's role">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {ICON_OPTIONS.map((ico) => (
+                  <button
+                    key={ico}
+                    type="button"
+                    onClick={() => setForm({ ...form, icon: form.icon === ico ? '' : ico })}
+                    style={{
+                      width: 40, height: 40, borderRadius: 10, border: `2px solid ${form.icon === ico ? '#6366f1' : '#e2e8f0'}`,
+                      background: form.icon === ico ? '#eef2ff' : '#fafafa',
+                      cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    {ico}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <Field label="Name *">
               <input
@@ -880,12 +912,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </Field>
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <Field label="Description">
+            <Field label="Description" hint="Describe what this agent does in first person, e.g. 'I research your competitors and report weekly'">
               <textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={2}
-                placeholder="Brief description of this agent's purpose"
+                placeholder="e.g. I research your competitors and deliver weekly insight reports"
                 style={{ ...inputStyle, resize: 'vertical' }}
               />
             </Field>

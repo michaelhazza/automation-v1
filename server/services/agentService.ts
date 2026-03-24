@@ -495,6 +495,7 @@ export const agentService = {
       temperature?: number;
       maxTokens?: number;
       defaultSkillSlugs?: string[];
+      icon?: string;
     }
   ) {
     const slug = makeSlug(data.name);
@@ -505,6 +506,7 @@ export const agentService = {
         name: data.name,
         slug,
         description: data.description,
+        icon: data.icon ?? null,
         masterPrompt: data.masterPrompt,
         modelProvider: data.modelProvider ?? 'anthropic',
         modelId: data.modelId ?? 'claude-sonnet-4-6',
@@ -532,6 +534,7 @@ export const agentService = {
       temperature: number;
       maxTokens: number;
       defaultSkillSlugs: string[];
+      icon: string;
     }>
   ) {
     const [existing] = await db
@@ -550,6 +553,7 @@ export const agentService = {
     if (data.temperature !== undefined) update.temperature = data.temperature;
     if (data.maxTokens !== undefined) update.maxTokens = data.maxTokens;
     if (data.defaultSkillSlugs !== undefined) update.defaultSkillSlugs = data.defaultSkillSlugs;
+    if (data.icon !== undefined) update.icon = data.icon;
 
     const [updated] = await db
       .update(agents)
