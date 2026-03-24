@@ -115,7 +115,13 @@ router.get(
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      const config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+      let config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+
+      // Auto-initialise from org config if subaccount has no board yet
+      if (!config) {
+        config = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
+      }
+
       res.json(config);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };

@@ -113,6 +113,9 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
       setNativeProcesses(processRes.data.nativeProcesses ?? []);
       setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to load subaccount');
     } finally {
       setLoading(false);
     }
@@ -228,7 +231,8 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
     }
   };
 
-  if (loading || !sa) return <div>Loading...</div>;
+  if (loading) return <div>Loading...</div>;
+  if (!sa) return <div style={{ padding: 40, color: '#dc2626' }}>{error || 'Subaccount not found'}</div>;
 
   const tabStyle = (tab: ActiveTab): React.CSSProperties => ({
     padding: '8px 16px',
