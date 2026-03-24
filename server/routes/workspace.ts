@@ -1,0 +1,710 @@
+import { Router } from 'express';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { boardService } from '../services/boardService.js';
+import { workspaceItemService } from '../services/workspaceItemService.js';
+import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { db } from '../db/index.js';
+import { subaccounts } from '../db/schema/index.js';
+import { eq, and, isNull } from 'drizzle-orm';
+
+const router = Router();
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+async function resolveSubaccount(subaccountId: string, organisationId: string) {
+  const [sa] = await db
+    .select()
+    .from(subaccounts)
+    .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)));
+
+  if (!sa) throw { statusCode: 404, message: 'Subaccount not found' };
+  return sa;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BOARD CONFIG — ORG LEVEL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/board-config
+ * Get the org-level board configuration.
+ */
+router.get(
+  '/api/board-config',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  async (req, res) => {
+    try {
+      const config = await boardService.getOrgBoardConfig(req.orgId!);
+      res.json(config);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/board-config/init
+ * Initialise org board config from a template.
+ */
+router.post(
+  '/api/board-config/init',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      const { templateId } = req.body as { templateId?: string };
+      if (!templateId) {
+        res.status(400).json({ error: 'templateId is required' });
+        return;
+      }
+
+      const config = await boardService.initOrgBoardFromTemplate(req.orgId!, templateId);
+      res.status(201).json(config);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * PATCH /api/board-config
+ * Update the org-level board columns.
+ */
+router.patch(
+  '/api/board-config',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      const { columns } = req.body as { columns?: unknown[] };
+      if (!columns || !Array.isArray(columns)) {
+        res.status(400).json({ error: 'columns array is required' });
+        return;
+      }
+
+      const existing = await boardService.getOrgBoardConfig(req.orgId!);
+      if (!existing) {
+        res.status(404).json({ error: 'Organisation has no board configuration. Initialise first.' });
+        return;
+      }
+
+      const updated = await boardService.updateBoardConfig(existing.id, req.orgId!, columns as any);
+      res.json(updated);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BOARD CONFIG — SUBACCOUNT LEVEL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/subaccounts/:subaccountId/board-config
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/board-config',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+      res.json(config);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/board-config/init
+ * Initialise subaccount board from org config.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/board-config/init',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const config = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
+      if (!config) {
+        res.status(404).json({ error: 'Organisation has no board configuration to copy from' });
+        return;
+      }
+      res.status(201).json(config);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * PATCH /api/subaccounts/:subaccountId/board-config
+ * Update subaccount board columns.
+ */
+router.patch(
+  '/api/subaccounts/:subaccountId/board-config',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { columns } = req.body as { columns?: unknown[] };
+      if (!columns || !Array.isArray(columns)) {
+        res.status(400).json({ error: 'columns array is required' });
+        return;
+      }
+
+      const existing = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+      if (!existing) {
+        res.status(404).json({ error: 'Subaccount has no board configuration. Initialise first.' });
+        return;
+      }
+
+      const updated = await boardService.updateBoardConfig(existing.id, req.orgId!, columns as any);
+      res.json(updated);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/board-config/push
+ * Push org board config to this subaccount.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/board-config/push',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const results = await boardService.pushOrgConfigToSubaccounts(req.orgId!, [req.params.subaccountId]);
+      res.json(results[0]);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SUBACCOUNT AGENTS — AGENT LINKING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/subaccounts/:subaccountId/agents
+ * List agents linked to this subaccount.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/agents',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const agentLinks = await subaccountAgentService.listSubaccountAgents(req.orgId!, req.params.subaccountId);
+      res.json(agentLinks);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/agents
+ * Link an agent to this subaccount.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/agents',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { agentId } = req.body as { agentId?: string };
+
+      if (!agentId) {
+        res.status(400).json({ error: 'agentId is required' });
+        return;
+      }
+
+      const link = await subaccountAgentService.linkAgent(req.orgId!, req.params.subaccountId, agentId);
+      res.status(201).json(link);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string; code?: string };
+      if (e.code === '23505') {
+        res.status(409).json({ error: 'Agent is already linked to this subaccount' });
+        return;
+      }
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/subaccounts/:subaccountId/agents/:agentId
+ * Unlink an agent from this subaccount.
+ */
+router.delete(
+  '/api/subaccounts/:subaccountId/agents/:agentId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      await subaccountAgentService.unlinkAgent(req.orgId!, req.params.subaccountId, req.params.agentId);
+      res.json({ message: 'Agent unlinked' });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * PATCH /api/subaccounts/:subaccountId/agents/:linkId
+ * Toggle agent active status.
+ */
+router.patch(
+  '/api/subaccounts/:subaccountId/agents/:linkId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { isActive } = req.body as { isActive?: boolean };
+
+      if (isActive === undefined) {
+        res.status(400).json({ error: 'isActive is required' });
+        return;
+      }
+
+      const updated = await subaccountAgentService.toggleActive(req.orgId!, req.params.linkId, isActive);
+      res.json(updated);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * GET /api/subaccounts/:subaccountId/agents/:linkId/data-sources
+ * List subaccount-level data sources for a linked agent.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/agents/:linkId/data-sources',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const sources = await subaccountAgentService.listSubaccountDataSources(req.params.linkId);
+      res.json(sources);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/agents/:linkId/data-sources
+ * Add a subaccount-level data source for a linked agent.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/agents/:linkId/data-sources',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, syncMode } =
+        req.body as Record<string, unknown>;
+
+      if (!name || !sourceType || !sourcePath) {
+        res.status(400).json({ error: 'name, sourceType and sourcePath are required' });
+        return;
+      }
+
+      // We need the agentId from the link — fetch it
+      const links = await subaccountAgentService.listSubaccountAgents(req.orgId!, req.params.subaccountId);
+      const link = links.find(l => l.id === req.params.linkId);
+      if (!link) {
+        res.status(404).json({ error: 'Agent link not found' });
+        return;
+      }
+
+      const source = await subaccountAgentService.addSubaccountDataSource(req.params.linkId, link.agentId, {
+        name: name as string,
+        description: description as string | undefined,
+        sourceType: sourceType as any,
+        sourcePath: sourcePath as string,
+        sourceHeaders: sourceHeaders as Record<string, string> | undefined,
+        contentType: contentType as any,
+        priority: priority as number | undefined,
+        maxTokenBudget: maxTokenBudget as number | undefined,
+        cacheMinutes: cacheMinutes as number | undefined,
+        syncMode: syncMode as any,
+      });
+      res.status(201).json(source);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/subaccounts/:subaccountId/agents/:linkId/data-sources/:sourceId
+ * Remove a subaccount-level data source.
+ */
+router.delete(
+  '/api/subaccounts/:subaccountId/agents/:linkId/data-sources/:sourceId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      await subaccountAgentService.removeSubaccountDataSource(req.params.sourceId, req.params.linkId);
+      res.json({ message: 'Data source removed' });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WORKSPACE ITEMS — KANBAN CARDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/subaccounts/:subaccountId/workspace-items
+ * List workspace items for a subaccount.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/workspace-items',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { status, priority, assignedAgentId, search } = req.query as Record<string, string>;
+      const items = await workspaceItemService.listItems(req.orgId!, req.params.subaccountId, {
+        status,
+        priority,
+        assignedAgentId,
+        search,
+      });
+      res.json(items);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/workspace-items
+ * Create a workspace item.
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/workspace-items',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { title, description, brief, status, priority, assignedAgentId, createdByAgentId, taskId, dueDate } = req.body as {
+        title?: string;
+        description?: string;
+        brief?: string;
+        status?: string;
+        priority?: 'low' | 'normal' | 'high' | 'urgent';
+        assignedAgentId?: string;
+        createdByAgentId?: string;
+        taskId?: string;
+        dueDate?: string;
+      };
+
+      if (!title) {
+        res.status(400).json({ error: 'title is required' });
+        return;
+      }
+
+      const item = await workspaceItemService.createItem(
+        req.orgId!,
+        req.params.subaccountId,
+        {
+          title,
+          description,
+          brief,
+          status,
+          priority,
+          assignedAgentId,
+          createdByAgentId,
+          taskId,
+          dueDate: dueDate ? new Date(dueDate) : undefined,
+        },
+        req.user!.id
+      );
+
+      res.status(201).json(item);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * GET /api/subaccounts/:subaccountId/workspace-items/:itemId
+ * Get a single workspace item with activities and deliverables.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const item = await workspaceItemService.getItem(req.params.itemId, req.orgId!);
+      res.json(item);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * PATCH /api/subaccounts/:subaccountId/workspace-items/:itemId
+ * Update a workspace item.
+ */
+router.patch(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { title, description, brief, status, priority, assignedAgentId, taskId, dueDate } = req.body as Record<string, unknown>;
+
+      const item = await workspaceItemService.updateItem(
+        req.params.itemId,
+        req.orgId!,
+        {
+          title: title as string | undefined,
+          description: description as string | undefined,
+          brief: brief as string | undefined,
+          status: status as string | undefined,
+          priority: priority as any,
+          assignedAgentId: assignedAgentId as string | null | undefined,
+          taskId: taskId as string | null | undefined,
+          dueDate: dueDate === null ? null : dueDate ? new Date(dueDate as string) : undefined,
+        },
+        req.user!.id
+      );
+
+      res.json(item);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * PATCH /api/subaccounts/:subaccountId/workspace-items/:itemId/move
+ * Move a workspace item (drag-and-drop optimised).
+ */
+router.patch(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId/move',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      const { status, position } = req.body as { status?: string; position?: number };
+
+      if (!status || position === undefined) {
+        res.status(400).json({ error: 'status and position are required' });
+        return;
+      }
+
+      const item = await workspaceItemService.moveItem(req.params.itemId, req.orgId!, { status, position }, req.user!.id);
+      res.json(item);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/subaccounts/:subaccountId/workspace-items/:itemId
+ * Soft-delete a workspace item.
+ */
+router.delete(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      await workspaceItemService.deleteItem(req.params.itemId, req.orgId!);
+      res.json({ message: 'Item deleted' });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ACTIVITIES & DELIVERABLES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/subaccounts/:subaccountId/workspace-items/:itemId/activities
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId/activities',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  async (req, res) => {
+    try {
+      const activities = await workspaceItemService.listActivities(req.params.itemId);
+      res.json(activities);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/workspace-items/:itemId/activities
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId/activities',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      const { activityType, message, agentId, metadata } = req.body as {
+        activityType?: string;
+        message?: string;
+        agentId?: string;
+        metadata?: Record<string, unknown>;
+      };
+
+      if (!activityType || !message) {
+        res.status(400).json({ error: 'activityType and message are required' });
+        return;
+      }
+
+      const activity = await workspaceItemService.addActivity(req.params.itemId, {
+        activityType: activityType as any,
+        message,
+        agentId,
+        userId: req.user!.id,
+        metadata,
+      });
+
+      res.status(201).json(activity);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * GET /api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  async (req, res) => {
+    try {
+      const deliverables = await workspaceItemService.listDeliverables(req.params.itemId);
+      res.json(deliverables);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * POST /api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables
+ */
+router.post(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      const { deliverableType, title, path, description } = req.body as {
+        deliverableType?: string;
+        title?: string;
+        path?: string;
+        description?: string;
+      };
+
+      if (!deliverableType || !title) {
+        res.status(400).json({ error: 'deliverableType and title are required' });
+        return;
+      }
+
+      const deliverable = await workspaceItemService.addDeliverable(req.params.itemId, {
+        deliverableType: deliverableType as any,
+        title,
+        path,
+        description,
+      });
+
+      res.status(201).json(deliverable);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables/:delivId
+ */
+router.delete(
+  '/api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables/:delivId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  async (req, res) => {
+    try {
+      await workspaceItemService.deleteDeliverable(req.params.delivId);
+      res.json({ message: 'Deliverable deleted' });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+export default router;

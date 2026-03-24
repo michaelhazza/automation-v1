@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
 import { agents } from './agents';
+import { subaccountAgents } from './subaccountAgents';
 
 export const agentDataSources = pgTable(
   'agent_data_sources',
@@ -31,12 +32,17 @@ export const agentDataSources = pgTable(
     lastFetchError: text('last_fetch_error'),
     // Timestamp of last admin alert email (used for 1-hour cooldown to avoid alert spam)
     lastAlertSentAt: timestamp('last_alert_sent_at'),
+    // Subaccount-level data source: when set, this source is loaded only for this agent+subaccount combo.
+    // When NULL, this is an org-level data source (original behaviour).
+    subaccountAgentId: uuid('subaccount_agent_id')
+      .references(() => subaccountAgents.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (table) => ({
     agentIdx: index('agent_data_sources_agent_idx').on(table.agentId),
     agentPriorityIdx: index('agent_data_sources_agent_priority_idx').on(table.agentId, table.priority),
+    subaccountAgentIdx: index('agent_data_sources_subaccount_agent_idx').on(table.subaccountAgentId),
   })
 );
 
