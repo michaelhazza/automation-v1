@@ -8,6 +8,8 @@ import { env } from './lib/env.js';
 import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeedService.js';
 import { agentService } from './services/agentService.js';
 import { boardService } from './services/boardService.js';
+import { skillService } from './services/skillService.js';
+import { agentScheduleService } from './services/agentScheduleService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,6 +34,9 @@ import portalRouter from './routes/portal.js';
 import agentsRouter from './routes/agents.js';
 import boardTemplatesRouter from './routes/boardTemplates.js';
 import workspaceRouter from './routes/workspace.js';
+import agentTemplatesRouter from './routes/agentTemplates.js';
+import skillsRouter from './routes/skills.js';
+import agentRunsRouter from './routes/agentRuns.js';
 
 const app = express();
 
@@ -70,6 +75,9 @@ app.use(portalRouter);
 app.use(agentsRouter);
 app.use(boardTemplatesRouter);
 app.use(workspaceRouter);
+app.use(agentTemplatesRouter);
+app.use(skillsRouter);
+app.use(agentRunsRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
@@ -100,6 +108,8 @@ async function start() {
   await backfillOrgUserRoles();
   await agentService.scheduleAllProactiveSources();
   await boardService.seedDefaultTemplate();
+  await skillService.seedBuiltInSkills();
+  await agentScheduleService.initialize();
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);

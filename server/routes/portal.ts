@@ -21,6 +21,7 @@ import {
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc, gte, lte } from 'drizzle-orm';
 import { queueService } from '../services/queueService.js';
+import { agentActivityService } from '../services/agentActivityService.js';
 
 const router = Router();
 
@@ -434,6 +435,56 @@ router.get(
         durationMs: execution.durationMs,
         createdAt: execution.createdAt,
       });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ─── Portal: agent activity for a subaccount ────────────────────────────────
+
+router.get(
+  '/api/portal/:subaccountId/agent-activity',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId);
+
+      const { agentId, status, limit, offset } = req.query;
+
+      const runs = await agentActivityService.listRuns({
+        subaccountId: req.params.subaccountId,
+        agentId: agentId as string | undefined,
+        status: status as string | undefined,
+        limit: limit ? Number(limit) : undefined,
+        offset: offset ? Number(offset) : undefined,
+      });
+
+      res.json(runs);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+router.get(
+  '/api/portal/:subaccountId/agent-activity/stats',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
+  async (req, res) => {
+    try {
+      await resolveSubaccount(req.params.subaccountId);
+
+      const { sinceDays } = req.query;
+      const stats = await agentActivityService.getStats({
+        subaccountId: req.params.subaccountId,
+        sinceDays: sinceDays ? Number(sinceDays) : undefined,
+      });
+
+      res.json(stats);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });

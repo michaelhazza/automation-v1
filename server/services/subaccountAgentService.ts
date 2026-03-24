@@ -21,6 +21,17 @@ export const subaccountAgentService = {
       agentId: link.agentId,
       subaccountId: link.subaccountId,
       isActive: link.isActive,
+      // Schedule & config
+      scheduleCron: link.scheduleCron,
+      scheduleEnabled: link.scheduleEnabled,
+      scheduleTimezone: link.scheduleTimezone,
+      tokenBudgetPerRun: link.tokenBudgetPerRun,
+      maxToolCallsPerRun: link.maxToolCallsPerRun,
+      timeoutSeconds: link.timeoutSeconds,
+      skillSlugs: link.skillSlugs,
+      customInstructions: link.customInstructions,
+      lastRunAt: link.lastRunAt,
+      nextRunAt: link.nextRunAt,
       createdAt: link.createdAt,
       updatedAt: link.updatedAt,
       agent: {
