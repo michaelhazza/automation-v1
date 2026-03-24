@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
 import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeedService.js';
 import { agentService } from './services/agentService.js';
+import { boardService } from './services/boardService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,8 @@ import subaccountsRouter from './routes/subaccounts.js';
 import permissionSetsRouter from './routes/permissionSets.js';
 import portalRouter from './routes/portal.js';
 import agentsRouter from './routes/agents.js';
+import boardTemplatesRouter from './routes/boardTemplates.js';
+import workspaceRouter from './routes/workspace.js';
 
 const app = express();
 
@@ -65,6 +68,8 @@ app.use(subaccountsRouter);
 app.use(permissionSetsRouter);
 app.use(portalRouter);
 app.use(agentsRouter);
+app.use(boardTemplatesRouter);
+app.use(workspaceRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
@@ -94,6 +99,7 @@ async function start() {
   await seedPermissions();
   await backfillOrgUserRoles();
   await agentService.scheduleAllProactiveSources();
+  await boardService.seedDefaultTemplate();
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);

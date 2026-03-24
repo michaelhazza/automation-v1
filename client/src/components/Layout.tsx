@@ -413,6 +413,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
               <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
               <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Subaccounts" />
+              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
               <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permission Sets" />
             </>
           )}
@@ -427,6 +428,11 @@ export default function Layout({ user, children }: LayoutProps) {
                 to={`/admin/subaccounts/${activeSubaccountId}`}
                 icon={<Icons.subaccounts />}
                 label="Overview"
+              />
+              <NavLink
+                to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
+                icon={<Icons.queue />}
+                label="Workspace Board"
               />
               <NavLink
                 to={`/portal/${activeSubaccountId}`}
@@ -444,6 +450,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
               <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
               <NavLink to="/system/settings" icon={<Icons.settings />} label="System Settings" />
+              <NavLink to="/system/board-templates" icon={<Icons.queue />} label="Board Templates" />
             </>
           )}
         </div>

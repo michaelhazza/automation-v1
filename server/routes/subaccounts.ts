@@ -12,6 +12,7 @@ import {
   permissionSets,
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc } from 'drizzle-orm';
+import { boardService } from '../services/boardService.js';
 
 const router = Router();
 
@@ -101,6 +102,11 @@ router.post(
           updatedAt: new Date(),
         })
         .returning();
+
+      // Auto-init board config from org config (if available)
+      boardService.initSubaccountBoard(organisationId, sa.id).catch(() => {
+        // Non-critical: if org has no board config, skip silently
+      });
 
       res.status(201).json({
         id: sa.id,

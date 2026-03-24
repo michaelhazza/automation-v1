@@ -42,6 +42,9 @@ export const ORG_PERMISSIONS = {
   AGENTS_EDIT: 'org.agents.edit',
   AGENTS_DELETE: 'org.agents.delete',
   AGENTS_CHAT: 'org.agents.chat',
+  // Workspace
+  WORKSPACE_VIEW: 'org.workspace.view',
+  WORKSPACE_MANAGE: 'org.workspace.manage',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -65,6 +68,9 @@ export const SUBACCOUNT_PERMISSIONS = {
   CATEGORIES_MANAGE: 'subaccount.categories.manage',
   // Settings
   SETTINGS_EDIT: 'subaccount.settings.edit',
+  // Workspace
+  WORKSPACE_VIEW: 'subaccount.workspace.view',
+  WORKSPACE_MANAGE: 'subaccount.workspace.manage',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -125,6 +131,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.CATEGORIES_MANAGE, description: 'Manage subaccount categories', groupName: 'subaccount.categories' },
   // subaccount.settings
   { key: SUBACCOUNT_PERMISSIONS.SETTINGS_EDIT, description: 'Edit subaccount settings', groupName: 'subaccount.settings' },
+  // org.workspace
+  { key: ORG_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace boards and items',             groupName: 'org.workspace' },
+  { key: ORG_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace boards, items and configs',   groupName: 'org.workspace' },
+  // subaccount.workspace
+  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace board and items in portal',   groupName: 'subaccount.workspace' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace items in portal',           groupName: 'subaccount.workspace' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
@@ -157,6 +169,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.SUBACCOUNTS_VIEW,
       ORG_PERMISSIONS.AGENTS_VIEW,
       ORG_PERMISSIONS.AGENTS_CHAT,
+      ORG_PERMISSIONS.WORKSPACE_VIEW,
+      ORG_PERMISSIONS.WORKSPACE_MANAGE,
     ],
   },
   {
@@ -170,6 +184,7 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       ORG_PERMISSIONS.SUBACCOUNTS_VIEW,
       ORG_PERMISSIONS.AGENTS_VIEW,
       ORG_PERMISSIONS.AGENTS_CHAT,
+      ORG_PERMISSIONS.WORKSPACE_VIEW,
     ],
   },
   {
@@ -191,6 +206,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       SUBACCOUNT_PERMISSIONS.USERS_INVITE,
       SUBACCOUNT_PERMISSIONS.USERS_EDIT,
       SUBACCOUNT_PERMISSIONS.CATEGORIES_MANAGE,
+      SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,
+      SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE,
     ],
   },
   {
@@ -200,6 +217,7 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       SUBACCOUNT_PERMISSIONS.TASKS_VIEW,
       SUBACCOUNT_PERMISSIONS.TASKS_EXECUTE,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,
+      SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,
     ],
   },
 ];
