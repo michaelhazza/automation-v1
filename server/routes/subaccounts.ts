@@ -365,13 +365,13 @@ router.delete(
 // ─── Subaccount process links ─────────────────────────────────────────────────
 
 /**
- * GET /api/subaccounts/:subaccountId/tasks
+ * GET /api/subaccounts/:subaccountId/processes
  * List all processes visible to this subaccount:
  *   - Org processes linked via subaccount_process_links
  *   - Subaccount-native processes (processes.subaccount_id = subaccountId)
  */
 router.get(
-  '/api/subaccounts/:subaccountId/tasks',
+  '/api/subaccounts/:subaccountId/processes',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   async (req, res) => {
@@ -418,12 +418,12 @@ router.get(
 );
 
 /**
- * POST /api/subaccounts/:subaccountId/tasks
+ * POST /api/subaccounts/:subaccountId/processes
  * Link an org-level process to this subaccount.
  * Body: { processId, subaccountCategoryId? }
  */
 router.post(
-  '/api/subaccounts/:subaccountId/tasks',
+  '/api/subaccounts/:subaccountId/processes',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   async (req, res) => {
@@ -478,11 +478,11 @@ router.post(
 );
 
 /**
- * PATCH /api/subaccounts/:subaccountId/tasks/:linkId
+ * PATCH /api/subaccounts/:subaccountId/processes/:linkId
  * Update a process link (toggle isActive, change category).
  */
 router.patch(
-  '/api/subaccounts/:subaccountId/tasks/:linkId',
+  '/api/subaccounts/:subaccountId/processes/:linkId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   async (req, res) => {
@@ -524,11 +524,11 @@ router.patch(
 );
 
 /**
- * DELETE /api/subaccounts/:subaccountId/tasks/:linkId
+ * DELETE /api/subaccounts/:subaccountId/processes/:linkId
  * Remove a process link from this subaccount.
  */
 router.delete(
-  '/api/subaccounts/:subaccountId/tasks/:linkId',
+  '/api/subaccounts/:subaccountId/processes/:linkId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   async (req, res) => {
