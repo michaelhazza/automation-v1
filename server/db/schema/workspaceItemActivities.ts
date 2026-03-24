@@ -14,9 +14,11 @@ export const workspaceItemActivities = pgTable(
       .references(() => agents.id),
     userId: uuid('user_id')
       .references(() => users.id),
-    activityType: text('activity_type').notNull().$type<'created' | 'assigned' | 'status_changed' | 'progress' | 'completed' | 'note' | 'blocked'>(),
+    activityType: text('activity_type').notNull().$type<'created' | 'assigned' | 'status_changed' | 'progress' | 'completed' | 'note' | 'blocked' | 'deliverable_added'>(),
     message: text('message').notNull(),
     metadata: jsonb('metadata'),
+    // Optional reference to the agent run that created this activity
+    agentRunId: uuid('agent_run_id'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => ({

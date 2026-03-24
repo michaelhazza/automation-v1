@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, real, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
+import { agentTemplates } from './agentTemplates';
 
 export const agents = pgTable(
   'agents',
@@ -8,6 +9,10 @@ export const agents = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
+    // Optional link to the template this agent was created from
+    sourceTemplateId: uuid('source_template_id')
+      .references(() => agentTemplates.id),
+    sourceTemplateVersion: integer('source_template_version'),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     description: text('description'),

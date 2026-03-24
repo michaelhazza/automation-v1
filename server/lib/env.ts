@@ -45,6 +45,8 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   // Maximum messages to include in chat context (recent N messages)
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
+  // Tavily AI search API key for agent web search skill
+  TAVILY_API_KEY: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
