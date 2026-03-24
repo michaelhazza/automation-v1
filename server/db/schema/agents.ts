@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, real, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { agentTemplates } from './agentTemplates';
 
@@ -23,6 +23,8 @@ export const agents = pgTable(
     modelId: text('model_id').notNull().default('claude-sonnet-4-6'),
     temperature: real('temperature').notNull().default(0.7),
     maxTokens: integer('max_tokens').notNull().default(4096),
+    // Default skills assigned to this agent (copied to subaccountAgents on link)
+    defaultSkillSlugs: jsonb('default_skill_slugs').$type<string[]>(),
     // Lifecycle
     status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),

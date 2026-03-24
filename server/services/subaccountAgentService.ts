@@ -53,6 +53,12 @@ export const subaccountAgentService = {
 
     if (!agent) throw { statusCode: 404, message: 'Agent not found in this organisation' };
 
+    // Load full agent to get default skill slugs
+    const [fullAgent] = await db
+      .select({ defaultSkillSlugs: agents.defaultSkillSlugs })
+      .from(agents)
+      .where(eq(agents.id, agentId));
+
     const [link] = await db
       .insert(subaccountAgents)
       .values({
@@ -60,6 +66,7 @@ export const subaccountAgentService = {
         subaccountId,
         agentId,
         isActive: true,
+        skillSlugs: fullAgent?.defaultSkillSlugs ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
