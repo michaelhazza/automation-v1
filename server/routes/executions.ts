@@ -12,7 +12,7 @@ router.get('/api/executions/export', authenticate, requireOrgPermission(ORG_PERM
     const result = await executionService.exportExecutions(req.orgId!, {
       from: req.query.from as string | undefined,
       to: req.query.to as string | undefined,
-      taskId: req.query.taskId as string | undefined,
+      processId: req.query.processId as string | undefined,
       userId: req.query.userId as string | undefined,
     });
     res.setHeader('Content-Type', result.contentType);
@@ -29,7 +29,7 @@ router.get('/api/executions', authenticate, async (req, res) => {
     const canViewAll = await checkOrgPermission(req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.EXECUTIONS_VIEW);
     const viewFullAudit = req.user!.role === 'system_admin';
     const result = await executionService.listExecutions(req.user!.id, req.orgId!, canViewAll, viewFullAudit, {
-      taskId: req.query.taskId as string | undefined,
+      processId: req.query.processId as string | undefined,
       userId: req.query.userId as string | undefined,
       status: req.query.status as string | undefined,
       from: req.query.from as string | undefined,
@@ -46,15 +46,15 @@ router.get('/api/executions', authenticate, async (req, res) => {
 
 router.post('/api/executions', authenticate, validateMultipart, async (req, res) => {
   try {
-    const { taskId, inputData, notifyOnComplete, subaccountId } = req.body;
-    if (!taskId) {
-      res.status(400).json({ error: 'Validation failed', details: 'taskId is required' });
+    const { processId, inputData, notifyOnComplete, subaccountId } = req.body;
+    if (!processId) {
+      res.status(400).json({ error: 'Validation failed', details: 'processId is required' });
       return;
     }
     const parsedInputData = inputData ? (typeof inputData === 'string' ? JSON.parse(inputData) : inputData) : undefined;
     const parsedNotify = notifyOnComplete === true || notifyOnComplete === 'true';
     const result = await executionService.createExecution(req.user!.id, req.orgId!, {
-      taskId,
+      processId,
       inputData: parsedInputData,
       notifyOnComplete: parsedNotify,
       subaccountId: subaccountId ?? undefined,

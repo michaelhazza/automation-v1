@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { db } from '../db/index.js';
-import { executions, organisations, tasks, users } from '../db/schema/index.js';
+import { executions, organisations, processes, users } from '../db/schema/index.js';
 import { eq, and, gte, lte, desc, SQL } from 'drizzle-orm';
 import { parsePositiveInt } from '../middleware/validate.js';
 
@@ -54,20 +54,20 @@ router.get('/api/system/executions', authenticate, requireSystemAdmin, async (re
         durationMs: executions.durationMs,
         createdAt: executions.createdAt,
         organisationId: executions.organisationId,
-        taskId: executions.taskId,
+        processId: executions.processId,
         triggeredByUserId: executions.triggeredByUserId,
         subaccountId: executions.subaccountId,
         notifyOnComplete: executions.notifyOnComplete,
         taskSnapshot: executions.taskSnapshot,
         organisationName: organisations.name,
-        taskName: tasks.name,
+        processName: processes.name,
         userEmail: users.email,
         userFirstName: users.firstName,
         userLastName: users.lastName,
       })
       .from(executions)
       .leftJoin(organisations, eq(executions.organisationId, organisations.id))
-      .leftJoin(tasks, eq(executions.taskId, tasks.id))
+      .leftJoin(processes, eq(executions.processId, processes.id))
       .leftJoin(users, eq(executions.triggeredByUserId, users.id))
       .where(whereClause)
       .orderBy(desc(executions.createdAt))
@@ -110,18 +110,18 @@ router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async
         notifyOnComplete: executions.notifyOnComplete,
         taskSnapshot: executions.taskSnapshot,
         organisationId: executions.organisationId,
-        taskId: executions.taskId,
+        processId: executions.processId,
         triggeredByUserId: executions.triggeredByUserId,
         subaccountId: executions.subaccountId,
         organisationName: organisations.name,
-        taskName: tasks.name,
+        processName: processes.name,
         userEmail: users.email,
         userFirstName: users.firstName,
         userLastName: users.lastName,
       })
       .from(executions)
       .leftJoin(organisations, eq(executions.organisationId, organisations.id))
-      .leftJoin(tasks, eq(executions.taskId, tasks.id))
+      .leftJoin(processes, eq(executions.processId, processes.id))
       .leftJoin(users, eq(executions.triggeredByUserId, users.id))
       .where(eq(executions.id, req.params.id));
 

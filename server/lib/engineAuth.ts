@@ -1,5 +1,5 @@
 /**
- * Shared engine authentication header builder used by queueService and taskService.
+ * Shared engine authentication header builder used by queueService and processService.
  * Each engine type uses a different auth header convention.
  */
 

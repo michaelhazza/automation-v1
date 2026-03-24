@@ -1,6 +1,6 @@
 import { eq, and, desc, gte, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentRuns, agents, subaccounts, workspaceItemActivities } from '../db/schema/index.js';
+import { agentRuns, agents, subaccounts, taskActivities } from '../db/schema/index.js';
 
 // ---------------------------------------------------------------------------
 // Agent Activity Service — scoped activity queries for dashboard/activity page
@@ -54,8 +54,8 @@ export const agentActivityService = {
       summary: run.summary,
       totalToolCalls: run.totalToolCalls,
       totalTokens: run.totalTokens,
-      workspaceItemsCreated: run.workspaceItemsCreated,
-      workspaceItemsUpdated: run.workspaceItemsUpdated,
+      tasksCreated: run.tasksCreated,
+      tasksUpdated: run.tasksUpdated,
       deliverablesCreated: run.deliverablesCreated,
       durationMs: run.durationMs,
       errorMessage: run.errorMessage,
@@ -116,8 +116,8 @@ export const agentActivityService = {
         failedRuns: sql<number>`count(*) filter (where ${agentRuns.status} = 'failed')::int`,
         totalTokens: sql<number>`coalesce(sum(${agentRuns.totalTokens}), 0)::int`,
         totalToolCalls: sql<number>`coalesce(sum(${agentRuns.totalToolCalls}), 0)::int`,
-        totalItemsCreated: sql<number>`coalesce(sum(${agentRuns.workspaceItemsCreated}), 0)::int`,
-        totalItemsUpdated: sql<number>`coalesce(sum(${agentRuns.workspaceItemsUpdated}), 0)::int`,
+        totalItemsCreated: sql<number>`coalesce(sum(${agentRuns.tasksCreated}), 0)::int`,
+        totalItemsUpdated: sql<number>`coalesce(sum(${agentRuns.tasksUpdated}), 0)::int`,
         totalDeliverables: sql<number>`coalesce(sum(${agentRuns.deliverablesCreated}), 0)::int`,
         avgDurationMs: sql<number>`coalesce(avg(${agentRuns.durationMs}), 0)::int`,
       })
@@ -140,12 +140,12 @@ export const agentActivityService = {
     // Get activities that were created by agents
     let query = db
       .select({
-        activity: workspaceItemActivities,
+        activity: taskActivities,
         agentName: agents.name,
       })
-      .from(workspaceItemActivities)
-      .innerJoin(agents, eq(agents.id, workspaceItemActivities.agentId))
-      .orderBy(desc(workspaceItemActivities.createdAt))
+      .from(taskActivities)
+      .innerJoin(agents, eq(agents.id, taskActivities.agentId))
+      .orderBy(desc(taskActivities.createdAt))
       .limit(limit);
 
     return query;

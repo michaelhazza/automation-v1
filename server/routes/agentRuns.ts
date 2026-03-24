@@ -20,7 +20,7 @@ router.post(
   async (req, res) => {
     try {
       const { subaccountId, agentId } = req.params;
-      const { workspaceItemId } = req.body;
+      const { taskId } = req.body;
 
       // Find the subaccount agent link
       const [saLink] = await db
@@ -46,7 +46,7 @@ router.post(
         organisationId: req.orgId!,
         runType: 'manual',
         executionMode: 'api',
-        workspaceItemId,
+        taskId,
         triggerContext: { triggeredBy: req.user!.id, source: 'manual' },
       });
 

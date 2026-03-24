@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-interface Task {
+interface Process {
   id: string;
   name: string;
   description: string;
@@ -17,7 +17,7 @@ interface Task {
 
 export default function AdminTaskEditPage({ user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
-  const [task, setTask] = useState<Task | null>(null);
+  const [process, setProcess] = useState<Process | null>(null);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [engines, setEngines] = useState<{ id: string; name: string; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,12 +30,12 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
 
   useEffect(() => {
     const load = async () => {
-      const [taskRes, catRes, engRes] = await Promise.all([
-        api.get(`/api/tasks/${id}`),
+      const [processRes, catRes, engRes] = await Promise.all([
+        api.get(`/api/processes/${id}`),
         api.get('/api/categories'),
         api.get('/api/engines'),
       ]);
-      setTask(taskRes.data);
+      setProcess(processRes.data);
       setCategories(catRes.data);
       setEngines(engRes.data);
       setLoading(false);
@@ -48,8 +48,8 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
     setSuccess('');
     setSaving(true);
     try {
-      await api.patch(`/api/tasks/${id}`, task);
-      setSuccess('Task saved successfully');
+      await api.patch(`/api/processes/${id}`, process);
+      setSuccess('Process saved successfully');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Save failed');
@@ -68,7 +68,7 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
       }
       const form = new FormData();
       if (parsedInput !== undefined) form.append('inputData', JSON.stringify(parsedInput));
-      const { data } = await api.post(`/api/tasks/${id}/test`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const { data } = await api.post(`/api/processes/${id}/test`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
       setTestResult(data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: unknown } };
@@ -78,14 +78,14 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
     }
   };
 
-  if (loading || !task) return <div>Loading...</div>;
+  if (loading || !process) return <div>Loading...</div>;
 
   return (
     <>
       <div style={{ marginBottom: 16 }}>
-        <Link to="/admin/tasks" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to tasks</Link>
+        <Link to="/admin/processes" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to processes</Link>
       </div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 24 }}>Edit Task: {task.name}</h1>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 24 }}>Edit Process: {process.name}</h1>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>
         {/* Edit form */}
@@ -95,30 +95,30 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
           <div style={{ display: 'grid', gap: 16 }}>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
-              <input type="text" value={task.name ?? ''} onChange={(e) => setTask({ ...task, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <input type="text" value={process.name ?? ''} onChange={(e) => setProcess({ ...process, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Webhook path</label>
-              <input type="text" value={task.webhookPath ?? ''} onChange={(e) => setTask({ ...task, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <input type="text" value={process.webhookPath ?? ''} onChange={(e) => setProcess({ ...process, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Category</label>
-              <select value={task.orgCategoryId ?? ''} onChange={(e) => setTask({ ...task, orgCategoryId: e.target.value || null })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
+              <select value={process.orgCategoryId ?? ''} onChange={(e) => setProcess({ ...process, orgCategoryId: e.target.value || null })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
                 <option value="">No category</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
-              <textarea value={task.description ?? ''} onChange={(e) => setTask({ ...task, description: e.target.value })} rows={3} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <textarea value={process.description ?? ''} onChange={(e) => setProcess({ ...process, description: e.target.value })} rows={3} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input schema / guidance</label>
-              <textarea value={task.inputSchema ?? ''} onChange={(e) => setTask({ ...task, inputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <textarea value={process.inputSchema ?? ''} onChange={(e) => setProcess({ ...process, inputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Output schema / description</label>
-              <textarea value={task.outputSchema ?? ''} onChange={(e) => setTask({ ...task, outputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <textarea value={process.outputSchema ?? ''} onChange={(e) => setProcess({ ...process, outputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
             </div>
           </div>
           <button onClick={handleSave} disabled={saving} style={{ marginTop: 20, padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>

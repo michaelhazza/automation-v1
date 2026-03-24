@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-interface Task {
+interface Process {
   id: string;
   name: string;
   description: string;
@@ -58,7 +58,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function TaskExecutionPage({ user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
-  const [task, setTask] = useState<Task | null>(null);
+  const [process, setProcess] = useState<Process | null>(null);
   const [inputData, setInputData] = useState('');
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [execution, setExecution] = useState<Execution | null>(null);
@@ -76,10 +76,10 @@ export default function TaskExecutionPage({ user }: { user: User }) {
 
   useEffect(() => {
     Promise.all([
-      api.get(`/api/tasks/${id}`),
+      api.get(`/api/processes/${id}`),
       api.get('/api/settings/upload').catch(() => ({ data: { maxUploadSizeMb: 200 } })),
-    ]).then(([taskRes, settingsRes]) => {
-      setTask(taskRes.data);
+    ]).then(([processRes, settingsRes]) => {
+      setProcess(processRes.data);
       setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
     }).finally(() => setLoading(false));
 
@@ -137,7 +137,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
       }
 
       const { data: execData } = await api.post('/api/executions', {
-        taskId: id,
+        processId: id,
         ...(parsedInput !== undefined ? { inputData: JSON.stringify(parsedInput) } : {}),
         notifyOnComplete,
       });
@@ -157,7 +157,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
       pollExecution(execId);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to submit task');
+      setError(e.response?.data?.error ?? 'Failed to submit process');
       setUploadProgress('');
       setSubmitting(false);
     }
@@ -184,12 +184,12 @@ export default function TaskExecutionPage({ user }: { user: User }) {
     );
   }
 
-  if (!task) {
+  if (!process) {
     return (
       <div className="card empty-state" style={{ maxWidth: 480, margin: '0 auto' }}>
-        <p style={{ fontWeight: 700, fontSize: 16, color: '#dc2626' }}>Task not found</p>
-        <Link to="/tasks" className="btn btn-secondary" style={{ textDecoration: 'none', marginTop: 12 }}>
-          Back to Tasks
+        <p style={{ fontWeight: 700, fontSize: 16, color: '#dc2626' }}>Process not found</p>
+        <Link to="/processes" className="btn btn-secondary" style={{ textDecoration: 'none', marginTop: 12 }}>
+          Back to Processes
         </Link>
       </div>
     );
@@ -203,29 +203,29 @@ export default function TaskExecutionPage({ user }: { user: User }) {
     <div className="page-enter" style={{ maxWidth: 780 }}>
       {/* Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, fontSize: 13 }}>
-        <Link to="/tasks" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>Tasks</Link>
+        <Link to="/processes" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>Processes</Link>
         <span style={{ color: '#94a3b8' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6" />
           </svg>
         </span>
-        <span style={{ color: '#64748b', fontWeight: 500 }}>{task.name}</span>
+        <span style={{ color: '#64748b', fontWeight: 500 }}>{process.name}</span>
       </div>
 
-      {/* Task header */}
+      {/* Process header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: '0 0 8px', letterSpacing: '-0.03em' }}>
-          {task.name}
+          {process.name}
         </h1>
-        {task.description && (
-          <p style={{ color: '#64748b', margin: 0, fontSize: 14, lineHeight: 1.6 }}>{task.description}</p>
+        {process.description && (
+          <p style={{ color: '#64748b', margin: 0, fontSize: 14, lineHeight: 1.6 }}>{process.description}</p>
         )}
       </div>
 
       {/* Schema hints */}
-      {(task.inputSchema || task.outputSchema) && (
+      {(process.inputSchema || process.outputSchema) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-          {task.inputSchema && (
+          {process.inputSchema && (
             <div style={{
               background: '#f0f9ff', border: '1px solid #bae6fd',
               borderRadius: 10, padding: '12px 16px', fontSize: 13, color: '#0369a1',
@@ -234,10 +234,10 @@ export default function TaskExecutionPage({ user }: { user: User }) {
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              <div><strong>Input guidance:</strong> {task.inputSchema}</div>
+              <div><strong>Input guidance:</strong> {process.inputSchema}</div>
             </div>
           )}
-          {task.outputSchema && (
+          {process.outputSchema && (
             <div style={{
               background: '#f0fdf4', border: '1px solid #bbf7d0',
               borderRadius: 10, padding: '12px 16px', fontSize: 13, color: '#166534',
@@ -246,7 +246,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <div><strong>Expected output:</strong> {task.outputSchema}</div>
+              <div><strong>Expected output:</strong> {process.outputSchema}</div>
             </div>
           )}
         </div>
@@ -256,7 +256,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
       {!execution && (
         <div className="card" style={{ padding: 28, marginBottom: 20, animation: 'fadeIn 0.2s ease-out both' }}>
           <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
-            Task Input
+            Process Input
           </h3>
 
           {/* Input data */}
@@ -357,7 +357,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
             </div>
             <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} style={{ display: 'none' }} />
             <span style={{ fontSize: 13.5, color: '#374151', fontWeight: 500 }}>
-              Email me when this task completes
+              Email me when this process completes
             </span>
           </label>
 
@@ -397,7 +397,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                Run Task
+                Run Process
               </>
             )}
           </button>
@@ -431,7 +431,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
           </div>
           <div>
             <div style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', marginBottom: 8, letterSpacing: '-0.01em' }}>
-              Executing task…
+              Executing process…
             </div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <span style={{ fontSize: 13, color: '#64748b' }}>Status:</span>

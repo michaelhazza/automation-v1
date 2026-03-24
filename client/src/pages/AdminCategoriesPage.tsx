@@ -66,8 +66,8 @@ export default function AdminCategoriesPage({ user }: { user: User }) {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Task Categories</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Organise tasks and control access via categories</p>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Process Categories</h1>
+          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Organise processes and control access via categories</p>
         </div>
         <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
           + Add category

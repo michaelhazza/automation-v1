@@ -1,13 +1,13 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { taskCategories } from '../db/schema/index.js';
+import { processCategories } from '../db/schema/index.js';
 
 export class CategoryService {
   async listCategories(organisationId: string) {
     const rows = await db
       .select()
-      .from(taskCategories)
-      .where(and(eq(taskCategories.organisationId, organisationId), isNull(taskCategories.deletedAt)));
+      .from(processCategories)
+      .where(and(eq(processCategories.organisationId, organisationId), isNull(processCategories.deletedAt)));
 
     return rows.map((c) => ({
       id: c.id,
@@ -23,7 +23,7 @@ export class CategoryService {
     data: { name: string; description?: string; colour?: string }
   ) {
     const [category] = await db
-      .insert(taskCategories)
+      .insert(processCategories)
       .values({
         organisationId,
         name: data.name,
@@ -48,8 +48,8 @@ export class CategoryService {
   ) {
     const [category] = await db
       .select()
-      .from(taskCategories)
-      .where(and(eq(taskCategories.id, id), eq(taskCategories.organisationId, organisationId), isNull(taskCategories.deletedAt)));
+      .from(processCategories)
+      .where(and(eq(processCategories.id, id), eq(processCategories.organisationId, organisationId), isNull(processCategories.deletedAt)));
 
     if (!category) {
       throw { statusCode: 404, message: 'Category not found' };
@@ -61,9 +61,9 @@ export class CategoryService {
     if (data.colour !== undefined) update.colour = data.colour;
 
     const [updated] = await db
-      .update(taskCategories)
+      .update(processCategories)
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(taskCategories.id, id))
+      .where(eq(processCategories.id, id))
       .returning();
 
     return {
@@ -76,15 +76,15 @@ export class CategoryService {
   async deleteCategory(id: string, organisationId: string) {
     const [category] = await db
       .select()
-      .from(taskCategories)
-      .where(and(eq(taskCategories.id, id), eq(taskCategories.organisationId, organisationId), isNull(taskCategories.deletedAt)));
+      .from(processCategories)
+      .where(and(eq(processCategories.id, id), eq(processCategories.organisationId, organisationId), isNull(processCategories.deletedAt)));
 
     if (!category) {
       throw { statusCode: 404, message: 'Category not found' };
     }
 
     const now = new Date();
-    await db.update(taskCategories).set({ deletedAt: now, updatedAt: now }).where(eq(taskCategories.id, id));
+    await db.update(processCategories).set({ deletedAt: now, updatedAt: now }).where(eq(processCategories.id, id));
 
     return { message: 'Category deleted successfully' };
   }

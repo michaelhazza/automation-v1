@@ -25,7 +25,7 @@ interface Deliverable {
   createdAt: string;
 }
 
-interface ItemData {
+interface TaskData {
   id: string;
   title: string;
   description: string | null;
@@ -58,8 +58,8 @@ const activityIcons: Record<string, string> = {
   blocked: '🚫',
 };
 
-export default function WorkspaceItemModal({ subaccountId, itemId, agents, columns, onClose, onSaved }: Props) {
-  const [item, setItem] = useState<ItemData | null>(null);
+export default function TaskModal({ subaccountId, itemId, agents, columns, onClose, onSaved }: Props) {
+  const [task, setTask] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'details' | 'activity' | 'deliverables'>('details');
   const [saving, setSaving] = useState(false);
@@ -80,8 +80,8 @@ export default function WorkspaceItemModal({ subaccountId, itemId, agents, colum
   const load = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get(`/api/subaccounts/${subaccountId}/workspace-items/${itemId}`);
-      setItem(data);
+      const { data } = await api.get(`/api/subaccounts/${subaccountId}/tasks/${itemId}`);
+      setTask(data);
       setTitle(data.title);
       setDescription(data.description ?? '');
       setBrief(data.brief ?? '');
@@ -100,7 +100,7 @@ export default function WorkspaceItemModal({ subaccountId, itemId, agents, colum
     setSaving(true);
     setError('');
     try {
-      await api.patch(`/api/subaccounts/${subaccountId}/workspace-items/${itemId}`, {
+      await api.patch(`/api/subaccounts/${subaccountId}/tasks/${itemId}`, {
         title,
         description: description || null,
         brief: brief || null,
@@ -122,7 +122,7 @@ export default function WorkspaceItemModal({ subaccountId, itemId, agents, colum
   const handleAddNote = async () => {
     if (!noteMessage.trim()) return;
     try {
-      await api.post(`/api/subaccounts/${subaccountId}/workspace-items/${itemId}/activities`, {
+      await api.post(`/api/subaccounts/${subaccountId}/tasks/${itemId}/activities`, {
         activityType: 'note',
         message: noteMessage,
       });
@@ -134,16 +134,16 @@ export default function WorkspaceItemModal({ subaccountId, itemId, agents, colum
   };
 
   if (loading) return <Modal title="Loading..." onClose={onClose}><div style={{ padding: 20 }}>Loading...</div></Modal>;
-  if (!item) return null;
+  if (!task) return null;
 
   const tabs = [
     { key: 'details', label: 'Details' },
-    { key: 'activity', label: `Activity (${item.activities.length})` },
-    { key: 'deliverables', label: `Deliverables (${item.deliverables.length})` },
+    { key: 'activity', label: `Activity (${task.activities.length})` },
+    { key: 'deliverables', label: `Deliverables (${task.deliverables.length})` },
   ];
 
   return (
-    <Modal title={item.title} onClose={onClose} maxWidth={640}>
+    <Modal title={task.title} onClose={onClose} maxWidth={640}>
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e2e8f0', marginBottom: 16 }}>
         {tabs.map(t => (
           <button
@@ -268,8 +268,8 @@ export default function WorkspaceItemModal({ subaccountId, itemId, agents, colum
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto' as const }}>
-            {item.activities.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13, fontStyle: 'italic' }}>No activity yet</div>}
-            {item.activities.map(a => (
+            {task.activities.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13, fontStyle: 'italic' }}>No activity yet</div>}
+            {task.activities.map(a => (
               <div key={a.id} style={{ display: 'flex', gap: 8, padding: '6px 0', borderBottom: '1px solid #f1f5f9' }}>
                 <span style={{ fontSize: 14 }}>{activityIcons[a.activityType] ?? '•'}</span>
                 <div style={{ flex: 1 }}>
@@ -284,8 +284,8 @@ export default function WorkspaceItemModal({ subaccountId, itemId, agents, colum
 
       {tab === 'deliverables' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 4px' }}>
-          {item.deliverables.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13, fontStyle: 'italic' }}>No deliverables yet</div>}
-          {item.deliverables.map(d => (
+          {task.deliverables.length === 0 && <div style={{ color: '#94a3b8', fontSize: 13, fontStyle: 'italic' }}>No deliverables yet</div>}
+          {task.deliverables.map(d => (
             <div key={d.id} style={{ padding: '8px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{d.title}</span>

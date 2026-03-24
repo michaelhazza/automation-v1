@@ -11,11 +11,11 @@ import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
 import {
   subaccounts,
-  subaccountTaskLinks,
+  subaccountProcessLinks,
   subaccountCategories,
   subaccountUserAssignments,
   permissionSetItems,
-  tasks,
+  processes,
   executions,
   workflowEngines,
 } from '../db/schema/index.js';
@@ -85,16 +85,16 @@ async function hasSubaccountPerm(userId: string, subaccountId: string, key: stri
   return !!row;
 }
 
-// ─── Portal: list tasks ───────────────────────────────────────────────────────
+// ─── Portal: list processes ───────────────────────────────────────────────────
 
 /**
- * GET /api/portal/:subaccountId/tasks
- * Returns tasks visible to this subaccount member, grouped by category.
+ * GET /api/portal/:subaccountId/processes
+ * Returns processes visible to this subaccount member, grouped by category.
  */
 router.get(
-  '/api/portal/:subaccountId/tasks',
+  '/api/portal/:subaccountId/processes',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.TASKS_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW),
   async (req, res) => {
     try {
       const sa = await resolveSubaccount(req.params.subaccountId);
@@ -104,36 +104,36 @@ router.get(
         return;
       }
 
-      // Org tasks linked (active link + active task)
+      // Org processes linked (active link + active process)
       const linkedRows = await db
         .select({
-          taskId: subaccountTaskLinks.taskId,
-          subaccountCategoryId: subaccountTaskLinks.subaccountCategoryId,
-          taskName: tasks.name,
-          taskDescription: tasks.description,
-          taskInputSchema: tasks.inputSchema,
-          taskOutputSchema: tasks.outputSchema,
+          processId: subaccountProcessLinks.processId,
+          subaccountCategoryId: subaccountProcessLinks.subaccountCategoryId,
+          processName: processes.name,
+          processDescription: processes.description,
+          processInputSchema: processes.inputSchema,
+          processOutputSchema: processes.outputSchema,
         })
-        .from(subaccountTaskLinks)
-        .innerJoin(tasks, eq(tasks.id, subaccountTaskLinks.taskId))
+        .from(subaccountProcessLinks)
+        .innerJoin(processes, eq(processes.id, subaccountProcessLinks.processId))
         .where(
           and(
-            eq(subaccountTaskLinks.subaccountId, req.params.subaccountId),
-            eq(subaccountTaskLinks.isActive, true),
-            eq(tasks.status, 'active'),
-            isNull(tasks.deletedAt)
+            eq(subaccountProcessLinks.subaccountId, req.params.subaccountId),
+            eq(subaccountProcessLinks.isActive, true),
+            eq(processes.status, 'active'),
+            isNull(processes.deletedAt)
           )
         );
 
-      // Subaccount-native tasks
+      // Subaccount-native processes
       const nativeRows = await db
         .select()
-        .from(tasks)
+        .from(processes)
         .where(
           and(
-            eq(tasks.subaccountId, req.params.subaccountId),
-            eq(tasks.status, 'active'),
-            isNull(tasks.deletedAt)
+            eq(processes.subaccountId, req.params.subaccountId),
+            eq(processes.status, 'active'),
+            isNull(processes.deletedAt)
           )
         );
 
@@ -152,13 +152,13 @@ router.get(
         categories.map((c) => [c.id, { id: c.id, name: c.name, colour: c.colour }])
       );
 
-      const allTasks = [
+      const allProcesses = [
         ...linkedRows.map((row) => ({
-          id: row.taskId,
-          name: row.taskName,
-          description: row.taskDescription,
-          inputSchema: row.taskInputSchema,
-          outputSchema: row.taskOutputSchema,
+          id: row.processId,
+          name: row.processName,
+          description: row.processDescription,
+          inputSchema: row.processInputSchema,
+          outputSchema: row.processOutputSchema,
           category: row.subaccountCategoryId ? catMap[row.subaccountCategoryId] : null,
           source: 'linked' as const,
         })),
@@ -175,7 +175,7 @@ router.get(
 
       res.json({
         subaccount: { id: sa.id, name: sa.name },
-        tasks: allTasks,
+        processes: allProcesses,
         categories,
       });
     } catch (err: unknown) {
@@ -185,17 +185,17 @@ router.get(
   }
 );
 
-// ─── Portal: execute a task ───────────────────────────────────────────────────
+// ─── Portal: execute a process ──────────────────────────────────────────────
 
 /**
  * POST /api/portal/:subaccountId/executions
- * Execute a task as a subaccount member.
- * Body: { taskId, inputData?, notifyOnComplete? }
+ * Execute a process as a subaccount member.
+ * Body: { processId, inputData?, notifyOnComplete? }
  */
 router.post(
   '/api/portal/:subaccountId/executions',
   authenticate,
-  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.TASKS_EXECUTE),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE),
   async (req, res) => {
     try {
       const sa = await resolveSubaccount(req.params.subaccountId);
@@ -205,61 +205,61 @@ router.post(
         return;
       }
 
-      const { taskId, inputData, notifyOnComplete } = req.body as {
-        taskId?: string;
+      const { processId, inputData, notifyOnComplete } = req.body as {
+        processId?: string;
         inputData?: unknown;
         notifyOnComplete?: boolean;
       };
 
-      if (!taskId) {
-        res.status(400).json({ error: 'Validation failed', details: 'taskId is required' });
+      if (!processId) {
+        res.status(400).json({ error: 'Validation failed', details: 'processId is required' });
         return;
       }
 
-      // Verify the task is accessible to this subaccount (linked or native)
+      // Verify the process is accessible to this subaccount (linked or native)
       const linkedResult = await db
-        .select({ taskId: subaccountTaskLinks.taskId })
-        .from(subaccountTaskLinks)
+        .select({ processId: subaccountProcessLinks.processId })
+        .from(subaccountProcessLinks)
         .where(
           and(
-            eq(subaccountTaskLinks.subaccountId, req.params.subaccountId),
-            eq(subaccountTaskLinks.taskId, taskId),
-            eq(subaccountTaskLinks.isActive, true)
+            eq(subaccountProcessLinks.subaccountId, req.params.subaccountId),
+            eq(subaccountProcessLinks.processId, processId),
+            eq(subaccountProcessLinks.isActive, true)
           )
         );
 
       const nativeResult = await db
-        .select({ id: tasks.id })
-        .from(tasks)
+        .select({ id: processes.id })
+        .from(processes)
         .where(
           and(
-            eq(tasks.id, taskId),
-            eq(tasks.subaccountId, req.params.subaccountId),
-            eq(tasks.status, 'active'),
-            isNull(tasks.deletedAt)
+            eq(processes.id, processId),
+            eq(processes.subaccountId, req.params.subaccountId),
+            eq(processes.status, 'active'),
+            isNull(processes.deletedAt)
           )
         );
 
       if (linkedResult.length === 0 && nativeResult.length === 0) {
-        res.status(404).json({ error: 'Task not found or not accessible in this subaccount' });
+        res.status(404).json({ error: 'Process not found or not accessible in this subaccount' });
         return;
       }
 
-      // Fetch task and engine
-      const [task] = await db
+      // Fetch process and engine
+      const [process] = await db
         .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.status, 'active'), isNull(tasks.deletedAt)));
+        .from(processes)
+        .where(and(eq(processes.id, processId), eq(processes.status, 'active'), isNull(processes.deletedAt)));
 
-      if (!task || !task.workflowEngineId) {
-        res.status(400).json({ error: 'Task not available' });
+      if (!process || !process.workflowEngineId) {
+        res.status(400).json({ error: 'Process not available' });
         return;
       }
 
       const [engine] = await db
         .select()
         .from(workflowEngines)
-        .where(eq(workflowEngines.id, task.workflowEngineId));
+        .where(eq(workflowEngines.id, process.workflowEngineId));
 
       if (!engine) {
         res.status(400).json({ error: 'Workflow engine not found' });
@@ -274,7 +274,7 @@ router.post(
         .where(
           and(
             eq(executions.triggeredByUserId, req.user!.id),
-            eq(executions.taskId, taskId),
+            eq(executions.processId, processId),
             gte(executions.createdAt, fiveMinutesAgo)
           )
         );
@@ -284,7 +284,7 @@ router.post(
         const oldest = nonTestRecent.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
         const waitSec = Math.ceil((oldest.createdAt.getTime() + 5 * 60 * 1000 - Date.now()) / 1000);
         res.status(429).json({
-          error: `Duplicate execution: this task was already triggered recently. Please wait ${waitSec} seconds before retrying.`,
+          error: `Duplicate execution: this process was already triggered recently. Please wait ${waitSec} seconds before retrying.`,
         });
         return;
       }
@@ -292,14 +292,14 @@ router.post(
       const [execution] = await db
         .insert(executions)
         .values({
-          organisationId: task.organisationId,
-          taskId,
+          organisationId: process.organisationId,
+          processId,
           triggeredByUserId: req.user!.id,
           subaccountId: req.params.subaccountId,
           status: 'pending',
           inputData: inputData ?? null,
           engineType: engine.engineType,
-          taskSnapshot: task as unknown as Record<string, unknown>,
+          processSnapshot: process as unknown as Record<string, unknown>,
           isTestExecution: false,
           notifyOnComplete: notifyOnComplete ?? false,
           retryCount: 0,
@@ -314,7 +314,7 @@ router.post(
         // Queue failure should not fail the API response
       }
 
-      res.status(201).json({ id: execution.id, status: execution.status, taskId: execution.taskId });
+      res.status(201).json({ id: execution.id, status: execution.status, processId: execution.processId });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
@@ -342,13 +342,13 @@ router.get(
         SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL
       );
 
-      const { from, to, taskId, limit: limitRaw, offset: offsetRaw } = req.query;
+      const { from, to, processId, limit: limitRaw, offset: offsetRaw } = req.query;
       const limit = Math.min(parseInt(limitRaw as string) || 50, 200);
       const offset = parseInt(offsetRaw as string) || 0;
 
       const conditions = [eq(executions.subaccountId, req.params.subaccountId)];
       if (!canViewAll) conditions.push(eq(executions.triggeredByUserId, req.user!.id));
-      if (taskId) conditions.push(eq(executions.taskId, taskId as string));
+      if (processId) conditions.push(eq(executions.processId, processId as string));
       if (from) conditions.push(gte(executions.createdAt, new Date(from as string)));
       if (to) conditions.push(lte(executions.createdAt, new Date(to as string)));
 
@@ -363,7 +363,7 @@ router.get(
       res.json(
         rows.map((e) => ({
           id: e.id,
-          taskId: e.taskId,
+          processId: e.processId,
           status: e.status,
           inputData: e.inputData,
           outputData: e.outputData,
@@ -424,7 +424,7 @@ router.get(
 
       res.json({
         id: execution.id,
-        taskId: execution.taskId,
+        processId: execution.processId,
         status: execution.status,
         inputData: execution.inputData,
         outputData: execution.outputData,

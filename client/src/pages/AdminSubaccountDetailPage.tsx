@@ -19,16 +19,16 @@ interface Category {
   colour: string | null;
 }
 
-interface TaskLink {
+interface ProcessLink {
   linkId: string;
-  taskId: string;
-  taskName: string;
-  taskStatus: string;
+  processId: string;
+  processName: string;
+  processStatus: string;
   isActive: boolean;
   subaccountCategoryId: string | null;
 }
 
-interface NativeTask {
+interface NativeProcess {
   id: string;
   name: string;
   status: string;
@@ -45,7 +45,7 @@ interface Member {
   permissionSetName: string;
 }
 
-interface OrgTask {
+interface OrgProcess {
   id: string;
   name: string;
   status: string;
@@ -63,16 +63,16 @@ interface OrgMember {
   lastName: string;
 }
 
-type ActiveTab = 'categories' | 'tasks' | 'members' | 'settings';
+type ActiveTab = 'categories' | 'processes' | 'members' | 'settings';
 
 export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [sa, setSa] = useState<Subaccount | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [linkedTasks, setLinkedTasks] = useState<TaskLink[]>([]);
-  const [nativeTasks, setNativeTasks] = useState<NativeTask[]>([]);
+  const [linkedProcesses, setLinkedProcesses] = useState<ProcessLink[]>([]);
+  const [nativeProcesses, setNativeProcesses] = useState<NativeProcess[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [orgTasks, setOrgTasks] = useState<OrgTask[]>([]);
+  const [orgProcesses, setOrgProcesses] = useState<OrgProcess[]>([]);
   const [permissionSets, setPermissionSets] = useState<PermissionSet[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,9 +84,9 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   const [catForm, setCatForm] = useState({ name: '', description: '', colour: '#6366f1' });
   const [deleteCatId, setDeleteCatId] = useState<string | null>(null);
 
-  // Task link form
+  // Process link form
   const [showLinkForm, setShowLinkForm] = useState(false);
-  const [linkForm, setLinkForm] = useState({ taskId: '', subaccountCategoryId: '' });
+  const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
   const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
   // Member form
@@ -101,16 +101,16 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   const load = async () => {
     if (!subaccountId) return;
     try {
-      const [saRes, catRes, taskRes, memberRes] = await Promise.all([
+      const [saRes, catRes, processRes, memberRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
-        api.get(`/api/subaccounts/${subaccountId}/tasks`),
+        api.get(`/api/subaccounts/${subaccountId}/processes`),
         api.get(`/api/subaccounts/${subaccountId}/members`),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);
-      setLinkedTasks(taskRes.data.linkedTasks ?? []);
-      setNativeTasks(taskRes.data.nativeTasks ?? []);
+      setLinkedProcesses(processRes.data.linkedProcesses ?? []);
+      setNativeProcesses(processRes.data.nativeProcesses ?? []);
       setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
     } finally {
@@ -119,13 +119,13 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   };
 
   const loadOrgData = async () => {
-    const [psRes, tasksRes, membersRes] = await Promise.all([
+    const [psRes, processesRes, membersRes] = await Promise.all([
       api.get('/api/permission-sets').catch(() => ({ data: [] })),
-      api.get('/api/tasks').catch(() => ({ data: [] })),
+      api.get('/api/processes').catch(() => ({ data: [] })),
       api.get('/api/org/members').catch(() => ({ data: [] })),
     ]);
     setPermissionSets(psRes.data);
-    setOrgTasks(tasksRes.data.filter((t: OrgTask) => t.status === 'active'));
+    setOrgProcesses(processesRes.data.filter((t: OrgProcess) => t.status === 'active'));
     setOrgMembers(membersRes.data);
   };
 
@@ -156,33 +156,33 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
     load();
   };
 
-  // ─── Task links ───────────────────────────────────────────────────────────
+  // ─── Process links ──────────────────────────────────────────────────────────
 
   const handleCreateLink = async () => {
     setError('');
     try {
-      await api.post(`/api/subaccounts/${subaccountId}/tasks`, {
-        taskId: linkForm.taskId,
+      await api.post(`/api/subaccounts/${subaccountId}/processes`, {
+        processId: linkForm.processId,
         subaccountCategoryId: linkForm.subaccountCategoryId || undefined,
       });
       setShowLinkForm(false);
-      setLinkForm({ taskId: '', subaccountCategoryId: '' });
+      setLinkForm({ processId: '', subaccountCategoryId: '' });
       load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to link task');
+      setError(e.response?.data?.error ?? 'Failed to link process');
     }
   };
 
   const handleDeleteLink = async () => {
     if (!deleteLinkId) return;
-    await api.delete(`/api/subaccounts/${subaccountId}/tasks/${deleteLinkId}`);
+    await api.delete(`/api/subaccounts/${subaccountId}/processes/${deleteLinkId}`);
     setDeleteLinkId(null);
     load();
   };
 
-  const handleToggleLinkActive = async (link: TaskLink) => {
-    await api.patch(`/api/subaccounts/${subaccountId}/tasks/${link.linkId}`, { isActive: !link.isActive });
+  const handleToggleLinkActive = async (link: ProcessLink) => {
+    await api.patch(`/api/subaccounts/${subaccountId}/processes/${link.linkId}`, { isActive: !link.isActive });
     load();
   };
 
@@ -251,7 +251,7 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
-        {(['categories', 'tasks', 'members', 'settings'] as ActiveTab[]).map((tab) => (
+        {(['categories', 'processes', 'members', 'settings'] as ActiveTab[]).map((tab) => (
           <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
@@ -327,22 +327,22 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
         </>
       )}
 
-      {/* ─── Tasks tab ─── */}
-      {activeTab === 'tasks' && (
+      {/* ─── Processes tab ─── */}
+      {activeTab === 'processes' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Linked org tasks</h2>
-            <button onClick={() => setShowLinkForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Link task</button>
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Linked org processes</h2>
+            <button onClick={() => setShowLinkForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Link process</button>
           </div>
 
           {showLinkForm && (
-            <Modal title="Link task to subaccount" onClose={() => setShowLinkForm(false)} maxWidth={400}>
+            <Modal title="Link process to subaccount" onClose={() => setShowLinkForm(false)} maxWidth={400}>
               <div style={{ display: 'grid', gap: 14, marginBottom: 20 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Org task *</label>
-                  <select value={linkForm.taskId} onChange={(e) => setLinkForm({ ...linkForm, taskId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
-                    <option value="">Select task...</option>
-                    {orgTasks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Org process *</label>
+                  <select value={linkForm.processId} onChange={(e) => setLinkForm({ ...linkForm, processId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+                    <option value="">Select process...</option>
+                    {orgProcesses.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
                 <div>
@@ -361,25 +361,25 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
           )}
 
           {deleteLinkId && (
-            <ConfirmDialog title="Remove task link" message="Remove this task from the subaccount?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
+            <ConfirmDialog title="Remove process link" message="Remove this process from the subaccount?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
           )}
 
           <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 24 }}>
-            {linkedTasks.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No tasks linked yet.</div>
+            {linkedProcesses.length === 0 ? (
+              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No processes linked yet.</div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Task</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Process</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Active in portal</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
                 </tr></thead>
                 <tbody>
-                  {linkedTasks.map((link) => (
+                  {linkedProcesses.map((link) => (
                     <tr key={link.linkId} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px 16px', fontWeight: 500 }}>{link.taskName}</td>
-                      <td style={{ padding: '12px 16px', color: '#64748b' }}>{link.taskStatus}</td>
+                      <td style={{ padding: '12px 16px', fontWeight: 500 }}>{link.processName}</td>
+                      <td style={{ padding: '12px 16px', color: '#64748b' }}>{link.processStatus}</td>
                       <td style={{ padding: '12px 16px' }}>
                         <button onClick={() => handleToggleLinkActive(link)} style={{ padding: '3px 10px', background: link.isActive ? '#dcfce7' : '#f1f5f9', color: link.isActive ? '#16a34a' : '#6b7280', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
                           {link.isActive ? 'Active' : 'Hidden'}
@@ -395,17 +395,17 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
             )}
           </div>
 
-          {nativeTasks.length > 0 && (
+          {nativeProcesses.length > 0 && (
             <>
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Subaccount-native tasks</h3>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Subaccount-native processes</h3>
               <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                   <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Task</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Process</th>
                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
                   </tr></thead>
                   <tbody>
-                    {nativeTasks.map((t) => (
+                    {nativeProcesses.map((t) => (
                       <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '12px 16px', fontWeight: 500 }}>{t.name}</td>
                         <td style={{ padding: '12px 16px', color: '#64748b' }}>{t.status}</td>

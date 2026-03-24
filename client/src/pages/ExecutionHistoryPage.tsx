@@ -5,7 +5,7 @@ import { User } from '../lib/auth';
 
 interface Execution {
   id: string;
-  taskId: string;
+  processId: string;
   userId: string;
   status: string;
   isTestExecution: boolean;
@@ -13,7 +13,7 @@ interface Execution {
   createdAt: string;
 }
 
-interface Task {
+interface Process {
   id: string;
   name: string;
 }
@@ -24,8 +24,8 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function ExecutionHistoryPage({ user }: { user: User }) {
   const [executions, setExecutions] = useState<Execution[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [filterTaskId, setFilterTaskId] = useState('');
+  const [processes, setProcesses] = useState<Process[]>([]);
+  const [filterProcessId, setFilterProcessId] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -36,16 +36,16 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
     setLoading(true);
     try {
       const params: Record<string, string> = { limit: '50' };
-      if (filterTaskId) params.taskId = filterTaskId;
+      if (filterProcessId) params.processId = filterProcessId;
       if (filterStatus) params.status = filterStatus;
       if (from) params.from = from;
       if (to) params.to = to;
-      const [execRes, taskRes] = await Promise.all([
+      const [execRes, processRes] = await Promise.all([
         api.get('/api/executions', { params }),
-        api.get('/api/tasks'),
+        api.get('/api/processes'),
       ]);
       setExecutions(execRes.data);
-      setTasks(taskRes.data);
+      setProcesses(processRes.data);
     } finally {
       setLoading(false);
     }
@@ -55,7 +55,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
 
   const handleExport = async () => {
     const params: Record<string, string> = {};
-    if (filterTaskId) params.taskId = filterTaskId;
+    if (filterProcessId) params.processId = filterProcessId;
     if (from) params.from = from;
     if (to) params.to = to;
     const res = await api.get('/api/executions/export', { params, responseType: 'blob' });
@@ -66,11 +66,11 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
   };
 
   const handleClearFilters = () => {
-    setFilterTaskId(''); setFilterStatus(''); setFrom(''); setTo('');
+    setFilterProcessId(''); setFilterStatus(''); setFrom(''); setTo('');
   };
 
-  const hasFilters = filterTaskId || filterStatus || from || to;
-  const taskMap = Object.fromEntries(tasks.map((t) => [t.id, t.name]));
+  const hasFilters = filterProcessId || filterStatus || from || to;
+  const processMap = Object.fromEntries(processes.map((t) => [t.id, t.name]));
 
   const statuses = ['pending', 'running', 'completed', 'failed', 'timeout', 'cancelled'];
 
@@ -99,18 +99,18 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
       {/* Filter bar */}
       <div className="card" style={{ padding: '16px 20px', marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          {/* Task filter */}
+          {/* Process filter */}
           <div style={{ flex: '1 1 180px', minWidth: 160 }}>
             <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-              Task
+              Process
             </label>
             <select
-              value={filterTaskId}
-              onChange={(e) => setFilterTaskId(e.target.value)}
+              value={filterProcessId}
+              onChange={(e) => setFilterProcessId(e.target.value)}
               className="form-select"
             >
-              <option value="">All tasks</option>
-              {tasks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value="">All processes</option>
+              {processes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
 
@@ -208,12 +208,12 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
           </div>
           <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16, color: '#0f172a' }}>No executions found</p>
           <p style={{ margin: '0 0 20px', fontSize: 13.5, color: '#64748b' }}>
-            {hasFilters ? 'Try adjusting your filters.' : 'Run a task to start your execution history.'}
+            {hasFilters ? 'Try adjusting your filters.' : 'Run a process to start your execution history.'}
           </p>
           {hasFilters ? (
             <button className="btn btn-secondary" onClick={handleClearFilters}>Clear filters</button>
           ) : (
-            <Link to="/tasks" className="btn btn-primary" style={{ textDecoration: 'none' }}>Browse Tasks</Link>
+            <Link to="/processes" className="btn btn-primary" style={{ textDecoration: 'none' }}>Browse Processes</Link>
           )}
         </div>
       ) : (
@@ -222,7 +222,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
             <thead>
               <tr>
                 <th>Execution</th>
-                <th>Task</th>
+                <th>Process</th>
                 <th>Status</th>
                 <th>Duration</th>
                 <th>Created</th>
@@ -254,9 +254,9 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
                     </div>
                   </td>
                   <td style={{ color: '#374151', fontSize: 13.5, fontWeight: 500 }}>
-                    {taskMap[exec.taskId] ?? (
+                    {processMap[exec.processId] ?? (
                       <span style={{ color: '#94a3b8', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
-                        {exec.taskId.substring(0, 8)}…
+                        {exec.processId.substring(0, 8)}…
                       </span>
                     )}
                   </td>

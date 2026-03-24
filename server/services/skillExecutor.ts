@@ -1,6 +1,6 @@
 import { env } from '../lib/env.js';
-import { workspaceItemService } from './workspaceItemService.js';
-import { executeTriggerredTask } from './llmService.js';
+import { taskService } from './taskService.js';
+import { executeTriggerredProcess } from './llmService.js';
 
 // ---------------------------------------------------------------------------
 // Skill Executor — executes tool calls for autonomous agent runs
@@ -11,7 +11,7 @@ interface SkillExecutionContext {
   organisationId: string;
   subaccountId: string;
   agentId: string;
-  orgTasks: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
+  orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
 }
 
 interface SkillExecutionParams {
@@ -31,12 +31,12 @@ export const skillExecutor = {
         return executeReadWorkspace(input, context);
       case 'write_workspace':
         return executeWriteWorkspace(input, context);
-      case 'trigger_task':
-        return executeTriggerTask(input, context);
-      case 'create_workspace_item':
-        return executeCreateWorkspaceItem(input, context);
-      case 'move_workspace_item':
-        return executeMoveWorkspaceItem(input, context);
+      case 'trigger_process':
+        return executeTriggerProcess(input, context);
+      case 'create_task':
+        return executeCreateTask(input, context);
+      case 'move_task':
+        return executeMoveTask(input, context);
       case 'add_deliverable':
         return executeAddDeliverable(input, context);
       default:
@@ -120,7 +120,7 @@ async function executeReadWorkspace(
   const includeActivities = Boolean(input.include_activities);
 
   try {
-    const items = await workspaceItemService.listItems(
+    const items = await taskService.listTasks(
       context.organisationId,
       context.subaccountId,
       filters
@@ -130,7 +130,7 @@ async function executeReadWorkspace(
 
     if (includeActivities) {
       const enriched = await Promise.all(sliced.map(async (item) => {
-        const activities = await workspaceItemService.listActivities(item.id);
+        const activities = await taskService.listActivities(item.id);
         return {
           id: item.id,
           title: item.title,
@@ -166,7 +166,7 @@ async function executeReadWorkspace(
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Failed to read workspace: ${errMsg}` };
+    return { success: false, error: `Failed to read board: ${errMsg}` };
   }
 }
 
@@ -178,24 +178,24 @@ async function executeWriteWorkspace(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const workspaceItemId = String(input.workspace_item_id ?? '');
+  const taskId = String(input.task_id ?? '');
   const activityType = String(input.activity_type ?? 'progress') as 'progress' | 'note' | 'completed' | 'blocked';
   const message = String(input.message ?? '');
 
-  if (!workspaceItemId) return { success: false, error: 'workspace_item_id is required' };
+  if (!taskId) return { success: false, error: 'task_id is required' };
   if (!message) return { success: false, error: 'message is required' };
 
   try {
-    const activity = await workspaceItemService.addActivity(workspaceItemId, {
+    const activity = await taskService.addActivity(taskId, {
       activityType,
       message,
       agentId: context.agentId,
     });
 
-    return { success: true, activity_id: activity.id, _updated_workspace_item: true };
+    return { success: true, activity_id: activity.id, _updated_task: true };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Failed to write to workspace: ${errMsg}` };
+    return { success: false, error: `Failed to write to board: ${errMsg}` };
   }
 }
 
@@ -203,21 +203,21 @@ async function executeWriteWorkspace(
 // Trigger Task
 // ---------------------------------------------------------------------------
 
-async function executeTriggerTask(
+async function executeTriggerProcess(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const taskId = String(input.task_id ?? '');
+  const processId = String(input.process_id ?? '');
   const inputData = String(input.input_data ?? '{}');
   const reason = String(input.reason ?? '');
 
-  if (!taskId) return { success: false, error: 'task_id is required' };
+  if (!processId) return { success: false, error: 'process_id is required' };
 
   try {
     // Use a system user ID placeholder for autonomous runs
-    const result = await executeTriggerredTask(
+    const result = await executeTriggerredProcess(
       context.organisationId,
-      taskId,
+      processId,
       context.agentId, // use agentId as the triggerer for autonomous runs
       inputData
     );
@@ -225,21 +225,21 @@ async function executeTriggerTask(
     return {
       success: true,
       execution_id: result.executionId,
-      task_name: result.taskName,
+      process_name: result.processName,
       status: result.status,
-      message: `Task "${result.taskName}" has been queued. Execution ID: ${result.executionId}`,
+      message: `Process "${result.processName}" has been queued. Execution ID: ${result.executionId}`,
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Failed to trigger task: ${errMsg}` };
+    return { success: false, error: `Failed to trigger process: ${errMsg}` };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Create Workspace Item
+// Create Task
 // ---------------------------------------------------------------------------
 
-async function executeCreateWorkspaceItem(
+async function executeCreateTask(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
@@ -247,7 +247,7 @@ async function executeCreateWorkspaceItem(
   if (!title) return { success: false, error: 'title is required' };
 
   try {
-    const item = await workspaceItemService.createItem(
+    const item = await taskService.createTask(
       context.organisationId,
       context.subaccountId,
       {
@@ -263,51 +263,51 @@ async function executeCreateWorkspaceItem(
 
     return {
       success: true,
-      workspace_item_id: item.id,
+      task_id: item.id,
       title: item.title,
       status: item.status,
-      _created_workspace_item: true,
+      _created_task: true,
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Failed to create workspace item: ${errMsg}` };
+    return { success: false, error: `Failed to create task: ${errMsg}` };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Move Workspace Item
+// Move Task
 // ---------------------------------------------------------------------------
 
-async function executeMoveWorkspaceItem(
+async function executeMoveTask(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const workspaceItemId = String(input.workspace_item_id ?? '');
+  const taskId = String(input.task_id ?? '');
   const status = String(input.status ?? '');
 
-  if (!workspaceItemId) return { success: false, error: 'workspace_item_id is required' };
+  if (!taskId) return { success: false, error: 'task_id is required' };
   if (!status) return { success: false, error: 'status is required' };
 
   try {
     // Get current item to find subaccount
-    const item = await workspaceItemService.getItem(workspaceItemId, context.organisationId);
-    const position = await workspaceItemService._nextPosition(item.subaccountId, status);
+    const item = await taskService.getTask(taskId, context.organisationId);
+    const position = await taskService._nextPosition(item.subaccountId, status);
 
-    const updated = await workspaceItemService.moveItem(
-      workspaceItemId,
+    const updated = await taskService.moveTask(
+      taskId,
       context.organisationId,
       { status, position }
     );
 
     return {
       success: true,
-      workspace_item_id: updated.id,
+      task_id: updated.id,
       new_status: updated.status,
-      _updated_workspace_item: true,
+      _updated_task: true,
     };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: `Failed to move workspace item: ${errMsg}` };
+    return { success: false, error: `Failed to move task: ${errMsg}` };
   }
 }
 
@@ -319,23 +319,23 @@ async function executeAddDeliverable(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const workspaceItemId = String(input.workspace_item_id ?? '');
+  const taskId = String(input.task_id ?? '');
   const title = String(input.title ?? '');
   const deliverableType = String(input.deliverable_type ?? 'artifact') as 'file' | 'url' | 'artifact';
   const description = String(input.description ?? '');
 
-  if (!workspaceItemId) return { success: false, error: 'workspace_item_id is required' };
+  if (!taskId) return { success: false, error: 'task_id is required' };
   if (!title) return { success: false, error: 'title is required' };
 
   try {
-    const deliverable = await workspaceItemService.addDeliverable(workspaceItemId, {
+    const deliverable = await taskService.addDeliverable(taskId, {
       deliverableType,
       title,
       description: description || undefined,
     });
 
     // Also log an activity
-    await workspaceItemService.addActivity(workspaceItemId, {
+    await taskService.addActivity(taskId, {
       activityType: 'deliverable_added',
       message: `Deliverable added: "${title}"`,
       agentId: context.agentId,

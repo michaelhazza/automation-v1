@@ -1,6 +1,7 @@
 /**
  * PortalExecutionHistoryPage — subaccount member's execution history.
  */
+
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
@@ -8,7 +9,7 @@ import { User } from '../lib/auth';
 
 interface Execution {
   id: string;
-  taskId: string;
+  processId: string;
   status: string;
   errorMessage: string | null;
   durationMs: number | null;
@@ -43,13 +44,13 @@ export default function PortalExecutionHistoryPage({ user }: { user: User }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>My Executions</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Your task execution history in this subaccount</p>
+          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Your process execution history in this subaccount</p>
         </div>
         <Link
           to={`/portal/${subaccountId}`}
           style={{ padding: '10px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', textDecoration: 'none' }}
         >
-          ← Back to tasks
+          ← Back to processes
         </Link>
       </div>
 

@@ -1,4 +1,4 @@
-interface WorkspaceItemCardProps {
+interface TaskCardProps {
   item: {
     id: string;
     title: string;
@@ -23,7 +23,7 @@ const priorityColours: Record<string, string> = {
   low: '#94a3b8',
 };
 
-export default function WorkspaceItemCard({ item, onClick, provided, isDragging }: WorkspaceItemCardProps) {
+export default function TaskCard({ item, onClick, provided, isDragging }: TaskCardProps) {
   const refProps = provided
     ? { ref: provided.innerRef, ...provided.draggableProps, ...provided.dragHandleProps }
     : {};

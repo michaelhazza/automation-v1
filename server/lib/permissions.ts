@@ -9,13 +9,13 @@
 // ─── Org-level permissions ────────────────────────────────────────────────────
 
 export const ORG_PERMISSIONS = {
-  // Tasks
-  TASKS_VIEW: 'org.tasks.view',
-  TASKS_CREATE: 'org.tasks.create',
-  TASKS_EDIT: 'org.tasks.edit',
-  TASKS_DELETE: 'org.tasks.delete',
-  TASKS_ACTIVATE: 'org.tasks.activate',
-  TASKS_TEST: 'org.tasks.test',
+  // Processes (workflow definitions)
+  PROCESSES_VIEW: 'org.processes.view',
+  PROCESSES_CREATE: 'org.processes.create',
+  PROCESSES_EDIT: 'org.processes.edit',
+  PROCESSES_DELETE: 'org.processes.delete',
+  PROCESSES_ACTIVATE: 'org.processes.activate',
+  PROCESSES_TEST: 'org.processes.test',
   // Executions
   EXECUTIONS_VIEW: 'org.executions.view',
   // Users
@@ -26,7 +26,7 @@ export const ORG_PERMISSIONS = {
   // Workflow engines
   ENGINES_VIEW: 'org.engines.view',
   ENGINES_MANAGE: 'org.engines.manage',
-  // Task categories
+  // Process categories
   CATEGORIES_VIEW: 'org.categories.view',
   CATEGORIES_MANAGE: 'org.categories.manage',
   // Subaccounts
@@ -50,12 +50,12 @@ export const ORG_PERMISSIONS = {
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
 
 export const SUBACCOUNT_PERMISSIONS = {
-  // Tasks
-  TASKS_VIEW: 'subaccount.tasks.view',
-  TASKS_EXECUTE: 'subaccount.tasks.execute',
-  TASKS_CREATE: 'subaccount.tasks.create',
-  TASKS_EDIT: 'subaccount.tasks.edit',
-  TASKS_DELETE: 'subaccount.tasks.delete',
+  // Processes (workflow definitions)
+  PROCESSES_VIEW: 'subaccount.processes.view',
+  PROCESSES_EXECUTE: 'subaccount.processes.execute',
+  PROCESSES_CREATE: 'subaccount.processes.create',
+  PROCESSES_EDIT: 'subaccount.processes.edit',
+  PROCESSES_DELETE: 'subaccount.processes.delete',
   // Executions
   EXECUTIONS_VIEW: 'subaccount.executions.view',
   EXECUTIONS_VIEW_ALL: 'subaccount.executions.view_all',
@@ -80,13 +80,13 @@ export type PermissionKey = OrgPermissionKey | SubaccountPermissionKey;
 // ─── Full permission catalogue (for DB seeding) ───────────────────────────────
 
 export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupName: string }> = [
-  // org.tasks
-  { key: ORG_PERMISSIONS.TASKS_VIEW,     description: 'View org tasks',              groupName: 'org.tasks' },
-  { key: ORG_PERMISSIONS.TASKS_CREATE,   description: 'Create org tasks',            groupName: 'org.tasks' },
-  { key: ORG_PERMISSIONS.TASKS_EDIT,     description: 'Edit org tasks',              groupName: 'org.tasks' },
-  { key: ORG_PERMISSIONS.TASKS_DELETE,   description: 'Delete org tasks',            groupName: 'org.tasks' },
-  { key: ORG_PERMISSIONS.TASKS_ACTIVATE, description: 'Activate/deactivate tasks',   groupName: 'org.tasks' },
-  { key: ORG_PERMISSIONS.TASKS_TEST,     description: 'Test-execute tasks',          groupName: 'org.tasks' },
+  // org.processes
+  { key: ORG_PERMISSIONS.PROCESSES_VIEW,     description: 'View org processes',              groupName: 'org.processes' },
+  { key: ORG_PERMISSIONS.PROCESSES_CREATE,   description: 'Create org processes',            groupName: 'org.processes' },
+  { key: ORG_PERMISSIONS.PROCESSES_EDIT,     description: 'Edit org processes',              groupName: 'org.processes' },
+  { key: ORG_PERMISSIONS.PROCESSES_DELETE,   description: 'Delete org processes',            groupName: 'org.processes' },
+  { key: ORG_PERMISSIONS.PROCESSES_ACTIVATE, description: 'Activate/deactivate processes',   groupName: 'org.processes' },
+  { key: ORG_PERMISSIONS.PROCESSES_TEST,     description: 'Test-execute processes',          groupName: 'org.processes' },
   // org.executions
   { key: ORG_PERMISSIONS.EXECUTIONS_VIEW, description: 'View all org executions',    groupName: 'org.executions' },
   // org.users
@@ -98,7 +98,7 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.ENGINES_VIEW,   description: 'View workflow engines',       groupName: 'org.engines' },
   { key: ORG_PERMISSIONS.ENGINES_MANAGE, description: 'Create/edit/delete engines',  groupName: 'org.engines' },
   // org.categories
-  { key: ORG_PERMISSIONS.CATEGORIES_VIEW,   description: 'View org task categories',         groupName: 'org.categories' },
+  { key: ORG_PERMISSIONS.CATEGORIES_VIEW,   description: 'View org process categories',         groupName: 'org.categories' },
   { key: ORG_PERMISSIONS.CATEGORIES_MANAGE, description: 'Create/edit/delete org categories', groupName: 'org.categories' },
   // org.subaccounts
   { key: ORG_PERMISSIONS.SUBACCOUNTS_VIEW,   description: 'View subaccounts',               groupName: 'org.subaccounts' },
@@ -113,12 +113,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.AGENTS_EDIT,   description: 'Edit AI agents',             groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_DELETE, description: 'Delete AI agents',           groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_CHAT,   description: 'Chat with AI agents',        groupName: 'org.agents' },
-  // subaccount.tasks
-  { key: SUBACCOUNT_PERMISSIONS.TASKS_VIEW,    description: 'View tasks in portal',                  groupName: 'subaccount.tasks' },
-  { key: SUBACCOUNT_PERMISSIONS.TASKS_EXECUTE, description: 'Execute tasks in portal',                groupName: 'subaccount.tasks' },
-  { key: SUBACCOUNT_PERMISSIONS.TASKS_CREATE,  description: 'Create subaccount-specific tasks',       groupName: 'subaccount.tasks' },
-  { key: SUBACCOUNT_PERMISSIONS.TASKS_EDIT,    description: 'Edit subaccount tasks',                  groupName: 'subaccount.tasks' },
-  { key: SUBACCOUNT_PERMISSIONS.TASKS_DELETE,  description: 'Delete subaccount tasks',                groupName: 'subaccount.tasks' },
+  // subaccount.processes
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CREATE,  description: 'Create subaccount-specific processes',       groupName: 'subaccount.processes' },
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EDIT,    description: 'Edit subaccount processes',                  groupName: 'subaccount.processes' },
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_DELETE,  description: 'Delete subaccount processes',                groupName: 'subaccount.processes' },
   // subaccount.executions
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,     description: 'View own execution history',         groupName: 'subaccount.executions' },
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL, description: 'View all subaccount executions',     groupName: 'subaccount.executions' },
@@ -132,11 +132,11 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.settings
   { key: SUBACCOUNT_PERMISSIONS.SETTINGS_EDIT, description: 'Edit subaccount settings', groupName: 'subaccount.settings' },
   // org.workspace
-  { key: ORG_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace boards and items',             groupName: 'org.workspace' },
-  { key: ORG_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace boards, items and configs',   groupName: 'org.workspace' },
+  { key: ORG_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace boards and tasks',             groupName: 'org.workspace' },
+  { key: ORG_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace boards, tasks and configs',   groupName: 'org.workspace' },
   // subaccount.workspace
-  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace board and items in portal',   groupName: 'subaccount.workspace' },
-  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace items in portal',           groupName: 'subaccount.workspace' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace board and tasks in portal',   groupName: 'subaccount.workspace' },
+  { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace tasks in portal',           groupName: 'subaccount.workspace' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
@@ -148,19 +148,19 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
 }> = [
   {
     name: 'Org Admin',
-    description: 'Full control over the organisation, including engines, tasks, users, subaccounts and permission sets.',
+    description: 'Full control over the organisation, including engines, processes, users, subaccounts and permission sets.',
     permissionKeys: Object.values(ORG_PERMISSIONS),
   },
   {
     name: 'Org Manager',
-    description: 'Operational access: manage tasks and users, view subaccounts and executions.',
+    description: 'Operational access: manage processes and users, view subaccounts and executions.',
     permissionKeys: [
-      ORG_PERMISSIONS.TASKS_VIEW,
-      ORG_PERMISSIONS.TASKS_CREATE,
-      ORG_PERMISSIONS.TASKS_EDIT,
-      ORG_PERMISSIONS.TASKS_DELETE,
-      ORG_PERMISSIONS.TASKS_ACTIVATE,
-      ORG_PERMISSIONS.TASKS_TEST,
+      ORG_PERMISSIONS.PROCESSES_VIEW,
+      ORG_PERMISSIONS.PROCESSES_CREATE,
+      ORG_PERMISSIONS.PROCESSES_EDIT,
+      ORG_PERMISSIONS.PROCESSES_DELETE,
+      ORG_PERMISSIONS.PROCESSES_ACTIVATE,
+      ORG_PERMISSIONS.PROCESSES_TEST,
       ORG_PERMISSIONS.EXECUTIONS_VIEW,
       ORG_PERMISSIONS.USERS_VIEW,
       ORG_PERMISSIONS.USERS_INVITE,
@@ -175,9 +175,9 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
   },
   {
     name: 'Org Viewer',
-    description: 'Read-only access to tasks, executions, users and subaccounts.',
+    description: 'Read-only access to processes, executions, users and subaccounts.',
     permissionKeys: [
-      ORG_PERMISSIONS.TASKS_VIEW,
+      ORG_PERMISSIONS.PROCESSES_VIEW,
       ORG_PERMISSIONS.EXECUTIONS_VIEW,
       ORG_PERMISSIONS.USERS_VIEW,
       ORG_PERMISSIONS.CATEGORIES_VIEW,
@@ -189,17 +189,17 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
   },
   {
     name: 'Subaccount Admin',
-    description: 'Full control over a subaccount: tasks, members, categories and settings.',
+    description: 'Full control over a subaccount: processes, members, categories and settings.',
     permissionKeys: Object.values(SUBACCOUNT_PERMISSIONS),
   },
   {
     name: 'Subaccount Manager',
-    description: 'Manage subaccount tasks, view all executions and manage members.',
+    description: 'Manage subaccount processes, view all executions and manage members.',
     permissionKeys: [
-      SUBACCOUNT_PERMISSIONS.TASKS_VIEW,
-      SUBACCOUNT_PERMISSIONS.TASKS_EXECUTE,
-      SUBACCOUNT_PERMISSIONS.TASKS_CREATE,
-      SUBACCOUNT_PERMISSIONS.TASKS_EDIT,
+      SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,
+      SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE,
+      SUBACCOUNT_PERMISSIONS.PROCESSES_CREATE,
+      SUBACCOUNT_PERMISSIONS.PROCESSES_EDIT,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL,
       SUBACCOUNT_PERMISSIONS.USERS_VIEW,
@@ -212,10 +212,10 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
   },
   {
     name: 'Subaccount User',
-    description: 'Basic portal access: execute tasks and view own execution history.',
+    description: 'Basic portal access: execute processes and view own execution history.',
     permissionKeys: [
-      SUBACCOUNT_PERMISSIONS.TASKS_VIEW,
-      SUBACCOUNT_PERMISSIONS.TASKS_EXECUTE,
+      SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,
+      SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE,
       SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,
       SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,
     ],

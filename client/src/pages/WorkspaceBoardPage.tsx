@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
-import WorkspaceItemCard from '../components/WorkspaceItemCard';
-import WorkspaceItemModal from '../components/WorkspaceItemModal';
+import TaskCard from '../components/TaskCard';
+import TaskModal from '../components/TaskModal';
 import Modal from '../components/Modal';
 import { type User } from '../lib/auth';
 
@@ -20,7 +20,7 @@ interface Agent {
   slug: string;
 }
 
-interface WorkspaceItem {
+interface Task {
   id: string;
   title: string;
   description: string | null;
@@ -36,7 +36,7 @@ interface WorkspaceItem {
 export default function WorkspaceBoardPage({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [columns, setColumns] = useState<BoardColumn[]>([]);
-  const [items, setItems] = useState<WorkspaceItem[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -56,14 +56,14 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     if (!subaccountId) return;
     setLoading(true);
     try {
-      const [configRes, itemsRes, agentsRes, saRes] = await Promise.all([
+      const [configRes, tasksRes, agentsRes, saRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}/board-config`),
-        api.get(`/api/subaccounts/${subaccountId}/workspace-items`),
+        api.get(`/api/subaccounts/${subaccountId}/tasks`),
         api.get('/api/agents'),
         api.get(`/api/subaccounts/${subaccountId}`),
       ]);
       setColumns(configRes.data?.columns ?? []);
-      setItems(itemsRes.data);
+      setTasks(tasksRes.data);
       setAgents(agentsRes.data.filter((a: { status: string }) => a.status === 'active'));
       setSubaccountName(saRes.data.name);
     } finally {
@@ -76,7 +76,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
   const handleCreate = async () => {
     if (!newTitle.trim() || !subaccountId) return;
     try {
-      await api.post(`/api/subaccounts/${subaccountId}/workspace-items`, {
+      await api.post(`/api/subaccounts/${subaccountId}/tasks`, {
         title: newTitle,
         priority: newPriority,
         status: newStatus,
@@ -107,23 +107,23 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     e.preventDefault();
     if (!dragItem || !subaccountId) return;
 
-    const item = items.find(i => i.id === dragItem);
-    if (!item || item.status === targetStatus) {
+    const task = tasks.find(i => i.id === dragItem);
+    if (!task || task.status === targetStatus) {
       setDragItem(null);
       return;
     }
 
     // Optimistic update
-    setItems(prev => prev.map(i => i.id === dragItem ? { ...i, status: targetStatus } : i));
+    setTasks(prev => prev.map(i => i.id === dragItem ? { ...i, status: targetStatus } : i));
     setDragItem(null);
 
     // Calculate position (append to end)
-    const columnItems = items.filter(i => i.status === targetStatus);
-    const maxPos = columnItems.reduce((max, i) => Math.max(max, i.position), 0);
+    const columnTasks = tasks.filter(i => i.status === targetStatus);
+    const maxPos = columnTasks.reduce((max, i) => Math.max(max, i.position), 0);
     const newPosition = maxPos + 1000;
 
     try {
-      await api.patch(`/api/subaccounts/${subaccountId}/workspace-items/${dragItem}/move`, {
+      await api.patch(`/api/subaccounts/${subaccountId}/tasks/${dragItem}/move`, {
         status: targetStatus,
         position: newPosition,
       });
@@ -154,8 +154,8 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     );
   }
 
-  const getColumnItems = (key: string) =>
-    items.filter(i => i.status === key).sort((a, b) => a.position - b.position);
+  const getColumnTasks = (key: string) =>
+    tasks.filter(i => i.status === key).sort((a, b) => a.position - b.position);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -166,14 +166,14 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
             {subaccountName} — Workspace
           </h1>
           <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
-            {items.length} item{items.length !== 1 ? 's' : ''} across {columns.length} columns
+            {tasks.length} task{tasks.length !== 1 ? 's' : ''} across {columns.length} columns
           </div>
         </div>
         <button
           onClick={() => setShowCreateForm(true)}
           style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
         >
-          + New Item
+          + New Task
         </button>
       </div>
 
@@ -188,7 +188,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
         }}
       >
         {columns.map(col => {
-          const colItems = getColumnItems(col.key);
+          const colTasks = getColumnTasks(col.key);
           return (
             <div
               key={col.key}
@@ -226,29 +226,29 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
                       borderRadius: 10,
                     }}
                   >
-                    {colItems.length}
+                    {colTasks.length}
                   </span>
                 </div>
               </div>
 
               {/* Cards */}
               <div style={{ flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
-                {colItems.map(item => (
+                {colTasks.map(task => (
                   <div
-                    key={item.id}
+                    key={task.id}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, item.id)}
-                    style={{ opacity: dragItem === item.id ? 0.4 : 1 }}
+                    onDragStart={(e) => handleDragStart(e, task.id)}
+                    style={{ opacity: dragItem === task.id ? 0.4 : 1 }}
                   >
-                    <WorkspaceItemCard
-                      item={item}
-                      onClick={() => setSelectedItemId(item.id)}
+                    <TaskCard
+                      item={task}
+                      onClick={() => setSelectedItemId(task.id)}
                     />
                   </div>
                 ))}
-                {colItems.length === 0 && (
+                {colTasks.length === 0 && (
                   <div style={{ padding: '20px 0', textAlign: 'center', color: '#cbd5e1', fontSize: 12, fontStyle: 'italic' }}>
-                    Drop items here
+                    Drop tasks here
                   </div>
                 )}
               </div>
@@ -257,9 +257,9 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
         })}
       </div>
 
-      {/* Item detail modal */}
+      {/* Task detail modal */}
       {selectedItemId && subaccountId && (
-        <WorkspaceItemModal
+        <TaskModal
           subaccountId={subaccountId}
           itemId={selectedItemId}
           agents={agents}
@@ -271,7 +271,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
 
       {/* Create form modal */}
       {showCreateForm && (
-        <Modal title="New Workspace Item" onClose={() => setShowCreateForm(false)} maxWidth={480}>
+        <Modal title="New Task" onClose={() => setShowCreateForm(false)} maxWidth={480}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Title *</label>
@@ -326,7 +326,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
                 fontWeight: 600,
               }}
             >
-              Create Item
+              Create Task
             </button>
           </div>
         </Modal>

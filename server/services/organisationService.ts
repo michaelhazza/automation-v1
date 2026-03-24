@@ -161,14 +161,14 @@ export class OrganisationService {
       and(eq(workflowEngines.organisationId, id), isNull(workflowEngines.deletedAt))
     );
 
-    const { taskCategories } = await import('../db/schema/index.js');
-    await db.update(taskCategories).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(taskCategories.organisationId, id), isNull(taskCategories.deletedAt))
+    const { processCategories } = await import('../db/schema/index.js');
+    await db.update(processCategories).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(processCategories.organisationId, id), isNull(processCategories.deletedAt))
     );
 
-    const { tasks } = await import('../db/schema/index.js');
-    await db.update(tasks).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(tasks.organisationId, id), isNull(tasks.deletedAt))
+    const { processes } = await import('../db/schema/index.js');
+    await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(
+      and(eq(processes.organisationId, id), isNull(processes.deletedAt))
     );
 
     const { permissionGroups } = await import('../db/schema/index.js');

@@ -1,13 +1,13 @@
 import { eq, and, isNull, gte, lte, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, executionFiles, tasks } from '../db/schema/index.js';
+import { executions, executionFiles, processes } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
 import type { Execution } from '../db/schema/executions.js';
 
 function mapExecution(e: Execution, viewFullAudit: boolean) {
   return {
     id: e.id,
-    taskId: e.taskId,
+    processId: e.processId,
     triggeredByUserId: e.triggeredByUserId,
     subaccountId: e.subaccountId,
     status: e.status,
@@ -43,12 +43,12 @@ export class ExecutionService {
     organisationId: string,
     viewAll: boolean,
     viewFullAudit: boolean,
-    params: { taskId?: string; userId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }
+    params: { processId?: string; userId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }
   ) {
 
     const conditions = [eq(executions.organisationId, organisationId)];
     if (!viewAll) conditions.push(eq(executions.triggeredByUserId, userId));
-    if (params.taskId) conditions.push(eq(executions.taskId, params.taskId));
+    if (params.processId) conditions.push(eq(executions.processId, params.processId));
     if (params.userId) conditions.push(eq(executions.triggeredByUserId, params.userId));
     if (params.status) conditions.push(eq(executions.status, params.status as 'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled'));
     if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
@@ -71,24 +71,24 @@ export class ExecutionService {
   async createExecution(
     userId: string,
     organisationId: string,
-    data: { taskId: string; inputData?: unknown; notifyOnComplete?: boolean; subaccountId?: string }
+    data: { processId: string; inputData?: unknown; notifyOnComplete?: boolean; subaccountId?: string }
   ) {
-    const [task] = await db
+    const [process] = await db
       .select()
-      .from(tasks)
-      .where(and(eq(tasks.id, data.taskId), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+      .from(processes)
+      .where(and(eq(processes.id, data.processId), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
 
-    if (!task) throw { statusCode: 404, message: 'Task not found or not accessible' };
-    if (task.status !== 'active') throw { statusCode: 400, message: 'Task is not active' };
+    if (!process) throw { statusCode: 404, message: 'Process not found or not accessible' };
+    if (process.status !== 'active') throw { statusCode: 400, message: 'Process is not active' };
 
-    // Duplicate prevention: 5-minute cooldown per user per task
+    // Duplicate prevention: 5-minute cooldown per user per process
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const recentExec = await db
       .select()
       .from(executions)
       .where(and(
         eq(executions.triggeredByUserId, userId),
-        eq(executions.taskId, data.taskId),
+        eq(executions.processId, data.processId),
         gte(executions.createdAt, fiveMinutesAgo)
       ));
 
@@ -96,20 +96,20 @@ export class ExecutionService {
     if (nonTestRecent.length > 0) {
       const oldest = nonTestRecent.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
       const waitSec = Math.ceil((oldest.createdAt.getTime() + 5 * 60 * 1000 - Date.now()) / 1000);
-      throw { statusCode: 429, message: `Duplicate execution: this task was already triggered recently. Please wait ${waitSec} seconds before retrying.` };
+      throw { statusCode: 429, message: `Duplicate execution: this process was already triggered recently. Please wait ${waitSec} seconds before retrying.` };
     }
 
     const [execution] = await db
       .insert(executions)
       .values({
         organisationId,
-        taskId: data.taskId,
+        processId: data.processId,
         triggeredByUserId: userId,
         subaccountId: data.subaccountId ?? null,
         status: 'pending',
         inputData: data.inputData ?? null,
-        engineType: '', // will be resolved by queue worker from task snapshot
-        taskSnapshot: task as unknown as Record<string, unknown>,
+        engineType: '', // will be resolved by queue worker from process snapshot
+        processSnapshot: process as unknown as Record<string, unknown>,
         isTestExecution: false,
         notifyOnComplete: data.notifyOnComplete ?? false,
         retryCount: 0,
@@ -124,7 +124,7 @@ export class ExecutionService {
       // Queue failure should not fail the API response
     }
 
-    return { id: execution.id, status: execution.status, taskId: execution.taskId };
+    return { id: execution.id, status: execution.status, processId: execution.processId };
   }
 
   async getExecution(id: string, userId: string, organisationId: string, canViewAll: boolean, viewFullAudit: boolean) {
@@ -173,10 +173,10 @@ export class ExecutionService {
 
   async exportExecutions(
     organisationId: string,
-    params: { from?: string; to?: string; taskId?: string; userId?: string }
+    params: { from?: string; to?: string; processId?: string; userId?: string }
   ) {
     const conditions = [eq(executions.organisationId, organisationId)];
-    if (params.taskId) conditions.push(eq(executions.taskId, params.taskId));
+    if (params.processId) conditions.push(eq(executions.processId, params.processId));
     if (params.userId) conditions.push(eq(executions.triggeredByUserId, params.userId));
     if (params.from) conditions.push(gte(executions.createdAt, new Date(params.from)));
     if (params.to) conditions.push(lte(executions.createdAt, new Date(params.to)));
@@ -187,9 +187,9 @@ export class ExecutionService {
       .where(and(...conditions))
       .orderBy(desc(executions.createdAt));
 
-    const headers = ['id', 'taskId', 'triggeredByUserId', 'subaccountId', 'status', 'engineType', 'isTestExecution', 'retryCount', 'durationMs', 'startedAt', 'completedAt', 'createdAt'];
+    const headers = ['id', 'processId', 'triggeredByUserId', 'subaccountId', 'status', 'engineType', 'isTestExecution', 'retryCount', 'durationMs', 'startedAt', 'completedAt', 'createdAt'];
     const csvRows = rows.map((e) =>
-      [e.id, e.taskId, e.triggeredByUserId, e.subaccountId, e.status, e.engineType, e.isTestExecution, e.retryCount, e.durationMs, e.startedAt, e.completedAt, e.createdAt]
+      [e.id, e.processId, e.triggeredByUserId, e.subaccountId, e.status, e.engineType, e.isTestExecution, e.retryCount, e.durationMs, e.startedAt, e.completedAt, e.createdAt]
         .map((v) => (v === null || v === undefined ? '' : String(v)))
         .join(',')
     );

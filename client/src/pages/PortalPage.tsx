@@ -1,15 +1,15 @@
 /**
- * PortalPage — subaccount member's task browser.
+ * PortalPage — subaccount member's process browser.
  *
- * Displays tasks available in the selected subaccount, grouped by category.
- * Subaccount members execute tasks via the portal execution endpoint.
+ * Displays processes available in the selected subaccount, grouped by category.
+ * Subaccount members execute processes via the portal execution endpoint.
  */
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-interface PortalTask {
+interface PortalProcess {
   id: string;
   name: string;
   description: string | null;
@@ -33,7 +33,7 @@ interface SubaccountInfo {
 export default function PortalPage({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [subaccount, setSubaccount] = useState<SubaccountInfo | null>(null);
-  const [tasks, setTasks] = useState<PortalTask[]>([]);
+  const [processes, setProcesses] = useState<PortalProcess[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -42,20 +42,20 @@ export default function PortalPage({ user }: { user: User }) {
 
   useEffect(() => {
     if (!subaccountId) return;
-    api.get(`/api/portal/${subaccountId}/tasks`)
+    api.get(`/api/portal/${subaccountId}/processes`)
       .then(({ data }) => {
         setSubaccount(data.subaccount);
-        setTasks(data.tasks ?? []);
+        setProcesses(data.processes ?? []);
         setCategories(data.categories ?? []);
       })
       .catch((err) => {
         const e = err as { response?: { data?: { error?: string } } };
-        setError(e.response?.data?.error ?? 'Failed to load tasks');
+        setError(e.response?.data?.error ?? 'Failed to load processes');
       })
       .finally(() => setLoading(false));
   }, [subaccountId]);
 
-  const filtered = tasks.filter((t) => {
+  const filtered = processes.filter((t) => {
     const matchSearch =
       !search ||
       t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -72,7 +72,7 @@ export default function PortalPage({ user }: { user: User }) {
       <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
         {subaccount?.name ?? 'Portal'}
       </h1>
-      <p style={{ color: '#64748b', marginBottom: 28 }}>Select a task to run an automation.</p>
+      <p style={{ color: '#64748b', marginBottom: 28 }}>Select a process to run an automation.</p>
 
       <div style={{ display: 'flex', gap: 24 }}>
         {/* Sidebar filters */}
@@ -80,7 +80,7 @@ export default function PortalPage({ user }: { user: User }) {
           <div style={{ marginBottom: 12 }}>
             <input
               type="text"
-              placeholder="Search tasks..."
+              placeholder="Search processes..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
@@ -117,30 +117,30 @@ export default function PortalPage({ user }: { user: User }) {
           </div>
         </div>
 
-        {/* Task grid */}
+        {/* Process grid */}
         <div style={{ flex: 1 }}>
           {filtered.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px', color: '#64748b', background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
-              No tasks found. {search && 'Try a different search term.'}
+              No processes found. {search && 'Try a different search term.'}
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-              {filtered.map((task) => (
-                <Link key={task.id} to={`/portal/${subaccountId}/tasks/${task.id}`} style={{ textDecoration: 'none' }}>
+              {filtered.map((process) => (
+                <Link key={process.id} to={`/portal/${subaccountId}/processes/${process.id}`} style={{ textDecoration: 'none' }}>
                   <div style={{ background: '#fff', borderRadius: 10, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', height: '100%', boxSizing: 'border-box' }}>
-                    {task.category && (
+                    {process.category && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                        {task.category.colour && <span style={{ width: 8, height: 8, borderRadius: '50%', background: task.category.colour }} />}
-                        <span style={{ fontSize: 11, color: '#64748b' }}>{task.category.name}</span>
+                        {process.category.colour && <span style={{ width: 8, height: 8, borderRadius: '50%', background: process.category.colour }} />}
+                        <span style={{ fontSize: 11, color: '#64748b' }}>{process.category.name}</span>
                       </div>
                     )}
-                    <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 8, fontSize: 16 }}>{task.name}</div>
-                    {task.description && (
-                      <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, marginBottom: 12 }}>{task.description}</div>
+                    <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 8, fontSize: 16 }}>{process.name}</div>
+                    {process.description && (
+                      <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, marginBottom: 12 }}>{process.description}</div>
                     )}
-                    {task.inputSchema && (
+                    {process.inputSchema && (
                       <div style={{ fontSize: 12, color: '#0284c7', background: '#f0f9ff', padding: '6px 10px', borderRadius: 6 }}>
-                        {task.inputSchema.substring(0, 80)}{task.inputSchema.length > 80 ? '...' : ''}
+                        {process.inputSchema.substring(0, 80)}{process.inputSchema.length > 80 ? '...' : ''}
                       </div>
                     )}
                   </div>

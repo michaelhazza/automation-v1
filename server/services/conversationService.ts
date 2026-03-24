@@ -6,9 +6,9 @@ import { agentService } from './agentService.js';
 import {
   callAnthropic,
   buildSystemPrompt,
-  buildTaskTools,
-  getOrgTasksForTools,
-  executeTriggerredTask,
+  buildProcessTools,
+  getOrgProcessesForTools,
+  executeTriggerredProcess,
   type LLMMessage,
 } from './llmService.js';
 import { env } from '../lib/env.js';
@@ -171,14 +171,14 @@ export const conversationService = {
     // ── 3. Fetch data sources (with cache) ────────────────────────────────────
     const dataSourceContents = await agentService.fetchAgentDataSources(agentId);
 
-    // ── 4. Get available tasks for tool use ───────────────────────────────────
-    const orgTasks = await getOrgTasksForTools(organisationId);
+    // ── 4. Get available processes for tool use ────────────────────────────────
+    const orgProcesses = await getOrgProcessesForTools(organisationId);
 
     // ── 5. Build system prompt ────────────────────────────────────────────────
     const systemPrompt = buildSystemPrompt(
       agent.masterPrompt,
       dataSourceContents,
-      orgTasks,
+      orgProcesses,
     );
 
     // ── 6. Build message history (last N messages) ────────────────────────────
@@ -231,7 +231,7 @@ export const conversationService = {
     }
 
     // ── 7. Build tools ────────────────────────────────────────────────────────
-    const tools = buildTaskTools(orgTasks);
+    const tools = buildProcessTools(orgProcesses);
 
     // ── 8. Call LLM ───────────────────────────────────────────────────────────
     let llmResponse = await callAnthropic({
@@ -243,7 +243,7 @@ export const conversationService = {
       maxTokens: agent.maxTokens,
     });
 
-    // ── 9. Handle tool calls (agent-to-task chaining) ─────────────────────────
+    // ── 9. Handle tool calls (agent-to-process chaining) ──────────────────────
     let triggeredExecutionId: string | undefined;
 
     if (llmResponse.toolCalls && llmResponse.toolCalls.length > 0) {
@@ -263,19 +263,19 @@ export const conversationService = {
       const toolResults: Array<{ tool_use_id: string; content: string }> = [];
 
       for (const toolCall of llmResponse.toolCalls) {
-        if (toolCall.name === 'trigger_task') {
+        if (toolCall.name === 'trigger_process') {
           const input = toolCall.input as {
-            task_id: string;
-            task_name: string;
+            process_id: string;
+            process_name: string;
             input_data: string;
             reason: string;
           };
 
           let resultContent: string;
           try {
-            const execResult = await executeTriggerredTask(
+            const execResult = await executeTriggerredProcess(
               organisationId,
-              input.task_id,
+              input.process_id,
               userId,
               input.input_data
             );
@@ -283,9 +283,9 @@ export const conversationService = {
             resultContent = JSON.stringify({
               success: true,
               executionId: execResult.executionId,
-              taskName: execResult.taskName,
+              processName: execResult.processName,
               status: execResult.status,
-              message: `Task "${execResult.taskName}" has been queued. Execution ID: ${execResult.executionId}`,
+              message: `Process "${execResult.processName}" has been queued. Execution ID: ${execResult.executionId}`,
             });
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
