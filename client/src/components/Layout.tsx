@@ -392,7 +392,31 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* Top-level */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* Org subaccount nav */}
+          {/* Active subaccount nav – current working context */}
+          {activeSubaccountId && (
+            <>
+              <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                {activeSubaccountName ?? 'Subaccount'}
+              </div>
+              <NavLink
+                to={`/admin/subaccounts/${activeSubaccountId}`}
+                icon={<Icons.subaccounts />}
+                label="Overview"
+              />
+              <NavLink
+                to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
+                icon={<Icons.queue />}
+                label="Workspace Board"
+              />
+              <NavLink
+                to={`/portal/${activeSubaccountId}`}
+                icon={<Icons.portal />}
+                label="Portal"
+              />
+            </>
+          )}
+
+          {/* Subaccount operational nav */}
           {hasOrgContext && (
             <>
               <NavSection label="Subaccount" />
@@ -415,30 +439,6 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Subaccounts" />
               <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
               <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permission Sets" />
-            </>
-          )}
-
-          {/* Active subaccount nav */}
-          {activeSubaccountId && (
-            <>
-              <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                {activeSubaccountName ?? 'Subaccount'}
-              </div>
-              <NavLink
-                to={`/admin/subaccounts/${activeSubaccountId}`}
-                icon={<Icons.subaccounts />}
-                label="Overview"
-              />
-              <NavLink
-                to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
-                icon={<Icons.queue />}
-                label="Workspace Board"
-              />
-              <NavLink
-                to={`/portal/${activeSubaccountId}`}
-                icon={<Icons.portal />}
-                label="Portal"
-              />
             </>
           )}
 
