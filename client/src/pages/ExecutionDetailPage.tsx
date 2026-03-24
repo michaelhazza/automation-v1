@@ -5,7 +5,7 @@ import { User } from '../lib/auth';
 
 interface Execution {
   id: string;
-  taskId: string;
+  processId: string;
   status: string;
   inputData: unknown;
   outputData: unknown;

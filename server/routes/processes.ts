@@ -1,14 +1,14 @@
 import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
-import { taskService } from '../services/taskService.js';
+import { processService } from '../services/processService.js';
 import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
-router.get('/api/tasks', authenticate, async (req, res) => {
+router.get('/api/processes', authenticate, async (req, res) => {
   try {
-    const result = await taskService.listTasks(req.user!.id, req.orgId!, req.user!.role, {
+    const result = await processService.listProcesses(req.user!.id, req.orgId!, req.user!.role, {
       categoryId: req.query.categoryId as string | undefined,
       status: req.query.status as string | undefined,
       search: req.query.search as string | undefined,
@@ -22,14 +22,14 @@ router.get('/api/tasks', authenticate, async (req, res) => {
   }
 });
 
-router.post('/api/tasks', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_CREATE), async (req, res) => {
+router.post('/api/processes', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_CREATE), async (req, res) => {
   try {
     const { name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId } = req.body;
     if (!name || !workflowEngineId || !webhookPath) {
       res.status(400).json({ error: 'Validation failed', details: 'name, workflowEngineId, and webhookPath are required' });
       return;
     }
-    const result = await taskService.createTask(req.orgId!, {
+    const result = await processService.createProcess(req.orgId!, {
       name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId,
     });
     res.status(201).json(result);
@@ -39,9 +39,9 @@ router.post('/api/tasks', authenticate, requireOrgPermission(ORG_PERMISSIONS.TAS
   }
 });
 
-router.get('/api/tasks/:id', authenticate, async (req, res) => {
+router.get('/api/processes/:id', authenticate, async (req, res) => {
   try {
-    const result = await taskService.getTask(req.params.id, req.orgId!, req.user!.role);
+    const result = await processService.getProcess(req.params.id, req.orgId!, req.user!.role);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -49,9 +49,9 @@ router.get('/api/tasks/:id', authenticate, async (req, res) => {
   }
 });
 
-router.patch('/api/tasks/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_EDIT), async (req, res) => {
+router.patch('/api/processes/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_EDIT), async (req, res) => {
   try {
-    const result = await taskService.updateTask(req.params.id, req.orgId!, req.body);
+    const result = await processService.updateProcess(req.params.id, req.orgId!, req.body);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -59,9 +59,9 @@ router.patch('/api/tasks/:id', authenticate, requireOrgPermission(ORG_PERMISSION
   }
 });
 
-router.delete('/api/tasks/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_DELETE), async (req, res) => {
+router.delete('/api/processes/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_DELETE), async (req, res) => {
   try {
-    const result = await taskService.deleteTask(req.params.id, req.orgId!);
+    const result = await processService.deleteProcess(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -69,10 +69,10 @@ router.delete('/api/tasks/:id', authenticate, requireOrgPermission(ORG_PERMISSIO
   }
 });
 
-router.post('/api/tasks/:id/test', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_TEST), validateMultipart, async (req, res) => {
+router.post('/api/processes/:id/test', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_TEST), validateMultipart, async (req, res) => {
   try {
     const inputData = req.body.inputData ? JSON.parse(req.body.inputData) : undefined;
-    const result = await taskService.testTask(req.params.id, req.orgId!, req.user!.id, inputData);
+    const result = await processService.testProcess(req.params.id, req.orgId!, req.user!.id, inputData);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -80,9 +80,9 @@ router.post('/api/tasks/:id/test', authenticate, requireOrgPermission(ORG_PERMIS
   }
 });
 
-router.post('/api/tasks/:id/activate', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_ACTIVATE), async (req, res) => {
+router.post('/api/processes/:id/activate', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_ACTIVATE), async (req, res) => {
   try {
-    const result = await taskService.activateTask(req.params.id, req.orgId!);
+    const result = await processService.activateProcess(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
@@ -90,9 +90,9 @@ router.post('/api/tasks/:id/activate', authenticate, requireOrgPermission(ORG_PE
   }
 });
 
-router.post('/api/tasks/:id/deactivate', authenticate, requireOrgPermission(ORG_PERMISSIONS.TASKS_ACTIVATE), async (req, res) => {
+router.post('/api/processes/:id/deactivate', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_ACTIVATE), async (req, res) => {
   try {
-    const result = await taskService.deactivateTask(req.params.id, req.orgId!);
+    const result = await processService.deactivateProcess(req.params.id, req.orgId!);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

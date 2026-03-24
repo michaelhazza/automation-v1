@@ -60,11 +60,11 @@ async function processExecution(executionId: string): Promise<void> {
     .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
     .where(eq(executions.id, executionId));
 
-  const task = execution.taskSnapshot as Record<string, unknown> | null;
-  if (!task) {
+  const process = execution.processSnapshot as Record<string, unknown> | null;
+  if (!process) {
     await db
       .update(executions)
-      .set({ status: 'failed', errorMessage: 'Task configuration not found', updatedAt: new Date() })
+      .set({ status: 'failed', errorMessage: 'Process configuration not found', updatedAt: new Date() })
       .where(eq(executions.id, executionId));
     return;
   }
@@ -72,7 +72,7 @@ async function processExecution(executionId: string): Promise<void> {
   const [engine] = await db
     .select()
     .from(workflowEngines)
-    .where(eq(workflowEngines.id, task.workflowEngineId as string));
+    .where(eq(workflowEngines.id, process.workflowEngineId as string));
 
   if (!engine) {
     await db
@@ -114,7 +114,7 @@ async function processExecution(executionId: string): Promise<void> {
   while (retryCount <= maxRetries) {
     try {
       const baseUrl = (engine.baseUrl ?? '').replace(/\/$/, '');
-      const webhookPath = (task.webhookPath as string) ?? '';
+      const webhookPath = (process.webhookPath as string) ?? '';
       const fullEndpointUrl = `${baseUrl}${webhookPath}`;
 
       const response = await fetch(fullEndpointUrl, {
@@ -154,7 +154,7 @@ async function processExecution(executionId: string): Promise<void> {
           if (user) {
             await emailService.sendExecutionCompletionEmail(
               user.email,
-              task.name as string,
+              process.name as string,
               executionId,
               'completed'
             );

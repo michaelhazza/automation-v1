@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { boardService } from '../services/boardService.js';
-import { workspaceItemService } from '../services/workspaceItemService.js';
+import { taskService } from '../services/taskService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { db } from '../db/index.js';
 import { subaccounts } from '../db/schema/index.js';
@@ -390,22 +390,22 @@ router.delete(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// WORKSPACE ITEMS — KANBAN CARDS
+// TASKS — KANBAN CARDS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/subaccounts/:subaccountId/workspace-items
- * List workspace items for a subaccount.
+ * GET /api/subaccounts/:subaccountId/tasks
+ * List tasks for a subaccount.
  */
 router.get(
-  '/api/subaccounts/:subaccountId/workspace-items',
+  '/api/subaccounts/:subaccountId/tasks',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
       const { status, priority, assignedAgentId, search } = req.query as Record<string, string>;
-      const items = await workspaceItemService.listItems(req.orgId!, req.params.subaccountId, {
+      const items = await taskService.listTasks(req.orgId!, req.params.subaccountId, {
         status,
         priority,
         assignedAgentId,
@@ -420,17 +420,17 @@ router.get(
 );
 
 /**
- * POST /api/subaccounts/:subaccountId/workspace-items
- * Create a workspace item.
+ * POST /api/subaccounts/:subaccountId/tasks
+ * Create a task.
  */
 router.post(
-  '/api/subaccounts/:subaccountId/workspace-items',
+  '/api/subaccounts/:subaccountId/tasks',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      const { title, description, brief, status, priority, assignedAgentId, createdByAgentId, taskId, dueDate } = req.body as {
+      const { title, description, brief, status, priority, assignedAgentId, createdByAgentId, processId, dueDate } = req.body as {
         title?: string;
         description?: string;
         brief?: string;
@@ -438,7 +438,7 @@ router.post(
         priority?: 'low' | 'normal' | 'high' | 'urgent';
         assignedAgentId?: string;
         createdByAgentId?: string;
-        taskId?: string;
+        processId?: string;
         dueDate?: string;
       };
 
@@ -447,7 +447,7 @@ router.post(
         return;
       }
 
-      const item = await workspaceItemService.createItem(
+      const item = await taskService.createTask(
         req.orgId!,
         req.params.subaccountId,
         {
@@ -458,7 +458,7 @@ router.post(
           priority,
           assignedAgentId,
           createdByAgentId,
-          taskId,
+          processId,
           dueDate: dueDate ? new Date(dueDate) : undefined,
         },
         req.user!.id
@@ -473,17 +473,17 @@ router.post(
 );
 
 /**
- * GET /api/subaccounts/:subaccountId/workspace-items/:itemId
- * Get a single workspace item with activities and deliverables.
+ * GET /api/subaccounts/:subaccountId/tasks/:itemId
+ * Get a single task with activities and deliverables.
  */
 router.get(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId',
+  '/api/subaccounts/:subaccountId/tasks/:itemId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      const item = await workspaceItemService.getItem(req.params.itemId, req.orgId!);
+      const item = await taskService.getTask(req.params.itemId, req.orgId!);
       res.json(item);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -493,19 +493,19 @@ router.get(
 );
 
 /**
- * PATCH /api/subaccounts/:subaccountId/workspace-items/:itemId
- * Update a workspace item.
+ * PATCH /api/subaccounts/:subaccountId/tasks/:itemId
+ * Update a task.
  */
 router.patch(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId',
+  '/api/subaccounts/:subaccountId/tasks/:itemId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      const { title, description, brief, status, priority, assignedAgentId, taskId, dueDate } = req.body as Record<string, unknown>;
+      const { title, description, brief, status, priority, assignedAgentId, processId, dueDate } = req.body as Record<string, unknown>;
 
-      const item = await workspaceItemService.updateItem(
+      const item = await taskService.updateTask(
         req.params.itemId,
         req.orgId!,
         {
@@ -515,7 +515,7 @@ router.patch(
           status: status as string | undefined,
           priority: priority as any,
           assignedAgentId: assignedAgentId as string | null | undefined,
-          taskId: taskId as string | null | undefined,
+          processId: processId as string | null | undefined,
           dueDate: dueDate === null ? null : dueDate ? new Date(dueDate as string) : undefined,
         },
         req.user!.id
@@ -530,11 +530,11 @@ router.patch(
 );
 
 /**
- * PATCH /api/subaccounts/:subaccountId/workspace-items/:itemId/move
- * Move a workspace item (drag-and-drop optimised).
+ * PATCH /api/subaccounts/:subaccountId/tasks/:itemId/move
+ * Move a task (drag-and-drop optimised).
  */
 router.patch(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId/move',
+  '/api/subaccounts/:subaccountId/tasks/:itemId/move',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
@@ -547,7 +547,7 @@ router.patch(
         return;
       }
 
-      const item = await workspaceItemService.moveItem(req.params.itemId, req.orgId!, { status, position }, req.user!.id);
+      const item = await taskService.moveTask(req.params.itemId, req.orgId!, { status, position }, req.user!.id);
       res.json(item);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -557,18 +557,18 @@ router.patch(
 );
 
 /**
- * DELETE /api/subaccounts/:subaccountId/workspace-items/:itemId
- * Soft-delete a workspace item.
+ * DELETE /api/subaccounts/:subaccountId/tasks/:itemId
+ * Soft-delete a task.
  */
 router.delete(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId',
+  '/api/subaccounts/:subaccountId/tasks/:itemId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      await workspaceItemService.deleteItem(req.params.itemId, req.orgId!);
-      res.json({ message: 'Item deleted' });
+      await taskService.deleteTask(req.params.itemId, req.orgId!);
+      res.json({ message: 'Task deleted' });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
@@ -581,15 +581,15 @@ router.delete(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /**
- * GET /api/subaccounts/:subaccountId/workspace-items/:itemId/activities
+ * GET /api/subaccounts/:subaccountId/tasks/:itemId/activities
  */
 router.get(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId/activities',
+  '/api/subaccounts/:subaccountId/tasks/:itemId/activities',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   async (req, res) => {
     try {
-      const activities = await workspaceItemService.listActivities(req.params.itemId);
+      const activities = await taskService.listActivities(req.params.itemId);
       res.json(activities);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -599,10 +599,10 @@ router.get(
 );
 
 /**
- * POST /api/subaccounts/:subaccountId/workspace-items/:itemId/activities
+ * POST /api/subaccounts/:subaccountId/tasks/:itemId/activities
  */
 router.post(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId/activities',
+  '/api/subaccounts/:subaccountId/tasks/:itemId/activities',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
@@ -619,7 +619,7 @@ router.post(
         return;
       }
 
-      const activity = await workspaceItemService.addActivity(req.params.itemId, {
+      const activity = await taskService.addActivity(req.params.itemId, {
         activityType: activityType as any,
         message,
         agentId,
@@ -636,15 +636,15 @@ router.post(
 );
 
 /**
- * GET /api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables
+ * GET /api/subaccounts/:subaccountId/tasks/:itemId/deliverables
  */
 router.get(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables',
+  '/api/subaccounts/:subaccountId/tasks/:itemId/deliverables',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   async (req, res) => {
     try {
-      const deliverables = await workspaceItemService.listDeliverables(req.params.itemId);
+      const deliverables = await taskService.listDeliverables(req.params.itemId);
       res.json(deliverables);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -654,10 +654,10 @@ router.get(
 );
 
 /**
- * POST /api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables
+ * POST /api/subaccounts/:subaccountId/tasks/:itemId/deliverables
  */
 router.post(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables',
+  '/api/subaccounts/:subaccountId/tasks/:itemId/deliverables',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
@@ -674,7 +674,7 @@ router.post(
         return;
       }
 
-      const deliverable = await workspaceItemService.addDeliverable(req.params.itemId, {
+      const deliverable = await taskService.addDeliverable(req.params.itemId, {
         deliverableType: deliverableType as any,
         title,
         path,
@@ -690,15 +690,15 @@ router.post(
 );
 
 /**
- * DELETE /api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables/:delivId
+ * DELETE /api/subaccounts/:subaccountId/tasks/:itemId/deliverables/:delivId
  */
 router.delete(
-  '/api/subaccounts/:subaccountId/workspace-items/:itemId/deliverables/:delivId',
+  '/api/subaccounts/:subaccountId/tasks/:itemId/deliverables/:delivId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   async (req, res) => {
     try {
-      await workspaceItemService.deleteDeliverable(req.params.delivId);
+      await taskService.deleteDeliverable(req.params.delivId);
       res.json({ message: 'Deliverable deleted' });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };

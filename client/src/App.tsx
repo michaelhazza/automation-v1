@@ -9,14 +9,14 @@ const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'));
 const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const TasksPage = lazy(() => import('./pages/TasksPage'));
-const TaskExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
+const ProcessesPage = lazy(() => import('./pages/TasksPage'));
+const ProcessExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
 const ExecutionHistoryPage = lazy(() => import('./pages/ExecutionHistoryPage'));
 const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminEnginesPage = lazy(() => import('./pages/AdminEnginesPage'));
-const AdminTasksPage = lazy(() => import('./pages/AdminTasksPage'));
-const AdminTaskEditPage = lazy(() => import('./pages/AdminTaskEditPage'));
+const AdminProcessesPage = lazy(() => import('./pages/AdminTasksPage'));
+const AdminProcessEditPage = lazy(() => import('./pages/AdminTaskEditPage'));
 const AdminCategoriesPage = lazy(() => import('./pages/AdminCategoriesPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
@@ -128,16 +128,16 @@ export default function App() {
 
         <Route element={<ProtectedLayout user={user} loading={loading} />}>
           <Route path="/" element={<DashboardPage user={user!} />} />
-          <Route path="/tasks" element={<TasksPage user={user!} />} />
-          <Route path="/tasks/:id" element={<TaskExecutionPage user={user!} />} />
+          <Route path="/processes" element={<ProcessesPage user={user!} />} />
+          <Route path="/processes/:id" element={<ProcessExecutionPage user={user!} />} />
           <Route path="/executions" element={<ExecutionHistoryPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
-            <Route path="/admin/tasks" element={<AdminTasksPage user={user!} />} />
-            <Route path="/admin/tasks/:id" element={<AdminTaskEditPage user={user!} />} />
+            <Route path="/admin/processes" element={<AdminProcessesPage user={user!} />} />
+            <Route path="/admin/processes/:id" element={<AdminProcessEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
             <Route path="/admin/engines" element={<AdminEnginesPage user={user!} />} />
             <Route path="/admin/categories" element={<AdminCategoriesPage user={user!} />} />
@@ -165,7 +165,7 @@ export default function App() {
           {/* Client portal routes */}
           <Route path="/portal" element={<PortalLandingPage user={user!} />} />
           <Route path="/portal/:subaccountId" element={<PortalPage user={user!} />} />
-          <Route path="/portal/:subaccountId/tasks/:taskId" element={<PortalExecutionPage user={user!} />} />
+          <Route path="/portal/:subaccountId/processes/:processId" element={<PortalExecutionPage user={user!} />} />
           <Route path="/portal/:subaccountId/executions" element={<PortalExecutionHistoryPage user={user!} />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />

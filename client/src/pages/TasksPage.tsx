@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-interface Task {
+interface Process {
   id: string;
   name: string;
   description: string;
@@ -18,7 +18,7 @@ interface Category {
 }
 
 export default function TasksPage({ user }: { user: User }) {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [processes, setProcesses] = useState<Process[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -27,11 +27,11 @@ export default function TasksPage({ user }: { user: User }) {
   useEffect(() => {
     const load = async () => {
       try {
-        const [taskRes, catRes] = await Promise.all([
-          api.get('/api/tasks', { params: { status: 'active' } }),
+        const [processRes, catRes] = await Promise.all([
+          api.get('/api/processes', { params: { status: 'active' } }),
           api.get('/api/categories'),
         ]);
-        setTasks(taskRes.data);
+        setProcesses(processRes.data);
         setCategories(catRes.data);
       } finally {
         setLoading(false);
@@ -40,14 +40,14 @@ export default function TasksPage({ user }: { user: User }) {
     load();
   }, []);
 
-  const filtered = tasks.filter((t) => {
+  const filtered = processes.filter((t) => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || (t.description ?? '').toLowerCase().includes(search.toLowerCase());
     const matchCat = !selectedCategory || t.orgCategoryId === selectedCategory;
     return matchSearch && matchCat;
   });
 
-  const getCategoryForTask = (task: Task) =>
-    task.orgCategoryId ? categories.find((c) => c.id === task.orgCategoryId) : null;
+  const getCategoryForProcess = (process: Process) =>
+    process.orgCategoryId ? categories.find((c) => c.id === process.orgCategoryId) : null;
 
   if (loading) {
     return (
@@ -69,10 +69,10 @@ export default function TasksPage({ user }: { user: User }) {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.03em' }}>
-          Tasks
+          Processes
         </h1>
         <p style={{ color: '#64748b', margin: 0, fontSize: 14 }}>
-          {tasks.length} automation{tasks.length !== 1 ? 's' : ''} available to run
+          {processes.length} automation{processes.length !== 1 ? 's' : ''} available to run
         </p>
       </div>
 
@@ -85,7 +85,7 @@ export default function TasksPage({ user }: { user: User }) {
         </div>
         <input
           type="text"
-          placeholder="Search tasks by name or description..."
+          placeholder="Search processes by name or description..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="form-input"
@@ -120,11 +120,11 @@ export default function TasksPage({ user }: { user: User }) {
               color: !selectedCategory ? '#4f46e5' : '#64748b',
               padding: '1px 7px', borderRadius: 9999, fontSize: 11, fontWeight: 700, marginLeft: 2,
             }}>
-              {tasks.length}
+              {processes.length}
             </span>
           </button>
           {categories.map((cat) => {
-            const count = tasks.filter((t) => t.orgCategoryId === cat.id).length;
+            const count = processes.filter((t) => t.orgCategoryId === cat.id).length;
             const isActive = selectedCategory === cat.id;
             return (
               <button
@@ -152,7 +152,7 @@ export default function TasksPage({ user }: { user: User }) {
         </div>
       )}
 
-      {/* Task grid */}
+      {/* Process grid */}
       {filtered.length === 0 ? (
         <div className="card empty-state">
           <div style={{
@@ -165,10 +165,10 @@ export default function TasksPage({ user }: { user: User }) {
             </svg>
           </div>
           <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16, color: '#0f172a' }}>
-            {search ? 'No tasks match your search' : 'No tasks available'}
+            {search ? 'No processes match your search' : 'No processes available'}
           </p>
           <p style={{ margin: '0 0 20px', fontSize: 13.5, color: '#64748b' }}>
-            {search ? 'Try a different search term or clear the filters.' : 'Tasks will appear here once they are activated.'}
+            {search ? 'Try a different search term or clear the filters.' : 'Processes will appear here once they are activated.'}
           </p>
           {search && (
             <button className="btn btn-secondary" onClick={() => { setSearch(''); setSelectedCategory(''); }}>
@@ -178,10 +178,10 @@ export default function TasksPage({ user }: { user: User }) {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-          {filtered.map((task) => {
-            const cat = getCategoryForTask(task);
+          {filtered.map((process) => {
+            const cat = getCategoryForProcess(process);
             return (
-              <Link key={task.id} to={`/tasks/${task.id}`} className="task-card" style={{ padding: '20px 22px', display: 'block' }}>
+              <Link key={process.id} to={`/processes/${process.id}`} className="task-card" style={{ padding: '20px 22px', display: 'block' }}>
                 {/* Category badge */}
                 {cat && (
                   <div style={{ marginBottom: 10 }}>
@@ -201,24 +201,24 @@ export default function TasksPage({ user }: { user: User }) {
 
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
                   <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 15, letterSpacing: '-0.01em', lineHeight: 1.3 }}>
-                    {task.name}
+                    {process.name}
                   </div>
                   <div className="run-arrow" style={{ color: '#6366f1', fontSize: 13, fontWeight: 700, flexShrink: 0, marginTop: 2 }}>
                     Run →
                   </div>
                 </div>
 
-                {task.description && (
+                {process.description && (
                   <div style={{
                     marginTop: 8, fontSize: 13, color: '#64748b', lineHeight: 1.55,
                     overflow: 'hidden', display: '-webkit-box',
                     WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                   }}>
-                    {task.description}
+                    {process.description}
                   </div>
                 )}
 
-                {task.inputSchema && (
+                {process.inputSchema && (
                   <div style={{
                     marginTop: 12, padding: '8px 10px',
                     background: '#f8faff', border: '1px solid #e8ecf7',
@@ -226,7 +226,7 @@ export default function TasksPage({ user }: { user: User }) {
                     fontFamily: 'ui-monospace, monospace',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
-                    {task.inputSchema.substring(0, 90)}{task.inputSchema.length > 90 ? '…' : ''}
+                    {process.inputSchema.substring(0, 90)}{process.inputSchema.length > 90 ? '…' : ''}
                   </div>
                 )}
               </Link>

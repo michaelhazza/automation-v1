@@ -1,5 +1,5 @@
 /**
- * PortalExecutionPage — subaccount member's task execution page.
+ * PortalExecutionPage — subaccount member's process execution page.
  *
  * Mirrors TaskExecutionPage but uses the portal API endpoints
  * (/api/portal/:subaccountId/executions) and reads the subaccountId from params.
@@ -9,7 +9,7 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-interface Task {
+interface Process {
   id: string;
   name: string;
   description: string | null;
@@ -56,8 +56,8 @@ const spinnerStyle: React.CSSProperties = {
 };
 
 export default function PortalExecutionPage({ user }: { user: User }) {
-  const { subaccountId, taskId } = useParams<{ subaccountId: string; taskId: string }>();
-  const [task, setTask] = useState<Task | null>(null);
+  const { subaccountId, processId } = useParams<{ subaccountId: string; processId: string }>();
+  const [process, setProcess] = useState<Process | null>(null);
   const [inputData, setInputData] = useState('');
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [execution, setExecution] = useState<Execution | null>(null);
@@ -75,16 +75,16 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   useEffect(() => {
     if (!subaccountId) return;
     Promise.all([
-      api.get(`/api/portal/${subaccountId}/tasks`),
+      api.get(`/api/portal/${subaccountId}/processes`),
       api.get('/api/settings/upload').catch(() => ({ data: { maxUploadSizeMb: 200 } })),
     ]).then(([portalRes, settingsRes]) => {
-      const found = (portalRes.data.tasks as Task[]).find((t: Task) => t.id === taskId);
-      setTask(found ?? null);
+      const found = (portalRes.data.processes as Process[]).find((t: Process) => t.id === processId);
+      setProcess(found ?? null);
       setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
     }).finally(() => setLoading(false));
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [subaccountId, taskId]);
+  }, [subaccountId, processId]);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const maxBytes = maxUploadSizeMb * 1024 * 1024;
@@ -126,7 +126,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
       }
 
       const { data: execData } = await api.post(`/api/portal/${subaccountId}/executions`, {
-        taskId,
+        processId,
         ...(parsedInput !== undefined ? { inputData: parsedInput } : {}),
         notifyOnComplete,
       });
@@ -148,14 +148,14 @@ export default function PortalExecutionPage({ user }: { user: User }) {
       pollExecution(execId);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to submit task');
+      setError(e.response?.data?.error ?? 'Failed to submit process');
       setUploadProgress('');
       setSubmitting(false);
     }
   };
 
   if (loading) return <div>Loading...</div>;
-  if (!task) return <div style={{ color: '#dc2626', padding: 32 }}>Task not found</div>;
+  if (!process) return <div style={{ color: '#dc2626', padding: 32 }}>Process not found</div>;
 
   const hasInvalidFiles = stagedFiles.some((f) => f.error);
   const isExecuting = execution && ['pending', 'running'].includes(execution.status);
@@ -164,21 +164,21 @@ export default function PortalExecutionPage({ user }: { user: User }) {
     <>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={{ marginBottom: 16 }}>
-        <Link to={`/portal/${subaccountId}`} style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to tasks</Link>
+        <Link to={`/portal/${subaccountId}`} style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to processes</Link>
       </div>
       <div style={{ maxWidth: 760 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{task.name}</h1>
-        {task.description && <p style={{ color: '#64748b', marginBottom: 24 }}>{task.description}</p>}
+        <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{process.name}</h1>
+        {process.description && <p style={{ color: '#64748b', marginBottom: 24 }}>{process.description}</p>}
 
-        {task.outputSchema && (
+        {process.outputSchema && (
           <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#166534' }}>
-            <strong>Expected output:</strong> {task.outputSchema}
+            <strong>Expected output:</strong> {process.outputSchema}
           </div>
         )}
 
-        {task.inputSchema && (
+        {process.inputSchema && (
           <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#0c4a6e' }}>
-            <strong>Input guidance:</strong> {task.inputSchema}
+            <strong>Input guidance:</strong> {process.inputSchema}
           </div>
         )}
 
@@ -229,7 +229,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
 
             <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
               <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#2563eb' }} />
-              <span style={{ fontSize: 13, color: '#374151' }}>Email me when this task completes</span>
+              <span style={{ fontSize: 13, color: '#374151' }}>Email me when this process completes</span>
             </label>
 
             {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
@@ -240,7 +240,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
               disabled={submitting || hasInvalidFiles}
               style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: (submitting || hasInvalidFiles) ? 'not-allowed' : 'pointer', opacity: (submitting || hasInvalidFiles) ? 0.7 : 1 }}
             >
-              {submitting ? (uploadProgress ? 'Uploading...' : 'Submitting...') : 'Run Task'}
+              {submitting ? (uploadProgress ? 'Uploading...' : 'Submitting...') : 'Run Process'}
             </button>
           </div>
         )}

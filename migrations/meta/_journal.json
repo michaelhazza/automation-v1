@@ -8,6 +8,13 @@
       "when": 1771744831581,
       "tag": "0000_wandering_firedrake",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1771919200000,
+      "tag": "0010_rename_tasks_and_workspace_items",
+      "breakpoints": true
     }
   ]
 }

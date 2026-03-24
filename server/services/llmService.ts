@@ -1,6 +1,6 @@
 import { env } from '../lib/env.js';
 import { db } from '../db/index.js';
-import { tasks, executions } from '../db/schema/index.js';
+import { processes, executions } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -48,80 +48,80 @@ export function truncateToTokenBudget(text: string, maxTokens: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Task tool definition for agent-to-task chaining
+// Process tool definition for agent-to-process chaining
 // ---------------------------------------------------------------------------
 
-export function buildTaskTools(orgTasks: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>): AnthropicTool[] {
-  if (orgTasks.length === 0) return [];
+export function buildProcessTools(orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>): AnthropicTool[] {
+  if (orgProcesses.length === 0) return [];
 
   return [
     {
-      name: 'trigger_task',
-      description: 'Trigger an automation task/workflow. Use this when the user asks you to run, execute, or trigger a specific automation. Always confirm with the user before triggering unless they explicitly asked you to do it.',
+      name: 'trigger_process',
+      description: 'Trigger an automation process/workflow. Use this when the user asks you to run, execute, or trigger a specific automation. Always confirm with the user before triggering unless they explicitly asked you to do it.',
       input_schema: {
         type: 'object',
         properties: {
-          task_id: {
+          process_id: {
             type: 'string',
-            description: 'The ID of the task to trigger',
-            enum: orgTasks.map((t) => t.id),
+            description: 'The ID of the process to trigger',
+            enum: orgProcesses.map((t) => t.id),
           },
-          task_name: {
+          process_name: {
             type: 'string',
-            description: 'The human-readable name of the task being triggered',
+            description: 'The human-readable name of the process being triggered',
           },
           input_data: {
             type: 'string',
-            description: 'JSON string of input data to pass to the task. Use {} if no input is needed.',
+            description: 'JSON string of input data to pass to the process. Use {} if no input is needed.',
           },
           reason: {
             type: 'string',
-            description: 'Brief explanation of why you are triggering this task',
+            description: 'Brief explanation of why you are triggering this process',
           },
         },
-        required: ['task_id', 'task_name', 'input_data', 'reason'],
+        required: ['process_id', 'process_name', 'input_data', 'reason'],
       },
     },
   ];
 }
 
 // ---------------------------------------------------------------------------
-// Fetch available tasks for an organisation (for tool use context)
+// Fetch available processes for an organisation (for tool use context)
 // ---------------------------------------------------------------------------
 
-export async function getOrgTasksForTools(
+export async function getOrgProcessesForTools(
   organisationId: string
 ): Promise<Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>> {
   const rows = await db
     .select({
-      id: tasks.id,
-      name: tasks.name,
-      description: tasks.description,
-      inputSchema: tasks.inputSchema,
+      id: processes.id,
+      name: processes.name,
+      description: processes.description,
+      inputSchema: processes.inputSchema,
     })
-    .from(tasks)
-    .where(and(eq(tasks.organisationId, organisationId), eq(tasks.status, 'active'), isNull(tasks.deletedAt)));
+    .from(processes)
+    .where(and(eq(processes.organisationId, organisationId), eq(processes.status, 'active'), isNull(processes.deletedAt)));
 
   return rows;
 }
 
 // ---------------------------------------------------------------------------
-// Execute a triggered task (creates an execution record)
+// Execute a triggered process (creates an execution record)
 // ---------------------------------------------------------------------------
 
-export async function executeTriggerredTask(
+export async function executeTriggerredProcess(
   organisationId: string,
-  taskId: string,
+  processId: string,
   userId: string,
   inputDataStr: string
-): Promise<{ executionId: string; taskName: string; status: string }> {
-  const [task] = await db
+): Promise<{ executionId: string; processName: string; status: string }> {
+  const [process] = await db
     .select()
-    .from(tasks)
-    .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+    .from(processes)
+    .where(and(eq(processes.id, processId), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
 
-  if (!task) throw new Error(`Task ${taskId} not found`);
-  if (task.status !== 'active') throw new Error(`Task ${task.name} is not active`);
+  if (!process) throw new Error(`Process ${processId} not found`);
+  if (process.status !== 'active') throw new Error(`Process ${process.name} is not active`);
 
   let inputData: unknown = {};
   try {
@@ -136,12 +136,12 @@ export async function executeTriggerredTask(
     .insert(executions)
     .values({
       organisationId,
-      taskId,
+      processId,
       triggeredByUserId: userId,
       status: 'pending',
       inputData: inputData as Record<string, unknown>,
       engineType: 'agent_triggered',
-      taskSnapshot: task as unknown as Record<string, unknown>,
+      processSnapshot: process as unknown as Record<string, unknown>,
       isTestExecution: false,
       retryCount: 0,
       createdAt: new Date(),
@@ -151,7 +151,7 @@ export async function executeTriggerredTask(
 
   await queueService.enqueueExecution(execution.id);
 
-  return { executionId: execution.id, taskName: task.name, status: 'queued' };
+  return { executionId: execution.id, processName: process.name, status: 'queued' };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,12 +259,12 @@ export function buildSystemPrompt(
   }
 
   if (orgTasks.length > 0) {
-    parts.push('\n---\n## Available Automations\n');
-    parts.push('You can trigger the following automation tasks when appropriate:\n');
+    parts.push('\n---\n## Available Processes\n');
+    parts.push('You can trigger the following automation processes when appropriate:\n');
     for (const t of orgTasks) {
       parts.push(`- **${t.name}** (id: \`${t.id}\`)${t.description ? `: ${t.description}` : ''}`);
     }
-    parts.push('\nUse the `trigger_task` tool to execute any of these. Always explain what you\'re about to do before triggering.\n');
+    parts.push('\nUse the `trigger_process` tool to execute any of these. Always explain what you\'re about to do before triggering.\n');
   }
 
   return parts.join('');
@@ -273,9 +273,9 @@ export function buildSystemPrompt(
 export const llmService = {
   approxTokens,
   truncateToTokenBudget,
-  buildTaskTools,
-  getOrgTasksForTools,
-  executeTriggerredTask,
+  buildProcessTools,
+  getOrgProcessesForTools,
+  executeTriggerredProcess,
   callAnthropic,
   buildSystemPrompt,
 };

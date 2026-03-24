@@ -1,6 +1,6 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
-import { tasks } from './tasks';
+import { processes } from './processes';
 import { users } from './users';
 import { subaccounts } from './subaccounts';
 
@@ -11,9 +11,9 @@ export const executions = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
-    taskId: uuid('task_id')
+    processId: uuid('process_id')
       .notNull()
-      .references(() => tasks.id),
+      .references(() => processes.id),
     triggeredByUserId: uuid('triggered_by_user_id')
       .notNull()
       .references(() => users.id),
@@ -25,7 +25,7 @@ export const executions = pgTable(
     errorMessage: text('error_message'),
     errorDetail: jsonb('error_detail'),
     engineType: text('engine_type').notNull(),
-    taskSnapshot: jsonb('task_snapshot'),
+    processSnapshot: jsonb('process_snapshot'),
     isTestExecution: boolean('is_test_execution').notNull().default(false),
     retryCount: integer('retry_count').notNull().default(0),
     // Webhook / queue tracking fields
@@ -43,12 +43,12 @@ export const executions = pgTable(
   },
   (table) => ({
     orgStatusIdx: index('executions_org_status_idx').on(table.organisationId, table.status),
-    orgTaskIdx: index('executions_org_task_idx').on(table.organisationId, table.taskId),
+    orgProcessIdx: index('executions_org_process_idx').on(table.organisationId, table.processId),
     orgUserIdx: index('executions_org_user_idx').on(table.organisationId, table.triggeredByUserId),
     orgCreatedAtIdx: index('executions_org_created_at_idx').on(table.organisationId, table.createdAt),
-    userTaskCreatedAtIdx: index('executions_user_task_created_at_idx').on(table.triggeredByUserId, table.taskId, table.createdAt),
+    userProcessCreatedAtIdx: index('executions_user_process_created_at_idx').on(table.triggeredByUserId, table.processId, table.createdAt),
     orgIdIdx: index('executions_org_id_idx').on(table.organisationId),
-    taskIdx: index('executions_task_idx').on(table.taskId),
+    processIdx: index('executions_process_idx').on(table.processId),
     userIdx: index('executions_user_idx').on(table.triggeredByUserId),
     subaccountIdx: index('executions_subaccount_idx').on(table.subaccountId),
     statusIdx: index('executions_status_idx').on(table.status),

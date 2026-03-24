@@ -21,12 +21,12 @@ interface ExecutionRow {
   durationMs: number | null;
   createdAt: string;
   notifyOnComplete: boolean;
-  taskSnapshot: unknown;
+  processSnapshot: unknown;
   organisationId: string;
-  taskId: string;
+  processId: string;
   userId: string;
   organisationName: string | null;
-  taskName: string | null;
+  processName: string | null;
   userEmail: string | null;
   userFirstName: string | null;
   userLastName: string | null;
@@ -128,7 +128,7 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
 
   // Check timeout
   if (row.status === 'timeout') {
-    issues.push({ label: 'Execution timed out', desc: 'The task did not complete within the configured timeout window.', severity: 'error' });
+    issues.push({ label: 'Execution timed out', desc: 'The process did not complete within the configured timeout window.', severity: 'error' });
   }
 
   // No issues
@@ -164,7 +164,7 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
             {[
               { label: 'Organisation', value: row.organisationName ?? row.organisationId },
-              { label: 'Task', value: row.taskName ?? row.taskId },
+              { label: 'Process', value: row.processName ?? row.processId },
               { label: 'User', value: row.userEmail ?? row.userId },
               { label: 'Engine', value: row.engineType },
               { label: 'Status', value: row.status },
@@ -236,10 +236,10 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
             </div>
           </div>
 
-          {/* Task snapshot */}
+          {/* Process snapshot */}
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b', marginBottom: 10 }}>Task Snapshot</div>
-            <JsonBlock data={row.taskSnapshot} label="task configuration at time of execution" />
+            <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b', marginBottom: 10 }}>Process Snapshot</div>
+            <JsonBlock data={row.processSnapshot} label="process configuration at time of execution" />
           </div>
         </div>
       </div>
@@ -251,7 +251,7 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
 const STATUSES = ['', 'pending', 'running', 'completed', 'failed', 'timeout', 'cancelled'];
 const ENGINE_TYPES = ['', 'n8n', 'ghl', 'make', 'zapier', 'custom_webhook'];
 
-export default function SystemTaskQueuePage({ user }: { user: User }) {
+export default function SystemProcessQueuePage({ user }: { user: User }) {
   const [rows, setRows] = useState<ExecutionRow[]>([]);
   const [orgs, setOrgs] = useState<Organisation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -331,9 +331,9 @@ export default function SystemTaskQueuePage({ user }: { user: User }) {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>System Task Queue</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>System Process Queue</h1>
         <p style={{ fontSize: 14, color: '#64748b', margin: 0 }}>
-          All task executions across every organisation. Use diagnostic tools to investigate failures.
+          All process executions across every organisation. Use diagnostic tools to investigate failures.
         </p>
       </div>
 
@@ -421,7 +421,7 @@ export default function SystemTaskQueuePage({ user }: { user: User }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  {['Created', 'Organisation', 'Task', 'User', 'Engine', 'Status', 'Duration', 'Retries', 'Callback', 'Actions'].map((h) => (
+                  {['Created', 'Organisation', 'Process', 'User', 'Engine', 'Status', 'Duration', 'Retries', 'Callback', 'Actions'].map((h) => (
                     <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                       {h}
                     </th>
@@ -442,8 +442,8 @@ export default function SystemTaskQueuePage({ user }: { user: User }) {
                         </div>
                       </td>
                       <td style={{ padding: '10px 14px', maxWidth: 160 }}>
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1e293b' }} title={row.taskName ?? row.taskId}>
-                          {row.taskName ?? <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{row.taskId.slice(0, 8)}</span>}
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1e293b' }} title={row.processName ?? row.processId}>
+                          {row.processName ?? <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{row.processId.slice(0, 8)}</span>}
                           {row.isTestExecution && (
                             <span style={{ marginLeft: 6, fontSize: 10, background: '#e0e7ff', color: '#3730a3', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>TEST</span>
                           )}

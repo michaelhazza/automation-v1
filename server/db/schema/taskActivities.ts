@@ -1,15 +1,15 @@
 import { pgTable, uuid, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
-import { workspaceItems } from './workspaceItems';
+import { tasks } from './tasks';
 import { agents } from './agents';
 import { users } from './users';
 
-export const workspaceItemActivities = pgTable(
-  'workspace_item_activities',
+export const taskActivities = pgTable(
+  'task_activities',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    workspaceItemId: uuid('workspace_item_id')
+    taskId: uuid('task_id')
       .notNull()
-      .references(() => workspaceItems.id, { onDelete: 'cascade' }),
+      .references(() => tasks.id, { onDelete: 'cascade' }),
     agentId: uuid('agent_id')
       .references(() => agents.id),
     userId: uuid('user_id')
@@ -22,11 +22,11 @@ export const workspaceItemActivities = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => ({
-    itemIdx: index('ws_item_activities_item_idx').on(table.workspaceItemId),
-    itemCreatedIdx: index('ws_item_activities_item_created_idx').on(table.workspaceItemId, table.createdAt),
-    agentIdx: index('ws_item_activities_agent_idx').on(table.agentId),
+    taskIdx: index('task_activities_task_idx').on(table.taskId),
+    taskCreatedIdx: index('task_activities_task_created_idx').on(table.taskId, table.createdAt),
+    agentIdx: index('task_activities_agent_idx').on(table.agentId),
   })
 );
 
-export type WorkspaceItemActivity = typeof workspaceItemActivities.$inferSelect;
-export type NewWorkspaceItemActivity = typeof workspaceItemActivities.$inferInsert;
+export type TaskActivity = typeof taskActivities.$inferSelect;
+export type NewTaskActivity = typeof taskActivities.$inferInsert;

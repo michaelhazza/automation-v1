@@ -5,14 +5,14 @@ import { User } from '../lib/auth';
 
 interface Execution {
   id: string;
-  taskId: string;
+  processId: string;
   status: string;
   createdAt: string;
   durationMs: number | null;
   isTestExecution: boolean;
 }
 
-interface Task {
+interface Process {
   id: string;
   name: string;
   description: string;
@@ -68,18 +68,18 @@ function StatCard({
 
 export default function DashboardPage({ user }: DashboardPageProps) {
   const [executions, setExecutions] = useState<Execution[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [processes, setProcesses] = useState<Process[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [execRes, taskRes] = await Promise.all([
+        const [execRes, processRes] = await Promise.all([
           api.get('/api/executions', { params: { limit: 10 } }),
-          api.get('/api/tasks', { params: { status: 'active', limit: 6 } }),
+          api.get('/api/processes', { params: { status: 'active', limit: 6 } }),
         ]);
         setExecutions(execRes.data);
-        setTasks(taskRes.data);
+        setProcesses(processRes.data);
       } catch {
         // silently handle
       } finally {
@@ -124,11 +124,11 @@ export default function DashboardPage({ user }: DashboardPageProps) {
               Here's what's happening with your automations today.
             </p>
           </div>
-          <Link to="/tasks" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+          <Link to="/processes" className="btn btn-primary" style={{ textDecoration: 'none' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
-            Run a Task
+            Run a Process
           </Link>
         </div>
       </div>
@@ -185,23 +185,23 @@ export default function DashboardPage({ user }: DashboardPageProps) {
         />
       </div>
 
-      {/* Quick access tasks */}
-      {tasks.length > 0 && (
+      {/* Quick access processes */}
+      {processes.length > 0 && (
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-              Available Tasks
+              Available Processes
             </h2>
-            <Link to="/tasks" style={{ fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>
+            <Link to="/processes" style={{ fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>
               View all →
             </Link>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-            {tasks.map((task) => (
-              <Link key={task.id} to={`/tasks/${task.id}`} className="task-card" style={{ padding: '18px 20px' }}>
+            {processes.map((process) => (
+              <Link key={process.id} to={`/processes/${process.id}`} className="task-card" style={{ padding: '18px 20px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
                   <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 14.5, letterSpacing: '-0.01em' }}>
-                    {task.name}
+                    {process.name}
                   </div>
                   <div
                     className="run-arrow"
@@ -210,13 +210,13 @@ export default function DashboardPage({ user }: DashboardPageProps) {
                     Run →
                   </div>
                 </div>
-                {task.description && (
+                {process.description && (
                   <div style={{
                     fontSize: 12.5, color: '#64748b', lineHeight: 1.55,
                     overflow: 'hidden', display: '-webkit-box',
                     WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                   }}>
-                    {task.description}
+                    {process.description}
                   </div>
                 )}
                 <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -256,10 +256,10 @@ export default function DashboardPage({ user }: DashboardPageProps) {
             </div>
             <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16, color: '#0f172a' }}>No executions yet</p>
             <p style={{ margin: '0 0 20px', fontSize: 13.5, color: '#64748b' }}>
-              Run your first task to get started.
+              Run your first process to get started.
             </p>
-            <Link to="/tasks" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-              Browse Tasks
+            <Link to="/processes" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+              Browse Processes
             </Link>
           </div>
         ) : (

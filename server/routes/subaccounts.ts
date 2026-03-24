@@ -5,9 +5,9 @@ import { db } from '../db/index.js';
 import {
   subaccounts,
   subaccountCategories,
-  subaccountTaskLinks,
+  subaccountProcessLinks,
   subaccountUserAssignments,
-  tasks,
+  processes,
   users,
   permissionSets,
 } from '../db/schema/index.js';
@@ -362,13 +362,13 @@ router.delete(
   }
 );
 
-// ─── Subaccount task links ────────────────────────────────────────────────────
+// ─── Subaccount process links ─────────────────────────────────────────────────
 
 /**
  * GET /api/subaccounts/:subaccountId/tasks
- * List all tasks visible to this subaccount:
- *   - Org tasks linked via subaccount_task_links
- *   - Subaccount-native tasks (tasks.subaccount_id = subaccountId)
+ * List all processes visible to this subaccount:
+ *   - Org processes linked via subaccount_process_links
+ *   - Subaccount-native processes (processes.subaccount_id = subaccountId)
  */
 router.get(
   '/api/subaccounts/:subaccountId/tasks',
@@ -378,37 +378,37 @@ router.get(
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
 
-      // Linked org tasks
+      // Linked org processes
       const links = await db
         .select({
-          linkId: subaccountTaskLinks.id,
-          taskId: subaccountTaskLinks.taskId,
-          subaccountCategoryId: subaccountTaskLinks.subaccountCategoryId,
-          isActive: subaccountTaskLinks.isActive,
-          linkCreatedAt: subaccountTaskLinks.createdAt,
-          taskName: tasks.name,
-          taskStatus: tasks.status,
-          taskDescription: tasks.description,
-          taskWebhookPath: tasks.webhookPath,
+          linkId: subaccountProcessLinks.id,
+          processId: subaccountProcessLinks.processId,
+          subaccountCategoryId: subaccountProcessLinks.subaccountCategoryId,
+          isActive: subaccountProcessLinks.isActive,
+          linkCreatedAt: subaccountProcessLinks.createdAt,
+          processName: processes.name,
+          processStatus: processes.status,
+          processDescription: processes.description,
+          processWebhookPath: processes.webhookPath,
         })
-        .from(subaccountTaskLinks)
-        .innerJoin(tasks, eq(tasks.id, subaccountTaskLinks.taskId))
-        .where(eq(subaccountTaskLinks.subaccountId, req.params.subaccountId));
+        .from(subaccountProcessLinks)
+        .innerJoin(processes, eq(processes.id, subaccountProcessLinks.processId))
+        .where(eq(subaccountProcessLinks.subaccountId, req.params.subaccountId));
 
-      // Subaccount-native tasks
-      const nativeTasks = await db
+      // Subaccount-native processes
+      const nativeProcesses = await db
         .select()
-        .from(tasks)
+        .from(processes)
         .where(
           and(
-            eq(tasks.subaccountId, req.params.subaccountId),
-            isNull(tasks.deletedAt)
+            eq(processes.subaccountId, req.params.subaccountId),
+            isNull(processes.deletedAt)
           )
         );
 
       res.json({
-        linkedTasks: links,
-        nativeTasks,
+        linkedProcesses: links,
+        nativeProcesses,
       });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -419,8 +419,8 @@ router.get(
 
 /**
  * POST /api/subaccounts/:subaccountId/tasks
- * Link an org-level task to this subaccount.
- * Body: { taskId, subaccountCategoryId? }
+ * Link an org-level process to this subaccount.
+ * Body: { processId, subaccountCategoryId? }
  */
 router.post(
   '/api/subaccounts/:subaccountId/tasks',
@@ -429,35 +429,35 @@ router.post(
   async (req, res) => {
     try {
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      const { taskId, subaccountCategoryId } = req.body as { taskId?: string; subaccountCategoryId?: string };
+      const { processId, subaccountCategoryId } = req.body as { processId?: string; subaccountCategoryId?: string };
 
-      if (!taskId) {
-        res.status(400).json({ error: 'Validation failed', details: 'taskId is required' });
+      if (!processId) {
+        res.status(400).json({ error: 'Validation failed', details: 'processId is required' });
         return;
       }
 
-      // Verify task belongs to this org
-      const [task] = await db
+      // Verify process belongs to this org
+      const [process] = await db
         .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, req.orgId!), isNull(tasks.deletedAt)));
+        .from(processes)
+        .where(and(eq(processes.id, processId), eq(processes.organisationId, req.orgId!), isNull(processes.deletedAt)));
 
-      if (!task) {
-        res.status(404).json({ error: 'Task not found or not accessible' });
+      if (!process) {
+        res.status(404).json({ error: 'Process not found or not accessible' });
         return;
       }
 
-      // Only org-level tasks (no subaccount_id) can be linked
-      if (task.subaccountId !== null) {
-        res.status(400).json({ error: 'Subaccount-native tasks cannot be linked; they already belong to a subaccount' });
+      // Only org-level processes (no subaccount_id) can be linked
+      if (process.subaccountId !== null) {
+        res.status(400).json({ error: 'Subaccount-native processes cannot be linked; they already belong to a subaccount' });
         return;
       }
 
       const [link] = await db
-        .insert(subaccountTaskLinks)
+        .insert(subaccountProcessLinks)
         .values({
           subaccountId: req.params.subaccountId,
-          taskId,
+          processId,
           subaccountCategoryId: subaccountCategoryId ?? null,
           isActive: true,
           createdAt: new Date(),
@@ -469,7 +469,7 @@ router.post(
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string; code?: string };
       if (e.code === '23505') {
-        res.status(409).json({ error: 'This task is already linked to the subaccount' });
+        res.status(409).json({ error: 'This process is already linked to the subaccount' });
         return;
       }
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
@@ -479,7 +479,7 @@ router.post(
 
 /**
  * PATCH /api/subaccounts/:subaccountId/tasks/:linkId
- * Update a task link (toggle isActive, change category).
+ * Update a process link (toggle isActive, change category).
  */
 router.patch(
   '/api/subaccounts/:subaccountId/tasks/:linkId',
@@ -492,16 +492,16 @@ router.patch(
 
       const [link] = await db
         .select()
-        .from(subaccountTaskLinks)
+        .from(subaccountProcessLinks)
         .where(
           and(
-            eq(subaccountTaskLinks.id, req.params.linkId),
-            eq(subaccountTaskLinks.subaccountId, req.params.subaccountId)
+            eq(subaccountProcessLinks.id, req.params.linkId),
+            eq(subaccountProcessLinks.subaccountId, req.params.subaccountId)
           )
         );
 
       if (!link) {
-        res.status(404).json({ error: 'Task link not found' });
+        res.status(404).json({ error: 'Process link not found' });
         return;
       }
 
@@ -510,9 +510,9 @@ router.patch(
       if (subaccountCategoryId !== undefined) update.subaccountCategoryId = subaccountCategoryId;
 
       const [updated] = await db
-        .update(subaccountTaskLinks)
+        .update(subaccountProcessLinks)
         .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-        .where(eq(subaccountTaskLinks.id, link.id))
+        .where(eq(subaccountProcessLinks.id, link.id))
         .returning();
 
       res.json(updated);
@@ -525,7 +525,7 @@ router.patch(
 
 /**
  * DELETE /api/subaccounts/:subaccountId/tasks/:linkId
- * Remove a task link from this subaccount.
+ * Remove a process link from this subaccount.
  */
 router.delete(
   '/api/subaccounts/:subaccountId/tasks/:linkId',
@@ -536,21 +536,21 @@ router.delete(
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
       const [link] = await db
         .select()
-        .from(subaccountTaskLinks)
+        .from(subaccountProcessLinks)
         .where(
           and(
-            eq(subaccountTaskLinks.id, req.params.linkId),
-            eq(subaccountTaskLinks.subaccountId, req.params.subaccountId)
+            eq(subaccountProcessLinks.id, req.params.linkId),
+            eq(subaccountProcessLinks.subaccountId, req.params.subaccountId)
           )
         );
 
       if (!link) {
-        res.status(404).json({ error: 'Task link not found' });
+        res.status(404).json({ error: 'Process link not found' });
         return;
       }
 
-      await db.delete(subaccountTaskLinks).where(eq(subaccountTaskLinks.id, link.id));
-      res.json({ message: 'Task link removed' });
+      await db.delete(subaccountProcessLinks).where(eq(subaccountProcessLinks.id, link.id));
+      res.json({ message: 'Process link removed' });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
