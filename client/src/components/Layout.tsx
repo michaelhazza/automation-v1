@@ -400,55 +400,40 @@ export default function Layout({ user, children }: LayoutProps) {
             </>
           )}
 
-          {/* Admin section — collapsed under a clear heading */}
-          {hasOrgContext && (
+          {/* Admin section — only for org_admin+ roles */}
+          {hasOrgContext && ['system_admin', 'org_admin'].includes(user.role) && (
             <>
               <NavSection label="Admin" />
               <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage Agents" />
               <NavLink to="/admin/skills" icon={<Icons.settings />} label="Agent Skills" />
-              <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Manage Automations" />
+              <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Automations" />
               <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Clients" />
-              <NavLink to="/admin/users" icon={<Icons.users />} label="Team Access" />
-              <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
-              <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
-              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Workspace Layout" />
-              <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permissions" />
+              <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
+              {activeSubaccountId && (
+                <>
+                  <NavLink
+                    to={`/admin/subaccounts/${activeSubaccountId}`}
+                    icon={<Icons.portal />}
+                    label={activeSubaccountName ?? 'Client View'}
+                  />
+                  <NavLink
+                    to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
+                    icon={<Icons.queue />}
+                    label="Workspace"
+                  />
+                </>
+              )}
             </>
           )}
 
-          {/* Active subaccount nav */}
-          {activeSubaccountId && (
-            <>
-              <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                {activeSubaccountName ?? 'Subaccount'}
-              </div>
-              <NavLink
-                to={`/admin/subaccounts/${activeSubaccountId}`}
-                icon={<Icons.subaccounts />}
-                label="Overview"
-              />
-              <NavLink
-                to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
-                icon={<Icons.queue />}
-                label="Workspace Board"
-              />
-              <NavLink
-                to={`/portal/${activeSubaccountId}`}
-                icon={<Icons.portal />}
-                label="Portal"
-              />
-            </>
-          )}
-
-          {/* System admin nav */}
+          {/* System admin — platform-level ops */}
           {isSystemAdmin && (
             <>
-              <NavSection label="System Admin" />
+              <NavSection label="Platform" />
               <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
               <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
               <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
-              <NavLink to="/system/settings" icon={<Icons.settings />} label="System Settings" />
-              <NavLink to="/system/board-templates" icon={<Icons.queue />} label="Board Templates" />
+              <NavLink to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}
         </div>
