@@ -68,14 +68,45 @@ const Icons = {
 };
 
 // ── Shared NavLink component ───────────────────────────────────────────────
-function NavLink({ to, icon, label, exact = false }: { to: string; icon: React.ReactNode; label: string; exact?: boolean }) {
+function NavLink({ to, icon, label, exact = false, indent = false }: { to: string; icon: React.ReactNode; label: string; exact?: boolean; indent?: boolean }) {
   const location = useLocation();
   const isActive = exact ? location.pathname === to : location.pathname === to || location.pathname.startsWith(to + '/');
   return (
-    <Link to={to} className={`nav-item${isActive ? ' active' : ''}`}>
+    <Link
+      to={to}
+      className={`nav-item${isActive ? ' active' : ''}`}
+      style={indent ? { paddingLeft: 38 } : undefined}
+    >
       {icon}
       <span>{label}</span>
     </Link>
+  );
+}
+
+// ── Expandable nav group ──────────────────────────────────────────────────
+function NavGroup({ icon, label, children, defaultOpen }: { icon: React.ReactNode; label: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen ?? true);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="nav-item"
+        style={{ width: '100%', borderRadius: 0, cursor: 'pointer', justifyContent: 'space-between' }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {icon}
+          <span>{label}</span>
+        </span>
+        <span style={{ color: '#475569', transition: 'transform 0.15s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
+          <Icons.chevronDown />
+        </span>
+      </button>
+      {open && (
+        <div style={{ animation: 'fadeIn 0.1s ease-out' }}>
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -397,26 +428,32 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label={activeSubaccountName ?? 'Client'} />
               <NavLink to="/agents" icon={<Icons.agents />} label="AI Team" />
-              <NavLink to="/executions" icon={<Icons.executions />} label="Activity" />
-              <NavLink to="/processes" icon={<Icons.tasks />} label="Automations" />
+              <NavGroup icon={<Icons.tasks />} label="Automations">
+                <NavLink to="/processes" icon={<Icons.manageTasks />} label="Manage" indent />
+                <NavLink to="/executions" icon={<Icons.executions />} label="Activity" indent />
+              </NavGroup>
               {/* Subaccount admin — for org_admin+ */}
               {['system_admin', 'org_admin'].includes(user.role) && (
                 <>
-                  <NavLink
-                    to={`/admin/subaccounts/${activeSubaccountId}`}
-                    icon={<Icons.subaccounts />}
-                    label="Client Settings"
-                  />
                   <NavLink
                     to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
                     icon={<Icons.queue />}
                     label="Workspace"
                   />
-                  <NavLink
-                    to={`/portal/${activeSubaccountId}`}
-                    icon={<Icons.portal />}
-                    label="Portal"
-                  />
+                  <NavGroup icon={<Icons.portal />} label="Portal">
+                    <NavLink
+                      to={`/portal/${activeSubaccountId}`}
+                      icon={<Icons.portal />}
+                      label="View Portal"
+                      indent
+                    />
+                    <NavLink
+                      to={`/admin/subaccounts/${activeSubaccountId}`}
+                      icon={<Icons.settings />}
+                      label="Configure"
+                      indent
+                    />
+                  </NavGroup>
                 </>
               )}
             </>
@@ -429,7 +466,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage Agents" />
               <NavLink to="/admin/skills" icon={<Icons.settings />} label="Agent Skills" />
               <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Automations" />
-              <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Clients" />
+              <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
             </>
           )}
