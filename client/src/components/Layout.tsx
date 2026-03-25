@@ -438,7 +438,7 @@ export default function Layout({ user, children }: LayoutProps) {
                   <NavLink
                     to={`/admin/subaccounts/${activeClientId}/workspace`}
                     icon={<Icons.queue />}
-                    label="Workspace"
+                    label="Tasks"
                   />
                   <NavLink
                     to={`/portal/${activeClientId}`}
@@ -459,11 +459,19 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && ['system_admin', 'org_admin'].includes(user.role) && (
             <>
               <NavSection label="Organisation" />
-              <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage Agents" />
-              <NavLink to="/admin/skills" icon={<Icons.settings />} label="Agent Skills" />
-              <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Automations" />
+              <NavGroup icon={<Icons.agents />} label="Agents">
+                <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage" indent />
+                <NavLink to="/admin/skills" icon={<Icons.categories />} label="Skills" indent />
+              </NavGroup>
+              <NavGroup icon={<Icons.tasks />} label="Automations">
+                <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Manage" indent />
+                <NavLink to="/executions" exact icon={<Icons.executions />} label="Activity" indent />
+              </NavGroup>
               <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
+              {isSystemAdmin && (
+                <NavLink to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />
+              )}
             </>
           )}
 
@@ -472,7 +480,8 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Platform" />
               <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
-              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
+              <NavLink to="/system/activity" icon={<Icons.executions />} label="Activity" />
+              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Diagnostics" />
               <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
               <NavLink to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
