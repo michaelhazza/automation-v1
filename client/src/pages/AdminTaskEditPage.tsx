@@ -49,7 +49,7 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
     setSaving(true);
     try {
       await api.patch(`/api/processes/${id}`, process);
-      setSuccess('Process saved successfully');
+      setSuccess('Automation saved successfully');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Save failed');
@@ -83,9 +83,9 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
   return (
     <>
       <div style={{ marginBottom: 16 }}>
-        <Link to="/admin/processes" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to processes</Link>
+        <Link to="/admin/processes" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to automations</Link>
       </div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 24 }}>Edit Process: {process.name}</h1>
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 24 }}>Edit Automation: {process.name}</h1>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>
         {/* Edit form */}

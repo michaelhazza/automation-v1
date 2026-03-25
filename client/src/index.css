@@ -79,6 +79,7 @@ body {
   text-decoration: none;
   font-size: 13.5px;
   font-weight: 500;
+  font-family: inherit;
   border-radius: 0;
   cursor: pointer;
   background: transparent;
@@ -480,4 +481,57 @@ body {
   padding: 20px 24px;
   border-bottom: 1px solid #f1f5f9;
   background: #fafbff;
+}
+
+/* ── Board horizontal scroll (Trello-style on mobile) ───────────────────── */
+.board-scroll {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.board-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.board-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.board-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+/* ── Mobile responsive ──────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Sidebar becomes a top bar or hidden — for now just collapse width */
+  .sidebar-scroll {
+    width: 200px !important;
+  }
+
+  /* Board columns: fixed width for horizontal scroll like Trello mobile */
+  .board-scroll > div {
+    flex: 0 0 260px !important;
+    min-width: 260px !important;
+    max-width: 260px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .sidebar-scroll {
+    width: 56px !important;
+  }
+
+  .sidebar-scroll .nav-item span,
+  .sidebar-scroll .context-picker-btn,
+  .sidebar-scroll [style*="fontSize: 10"] {
+    display: none !important;
+  }
+
+  .board-scroll > div {
+    flex: 0 0 240px !important;
+    min-width: 240px !important;
+    max-width: 240px !important;
+  }
 }

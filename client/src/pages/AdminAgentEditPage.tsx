@@ -6,14 +6,25 @@ import ConfirmDialog from '../components/ConfirmDialog';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
+interface AvailableSkill {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  skillType: 'built_in' | 'custom';
+  methodology: string | null;
+}
+
 interface AgentForm {
   name: string;
   description: string;
+  icon: string;
   masterPrompt: string;
   modelProvider: string;
   modelId: string;
   temperature: number;
   maxTokens: number;
+  defaultSkillSlugs: string[];
 }
 
 interface Agent extends AgentForm {
@@ -116,14 +127,23 @@ const EMPTY_DS_FORM: DataSourceForm = {
   googleApiKey: '',
 };
 
+const ICON_OPTIONS = [
+  '\u{1F50D}', '\u{1F4CA}', '\u{1F4DD}', '\u{1F4E3}', '\u{1F916}', '\u{2699}\uFE0F}',
+  '\u{1F4AC}', '\u{1F4C8}', '\u{2728}', '\u{1F3AF}', '\u{1F4A1}', '\u{1F4CB}',
+  '\u{1F4E7}', '\u{1F310}', '\u{1F4B0}', '\u{1F465}', '\u{1F4F1}', '\u{1F5A5}\uFE0F',
+  '\u{1F4DA}', '\u{1F3E2}', '\u{1F6E0}\uFE0F', '\u{1F4CC}', '\u{1F4CE}', '\u{1F512}',
+];
+
 const EMPTY_AGENT_FORM: AgentForm = {
   name: '',
   description: '',
+  icon: '',
   masterPrompt: '',
   modelProvider: 'anthropic',
   modelId: 'claude-sonnet-4-6',
   temperature: 0.7,
   maxTokens: 2048,
+  defaultSkillSlugs: [],
 };
 
 // ─── Helper components ───────────────────────────────────────────────────────
@@ -239,6 +259,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const [pendingNewSources, setPendingNewSources] = useState<PendingDataSource[]>([]);
   const [editingTempId, setEditingTempId] = useState<string | null>(null);
 
+  // Skills state
+  const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
+
   // ── Load ──
 
   const loadAgent = async (agentId: string) => {
@@ -248,11 +271,13 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       setForm({
         name: data.name ?? '',
         description: data.description ?? '',
+        icon: data.icon ?? '',
         masterPrompt: data.masterPrompt ?? '',
         modelProvider: data.modelProvider ?? 'anthropic',
         modelId: data.modelId ?? 'claude-sonnet-4-6',
         temperature: data.temperature ?? 0.7,
         maxTokens: data.maxTokens ?? 2048,
+        defaultSkillSlugs: data.defaultSkillSlugs ?? [],
       });
       setDataSources(data.dataSources ?? []);
     } finally {
@@ -264,6 +289,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     if (!isNew && id) {
       loadAgent(id);
     }
+    // Load available skills for the skills picker
+    api.get('/api/skills').then(({ data }) => setAvailableSkills(data)).catch(() => {});
   }, [id, isNew]);
 
   // ── Save / Create ──
@@ -852,6 +879,28 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Section 1: Basic Info ── */}
       <SectionCard title="Basic Info">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {/* Icon picker */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <Field label="Icon" hint="Choose an icon that represents this agent's role">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {ICON_OPTIONS.map((ico) => (
+                  <button
+                    key={ico}
+                    type="button"
+                    onClick={() => setForm({ ...form, icon: form.icon === ico ? '' : ico })}
+                    style={{
+                      width: 40, height: 40, borderRadius: 10, border: `2px solid ${form.icon === ico ? '#6366f1' : '#e2e8f0'}`,
+                      background: form.icon === ico ? '#eef2ff' : '#fafafa',
+                      cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    {ico}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <Field label="Name *">
               <input
@@ -863,12 +912,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </Field>
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <Field label="Description">
+            <Field label="Description" hint="Describe what this agent does in first person, e.g. 'I research your competitors and report weekly'">
               <textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={2}
-                placeholder="Brief description of this agent's purpose"
+                placeholder="e.g. I research your competitors and deliver weekly insight reports"
                 style={{ ...inputStyle, resize: 'vertical' }}
               />
             </Field>
@@ -940,7 +989,101 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </div>
       </SectionCard>
 
-      {/* ── Section 4: Data Sources ── */}
+      {/* ── Section 4: Skills ── */}
+      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 20 }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b', display: 'inline' }}>
+              Skills
+            </h2>
+            {form.defaultSkillSlugs.length > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 999 }}>
+                {form.defaultSkillSlugs.length} selected
+              </span>
+            )}
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+              Select which capabilities this agent has access to. Skills provide tools and structured methodology guidance.
+            </div>
+          </div>
+          <Link
+            to="/admin/skills"
+            style={{ fontSize: 12, color: '#6366f1', textDecoration: 'none', fontWeight: 500, whiteSpace: 'nowrap' }}
+          >
+            Manage Skills
+          </Link>
+        </div>
+        <div style={{ padding: 20 }}>
+          {availableSkills.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 13 }}>
+              No skills available. <Link to="/admin/skills/new" style={{ color: '#6366f1' }}>Create one</Link>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+              {availableSkills.map((skill) => {
+                const isSelected = form.defaultSkillSlugs.includes(skill.slug);
+                return (
+                  <button
+                    key={skill.id}
+                    onClick={() => {
+                      const slugs = isSelected
+                        ? form.defaultSkillSlugs.filter(s => s !== skill.slug)
+                        : [...form.defaultSkillSlugs, skill.slug];
+                      setForm({ ...form, defaultSkillSlugs: slugs });
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px',
+                      background: isSelected ? '#eef2ff' : '#fafafa',
+                      border: `1.5px solid ${isSelected ? '#6366f1' : '#e2e8f0'}`,
+                      borderRadius: 10, cursor: 'pointer', textAlign: 'left',
+                      transition: 'all 0.15s', fontFamily: 'inherit',
+                    }}
+                  >
+                    {/* Checkbox */}
+                    <div style={{
+                      width: 20, height: 20, borderRadius: 6, flexShrink: 0, marginTop: 1,
+                      background: isSelected ? '#6366f1' : '#fff',
+                      border: `2px solid ${isSelected ? '#6366f1' : '#d1d5db'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}>
+                      {isSelected && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </div>
+                    {/* Skill info */}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{skill.name}</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
+                          background: skill.skillType === 'built_in' ? '#ede9fe' : '#dbeafe',
+                          color: skill.skillType === 'built_in' ? '#6d28d9' : '#1d4ed8',
+                        }}>
+                          {skill.skillType === 'built_in' ? 'Built-in' : 'Custom'}
+                        </span>
+                        {skill.methodology && (
+                          <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 999, background: '#dcfce7', color: '#166534' }}>
+                            Methodology
+                          </span>
+                        )}
+                      </div>
+                      {skill.description && (
+                        <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>
+                          {skill.description}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Section 5: Data Sources ── */}
       {!isNew && deleteDsId && (
         <ConfirmDialog
           title="Delete data source"

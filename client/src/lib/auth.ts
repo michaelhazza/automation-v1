@@ -55,7 +55,7 @@ export function removeActiveOrg(): void {
   localStorage.removeItem('activeOrgName');
 }
 
-// Active subaccount context — used by org users / system_admin to scope view to a subaccount
+// Active subaccount/client context — used by org users / system_admin to scope view to a client
 export function getActiveSubaccountId(): string | null {
   return localStorage.getItem('activeSubaccountId');
 }
@@ -73,3 +73,9 @@ export function removeActiveSubaccount(): void {
   localStorage.removeItem('activeSubaccountId');
   localStorage.removeItem('activeSubaccountName');
 }
+
+// UI-friendly aliases (the domain concept is "client" in the UI, "subaccount" internally)
+export const getActiveClientId = getActiveSubaccountId;
+export const getActiveClientName = getActiveSubaccountName;
+export const setActiveClient = setActiveSubaccount;
+export const removeActiveClient = removeActiveSubaccount;

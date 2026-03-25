@@ -1,0 +1,365 @@
+What's been built
+Backend (commit 1):
+
+methodology column added to skills table + migration 0011
+All 7 built-in skills now have rich methodology documents (workflow phases, decision rules, quality standards)
+resolveSkillsForAgent() injects methodology into system prompts alongside instructions
+Seed function updates existing skills with new methodology on startup
+CRUD endpoints accept methodology field for custom skills
+Frontend (commit 2):
+
+Skills Library page (/admin/skills) — lists all skills split into Custom and Built-in sections, shows methodology status, CRUD for custom skills
+Skill Edit page (/admin/skills/:id or /admin/skills/new) — full editor with:
+Name, slug, description
+Tool definition (JSON editor)
+Instructions (short guidance)
+Methodology (markdown editor with edit/preview toggle)
+Active/inactive toggle
+Built-in skills render as read-only
+Sidebar navigation — "Skills" link under Administration, between Agents and Users
+How to test
+Run the migration (0011_skill_methodology.sql)
+Restart the server (seed function will update existing built-in skills with methodology)
+Navigate to /admin/skills — you should see 7 built-in skills, each showing "Has methodology"
+Click any built-in skill to view its methodology in read-only mode
+Click "+ New Skill" to create a custom skill with your own methodology
+Trigger an agent run and check systemPromptSnapshot in the run detail — methodology should appear in the prompt
+have you created a nice, neat and professional UI for adding skills to an individual agent too?
+
+
+
+No, not yet. The Skills Library page manages the skill definitions themselves, but there's no UI for assigning which skills an agent gets per subaccount. That's the critical missing piece — the subaccountAgents.skillSlugs field exists in the DB but there's no way to configure it in the UI.
+
+Let me check how the agent edit page currently works so I can add skill assignment properly.
+
+
+Read 2 files, ran a command
+Read 2 files, ran a command
+
+Large file. Let me find where the data sources section renders so I know where to add skills assignment.
+
+
+Searched code, read a file
+Searched code, read a file
+
+Now let me see the bottom of the page to understand where to add the skills section.
+
+
+Read 2 files
+Read 2 files
+
+Good. Now I understand the layout. The agent edit page has: Basic Info → Agent Prompt → Model Settings → Data Sources → Save button. I need to add a Skills section between Data Sources and the Save button.
+
+But this is the org-level agent editor. Skills are assigned per subaccount via subaccountAgents.skillSlugs. Let me check where subaccount agent configuration happens.
+
+
+Searched 4 patterns, read a file
+Searched 4 patterns, read a file
+
+So the subaccount detail page has no agent management at all. There's no UI anywhere for configuring which agents belong to a subaccount or their per-subaccount settings (skills, schedule, token budgets). Let me also check the backend route for the agent config endpoint.
+
+
+Read a file
+Read a file
+
+Good. The backend is already wired — PATCH /api/subaccounts/:subaccountId/agents/:agentId/config accepts skillSlugs and GET .../config returns it. The APIs exist; it's just the UI that's missing.
+
+The right approach is: add a Skills section to the agent edit page that lets you configure which skills this agent has. Since agents are org-level but skill assignment is per-subaccount, I need to think about where this lives.
+
+Looking at the current architecture: the agent edit page (/admin/agents/:id) is the natural place. I'll add a Skills section that shows available skills with toggle switches. For now, this sets the agent's default skills (which get copied to subaccountAgents.skillSlugs when the agent is linked to a subaccount). Per-subaccount overrides can be done later in the subaccount detail page.
+
+But actually — looking at the routes, the backend stores skills on the subaccountAgents link, not on the agents table directly. And the agent templates have skillSlugs too. Let me check what the agent route returns.
+
+
+Searched 5 patterns, found files, read a file
+Searched 5 patterns, found files, read a file
+
+Now I understand the full picture. The agent edit page is org-level (no subaccount context). Skills are assigned per-subaccount in subaccountAgents.skillSlugs.
+
+The cleanest approach: add a Skills section to the agent edit page that lets you set the default skills for this agent. These defaults would be used when linking the agent to any subaccount. I need to add a defaultSkillSlugs concept — but actually, looking at the agent templates, they already have skillSlugs. Let me check what happens when an agent is linked to a subaccount.
+
+
+Searched code, read a file
+Searched code, read a file
+
+Now I see: linkAgent creates the subaccountAgents record but doesn't set skillSlugs — they default to null. The config PATCH endpoint can set them later.
+
+The right approach is two places for skills:
+
+Agent edit page — a Skills section showing which skills this agent uses as defaults. Since agents table doesn't have skillSlugs, I'll add it to the agents table as defaultSkillSlugs so when an agent is linked to a subaccount, these get copied. Actually, the simpler approach: just show skills on the agent edit page and save them for any existing subaccount links. But that couples org-level to subaccount-level.
+Let me think about what makes most sense for the user... The cleanest UX: add skills directly on the agent edit page. When the agent isn't linked to any subaccount yet, these are the "default skills" that will be used. When linked, they get stored on subaccountAgents.skillSlugs. This means I should add a defaultSkillSlugs JSONB column to the agents table, and when linkAgent fires, copy them to the new subaccountAgents record.
+
+Actually, wait — let me reconsider. Agent templates already have skillSlugs. The agents table was intentionally kept without skills because the intent is per-subaccount configuration. But without a subaccount agent config UI, there's no way to set skills at all.
+
+The pragmatic answer: add a skills picker to the agent edit page that writes to agents.defaultSkillSlugs, and have linkAgent copy those defaults to subaccountAgents.skillSlugs. Per-subaccount overrides can happen later in the subaccount agent config UI.
+
+
+Read a file
+Read a file
+
+Let me add defaultSkillSlugs to the agents table, update the migration, link service, and build the UI. I'll do this efficiently.
+
+
+Edited 2 files
+Edited 2 files
+
+Now update the migration file to include this column.
+
+
+Read a file, edited a file
+Read a file, edited a file
+
+Now update linkAgent to copy defaultSkillSlugs from the agent.
+
+
+Edited a file
+Edited a file
+
+Now update the agent routes to accept defaultSkillSlugs in create and update.
+
+
+Read a file
+Read a file
+
+Good. The create and update routes pass through to agentService. Let me update the create route to accept defaultSkillSlugs and check how agentService.createAgent and updateAgent work.
+
+
+Searched 6 patterns
+Searched 6 patterns
+
+Now I need to update both createAgent and updateAgent to handle defaultSkillSlugs.
+
+
+Edited 3 files, read a file
+Edited 3 files, read a file
+
+Now update the create route to pass defaultSkillSlugs.
+
+
+Read a file, edited a file
+Read a file, edited a file
+
+Now the key piece — adding the Skills section to the agent edit page. Let me add it between Model Settings and Data Sources.
+
+
+Edited 2 files, read a file
+Edited 2 files, read a file
+
+Now update the loadAgent function and add the skills state.
+
+
+Edited a file
+Edited a file
+
+Now update the loadAgent function to set defaultSkillSlugs and load available skills.
+
+
+Edited a file
+Edited a file
+
+Now add the skills loading in the useEffect.
+
+
+Edited a file
+Edited a file
+
+Now add the Skills section to the render. Let me find the exact insertion point — after Model Settings, before Data Sources.
+
+
+Edited a file
+Edited a file
+
+Now verify TypeScript compiles cleanly on the server side.
+
+
+Check server-side TypeScript errors
+Check server-side TypeScript errors
+
+Clean. Let me commit and push.
+
+
+Ran 3 commands
+Ran 3 commands
+
+Done. Here's what was added:
+
+Skill Assignment on Agent Editor
+The agent edit page (/admin/agents/:id) now has a Skills section between Model Settings and Data Sources:
+
+Card-style toggle grid — each available skill renders as a clickable card with a checkbox
+Each card shows: skill name, type badge (Built-in / Custom), methodology indicator, and description (2-line clamp)
+Selecting/deselecting a skill updates defaultSkillSlugs on the agent
+"Manage Skills" link in the section header takes you to the full skills library
+Count badge shows how many skills are selected
+Data flow
+User toggles skills on the agent edit page → saved to agents.defaultSkillSlugs
+When agent is linked to a subaccount → defaultSkillSlugs are copied to subaccountAgents.skillSlugs
+At runtime, resolveSkillsForAgent reads skillSlugs from the subaccount link and injects the tool definitions + methodology into the system prompt
+Three commits on the branch now:
+Backend: methodology column, methodology documents for all 7 built-in skills
+Skills Library UI: list page + create/edit page for skill management
+Agent skill assignment: toggle skills per agent, defaultSkillSlugs on agents table, auto-copy on subaccount link
+Uploaded image
+image.png
+Uploaded image
+image.png
+This UI is really clean and professional. What can we learn from this that we can implement here so make this app as simple as possible for non technical users?
+
+
+
+Good reference. Let me study this properly before answering — I want to look at what ExpertOS does well and then compare it to our current UI to identify the specific gaps.
+
+
+Audit current frontend UX patterns
+Audit current frontend UX patterns
+
+Great question. Looking at ExpertOS alongside the audit of our frontend, here's what stands out:
+
+What ExpertOS Gets Right
+1. Agent-first, not admin-first. The entire landing experience is "Browse All Agents — Select an agent to start a conversation." That's it. No dashboard with stats, no process tables, no execution history. The primary user action is front and centre.
+
+2. Progressive disclosure via locked states. Agents are locked until you complete a prerequisite ("Complete Client Onboarding to unlock"). This creates a guided path through what would otherwise be an overwhelming grid of options. Users can't get lost because the system tells them what to do next.
+
+3. Minimal sidebar. Six items: New Chat, Projects, Playbook, This Agent, Starred, Recent. Ours has 19+. Their sidebar is about the user's work, not the system's configuration.
+
+4. Zero technical language visible. No model names, no slugs, no schemas, no "executions." Each agent has a name, an icon, a one-line description of what it does in plain English. "I Help You Build High Converting Events!" vs our "claude-sonnet-4-6 | 3 data sources."
+
+5. Personality-forward design. Each agent has a unique icon and a first-person description. They feel like people, not configurations.
+
+The Specific Gaps in Our App
+ExpertOS Pattern	Our Current State	What to Change
+Agent cards are the home page	Dashboard with stats is the home page	Make the agent grid the primary landing for non-admin users
+6 sidebar items	19+ sidebar items	Collapse admin into a single "Settings" section; user sidebar should be: Dashboard, Agents, Workspace, Chat History
+Locked/unlocked progression	No guided flow at all	Add an onboarding state: first visit → guided setup wizard
+Plain English descriptions	Model badges, technical metadata	Hide modelId, data source counts from user-facing cards. Show only name, role description, status
+First-person agent voice	Third-person descriptions	Agent descriptions should read like "I research your competitors and report weekly" not "Competitor Research Agent"
+Icons per agent	Generic purple gradient avatar for all	Add icon/emoji selection to agent templates
+"Complete X to unlock"	No prerequisite system	Not needed for MVP, but could gate advanced agents behind training data completion
+What I'd Recommend for This Codebase
+Rather than a full redesign, there are four targeted changes that would dramatically close the gap:
+
+A. Split the user experience. Non-admin users should see: Agents (card grid), Workspace Board, Chat History. That's it. Admin users see everything. The role system already supports this — we just need to hide nav items based on role.
+
+B. Redesign the Agents page cards. Remove model badge, add a proper icon/emoji field to agents, make the description first-person, increase card size, add a subtle "capabilities" line (e.g. "Can search the web, manage tasks, trigger automations").
+
+C. Reduce sidebar to essentials. Group admin items under a collapsible "Administration" accordion that's closed by default. The top-level nav for all users should be 4-5 items max.
+
+D. Add agent onboarding context. When an agent has no data sources attached, show a friendly setup prompt on its card: "Needs training data to get started" with a setup CTA, similar to ExpertOS's "Complete Client Onboarding to unlock."
+
+These are all UI-only changes — no backend work. Want me to implement any of these, or shall we continue with Priority 2 (context offloading) first and circle back to UX improvements as a separate track?
+
+Implement all of these now and will test with the skills framework
+
+
+
+Read all frontend files needed
+Read all frontend files needed
+
+Now I have everything. Let me implement all four changes in parallel — rewrite the agents page, simplify the dashboard, slim down the sidebar, and add the agents schema change for icons.
+
+
+Read a file
+Read a file
+
+Now let me implement all four changes. I'll add the icon/emoji field to agents, rewrite the agents page, redesign the dashboard to be agent-first, and slim the sidebar.
+
+
+Edited 2 files
+Edited 2 files
+
+Now update agentService to handle the icon field in create/update.
+
+
+Edited 3 files, read a file
+Edited 3 files, read a file
+
+Now update the agent create route to pass icon.
+
+
+Edited a file
+Edited a file
+
+Good, backend is done. Now let me rewrite the three frontend files. Starting with the Agents page — the big redesign inspired by ExpertOS.
+
+
+Created 2 files, read a file
+Created 2 files, read a file
+
+Now redesign the Dashboard to be agent-first with a cleaner greeting and agent quick-access.
+
+
+Created 2 files, read a file
+Created 2 files, read a file
+
+Now slim down the sidebar — collapse admin section and simplify terminology.
+
+
+Edited a file
+Edited a file
+
+Now add the icon picker to the agent edit page. Let me add it in the Basic Info section.
+
+
+Edited 2 files, read a file
+Edited 2 files, read a file
+
+Now update loadAgent to include icon.
+
+
+Edited a file
+Edited a file
+
+Now add the icon picker UI to the Basic Info section. Let me find that section.
+
+
+Searched code, edited a file
+Searched code, edited a file
+
+Now verify server-side compiles clean.
+
+
+Check server-side TypeScript errors
+Check server-side TypeScript errors
+
+Clean. Let me commit and push everything.
+
+
+Ran 3 commands
+Ran 3 commands
+
+Done. Here's a summary of all four UX changes:
+
+A. Agent-first experience
+Agents page — Renamed to "Your AI Team." Cards are larger with emoji icons, capability summaries (e.g. "Web search, Read tasks, Run automations"), and clear "Ready" status badges. No model names visible. Inactive agents show in a separate "Setting Up" section with dashed borders and "Needs setup to get started" — similar to ExpertOS's locked state.
+
+Dashboard — Replaced the 4-stat execution metrics with a "Quick Chat" grid showing active agents. Greeting now says "You have 3 AI team members ready to help" instead of execution stats. Recent activity table is simpler (5 rows, cleaner headers).
+
+B. Simplified sidebar
+Before (19+ items): Dashboard, Processes, Agents, Executions, Portal, then 9 admin items with jargon.
+
+After (4 user + admin):
+
+Dashboard, AI Team, Activity, Automations (user-facing)
+Admin section with renamed items: "Clients" (was Subaccounts), "Agent Skills" (was Skills), "Workspace Layout" (was Board Config), "Team Access" → "Permissions"
+C. Icon system
+Agent editor now has an icon picker — 24 emoji options in a grid. Icons show on agent cards, dashboard quick-chat cards, and empty states. Agents without a custom icon get a deterministic fallback based on their ID hash.
+
+D. Onboarding context
+Empty states rewritten with friendlier language. Description field now hints "Describe what this agent does in first person." Setup-needed agents show a clear visual distinction instead of being mixed in with active ones.
+
+Is this in a feature branch that replit will be able to recognise so I can change to this feature branch and test?
+
+
+
+Yes — all changes are pushed to claude/dear-flow-recommendations-Tl6ag. In Replit you can switch to it via the Git panel (Version Control > Branches) or run in the shell:
+
+git fetch origin claude/dear-flow-recommendations-Tl6ag
+git checkout claude/dear-flow-recommendations-Tl6ag
+
+One thing to note before testing: the migration adds the icon column to the agents table. You'll need to run migrations for the icon picker to work end-to-end:
+
+npx drizzle-kit push
+
+Or if you use a different migration runner, apply migrations/0011_skill_methodology.sql which now includes the ALTER TABLE "agents" ADD COLUMN "icon" text; line.
+
+Everything else (sidebar changes, dashboard redesign, agents page redesign) is purely frontend and will work immediately after switching branches.

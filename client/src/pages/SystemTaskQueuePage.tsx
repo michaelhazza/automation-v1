@@ -331,7 +331,7 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>System Process Queue</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>System Task Queue</h1>
         <p style={{ fontSize: 14, color: '#64748b', margin: 0 }}>
           All process executions across every organisation. Use diagnostic tools to investigate failures.
         </p>

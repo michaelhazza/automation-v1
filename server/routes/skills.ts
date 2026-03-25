@@ -33,12 +33,12 @@ router.get('/api/skills/:id', authenticate, async (req, res) => {
 
 router.post('/api/skills', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), async (req, res) => {
   try {
-    const { name, slug, description, definition, instructions } = req.body;
+    const { name, slug, description, definition, instructions, methodology } = req.body;
     if (!name || !slug || !definition) {
       res.status(400).json({ error: 'name, slug, and definition are required' });
       return;
     }
-    const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions });
+    const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions, methodology });
     res.status(201).json(skill);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

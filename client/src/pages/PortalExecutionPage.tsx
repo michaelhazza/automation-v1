@@ -155,7 +155,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   };
 
   if (loading) return <div>Loading...</div>;
-  if (!process) return <div style={{ color: '#dc2626', padding: 32 }}>Process not found</div>;
+  if (!process) return <div style={{ color: '#dc2626', padding: 32 }}>Automation not found</div>;
 
   const hasInvalidFiles = stagedFiles.some((f) => f.error);
   const isExecuting = execution && ['pending', 'running'].includes(execution.status);
@@ -164,7 +164,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
     <>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div style={{ marginBottom: 16 }}>
-        <Link to={`/portal/${subaccountId}`} style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to processes</Link>
+        <Link to={`/portal/${subaccountId}`} style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to automations</Link>
       </div>
       <div style={{ maxWidth: 760 }}>
         <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{process.name}</h1>
@@ -240,7 +240,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
               disabled={submitting || hasInvalidFiles}
               style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: (submitting || hasInvalidFiles) ? 'not-allowed' : 'pointer', opacity: (submitting || hasInvalidFiles) ? 0.7 : 1 }}
             >
-              {submitting ? (uploadProgress ? 'Uploading...' : 'Submitting...') : 'Run Process'}
+              {submitting ? (uploadProgress ? 'Uploading...' : 'Submitting...') : 'Run Automation'}
             </button>
           </div>
         )}

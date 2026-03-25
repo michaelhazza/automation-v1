@@ -5,7 +5,7 @@ import api from '../lib/api';
 import {
   removeToken, removeUserRole,
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
-  getActiveSubaccountId, getActiveSubaccountName, setActiveSubaccount, removeActiveSubaccount,
+  getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
 } from '../lib/auth';
 
 interface LayoutProps {
@@ -18,7 +18,7 @@ interface OrgOption {
   name: string;
 }
 
-interface SubaccountOption {
+interface ClientOption {
   id: string;
   name: string;
   slug: string;
@@ -68,14 +68,45 @@ const Icons = {
 };
 
 // ── Shared NavLink component ───────────────────────────────────────────────
-function NavLink({ to, icon, label, exact = false }: { to: string; icon: React.ReactNode; label: string; exact?: boolean }) {
+function NavLink({ to, icon, label, exact = false, indent = false }: { to: string; icon: React.ReactNode; label: string; exact?: boolean; indent?: boolean }) {
   const location = useLocation();
   const isActive = exact ? location.pathname === to : location.pathname === to || location.pathname.startsWith(to + '/');
   return (
-    <Link to={to} className={`nav-item${isActive ? ' active' : ''}`}>
+    <Link
+      to={to}
+      className={`nav-item${isActive ? ' active' : ''}`}
+      style={indent ? { paddingLeft: 38 } : undefined}
+    >
       {icon}
       <span>{label}</span>
     </Link>
+  );
+}
+
+// ── Expandable nav group ──────────────────────────────────────────────────
+function NavGroup({ icon, label, children, defaultOpen }: { icon: React.ReactNode; label: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen ?? true);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="nav-item"
+        style={{ width: '100%', borderRadius: 0, cursor: 'pointer', justifyContent: 'space-between' }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {icon}
+          <span>{label}</span>
+        </span>
+        <span style={{ color: '#475569', transition: 'transform 0.15s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
+          <Icons.chevronDown />
+        </span>
+      </button>
+      {open && (
+        <div style={{ animation: 'fadeIn 0.1s ease-out' }}>
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -111,9 +142,9 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveOrgIdState(org.id);
     setActiveOrgNameState(org.name);
     setOrgPickerOpen(false);
-    removeActiveSubaccount();
-    setActiveSubaccountIdState(null);
-    setActiveSubaccountNameState(null);
+    removeActiveClient();
+    setActiveClientIdState(null);
+    setActiveClientNameState(null);
     navigate('/');
   };
 
@@ -121,48 +152,48 @@ export default function Layout({ user, children }: LayoutProps) {
     removeActiveOrg();
     setActiveOrgIdState(null);
     setActiveOrgNameState(null);
-    removeActiveSubaccount();
-    setActiveSubaccountIdState(null);
-    setActiveSubaccountNameState(null);
+    removeActiveClient();
+    setActiveClientIdState(null);
+    setActiveClientNameState(null);
     navigate('/');
   };
 
-  // ── Subaccount context ─────────────────────────────────────────────────
-  const [activeSubaccountId, setActiveSubaccountIdState] = useState<string | null>(getActiveSubaccountId);
-  const [activeSubaccountName, setActiveSubaccountNameState] = useState<string | null>(getActiveSubaccountName);
-  const [subaccounts, setSubaccounts] = useState<SubaccountOption[]>([]);
-  const [subaccountPickerOpen, setSubaccountPickerOpen] = useState(false);
+  // ── Client context ─────────────────────────────────────────────────
+  const [activeClientId, setActiveClientIdState] = useState<string | null>(getActiveClientId);
+  const [activeClientName, setActiveClientNameState] = useState<string | null>(getActiveClientName);
+  const [subaccounts, setClients] = useState<ClientOption[]>([]);
+  const [subaccountPickerOpen, setClientPickerOpen] = useState(false);
 
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
 
   useEffect(() => {
     if (hasOrgContext) {
       api.get('/api/subaccounts')
-        .then(({ data }) => setSubaccounts(data))
-        .catch(() => setSubaccounts([]));
+        .then(({ data }) => setClients(data))
+        .catch(() => setClients([]));
     } else {
-      setSubaccounts([]);
+      setClients([]);
     }
   }, [hasOrgContext, activeOrgId]);
 
-  const handleSelectSubaccount = (sa: SubaccountOption) => {
-    setActiveSubaccount(sa.id, sa.name);
-    setActiveSubaccountIdState(sa.id);
-    setActiveSubaccountNameState(sa.name);
-    setSubaccountPickerOpen(false);
+  const handleSelectClient = (sa: ClientOption) => {
+    setActiveClient(sa.id, sa.name);
+    setActiveClientIdState(sa.id);
+    setActiveClientNameState(sa.name);
+    setClientPickerOpen(false);
   };
 
-  const handleClearSubaccount = () => {
-    removeActiveSubaccount();
-    setActiveSubaccountIdState(null);
-    setActiveSubaccountNameState(null);
-    setSubaccountPickerOpen(false);
+  const handleClearClient = () => {
+    removeActiveClient();
+    setActiveClientIdState(null);
+    setActiveClientNameState(null);
+    setClientPickerOpen(false);
   };
 
   // ── Logout ─────────────────────────────────────────────────────────────
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout'); } finally {
-      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveSubaccount();
+      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient();
       navigate('/login');
     }
   };
@@ -303,23 +334,23 @@ export default function Layout({ user, children }: LayoutProps) {
               </div>
             )}
 
-            {/* Subaccount picker */}
+            {/* Client picker */}
             {hasOrgContext && (
               <div style={{ position: 'relative' }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                  Subaccount
+                  Client
                 </div>
                 <button
-                  onClick={() => setSubaccountPickerOpen(!subaccountPickerOpen)}
+                  onClick={() => setClientPickerOpen(!subaccountPickerOpen)}
                   className="context-picker-btn"
                   style={{
-                    background: activeSubaccountId ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${activeSubaccountId ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)'}`,
-                    color: activeSubaccountId ? '#6ee7b7' : '#64748b',
+                    background: activeClientId ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${activeClientId ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    color: activeClientId ? '#6ee7b7' : '#64748b',
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150, fontSize: 12 }}>
-                    {activeSubaccountName ?? 'Select subaccount'}
+                    {activeClientName ?? 'Select client'}
                   </span>
                   <span style={{ color: '#64748b', flexShrink: 0 }}>
                     {subaccountPickerOpen ? <Icons.chevronUp /> : <Icons.chevronDown />}
@@ -335,17 +366,17 @@ export default function Layout({ user, children }: LayoutProps) {
                     animation: 'fadeInScale 0.12s ease-out both',
                   }}>
                     {subaccounts.length === 0 && (
-                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No subaccounts found</div>
+                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No clients found</div>
                     )}
                     {subaccounts.map((sa) => (
                       <button
                         key={sa.id}
-                        onClick={() => handleSelectSubaccount(sa)}
+                        onClick={() => handleSelectClient(sa)}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
                           padding: '9px 14px',
-                          background: sa.id === activeSubaccountId ? 'rgba(16,185,129,0.1)' : 'transparent',
-                          color: sa.id === activeSubaccountId ? '#6ee7b7' : '#cbd5e1',
+                          background: sa.id === activeClientId ? 'rgba(16,185,129,0.1)' : 'transparent',
+                          color: sa.id === activeClientId ? '#6ee7b7' : '#cbd5e1',
                           border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
                           fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
                           transition: 'background 0.1s',
@@ -357,9 +388,9 @@ export default function Layout({ user, children }: LayoutProps) {
                         )}
                       </button>
                     ))}
-                    {activeSubaccountId && (
+                    {activeClientId && (
                       <button
-                        onClick={handleClearSubaccount}
+                        onClick={handleClearClient}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
                           padding: '9px 14px', background: 'transparent',
@@ -367,7 +398,7 @@ export default function Layout({ user, children }: LayoutProps) {
                           fontFamily: 'inherit',
                         }}
                       >
-                        Clear subaccount
+                        Clear client
                       </button>
                     )}
                   </div>
@@ -389,68 +420,70 @@ export default function Layout({ user, children }: LayoutProps) {
 
         {/* ── Navigation ──────────────────────────────────────────────── */}
         <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
-          {/* Top-level */}
+          {/* Always visible */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* Org subaccount nav */}
-          {hasOrgContext && (
+          {/* ── Client section — only when a client is selected ── */}
+          {activeClientId && (
             <>
-              <NavSection label="Subaccount" />
-              <NavLink to="/processes" icon={<Icons.tasks />} label="Processes" />
-              <NavLink to="/agents" icon={<Icons.agents />} label="Agents" />
-              <NavLink to="/executions" icon={<Icons.executions />} label="Executions" />
-              <NavLink to="/portal" icon={<Icons.portal />} label="Portal" />
+              <NavSection label={activeClientName ?? 'Client'} />
+              <NavLink to="/agents" icon={<Icons.agents />} label="AI Team" />
+              <NavGroup icon={<Icons.tasks />} label="Automations">
+                <NavLink to="/processes" icon={<Icons.manageTasks />} label="Manage" indent />
+                <NavLink to="/executions" icon={<Icons.executions />} label="Activity" indent />
+              </NavGroup>
+              {/* Admin-only client items */}
+              {['system_admin', 'org_admin'].includes(user.role) && (
+                <>
+                  <NavLink
+                    to={`/admin/subaccounts/${activeClientId}/workspace`}
+                    icon={<Icons.queue />}
+                    label="Tasks"
+                  />
+                  <NavLink
+                    to={`/portal/${activeClientId}`}
+                    icon={<Icons.portal />}
+                    label="Portal"
+                  />
+                  <NavLink
+                    to={`/admin/subaccounts/${activeClientId}`}
+                    icon={<Icons.settings />}
+                    label="Client Settings"
+                  />
+                </>
+              )}
             </>
           )}
 
-          {/* Admin nav */}
-          {hasOrgContext && (
+          {/* ── Organisation section — only when org context exists ────────── */}
+          {hasOrgContext && ['system_admin', 'org_admin'].includes(user.role) && (
             <>
-              <NavSection label="Administration" />
-              <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Processes" />
-              <NavLink to="/admin/agents" icon={<Icons.agents />} label="Agents" />
-              <NavLink to="/admin/users" icon={<Icons.users />} label="Users" />
-              <NavLink to="/admin/engines" icon={<Icons.engines />} label="Engines" />
-              <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
-              <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Subaccounts" />
-              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
-              <NavLink to="/admin/permission-sets" icon={<Icons.permissions />} label="Permission Sets" />
+              <NavSection label="Organisation" />
+              <NavGroup icon={<Icons.agents />} label="Agents">
+                <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage" indent />
+                <NavLink to="/admin/skills" icon={<Icons.categories />} label="Skills" indent />
+              </NavGroup>
+              <NavGroup icon={<Icons.tasks />} label="Automations">
+                <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Manage" indent />
+                <NavLink to="/executions" exact icon={<Icons.executions />} label="Activity" indent />
+              </NavGroup>
+              <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
+              <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
+              {isSystemAdmin && (
+                <NavLink to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />
+              )}
             </>
           )}
 
-          {/* Active subaccount nav */}
-          {activeSubaccountId && (
-            <>
-              <div style={{ padding: '14px 20px 5px', fontSize: 10, fontWeight: 700, color: '#0d9488', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                {activeSubaccountName ?? 'Subaccount'}
-              </div>
-              <NavLink
-                to={`/admin/subaccounts/${activeSubaccountId}`}
-                icon={<Icons.subaccounts />}
-                label="Overview"
-              />
-              <NavLink
-                to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
-                icon={<Icons.queue />}
-                label="Workspace Board"
-              />
-              <NavLink
-                to={`/portal/${activeSubaccountId}`}
-                icon={<Icons.portal />}
-                label="Portal"
-              />
-            </>
-          )}
-
-          {/* System admin nav */}
+          {/* ── Platform section — system_admin only ───────────────────── */}
           {isSystemAdmin && (
             <>
-              <NavSection label="System Admin" />
+              <NavSection label="Platform" />
               <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
-              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Task Queue" />
+              <NavLink to="/system/activity" icon={<Icons.executions />} label="Activity" />
+              <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Diagnostics" />
               <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
-              <NavLink to="/system/settings" icon={<Icons.settings />} label="System Settings" />
-              <NavLink to="/system/board-templates" icon={<Icons.queue />} label="Board Templates" />
+              <NavLink to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}
         </div>
@@ -478,7 +511,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
       {/* ── Main content ────────────────────────────────────────────────── */}
       <main style={{ flex: 1, background: '#f8fafc', overflow: 'auto', minHeight: '100vh' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '36px 32px' }} className="page-enter">
+        <div style={{ padding: '28px 24px', height: '100%', boxSizing: 'border-box' }} className="page-enter">
           {children}
         </div>
       </main>

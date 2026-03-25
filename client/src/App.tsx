@@ -35,8 +35,12 @@ const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
 const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
 const AdminBoardConfigPage = lazy(() => import('./pages/AdminBoardConfigPage'));
+const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
+const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
+const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
+const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 
 function PageLoader() {
   return (
@@ -146,14 +150,18 @@ export default function App() {
             <Route path="/admin/permission-sets" element={<AdminPermissionSetsPage user={user!} />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
+            <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
+            <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/board-config" element={<AdminBoardConfigPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
+            <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
             <Route path="/system/users" element={<SystemUsersPage user={user!} />} />
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
+            <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
             <Route path="/system/board-templates" element={<SystemBoardTemplatesPage user={user!} />} />
           </Route>

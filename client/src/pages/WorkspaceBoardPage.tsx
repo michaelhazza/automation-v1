@@ -177,14 +177,16 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
         </button>
       </div>
 
-      {/* Board */}
+      {/* Board — fills width on desktop, horizontal scroll on mobile */}
       <div
+        className="board-scroll"
         style={{
           display: 'flex',
           gap: 12,
           flex: 1,
           overflowX: 'auto',
           paddingBottom: 16,
+          minHeight: 0,
         }}
       >
         {columns.map(col => {
@@ -195,7 +197,9 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, col.key)}
               style={{
-                flex: '0 0 280px',
+                flex: '1 1 0',
+                minWidth: 240,
+                maxWidth: columns.length <= 4 ? undefined : 320,
                 display: 'flex',
                 flexDirection: 'column',
                 background: '#f8fafc',
