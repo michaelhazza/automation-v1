@@ -20,6 +20,14 @@ import {
   type AnthropicTool,
 } from './llmService.js';
 import { skillExecutor } from './skillExecutor.js';
+import { workspaceMemoryService } from './workspaceMemoryService.js';
+import {
+  createDefaultPipeline,
+  hashToolCall,
+  executeWithRetry,
+  type MiddlewareContext,
+  type MiddlewarePipeline,
+} from './middleware/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,11 +42,13 @@ export interface AgentRunRequest {
   executionMode?: 'api' | 'headless';
   taskId?: string;
   triggerContext?: Record<string, unknown>;
+  handoffDepth?: number;
+  parentRunId?: string;
 }
 
 export interface AgentRunResult {
   runId: string;
-  status: 'completed' | 'failed' | 'timeout';
+  status: 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -72,6 +82,8 @@ export const agentExecutionService = {
         status: 'running',
         triggerContext: request.triggerContext ?? null,
         taskId: request.taskId ?? null,
+        handoffDepth: request.handoffDepth ?? 0,
+        parentRunId: request.parentRunId ?? null,
         startedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -128,7 +140,7 @@ export const agentExecutionService = {
         return tool;
       });
 
-      // ── 6. Build task context ─────────────────────────────────────────
+      // ── 6. Build task context (with smart offloading) ───────────────────
       let workspaceContext = '';
       let targetItem: typeof tasks.$inferSelect | null = null;
 
@@ -137,15 +149,12 @@ export const agentExecutionService = {
         targetItem = item;
         workspaceContext = buildTaskContext(item);
       } else {
-        // Load recent tasks for general awareness
-        const recentItems = await taskService.listTasks(
+        // Smart board context: use board summary + agent-specific details
+        workspaceContext = await buildSmartBoardContext(
           request.organisationId,
           request.subaccountId,
-          {}
+          request.agentId
         );
-        if (recentItems.length > 0) {
-          workspaceContext = buildTaskOverviewContext(recentItems.slice(0, 30));
-        }
       }
 
       // ── 7. Build the full system prompt ─────────────────────────────────
@@ -167,23 +176,36 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Your Capabilities\n${skillInstructions.join('\n\n')}`);
       }
 
-      // Add task context
+      // Add workspace memory
+      const memory = await workspaceMemoryService.getMemoryForPrompt(
+        request.organisationId,
+        request.subaccountId
+      );
+      if (memory) {
+        systemPromptParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
+      }
+
+      // Add task context / board overview
       if (workspaceContext) {
         systemPromptParts.push(`\n\n---\n## Current Board\n${workspaceContext}`);
       }
 
-      // Add autonomous execution instructions
+      // Add autonomous execution instructions (with handoff context if applicable)
       systemPromptParts.push(buildAutonomousInstructions(request, targetItem));
 
       const fullSystemPrompt = systemPromptParts.join('');
+      const systemPromptTokens = approxTokens(fullSystemPrompt);
 
       // Snapshot the prompt for logging
       await db.update(agentRuns).set({
         systemPromptSnapshot: fullSystemPrompt,
         skillsUsed: skillSlugs,
+        systemPromptTokens,
       }).where(eq(agentRuns.id, run.id));
 
-      // ── 8. Execute the agentic loop ─────────────────────────────────────
+      // ── 8. Execute the agentic loop with middleware pipeline ────────────
+      const pipeline = createDefaultPipeline();
+
       const loopResult = await runAgenticLoop({
         runId: run.id,
         agent,
@@ -195,13 +217,16 @@ export const agentExecutionService = {
         startTime,
         request,
         orgProcesses,
+        saLink,
+        pipeline,
       });
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
+      const finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
 
       await db.update(agentRuns).set({
-        status: 'completed',
+        status: finalStatus,
         toolCallsLog: loopResult.toolCallsLog,
         totalToolCalls: loopResult.totalToolCalls,
         inputTokens: loopResult.inputTokens,
@@ -222,9 +247,20 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       }).where(eq(subaccountAgents.id, request.subaccountAgentId));
 
+      // ── 10. Extract insights for workspace memory (fire-and-forget) ─────
+      if (loopResult.summary) {
+        workspaceMemoryService.extractRunInsights(
+          run.id,
+          request.agentId,
+          request.organisationId,
+          request.subaccountId,
+          loopResult.summary
+        ).catch(err => console.error('[AgentExecution] Memory extraction failed:', err));
+      }
+
       return {
         runId: run.id,
-        status: 'completed',
+        status: finalStatus as AgentRunResult['status'],
         summary: loopResult.summary,
         totalToolCalls: loopResult.totalToolCalls,
         totalTokens: loopResult.totalTokens,
@@ -276,6 +312,8 @@ interface LoopParams {
   startTime: number;
   request: AgentRunRequest;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
+  saLink: typeof subaccountAgents.$inferSelect;
+  pipeline: MiddlewarePipeline;
 }
 
 interface LoopResult {
@@ -288,12 +326,14 @@ interface LoopResult {
   tasksCreated: number;
   tasksUpdated: number;
   deliverablesCreated: number;
+  finalStatus?: string;
 }
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
+    saLink, pipeline,
   } = params;
 
   const toolCallsLog: object[] = [];
@@ -302,6 +342,23 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let tasksCreated = 0;
   let tasksUpdated = 0;
   let deliverablesCreated = 0;
+  let finalStatus: string | undefined;
+
+  // Middleware context — shared across all middleware checks
+  const mwCtx: MiddlewareContext = {
+    runId,
+    request,
+    agent,
+    saLink,
+    tokensUsed: 0,
+    toolCallsCount: 0,
+    toolCallHistory: [],
+    iteration: 0,
+    startTime,
+    tokenBudget,
+    maxToolCalls,
+    timeoutMs,
+  };
 
   // Start with the initial instruction message
   const initialMessage = buildInitialMessage(request);
@@ -310,62 +367,33 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let lastTextContent = '';
   const MAX_ITERATIONS = 25; // safety limit
 
+  outerLoop:
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-    // Check timeout
-    if (Date.now() - startTime > timeoutMs) {
-      // Soft stop: add a wrap-up message
-      messages.push({
-        role: 'user',
-        content: 'You have reached the time limit for this run. Please provide a brief summary of what you accomplished and stop.',
-      });
-      const wrapUp = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
-        messages,
-        temperature: agent.temperature,
-        maxTokens: Math.min(agent.maxTokens, 1024),
-      });
-      lastTextContent = wrapUp.content;
-      break;
+    mwCtx.iteration = iteration;
+    mwCtx.tokensUsed = totalTokensUsed;
+    mwCtx.toolCallsCount = totalToolCalls;
+
+    // ── Pre-call middleware ────────────────────────────────────────────
+    for (const mw of pipeline.preCall) {
+      const result = mw.execute(mwCtx);
+      if (result.action === 'stop') {
+        // Soft stop: ask for wrap-up summary
+        messages.push({ role: 'user', content: result.reason });
+        const wrapUp = await callAnthropic({
+          modelId: agent.modelId,
+          systemPrompt,
+          messages,
+          temperature: agent.temperature,
+          maxTokens: Math.min(agent.maxTokens, 1024),
+        });
+        lastTextContent = wrapUp.content;
+        totalTokensUsed += approxTokens(wrapUp.content) + approxTokens(result.reason);
+        finalStatus = result.status;
+        break outerLoop;
+      }
     }
 
-    // Check token budget (soft stop)
-    if (totalTokensUsed >= tokenBudget) {
-      messages.push({
-        role: 'user',
-        content: 'You have reached your token budget for this run. Please provide a brief summary of what you accomplished and stop.',
-      });
-      const wrapUp = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
-        messages,
-        temperature: agent.temperature,
-        maxTokens: Math.min(agent.maxTokens, 1024),
-      });
-      lastTextContent = wrapUp.content;
-      // Estimate tokens for the wrap-up
-      totalTokensUsed += approxTokens(wrapUp.content) + approxTokens(messages[messages.length - 1].content as string);
-      break;
-    }
-
-    // Check tool call limit
-    if (totalToolCalls >= maxToolCalls) {
-      messages.push({
-        role: 'user',
-        content: 'You have reached the maximum number of tool calls for this run. Please provide a brief summary of what you accomplished and stop.',
-      });
-      const wrapUp = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
-        messages,
-        temperature: agent.temperature,
-        maxTokens: Math.min(agent.maxTokens, 1024),
-      });
-      lastTextContent = wrapUp.content;
-      break;
-    }
-
-    // Call LLM
+    // ── Call LLM ──────────────────────────────────────────────────────
     const response = await callAnthropic({
       modelId: agent.modelId,
       systemPrompt,
@@ -399,12 +427,55 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     const toolResults: Array<{ tool_use_id: string; content: string }> = [];
 
     for (const toolCall of response.toolCalls) {
+      // ── Pre-tool middleware ──────────────────────────────────────────
+      let skipTool = false;
+      for (const mw of pipeline.preTool) {
+        const result = mw.execute(mwCtx, { name: toolCall.name, input: toolCall.input });
+        if (result.action === 'skip') {
+          toolResults.push({
+            tool_use_id: toolCall.id,
+            content: JSON.stringify({ success: false, error: result.reason }),
+          });
+          skipTool = true;
+          break;
+        }
+        if (result.action === 'stop') {
+          // Soft stop due to tool-level issue (e.g. loop detected)
+          messages.push({
+            role: 'user',
+            content: toolResults.map(tr => ({
+              type: 'tool_result' as const,
+              tool_use_id: tr.tool_use_id,
+              content: tr.content,
+            })),
+          });
+          messages.push({ role: 'user', content: result.reason });
+          const wrapUp = await callAnthropic({
+            modelId: agent.modelId,
+            systemPrompt,
+            messages,
+            temperature: agent.temperature,
+            maxTokens: Math.min(agent.maxTokens, 1024),
+          });
+          lastTextContent = wrapUp.content;
+          finalStatus = result.status;
+          break outerLoop;
+        }
+      }
+
+      if (skipTool) continue;
+
       totalToolCalls++;
       const toolStart = Date.now();
 
+      // Track for loop detection
+      const inputHash = hashToolCall(toolCall.name, toolCall.input);
+      mwCtx.toolCallHistory.push({ name: toolCall.name, inputHash, iteration });
+
       let resultContent: string;
-      try {
-        const result = await skillExecutor.execute({
+      // Execute with retry for transient errors
+      const { result, error, retried } = await executeWithRetry(async () => {
+        return skillExecutor.execute({
           skillName: toolCall.name,
           input: toolCall.input,
           context: {
@@ -413,9 +484,19 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             subaccountId: request.subaccountId,
             agentId: request.agentId,
             orgProcesses,
+            handoffDepth: request.handoffDepth,
           },
         });
+      });
 
+      if (error) {
+        resultContent = JSON.stringify({
+          success: false,
+          error: error.message,
+          error_type: error.type,
+          retried,
+        });
+      } else {
         resultContent = typeof result === 'string' ? result : JSON.stringify(result);
 
         // Track impact
@@ -425,9 +506,6 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           if (r._updated_task) tasksUpdated++;
           if (r._created_deliverable) deliverablesCreated++;
         }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        resultContent = JSON.stringify({ success: false, error: errMsg });
       }
 
       const toolDurationMs = Date.now() - toolStart;
@@ -438,6 +516,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         output: resultContent.length > 2000 ? resultContent.slice(0, 2000) + '...[truncated]' : resultContent,
         durationMs: toolDurationMs,
         iteration,
+        retried,
       });
 
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
@@ -464,7 +543,72 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     tasksCreated,
     tasksUpdated,
     deliverablesCreated,
+    finalStatus,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Smart Board Context — context offloading with tiered detail
+// ---------------------------------------------------------------------------
+
+async function buildSmartBoardContext(
+  organisationId: string,
+  subaccountId: string,
+  agentId: string
+): Promise<string> {
+  const parts: string[] = [];
+
+  // 1. Board summary from workspace memory (compressed)
+  const boardSummary = await workspaceMemoryService.getBoardSummaryForPrompt(
+    organisationId,
+    subaccountId
+  );
+  if (boardSummary) {
+    parts.push('### Board Summary');
+    parts.push(boardSummary);
+  }
+
+  // 2. Tasks assigned to THIS agent — always full detail
+  const allTasks = await taskService.listTasks(organisationId, subaccountId, {});
+  const myTasks = allTasks.filter(t => t.assignedAgentId === agentId);
+
+  if (myTasks.length > 0) {
+    parts.push('\n### Your Assigned Tasks');
+    for (const task of myTasks) {
+      parts.push(`- [${task.id}] **${task.title}** (${task.status}, ${task.priority})`);
+      if (task.description) parts.push(`  ${String(task.description).slice(0, 200)}`);
+    }
+  }
+
+  // 3. In-progress tasks from other agents (cross-agent awareness)
+  const othersInProgress = allTasks.filter(
+    t => t.status === 'in_progress' && t.assignedAgentId !== agentId
+  );
+  if (othersInProgress.length > 0) {
+    parts.push('\n### Other In-Progress Work');
+    for (const task of othersInProgress.slice(0, 5)) {
+      const agentName = (task as Record<string, unknown>).assignedAgent
+        ? ((task as Record<string, unknown>).assignedAgent as Record<string, unknown>).name
+        : 'unassigned';
+      parts.push(`- [${task.id}] ${task.title} → ${agentName}`);
+    }
+  }
+
+  // 4. Status counts for everything else
+  const counts: Record<string, number> = {};
+  for (const t of allTasks) {
+    counts[t.status] = (counts[t.status] ?? 0) + 1;
+  }
+  if (Object.keys(counts).length > 0) {
+    parts.push('\n### Board Totals: ' + Object.entries(counts).map(([s, c]) => `${s}: ${c}`).join(' | '));
+  }
+
+  // If no board summary exists and we have tasks, fall back to the old overview
+  if (!boardSummary && allTasks.length > 0 && parts.length <= 1) {
+    return buildTaskOverviewContext(allTasks.slice(0, 30));
+  }
+
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +670,16 @@ function buildAutonomousInstructions(request: AgentRunRequest, targetItem: Recor
 
   parts.push('You are running autonomously (not in a conversation with a user).');
   parts.push(`This is a ${request.runType} run.`);
+
+  // Handoff context injection
+  if (request.triggerContext?.type === 'handoff') {
+    const ctx = request.triggerContext;
+    parts.push(`\nYou were handed this task by another agent (run: ${ctx.sourceRunId}).`);
+    if (ctx.handoffContext) {
+      parts.push(`The previous agent provided this context: ${ctx.handoffContext}`);
+    }
+    parts.push('Continue the work from where they left off.');
+  }
 
   if (targetItem) {
     parts.push(`\nYou have been assigned to work on the task: "${targetItem.title}" (ID: ${targetItem.id}).`);

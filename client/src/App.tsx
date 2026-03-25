@@ -41,6 +41,7 @@ const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
+const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
 
 function PageLoader() {
   return (
@@ -154,6 +155,7 @@ export default function App() {
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/board-config" element={<AdminBoardConfigPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
           </Route>
 

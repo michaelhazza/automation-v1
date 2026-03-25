@@ -32,6 +32,10 @@ export const subaccountAgents = pgTable(
     // Array of skill slugs this agent can use in this subaccount
     skillSlugs: jsonb('skill_slugs').$type<string[]>(),
 
+    // ── Tool restriction ────────────────────────────────────────────────
+    // If set, only these tools are allowed. Null = all tools available.
+    allowedSkillSlugs: jsonb('allowed_skill_slugs').$type<string[]>(),
+
     // ── Subaccount-specific prompt additions ─────────────────────────────
     customInstructions: text('custom_instructions'),
 

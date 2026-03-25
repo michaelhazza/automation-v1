@@ -92,6 +92,9 @@ export const taskService = {
       createdByAgentId?: string;
       processId?: string;
       dueDate?: Date;
+      handoffSourceRunId?: string;
+      handoffContext?: Record<string, unknown>;
+      handoffDepth?: number;
     },
     userId?: string
   ) {
@@ -118,6 +121,9 @@ export const taskService = {
         processId: data.processId ?? null,
         position,
         dueDate: data.dueDate ?? null,
+        handoffSourceRunId: data.handoffSourceRunId ?? null,
+        handoffContext: data.handoffContext ?? null,
+        handoffDepth: data.handoffDepth ?? 0,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -268,7 +274,7 @@ export const taskService = {
   async addActivity(
     taskId: string,
     data: {
-      activityType: 'created' | 'assigned' | 'status_changed' | 'progress' | 'completed' | 'note' | 'blocked';
+      activityType: 'created' | 'assigned' | 'status_changed' | 'progress' | 'completed' | 'note' | 'blocked' | 'deliverable_added';
       message: string;
       agentId?: string;
       userId?: string;

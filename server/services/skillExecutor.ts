@@ -1,6 +1,10 @@
+import { eq, and } from 'drizzle-orm';
 import { env } from '../lib/env.js';
+import { db } from '../db/index.js';
+import { subaccountAgents, agents, agentRuns } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
+import { isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Skill Executor — executes tool calls for autonomous agent runs
@@ -12,12 +16,24 @@ interface SkillExecutionContext {
   subaccountId: string;
   agentId: string;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
+  handoffDepth?: number;
 }
 
 interface SkillExecutionParams {
   skillName: string;
   input: Record<string, unknown>;
   context: SkillExecutionContext;
+}
+
+// Handoff job queue name
+const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
+const MAX_HANDOFF_DEPTH = 5;
+
+// pg-boss reference for enqueueing handoff jobs (set by agentScheduleService)
+let pgBossSend: ((name: string, data: object) => Promise<string | null>) | null = null;
+
+export function setHandoffJobSender(sender: (name: string, data: object) => Promise<string | null>) {
+  pgBossSend = sender;
 }
 
 export const skillExecutor = {
@@ -236,7 +252,7 @@ async function executeTriggerProcess(
 }
 
 // ---------------------------------------------------------------------------
-// Create Task
+// Create Task — with handoff support
 // ---------------------------------------------------------------------------
 
 async function executeCreateTask(
@@ -245,6 +261,16 @@ async function executeCreateTask(
 ): Promise<unknown> {
   const title = String(input.title ?? '');
   if (!title) return { success: false, error: 'title is required' };
+
+  const assignedAgentId = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
+
+  // Self-assignment prevention
+  if (assignedAgentId === context.agentId) {
+    return { success: false, error: 'Cannot assign a task to yourself — this would create an infinite loop. Assign to a different agent or leave unassigned.' };
+  }
+
+  const handoffContext = input.handoff_context ? String(input.handoff_context) : undefined;
+  const currentDepth = context.handoffDepth ?? 0;
 
   try {
     const item = await taskService.createTask(
@@ -256,16 +282,34 @@ async function executeCreateTask(
         brief: input.brief ? String(input.brief) : undefined,
         priority: (input.priority as 'low' | 'normal' | 'high' | 'urgent') ?? 'normal',
         status: input.status ? String(input.status) : 'inbox',
-        assignedAgentId: input.assigned_agent_id ? String(input.assigned_agent_id) : undefined,
+        assignedAgentId,
         createdByAgentId: context.agentId,
+        handoffSourceRunId: context.runId,
+        handoffContext: handoffContext ? { message: handoffContext } : undefined,
+        handoffDepth: assignedAgentId ? currentDepth + 1 : 0,
       }
     );
+
+    // Trigger handoff if assigned to another agent
+    let handoffEnqueued = false;
+    if (assignedAgentId) {
+      handoffEnqueued = await enqueueHandoff({
+        taskId: item.id,
+        agentId: assignedAgentId,
+        subaccountId: context.subaccountId,
+        organisationId: context.organisationId,
+        sourceRunId: context.runId,
+        handoffDepth: currentDepth + 1,
+        handoffContext,
+      });
+    }
 
     return {
       success: true,
       task_id: item.id,
       title: item.title,
       status: item.status,
+      handoff_enqueued: handoffEnqueued,
       _created_task: true,
     };
   } catch (err) {
@@ -349,5 +393,87 @@ async function executeAddDeliverable(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to add deliverable: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Handoff enqueuing
+// ---------------------------------------------------------------------------
+
+interface HandoffRequest {
+  taskId: string;
+  agentId: string;
+  subaccountId: string;
+  organisationId: string;
+  sourceRunId: string;
+  handoffDepth: number;
+  handoffContext?: string;
+}
+
+async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
+  // Depth cap
+  if (req.handoffDepth > MAX_HANDOFF_DEPTH) {
+    console.warn(`[Handoff] Depth ${req.handoffDepth} exceeds max ${MAX_HANDOFF_DEPTH}, skipping`);
+    return false;
+  }
+
+  // Look up the subaccount agent link for the target agent
+  const [saLink] = await db
+    .select()
+    .from(subaccountAgents)
+    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .where(
+      and(
+        eq(subaccountAgents.subaccountId, req.subaccountId),
+        eq(subaccountAgents.agentId, req.agentId),
+        eq(subaccountAgents.isActive, true),
+        eq(agents.status, 'active'),
+        isNull(agents.deletedAt)
+      )
+    );
+
+  if (!saLink) {
+    console.warn(`[Handoff] No active subaccount agent link for agent ${req.agentId} in subaccount ${req.subaccountId}`);
+    return false;
+  }
+
+  // Duplicate prevention: check for running/pending runs for same agent+task
+  const [existingRun] = await db
+    .select()
+    .from(agentRuns)
+    .where(
+      and(
+        eq(agentRuns.agentId, req.agentId),
+        eq(agentRuns.taskId, req.taskId),
+        eq(agentRuns.subaccountId, req.subaccountId)
+      )
+    )
+    .limit(1);
+
+  if (existingRun && (existingRun.status === 'running' || existingRun.status === 'pending')) {
+    console.warn(`[Handoff] Agent ${req.agentId} already has a ${existingRun.status} run for task ${req.taskId}, skipping`);
+    return false;
+  }
+
+  if (!pgBossSend) {
+    console.warn('[Handoff] pg-boss sender not configured, cannot enqueue handoff');
+    return false;
+  }
+
+  try {
+    await pgBossSend(AGENT_HANDOFF_QUEUE, {
+      taskId: req.taskId,
+      agentId: req.agentId,
+      subaccountAgentId: saLink.subaccount_agents.id,
+      subaccountId: req.subaccountId,
+      organisationId: req.organisationId,
+      sourceRunId: req.sourceRunId,
+      handoffDepth: req.handoffDepth,
+      handoffContext: req.handoffContext,
+    });
+    return true;
+  } catch (err) {
+    console.error('[Handoff] Failed to enqueue handoff job:', err);
+    return false;
   }
 }
