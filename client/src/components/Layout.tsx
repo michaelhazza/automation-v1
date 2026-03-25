@@ -5,7 +5,7 @@ import api from '../lib/api';
 import {
   removeToken, removeUserRole,
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
-  getActiveSubaccountId, getActiveSubaccountName, setActiveSubaccount, removeActiveSubaccount,
+  getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
 } from '../lib/auth';
 
 interface LayoutProps {
@@ -18,7 +18,7 @@ interface OrgOption {
   name: string;
 }
 
-interface SubaccountOption {
+interface ClientOption {
   id: string;
   name: string;
   slug: string;
@@ -142,9 +142,9 @@ export default function Layout({ user, children }: LayoutProps) {
     setActiveOrgIdState(org.id);
     setActiveOrgNameState(org.name);
     setOrgPickerOpen(false);
-    removeActiveSubaccount();
-    setActiveSubaccountIdState(null);
-    setActiveSubaccountNameState(null);
+    removeActiveClient();
+    setActiveClientIdState(null);
+    setActiveClientNameState(null);
     navigate('/');
   };
 
@@ -152,48 +152,48 @@ export default function Layout({ user, children }: LayoutProps) {
     removeActiveOrg();
     setActiveOrgIdState(null);
     setActiveOrgNameState(null);
-    removeActiveSubaccount();
-    setActiveSubaccountIdState(null);
-    setActiveSubaccountNameState(null);
+    removeActiveClient();
+    setActiveClientIdState(null);
+    setActiveClientNameState(null);
     navigate('/');
   };
 
-  // ── Subaccount context ─────────────────────────────────────────────────
-  const [activeSubaccountId, setActiveSubaccountIdState] = useState<string | null>(getActiveSubaccountId);
-  const [activeSubaccountName, setActiveSubaccountNameState] = useState<string | null>(getActiveSubaccountName);
-  const [subaccounts, setSubaccounts] = useState<SubaccountOption[]>([]);
-  const [subaccountPickerOpen, setSubaccountPickerOpen] = useState(false);
+  // ── Client context ─────────────────────────────────────────────────
+  const [activeClientId, setActiveClientIdState] = useState<string | null>(getActiveClientId);
+  const [activeClientName, setActiveClientNameState] = useState<string | null>(getActiveClientName);
+  const [subaccounts, setClients] = useState<ClientOption[]>([]);
+  const [subaccountPickerOpen, setClientPickerOpen] = useState(false);
 
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
 
   useEffect(() => {
     if (hasOrgContext) {
       api.get('/api/subaccounts')
-        .then(({ data }) => setSubaccounts(data))
-        .catch(() => setSubaccounts([]));
+        .then(({ data }) => setClients(data))
+        .catch(() => setClients([]));
     } else {
-      setSubaccounts([]);
+      setClients([]);
     }
   }, [hasOrgContext, activeOrgId]);
 
-  const handleSelectSubaccount = (sa: SubaccountOption) => {
-    setActiveSubaccount(sa.id, sa.name);
-    setActiveSubaccountIdState(sa.id);
-    setActiveSubaccountNameState(sa.name);
-    setSubaccountPickerOpen(false);
+  const handleSelectClient = (sa: ClientOption) => {
+    setActiveClient(sa.id, sa.name);
+    setActiveClientIdState(sa.id);
+    setActiveClientNameState(sa.name);
+    setClientPickerOpen(false);
   };
 
-  const handleClearSubaccount = () => {
-    removeActiveSubaccount();
-    setActiveSubaccountIdState(null);
-    setActiveSubaccountNameState(null);
-    setSubaccountPickerOpen(false);
+  const handleClearClient = () => {
+    removeActiveClient();
+    setActiveClientIdState(null);
+    setActiveClientNameState(null);
+    setClientPickerOpen(false);
   };
 
   // ── Logout ─────────────────────────────────────────────────────────────
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout'); } finally {
-      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveSubaccount();
+      removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient();
       navigate('/login');
     }
   };
@@ -334,23 +334,23 @@ export default function Layout({ user, children }: LayoutProps) {
               </div>
             )}
 
-            {/* Subaccount picker */}
+            {/* Client picker */}
             {hasOrgContext && (
               <div style={{ position: 'relative' }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>
-                  Subaccount
+                  Client
                 </div>
                 <button
-                  onClick={() => setSubaccountPickerOpen(!subaccountPickerOpen)}
+                  onClick={() => setClientPickerOpen(!subaccountPickerOpen)}
                   className="context-picker-btn"
                   style={{
-                    background: activeSubaccountId ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
-                    border: `1px solid ${activeSubaccountId ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)'}`,
-                    color: activeSubaccountId ? '#6ee7b7' : '#64748b',
+                    background: activeClientId ? 'rgba(16,185,129,0.1)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${activeClientId ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                    color: activeClientId ? '#6ee7b7' : '#64748b',
                   }}
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150, fontSize: 12 }}>
-                    {activeSubaccountName ?? 'Select subaccount'}
+                    {activeClientName ?? 'Select client'}
                   </span>
                   <span style={{ color: '#64748b', flexShrink: 0 }}>
                     {subaccountPickerOpen ? <Icons.chevronUp /> : <Icons.chevronDown />}
@@ -366,17 +366,17 @@ export default function Layout({ user, children }: LayoutProps) {
                     animation: 'fadeInScale 0.12s ease-out both',
                   }}>
                     {subaccounts.length === 0 && (
-                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No subaccounts found</div>
+                      <div style={{ padding: '12px 14px', color: '#475569', fontSize: 12 }}>No clients found</div>
                     )}
                     {subaccounts.map((sa) => (
                       <button
                         key={sa.id}
-                        onClick={() => handleSelectSubaccount(sa)}
+                        onClick={() => handleSelectClient(sa)}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
                           padding: '9px 14px',
-                          background: sa.id === activeSubaccountId ? 'rgba(16,185,129,0.1)' : 'transparent',
-                          color: sa.id === activeSubaccountId ? '#6ee7b7' : '#cbd5e1',
+                          background: sa.id === activeClientId ? 'rgba(16,185,129,0.1)' : 'transparent',
+                          color: sa.id === activeClientId ? '#6ee7b7' : '#cbd5e1',
                           border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
                           fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
                           transition: 'background 0.1s',
@@ -388,9 +388,9 @@ export default function Layout({ user, children }: LayoutProps) {
                         )}
                       </button>
                     ))}
-                    {activeSubaccountId && (
+                    {activeClientId && (
                       <button
-                        onClick={handleClearSubaccount}
+                        onClick={handleClearClient}
                         style={{
                           display: 'block', width: '100%', textAlign: 'left',
                           padding: '9px 14px', background: 'transparent',
@@ -398,7 +398,7 @@ export default function Layout({ user, children }: LayoutProps) {
                           fontFamily: 'inherit',
                         }}
                       >
-                        Clear subaccount
+                        Clear client
                       </button>
                     )}
                   </div>
@@ -423,46 +423,42 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* Always visible */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* ── Subaccount section — only when a subaccount is selected ── */}
-          {activeSubaccountId && (
+          {/* ── Client section — only when a client is selected ── */}
+          {activeClientId && (
             <>
-              <NavSection label={activeSubaccountName ?? 'Client'} />
+              <NavSection label={activeClientName ?? 'Client'} />
               <NavLink to="/agents" icon={<Icons.agents />} label="AI Team" />
               <NavGroup icon={<Icons.tasks />} label="Automations">
                 <NavLink to="/processes" icon={<Icons.manageTasks />} label="Manage" indent />
                 <NavLink to="/executions" icon={<Icons.executions />} label="Activity" indent />
               </NavGroup>
-              {/* Subaccount admin — for org_admin+ */}
+              {/* Admin-only client items */}
               {['system_admin', 'org_admin'].includes(user.role) && (
                 <>
                   <NavLink
-                    to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
+                    to={`/admin/subaccounts/${activeClientId}/workspace`}
                     icon={<Icons.queue />}
                     label="Workspace"
                   />
-                  <NavGroup icon={<Icons.portal />} label="Portal">
-                    <NavLink
-                      to={`/portal/${activeSubaccountId}`}
-                      icon={<Icons.portal />}
-                      label="View Portal"
-                      indent
-                    />
-                    <NavLink
-                      to={`/admin/subaccounts/${activeSubaccountId}`}
-                      icon={<Icons.settings />}
-                      label="Configure"
-                      indent
-                    />
-                  </NavGroup>
+                  <NavLink
+                    to={`/portal/${activeClientId}`}
+                    icon={<Icons.portal />}
+                    label="Portal"
+                  />
+                  <NavLink
+                    to={`/admin/subaccounts/${activeClientId}`}
+                    icon={<Icons.settings />}
+                    label="Client Settings"
+                  />
                 </>
               )}
             </>
           )}
 
-          {/* ── Org admin section — only when org context exists ────────── */}
+          {/* ── Organisation section — only when org context exists ────────── */}
           {hasOrgContext && ['system_admin', 'org_admin'].includes(user.role) && (
             <>
-              <NavSection label="Admin" />
+              <NavSection label="Organisation" />
               <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage Agents" />
               <NavLink to="/admin/skills" icon={<Icons.settings />} label="Agent Skills" />
               <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Automations" />
