@@ -5,6 +5,9 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
+const MAX_SUMMARY_LENGTH = 10000;
+const MAX_PAGE_LIMIT = 100;
+
 // ─── Get workspace memory for a subaccount ──────────────────────────────────
 
 router.get(
@@ -47,6 +50,11 @@ router.put(
 
       if (typeof summary !== 'string') {
         res.status(400).json({ error: 'summary (string) is required' });
+        return;
+      }
+
+      if (summary.length > MAX_SUMMARY_LENGTH) {
+        res.status(400).json({ error: `Summary exceeds maximum length of ${MAX_SUMMARY_LENGTH} characters` });
         return;
       }
 
@@ -96,9 +104,12 @@ router.get(
       const { subaccountId } = req.params;
       const { limit, offset } = req.query;
 
+      const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), MAX_PAGE_LIMIT);
+      const safeOffset = Math.max(Number(offset) || 0, 0);
+
       const entries = await workspaceMemoryService.listEntries(subaccountId, {
-        limit: limit ? Number(limit) : undefined,
-        offset: offset ? Number(offset) : undefined,
+        limit: safeLimit,
+        offset: safeOffset,
       });
 
       res.json(entries);
@@ -117,8 +128,8 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   async (req, res) => {
     try {
-      const { entryId } = req.params;
-      const deleted = await workspaceMemoryService.deleteEntry(entryId);
+      const { subaccountId, entryId } = req.params;
+      const deleted = await workspaceMemoryService.deleteEntry(entryId, req.orgId!, subaccountId);
 
       if (!deleted) {
         res.status(404).json({ error: 'Entry not found' });

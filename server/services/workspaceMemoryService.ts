@@ -1,4 +1,4 @@
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   workspaceMemories,
@@ -68,10 +68,16 @@ export const workspaceMemoryService = {
       .offset(offset);
   },
 
-  async deleteEntry(entryId: string) {
+  async deleteEntry(entryId: string, organisationId: string, subaccountId: string) {
     const [deleted] = await db
       .delete(workspaceMemoryEntries)
-      .where(eq(workspaceMemoryEntries.id, entryId))
+      .where(
+        and(
+          eq(workspaceMemoryEntries.id, entryId),
+          eq(workspaceMemoryEntries.organisationId, organisationId),
+          eq(workspaceMemoryEntries.subaccountId, subaccountId)
+        )
+      )
       .returning();
     return deleted ?? null;
   },
@@ -230,15 +236,13 @@ Respond with ONLY the updated memory text.`,
       })
       .where(eq(workspaceMemories.id, memory.id));
 
-    // Mark entries as included
+    // Mark entries as included (batch update)
     if (newEntries.length > 0) {
       const entryIds = newEntries.map(e => e.id);
-      for (const id of entryIds) {
-        await db
-          .update(workspaceMemoryEntries)
-          .set({ includedInSummary: true })
-          .where(eq(workspaceMemoryEntries.id, id));
-      }
+      await db
+        .update(workspaceMemoryEntries)
+        .set({ includedInSummary: true })
+        .where(inArray(workspaceMemoryEntries.id, entryIds));
     }
   },
 

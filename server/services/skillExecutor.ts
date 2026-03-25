@@ -1,10 +1,9 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentRuns } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
-import { isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Skill Executor — executes tool calls for autonomous agent runs
@@ -419,7 +418,9 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
 
   // Look up the subaccount agent link for the target agent
   const [saLink] = await db
-    .select()
+    .select({
+      sa: subaccountAgents,
+    })
     .from(subaccountAgents)
     .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
     .where(
@@ -464,7 +465,7 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
     await pgBossSend(AGENT_HANDOFF_QUEUE, {
       taskId: req.taskId,
       agentId: req.agentId,
-      subaccountAgentId: saLink.subaccount_agents.id,
+      subaccountAgentId: saLink.sa.id,
       subaccountId: req.subaccountId,
       organisationId: req.organisationId,
       sourceRunId: req.sourceRunId,
