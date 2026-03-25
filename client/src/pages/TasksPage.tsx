@@ -69,7 +69,7 @@ export default function TasksPage({ user }: { user: User }) {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.03em' }}>
-          Processes
+          Automations
         </h1>
         <p style={{ color: '#64748b', margin: 0, fontSize: 14 }}>
           {processes.length} automation{processes.length !== 1 ? 's' : ''} available to run
@@ -85,7 +85,7 @@ export default function TasksPage({ user }: { user: User }) {
         </div>
         <input
           type="text"
-          placeholder="Search processes by name or description..."
+          placeholder="Search automations by name or description..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="form-input"
@@ -165,10 +165,10 @@ export default function TasksPage({ user }: { user: User }) {
             </svg>
           </div>
           <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16, color: '#0f172a' }}>
-            {search ? 'No processes match your search' : 'No processes available'}
+            {search ? 'No automations match your search' : 'No automations available'}
           </p>
           <p style={{ margin: '0 0 20px', fontSize: 13.5, color: '#64748b' }}>
-            {search ? 'Try a different search term or clear the filters.' : 'Processes will appear here once they are activated.'}
+            {search ? 'Try a different search term or clear the filters.' : 'Automations will appear here once they are activated.'}
           </p>
           {search && (
             <button className="btn btn-secondary" onClick={() => { setSearch(''); setSelectedCategory(''); }}>

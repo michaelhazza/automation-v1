@@ -389,18 +389,40 @@ export default function Layout({ user, children }: LayoutProps) {
 
         {/* ── Navigation ──────────────────────────────────────────────── */}
         <div style={{ flex: 1, paddingTop: 6, paddingBottom: 6 }}>
-          {/* Top-level — user-facing, minimal */}
+          {/* Always visible */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {hasOrgContext && (
+          {/* ── Subaccount section — only when a subaccount is selected ── */}
+          {activeSubaccountId && (
             <>
+              <NavSection label={activeSubaccountName ?? 'Client'} />
               <NavLink to="/agents" icon={<Icons.agents />} label="AI Team" />
               <NavLink to="/executions" icon={<Icons.executions />} label="Activity" />
               <NavLink to="/processes" icon={<Icons.tasks />} label="Automations" />
+              {/* Subaccount admin — for org_admin+ */}
+              {['system_admin', 'org_admin'].includes(user.role) && (
+                <>
+                  <NavLink
+                    to={`/admin/subaccounts/${activeSubaccountId}`}
+                    icon={<Icons.subaccounts />}
+                    label="Client Settings"
+                  />
+                  <NavLink
+                    to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
+                    icon={<Icons.queue />}
+                    label="Workspace"
+                  />
+                  <NavLink
+                    to={`/portal/${activeSubaccountId}`}
+                    icon={<Icons.portal />}
+                    label="Portal"
+                  />
+                </>
+              )}
             </>
           )}
 
-          {/* Admin section — only for org_admin+ roles */}
+          {/* ── Org admin section — only when org context exists ────────── */}
           {hasOrgContext && ['system_admin', 'org_admin'].includes(user.role) && (
             <>
               <NavSection label="Admin" />
@@ -409,24 +431,10 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Automations" />
               <NavLink to="/admin/subaccounts" icon={<Icons.subaccounts />} label="Clients" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
-              {activeSubaccountId && (
-                <>
-                  <NavLink
-                    to={`/admin/subaccounts/${activeSubaccountId}`}
-                    icon={<Icons.portal />}
-                    label={activeSubaccountName ?? 'Client View'}
-                  />
-                  <NavLink
-                    to={`/admin/subaccounts/${activeSubaccountId}/workspace`}
-                    icon={<Icons.queue />}
-                    label="Workspace"
-                  />
-                </>
-              )}
             </>
           )}
 
-          {/* System admin — platform-level ops */}
+          {/* ── Platform section — system_admin only ───────────────────── */}
           {isSystemAdmin && (
             <>
               <NavSection label="Platform" />

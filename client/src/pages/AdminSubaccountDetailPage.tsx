@@ -173,7 +173,7 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
       load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to link process');
+      setError(e.response?.data?.error ?? 'Failed to link automation');
     }
   };
 
@@ -255,11 +255,14 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
-        {(['categories', 'processes', 'members', 'settings'] as ActiveTab[]).map((tab) => (
+        {(['categories', 'processes', 'members', 'settings'] as ActiveTab[]).map((tab) => {
+          const tabLabels: Record<ActiveTab, string> = { categories: 'Categories', processes: 'Automations', members: 'Members', settings: 'Settings' };
+          return (
           <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tabLabels[tab]}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
@@ -335,17 +338,17 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
       {activeTab === 'processes' && (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Linked org processes</h2>
-            <button onClick={() => setShowLinkForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Link process</button>
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Linked org automations</h2>
+            <button onClick={() => setShowLinkForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Link automation</button>
           </div>
 
           {showLinkForm && (
-            <Modal title="Link process to subaccount" onClose={() => setShowLinkForm(false)} maxWidth={400}>
+            <Modal title="Link automation to client" onClose={() => setShowLinkForm(false)} maxWidth={400}>
               <div style={{ display: 'grid', gap: 14, marginBottom: 20 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Org process *</label>
+                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Org automation *</label>
                   <select value={linkForm.processId} onChange={(e) => setLinkForm({ ...linkForm, processId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
-                    <option value="">Select process...</option>
+                    <option value="">Select automation...</option>
                     {orgProcesses.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
@@ -365,16 +368,16 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
           )}
 
           {deleteLinkId && (
-            <ConfirmDialog title="Remove process link" message="Remove this process from the subaccount?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
+            <ConfirmDialog title="Remove automation link" message="Remove this automation from the client?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
           )}
 
           <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 24 }}>
             {linkedProcesses.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No processes linked yet.</div>
+              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No automations linked yet.</div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                 <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Process</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Automation</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Active in portal</th>
                   <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
@@ -401,11 +404,11 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
 
           {nativeProcesses.length > 0 && (
             <>
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Subaccount-native processes</h3>
+              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Client-native automations</h3>
               <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                   <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Process</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Automation</th>
                     <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
                   </tr></thead>
                   <tbody>

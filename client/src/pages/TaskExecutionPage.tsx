@@ -187,9 +187,9 @@ export default function TaskExecutionPage({ user }: { user: User }) {
   if (!process) {
     return (
       <div className="card empty-state" style={{ maxWidth: 480, margin: '0 auto' }}>
-        <p style={{ fontWeight: 700, fontSize: 16, color: '#dc2626' }}>Process not found</p>
+        <p style={{ fontWeight: 700, fontSize: 16, color: '#dc2626' }}>Automation not found</p>
         <Link to="/processes" className="btn btn-secondary" style={{ textDecoration: 'none', marginTop: 12 }}>
-          Back to Processes
+          Back to Automations
         </Link>
       </div>
     );
@@ -203,7 +203,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
     <div className="page-enter" style={{ maxWidth: 780 }}>
       {/* Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, fontSize: 13 }}>
-        <Link to="/processes" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>Processes</Link>
+        <Link to="/processes" style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>Automations</Link>
         <span style={{ color: '#94a3b8' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6" />
@@ -256,7 +256,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
       {!execution && (
         <div className="card" style={{ padding: 28, marginBottom: 20, animation: 'fadeIn 0.2s ease-out both' }}>
           <h3 style={{ margin: '0 0 20px', fontSize: 15, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
-            Process Input
+            Automation Input
           </h3>
 
           {/* Input data */}
@@ -397,7 +397,7 @@ export default function TaskExecutionPage({ user }: { user: User }) {
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="5 3 19 12 5 21 5 3" />
                 </svg>
-                Run Process
+                Run Automation
               </>
             )}
           </button>

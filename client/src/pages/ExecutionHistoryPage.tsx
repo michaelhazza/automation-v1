@@ -102,7 +102,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
           {/* Process filter */}
           <div style={{ flex: '1 1 180px', minWidth: 160 }}>
             <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-              Process
+              Automation
             </label>
             <select
               value={filterProcessId}
@@ -208,12 +208,12 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
           </div>
           <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16, color: '#0f172a' }}>No executions found</p>
           <p style={{ margin: '0 0 20px', fontSize: 13.5, color: '#64748b' }}>
-            {hasFilters ? 'Try adjusting your filters.' : 'Run a process to start your execution history.'}
+            {hasFilters ? 'Try adjusting your filters.' : 'Run an automation to start your execution history.'}
           </p>
           {hasFilters ? (
             <button className="btn btn-secondary" onClick={handleClearFilters}>Clear filters</button>
           ) : (
-            <Link to="/processes" className="btn btn-primary" style={{ textDecoration: 'none' }}>Browse Processes</Link>
+            <Link to="/processes" className="btn btn-primary" style={{ textDecoration: 'none' }}>Browse Automations</Link>
           )}
         </div>
       ) : (
@@ -222,7 +222,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
             <thead>
               <tr>
                 <th>Execution</th>
-                <th>Process</th>
+                <th>Automation</th>
                 <th>Status</th>
                 <th>Duration</th>
                 <th>Created</th>
