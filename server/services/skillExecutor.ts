@@ -24,9 +24,16 @@ interface SkillExecutionParams {
   context: SkillExecutionContext;
 }
 
+import {
+  MAX_HANDOFF_DEPTH,
+  MAX_TASK_TITLE_LENGTH,
+  MAX_TASK_DESCRIPTION_LENGTH,
+  VALID_PRIORITIES,
+  type TaskPriority,
+} from '../config/limits.js';
+
 // Handoff job queue name
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
-const MAX_HANDOFF_DEPTH = 5;
 
 // pg-boss reference for enqueueing handoff jobs (set by agentScheduleService)
 let pgBossSend: ((name: string, data: object) => Promise<string | null>) | null = null;
@@ -258,7 +265,7 @@ async function executeCreateTask(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const title = String(input.title ?? '');
+  const title = String(input.title ?? '').slice(0, MAX_TASK_TITLE_LENGTH);
   if (!title) return { success: false, error: 'title is required' };
 
   const assignedAgentId = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
@@ -268,8 +275,23 @@ async function executeCreateTask(
     return { success: false, error: 'Cannot assign a task to yourself — this would create an infinite loop. Assign to a different agent or leave unassigned.' };
   }
 
+  // Validate priority
+  const rawPriority = String(input.priority ?? 'normal');
+  const priority: TaskPriority = (VALID_PRIORITIES as readonly string[]).includes(rawPriority)
+    ? rawPriority as TaskPriority
+    : 'normal';
+
+  const description = input.description ? String(input.description).slice(0, MAX_TASK_DESCRIPTION_LENGTH) : undefined;
   const handoffContext = input.handoff_context ? String(input.handoff_context) : undefined;
   const currentDepth = context.handoffDepth ?? 0;
+
+  // Check handoff depth BEFORE creating the task to avoid orphans
+  if (assignedAgentId && currentDepth + 1 > MAX_HANDOFF_DEPTH) {
+    return {
+      success: false,
+      error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot assign task to another agent at this depth. Create the task without assignment instead.`,
+    };
+  }
 
   try {
     const item = await taskService.createTask(
@@ -277,9 +299,9 @@ async function executeCreateTask(
       context.subaccountId,
       {
         title,
-        description: input.description ? String(input.description) : undefined,
+        description,
         brief: input.brief ? String(input.brief) : undefined,
-        priority: (input.priority as 'low' | 'normal' | 'high' | 'urgent') ?? 'normal',
+        priority,
         status: input.status ? String(input.status) : 'inbox',
         assignedAgentId,
         createdByAgentId: context.agentId,

@@ -9,8 +9,10 @@ export type {
   MiddlewareContext,
   PreCallResult,
   PreToolResult,
+  PostToolResult,
   PreCallMiddleware,
   PreToolMiddleware,
+  PostToolMiddleware,
   MiddlewarePipeline,
 } from './types.js';
 
@@ -22,5 +24,6 @@ export function createDefaultPipeline(): MiddlewarePipeline {
   return {
     preCall: [budgetCheckMiddleware],
     preTool: [toolRestrictionMiddleware, loopDetectionMiddleware],
+    postTool: [],
   };
 }

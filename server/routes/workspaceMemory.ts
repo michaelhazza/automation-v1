@@ -2,11 +2,9 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { MAX_SUMMARY_LENGTH, MAX_ENTRY_LIMIT } from '../config/limits.js';
 
 const router = Router();
-
-const MAX_SUMMARY_LENGTH = 10000;
-const MAX_PAGE_LIMIT = 100;
 
 // ─── Get workspace memory for a subaccount ──────────────────────────────────
 
@@ -104,7 +102,7 @@ router.get(
       const { subaccountId } = req.params;
       const { limit, offset } = req.query;
 
-      const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), MAX_PAGE_LIMIT);
+      const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), MAX_ENTRY_LIMIT);
       const safeOffset = Math.max(Number(offset) || 0, 0);
 
       const entries = await workspaceMemoryService.listEntries(subaccountId, {

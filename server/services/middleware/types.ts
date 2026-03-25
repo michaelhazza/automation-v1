@@ -29,6 +29,10 @@ export type PreToolResult =
   | { action: 'skip'; reason: string }
   | { action: 'stop'; reason: string; status: string };
 
+export type PostToolResult =
+  | { action: 'continue'; content?: string }
+  | { action: 'stop'; reason: string; status: string };
+
 export interface PreCallMiddleware {
   name: string;
   execute(ctx: MiddlewareContext): PreCallResult;
@@ -42,7 +46,17 @@ export interface PreToolMiddleware {
   ): PreToolResult;
 }
 
+export interface PostToolMiddleware {
+  name: string;
+  execute(
+    ctx: MiddlewareContext,
+    toolCall: { name: string; input: Record<string, unknown> },
+    result: { content: string; durationMs: number }
+  ): PostToolResult;
+}
+
 export interface MiddlewarePipeline {
   preCall: PreCallMiddleware[];
   preTool: PreToolMiddleware[];
+  postTool: PostToolMiddleware[];
 }
