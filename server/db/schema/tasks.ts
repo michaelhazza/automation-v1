@@ -33,6 +33,10 @@ export const tasks = pgTable(
     handoffContext: jsonb('handoff_context'),
     handoffDepth: integer('handoff_depth').notNull().default(0),
 
+    // ── Sub-agent tracking ────────────────────────────────────────────────
+    isSubTask: integer('is_sub_task').notNull().default(0), // 0=false, 1=true
+    parentTaskId: uuid('parent_task_id'),
+
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     deletedAt: timestamp('deleted_at'),

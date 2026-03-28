@@ -67,6 +67,10 @@ export const agentRuns = pgTable(
     handoffDepth: integer('handoff_depth').notNull().default(0),
     parentRunId: uuid('parent_run_id'),
 
+    // Sub-agent tracking
+    isSubAgent: integer('is_sub_agent').notNull().default(0), // 0=false, 1=true (pg boolean via int for compat)
+    parentSpawnRunId: uuid('parent_spawn_run_id'),
+
     // Timing
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),

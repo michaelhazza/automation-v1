@@ -52,6 +52,8 @@ export interface AgentRunRequest {
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
   parentRunId?: string;
+  isSubAgent?: boolean;
+  parentSpawnRunId?: string;
 }
 
 export interface AgentRunResult {
@@ -106,6 +108,8 @@ export const agentExecutionService = {
         taskId: request.taskId ?? null,
         handoffDepth: request.handoffDepth ?? 0,
         parentRunId: request.parentRunId ?? null,
+        isSubAgent: request.isSubAgent ? 1 : 0,
+        parentSpawnRunId: request.parentSpawnRunId ?? null,
         startedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -193,6 +197,12 @@ export const agentExecutionService = {
 
       if (skillInstructions.length > 0) {
         systemPromptParts.push(`\n\n---\n## Your Capabilities\n${skillInstructions.join('\n\n')}`);
+      }
+
+      // Add team roster (loaded fresh from DB every run)
+      const teamRoster = await buildTeamRoster(request.subaccountId, request.agentId);
+      if (teamRoster) {
+        systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
       }
 
       // Add workspace memory (with prompt injection boundaries)
@@ -496,6 +506,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             agentId: request.agentId,
             orgProcesses,
             handoffDepth: request.handoffDepth,
+            isSubAgent: request.isSubAgent,
+            tokenBudget,
+            startTime,
+            timeoutMs,
           },
         });
       });
@@ -572,6 +586,38 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     deliverablesCreated,
     finalStatus,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Team Roster — loaded fresh from DB on every run
+// ---------------------------------------------------------------------------
+
+async function buildTeamRoster(subaccountId: string, currentAgentId: string): Promise<string | null> {
+  const roster = await db
+    .select({
+      agentId: agents.id,
+      agentName: agents.name,
+      agentDescription: agents.description,
+    })
+    .from(subaccountAgents)
+    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .where(
+      and(
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.isActive, true),
+        eq(agents.status, 'active'),
+        isNull(agents.deletedAt)
+      )
+    );
+
+  if (roster.length === 0) return null;
+
+  const lines = roster.map(r => {
+    const marker = r.agentId === currentAgentId ? ' ← (you)' : '';
+    return `- ${r.agentName} (${r.agentId}) — ${r.agentDescription ?? 'No description'}${marker}`;
+  });
+
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------

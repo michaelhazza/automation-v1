@@ -454,5 +454,97 @@ Choose the correct type for your output:
 - **Always attach to the right task**: The deliverable must belong to the task it fulfills. Do not attach work to unrelated tasks.
 - **Add deliverable before moving to review**: A task in "review" status should always have at least one deliverable attached.`,
     },
+    {
+      name: 'Reassign Task',
+      slug: 'reassign_task',
+      description: 'Reassign an existing task to another agent to continue working on it.',
+      definition: {
+        name: 'reassign_task',
+        description: 'Reassign an existing task to another agent to continue working on it. Use this when you have completed your part of a task and another agent should take over. This wakes the target agent to start working immediately. Check your team roster to see available agents.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            task_id: { type: 'string', description: 'ID of the task to reassign' },
+            assigned_agent_id: { type: 'string', description: 'ID of the agent to assign the task to (from your team roster)' },
+            handoff_context: { type: 'string', description: 'Context for the next agent — what you did, what they should do next' },
+          },
+          required: ['task_id', 'assigned_agent_id'],
+        },
+      },
+      instructions: 'You can reassign tasks to other agents on your team. Use this when you have completed your part of a task and another agent should continue. Always provide handoff context explaining what you did and what the next agent should do.',
+      methodology: `## Task Reassignment Methodology
+
+### When to Reassign
+- You have completed the work within your expertise and a different specialist should continue
+- The task explicitly calls for a multi-agent workflow (e.g. "research then write then review")
+- You've identified that another agent is better suited for the remaining work
+
+### When NOT to Reassign
+- You can complete the entire task yourself — just finish it
+- You're stuck and hoping another agent can figure it out — log the blocker instead
+- The task is almost done — finish it and move to review
+
+### Handoff Context Quality
+Always include in your handoff_context:
+1. **What you did**: Brief summary of your contribution
+2. **Key findings**: Any important information the next agent needs
+3. **What to do next**: Clear instructions for the next step
+4. **Where you left off**: If partially complete, what remains
+
+Bad: "Done, passing to content writer"
+Good: "Completed competitor analysis: found 3 competitors with new pricing. Key findings attached as activity. Content Writer should draft a comparison report focusing on our pricing advantage vs Competitor X."`,
+    },
+    {
+      name: 'Spawn Sub-Agents',
+      slug: 'spawn_sub_agents',
+      description: 'Split work into 2-3 parallel sub-tasks executed by agents simultaneously.',
+      definition: {
+        name: 'spawn_sub_agents',
+        description: 'Split work into 2-3 parallel sub-tasks executed by agents simultaneously. Each sub-task gets its own task card on the board and runs in parallel. You will receive all results when they complete, then continue your work with the combined output. Sub-agents can be the same agent type as you or different agents from your team.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            sub_tasks: {
+              type: 'array',
+              description: 'Array of 2-3 sub-tasks to execute in parallel',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', description: 'Sub-task title' },
+                  brief: { type: 'string', description: 'Detailed instructions for the sub-agent' },
+                  assigned_agent_id: { type: 'string', description: 'Agent ID from your team roster' },
+                },
+                required: ['title', 'brief', 'assigned_agent_id'],
+              },
+            },
+          },
+          required: ['sub_tasks'],
+        },
+      },
+      instructions: 'You can spawn 2-3 sub-agents to work on tasks in parallel. Use this when a task can be split into independent pieces that benefit from simultaneous execution. Results from all sub-agents will be returned to you for synthesis.',
+      methodology: `## Sub-Agent Spawning Methodology
+
+### When to Spawn
+- The task involves researching multiple independent topics (e.g. "research competitors X, Y, Z")
+- Parallel execution would save significant time
+- Each sub-task is self-contained and doesn't depend on others' output
+
+### When NOT to Spawn
+- The sub-tasks depend on each other (A must finish before B can start) — use sequential reassignment instead
+- There are fewer than 2 distinct parallel tracks — just do the work yourself
+- The task is simple enough to handle without splitting
+
+### Writing Good Sub-Task Briefs
+Each sub-agent receives ONLY its brief as context. Make each brief self-contained:
+- Include all necessary background information
+- Specify the expected output format
+- Set clear scope boundaries so sub-agents don't overlap
+
+### After Results Return
+1. Review all sub-agent results
+2. Synthesise findings into a cohesive output
+3. Note any gaps or contradictions between sub-agent outputs
+4. Attach the synthesised result as a deliverable on the parent task`,
+    },
   ];
 }

@@ -42,6 +42,8 @@ const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplates
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
+const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
+const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 
 function PageLoader() {
   return (
@@ -156,6 +158,8 @@ export default function App() {
             <Route path="/admin/board-config" element={<AdminBoardConfigPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
           </Route>
 
