@@ -95,6 +95,8 @@ export const taskService = {
       handoffSourceRunId?: string;
       handoffContext?: Record<string, unknown>;
       handoffDepth?: number;
+      isSubTask?: number;
+      parentTaskId?: string;
     },
     userId?: string
   ) {
@@ -124,6 +126,8 @@ export const taskService = {
         handoffSourceRunId: data.handoffSourceRunId ?? null,
         handoffContext: data.handoffContext ?? null,
         handoffDepth: data.handoffDepth ?? 0,
+        isSubTask: data.isSubTask ?? 0,
+        parentTaskId: data.parentTaskId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })

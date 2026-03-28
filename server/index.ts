@@ -38,6 +38,7 @@ import agentTemplatesRouter from './routes/agentTemplates.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
 import workspaceMemoryRouter from './routes/workspaceMemory.js';
+import scheduledTasksRouter from './routes/scheduledTasks.js';
 
 const app = express();
 
@@ -80,6 +81,7 @@ app.use(agentTemplatesRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
 app.use(workspaceMemoryRouter);
+app.use(scheduledTasksRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

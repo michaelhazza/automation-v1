@@ -76,3 +76,23 @@ export type EntryType = typeof VALID_ENTRY_TYPES[number];
 
 export const VALID_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 export type TaskPriority = typeof VALID_PRIORITIES[number];
+
+// ── Sub-agent spawning ──────────────────────────────────────────────────────
+
+/** Maximum number of sub-agents per spawn call */
+export const MAX_SUB_AGENTS = 3;
+
+/** Divisor for child timeout (parent remaining time / this = child timeout) */
+export const SUB_AGENT_TIMEOUT_BUFFER = 1.5;
+
+/** Minimum token budget per child to allow spawning */
+export const MIN_SUB_AGENT_TOKEN_BUDGET = 5000;
+
+// ── Scheduled tasks ─────────────────────────────────────────────────────────
+
+/** Default retry policy for scheduled tasks */
+export const DEFAULT_RETRY_POLICY = {
+  maxRetries: 1,
+  backoffMinutes: 5,
+  pauseAfterConsecutiveFailures: 3,
+} as const;
