@@ -479,13 +479,14 @@ export default function Layout({ user, children }: LayoutProps) {
               </NavGroup>
               <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
-              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
-              <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
-              <NavLink to="/admin/engines" icon={<Icons.manageTasks />} label="Engines" />
-              <NavLink to="/admin/permission-sets" icon={<Icons.sysUsers />} label="Permissions" />
-              {isSystemAdmin && (
-                <NavLink to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />
-              )}
+              <NavGroup icon={<Icons.settings />} label="Settings" defaultOpen={false}>
+                <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" indent />
+                <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" indent />
+                <NavLink to="/admin/engines" icon={<Icons.manageTasks />} label="Engines" indent />
+                {isSystemAdmin && (
+                  <NavLink to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" indent />
+                )}
+              </NavGroup>
             </>
           )}
 

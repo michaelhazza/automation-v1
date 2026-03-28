@@ -21,7 +21,6 @@ const AdminCategoriesPage = lazy(() => import('./pages/AdminCategoriesPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
-const AdminPermissionSetsPage = lazy(() => import('./pages/AdminPermissionSetsPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
@@ -150,7 +149,7 @@ export default function App() {
             <Route path="/admin/categories" element={<AdminCategoriesPage user={user!} />} />
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} />} />
-            <Route path="/admin/permission-sets" element={<AdminPermissionSetsPage user={user!} />} />
+            <Route path="/admin/permission-sets" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
