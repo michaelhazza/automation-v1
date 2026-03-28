@@ -441,6 +441,16 @@ export default function Layout({ user, children }: LayoutProps) {
                     label="Tasks"
                   />
                   <NavLink
+                    to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`}
+                    icon={<Icons.executions />}
+                    label="Scheduled Tasks"
+                  />
+                  <NavLink
+                    to={`/admin/subaccounts/${activeClientId}/memory`}
+                    icon={<Icons.categories />}
+                    label="Memory"
+                  />
+                  <NavLink
                     to={`/portal/${activeClientId}`}
                     icon={<Icons.portal />}
                     label="Portal"
@@ -469,6 +479,10 @@ export default function Layout({ user, children }: LayoutProps) {
               </NavGroup>
               <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
               <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
+              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
+              <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
+              <NavLink to="/admin/engines" icon={<Icons.manageTasks />} label="Engines" />
+              <NavLink to="/admin/permission-sets" icon={<Icons.sysUsers />} label="Permissions" />
               {isSystemAdmin && (
                 <NavLink to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />
               )}
@@ -482,6 +496,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
               <NavLink to="/system/activity" icon={<Icons.executions />} label="Activity" />
               <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Diagnostics" />
+              <NavLink to="/system/board-templates" icon={<Icons.queue />} label="Board Templates" />
               <NavLink to="/system/users" icon={<Icons.sysUsers />} label="System Admins" />
               <NavLink to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
