@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -32,6 +32,10 @@ export const tasks = pgTable(
     handoffSourceRunId: uuid('handoff_source_run_id'),
     handoffContext: jsonb('handoff_context'),
     handoffDepth: integer('handoff_depth').notNull().default(0),
+
+    // ── Review gate escalation ─────────────────────────────────────────────
+    // When true, all actions produced while an agent works this task escalate to review
+    reviewRequired: boolean('review_required').notNull().default(false),
 
     // ── Sub-agent tracking ────────────────────────────────────────────────
     isSubTask: integer('is_sub_task').notNull().default(0), // 0=false, 1=true
