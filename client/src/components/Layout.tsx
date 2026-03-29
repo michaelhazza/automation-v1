@@ -172,7 +172,13 @@ export default function Layout({ user, children }: LayoutProps) {
         .then(({ data }) => setClients(data))
         .catch(() => setClients([]));
     } else {
+      // No org → clear any stale client state (e.g. leftover from localStorage)
       setClients([]);
+      if (activeClientId) {
+        removeActiveClient();
+        setActiveClientIdState(null);
+        setActiveClientNameState(null);
+      }
     }
   }, [hasOrgContext, activeOrgId]);
 
@@ -459,8 +465,8 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* Always visible */}
           <NavLink to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
-          {/* ── Client section — only when a client is selected ── */}
-          {activeClientId && (
+          {/* ── Client section — only when org context exists AND a client is selected ── */}
+          {hasOrgContext && activeClientId && (
             <>
               <NavSection label={activeClientName ?? 'Client'} />
               <NavLink to="/agents" icon={<Icons.agents />} label="AI Team" />
