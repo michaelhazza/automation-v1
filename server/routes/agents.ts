@@ -24,13 +24,13 @@ router.get('/api/agents', authenticate, async (req, res) => {
 
 router.post('/api/agents', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), async (req, res) => {
   try {
-    const { name, description, masterPrompt, modelProvider, modelId, temperature, maxTokens, defaultSkillSlugs, icon } = req.body;
+    const { name, description, masterPrompt, modelProvider, modelId, temperature, maxTokens, responseMode, outputSize, allowModelOverride, defaultSkillSlugs, icon } = req.body;
     if (!name || !masterPrompt) {
       res.status(400).json({ error: 'Validation failed', details: 'name and masterPrompt are required' });
       return;
     }
     const result = await agentService.createAgent(req.orgId!, {
-      name, description, masterPrompt, modelProvider, modelId, temperature, maxTokens, defaultSkillSlugs, icon,
+      name, description, masterPrompt, modelProvider, modelId, temperature, maxTokens, responseMode, outputSize, allowModelOverride, defaultSkillSlugs, icon,
     });
     res.status(201).json(result);
   } catch (err: unknown) {

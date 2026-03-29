@@ -44,6 +44,9 @@ export const agentTemplateService = {
     modelId?: string;
     temperature?: number;
     maxTokens?: number;
+    responseMode?: string;
+    outputSize?: string;
+    allowModelOverride?: number;
     defaultScheduleCron?: string;
     defaultTokenBudget?: number;
     defaultMaxToolCalls?: number;
@@ -65,6 +68,9 @@ export const agentTemplateService = {
         modelId: data.modelId ?? 'claude-sonnet-4-6',
         temperature: data.temperature ?? 0.7,
         maxTokens: data.maxTokens ?? 4096,
+        responseMode: (data.responseMode as 'balanced' | 'precise' | 'expressive' | 'highly_creative') ?? 'balanced',
+        outputSize: (data.outputSize as 'standard' | 'extended' | 'maximum') ?? 'standard',
+        allowModelOverride: data.allowModelOverride ?? 1,
         defaultScheduleCron: data.defaultScheduleCron ?? null,
         defaultTokenBudget: data.defaultTokenBudget ?? 30000,
         defaultMaxToolCalls: data.defaultMaxToolCalls ?? 20,
@@ -88,6 +94,9 @@ export const agentTemplateService = {
     modelId: string;
     temperature: number;
     maxTokens: number;
+    responseMode: string;
+    outputSize: string;
+    allowModelOverride: number;
     defaultScheduleCron: string;
     defaultTokenBudget: number;
     defaultMaxToolCalls: number;
@@ -111,6 +120,9 @@ export const agentTemplateService = {
     if (data.modelId !== undefined) update.modelId = data.modelId;
     if (data.temperature !== undefined) update.temperature = data.temperature;
     if (data.maxTokens !== undefined) update.maxTokens = data.maxTokens;
+    if (data.responseMode !== undefined) update.responseMode = data.responseMode;
+    if (data.outputSize !== undefined) update.outputSize = data.outputSize;
+    if (data.allowModelOverride !== undefined) update.allowModelOverride = data.allowModelOverride;
     if (data.defaultScheduleCron !== undefined) update.defaultScheduleCron = data.defaultScheduleCron;
     if (data.defaultTokenBudget !== undefined) update.defaultTokenBudget = data.defaultTokenBudget;
     if (data.defaultMaxToolCalls !== undefined) update.defaultMaxToolCalls = data.defaultMaxToolCalls;
@@ -168,6 +180,9 @@ export const agentTemplateService = {
         modelId: template.modelId,
         temperature: template.temperature,
         maxTokens: template.maxTokens,
+        responseMode: template.responseMode,
+        outputSize: template.outputSize,
+        allowModelOverride: template.allowModelOverride,
         status: 'draft',
         createdAt: new Date(),
         updatedAt: new Date(),

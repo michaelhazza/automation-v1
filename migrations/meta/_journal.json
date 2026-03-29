@@ -15,6 +15,13 @@
       "when": 1771919200000,
       "tag": "0010_rename_tasks_and_workspace_items",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772265600000,
+      "tag": "0014_agent_model_options",
+      "breakpoints": true
     }
   ]
 }

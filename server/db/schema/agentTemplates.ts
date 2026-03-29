@@ -18,6 +18,10 @@ export const agentTemplates = pgTable('agent_templates', {
   modelId: text('model_id').notNull().default('claude-sonnet-4-6'),
   temperature: real('temperature').notNull().default(0.7),
   maxTokens: integer('max_tokens').notNull().default(4096),
+  // High-level LLM presets
+  responseMode: text('response_mode').notNull().default('balanced').$type<'balanced' | 'precise' | 'expressive' | 'highly_creative'>(),
+  outputSize: text('output_size').notNull().default('standard').$type<'standard' | 'extended' | 'maximum'>(),
+  allowModelOverride: integer('allow_model_override').notNull().default(1),
 
   // Scheduling defaults
   defaultScheduleCron: text('default_schedule_cron'), // e.g. "0 */2 * * *"

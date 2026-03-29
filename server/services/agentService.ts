@@ -3,7 +3,7 @@ import { db } from '../db/index.js';
 import { agents, agentDataSources, users } from '../db/schema/index.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { approxTokens } from './llmService.js';
+import { approxTokens, resolveTemperature, resolveMaxTokens } from './llmService.js';
 import { emailService } from './emailService.js';
 import { env } from '../lib/env.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -463,8 +463,13 @@ export const agentService = {
       masterPrompt: agent.masterPrompt,
       modelProvider: agent.modelProvider,
       modelId: agent.modelId,
-      temperature: agent.temperature,
-      maxTokens: agent.maxTokens,
+      // Effective values derived from presets (used by execution services)
+      temperature: resolveTemperature(agent.responseMode, agent.temperature),
+      maxTokens: resolveMaxTokens(agent.outputSize, agent.maxTokens),
+      // Preset fields (used by the UI)
+      responseMode: agent.responseMode,
+      outputSize: agent.outputSize,
+      allowModelOverride: agent.allowModelOverride,
       status: agent.status,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
@@ -496,6 +501,9 @@ export const agentService = {
       modelId?: string;
       temperature?: number;
       maxTokens?: number;
+      responseMode?: string;
+      outputSize?: string;
+      allowModelOverride?: number;
       defaultSkillSlugs?: string[];
       icon?: string;
     }
@@ -514,6 +522,9 @@ export const agentService = {
         modelId: data.modelId ?? 'claude-sonnet-4-6',
         temperature: data.temperature ?? 0.7,
         maxTokens: data.maxTokens ?? 4096,
+        responseMode: (data.responseMode as 'balanced' | 'precise' | 'expressive' | 'highly_creative') ?? 'balanced',
+        outputSize: (data.outputSize as 'standard' | 'extended' | 'maximum') ?? 'standard',
+        allowModelOverride: data.allowModelOverride ?? 1,
         defaultSkillSlugs: data.defaultSkillSlugs ?? null,
         status: 'draft',
         createdAt: new Date(),
@@ -535,6 +546,9 @@ export const agentService = {
       modelId: string;
       temperature: number;
       maxTokens: number;
+      responseMode: string;
+      outputSize: string;
+      allowModelOverride: number;
       defaultSkillSlugs: string[];
       icon: string;
     }>
@@ -554,6 +568,9 @@ export const agentService = {
     if (data.modelId !== undefined) update.modelId = data.modelId;
     if (data.temperature !== undefined) update.temperature = data.temperature;
     if (data.maxTokens !== undefined) update.maxTokens = data.maxTokens;
+    if (data.responseMode !== undefined) update.responseMode = data.responseMode;
+    if (data.outputSize !== undefined) update.outputSize = data.outputSize;
+    if (data.allowModelOverride !== undefined) update.allowModelOverride = data.allowModelOverride;
     if (data.defaultSkillSlugs !== undefined) update.defaultSkillSlugs = data.defaultSkillSlugs;
     if (data.icon !== undefined) update.icon = data.icon;
 
