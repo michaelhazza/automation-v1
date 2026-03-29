@@ -176,6 +176,42 @@ export default function Layout({ user, children }: LayoutProps) {
     }
   }, [hasOrgContext, activeOrgId]);
 
+  // ── Permission-based nav visibility ──────────────────────────────
+  const [orgPerms, setOrgPerms] = useState<Set<string>>(new Set());
+  const [clientPerms, setClientPerms] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (isSystemAdmin) {
+      setOrgPerms(new Set(['__system_admin__']));
+      return;
+    }
+    if (hasOrgContext) {
+      api.get('/api/my-permissions')
+        .then(({ data }) => setOrgPerms(new Set(data.permissions)))
+        .catch(() => setOrgPerms(new Set()));
+    } else {
+      setOrgPerms(new Set());
+    }
+  }, [hasOrgContext, activeOrgId, isSystemAdmin]);
+
+  useEffect(() => {
+    if (isSystemAdmin) {
+      setClientPerms(new Set(['__system_admin__']));
+      return;
+    }
+    if (activeClientId) {
+      api.get(`/api/subaccounts/${activeClientId}/my-permissions`)
+        .then(({ data }) => setClientPerms(new Set(data.permissions)))
+        .catch(() => setClientPerms(new Set()));
+    } else {
+      setClientPerms(new Set());
+    }
+  }, [activeClientId, isSystemAdmin]);
+
+  const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has(key);
+  const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has(key);
+  const hasAnyOrgPerm = orgPerms.size > 0;
+
   const handleSelectClient = (sa: ClientOption) => {
     setActiveClient(sa.id, sa.name);
     setActiveClientIdState(sa.id);
@@ -432,57 +468,78 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavLink to="/processes" icon={<Icons.manageTasks />} label="Manage" indent />
                 <NavLink to="/executions" icon={<Icons.executions />} label="Activity" indent />
               </NavGroup>
-              {/* Admin-only client items */}
-              {['system_admin', 'org_admin'].includes(user.role) && (
-                <>
-                  <NavLink
-                    to={`/admin/subaccounts/${activeClientId}/workspace`}
-                    icon={<Icons.queue />}
-                    label="Tasks"
-                  />
-                  <NavLink
-                    to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`}
-                    icon={<Icons.executions />}
-                    label="Scheduled Tasks"
-                  />
-                  <NavLink
-                    to={`/admin/subaccounts/${activeClientId}/memory`}
-                    icon={<Icons.categories />}
-                    label="Memory"
-                  />
-                  <NavLink
-                    to={`/portal/${activeClientId}`}
-                    icon={<Icons.portal />}
-                    label="Portal"
-                  />
-                  <NavLink
-                    to={`/admin/subaccounts/${activeClientId}`}
-                    icon={<Icons.settings />}
-                    label="Client Settings"
-                  />
-                </>
+              {/* Workspace — visible to anyone with workspace permissions */}
+              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
+                <NavLink
+                  to={`/admin/subaccounts/${activeClientId}/workspace`}
+                  icon={<Icons.queue />}
+                  label="Tasks"
+                />
+              )}
+              {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
+                <NavLink
+                  to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`}
+                  icon={<Icons.executions />}
+                  label="Scheduled Tasks"
+                />
+              )}
+              {/* Org-admin level items */}
+              {hasOrgPerm('org.workspace.manage') && (
+                <NavLink
+                  to={`/admin/subaccounts/${activeClientId}/memory`}
+                  icon={<Icons.categories />}
+                  label="Memory"
+                />
+              )}
+              {hasOrgPerm('org.subaccounts.view') && (
+                <NavLink
+                  to={`/portal/${activeClientId}`}
+                  icon={<Icons.portal />}
+                  label="Portal"
+                />
+              )}
+              {(hasClientPerm('subaccount.categories.manage') || hasClientPerm('subaccount.users.view')) && (
+                <NavLink
+                  to={`/client-settings/${activeClientId}`}
+                  icon={<Icons.settings />}
+                  label="Settings"
+                />
+              )}
+              {hasOrgPerm('org.subaccounts.edit') && (
+                <NavLink
+                  to={`/admin/subaccounts/${activeClientId}`}
+                  icon={<Icons.settings />}
+                  label="Client Settings"
+                />
               )}
             </>
           )}
 
-          {/* ── Organisation section — only when org context exists ────────── */}
-          {hasOrgContext && ['system_admin', 'org_admin'].includes(user.role) && (
+          {/* ── Organisation section — only when org context + any org permissions ── */}
+          {hasOrgContext && hasAnyOrgPerm && (
             <>
               <NavSection label="Organisation" />
-              <NavGroup icon={<Icons.agents />} label="Agents">
-                <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage" indent />
-                <NavLink to="/admin/skills" icon={<Icons.categories />} label="Skills" indent />
-              </NavGroup>
-              <NavGroup icon={<Icons.tasks />} label="Automations">
-                <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Manage" indent />
-                <NavLink to="/executions" exact icon={<Icons.executions />} label="Activity" indent />
-              </NavGroup>
-              <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
-              <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
-              <NavLink to="/admin/board-config" icon={<Icons.queue />} label="Board Config" />
-              <NavLink to="/admin/categories" icon={<Icons.categories />} label="Categories" />
-              <NavLink to="/admin/engines" icon={<Icons.manageTasks />} label="Engines" />
-              <NavLink to="/admin/permission-sets" icon={<Icons.sysUsers />} label="Permissions" />
+              {hasOrgPerm('org.agents.view') && (
+                <NavGroup icon={<Icons.agents />} label="Agents">
+                  <NavLink to="/admin/agents" icon={<Icons.agents />} label="Manage" indent />
+                  <NavLink to="/admin/skills" icon={<Icons.categories />} label="Skills" indent />
+                </NavGroup>
+              )}
+              {hasOrgPerm('org.processes.view') && (
+                <NavGroup icon={<Icons.tasks />} label="Automations">
+                  <NavLink to="/admin/processes" icon={<Icons.manageTasks />} label="Manage" indent />
+                  <NavLink to="/executions" exact icon={<Icons.executions />} label="Activity" indent />
+                </NavGroup>
+              )}
+              {hasOrgPerm('org.subaccounts.view') && (
+                <NavLink to="/admin/subaccounts" exact icon={<Icons.subaccounts />} label="Clients" />
+              )}
+              {hasOrgPerm('org.users.view') && (
+                <NavLink to="/admin/users" icon={<Icons.users />} label="Team" />
+              )}
+              {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view')) && (
+                <NavLink to="/admin/settings" icon={<Icons.settings />} label="Settings" />
+              )}
               {isSystemAdmin && (
                 <NavLink to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />
               )}

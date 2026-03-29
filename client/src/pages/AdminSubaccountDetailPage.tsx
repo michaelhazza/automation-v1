@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 
 interface Subaccount {
   id: string;
@@ -63,9 +64,9 @@ interface OrgMember {
   lastName: string;
 }
 
-type ActiveTab = 'categories' | 'processes' | 'members' | 'settings';
+type ActiveTab = 'board' | 'categories' | 'processes' | 'members' | 'settings';
 
-export default function AdminSubaccountDetailPage({ user }: { user: User }) {
+export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { user: User; mode?: 'client' | 'admin' }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [sa, setSa] = useState<Subaccount | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -76,7 +77,11 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   const [permissionSets, setPermissionSets] = useState<PermissionSet[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('categories');
+
+  const visibleTabs: ActiveTab[] = mode === 'client'
+    ? ['board', 'categories', 'members']
+    : ['processes', 'settings'];
+  const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
   // Category form
@@ -98,21 +103,35 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active' });
   const [settingsSaved, setSettingsSaved] = useState('');
 
+  // Board config
+  const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
+  const [boardLoading, setBoardLoading] = useState(false);
+  const [boardSaving, setBoardSaving] = useState(false);
+  const [boardMsg, setBoardMsg] = useState('');
+
   const load = async () => {
     if (!subaccountId) return;
     try {
-      const [saRes, catRes, processRes, memberRes] = await Promise.all([
+      const requests: Promise<any>[] = [
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
         api.get(`/api/subaccounts/${subaccountId}/processes`),
         api.get(`/api/subaccounts/${subaccountId}/members`),
-      ]);
+      ];
+      // Load board config for client mode
+      if (mode === 'client') {
+        requests.push(api.get(`/api/subaccounts/${subaccountId}/board-config`).catch(() => ({ data: null })));
+      }
+      const [saRes, catRes, processRes, memberRes, boardRes] = await Promise.all(requests);
       setSa(saRes.data);
       setCategories(catRes.data);
       setLinkedProcesses(processRes.data.linkedProcesses ?? []);
       setNativeProcesses(processRes.data.nativeProcesses ?? []);
       setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
+      if (boardRes?.data?.columns) {
+        setBoardColumns(boardRes.data.columns);
+      }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to load subaccount');
@@ -231,6 +250,56 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
     }
   };
 
+  // ─── Board Config ─────────────────────────────────────────────────────────
+
+  const handleSaveBoardConfig = async () => {
+    setBoardSaving(true);
+    setBoardMsg('');
+    try {
+      await api.patch(`/api/subaccounts/${subaccountId}/board-config`, { columns: boardColumns });
+      setBoardMsg('Board configuration saved.');
+      setTimeout(() => setBoardMsg(''), 3000);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setBoardMsg(e.response?.data?.error ?? 'Failed to save board config');
+    } finally {
+      setBoardSaving(false);
+    }
+  };
+
+  const handleResetFromOrg = async () => {
+    setBoardSaving(true);
+    setBoardMsg('');
+    try {
+      await api.post(`/api/subaccounts/${subaccountId}/board-config/push`);
+      const { data } = await api.get(`/api/subaccounts/${subaccountId}/board-config`);
+      if (data?.columns) setBoardColumns(data.columns);
+      setBoardMsg('Board reset from organisation config.');
+      setTimeout(() => setBoardMsg(''), 3000);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setBoardMsg(e.response?.data?.error ?? 'Failed to reset board config');
+    } finally {
+      setBoardSaving(false);
+    }
+  };
+
+  const handleInitBoard = async () => {
+    setBoardLoading(true);
+    setBoardMsg('');
+    try {
+      const { data } = await api.post(`/api/subaccounts/${subaccountId}/board-config/init`);
+      if (data?.columns) setBoardColumns(data.columns);
+      setBoardMsg('Board initialised from organisation config.');
+      setTimeout(() => setBoardMsg(''), 3000);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setBoardMsg(e.response?.data?.error ?? 'Failed to initialise board');
+    } finally {
+      setBoardLoading(false);
+    }
+  };
+
   if (loading) return <div>Loading...</div>;
   if (!sa) return <div style={{ padding: 40, color: '#dc2626' }}>{error || 'Subaccount not found'}</div>;
 
@@ -247,25 +316,76 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
 
   return (
     <>
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/admin/subaccounts" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to subaccounts</Link>
-      </div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>{sa.name}</h1>
-      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, fontFamily: 'monospace' }}>{sa.slug}</div>
+      {mode === 'admin' && (
+        <div style={{ marginBottom: 16 }}>
+          <Link to="/admin/subaccounts" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to subaccounts</Link>
+        </div>
+      )}
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
+        {mode === 'client' ? `${sa.name} Settings` : sa.name}
+      </h1>
+      {mode === 'admin' && (
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, fontFamily: 'monospace' }}>{sa.slug}</div>
+      )}
+      {mode === 'client' && (
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>Manage categories, automations and members</div>
+      )}
 
       {/* Tabs */}
-      <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
-        {(['categories', 'processes', 'members', 'settings'] as ActiveTab[]).map((tab) => {
-          const tabLabels: Record<ActiveTab, string> = { categories: 'Categories', processes: 'Automations', members: 'Members', settings: 'Settings' };
-          return (
-          <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
-            {tabLabels[tab]}
-          </button>
-          );
-        })}
-      </div>
+      {visibleTabs.length > 1 && (
+        <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
+          {visibleTabs.map((tab) => {
+            const tabLabels: Record<ActiveTab, string> = { board: 'Board Config', categories: 'Categories', processes: 'Automations', members: 'Members', settings: 'Settings' };
+            return (
+            <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
+              {tabLabels[tab]}
+            </button>
+            );
+          })}
+        </div>
+      )}
 
       {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+
+      {/* ─── Board Config tab ─── */}
+      {activeTab === 'board' && (
+        <div>
+          {boardColumns.length === 0 ? (
+            <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 32, textAlign: 'center' }}>
+              <p style={{ color: '#64748b', marginBottom: 16 }}>No board configuration yet. Initialise from the organisation board config.</p>
+              {boardMsg && <div style={{ color: boardMsg.includes('Failed') ? '#ef4444' : '#22c55e', fontSize: 13, marginBottom: 12 }}>{boardMsg}</div>}
+              <button
+                onClick={handleInitBoard}
+                disabled={boardLoading}
+                style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+              >
+                {boardLoading ? 'Initialising...' : 'Initialise from Org'}
+              </button>
+            </div>
+          ) : (
+            <>
+              {boardMsg && <div style={{ color: boardMsg.includes('Failed') ? '#ef4444' : '#22c55e', fontSize: 13, marginBottom: 12 }}>{boardMsg}</div>}
+              <BoardColumnEditor columns={boardColumns} onChange={setBoardColumns} />
+              <div style={{ marginTop: 20, display: 'flex', gap: 12 }}>
+                <button
+                  onClick={handleSaveBoardConfig}
+                  disabled={boardSaving}
+                  style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+                >
+                  {boardSaving ? 'Saving...' : 'Save Changes'}
+                </button>
+                <button
+                  onClick={handleResetFromOrg}
+                  disabled={boardSaving}
+                  style={{ padding: '10px 24px', background: '#f1f5f9', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}
+                >
+                  {boardSaving ? 'Resetting...' : 'Reset from Org'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ─── Categories tab ─── */}
       {activeTab === 'categories' && (

@@ -56,11 +56,17 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     if (!subaccountId) return;
     setLoading(true);
     try {
+      const safeFetch = (url: string, fallback: any = null) =>
+        api.get(url).catch((err) => {
+          console.error(`[WorkspaceBoardPage] ${url} failed:`, err.response?.status, err.response?.data);
+          return { data: fallback };
+        });
+
       const [configRes, tasksRes, agentsRes, saRes] = await Promise.all([
-        api.get(`/api/subaccounts/${subaccountId}/board-config`),
-        api.get(`/api/subaccounts/${subaccountId}/tasks`),
-        api.get('/api/agents'),
-        api.get(`/api/subaccounts/${subaccountId}`),
+        safeFetch(`/api/subaccounts/${subaccountId}/board-config`),
+        safeFetch(`/api/subaccounts/${subaccountId}/tasks`, []),
+        safeFetch('/api/agents', []),
+        safeFetch(`/api/subaccounts/${subaccountId}`, { name: '' }),
       ]);
       setColumns(configRes.data?.columns ?? []);
       setTasks(tasksRes.data);
@@ -145,7 +151,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
             Go to subaccount settings
           </Link>{' '}
           to initialise the board, or configure the{' '}
-          <Link to="/admin/board-config" style={{ color: '#6366f1' }}>
+          <Link to="/admin/settings" style={{ color: '#6366f1' }}>
             organisation board
           </Link>{' '}
           first.
