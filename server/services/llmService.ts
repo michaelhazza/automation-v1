@@ -34,6 +34,36 @@ export interface LLMResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Response Mode → temperature mapping
+// ---------------------------------------------------------------------------
+
+export type ResponseMode = 'balanced' | 'precise' | 'expressive' | 'highly_creative';
+export type OutputSize = 'standard' | 'extended' | 'maximum';
+
+const RESPONSE_MODE_TEMPERATURE: Record<ResponseMode, number> = {
+  balanced: 0.7,
+  precise: 0,
+  expressive: 0.85,
+  highly_creative: 1,
+};
+
+const OUTPUT_SIZE_MAX_TOKENS: Record<OutputSize, number> = {
+  standard: 4096,
+  extended: 8192,
+  maximum: 16384,
+};
+
+/** Resolve a response mode to a temperature value. */
+export function resolveTemperature(responseMode: ResponseMode | string, fallback = 0.7): number {
+  return RESPONSE_MODE_TEMPERATURE[responseMode as ResponseMode] ?? fallback;
+}
+
+/** Resolve an output size to a max_tokens value. */
+export function resolveMaxTokens(outputSize: OutputSize | string, fallback = 4096): number {
+  return OUTPUT_SIZE_MAX_TOKENS[outputSize as OutputSize] ?? fallback;
+}
+
+// ---------------------------------------------------------------------------
 // Token budget helpers (1 token ≈ 4 chars)
 // ---------------------------------------------------------------------------
 
@@ -278,4 +308,6 @@ export const llmService = {
   executeTriggerredProcess,
   callAnthropic,
   buildSystemPrompt,
+  resolveTemperature,
+  resolveMaxTokens,
 };

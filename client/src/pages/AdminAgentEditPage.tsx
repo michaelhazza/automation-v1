@@ -25,6 +25,9 @@ interface AgentForm {
   modelId: string;
   temperature: number;
   maxTokens: number;
+  responseMode: string;
+  outputSize: string;
+  allowModelOverride: number;
   defaultSkillSlugs: string[];
 }
 
@@ -86,6 +89,21 @@ const MODEL_OPTIONS = [
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
   { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+  { value: 'claude-opus-4-20250514', label: 'Claude Opus 4' },
+  { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+];
+
+const RESPONSE_MODE_OPTIONS = [
+  { value: 'balanced', label: 'Balanced (Default)', description: 'Consistent and clear responses' },
+  { value: 'precise', label: 'Precise', description: 'Fully deterministic — same input always produces the same output. Best for data extraction and analysis' },
+  { value: 'expressive', label: 'Expressive', description: 'More varied, natural language — good for insights and summaries' },
+  { value: 'highly_creative', label: 'Highly Creative', description: 'Maximises variation — only for open-ended creative tasks' },
+];
+
+const OUTPUT_SIZE_OPTIONS = [
+  { value: 'standard', label: 'Standard (Default)', description: 'Suitable for most tasks' },
+  { value: 'extended', label: 'Extended', description: 'Longer outputs — use when responses may include large tables or detailed summaries' },
+  { value: 'maximum', label: 'Maximum', description: 'For processing multiple large files where output may otherwise be truncated' },
 ];
 
 const SOURCE_TYPE_OPTIONS = [
@@ -146,7 +164,10 @@ const EMPTY_AGENT_FORM: AgentForm = {
   modelProvider: 'anthropic',
   modelId: 'claude-sonnet-4-6',
   temperature: 0.7,
-  maxTokens: 2048,
+  maxTokens: 4096,
+  responseMode: 'balanced',
+  outputSize: 'standard',
+  allowModelOverride: 1,
   defaultSkillSlugs: [],
 };
 
@@ -281,7 +302,10 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         modelProvider: data.modelProvider ?? 'anthropic',
         modelId: data.modelId ?? 'claude-sonnet-4-6',
         temperature: data.temperature ?? 0.7,
-        maxTokens: data.maxTokens ?? 2048,
+        maxTokens: data.maxTokens ?? 4096,
+        responseMode: data.responseMode ?? 'balanced',
+        outputSize: data.outputSize ?? 'standard',
+        allowModelOverride: data.allowModelOverride ?? 1,
         defaultSkillSlugs: data.defaultSkillSlugs ?? [],
       });
       setDataSources(data.dataSources ?? []);
@@ -967,8 +991,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </SectionCard>
       )}
 
-      {/* ── Section 3: Model Settings ── */}
-      <SectionCard title="Model Settings">
+      {/* ── Section 3: Model Configuration ── */}
+      <SectionCard title="Model Configuration">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <Field label="Model Provider">
             <select
@@ -990,28 +1014,48 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               ))}
             </select>
           </Field>
-          <Field label="Temperature" hint="Higher = more creative, lower = more focused">
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.1}
-              value={form.temperature}
-              onChange={(e) => setForm({ ...form, temperature: parseFloat(e.target.value) || 0 })}
-              style={inputStyle}
-            />
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+          <Field label="Response Mode" hint={RESPONSE_MODE_OPTIONS.find((o) => o.value === form.responseMode)?.description}>
+            <select
+              value={form.responseMode}
+              onChange={(e) => setForm({ ...form, responseMode: e.target.value })}
+              style={selectStyle}
+            >
+              {RESPONSE_MODE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </Field>
-          <Field label="Max Response Tokens">
-            <input
-              type="number"
-              min={256}
-              max={8192}
-              step={256}
-              value={form.maxTokens}
-              onChange={(e) => setForm({ ...form, maxTokens: parseInt(e.target.value) || 256 })}
-              style={inputStyle}
-            />
+          <Field label="Output Size" hint={OUTPUT_SIZE_OPTIONS.find((o) => o.value === form.outputSize)?.description}>
+            <select
+              value={form.outputSize}
+              onChange={(e) => setForm({ ...form, outputSize: e.target.value })}
+              style={selectStyle}
+            >
+              {OUTPUT_SIZE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </Field>
+        </div>
+
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#374151' }}>
+            <input
+              type="checkbox"
+              checked={form.allowModelOverride === 1}
+              onChange={(e) => setForm({ ...form, allowModelOverride: e.target.checked ? 1 : 0 })}
+              style={{ width: 16, height: 16, cursor: 'pointer' }}
+            />
+            Allow Model Override
+          </label>
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+            {form.allowModelOverride === 1
+              ? 'Sub-accounts can override the model for this agent'
+              : 'Model settings are locked — sub-accounts cannot change them'}
+          </span>
         </div>
       </SectionCard>
 

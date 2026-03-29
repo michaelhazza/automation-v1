@@ -33,6 +33,11 @@ export const agents = pgTable(
     modelId: text('model_id').notNull().default('claude-sonnet-4-6'),
     temperature: real('temperature').notNull().default(0.7),
     maxTokens: integer('max_tokens').notNull().default(4096),
+    // High-level LLM presets (map to temperature / maxTokens at call time)
+    responseMode: text('response_mode').notNull().default('balanced').$type<'balanced' | 'precise' | 'expressive' | 'highly_creative'>(),
+    outputSize: text('output_size').notNull().default('standard').$type<'standard' | 'extended' | 'maximum'>(),
+    // Whether per-subaccount model overrides are allowed
+    allowModelOverride: integer('allow_model_override').notNull().default(1),
     // Default skills assigned to this agent (copied to subaccountAgents on link)
     defaultSkillSlugs: jsonb('default_skill_slugs').$type<string[]>(),
     // Lifecycle

@@ -36,15 +36,6 @@ const FREQ_MAP: Record<FreqUnit, string> = {
   year: 'YEARLY',
 };
 
-const PRESETS = [
-  { label: 'Daily', rrule: 'FREQ=DAILY;INTERVAL=1' },
-  { label: 'Weekdays', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
-  { label: 'Weekly', rrule: 'FREQ=WEEKLY;INTERVAL=1' },
-  { label: 'Fortnightly', rrule: 'FREQ=WEEKLY;INTERVAL=2' },
-  { label: 'Monthly', rrule: 'FREQ=MONTHLY;BYMONTHDAY=1' },
-  { label: 'Custom...', rrule: '' },
-];
-
 // Parse an RRULE string into component parts
 function parseRRule(rrule: string): {
   freq: FreqUnit;
@@ -90,9 +81,6 @@ function defaultEndDate(): string {
 }
 
 export default function RecurrencePicker({ value, onChange }: Props) {
-  const [showCustom, setShowCustom] = useState(false);
-  const [activePreset, setActivePreset] = useState<string | null>(null);
-
   // Custom recurrence state
   const parsed = parseRRule(value.rrule || 'FREQ=WEEKLY;INTERVAL=1');
   const [freq, setFreq] = useState<FreqUnit>(parsed.freq);
@@ -107,16 +95,6 @@ export default function RecurrencePicker({ value, onChange }: Props) {
   const [endDate, setEndDate] = useState(value.endsAt || defaultEndDate());
   const [endAfter, setEndAfter] = useState(value.endsAfterRuns || 13);
 
-  // Detect if current rrule matches a preset
-  useEffect(() => {
-    const match = PRESETS.find(p => p.rrule && p.rrule === value.rrule);
-    if (match) {
-      setActivePreset(match.label);
-    } else if (value.rrule) {
-      setActivePreset('Custom...');
-    }
-  }, [value.rrule]);
-
   // Sync parsed values when value.rrule changes externally
   useEffect(() => {
     const p = parseRRule(value.rrule || 'FREQ=WEEKLY;INTERVAL=1');
@@ -125,16 +103,6 @@ export default function RecurrencePicker({ value, onChange }: Props) {
     setByDay(p.byDay);
     if (p.byMonthDay !== null) setByMonthDay(p.byMonthDay);
   }, [value.rrule]);
-
-  function handlePresetClick(preset: typeof PRESETS[number]) {
-    if (preset.label === 'Custom...') {
-      setShowCustom(true);
-      return;
-    }
-    setShowCustom(false);
-    setActivePreset(preset.label);
-    onChange({ ...value, rrule: preset.rrule });
-  }
 
   function emitCustom(
     f: FreqUnit = freq,
@@ -199,33 +167,11 @@ export default function RecurrencePicker({ value, onChange }: Props) {
 
   return (
     <div>
-      {/* Preset buttons */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: showCustom ? 16 : 0 }}>
-        {PRESETS.map(p => (
-          <button
-            key={p.label}
-            type="button"
-            onClick={() => handlePresetClick(p)}
-            style={{
-              padding: '6px 14px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
-              border: activePreset === p.label ? '2px solid #6366f1' : '1px solid #e2e8f0',
-              background: activePreset === p.label ? '#eef2ff' : '#fff',
-              color: activePreset === p.label ? '#6366f1' : '#475569',
-              fontWeight: activePreset === p.label ? 600 : 400,
-              fontFamily: 'inherit',
-            }}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Custom recurrence panel */}
-      {showCustom && (
-        <div style={{
-          background: '#fafbfc', border: '1px solid #e2e8f0', borderRadius: 10,
-          padding: 20,
-        }}>
+      {/* Recurrence panel */}
+      <div style={{
+        background: '#fafbfc', border: '1px solid #e2e8f0', borderRadius: 10,
+        padding: 20,
+      }}>
           {/* Repeat every N unit */}
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 14, fontWeight: 500, color: '#374151', marginBottom: 10 }}>Repeat every</div>
@@ -378,15 +324,7 @@ export default function RecurrencePicker({ value, onChange }: Props) {
             </div>
           </div>
 
-          {/* Summary */}
-          <div style={{
-            marginTop: 16, padding: '10px 14px', background: '#eef2ff', borderRadius: 8,
-            fontSize: 12, color: '#4338ca', fontFamily: 'monospace',
-          }}>
-            {value.rrule}
-          </div>
         </div>
-      )}
     </div>
   );
 }
