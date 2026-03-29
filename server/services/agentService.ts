@@ -159,8 +159,10 @@ async function fetchSourceContent(source: typeof agentDataSources.$inferSelect):
   const result = await s3.send(cmd);
   const body = result.Body;
   if (!body) throw new Error('Empty response from storage');
-  // @ts-expect-error — transformToString exists on S3 Body stream
-  return await body.transformToString('utf-8');
+  if (typeof (body as { transformToString?: unknown }).transformToString === 'function') {
+    return await (body as { transformToString: (encoding?: string) => Promise<string> }).transformToString('utf-8');
+  }
+  throw new Error('Storage response body is not readable as text');
 }
 
 // ---------------------------------------------------------------------------

@@ -42,6 +42,49 @@ class SimpleQueue {
 }
 
 const simpleQueue = new SimpleQueue();
+let queueWorkerReady = false;
+let pgBossQueue: {
+  send(name: string, data?: object): Promise<string | null>;
+  work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
+  start(): Promise<void>;
+} | null = null;
+const EXECUTION_QUEUE_NAME = 'execution-run';
+
+async function getQueueBackend() {
+  if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
+    return {
+      enqueue: async (executionId: string) => simpleQueue.add(executionId),
+      kind: 'in-memory' as const,
+    };
+  }
+
+  if (!pgBossQueue) {
+    const PgBossModule = await import('pg-boss');
+    const PgBossClass = (PgBossModule.default ?? PgBossModule) as unknown as new (connectionString: string) => {
+      send(name: string, data?: object): Promise<string | null>;
+      work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
+      start(): Promise<void>;
+    };
+    pgBossQueue = new PgBossClass(env.DATABASE_URL);
+    await pgBossQueue.start();
+  }
+
+  if (!queueWorkerReady) {
+    await pgBossQueue.work(EXECUTION_QUEUE_NAME, async (job) => {
+      const executionId = String(job.data.executionId ?? '');
+      if (!executionId) return;
+      await processExecution(executionId);
+    });
+    queueWorkerReady = true;
+  }
+
+  return {
+    enqueue: async (executionId: string) => {
+      await pgBossQueue!.send(EXECUTION_QUEUE_NAME, { executionId });
+    },
+    kind: 'pg-boss' as const,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Core execution processor
@@ -135,11 +178,14 @@ async function processExecution(executionId: string): Promise<void> {
         outputData = null;
       }
 
+      const successful = response.ok;
       await db
         .update(executions)
         .set({
-          status: 'completed',
-          outputData,
+          status: successful ? 'completed' : 'failed',
+          outputData: successful ? outputData : null,
+          errorMessage: successful ? null : `Engine response status ${response.status}`,
+          errorDetail: successful ? null : ({ responseStatus: response.status, responseBody: outputData } as Record<string, unknown>),
           completedAt: new Date(),
           durationMs,
           retryCount,
@@ -156,7 +202,7 @@ async function processExecution(executionId: string): Promise<void> {
               user.email,
               process.name as string,
               executionId,
-              'completed'
+              successful ? 'completed' : 'failed'
             );
           }
         } catch {
@@ -223,6 +269,7 @@ export const queueService = {
       .set({ queuedAt: new Date(), updatedAt: new Date() })
       .where(eq(executions.id, executionId));
 
-    await simpleQueue.add(executionId);
+    const backend = await getQueueBackend();
+    await backend.enqueue(executionId);
   },
 };

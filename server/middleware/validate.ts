@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
+import { ZodTypeAny } from 'zod';
 
 /**
  * Safely parse a query string value as a positive integer.
@@ -17,12 +18,28 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB absolute ceiling; configurable limit enforced in file route
 });
 
-export const validateBody = (req: Request, res: Response, next: NextFunction): void => {
-  next();
+export const validateBody = <T extends ZodTypeAny>(schema: T) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+      return;
+    }
+    req.body = result.data;
+    next();
+  };
 };
 
-export const validateQuery = (req: Request, res: Response, next: NextFunction): void => {
-  next();
+export const validateQuery = <T extends ZodTypeAny>(schema: T) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) {
+      res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+      return;
+    }
+    req.query = result.data as Request['query'];
+    next();
+  };
 };
 
 export const validateMultipart = upload.any();

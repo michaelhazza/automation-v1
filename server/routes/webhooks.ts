@@ -98,10 +98,10 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
     try {
       const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
       if (user) {
-        const taskName = (execution.taskSnapshot as Record<string, unknown> | null)?.name as string | undefined ?? 'Task';
+        const processName = (execution.processSnapshot as Record<string, unknown> | null)?.name as string | undefined ?? 'Process';
         await emailService.sendExecutionCompletionEmail(
           user.email,
-          taskName,
+          processName,
           executionId,
           isErrorPayload ? 'failed' : 'completed'
         );

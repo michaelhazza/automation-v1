@@ -85,7 +85,7 @@ export class FileService {
       throw { statusCode: 404, message: 'File not found or not accessible' };
     }
 
-    if (role === 'user' && execution.userId !== userId) {
+    if (role === 'user' && execution.triggeredByUserId !== userId) {
       throw { statusCode: 404, message: 'File not found or not accessible' };
     }
 
