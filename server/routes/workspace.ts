@@ -206,6 +206,38 @@ router.post(
   }
 );
 
+/**
+ * POST /api/board-config/push-all
+ * Push org board config to ALL subaccounts.
+ */
+router.post(
+  '/api/board-config/push-all',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  async (req, res) => {
+    try {
+      const allSubs = await db
+        .select({ id: subaccounts.id })
+        .from(subaccounts)
+        .where(and(eq(subaccounts.organisationId, req.orgId!), isNull(subaccounts.deletedAt)));
+
+      if (allSubs.length === 0) {
+        res.json({ pushed: 0, results: [] });
+        return;
+      }
+
+      const results = await boardService.pushOrgConfigToSubaccounts(
+        req.orgId!,
+        allSubs.map(s => s.id)
+      );
+      res.json({ pushed: results.length, results });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SUBACCOUNT AGENTS — AGENT LINKING
 // ═══════════════════════════════════════════════════════════════════════════════

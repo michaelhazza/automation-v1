@@ -145,7 +145,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
             Go to subaccount settings
           </Link>{' '}
           to initialise the board, or configure the{' '}
-          <Link to="/admin/board-config" style={{ color: '#6366f1' }}>
+          <Link to="/admin/settings" style={{ color: '#6366f1' }}>
             organisation board
           </Link>{' '}
           first.

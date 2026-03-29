@@ -17,12 +17,13 @@ interface BoardTemplate {
   isDefault: boolean;
 }
 
-export default function AdminBoardConfigPage({ user: _user }: { user: User }) {
+export default function AdminBoardConfigPage({ user: _user, embedded }: { user: User; embedded?: boolean }) {
   const [config, setConfig] = useState<BoardConfig | null>(null);
   const [templates, setTemplates] = useState<BoardTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [saving, setSaving] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -73,16 +74,35 @@ export default function AdminBoardConfigPage({ user: _user }: { user: User }) {
     }
   };
 
+  const handlePushAll = async () => {
+    setPushing(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { data } = await api.post('/api/board-config/push-all');
+      setSuccess(`Board config pushed to ${data.pushed} client${data.pushed !== 1 ? 's' : ''}`);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to push');
+    } finally {
+      setPushing(false);
+    }
+  };
+
   if (loading) return <div style={{ padding: 40 }}>Loading...</div>;
 
   // No config yet — show template picker
   if (!config) {
     return (
       <div>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Board Configuration</h1>
-        <p style={{ color: '#64748b', marginBottom: 24 }}>
-          Select a board template to initialise your organisation's board. This defines the default columns for all new subaccounts.
-        </p>
+        {!embedded && (
+          <>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Board Configuration</h1>
+            <p style={{ color: '#64748b', marginBottom: 24 }}>
+              Select a board template to initialise your organisation's board. This defines the default columns for all new subaccounts.
+            </p>
+          </>
+        )}
 
         {error && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>{error}</div>}
 
@@ -123,10 +143,14 @@ export default function AdminBoardConfigPage({ user: _user }: { user: User }) {
   // Config exists — show editor
   return (
     <div>
-      <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Board Configuration</h1>
-      <p style={{ color: '#64748b', marginBottom: 24 }}>
-        Customise your organisation's board columns. Locked columns cannot be removed. Changes here do not automatically apply to existing subaccounts — use "Push to Subaccounts" for that.
-      </p>
+      {!embedded && (
+        <>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Board Configuration</h1>
+          <p style={{ color: '#64748b', marginBottom: 24 }}>
+            Customise your organisation's board columns. Locked columns cannot be removed. Changes here do not automatically apply to existing subaccounts — use "Push to Subaccounts" for that.
+          </p>
+        </>
+      )}
 
       {error && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>{error}</div>}
       {success && <div style={{ color: '#22c55e', fontSize: 13, marginBottom: 12 }}>{success}</div>}
@@ -140,6 +164,13 @@ export default function AdminBoardConfigPage({ user: _user }: { user: User }) {
           style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
         >
           {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+        <button
+          onClick={handlePushAll}
+          disabled={pushing}
+          style={{ padding: '10px 24px', background: '#f1f5f9', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}
+        >
+          {pushing ? 'Pushing...' : 'Push to All Clients'}
         </button>
       </div>
     </div>
