@@ -3,6 +3,7 @@ import { executions, workflowEngines, users } from '../db/schema/index.js';
 import { eq } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
+import { processResolutionService } from './processResolutionService.js';
 import { env } from '../lib/env.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 
@@ -97,14 +98,14 @@ async function processExecution(executionId: string): Promise<void> {
 
   if (!execution) return;
 
-  // Mark as running and stamp queuedAt (it was queued just before this call)
+  // Mark as running
   await db
     .update(executions)
     .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
     .where(eq(executions.id, executionId));
 
-  const process = execution.processSnapshot as Record<string, unknown> | null;
-  if (!process) {
+  const processSnapshot = execution.processSnapshot as Record<string, unknown> | null;
+  if (!processSnapshot) {
     await db
       .update(executions)
       .set({ status: 'failed', errorMessage: 'Process configuration not found', updatedAt: new Date() })
@@ -112,37 +113,76 @@ async function processExecution(executionId: string): Promise<void> {
     return;
   }
 
-  const [engine] = await db
-    .select()
-    .from(workflowEngines)
-    .where(eq(workflowEngines.id, process.workflowEngineId as string));
+  // ------------------------------------------------------------------
+  // Resolve execution context via the three-level framework.
+  // If subaccountId is set, use processResolutionService for full
+  // connection/engine/config resolution. Otherwise fall back to legacy.
+  // ------------------------------------------------------------------
+  let engine: { id: string; baseUrl: string; engineType: string; apiKey: string | null; hmacSecret: string } | null = null;
+  let authPayload: Record<string, { access_token: string }> | undefined;
+  let resolvedConfig: Record<string, unknown> | undefined;
+  let resolvedConnections: Record<string, unknown> | undefined;
 
-  if (!engine) {
-    await db
-      .update(executions)
-      .set({ status: 'failed', errorMessage: 'Workflow engine not found', updatedAt: new Date() })
-      .where(eq(executions.id, executionId));
-    return;
+  if (execution.subaccountId && execution.organisationId) {
+    try {
+      const context = await processResolutionService.resolveForExecution(
+        execution.processId,
+        execution.subaccountId,
+        execution.organisationId,
+        (execution.resolvedConfig as Record<string, unknown>) ?? undefined
+      );
+      engine = context.engine;
+      resolvedConfig = context.config;
+      resolvedConnections = context.connectionSnapshot;
+
+      // Build auth payload from resolved connections
+      if (Object.keys(context.connections).length > 0) {
+        authPayload = {};
+        for (const [key, conn] of Object.entries(context.connections)) {
+          authPayload[key] = { access_token: conn.token };
+        }
+      }
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      await db.update(executions)
+        .set({ status: 'failed', errorMessage: e.message ?? 'Process resolution failed', updatedAt: new Date() })
+        .where(eq(executions.id, executionId));
+      return;
+    }
+  } else {
+    // Legacy path: look up engine from process snapshot
+    const [legacyEngine] = await db.select()
+      .from(workflowEngines)
+      .where(eq(workflowEngines.id, processSnapshot.workflowEngineId as string));
+
+    if (!legacyEngine) {
+      await db.update(executions)
+        .set({ status: 'failed', errorMessage: 'Workflow engine not found', updatedAt: new Date() })
+        .where(eq(executions.id, executionId));
+      return;
+    }
+    engine = legacyEngine;
   }
 
-  // ------------------------------------------------------------------
-  // Build the return webhook URL (automatically derived from env config)
-  // and the full outbound payload including pre-signed R2 file URLs
-  // ------------------------------------------------------------------
-  const returnWebhookUrl = webhookService.buildReturnUrl(executionId);
+  // Build return URL with per-engine HMAC
+  const returnWebhookUrl = webhookService.buildReturnUrl(executionId, engine.hmacSecret);
   const outboundPayload = await webhookService.buildOutboundPayload(
     executionId,
     execution.inputData,
-    returnWebhookUrl
+    returnWebhookUrl,
+    { auth: authPayload, config: resolvedConfig, processId: execution.processId }
   );
 
-  // Persist return URL and outbound payload for audit trail BEFORE calling
-  // the external engine, so it's captured even if the engine call fails.
+  // Persist audit trail (with auth redacted) BEFORE calling the engine
+  const auditPayload = webhookService.redactPayloadForAudit(outboundPayload);
   await db
     .update(executions)
     .set({
       returnWebhookUrl,
-      outboundPayload: outboundPayload as unknown as Record<string, unknown>,
+      outboundPayload: auditPayload as unknown as Record<string, unknown>,
+      engineId: engine.id,
+      resolvedConnections: resolvedConnections as unknown as Record<string, unknown> ?? null,
+      resolvedConfig: resolvedConfig as unknown as Record<string, unknown> ?? null,
       updatedAt: new Date(),
     })
     .where(eq(executions.id, executionId));
@@ -151,19 +191,21 @@ async function processExecution(executionId: string): Promise<void> {
   let retryCount = 0;
   const maxRetries = 3;
 
-  // Build engine-specific auth headers
+  // Build engine-specific auth headers + HMAC signature
   const authHeaders = buildEngineAuthHeaders(engine.engineType, engine.apiKey ?? undefined);
+  const hmacSignature = webhookService.signOutboundRequest(executionId, engine.hmacSecret);
 
   while (retryCount <= maxRetries) {
     try {
       const baseUrl = (engine.baseUrl ?? '').replace(/\/$/, '');
-      const webhookPath = (process.webhookPath as string) ?? '';
+      const webhookPath = (processSnapshot.webhookPath as string) ?? '';
       const fullEndpointUrl = `${baseUrl}${webhookPath}`;
 
       const response = await fetch(fullEndpointUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Webhook-Signature': hmacSignature,
           ...authHeaders,
         },
         body: JSON.stringify(outboundPayload),
@@ -194,13 +236,13 @@ async function processExecution(executionId: string): Promise<void> {
         .where(eq(executions.id, executionId));
 
       // Send completion notification only if user opted in
-      if (execution.notifyOnComplete) {
+      if (execution.notifyOnComplete && execution.triggeredByUserId) {
         try {
           const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
           if (user) {
             await emailService.sendExecutionCompletionEmail(
               user.email,
-              process.name as string,
+              processSnapshot.name as string,
               executionId,
               successful ? 'completed' : 'failed'
             );

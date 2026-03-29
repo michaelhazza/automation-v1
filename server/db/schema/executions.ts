@@ -3,6 +3,7 @@ import { organisations } from './organisations';
 import { processes } from './processes';
 import { users } from './users';
 import { subaccounts } from './subaccounts';
+import { workflowEngines } from './workflowEngines';
 
 export const executions = pgTable(
   'executions',
@@ -15,7 +16,6 @@ export const executions = pgTable(
       .notNull()
       .references(() => processes.id),
     triggeredByUserId: uuid('triggered_by_user_id')
-      .notNull()
       .references(() => users.id),
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
@@ -38,6 +38,13 @@ export const executions = pgTable(
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
     durationMs: integer('duration_ms'),
+    // Three-level framework additions
+    resolvedConnections: jsonb('resolved_connections'), // Snapshot of connection mapping used (no tokens)
+    resolvedConfig: jsonb('resolved_config'),           // Merged config (process default + subaccount overrides)
+    engineId: uuid('engine_id')
+      .references(() => workflowEngines.id),           // Which engine actually ran this
+    triggerType: text('trigger_type').notNull().default('manual').$type<'manual' | 'agent' | 'scheduled' | 'webhook'>(),
+    triggerSourceId: uuid('trigger_source_id'),         // ID of agent run, scheduled task run, etc.
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -52,6 +59,8 @@ export const executions = pgTable(
     userIdx: index('executions_user_idx').on(table.triggeredByUserId),
     subaccountIdx: index('executions_subaccount_idx').on(table.subaccountId),
     statusIdx: index('executions_status_idx').on(table.status),
+    triggerTypeIdx: index('executions_trigger_type_idx').on(table.triggerType),
+    engineIdx: index('executions_engine_idx').on(table.engineId),
   })
 );
 

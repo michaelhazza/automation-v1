@@ -15,6 +15,11 @@ function mapExecution(e: Execution, viewFullAudit: boolean) {
     outputData: e.outputData,
     errorMessage: e.errorMessage,
     isTestExecution: e.isTestExecution,
+    triggerType: e.triggerType,
+    triggerSourceId: e.triggerSourceId,
+    resolvedConnections: e.resolvedConnections,
+    resolvedConfig: e.resolvedConfig,
+    engineId: e.engineId,
     startedAt: e.startedAt,
     completedAt: e.completedAt,
     durationMs: e.durationMs,
@@ -69,34 +74,49 @@ export class ExecutionService {
   }
 
   async createExecution(
-    userId: string,
+    userId: string | null,
     organisationId: string,
-    data: { processId: string; inputData?: unknown; notifyOnComplete?: boolean; subaccountId?: string }
+    data: {
+      processId: string;
+      inputData?: unknown;
+      notifyOnComplete?: boolean;
+      subaccountId?: string;
+      triggerType?: 'manual' | 'agent' | 'scheduled' | 'webhook';
+      triggerSourceId?: string;
+      configOverrides?: Record<string, unknown>;
+    }
   ) {
+    // Load process — support system processes (no organisationId) and org/subaccount processes
     const [process] = await db
       .select()
       .from(processes)
-      .where(and(eq(processes.id, data.processId), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+      .where(and(eq(processes.id, data.processId), isNull(processes.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found or not accessible' };
+    // For org/subaccount processes, verify org ownership
+    if (process.organisationId && process.organisationId !== organisationId) {
+      throw { statusCode: 404, message: 'Process not found or not accessible' };
+    }
     if (process.status !== 'active') throw { statusCode: 400, message: 'Process is not active' };
 
-    // Duplicate prevention: 5-minute cooldown per user per process
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentExec = await db
-      .select()
-      .from(executions)
-      .where(and(
-        eq(executions.triggeredByUserId, userId),
-        eq(executions.processId, data.processId),
-        gte(executions.createdAt, fiveMinutesAgo)
-      ));
+    // Duplicate prevention: 5-minute cooldown per user per process (skip for agent/scheduled triggers)
+    if (userId && (!data.triggerType || data.triggerType === 'manual')) {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const recentExec = await db
+        .select()
+        .from(executions)
+        .where(and(
+          eq(executions.triggeredByUserId, userId),
+          eq(executions.processId, data.processId),
+          gte(executions.createdAt, fiveMinutesAgo)
+        ));
 
-    const nonTestRecent = recentExec.filter((e) => !e.isTestExecution);
-    if (nonTestRecent.length > 0) {
-      const oldest = nonTestRecent.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
-      const waitSec = Math.ceil((oldest.createdAt.getTime() + 5 * 60 * 1000 - Date.now()) / 1000);
-      throw { statusCode: 429, message: `Duplicate execution: this process was already triggered recently. Please wait ${waitSec} seconds before retrying.` };
+      const nonTestRecent = recentExec.filter((e) => !e.isTestExecution);
+      if (nonTestRecent.length > 0) {
+        const oldest = nonTestRecent.reduce((a, b) => (a.createdAt < b.createdAt ? a : b));
+        const waitSec = Math.ceil((oldest.createdAt.getTime() + 5 * 60 * 1000 - Date.now()) / 1000);
+        throw { statusCode: 429, message: `Duplicate execution: this process was already triggered recently. Please wait ${waitSec} seconds before retrying.` };
+      }
     }
 
     const [execution] = await db
@@ -108,10 +128,13 @@ export class ExecutionService {
         subaccountId: data.subaccountId ?? null,
         status: 'pending',
         inputData: data.inputData ?? null,
-        engineType: '', // will be resolved by queue worker from process snapshot
+        engineType: '', // will be resolved by queue worker
         processSnapshot: process as unknown as Record<string, unknown>,
         isTestExecution: false,
         notifyOnComplete: data.notifyOnComplete ?? false,
+        triggerType: data.triggerType ?? 'manual',
+        triggerSourceId: data.triggerSourceId ?? null,
+        resolvedConfig: data.configOverrides ?? null,
         retryCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
