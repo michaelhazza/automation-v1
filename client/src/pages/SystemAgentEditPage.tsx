@@ -7,6 +7,7 @@ interface SystemSkill {
   id: string;
   name: string;
   slug: string;
+  description: string | null;
 }
 
 interface AgentForm {
@@ -381,25 +382,41 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
         {systemSkills.length === 0 ? (
           <div style={{ fontSize: 13, color: '#94a3b8', fontStyle: 'italic' }}>No system skills available.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {systemSkills.map(skill => (
               <label
                 key={skill.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#1e293b', cursor: 'pointer' }}
+                title={skill.description ?? skill.name}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: '#1e293b',
+                  cursor: 'pointer', padding: '8px 10px', borderRadius: 8,
+                  background: form.defaultSystemSkillSlugs.includes(skill.slug) ? '#f5f3ff' : 'transparent',
+                  border: form.defaultSystemSkillSlugs.includes(skill.slug) ? '1px solid #ddd6fe' : '1px solid transparent',
+                  transition: 'background 0.15s, border-color 0.15s',
+                }}
               >
                 <input
                   type="checkbox"
                   checked={form.defaultSystemSkillSlugs.includes(skill.slug)}
                   onChange={() => toggleSkillSlug(skill.slug)}
-                  style={{ width: 16, height: 16, accentColor: '#6366f1' }}
+                  style={{ width: 16, height: 16, accentColor: '#6366f1', marginTop: 2, flexShrink: 0 }}
                 />
-                <span style={{ fontWeight: 500 }}>{skill.name}</span>
-                <span style={{
-                  fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#64748b',
-                  background: '#f1f5f9', padding: '2px 6px', borderRadius: 4,
-                }}>
-                  {skill.slug}
-                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 500 }}>{skill.name}</span>
+                    <span style={{
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: '#64748b',
+                      background: '#f1f5f9', padding: '2px 6px', borderRadius: 4,
+                    }}>
+                      {skill.slug}
+                    </span>
+                  </div>
+                  {skill.description && (
+                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, lineHeight: 1.4 }}>
+                      {skill.description}
+                    </div>
+                  )}
+                </div>
               </label>
             ))}
           </div>
