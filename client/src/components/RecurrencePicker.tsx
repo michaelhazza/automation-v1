@@ -324,13 +324,6 @@ export default function RecurrencePicker({ value, onChange }: Props) {
             </div>
           </div>
 
-          {/* Summary */}
-          <div style={{
-            marginTop: 16, padding: '10px 14px', background: '#eef2ff', borderRadius: 8,
-            fontSize: 12, color: '#4338ca', fontFamily: 'monospace',
-          }}>
-            {value.rrule}
-          </div>
         </div>
     </div>
   );
