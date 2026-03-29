@@ -15,6 +15,8 @@ export * from './permissionSetItems';
 export * from './orgUserRoles';
 export * from './subaccountUserAssignments';
 export * from './agentTemplates';
+export * from './systemAgents';
+export * from './systemSkills';
 export * from './agents';
 export * from './agentDataSources';
 export * from './agentConversations';
