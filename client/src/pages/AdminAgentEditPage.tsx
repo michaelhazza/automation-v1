@@ -20,6 +20,7 @@ interface AgentForm {
   description: string;
   icon: string;
   masterPrompt: string;
+  additionalPrompt: string;
   modelProvider: string;
   modelId: string;
   temperature: number;
@@ -30,6 +31,8 @@ interface AgentForm {
 interface Agent extends AgentForm {
   id: string;
   status: string;
+  systemAgentId: string | null;
+  isSystemManaged: boolean;
   createdAt: string;
   dataSources?: DataSource[];
 }
@@ -139,6 +142,7 @@ const EMPTY_AGENT_FORM: AgentForm = {
   description: '',
   icon: '',
   masterPrompt: '',
+  additionalPrompt: '',
   modelProvider: 'anthropic',
   modelId: 'claude-sonnet-4-6',
   temperature: 0.7,
@@ -273,6 +277,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         description: data.description ?? '',
         icon: data.icon ?? '',
         masterPrompt: data.masterPrompt ?? '',
+        additionalPrompt: data.additionalPrompt ?? '',
         modelProvider: data.modelProvider ?? 'anthropic',
         modelId: data.modelId ?? 'claude-sonnet-4-6',
         temperature: data.temperature ?? 0.7,
@@ -926,20 +931,41 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       </SectionCard>
 
       {/* ── Section 2: Agent Prompt ── */}
-      <SectionCard title="Agent Prompt">
-        <Field
-          label="System Prompt"
-          hint="Define this agent's persona, role, and instructions. This is sent to the AI as the system instruction for every conversation."
-        >
-          <textarea
-            value={form.masterPrompt}
-            onChange={(e) => setForm({ ...form, masterPrompt: e.target.value })}
-            rows={10}
-            placeholder="You are a helpful assistant that..."
-            style={{ ...inputStyle, resize: 'vertical', minHeight: 200, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6 }}
-          />
-        </Field>
-      </SectionCard>
+      {agent?.isSystemManaged ? (
+        <SectionCard title="Agent Prompt">
+          <div style={{ padding: '12px 16px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 8, marginBottom: 16, fontSize: 13, color: '#5b21b6' }}>
+            This agent&apos;s core system prompt is managed at the platform level and cannot be edited here.
+            You can add additional instructions below that will be layered on top of the system prompt.
+          </div>
+          <Field
+            label="Additional Prompt"
+            hint="Your organisation-level instructions appended to the system prompt. Add your branding, workflows, or extra context here."
+          >
+            <textarea
+              value={form.additionalPrompt}
+              onChange={(e) => setForm({ ...form, additionalPrompt: e.target.value })}
+              rows={10}
+              placeholder="Add your organisation-specific instructions here..."
+              style={{ ...inputStyle, resize: 'vertical', minHeight: 200, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6 }}
+            />
+          </Field>
+        </SectionCard>
+      ) : (
+        <SectionCard title="Agent Prompt">
+          <Field
+            label="System Prompt"
+            hint="Define this agent's persona, role, and instructions. This is sent to the AI as the system instruction for every conversation."
+          >
+            <textarea
+              value={form.masterPrompt}
+              onChange={(e) => setForm({ ...form, masterPrompt: e.target.value })}
+              rows={10}
+              placeholder="You are a helpful assistant that..."
+              style={{ ...inputStyle, resize: 'vertical', minHeight: 200, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6 }}
+            />
+          </Field>
+        </SectionCard>
+      )}
 
       {/* ── Section 3: Model Settings ── */}
       <SectionCard title="Model Settings">

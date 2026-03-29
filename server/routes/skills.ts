@@ -5,12 +5,14 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
-// ─── List skills (built-in + org-specific) ───────────────────────────────────
+// ─── List skills (org-specific custom skills only; built-in skills are now system-level) ──
 
 router.get('/api/skills', authenticate, async (req, res) => {
   try {
     const skills = await skillService.listSkills(req.orgId!);
-    res.json(skills);
+    // Filter out built-in skills from org listing — they are now managed as system skills
+    const orgSkills = skills.filter((s: { skillType: string }) => s.skillType !== 'built_in');
+    res.json(orgSkills);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };
     res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });

@@ -551,6 +551,10 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Platform" />
               <NavLink to="/system/organisations" icon={<Icons.organisations />} label="Organisations" />
+              <NavGroup icon={<Icons.agents />} label="Agents">
+                <NavLink to="/system/agents" icon={<Icons.agents />} label="Manage" indent />
+                <NavLink to="/system/skills" icon={<Icons.categories />} label="Skills" indent />
+              </NavGroup>
               <NavLink to="/system/activity" icon={<Icons.executions />} label="Activity" />
               <NavLink to="/system/task-queue" icon={<Icons.queue />} label="Diagnostics" />
               <NavLink to="/system/board-templates" icon={<Icons.queue />} label="Board Templates" />
