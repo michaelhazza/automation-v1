@@ -2,6 +2,8 @@
 
 This file applies to every project. Project-level CLAUDE.md files extend it with repo-specific context.
 
+> **App-specific architecture**: See [`architecture.md`](./architecture.md) for backend conventions, route patterns, permission system, and code structure specific to this application. Read it before making backend changes.
+
 ---
 
 ## 1. Plan Mode Default
