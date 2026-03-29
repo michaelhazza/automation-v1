@@ -550,6 +550,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             tokenBudget,
             startTime,
             timeoutMs,
+            taskId: request.taskId,
           },
         });
       });

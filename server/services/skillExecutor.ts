@@ -35,6 +35,8 @@ interface SkillExecutionContext {
   tokenBudget?: number;
   startTime?: number;
   timeoutMs?: number;
+  /** The task this agent run is working on, if any. Used for gate escalation. */
+  taskId?: string;
 }
 
 interface SkillExecutionParams {
@@ -117,6 +119,7 @@ async function executeWithActionAudit(
       actionType,
       idempotencyKey,
       payload: input,
+      taskId: context.taskId,
     });
 
     // If returned existing (not new), return its status
@@ -186,6 +189,7 @@ async function proposeReviewGatedAction(
       idempotencyKey,
       payload: input,
       metadata: input.metadata as Record<string, unknown> | undefined,
+      taskId: context.taskId,
     });
 
     if (!proposed.isNew) {

@@ -1,6 +1,6 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { actions, actionEvents } from '../db/schema/index.js';
+import { actions, actionEvents, tasks } from '../db/schema/index.js';
 import {
   getActionDefinition,
   LEGAL_TRANSITIONS,
@@ -22,6 +22,8 @@ export interface ProposeActionInput {
   payload: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   gateOverride?: 'auto' | 'review' | 'block';
+  /** If the agent is working a specific task, pass its ID for gate escalation */
+  taskId?: string;
 }
 
 export interface ProposeActionResult {
@@ -56,7 +58,7 @@ export const actionService = {
       return { actionId: existing.id, status: existing.status as ActionStatus, isNew: false };
     }
 
-    const gateLevel = input.gateOverride ?? definition.defaultGateLevel;
+    const gateLevel = await resolveGateLevel(definition.defaultGateLevel, input);
 
     // Create the action record
     const [action] = await db
@@ -293,3 +295,60 @@ export const actionService = {
     });
   },
 };
+
+// ---------------------------------------------------------------------------
+// Gate Level Resolution — multi-source, highest restriction wins
+// ---------------------------------------------------------------------------
+
+const GATE_PRIORITY: Record<string, number> = { auto: 0, review: 1, block: 2 };
+
+function higherGate(a: string, b: string): 'auto' | 'review' | 'block' {
+  return (GATE_PRIORITY[a] ?? 0) >= (GATE_PRIORITY[b] ?? 0) ? a as 'auto' | 'review' | 'block' : b as 'auto' | 'review' | 'block';
+}
+
+/**
+ * Resolves the effective gate level from multiple sources.
+ * Highest restriction wins: block > review > auto.
+ *
+ * Sources checked in order:
+ * 1. Action type registry default (always present)
+ * 2. Explicit gate override from caller
+ * 3. Task-level reviewRequired flag (escalates auto → review)
+ * 4. Agent metadata needs_human_review flag (escalates auto → review)
+ *
+ * Phase 1C will add: workspace-level policy overrides
+ */
+async function resolveGateLevel(
+  registryDefault: 'auto' | 'review' | 'block',
+  input: ProposeActionInput
+): Promise<'auto' | 'review' | 'block'> {
+  // Start with registry default
+  let gate: 'auto' | 'review' | 'block' = registryDefault;
+
+  // Explicit override from caller (e.g. skillExecutor knows this needs review)
+  if (input.gateOverride) {
+    gate = higherGate(gate, input.gateOverride);
+  }
+
+  // Task-level escalation: if the task has reviewRequired=true, escalate to review
+  if (input.taskId) {
+    const [task] = await db
+      .select({ reviewRequired: tasks.reviewRequired })
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId));
+
+    if (task?.reviewRequired) {
+      gate = higherGate(gate, 'review');
+    }
+  }
+
+  // Agent metadata escalation: if agent flagged uncertainty, escalate to review
+  if (input.metadata) {
+    const meta = input.metadata as Record<string, unknown>;
+    if (meta.needs_human_review === true || meta.needsHumanReview === true) {
+      gate = higherGate(gate, 'review');
+    }
+  }
+
+  return gate;
+}
