@@ -84,11 +84,17 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    let config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+    const existingConfig = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+    let config = existingConfig;
 
     // Auto-initialise from org config if subaccount has no board yet
     if (!config) {
-      config = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
+      const initializedConfig = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
+      if (!initializedConfig) {
+        res.status(404).json({ error: 'Organisation has no board configuration to copy from' });
+        return;
+      }
+      config = initializedConfig;
     }
 
     // If config exists but has empty columns, try to re-sync from org config

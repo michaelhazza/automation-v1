@@ -34,7 +34,7 @@ async function getBoss(): Promise<PgBoss> {
     const PgBossClass = PgBossModule.default ?? PgBossModule;
     const { env } = await import('../lib/env.js');
 
-    boss = new (PgBossClass as new (config: { connectionString: string; noScheduling?: boolean }) => PgBoss)({
+    boss = new (PgBossClass as unknown as new (config: { connectionString: string; noScheduling?: boolean }) => PgBoss)({
       connectionString: env.DATABASE_URL,
     });
 

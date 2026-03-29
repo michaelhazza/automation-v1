@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { users } from '../db/schema/index.js';
+import { users, organisations } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { emailService } from './emailService.js';
 
@@ -14,11 +14,30 @@ function signToken(payload: { id: string; organisationId: string; role: string; 
 }
 
 export class AuthService {
-  async login(email: string, password: string) {
-    const [user] = await db
-      .select()
+  async login(email: string, password: string, organisationSlug?: string) {
+    const normalizedEmail = email.toLowerCase();
+    const rows = await db
+      .select({
+        user: users,
+        organisationSlug: organisations.slug,
+      })
       .from(users)
-      .where(and(eq(users.email, email.toLowerCase()), isNull(users.deletedAt)));
+      .innerJoin(organisations, eq(organisations.id, users.organisationId))
+      .where(
+        and(
+          eq(users.email, normalizedEmail),
+          isNull(users.deletedAt),
+          isNull(organisations.deletedAt),
+          ...(organisationSlug ? [eq(organisations.slug, organisationSlug)] : [])
+        )
+      );
+
+    if (!organisationSlug && rows.length > 1) {
+      throw { statusCode: 400, message: 'Multiple accounts found for this email. Provide organisationSlug to continue.' };
+    }
+
+    const row = rows[0];
+    const user = row?.user;
 
     if (!user) {
       throw { statusCode: 401, message: 'Invalid email or password' };

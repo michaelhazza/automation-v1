@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, integer, real, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { agentTemplates } from './agentTemplates';
 
@@ -36,7 +37,9 @@ export const agents = pgTable(
   (table) => ({
     orgIdx: index('agents_org_idx').on(table.organisationId),
     orgStatusIdx: index('agents_org_status_idx').on(table.organisationId, table.status),
-    orgSlugUniq: uniqueIndex('agents_org_slug_uniq').on(table.organisationId, table.slug).where(table.deletedAt === null),
+    orgSlugUniq: uniqueIndex('agents_org_slug_uniq')
+      .on(table.organisationId, table.slug)
+      .where(sql`${table.deletedAt} IS NULL`),
   })
 );
 

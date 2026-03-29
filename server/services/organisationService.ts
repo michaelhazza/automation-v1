@@ -1,7 +1,6 @@
 import { eq, and, isNull, or } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { organisations, users } from '../db/schema/index.js';
-import { userService } from './userService.js';
 import { emailService } from './emailService.js';
 import { assignOrgUserRole } from './permissionSeedService.js';
 import crypto from 'crypto';
@@ -126,7 +125,7 @@ export class OrganisationService {
 
     const [updated] = await db
       .update(organisations)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update)
       .where(eq(organisations.id, id))
       .returning();
 
@@ -169,11 +168,6 @@ export class OrganisationService {
     const { processes } = await import('../db/schema/index.js');
     await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(
       and(eq(processes.organisationId, id), isNull(processes.deletedAt))
-    );
-
-    const { permissionGroups } = await import('../db/schema/index.js');
-    await db.update(permissionGroups).set({ deletedAt: now, updatedAt: now }).where(
-      and(eq(permissionGroups.organisationId, id), isNull(permissionGroups.deletedAt))
     );
 
     return { message: 'Organisation deleted successfully' };
