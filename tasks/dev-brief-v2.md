@@ -7,34 +7,28 @@
 
 ---
 
-## 1. Note on Missing Reference
-
-The original brief referenced `/docs/api_coinglass_20260322` — this file does not exist anywhere in the repository. No coinglass-related files were found. This reference should be clarified.
-
----
-
-## 2. What Already Exists (The Brief Ignores This)
+## 1. What Already Exists (The Brief Ignores This)
 
 The v6 spec reads as if we're starting from zero. We are not. Here's what's already built and working:
 
-### 2.1 Agent Runtime (Substantial — ~80% of what the brief describes)
+### 1.1 Agent Runtime (Substantial)
 
 | Component | Status | Location |
 |-----------|--------|----------|
 | Agent definitions (org-scoped) | **Built** | `server/db/schema/agents.ts` |
 | System agents (platform IP layer) | **Built** | `server/db/schema/systemAgents.ts` |
 | Agent-to-workspace linking | **Built** | `server/db/schema/subaccountAgents.ts` with per-client overrides |
-| Agent run records | **Built** | `server/db/schema/agentRuns.ts` — tracks status, tokens, duration, tool calls, summary |
+| Agent run records | **Built** | `server/db/schema/agentRuns.ts` — status, tokens, duration, tool calls, summary |
 | Agentic loop | **Built** | `server/services/agentExecutionService.ts` — full LLM loop with tool execution |
 | 3-layer prompt assembly | **Built** | System prompt → org prompt → subaccount instructions |
 | Middleware pipeline | **Built** | `server/services/middleware/` — budget check, loop detection, tool restriction, error handling |
-| Skill/tool system | **Built** | `server/services/skillExecutor.ts` — create_task, move_task, add_deliverable, reassign_task, spawn_sub_agents, web_search, read/write_workspace |
+| Skill/tool system | **Built** | `server/services/skillExecutor.ts` — 8 skills: create_task, move_task, add_deliverable, reassign_task, spawn_sub_agents, web_search, read_workspace, write_workspace |
 | System skills (hidden from orgs) | **Built** | `server/services/systemSkillService.ts` |
 | Token budget enforcement | **Built** | Per-run budgets with wrap-up on exhaustion |
 | Agent handoffs | **Built** | Agent-to-agent task handoff via pg-boss queue, max depth 5 |
-| Sub-agent spawning | **Built** | `spawn_sub_agents` tool with budget splitting |
+| Sub-agent spawning | **Built** | `spawn_sub_agents` tool with budget splitting, max 3 children |
 
-### 2.2 Task / Board System (Built)
+### 1.2 Task / Board System (Built)
 
 | Component | Status | Location |
 |-----------|--------|----------|
@@ -46,18 +40,18 @@ The v6 spec reads as if we're starting from zero. We are not. Here's what's alre
 | Kanban UI | **Built** | `client/src/pages/WorkspaceBoardPage.tsx` with drag-and-drop |
 | Task modal (create/edit) | **Built** | `client/src/components/TaskModal.tsx` |
 
-### 2.3 Memory System (Built)
+### 1.3 Memory System (Built)
 
 | Component | Status | Location |
 |-----------|--------|----------|
 | Workspace memories (summaries) | **Built** | `server/db/schema/workspaceMemories.ts` |
-| Memory entries (raw observations) | **Built** | Part of workspace memory schema |
+| Memory entries (raw observations) | **Built** | Per-run insight extraction |
 | Memory extraction post-run | **Built** | `workspaceMemoryService.extractRunInsights()` |
 | Memory summarisation | **Built** | Periodic summarisation after N runs |
 | Memory injection into prompts | **Built** | `workspaceMemoryService.getMemoryForPrompt()` |
 | Memory UI | **Built** | `client/src/pages/WorkspaceMemoryPage.tsx` |
 
-### 2.4 Scheduling (Built)
+### 1.4 Scheduling (Built)
 
 | Component | Status | Location |
 |-----------|--------|----------|
@@ -66,7 +60,7 @@ The v6 spec reads as if we're starting from zero. We are not. Here's what's alre
 | Retry policies | **Built** | Max retries, backoff, pause on consecutive failures |
 | Manual + scheduled + triggered runs | **Built** | `runType` field on agent runs |
 
-### 2.5 Multi-Tenancy & Permissions (Built)
+### 1.5 Multi-Tenancy & Permissions (Built)
 
 | Component | Status | Location |
 |-----------|--------|----------|
@@ -77,17 +71,19 @@ The v6 spec reads as if we're starting from zero. We are not. Here's what's alre
 | JWT auth | **Built** | 24h tokens, middleware enforcement |
 | Invite-only onboarding | **Built** | No self-registration |
 
-### 2.6 Integrations (Partial)
+### 1.6 Integrations (Partial)
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| Email (SendGrid/Resend/SMTP) | **Built** | `server/services/emailService.ts` — for platform emails (invites, resets) |
+| Email (SendGrid/Resend/SMTP) | **Built** | `server/services/emailService.ts` — platform emails only (invites, resets). Not exposed as agent skill. |
 | File storage (R2/S3) | **Built** | `server/services/fileService.ts` |
+| Data sources (HTTP, Google Docs, Dropbox, R2/S3, file upload) | **Built** | `server/db/schema/agentDataSources.ts` — caching, fallback, email alerts on failure |
 | Workflow engines (n8n adapter) | **Built** | `server/services/engineService.ts` |
-| LLM (Anthropic Claude) | **Built** | `server/services/llmService.ts` |
-| Web search (Tavily) | **Built** | Optional agent tool |
+| LLM (Anthropic Claude) | **Built** | `server/services/llmService.ts` — Sonnet 4.6 default, configurable per agent |
+| Web search (Tavily) | **Built** | Optional agent skill |
+| External service connections (Gmail, GitHub, CRM, ad platforms) | **NOT built** | No stored connection model, no provider auth |
 
-### 2.7 Frontend (Extensive — 54 pages)
+### 1.7 Frontend (54 Pages)
 
 Key pages already built:
 - Agent list, chat, admin edit pages
@@ -101,153 +97,156 @@ Key pages already built:
 
 ---
 
-## 3. What's Actually Missing (The Real Gap)
+## 2. What's Actually Missing
 
-The brief proposes ~30 new tables and services. Most of that duplicates what exists. Here's what's **genuinely missing** — the delta between current state and the HITL platform:
+The v6 brief proposes ~30 new tables and services. Most duplicate what already exists. Here's the **genuine delta**:
 
-### 3.1 Action System (THE core gap)
+### 2.1 Action System (The Core Gap)
 
-**Currently:** Agents execute tools directly via `skillExecutor`. There is no intermediate "proposed action" object. When an agent calls `create_task` or `move_task`, it happens immediately. There is no gate, no approval, no review step for side-effectful operations.
+**Currently:** Agents execute tools directly via `skillExecutor`. There is no intermediate "proposed action" object. When an agent calls `create_task` or `move_task`, it happens immediately with no gate, no approval step.
 
 **What's needed:**
-- An `actions` table representing proposed work units
+- `actions` table — proposed work units with structured payload
 - Action state machine: `proposed → pending_approval → approved → executing → completed/failed/rejected`
 - Gate levels per action type: `auto | review | block`
-- `is_external` flag to distinguish internal vs boundary actions
-- Idempotency keys for deduplication
-- Action events table for audit trail
+- `is_external` flag — internal vs boundary actions
+- Idempotency keys — prevent duplicate execution
+- `action_events` table — audit trail of every state transition
 
-### 3.2 Execution Layer with Adapter Pattern (Missing)
+### 2.2 Execution Layer with Adapter Pattern
 
-**Currently:** `skillExecutor.ts` is a big switch statement. Each skill is a function that directly does the work. There's no adapter abstraction, no execution dispatch layer, no separation between "propose" and "execute".
-
-**What's needed:**
-- Execution service that sits between action approval and actual execution
-- Adapter registry mapping action_type → adapter (API, worker, future browser/devops)
-- Adapter interface: validate → execute → capture result
-- Idempotency enforcement at execution time
-- Provider abstraction for external services (email, CRM, code, ads)
-
-### 3.3 Review / Approval System (Missing)
-
-**Currently:** Agents move tasks to "review" status on the kanban board. Humans see them there. But there's no structured review queue, no approve/reject/edit flow, no enforcement that prevents execution without approval.
+**Currently:** `skillExecutor.ts` is a switch statement where each case directly executes. No separation between "propose" and "execute", no adapter abstraction.
 
 **What's needed:**
-- Review items table (or projection from actions)
-- Review queue UI — dedicated page for pending approvals
-- Approve / Edit+Approve / Reject actions from UI
-- Backend enforcement: actions with `gate_level=review` cannot execute without approval record
-- Display: original context, agent reasoning, proposed payload, edit capability
+- Execution service that dispatches approved actions to adapters
+- Adapter registry: action_type → adapter (API adapter for Phase 1; browser/devops later)
+- Adapter interface: validate → idempotency check → execute → capture result
+- Provider abstraction for external services (EmailProvider, etc.)
 
-### 3.4 Integration Connections (Missing)
+### 2.3 Review / Approval System
 
-**Currently:** Email is used for platform operations (invites, resets). There's no stored connection model for external services that agents would use (Gmail inbox, GitHub repo, CRM account, ad platform).
+**Currently:** Agents move kanban tasks to "review" status. Humans see them on the board. No structured review queue, no approve/reject/edit flow, no backend enforcement preventing execution without approval.
 
 **What's needed:**
-- `integration_connections` table: workspace-scoped, provider_type, auth credentials (encrypted ref)
-- Provider abstraction interfaces (EmailProvider, CRMProvider, CodeProvider)
+- `review_items` table (projection of actions requiring human sign-off)
+- Review queue UI — dedicated page, not the kanban board
+- Approve / Edit+Approve / Reject from UI
+- Backend enforcement: `gate_level=review` actions cannot execute without an approval record
+- Review payload: original context, agent reasoning, proposed payload, edit capability
+
+### 2.4 Integration Connections
+
+**Currently:** No stored connection model for external services agents would consume.
+
+**What's needed:**
+- `integration_connections` table — subaccount-scoped, provider_type, encrypted credential ref
+- Provider interfaces (EmailProvider at minimum for Phase 1)
 - Connection management UI
-- Multi-tenant auth isolation
+- Strict tenant isolation
 
-### 3.5 Processed Resources / Deduplication (Missing)
+### 2.5 Processed Resources / Deduplication
 
 **Currently:** No mechanism to track "we already processed Gmail message X" across runs.
 
 **What's needed:**
-- `processed_resources` table: integration_type, resource_type, external_id, workspace-scoped
-- Checked before agent processes external inputs
+- `processed_resources` table — integration_type, resource_type, external_id, subaccount-scoped
+- Checked before agent processes any external input
 - Prevents duplicate work across scheduled runs
 
-### 3.6 Orchestrator Agent Pattern (Missing)
+### 2.6 Missing Agent Skills
 
-**Currently:** Agents work independently. No strategic coordination layer.
+The current 8 skills cover internal board operations only. Real workflows need:
 
-**What's needed (Phase 2+):**
-- Orchestrator agent type that reads workspace state and writes directives
+| Skill | Priority | Needed For |
+|-------|----------|------------|
+| `send_email` | Critical | Any outbound communication (support replies, notifications) |
+| `read_inbox` | Critical | Support agent inbox polling |
+| `request_approval` | Critical | Agent signals it needs human sign-off mid-run |
+| `fetch_url` | High | Reading external URLs, lightweight API calls |
+| `search_records` / `update_record` | High | CRM/support context lookup and update |
+
+Note: `emailService` already exists in the backend — it just needs a skill wrapper and a gate.
+
+### 2.7 Observability Gaps
+
+**Currently:** Run data is in the database. No trace viewer, no cost attribution, limited error context in UI.
+
+**What's needed:**
+- Run trace viewer — system prompt snapshot, each LLM call, tool calls, token counts
+- Cost estimate per run (approximate $/run)
+- Validation failure visibility in run logs
+
+### 2.8 Orchestrator Agent (Phase 2)
+
+**Currently:** Agents work independently. No strategic coordination.
+
+**Needed later:**
+- Orchestrator agent type reads workspace state, writes directives
 - `orchestrator_directives` table
 - Morning plan / evening summary schedule
 - Directives injected into other agents' context
 
 ---
 
-## 4. Critical Problems with the v6 Brief
+## 3. Critical Problems with the v6 Brief
 
-### 4.1 Terminology Collision
+### 3.1 Terminology Collision
 
-The brief uses "workspace" as the tenant unit. The codebase uses **"subaccount"**. These are the same concept but different names. The brief uses "task" for review/workflow items — but `tasks` already means kanban board items. This will cause confusion everywhere.
+The brief uses "workspace" as the tenant unit. The codebase uses **"subaccount"**. Same concept, different name. The brief also uses "task" for review/approval items — but `tasks` already means kanban board items.
 
-**Decision required:** Either rename subaccounts → workspaces (breaking migration) or keep subaccounts and map the brief's terminology. Recommend keeping `subaccounts` in code but allowing "workspace" in UI labels.
+**Decision:** Keep `subaccounts` in code, allow "workspace" in UI labels. Name new review objects `review_items`, not tasks.
 
-### 4.2 Duplicate Data Model
+### 3.2 Duplicate Data Model
 
-The brief proposes tables that already exist under different names:
+| Brief Proposes | Already Exists As |
+|---------------|-------------------|
+| `workspaces` | `subaccounts` |
+| `agents` | `agents` + `system_agents` |
+| `agent_runs` | `agent_runs` |
+| `scheduled_tasks` | `scheduled_tasks` |
+| `memory_entries` | `workspace_memory_entries` |
+| `memory_summaries` | `workspace_memories` |
 
-| Brief Proposes | Already Exists As | Notes |
-|---------------|-------------------|-------|
-| `workspaces` | `subaccounts` | Same concept |
-| `agents` | `agents` + `system_agents` | Already has 3-layer model |
-| `agent_runs` | `agent_runs` | Already comprehensive |
-| `scheduled_tasks` | `scheduled_tasks` | Already has RRULE + cron |
-| `memory_entries` | `workspace_memory_entries` | Already built |
-| `memory_summaries` | `workspace_memories` | Already built |
+### 3.3 Over-Engineering for Phase 1
 
-### 4.3 Over-Engineering for Phase 1
+The brief specifies in full detail things we don't need yet:
+- Browser adapter (Playwright) — defer
+- Docker deep work — defer
+- DevOps adapter — defer
+- Marketing agent — defer
+- Development agent — defer
+- Sub-agent spawning — **already built**
 
-The brief specifies in full detail:
-- Browser adapter (Playwright) — not needed Phase 1
-- Docker deep work execution — not needed Phase 1
-- DevOps adapter — not needed Phase 1
-- Marketing agent implementation — not needed Phase 1
-- Development agent implementation — not needed Phase 1
-- Sub-agent spawning in production — **already built**
+The API adapter is the only one needed for Phase 1.
 
-Designing adapter interfaces for browser/Docker/devops now adds complexity with zero payoff. The API adapter is the only one needed for Phase 1. The others can be added when there's a real use case.
+### 3.4 How Actions Integrate with skillExecutor
 
-### 4.4 28 Sections Is 10x Too Long
+The brief doesn't answer the key implementation question: **which existing skills become action-gated and which stay direct?**
 
-The brief spends ~60% of its length on:
-- Repeating the same principles in different words
-- Future agent types that won't be built yet
-- Adapter types that won't be built yet
-- Philosophical guidance that belongs in CLAUDE.md, not a spec
+Read operations (`read_workspace`, `web_search`) should stay direct.
+Write/external operations (`send_email`, anything with real-world side effects) should go through the action gate.
 
-A spec should be: data model + state machines + API contracts + build sequence. The rest is noise.
+The skill executor needs to be split into: direct-execute skills vs action-proposing skills.
 
-### 4.5 Missing: How Actions Integrate with Existing Skill Executor
+### 3.5 "Not a Support Feature" Is Right but Premature
 
-The brief doesn't address the most important implementation question: **how does the action system integrate with the existing `skillExecutor.ts` switch statement?**
-
-Currently, when an agent calls `create_task`, the skill executor directly creates the task. With the action system, some tool calls should:
-1. Create an action record (proposed)
-2. Check gate policy
-3. Either auto-execute or queue for review
-
-But other tool calls (internal ones like `read_workspace`, `list_tasks`) should remain direct. The brief doesn't distinguish which existing skills become action-gated vs which stay direct.
-
-### 4.6 The "Not a Support Feature" Stance Is Correct but Premature
-
-The brief is right that the platform should be general. But it over-indexes on this by designing abstractions for agents that don't exist yet. The correct approach:
-1. Build the action/approval layer as a general platform feature
-2. Implement the support agent as the first consumer
-3. Extract patterns when the second agent type arrives
-4. Don't pre-build abstractions for marketing/dev agents
+Build the action/approval layer as a general platform primitive. Use the support agent as the first consumer. Extract generalisations when the second agent type arrives. Don't pre-build marketing or dev agent abstractions now.
 
 ---
 
-## 5. Terminology Mapping (Brief → Codebase)
+## 4. Terminology Mapping
 
 | Brief Term | Codebase Term | Notes |
 |------------|---------------|-------|
-| workspace | subaccount | Same concept, keep subaccount in code |
-| agent | agent + subaccountAgent | Already split into definition + workspace link |
-| agent_run | agentRun | Already exists, needs minor extensions |
-| task (review) | **NEW: reviewItem or action** | Don't overload existing `tasks` table |
-| task (board) | task | Already exists as kanban items |
+| workspace | subaccount | Keep subaccount in code |
+| agent | agent + subaccountAgent | Already split |
+| agent_run | agentRun | Already exists |
+| task (review) | **NEW: review_item** | Don't overload existing tasks |
+| task (board) | task | Already exists |
 | scheduled_task | scheduledTask | Already exists |
 | memory_entry | workspaceMemoryEntry | Already exists |
 | memory_summary | workspaceMemory | Already exists |
 | skill | skill + systemSkill | Already exists, 3-layer |
-| execution layer | **NEW** | Does not exist yet |
 | action | **NEW** | Core addition |
 | action_event | **NEW** | Core addition |
 | review_item | **NEW** | Core addition |
@@ -257,16 +256,14 @@ The brief is right that the platform should be general. But it over-indexes on t
 
 ---
 
-## 6. Existing Architecture Strengths to Preserve
+## 5. Existing Architecture Strengths to Preserve
 
-These patterns are well-designed and should not be disrupted:
-
-1. **3-layer prompt assembly** (system → org → subaccount) — elegant IP protection model
-2. **Middleware pipeline** for agent execution — extensible, testable
-3. **pg-boss for background jobs** — reliable, PostgreSQL-native, already integrated
+1. **3-layer prompt assembly** (system → org → subaccount) — elegant IP protection
+2. **Middleware pipeline** — extensible, testable
+3. **pg-boss for background jobs** — PostgreSQL-native, already integrated
 4. **Skill executor pattern** — clean dispatch, easy to extend
-5. **Task activities as audit log** — good foundation for action events
-6. **Workspace memory with auto-extraction** — already does what the brief's memory layer describes
+5. **Task activities as audit log** — reuse pattern for action events
+6. **Workspace memory with auto-extraction** — already covers what the brief describes
 7. **Agent handoff via queue** — async, depth-limited, rate-limited
 8. **Org-scoped multi-tenancy** — consistent filtering everywhere
 
@@ -274,11 +271,4 @@ These patterns are well-designed and should not be disrupted:
 
 ## End of Part 1
 
-Part 2 will cover:
-- Refined data model (only new tables, extending existing ones)
-- Action system design and state machines
-- Execution layer architecture
-- Review/approval system
-- Integration with existing skillExecutor
-- Phase 1 support agent implementation plan
-- Build sequence and testing strategy
+Part 2 covers: refined data model (new tables only), action state machines, execution layer design, review/approval system, skillExecutor integration strategy, Phase 1 support agent plan, and build sequence.
