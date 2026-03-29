@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { workflowEngines, tasks } from '../db/schema/index.js';
+import { workflowEngines } from '../db/schema/index.js';
 
 export class EngineService {
   async listEngines(organisationId: string, params: { status?: string }) {
@@ -91,17 +91,9 @@ export class EngineService {
 
     const [updated] = await db
       .update(workflowEngines)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update)
       .where(eq(workflowEngines.id, id))
       .returning();
-
-    // If deactivated, deactivate all tasks using this engine
-    if (data.status === 'inactive') {
-      await db
-        .update(tasks)
-        .set({ status: 'inactive', updatedAt: new Date() })
-        .where(and(eq(tasks.workflowEngineId, id), isNull(tasks.deletedAt)));
-    }
 
     return {
       id: updated.id,
@@ -122,12 +114,6 @@ export class EngineService {
 
     const now = new Date();
     await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(eq(workflowEngines.id, id));
-
-    // Deactivate tasks using this engine
-    await db
-      .update(tasks)
-      .set({ status: 'inactive', deletedAt: now, updatedAt: now })
-      .where(and(eq(tasks.workflowEngineId, id), isNull(tasks.deletedAt)));
 
     return { message: 'Workflow engine deleted successfully' };
   }

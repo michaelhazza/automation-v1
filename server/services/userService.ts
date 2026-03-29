@@ -155,7 +155,7 @@ export class UserService {
 
     const [updated] = await db
       .update(users)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update)
       .where(eq(users.id, userId))
       .returning();
 
@@ -212,7 +212,7 @@ export class UserService {
 
     const [updated] = await db
       .update(users)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update)
       .where(and(eq(users.id, id), eq(users.organisationId, organisationId)))
       .returning();
 

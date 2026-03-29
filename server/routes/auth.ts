@@ -3,6 +3,22 @@ import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+const loginAttemptTimestamps = new Map<string, number[]>();
+
+function enforceLoginRateLimit(key: string): boolean {
+  const now = Date.now();
+  const attempts = loginAttemptTimestamps.get(key) ?? [];
+  const windowed = attempts.filter((ts) => now - ts < LOGIN_WINDOW_MS);
+  if (windowed.length >= LOGIN_MAX_ATTEMPTS) {
+    loginAttemptTimestamps.set(key, windowed);
+    return false;
+  }
+  windowed.push(now);
+  loginAttemptTimestamps.set(key, windowed);
+  return true;
+}
 
 // Validates password strength: min 8 chars, uppercase, number, special character
 function validatePasswordStrength(password: string): string | null {
@@ -15,12 +31,17 @@ function validatePasswordStrength(password: string): string | null {
 
 router.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, organisationSlug } = req.body;
     if (!email || !password) {
       res.status(400).json({ error: 'Validation failed', details: 'email and password are required' });
       return;
     }
-    const result = await authService.login(email, password);
+    const rateKey = `${req.ip}:${String(email).toLowerCase()}`;
+    if (!enforceLoginRateLimit(rateKey)) {
+      res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+      return;
+    }
+    const result = await authService.login(email, password, organisationSlug);
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

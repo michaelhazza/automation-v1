@@ -250,13 +250,18 @@ export const conversationService = {
       // Save the assistant's tool-use message
       const [assistantToolMsg] = await db
         .insert(agentMessages)
-        .values({
-          conversationId,
-          role: 'assistant',
-          content: llmResponse.content || null,
-          toolCalls: llmResponse.toolCalls,
-          createdAt: new Date(),
-        })
+          .values({
+            conversationId,
+            role: 'assistant',
+            content: llmResponse.content || null,
+            toolCalls: llmResponse.toolCalls.map((toolCall) => ({
+              id: toolCall.id,
+              type: 'tool_use' as const,
+              name: toolCall.name,
+              input: toolCall.input,
+            })),
+            createdAt: new Date(),
+          })
         .returning();
 
       // Process each tool call
