@@ -56,16 +56,18 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     if (!subaccountId) return;
     setLoading(true);
     try {
+      const safeFetch = (url: string, fallback: any = null) =>
+        api.get(url).catch((err) => {
+          console.error(`[WorkspaceBoardPage] ${url} failed:`, err.response?.status, err.response?.data);
+          return { data: fallback };
+        });
+
       const [configRes, tasksRes, agentsRes, saRes] = await Promise.all([
-        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err) => {
-          console.error('[WorkspaceBoardPage] board-config fetch failed:', err.response?.status, err.response?.data);
-          return { data: null };
-        }),
-        api.get(`/api/subaccounts/${subaccountId}/tasks`),
-        api.get('/api/agents'),
-        api.get(`/api/subaccounts/${subaccountId}`),
+        safeFetch(`/api/subaccounts/${subaccountId}/board-config`),
+        safeFetch(`/api/subaccounts/${subaccountId}/tasks`, []),
+        safeFetch('/api/agents', []),
+        safeFetch(`/api/subaccounts/${subaccountId}`, { name: '' }),
       ]);
-      console.log('[WorkspaceBoardPage] board-config response:', configRes.data ? { id: configRes.data.id, columnsCount: configRes.data.columns?.length } : null);
       setColumns(configRes.data?.columns ?? []);
       setTasks(tasksRes.data);
       setAgents(agentsRes.data.filter((a: { status: string }) => a.status === 'active'));
