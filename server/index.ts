@@ -9,6 +9,7 @@ import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeed
 import { agentService } from './services/agentService.js';
 import { boardService } from './services/boardService.js';
 import { skillService } from './services/skillService.js';
+import { systemSkillService } from './services/systemSkillService.js';
 import { agentScheduleService } from './services/agentScheduleService.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,7 +37,9 @@ import boardTemplatesRouter from './routes/boardTemplates.js';
 import boardConfigRouter from './routes/boardConfig.js';
 import tasksRouter from './routes/tasks.js';
 import subaccountAgentsRouter from './routes/subaccountAgents.js';
-import agentTemplatesRouter from './routes/agentTemplates.js';
+// agentTemplates deprecated — replaced by systemAgents
+import systemAgentsRouter from './routes/systemAgents.js';
+import systemSkillsRouter from './routes/systemSkills.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
 import workspaceMemoryRouter from './routes/workspaceMemory.js';
@@ -81,7 +84,9 @@ app.use(boardTemplatesRouter);
 app.use(boardConfigRouter);
 app.use(tasksRouter);
 app.use(subaccountAgentsRouter);
-app.use(agentTemplatesRouter);
+// agentTemplatesRouter removed — replaced by systemAgentsRouter
+app.use(systemAgentsRouter);
+app.use(systemSkillsRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
 app.use(workspaceMemoryRouter);
@@ -117,6 +122,7 @@ async function start() {
   await agentService.scheduleAllProactiveSources();
   await boardService.seedDefaultTemplate();
   await skillService.seedBuiltInSkills();
+  await systemSkillService.seedSystemSkills();
   await agentScheduleService.initialize();
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   app.listen(PORT, '0.0.0.0', () => {

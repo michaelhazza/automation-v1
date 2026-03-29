@@ -10,6 +10,8 @@ import {
 } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
 import { skillService } from './skillService.js';
+import { systemSkillService } from './systemSkillService.js';
+import { systemAgents } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import {
   callAnthropic,
@@ -139,7 +141,24 @@ export const agentExecutionService = {
       // ── 4. Load org processes for trigger_process skill ─────────────────
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
 
-      // ── 5. Resolve skills → tools + instructions ────────────────────────
+      // ── 5. Resolve skills → tools + instructions (3-layer) ─────────────
+      // Layer 1: System skills (from system agent, if linked)
+      let systemSkillTools: AnthropicTool[] = [];
+      let systemSkillInstructions: string[] = [];
+      let systemAgentRecord: typeof systemAgents.$inferSelect | null = null;
+
+      if (agent.systemAgentId) {
+        const [sa] = await db.select().from(systemAgents).where(eq(systemAgents.id, agent.systemAgentId));
+        if (sa) {
+          systemAgentRecord = sa;
+          const systemSlugs = (sa.defaultSystemSkillSlugs ?? []) as string[];
+          const resolved = await systemSkillService.resolveSystemSkills(systemSlugs);
+          systemSkillTools = resolved.tools;
+          systemSkillInstructions = resolved.instructions;
+        }
+      }
+
+      // Layer 2+3: Org skills + sub-account skills
       const skillSlugs = (saLink.skillSlugs ?? []) as string[];
       const { tools: skillTools, instructions: skillInstructions } = await skillService.resolveSkillsForAgent(
         skillSlugs,
@@ -147,7 +166,8 @@ export const agentExecutionService = {
       );
 
       // For trigger_process, inject the process enum dynamically
-      const enhancedTools = skillTools.map(tool => {
+      const allSkillTools = [...systemSkillTools, ...skillTools];
+      const enhancedTools = allSkillTools.map(tool => {
         if (tool.name === 'trigger_process' && orgProcesses.length > 0) {
           return {
             ...tool,
@@ -182,21 +202,38 @@ export const agentExecutionService = {
         );
       }
 
-      // ── 7. Build the full system prompt ─────────────────────────────────
+      // ── 7. Build the full system prompt (3-layer assembly) ─────────────
+      // Layer 1: System agent prompt (our IP — invisible to org/sub-account)
+      const effectiveMasterPrompt = systemAgentRecord
+        ? systemAgentRecord.masterPrompt
+        : agent.masterPrompt;
+
       const basePrompt = buildSystemPrompt(
-        agent.masterPrompt,
+        effectiveMasterPrompt,
         dataSourceContents,
         orgProcesses,
       );
 
       const systemPromptParts = [basePrompt];
 
-      if (saLink.customInstructions) {
-        systemPromptParts.push(`\n\n---\n## Additional Instructions\n${saLink.customInstructions}`);
+      // Layer 1b: System skill instructions
+      if (systemSkillInstructions.length > 0) {
+        systemPromptParts.push(`\n\n---\n## Core Capabilities\n${systemSkillInstructions.join('\n\n')}`);
       }
 
+      // Layer 2: Org additional prompt (invisible to sub-account)
+      if (agent.additionalPrompt) {
+        systemPromptParts.push(`\n\n---\n## Organisation Instructions\n${agent.additionalPrompt}`);
+      }
+
+      // Layer 2b: Org skill instructions
       if (skillInstructions.length > 0) {
         systemPromptParts.push(`\n\n---\n## Your Capabilities\n${skillInstructions.join('\n\n')}`);
+      }
+
+      // Layer 3: Sub-account custom instructions
+      if (saLink.customInstructions) {
+        systemPromptParts.push(`\n\n---\n## Additional Instructions\n${saLink.customInstructions}`);
       }
 
       // Add team roster (loaded fresh from DB every run)
@@ -225,7 +262,10 @@ export const agentExecutionService = {
 
       await db.update(agentRuns).set({
         systemPromptSnapshot: fullSystemPrompt,
-        skillsUsed: skillSlugs,
+        skillsUsed: [
+          ...(systemAgentRecord ? ((systemAgentRecord.defaultSystemSkillSlugs ?? []) as string[]).map(s => `system:${s}`) : []),
+          ...skillSlugs,
+        ],
         systemPromptTokens,
       }).where(eq(agentRuns.id, run.id));
 

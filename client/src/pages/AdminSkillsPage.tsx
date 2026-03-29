@@ -16,11 +16,6 @@ interface Skill {
   createdAt: string;
 }
 
-const TYPE_BADGE: Record<string, { bg: string; color: string; label: string }> = {
-  built_in: { bg: '#ede9fe', color: '#6d28d9', label: 'Built-in' },
-  custom:   { bg: '#dbeafe', color: '#1d4ed8', label: 'Custom' },
-};
-
 const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
   active:   { bg: '#dcfce7', color: '#166534' },
   inactive: { bg: '#fff7ed', color: '#9a3412' },
@@ -62,7 +57,7 @@ export default function AdminSkillsPage({ user }: { user: User }) {
     return <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 14 }}>Loading...</div>;
   }
 
-  const builtIn = skills.filter(s => s.skillType === 'built_in');
+  // Built-in skills are now managed at system level — only show custom org skills
   const custom = skills.filter(s => s.skillType === 'custom');
 
   return (
@@ -71,7 +66,8 @@ export default function AdminSkillsPage({ user }: { user: User }) {
         <div>
           <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Skills Library</h1>
           <p style={{ color: '#64748b', margin: '8px 0 0', fontSize: 14 }}>
-            Manage capability modules that agents use. Built-in skills are platform-provided. Custom skills encode your agency&apos;s workflows.
+            Create custom skills to encode your agency&apos;s proprietary workflows and methodologies.
+            Core platform skills are automatically included with system agents.
           </p>
         </div>
         <button
@@ -166,55 +162,7 @@ export default function AdminSkillsPage({ user }: { user: User }) {
         </div>
       </div>
 
-      {/* Built-in Skills */}
-      <div>
-        <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 12 }}>
-          Built-in Skills ({builtIn.length})
-        </h2>
-        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Slug</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Methodology</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: '#374151', fontSize: 13 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {builtIn.map((skill) => (
-                <tr key={skill.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{skill.name}</div>
-                      <span style={{
-                        display: 'inline-block', padding: '1px 8px', borderRadius: 999, fontSize: 11, fontWeight: 500,
-                        background: TYPE_BADGE.built_in.bg, color: TYPE_BADGE.built_in.color,
-                      }}>
-                        {TYPE_BADGE.built_in.label}
-                      </span>
-                    </div>
-                    {skill.description && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{skill.description}</div>}
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <code style={{ fontSize: 12, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, color: '#475569' }}>{skill.slug}</code>
-                  </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    {skill.methodology ? (
-                      <span style={{ fontSize: 12, color: '#166534', background: '#dcfce7', padding: '2px 8px', borderRadius: 4 }}>Has methodology</span>
-                    ) : (
-                      <span style={{ fontSize: 12, color: '#94a3b8' }}>None</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                    <Link to={`/admin/skills/${skill.id}`} style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, textDecoration: 'none', fontWeight: 500 }}>View</Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Note: Built-in skills are now managed at the system level and hidden from org admins */}
     </>
   );
 }

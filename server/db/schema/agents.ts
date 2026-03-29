@@ -1,7 +1,7 @@
-import { pgTable, uuid, text, integer, real, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, real, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
-import { agentTemplates } from './agentTemplates';
+import { systemAgents } from './systemAgents';
 
 export const agents = pgTable(
   'agents',
@@ -10,17 +10,24 @@ export const agents = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
-    // Optional link to the template this agent was created from
-    sourceTemplateId: uuid('source_template_id')
-      .references(() => agentTemplates.id),
+    // Legacy template fields (columns still in DB, no longer used)
+    sourceTemplateId: uuid('source_template_id'),
     sourceTemplateVersion: integer('source_template_version'),
+    // Living link to system agent — inherits system prompt + system skills at runtime
+    systemAgentId: uuid('system_agent_id')
+      .references(() => systemAgents.id),
+    // True if created from a system agent (limits what org admin can edit)
+    isSystemManaged: boolean('is_system_managed').notNull().default(false),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     description: text('description'),
     // Display icon/emoji for the agent card UI
     icon: text('icon'),
-    // The system instruction / persona that defines this AI employee
+    // For org-created agents: the full system prompt
+    // For system-managed agents: the org's additional prompt layered on top
     masterPrompt: text('master_prompt').notNull().default(''),
+    // Org-level additional prompt (appended to system prompt at runtime for system-managed agents)
+    additionalPrompt: text('additional_prompt').notNull().default(''),
     // LLM configuration
     modelProvider: text('model_provider').notNull().default('anthropic'),
     modelId: text('model_id').notNull().default('claude-sonnet-4-6'),

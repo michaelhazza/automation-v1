@@ -14,7 +14,10 @@ export * from './permissionSets';
 export * from './permissionSetItems';
 export * from './orgUserRoles';
 export * from './subaccountUserAssignments';
-export * from './agentTemplates';
+// agentTemplates deprecated — kept for migration compatibility but no longer exported
+// export * from './agentTemplates';
+export * from './systemAgents';
+export * from './systemSkills';
 export * from './agents';
 export * from './agentDataSources';
 export * from './agentConversations';

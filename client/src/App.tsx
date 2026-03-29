@@ -37,6 +37,10 @@ const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
+const SystemAgentsPage = lazy(() => import('./pages/SystemAgentsPage'));
+const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
+const SystemSkillsPage = lazy(() => import('./pages/SystemSkillsPage'));
+const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
@@ -168,6 +172,10 @@ export default function App() {
             <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
             <Route path="/system/board-templates" element={<SystemBoardTemplatesPage user={user!} />} />
+            <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
+            <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
+            <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
+            <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
           </Route>
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
