@@ -2,6 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
+import { setHandoffJobSender } from './skillExecutor.js';
 import { isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,7 @@ let boss: PgBoss | null = null;
 type PgBoss = {
   start(): Promise<void>;
   stop(): Promise<void>;
+  send(name: string, data?: object, options?: object): Promise<string | null>;
   schedule(name: string, cron: string, data?: object, options?: object): Promise<void>;
   unschedule(name: string): Promise<void>;
   work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
@@ -22,6 +24,7 @@ type PgBoss = {
 };
 
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
+const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 
 async function getBoss(): Promise<PgBoss> {
   if (boss) return boss;
@@ -53,6 +56,16 @@ function createFallbackScheduler(): PgBoss {
     async stop() {
       for (const interval of activeIntervals.values()) clearInterval(interval);
       activeIntervals.clear();
+    },
+    async send(name: string, data?: object) {
+      // Execute immediately for fallback
+      const handler = fallbackHandlers.get(name);
+      if (handler && data) {
+        handler({ data: data as Record<string, unknown> }).catch(err => {
+          console.error(`[FallbackScheduler] Error in ${name}:`, err);
+        });
+      }
+      return 'fallback-job';
     },
     async schedule(name: string, cron: string, data?: object) {
       // Parse simple cron patterns for the fallback
@@ -124,6 +137,11 @@ export const agentScheduleService = {
   async initialize() {
     const pgboss = await getBoss();
 
+    // Wire up the handoff job sender so skillExecutor can enqueue handoffs
+    setHandoffJobSender(async (name: string, data: object) => {
+      return pgboss.send(name, data);
+    });
+
     // Register the worker that processes scheduled agent runs
     await pgboss.work(AGENT_RUN_QUEUE, async (job) => {
       const data = job.data as {
@@ -147,6 +165,44 @@ export const agentScheduleService = {
         });
       } catch (err) {
         console.error(`[AgentScheduler] Scheduled run failed:`, err);
+      }
+    });
+
+    // Register the worker that processes agent handoff runs
+    await pgboss.work(AGENT_HANDOFF_QUEUE, async (job) => {
+      const data = job.data as {
+        taskId: string;
+        agentId: string;
+        subaccountAgentId: string;
+        subaccountId: string;
+        organisationId: string;
+        sourceRunId: string;
+        handoffDepth: number;
+        handoffContext?: string;
+      };
+
+      console.log(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
+
+      try {
+        await agentExecutionService.executeRun({
+          agentId: data.agentId,
+          subaccountId: data.subaccountId,
+          subaccountAgentId: data.subaccountAgentId,
+          organisationId: data.organisationId,
+          runType: 'triggered',
+          executionMode: 'api',
+          taskId: data.taskId,
+          handoffDepth: data.handoffDepth,
+          parentRunId: data.sourceRunId,
+          triggerContext: {
+            type: 'handoff',
+            sourceRunId: data.sourceRunId,
+            handoffDepth: data.handoffDepth,
+            handoffContext: data.handoffContext,
+          },
+        });
+      } catch (err) {
+        console.error(`[AgentScheduler] Handoff run failed:`, err);
       }
     });
 

@@ -13,7 +13,7 @@ interface Engine {
   lastTestStatus: string | null;
 }
 
-export default function AdminEnginesPage({ user }: { user: User }) {
+export default function AdminEnginesPage({ user, embedded }: { user: User; embedded?: boolean }) {
   const [engines, setEngines] = useState<Engine[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -73,10 +73,12 @@ export default function AdminEnginesPage({ user }: { user: User }) {
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Workflow Engines</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage automation engine connections</p>
-        </div>
+        {!embedded ? (
+          <div>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Workflow Engines</h1>
+            <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage automation engine connections</p>
+          </div>
+        ) : <div />}
         <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
           + Add engine
         </button>

@@ -14,14 +14,11 @@ const ProcessExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
 const ExecutionHistoryPage = lazy(() => import('./pages/ExecutionHistoryPage'));
 const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
-const AdminEnginesPage = lazy(() => import('./pages/AdminEnginesPage'));
 const AdminProcessesPage = lazy(() => import('./pages/AdminTasksPage'));
 const AdminProcessEditPage = lazy(() => import('./pages/AdminTaskEditPage'));
-const AdminCategoriesPage = lazy(() => import('./pages/AdminCategoriesPage'));
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
-const AdminPermissionSetsPage = lazy(() => import('./pages/AdminPermissionSetsPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
 const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
@@ -34,13 +31,16 @@ const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
 const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
-const AdminBoardConfigPage = lazy(() => import('./pages/AdminBoardConfigPage'));
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
+const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
+const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
+const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 
 function PageLoader() {
   return (
@@ -143,17 +143,21 @@ export default function App() {
             <Route path="/admin/processes" element={<AdminProcessesPage user={user!} />} />
             <Route path="/admin/processes/:id" element={<AdminProcessEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
-            <Route path="/admin/engines" element={<AdminEnginesPage user={user!} />} />
-            <Route path="/admin/categories" element={<AdminCategoriesPage user={user!} />} />
+            <Route path="/admin/settings" element={<AdminSettingsPage user={user!} />} />
+            <Route path="/admin/board-config" element={<Navigate to="/admin/settings" replace />} />
+            <Route path="/admin/categories" element={<Navigate to="/admin/settings" replace />} />
+            <Route path="/admin/engines" element={<Navigate to="/admin/settings" replace />} />
+            <Route path="/admin/permission-sets" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} />} />
-            <Route path="/admin/permission-sets" element={<AdminPermissionSetsPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
-            <Route path="/admin/board-config" element={<AdminBoardConfigPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
           </Route>
 
@@ -165,6 +169,9 @@ export default function App() {
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
             <Route path="/system/board-templates" element={<SystemBoardTemplatesPage user={user!} />} />
           </Route>
+
+          {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
+          <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
 
           {/* AI Agents */}
           <Route path="/agents" element={<AgentsPage user={user!} />} />

@@ -20,6 +20,22 @@ import {
   type AnthropicTool,
 } from './llmService.js';
 import { skillExecutor } from './skillExecutor.js';
+import { workspaceMemoryService } from './workspaceMemoryService.js';
+import {
+  createDefaultPipeline,
+  hashToolCall,
+  executeWithRetry,
+  type MiddlewareContext,
+  type MiddlewarePipeline,
+} from './middleware/index.js';
+import {
+  MAX_LOOP_ITERATIONS,
+  WRAP_UP_MAX_TOKENS,
+  TOKEN_INPUT_RATIO,
+  TOKEN_OUTPUT_RATIO,
+  MAX_CROSS_AGENT_TASKS,
+  MAX_TOOL_OUTPUT_LOG_LENGTH,
+} from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,11 +50,15 @@ export interface AgentRunRequest {
   executionMode?: 'api' | 'headless';
   taskId?: string;
   triggerContext?: Record<string, unknown>;
+  handoffDepth?: number;
+  parentRunId?: string;
+  isSubAgent?: boolean;
+  parentSpawnRunId?: string;
 }
 
 export interface AgentRunResult {
   runId: string;
-  status: 'completed' | 'failed' | 'timeout';
+  status: 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
   summary: string | null;
   totalToolCalls: number;
   totalTokens: number;
@@ -46,6 +66,20 @@ export interface AgentRunResult {
   tasksCreated: number;
   tasksUpdated: number;
   deliverablesCreated: number;
+}
+
+/** Task with its joined agent relation resolved */
+interface TaskWithAgent {
+  id: string;
+  title: string;
+  description: string | null;
+  brief: string | null;
+  status: string;
+  priority: string;
+  assignedAgentId: string | null;
+  assignedAgent: { id: string; name: string | null; slug: string | null } | null;
+  createdAt: Date;
+  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +106,10 @@ export const agentExecutionService = {
         status: 'running',
         triggerContext: request.triggerContext ?? null,
         taskId: request.taskId ?? null,
+        handoffDepth: request.handoffDepth ?? 0,
+        parentRunId: request.parentRunId ?? null,
+        isSubAgent: request.isSubAgent ? 1 : 0,
+        parentSpawnRunId: request.parentSpawnRunId ?? null,
         startedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -102,7 +140,7 @@ export const agentExecutionService = {
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
 
       // ── 5. Resolve skills → tools + instructions ────────────────────────
-      const skillSlugs = (saLink.skillSlugs as string[]) ?? [];
+      const skillSlugs = (saLink.skillSlugs ?? []) as string[];
       const { tools: skillTools, instructions: skillInstructions } = await skillService.resolveSkillsForAgent(
         skillSlugs,
         request.organisationId
@@ -128,7 +166,7 @@ export const agentExecutionService = {
         return tool;
       });
 
-      // ── 6. Build task context ─────────────────────────────────────────
+      // ── 6. Build task context (with smart offloading) ───────────────────
       let workspaceContext = '';
       let targetItem: typeof tasks.$inferSelect | null = null;
 
@@ -137,15 +175,11 @@ export const agentExecutionService = {
         targetItem = item;
         workspaceContext = buildTaskContext(item);
       } else {
-        // Load recent tasks for general awareness
-        const recentItems = await taskService.listTasks(
+        workspaceContext = await buildSmartBoardContext(
           request.organisationId,
           request.subaccountId,
-          {}
+          request.agentId
         );
-        if (recentItems.length > 0) {
-          workspaceContext = buildTaskOverviewContext(recentItems.slice(0, 30));
-        }
       }
 
       // ── 7. Build the full system prompt ─────────────────────────────────
@@ -157,33 +191,47 @@ export const agentExecutionService = {
 
       const systemPromptParts = [basePrompt];
 
-      // Add subaccount-specific instructions
       if (saLink.customInstructions) {
         systemPromptParts.push(`\n\n---\n## Additional Instructions\n${saLink.customInstructions}`);
       }
 
-      // Add skill instructions
       if (skillInstructions.length > 0) {
         systemPromptParts.push(`\n\n---\n## Your Capabilities\n${skillInstructions.join('\n\n')}`);
       }
 
-      // Add task context
+      // Add team roster (loaded fresh from DB every run)
+      const teamRoster = await buildTeamRoster(request.subaccountId, request.agentId);
+      if (teamRoster) {
+        systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
+      }
+
+      // Add workspace memory (with prompt injection boundaries)
+      const memory = await workspaceMemoryService.getMemoryForPrompt(
+        request.organisationId,
+        request.subaccountId
+      );
+      if (memory) {
+        systemPromptParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
+      }
+
       if (workspaceContext) {
         systemPromptParts.push(`\n\n---\n## Current Board\n${workspaceContext}`);
       }
 
-      // Add autonomous execution instructions
       systemPromptParts.push(buildAutonomousInstructions(request, targetItem));
 
       const fullSystemPrompt = systemPromptParts.join('');
+      const systemPromptTokens = approxTokens(fullSystemPrompt);
 
-      // Snapshot the prompt for logging
       await db.update(agentRuns).set({
         systemPromptSnapshot: fullSystemPrompt,
         skillsUsed: skillSlugs,
+        systemPromptTokens,
       }).where(eq(agentRuns.id, run.id));
 
-      // ── 8. Execute the agentic loop ─────────────────────────────────────
+      // ── 8. Execute the agentic loop with middleware pipeline ────────────
+      const pipeline = createDefaultPipeline();
+
       const loopResult = await runAgenticLoop({
         runId: run.id,
         agent,
@@ -195,13 +243,16 @@ export const agentExecutionService = {
         startTime,
         request,
         orgProcesses,
+        saLink,
+        pipeline,
       });
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
+      const finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
 
       await db.update(agentRuns).set({
-        status: 'completed',
+        status: finalStatus,
         toolCallsLog: loopResult.toolCallsLog,
         totalToolCalls: loopResult.totalToolCalls,
         inputTokens: loopResult.inputTokens,
@@ -216,15 +267,30 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       }).where(eq(agentRuns.id, run.id));
 
-      // Update last run time on the subaccount agent link
       await db.update(subaccountAgents).set({
         lastRunAt: new Date(),
         updatedAt: new Date(),
       }).where(eq(subaccountAgents.id, request.subaccountAgentId));
 
+      // ── 10. Extract insights for workspace memory ─────────────────────
+      // Awaited (not fire-and-forget) so failures are visible in run logs
+      if (loopResult.summary) {
+        try {
+          await workspaceMemoryService.extractRunInsights(
+            run.id,
+            request.agentId,
+            request.organisationId,
+            request.subaccountId,
+            loopResult.summary
+          );
+        } catch (err) {
+          console.error(`[AgentExecution] Memory extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
       return {
         runId: run.id,
-        status: 'completed',
+        status: finalStatus as AgentRunResult['status'],
         summary: loopResult.summary,
         totalToolCalls: loopResult.totalToolCalls,
         totalTokens: loopResult.totalTokens,
@@ -276,6 +342,8 @@ interface LoopParams {
   startTime: number;
   request: AgentRunRequest;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
+  saLink: typeof subaccountAgents.$inferSelect;
+  pipeline: MiddlewarePipeline;
 }
 
 interface LoopResult {
@@ -288,12 +356,14 @@ interface LoopResult {
   tasksCreated: number;
   tasksUpdated: number;
   deliverablesCreated: number;
+  finalStatus?: string;
 }
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
+    saLink, pipeline,
   } = params;
 
   const toolCallsLog: object[] = [];
@@ -302,70 +372,54 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let tasksCreated = 0;
   let tasksUpdated = 0;
   let deliverablesCreated = 0;
+  let finalStatus: string | undefined;
 
-  // Start with the initial instruction message
+  const mwCtx: MiddlewareContext = {
+    runId,
+    request,
+    agent,
+    saLink,
+    tokensUsed: 0,
+    toolCallsCount: 0,
+    toolCallHistory: [],
+    iteration: 0,
+    startTime,
+    tokenBudget,
+    maxToolCalls,
+    timeoutMs,
+  };
+
   const initialMessage = buildInitialMessage(request);
   const messages: LLMMessage[] = [{ role: 'user', content: initialMessage }];
 
   let lastTextContent = '';
-  const MAX_ITERATIONS = 25; // safety limit
 
-  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-    // Check timeout
-    if (Date.now() - startTime > timeoutMs) {
-      // Soft stop: add a wrap-up message
-      messages.push({
-        role: 'user',
-        content: 'You have reached the time limit for this run. Please provide a brief summary of what you accomplished and stop.',
-      });
-      const wrapUp = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
-        messages,
-        temperature: agent.temperature,
-        maxTokens: Math.min(agent.maxTokens, 1024),
-      });
-      lastTextContent = wrapUp.content;
-      break;
+  outerLoop:
+  for (let iteration = 0; iteration < MAX_LOOP_ITERATIONS; iteration++) {
+    mwCtx.iteration = iteration;
+    mwCtx.tokensUsed = totalTokensUsed;
+    mwCtx.toolCallsCount = totalToolCalls;
+
+    // ── Pre-call middleware ────────────────────────────────────────────
+    for (const mw of pipeline.preCall) {
+      const result = mw.execute(mwCtx);
+      if (result.action === 'stop') {
+        messages.push({ role: 'user', content: result.reason });
+        const wrapUp = await callAnthropic({
+          modelId: agent.modelId,
+          systemPrompt,
+          messages,
+          temperature: agent.temperature,
+          maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
+        });
+        lastTextContent = wrapUp.content;
+        totalTokensUsed += approxTokens(wrapUp.content) + approxTokens(result.reason);
+        finalStatus = result.status;
+        break outerLoop;
+      }
     }
 
-    // Check token budget (soft stop)
-    if (totalTokensUsed >= tokenBudget) {
-      messages.push({
-        role: 'user',
-        content: 'You have reached your token budget for this run. Please provide a brief summary of what you accomplished and stop.',
-      });
-      const wrapUp = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
-        messages,
-        temperature: agent.temperature,
-        maxTokens: Math.min(agent.maxTokens, 1024),
-      });
-      lastTextContent = wrapUp.content;
-      // Estimate tokens for the wrap-up
-      totalTokensUsed += approxTokens(wrapUp.content) + approxTokens(messages[messages.length - 1].content as string);
-      break;
-    }
-
-    // Check tool call limit
-    if (totalToolCalls >= maxToolCalls) {
-      messages.push({
-        role: 'user',
-        content: 'You have reached the maximum number of tool calls for this run. Please provide a brief summary of what you accomplished and stop.',
-      });
-      const wrapUp = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
-        messages,
-        temperature: agent.temperature,
-        maxTokens: Math.min(agent.maxTokens, 1024),
-      });
-      lastTextContent = wrapUp.content;
-      break;
-    }
-
-    // Call LLM
+    // ── Call LLM ──────────────────────────────────────────────────────
     const response = await callAnthropic({
       modelId: agent.modelId,
       systemPrompt,
@@ -375,14 +429,12 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       maxTokens: agent.maxTokens,
     });
 
-    // Estimate token usage (rough: input + output)
     const estimatedInputTokens = approxTokens(JSON.stringify(messages));
     const estimatedOutputTokens = approxTokens(JSON.stringify(response.content) + JSON.stringify(response.toolCalls ?? ''));
     totalTokensUsed += estimatedInputTokens + estimatedOutputTokens;
 
     lastTextContent = response.content;
 
-    // No tool calls — agent is done
     if (!response.toolCalls || response.toolCalls.length === 0) {
       break;
     }
@@ -395,16 +447,56 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     }
     messages.push({ role: 'assistant', content: assistantBlocks });
 
-    // Execute each tool call
+    // ── Execute tool calls ────────────────────────────────────────────
     const toolResults: Array<{ tool_use_id: string; content: string }> = [];
 
     for (const toolCall of response.toolCalls) {
+      // Pre-tool middleware
+      let skipTool = false;
+      for (const mw of pipeline.preTool) {
+        const result = mw.execute(mwCtx, { name: toolCall.name, input: toolCall.input });
+        if (result.action === 'skip') {
+          toolResults.push({
+            tool_use_id: toolCall.id,
+            content: JSON.stringify({ success: false, error: result.reason }),
+          });
+          skipTool = true;
+          break;
+        }
+        if (result.action === 'stop') {
+          messages.push({
+            role: 'user',
+            content: toolResults.map(tr => ({
+              type: 'tool_result' as const,
+              tool_use_id: tr.tool_use_id,
+              content: tr.content,
+            })),
+          });
+          messages.push({ role: 'user', content: result.reason });
+          const wrapUp = await callAnthropic({
+            modelId: agent.modelId,
+            systemPrompt,
+            messages,
+            temperature: agent.temperature,
+            maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
+          });
+          lastTextContent = wrapUp.content;
+          finalStatus = result.status;
+          break outerLoop;
+        }
+      }
+
+      if (skipTool) continue;
+
       totalToolCalls++;
       const toolStart = Date.now();
 
+      const inputHash = hashToolCall(toolCall.name, toolCall.input);
+      mwCtx.toolCallHistory.push({ name: toolCall.name, inputHash, iteration });
+
       let resultContent: string;
-      try {
-        const result = await skillExecutor.execute({
+      const { result, error, retried } = await executeWithRetry(async () => {
+        return skillExecutor.execute({
           skillName: toolCall.name,
           input: toolCall.input,
           context: {
@@ -413,37 +505,65 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             subaccountId: request.subaccountId,
             agentId: request.agentId,
             orgProcesses,
+            handoffDepth: request.handoffDepth,
+            isSubAgent: request.isSubAgent,
+            tokenBudget,
+            startTime,
+            timeoutMs,
           },
         });
+      });
 
+      if (error) {
+        resultContent = JSON.stringify({
+          success: false,
+          error: error.message,
+          error_type: error.type,
+          retried,
+        });
+      } else {
         resultContent = typeof result === 'string' ? result : JSON.stringify(result);
 
-        // Track impact
         if (result && typeof result === 'object') {
           const r = result as Record<string, unknown>;
           if (r._created_task) tasksCreated++;
           if (r._updated_task) tasksUpdated++;
           if (r._created_deliverable) deliverablesCreated++;
         }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        resultContent = JSON.stringify({ success: false, error: errMsg });
       }
 
       const toolDurationMs = Date.now() - toolStart;
 
+      // Post-tool middleware
+      for (const mw of pipeline.postTool) {
+        const postResult = mw.execute(
+          mwCtx,
+          { name: toolCall.name, input: toolCall.input },
+          { content: resultContent, durationMs: toolDurationMs }
+        );
+        if (postResult.action === 'stop') {
+          finalStatus = postResult.status;
+          break outerLoop;
+        }
+        if (postResult.content) {
+          resultContent = postResult.content;
+        }
+      }
+
       toolCallsLog.push({
         tool: toolCall.name,
         input: toolCall.input,
-        output: resultContent.length > 2000 ? resultContent.slice(0, 2000) + '...[truncated]' : resultContent,
+        output: resultContent.length > MAX_TOOL_OUTPUT_LOG_LENGTH
+          ? resultContent.slice(0, MAX_TOOL_OUTPUT_LOG_LENGTH) + '...[truncated]'
+          : resultContent,
         durationMs: toolDurationMs,
         iteration,
+        retried,
       });
 
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
     }
 
-    // Add tool results as a user message
     messages.push({
       role: 'user',
       content: toolResults.map(tr => ({
@@ -458,13 +578,112 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     summary: lastTextContent || null,
     toolCallsLog,
     totalToolCalls,
-    inputTokens: Math.floor(totalTokensUsed * 0.7), // rough split
-    outputTokens: Math.floor(totalTokensUsed * 0.3),
+    inputTokens: Math.floor(totalTokensUsed * TOKEN_INPUT_RATIO),
+    outputTokens: Math.floor(totalTokensUsed * TOKEN_OUTPUT_RATIO),
     totalTokens: totalTokensUsed,
     tasksCreated,
     tasksUpdated,
     deliverablesCreated,
+    finalStatus,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Team Roster — loaded fresh from DB on every run
+// ---------------------------------------------------------------------------
+
+async function buildTeamRoster(subaccountId: string, currentAgentId: string): Promise<string | null> {
+  const roster = await db
+    .select({
+      agentId: agents.id,
+      agentName: agents.name,
+      agentDescription: agents.description,
+    })
+    .from(subaccountAgents)
+    .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+    .where(
+      and(
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.isActive, true),
+        eq(agents.status, 'active'),
+        isNull(agents.deletedAt)
+      )
+    );
+
+  if (roster.length === 0) return null;
+
+  const lines = roster.map(r => {
+    const marker = r.agentId === currentAgentId ? ' ← (you)' : '';
+    return `- ${r.agentName} (${r.agentId}) — ${r.agentDescription ?? 'No description'}${marker}`;
+  });
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Smart Board Context — DB-level filtering instead of loading all tasks
+// ---------------------------------------------------------------------------
+
+async function buildSmartBoardContext(
+  organisationId: string,
+  subaccountId: string,
+  agentId: string
+): Promise<string> {
+  const parts: string[] = [];
+
+  // 1. Board summary from workspace memory (compressed)
+  const boardSummary = await workspaceMemoryService.getBoardSummaryForPrompt(
+    organisationId,
+    subaccountId
+  );
+  if (boardSummary) {
+    parts.push('### Board Summary');
+    parts.push(boardSummary);
+  }
+
+  // 2. Tasks assigned to THIS agent — full detail (DB-filtered)
+  const myTasks = await taskService.listTasks(organisationId, subaccountId, {
+    assignedAgentId: agentId,
+  }) as TaskWithAgent[];
+
+  if (myTasks.length > 0) {
+    parts.push('\n### Your Assigned Tasks');
+    for (const task of myTasks) {
+      parts.push(`- [${task.id}] **${task.title}** (${task.status}, ${task.priority})`);
+      if (task.description) parts.push(`  ${String(task.description).slice(0, 200)}`);
+    }
+  }
+
+  // 3. In-progress tasks from other agents (DB-filtered)
+  const inProgressTasks = await taskService.listTasks(organisationId, subaccountId, {
+    status: 'in_progress',
+  }) as TaskWithAgent[];
+
+  const othersInProgress = inProgressTasks.filter(t => t.assignedAgentId !== agentId);
+  if (othersInProgress.length > 0) {
+    parts.push('\n### Other In-Progress Work');
+    for (const task of othersInProgress.slice(0, MAX_CROSS_AGENT_TASKS)) {
+      const agentName = task.assignedAgent?.name ?? 'unassigned';
+      parts.push(`- [${task.id}] ${task.title} → ${agentName}`);
+    }
+  }
+
+  // 4. Status counts (single query for all tasks)
+  const allTasks = await taskService.listTasks(organisationId, subaccountId, {});
+  const counts: Record<string, number> = {};
+  for (const t of allTasks) {
+    counts[t.status] = (counts[t.status] ?? 0) + 1;
+  }
+  if (Object.keys(counts).length > 0) {
+    parts.push('\n### Board Totals: ' + Object.entries(counts).map(([s, c]) => `${s}: ${c}`).join(' | '));
+  }
+
+  // Fallback if no board summary and we have tasks
+  if (!boardSummary && allTasks.length > 0 && parts.length <= 1) {
+    return buildTaskOverviewContext(allTasks.slice(0, 30) as TaskWithAgent[]);
+  }
+
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -474,10 +693,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 function buildTaskContext(item: Record<string, unknown>): string {
   const parts: string[] = [];
   parts.push(`### Target Task`);
-  parts.push(`- **Title**: ${item.title}`);
+  parts.push(`- **Title**: ${item.title ?? '(untitled)'}`);
   parts.push(`- **ID**: ${item.id}`);
-  parts.push(`- **Status**: ${item.status}`);
-  parts.push(`- **Priority**: ${item.priority}`);
+  parts.push(`- **Status**: ${item.status ?? 'unknown'}`);
+  parts.push(`- **Priority**: ${item.priority ?? 'normal'}`);
   if (item.description) parts.push(`- **Description**: ${item.description}`);
   if (item.brief) parts.push(`- **Brief**: ${item.brief}`);
 
@@ -498,10 +717,10 @@ function buildTaskContext(item: Record<string, unknown>): string {
   return parts.join('\n');
 }
 
-function buildTaskOverviewContext(items: Array<Record<string, unknown>>): string {
-  const byStatus: Record<string, Array<Record<string, unknown>>> = {};
+function buildTaskOverviewContext(items: TaskWithAgent[]): string {
+  const byStatus: Record<string, TaskWithAgent[]> = {};
   for (const item of items) {
-    const status = String(item.status ?? 'unknown');
+    const status = item.status ?? 'unknown';
     if (!byStatus[status]) byStatus[status] = [];
     byStatus[status].push(item);
   }
@@ -510,8 +729,7 @@ function buildTaskOverviewContext(items: Array<Record<string, unknown>>): string
   for (const [status, statusItems] of Object.entries(byStatus)) {
     parts.push(`\n**${status}** (${statusItems.length} items):`);
     for (const item of statusItems.slice(0, 5)) {
-      const agent = item.assignedAgent as Record<string, unknown> | null;
-      parts.push(`- [${item.id}] ${item.title}${item.priority !== 'normal' ? ` (${item.priority})` : ''}${agent ? ` → ${agent.name}` : ''}`);
+      parts.push(`- [${item.id}] ${item.title}${item.priority !== 'normal' ? ` (${item.priority})` : ''}${item.assignedAgent ? ` → ${item.assignedAgent.name}` : ''}`);
     }
     if (statusItems.length > 5) {
       parts.push(`  ... and ${statusItems.length - 5} more`);
@@ -526,6 +744,15 @@ function buildAutonomousInstructions(request: AgentRunRequest, targetItem: Recor
 
   parts.push('You are running autonomously (not in a conversation with a user).');
   parts.push(`This is a ${request.runType} run.`);
+
+  if (request.triggerContext?.type === 'handoff') {
+    const ctx = request.triggerContext;
+    parts.push(`\nYou were handed this task by another agent (run: ${ctx.sourceRunId}).`);
+    if (ctx.handoffContext) {
+      parts.push(`The previous agent provided this context: ${ctx.handoffContext}`);
+    }
+    parts.push('Continue the work from where they left off.');
+  }
 
   if (targetItem) {
     parts.push(`\nYou have been assigned to work on the task: "${targetItem.title}" (ID: ${targetItem.id}).`);

@@ -33,10 +33,14 @@ import permissionSetsRouter from './routes/permissionSets.js';
 import portalRouter from './routes/portal.js';
 import agentsRouter from './routes/agents.js';
 import boardTemplatesRouter from './routes/boardTemplates.js';
-import workspaceRouter from './routes/workspace.js';
+import boardConfigRouter from './routes/boardConfig.js';
+import tasksRouter from './routes/tasks.js';
+import subaccountAgentsRouter from './routes/subaccountAgents.js';
 import agentTemplatesRouter from './routes/agentTemplates.js';
 import skillsRouter from './routes/skills.js';
 import agentRunsRouter from './routes/agentRuns.js';
+import workspaceMemoryRouter from './routes/workspaceMemory.js';
+import scheduledTasksRouter from './routes/scheduledTasks.js';
 
 const app = express();
 
@@ -74,10 +78,14 @@ app.use(permissionSetsRouter);
 app.use(portalRouter);
 app.use(agentsRouter);
 app.use(boardTemplatesRouter);
-app.use(workspaceRouter);
+app.use(boardConfigRouter);
+app.use(tasksRouter);
+app.use(subaccountAgentsRouter);
 app.use(agentTemplatesRouter);
 app.use(skillsRouter);
 app.use(agentRunsRouter);
+app.use(workspaceMemoryRouter);
+app.use(scheduledTasksRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

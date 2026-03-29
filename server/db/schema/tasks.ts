@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -27,6 +27,16 @@ export const tasks = pgTable(
       .references(() => processes.id),
     position: integer('position').notNull().default(0),
     dueDate: timestamp('due_date'),
+
+    // ── Handoff tracking ──────────────────────────────────────────────────
+    handoffSourceRunId: uuid('handoff_source_run_id'),
+    handoffContext: jsonb('handoff_context'),
+    handoffDepth: integer('handoff_depth').notNull().default(0),
+
+    // ── Sub-agent tracking ────────────────────────────────────────────────
+    isSubTask: integer('is_sub_task').notNull().default(0), // 0=false, 1=true
+    parentTaskId: uuid('parent_task_id'),
+
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     deletedAt: timestamp('deleted_at'),
