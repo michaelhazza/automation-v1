@@ -117,20 +117,30 @@ router.get(
       await resolveSubaccount(req.params.subaccountId, req.orgId!);
       let config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
 
+      console.log('[BOARD-CONFIG GET]', {
+        subaccountId: req.params.subaccountId,
+        orgId: req.orgId,
+        configFound: !!config,
+        columnsCount: config?.columns?.length ?? 0,
+      });
+
       // Auto-initialise from org config if subaccount has no board yet
       if (!config) {
         config = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
+        console.log('[BOARD-CONFIG GET] auto-init result:', !!config, config?.columns?.length ?? 0);
       }
 
       // If config exists but has empty columns, try to re-sync from org config
       if (config && Array.isArray(config.columns) && config.columns.length === 0) {
         const orgConfig = await boardService.getOrgBoardConfig(req.orgId!);
+        console.log('[BOARD-CONFIG GET] empty columns, org config:', !!orgConfig, orgConfig?.columns?.length ?? 0);
         if (orgConfig && orgConfig.columns.length > 0) {
           const updated = await boardService.updateBoardConfig(config.id, req.orgId!, orgConfig.columns as any);
           config = updated;
         }
       }
 
+      console.log('[BOARD-CONFIG GET] final response:', { configId: config?.id, columnsCount: config?.columns?.length ?? 0 });
       res.json(config);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };

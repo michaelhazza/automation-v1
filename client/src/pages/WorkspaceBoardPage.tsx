@@ -57,11 +57,15 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     setLoading(true);
     try {
       const [configRes, tasksRes, agentsRes, saRes] = await Promise.all([
-        api.get(`/api/subaccounts/${subaccountId}/board-config`),
+        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err) => {
+          console.error('[WorkspaceBoardPage] board-config fetch failed:', err.response?.status, err.response?.data);
+          return { data: null };
+        }),
         api.get(`/api/subaccounts/${subaccountId}/tasks`),
         api.get('/api/agents'),
         api.get(`/api/subaccounts/${subaccountId}`),
       ]);
+      console.log('[WorkspaceBoardPage] board-config response:', configRes.data ? { id: configRes.data.id, columnsCount: configRes.data.columns?.length } : null);
       setColumns(configRes.data?.columns ?? []);
       setTasks(tasksRes.data);
       setAgents(agentsRes.data.filter((a: { status: string }) => a.status === 'active'));
