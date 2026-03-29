@@ -122,6 +122,15 @@ router.get(
         config = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
       }
 
+      // If config exists but has empty columns, try to re-sync from org config
+      if (config && Array.isArray(config.columns) && config.columns.length === 0) {
+        const orgConfig = await boardService.getOrgBoardConfig(req.orgId!);
+        if (orgConfig && orgConfig.columns.length > 0) {
+          const updated = await boardService.updateBoardConfig(config.id, req.orgId!, orgConfig.columns as any);
+          config = updated;
+        }
+      }
+
       res.json(config);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
