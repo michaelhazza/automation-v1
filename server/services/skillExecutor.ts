@@ -5,6 +5,10 @@ import { subaccountAgents, agents, agentRuns, tasks } from '../db/schema/index.j
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
 import { agentExecutionService } from './agentExecutionService.js';
+import { actionService } from './actionService.js';
+import { executionLayerService } from './executionLayerService.js';
+import { reviewService } from './reviewService.js';
+import { getActionDefinition } from '../config/actionRegistry.js';
 import {
   MAX_HANDOFF_DEPTH,
   MAX_TASK_TITLE_LENGTH,
@@ -54,6 +58,7 @@ export const skillExecutor = {
     const { skillName, input, context } = params;
 
     switch (skillName) {
+      // ── Direct skills (no action record) ──────────────────────────────
       case 'web_search':
         return executeWebSearch(input);
       case 'read_workspace':
@@ -62,21 +67,159 @@ export const skillExecutor = {
         return executeWriteWorkspace(input, context);
       case 'trigger_process':
         return executeTriggerProcess(input, context);
-      case 'create_task':
-        return executeCreateTask(input, context);
-      case 'move_task':
-        return executeMoveTask(input, context);
-      case 'add_deliverable':
-        return executeAddDeliverable(input, context);
-      case 'reassign_task':
-        return executeReassignTask(input, context);
       case 'spawn_sub_agents':
         return executeSpawnSubAgents(input, context);
+
+      // ── Auto-gated skills (action record for audit, executes synchronously) ──
+      case 'create_task':
+        return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
+      case 'move_task':
+        return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
+      case 'add_deliverable':
+        return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
+      case 'reassign_task':
+        return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
+
+      // ── Review-gated skills (proposes action, does NOT execute immediately) ──
+      case 'send_email':
+        return proposeReviewGatedAction('send_email', input, context);
+      case 'update_record':
+        return proposeReviewGatedAction('update_record', input, context);
+
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// Action-gated execution helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Wraps an auto-gated internal skill: creates an action record for auditability,
+ * then executes the original skill logic synchronously and records the result.
+ */
+async function executeWithActionAudit(
+  actionType: string,
+  input: Record<string, unknown>,
+  context: SkillExecutionContext,
+  executor: () => Promise<unknown>
+): Promise<unknown> {
+  const idempotencyKey = `${actionType}:${context.runId}:${Date.now()}`;
+
+  try {
+    const proposed = await actionService.proposeAction({
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId,
+      agentId: context.agentId,
+      agentRunId: context.runId,
+      actionType,
+      idempotencyKey,
+      payload: input,
+    });
+
+    // If returned existing (not new), return its status
+    if (!proposed.isNew) {
+      return { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
+    }
+
+    // Auto-gated: should be approved immediately by proposeAction
+    if (proposed.status !== 'approved') {
+      return { success: false, action_id: proposed.actionId, status: proposed.status, message: `Action gated: ${proposed.status}` };
+    }
+
+    // Lock and execute
+    const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
+    if (!locked) {
+      return { success: false, error: 'Failed to acquire execution lock' };
+    }
+
+    // Run the original skill logic
+    const result = await executor();
+
+    // Record completion
+    const resultObj = result as Record<string, unknown>;
+    if (resultObj.success) {
+      await actionService.markCompleted(proposed.actionId, context.organisationId, result);
+    } else {
+      await actionService.markFailed(proposed.actionId, context.organisationId, resultObj.error ?? 'Unknown error');
+    }
+
+    return result;
+  } catch (err) {
+    // If action tracking fails, still execute the original skill
+    // to avoid breaking existing behaviour during rollout
+    console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
+    return executor();
+  }
+}
+
+/**
+ * Proposes a review-gated action. Does NOT execute — returns the action status
+ * to the agent so it knows the action is queued for human review.
+ */
+async function proposeReviewGatedAction(
+  actionType: string,
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const definition = getActionDefinition(actionType);
+  if (!definition) {
+    return { success: false, error: `Unknown action type: ${actionType}` };
+  }
+
+  // Build idempotency key from payload
+  const keyParts = [actionType, context.subaccountId];
+  if (input.thread_id) keyParts.push(String(input.thread_id));
+  if (input.record_id) keyParts.push(String(input.record_id));
+  keyParts.push(String(Date.now()));
+  const idempotencyKey = keyParts.join(':');
+
+  try {
+    const proposed = await actionService.proposeAction({
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId,
+      agentId: context.agentId,
+      agentRunId: context.runId,
+      actionType,
+      idempotencyKey,
+      payload: input,
+      metadata: input.metadata as Record<string, unknown> | undefined,
+    });
+
+    if (!proposed.isNew) {
+      return {
+        success: true,
+        action_id: proposed.actionId,
+        status: proposed.status,
+        message: 'Action already exists (duplicate detected)',
+      };
+    }
+
+    // Create review item if pending approval
+    if (proposed.status === 'pending_approval') {
+      const action = await actionService.getAction(proposed.actionId, context.organisationId);
+      await reviewService.createReviewItem(action, {
+        actionType,
+        reasoning: input.metadata ? String((input.metadata as Record<string, unknown>).reasoning ?? '') : undefined,
+        proposedPayload: input,
+      });
+    }
+
+    return {
+      success: true,
+      action_id: proposed.actionId,
+      status: proposed.status,
+      message: proposed.status === 'pending_approval'
+        ? 'Action queued for human review. It will execute after approval.'
+        : `Action status: ${proposed.status}`,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to propose ${actionType}: ${errMsg}` };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Web Search (Tavily)
