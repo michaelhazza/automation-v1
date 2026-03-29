@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
+import RecurrencePicker, { type RecurrenceValue } from '../components/RecurrencePicker';
 
 interface ScheduledTask {
   id: string;
@@ -26,13 +27,11 @@ interface Agent {
 
 interface Props { user: { id: string; role: string } }
 
-const PRESETS = [
-  { label: 'Daily', rrule: 'FREQ=DAILY;INTERVAL=1' },
-  { label: 'Weekdays', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
-  { label: 'Weekly', rrule: 'FREQ=WEEKLY;INTERVAL=1' },
-  { label: 'Fortnightly', rrule: 'FREQ=WEEKLY;INTERVAL=2' },
-  { label: 'Monthly', rrule: 'FREQ=MONTHLY;BYMONTHDAY=1' },
-];
+const INITIAL_FORM = {
+  title: '', description: '', brief: '', priority: 'normal',
+  assignedAgentId: '', rrule: 'FREQ=WEEKLY;INTERVAL=1', timezone: 'UTC', scheduleTime: '09:00',
+  endsAt: null as string | null, endsAfterRuns: null as number | null,
+};
 
 export default function ScheduledTasksPage({ user }: Props) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
@@ -41,7 +40,7 @@ export default function ScheduledTasksPage({ user }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: '', description: '', brief: '', priority: 'normal', assignedAgentId: '', rrule: 'FREQ=WEEKLY;INTERVAL=1', timezone: 'UTC', scheduleTime: '09:00' });
+  const [form, setForm] = useState({ ...INITIAL_FORM });
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -59,9 +58,13 @@ export default function ScheduledTasksPage({ user }: Props) {
 
   async function handleCreate() {
     try {
-      await api.post(`/api/subaccounts/${subaccountId}/scheduled-tasks`, form);
+      const payload: Record<string, unknown> = { ...form };
+      // Only send end conditions if set
+      if (!payload.endsAt) delete payload.endsAt;
+      if (!payload.endsAfterRuns) delete payload.endsAfterRuns;
+      await api.post(`/api/subaccounts/${subaccountId}/scheduled-tasks`, payload);
       setShowForm(false);
-      setForm({ title: '', description: '', brief: '', priority: 'normal', assignedAgentId: '', rrule: 'FREQ=WEEKLY;INTERVAL=1', timezone: 'UTC', scheduleTime: '09:00' });
+      setForm({ ...INITIAL_FORM });
       await load();
     } catch { setError('Failed to create'); }
   }
@@ -130,14 +133,10 @@ export default function ScheduledTasksPage({ user }: Props) {
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Recurrence</label>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                  {PRESETS.map(p => (
-                    <button key={p.label} onClick={() => setForm({ ...form, rrule: p.rrule })} style={{ padding: '6px 14px', borderRadius: 6, border: form.rrule === p.rrule ? '2px solid #6366f1' : '1px solid #e2e8f0', background: form.rrule === p.rrule ? '#eef2ff' : '#fff', fontSize: 13, cursor: 'pointer', color: form.rrule === p.rrule ? '#6366f1' : '#475569', fontWeight: form.rrule === p.rrule ? 600 : 400 }}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-                <input value={form.rrule} onChange={e => setForm({ ...form, rrule: e.target.value })} style={{ width: '100%', padding: 8, border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, fontFamily: 'monospace' }} placeholder="RRULE string" />
+                <RecurrencePicker
+                  value={{ rrule: form.rrule, endsAt: form.endsAt, endsAfterRuns: form.endsAfterRuns }}
+                  onChange={(rv: RecurrenceValue) => setForm({ ...form, rrule: rv.rrule, endsAt: rv.endsAt ?? null, endsAfterRuns: rv.endsAfterRuns ?? null })}
+                />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
