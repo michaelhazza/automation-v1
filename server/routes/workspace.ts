@@ -114,33 +114,40 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   async (req, res) => {
     try {
-      await resolveSubaccount(req.params.subaccountId, req.orgId!);
-      let config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+      console.log('[BOARD-DEBUG] === GET /api/subaccounts/:subaccountId/board-config ===');
+      console.log('[BOARD-DEBUG] subaccountId:', req.params.subaccountId);
+      console.log('[BOARD-DEBUG] req.orgId:', req.orgId);
+      console.log('[BOARD-DEBUG] user.role:', req.user?.role);
+      console.log('[BOARD-DEBUG] user.organisationId:', req.user?.organisationId);
+      console.log('[BOARD-DEBUG] X-Organisation-Id header:', req.headers['x-organisation-id']);
 
-      console.log('[BOARD-CONFIG GET]', {
-        subaccountId: req.params.subaccountId,
-        orgId: req.orgId,
-        configFound: !!config,
-        columnsCount: config?.columns?.length ?? 0,
-      });
+      await resolveSubaccount(req.params.subaccountId, req.orgId!);
+      console.log('[BOARD-DEBUG] resolveSubaccount passed');
+
+      let config = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);
+      console.log('[BOARD-DEBUG] getSubaccountBoardConfig result:', config ? { id: config.id, columnsLength: config.columns?.length, subaccountId: config.subaccountId, organisationId: config.organisationId } : 'NULL');
 
       // Auto-initialise from org config if subaccount has no board yet
       if (!config) {
+        const orgConfig = await boardService.getOrgBoardConfig(req.orgId!);
+        console.log('[BOARD-DEBUG] No subaccount config. Org config:', orgConfig ? { id: orgConfig.id, columnsLength: orgConfig.columns?.length } : 'NULL');
         config = await boardService.initSubaccountBoard(req.orgId!, req.params.subaccountId);
-        console.log('[BOARD-CONFIG GET] auto-init result:', !!config, config?.columns?.length ?? 0);
+        console.log('[BOARD-DEBUG] initSubaccountBoard result:', config ? { id: config.id, columnsLength: config.columns?.length } : 'NULL');
       }
 
       // If config exists but has empty columns, try to re-sync from org config
       if (config && Array.isArray(config.columns) && config.columns.length === 0) {
         const orgConfig = await boardService.getOrgBoardConfig(req.orgId!);
-        console.log('[BOARD-CONFIG GET] empty columns, org config:', !!orgConfig, orgConfig?.columns?.length ?? 0);
+        console.log('[BOARD-DEBUG] Empty columns detected. Org config:', orgConfig ? { id: orgConfig.id, columnsLength: orgConfig.columns?.length } : 'NULL');
         if (orgConfig && orgConfig.columns.length > 0) {
           const updated = await boardService.updateBoardConfig(config.id, req.orgId!, orgConfig.columns as any);
           config = updated;
+          console.log('[BOARD-DEBUG] Re-synced from org. New columnsLength:', config.columns?.length);
         }
       }
 
-      console.log('[BOARD-CONFIG GET] final response:', { configId: config?.id, columnsCount: config?.columns?.length ?? 0 });
+      console.log('[BOARD-DEBUG] FINAL RESPONSE:', config ? { id: config.id, columnsLength: config.columns?.length } : 'NULL');
+      console.log('[BOARD-DEBUG] === END ===');
       res.json(config);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
