@@ -42,6 +42,10 @@ router.post('/api/agents', authenticate, requireOrgPermission(ORG_PERMISSIONS.AG
 router.get('/api/agents/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), async (req, res) => {
   try {
     const result = await agentService.getAgent(req.params.id, req.orgId!);
+    // For system-managed agents, redact the system-level masterPrompt from org admins
+    if (result.isSystemManaged && req.user!.role !== 'system_admin') {
+      result.masterPrompt = '';
+    }
     res.json(result);
   } catch (err: unknown) {
     const e = err as { statusCode?: number; message?: string };

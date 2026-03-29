@@ -10,6 +10,8 @@ interface Agent {
   description: string | null;
   status: string;
   modelId: string;
+  systemAgentId: string | null;
+  isSystemManaged: boolean;
   dataSources?: { id: string }[];
   dataSourceCount?: number;
   createdAt: string;
@@ -157,7 +159,18 @@ export default function AdminAgentsPage({ user }: { user: User }) {
                 return (
                   <tr key={agent.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '12px 16px' }}>
-                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{agent.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontWeight: 600, color: '#1e293b' }}>{agent.name}</span>
+                        {agent.isSystemManaged && (
+                          <span style={{
+                            display: 'inline-block', padding: '1px 8px', borderRadius: 999,
+                            fontSize: 10, fontWeight: 600, background: '#ede9fe', color: '#6d28d9',
+                            letterSpacing: '0.02em',
+                          }}>
+                            System
+                          </span>
+                        )}
+                      </div>
                       {agent.description && (
                         <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {agent.description}

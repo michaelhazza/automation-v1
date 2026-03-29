@@ -37,7 +37,7 @@ import boardTemplatesRouter from './routes/boardTemplates.js';
 import boardConfigRouter from './routes/boardConfig.js';
 import tasksRouter from './routes/tasks.js';
 import subaccountAgentsRouter from './routes/subaccountAgents.js';
-import agentTemplatesRouter from './routes/agentTemplates.js';
+// agentTemplates deprecated — replaced by systemAgents
 import systemAgentsRouter from './routes/systemAgents.js';
 import systemSkillsRouter from './routes/systemSkills.js';
 import skillsRouter from './routes/skills.js';
@@ -84,7 +84,7 @@ app.use(boardTemplatesRouter);
 app.use(boardConfigRouter);
 app.use(tasksRouter);
 app.use(subaccountAgentsRouter);
-app.use(agentTemplatesRouter);
+// agentTemplatesRouter removed — replaced by systemAgentsRouter
 app.use(systemAgentsRouter);
 app.use(systemSkillsRouter);
 app.use(skillsRouter);

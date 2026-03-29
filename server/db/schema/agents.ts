@@ -1,6 +1,5 @@
 import { pgTable, uuid, text, integer, boolean, real, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
-import { agentTemplates } from './agentTemplates';
 import { systemAgents } from './systemAgents';
 
 export const agents = pgTable(
@@ -10,9 +9,8 @@ export const agents = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
-    // Optional link to the template this agent was created from (legacy)
-    sourceTemplateId: uuid('source_template_id')
-      .references(() => agentTemplates.id),
+    // Legacy template fields (columns still in DB, no longer used)
+    sourceTemplateId: uuid('source_template_id'),
     sourceTemplateVersion: integer('source_template_version'),
     // Living link to system agent — inherits system prompt + system skills at runtime
     systemAgentId: uuid('system_agent_id')

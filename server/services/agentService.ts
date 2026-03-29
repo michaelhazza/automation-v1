@@ -416,6 +416,8 @@ export const agentService = {
       modelProvider: a.modelProvider,
       modelId: a.modelId,
       status: a.status,
+      systemAgentId: a.systemAgentId,
+      isSystemManaged: a.isSystemManaged,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -434,6 +436,8 @@ export const agentService = {
       modelProvider: a.modelProvider,
       modelId: a.modelId,
       status: a.status,
+      systemAgentId: a.systemAgentId,
+      isSystemManaged: a.isSystemManaged,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -459,11 +463,14 @@ export const agentService = {
       slug: agent.slug,
       description: agent.description,
       masterPrompt: agent.masterPrompt,
+      additionalPrompt: agent.additionalPrompt,
       modelProvider: agent.modelProvider,
       modelId: agent.modelId,
       temperature: agent.temperature,
       maxTokens: agent.maxTokens,
       status: agent.status,
+      systemAgentId: agent.systemAgentId,
+      isSystemManaged: agent.isSystemManaged,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
       dataSources: sources.map((s) => ({
@@ -529,6 +536,7 @@ export const agentService = {
       name: string;
       description: string | null;
       masterPrompt: string;
+      additionalPrompt: string;
       modelProvider: string;
       modelId: string;
       temperature: number;
@@ -544,10 +552,16 @@ export const agentService = {
 
     if (!existing) throw { statusCode: 404, message: 'Agent not found' };
 
+    // System-managed agents: block editing the masterPrompt (that's the system layer)
+    if (existing.isSystemManaged && data.masterPrompt !== undefined) {
+      throw { statusCode: 400, message: 'Cannot edit master prompt on system-managed agents. Use additionalPrompt instead.' };
+    }
+
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) { update.name = data.name; update.slug = makeSlug(data.name); }
     if (data.description !== undefined) update.description = data.description;
-    if (data.masterPrompt !== undefined) update.masterPrompt = data.masterPrompt;
+    if (!existing.isSystemManaged && data.masterPrompt !== undefined) update.masterPrompt = data.masterPrompt;
+    if (data.additionalPrompt !== undefined) update.additionalPrompt = data.additionalPrompt;
     if (data.modelProvider !== undefined) update.modelProvider = data.modelProvider;
     if (data.modelId !== undefined) update.modelId = data.modelId;
     if (data.temperature !== undefined) update.temperature = data.temperature;
