@@ -78,8 +78,8 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
   const [loading, setLoading] = useState(true);
 
   const visibleTabs: ActiveTab[] = mode === 'client'
-    ? ['categories', 'processes', 'members']
-    : ['settings'];
+    ? ['categories', 'members']
+    : ['processes', 'settings'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
