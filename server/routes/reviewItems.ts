@@ -10,7 +10,7 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/review-queue',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_VIEW),
   async (req, res) => {
     try {
       const items = await reviewService.getReviewQueue(req.orgId!, req.params.subaccountId);
@@ -27,7 +27,7 @@ router.get(
 router.get(
   '/api/subaccounts/:subaccountId/review-queue/count',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_VIEW),
   async (req, res) => {
     try {
       const count = await reviewService.getReviewQueueCount(req.orgId!, req.params.subaccountId);
@@ -60,7 +60,7 @@ router.get(
 router.post(
   '/api/review-items/:id/approve',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   async (req, res) => {
     try {
       const { edits } = req.body;
@@ -78,7 +78,7 @@ router.post(
 router.post(
   '/api/review-items/:id/reject',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   async (req, res) => {
     try {
       const result = await reviewService.rejectItem(req.params.id, req.orgId!, req.userId!);
@@ -95,7 +95,7 @@ router.post(
 router.post(
   '/api/review-items/bulk-approve',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   async (req, res) => {
     try {
       const { ids } = req.body;
@@ -117,7 +117,7 @@ router.post(
 router.post(
   '/api/review-items/bulk-reject',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   async (req, res) => {
     try {
       const { ids } = req.body;

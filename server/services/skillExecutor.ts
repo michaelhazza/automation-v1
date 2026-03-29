@@ -81,12 +81,18 @@ export const skillExecutor = {
         return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
       case 'reassign_task':
         return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
+      case 'read_inbox':
+        return executeWithActionAudit('read_inbox', input, context, () => executeReadInbox(input, context));
+      case 'fetch_url':
+        return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
 
       // ── Review-gated skills (proposes action, does NOT execute immediately) ──
       case 'send_email':
         return proposeReviewGatedAction('send_email', input, context);
       case 'update_record':
         return proposeReviewGatedAction('update_record', input, context);
+      case 'request_approval':
+        return proposeReviewGatedAction('request_approval', input, context);
 
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
@@ -883,5 +889,78 @@ async function executeSpawnSubAgents(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to spawn sub-agents: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Read Inbox — stub (provider integration pending)
+// ---------------------------------------------------------------------------
+
+async function executeReadInbox(
+  _input: Record<string, unknown>,
+  _context: SkillExecutionContext
+): Promise<unknown> {
+  return {
+    success: true,
+    result: {
+      messages: [],
+      note: 'read_inbox: provider integration pending',
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Fetch URL — HTTP GET/POST with response truncation
+// ---------------------------------------------------------------------------
+
+async function executeFetchUrl(
+  input: Record<string, unknown>,
+  _context: SkillExecutionContext
+): Promise<unknown> {
+  const url = String(input.url ?? '');
+  if (!url) return { success: false, error: 'url is required' };
+
+  const method = (String(input.method ?? 'GET')).toUpperCase();
+  if (method !== 'GET' && method !== 'POST') {
+    return { success: false, error: 'method must be GET or POST' };
+  }
+
+  const headers: Record<string, string> = {};
+  if (input.headers && typeof input.headers === 'object') {
+    for (const [k, v] of Object.entries(input.headers as Record<string, unknown>)) {
+      headers[k] = String(v);
+    }
+  }
+
+  try {
+    const fetchOptions: RequestInit = {
+      method,
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    };
+
+    if (method === 'POST' && input.body) {
+      fetchOptions.body = String(input.body);
+      if (!headers['Content-Type'] && !headers['content-type']) {
+        headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    const response = await fetch(url, fetchOptions);
+
+    const bodyText = await response.text();
+    const truncated = bodyText.length > 10000;
+    const content = truncated ? bodyText.slice(0, 10000) : bodyText;
+
+    return {
+      success: true,
+      status_code: response.status,
+      content,
+      truncated,
+      content_type: response.headers.get('content-type') ?? undefined,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Fetch failed: ${errMsg}` };
   }
 }

@@ -50,6 +50,9 @@ export const ORG_PERMISSIONS = {
   // Workspace
   WORKSPACE_VIEW: 'org.workspace.view',
   WORKSPACE_MANAGE: 'org.workspace.manage',
+  // Review
+  REVIEW_VIEW: 'org.review.view',
+  REVIEW_APPROVE: 'org.review.approve',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -82,6 +85,9 @@ export const SUBACCOUNT_PERMISSIONS = {
   // Workspace
   WORKSPACE_VIEW: 'subaccount.workspace.view',
   WORKSPACE_MANAGE: 'subaccount.workspace.manage',
+  // Review
+  REVIEW_VIEW: 'subaccount.review.view',
+  REVIEW_APPROVE: 'subaccount.review.approve',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -159,6 +165,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.workspace
   { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace board and tasks in portal',   groupName: 'subaccount.workspace' },
   { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace tasks in portal',           groupName: 'subaccount.workspace' },
+  // org.review
+  { key: ORG_PERMISSIONS.REVIEW_VIEW,     description: 'View review queue and items',              groupName: 'org.review' },
+  { key: ORG_PERMISSIONS.REVIEW_APPROVE,  description: 'Approve or reject review items',           groupName: 'org.review' },
+  // subaccount.review
+  { key: SUBACCOUNT_PERMISSIONS.REVIEW_VIEW,    description: 'View review queue in portal',              groupName: 'subaccount.review' },
+  { key: SUBACCOUNT_PERMISSIONS.REVIEW_APPROVE, description: 'Approve or reject review items in portal', groupName: 'subaccount.review' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
