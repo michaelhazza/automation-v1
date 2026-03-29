@@ -149,7 +149,7 @@ export default function App() {
             <Route path="/admin/engines" element={<Navigate to="/admin/settings" replace />} />
             <Route path="/admin/permission-sets" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />
             <Route path="/admin/agents" element={<AdminAgentsPage user={user!} />} />
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
@@ -169,6 +169,9 @@ export default function App() {
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
             <Route path="/system/board-templates" element={<SystemBoardTemplatesPage user={user!} />} />
           </Route>
+
+          {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
+          <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
 
           {/* AI Agents */}
           <Route path="/agents" element={<AgentsPage user={user!} />} />

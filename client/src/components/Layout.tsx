@@ -498,7 +498,14 @@ export default function Layout({ user, children }: LayoutProps) {
                   label="Portal"
                 />
               )}
-              {(hasClientPerm('subaccount.settings.edit') || hasOrgPerm('org.subaccounts.edit')) && (
+              {(hasClientPerm('subaccount.categories.manage') || hasClientPerm('subaccount.users.view')) && (
+                <NavLink
+                  to={`/client-settings/${activeClientId}`}
+                  icon={<Icons.settings />}
+                  label="Settings"
+                />
+              )}
+              {hasOrgPerm('org.subaccounts.edit') && (
                 <NavLink
                   to={`/admin/subaccounts/${activeClientId}`}
                   icon={<Icons.settings />}

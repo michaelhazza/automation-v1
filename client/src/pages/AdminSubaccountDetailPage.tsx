@@ -65,7 +65,7 @@ interface OrgMember {
 
 type ActiveTab = 'categories' | 'processes' | 'members' | 'settings';
 
-export default function AdminSubaccountDetailPage({ user }: { user: User }) {
+export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { user: User; mode?: 'client' | 'admin' }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [sa, setSa] = useState<Subaccount | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -76,7 +76,11 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
   const [permissionSets, setPermissionSets] = useState<PermissionSet[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('categories');
+
+  const visibleTabs: ActiveTab[] = mode === 'client'
+    ? ['categories', 'processes', 'members']
+    : ['settings'];
+  const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
   // Category form
@@ -247,23 +251,34 @@ export default function AdminSubaccountDetailPage({ user }: { user: User }) {
 
   return (
     <>
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/admin/subaccounts" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to subaccounts</Link>
-      </div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>{sa.name}</h1>
-      <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, fontFamily: 'monospace' }}>{sa.slug}</div>
+      {mode === 'admin' && (
+        <div style={{ marginBottom: 16 }}>
+          <Link to="/admin/subaccounts" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to subaccounts</Link>
+        </div>
+      )}
+      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
+        {mode === 'client' ? `${sa.name} Settings` : sa.name}
+      </h1>
+      {mode === 'admin' && (
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, fontFamily: 'monospace' }}>{sa.slug}</div>
+      )}
+      {mode === 'client' && (
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>Manage categories, automations and members</div>
+      )}
 
       {/* Tabs */}
-      <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
-        {(['categories', 'processes', 'members', 'settings'] as ActiveTab[]).map((tab) => {
-          const tabLabels: Record<ActiveTab, string> = { categories: 'Categories', processes: 'Automations', members: 'Members', settings: 'Settings' };
-          return (
-          <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
-            {tabLabels[tab]}
-          </button>
-          );
-        })}
-      </div>
+      {visibleTabs.length > 1 && (
+        <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
+          {visibleTabs.map((tab) => {
+            const tabLabels: Record<ActiveTab, string> = { categories: 'Categories', processes: 'Automations', members: 'Members', settings: 'Settings' };
+            return (
+            <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
+              {tabLabels[tab]}
+            </button>
+            );
+          })}
+        </div>
+      )}
 
       {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
