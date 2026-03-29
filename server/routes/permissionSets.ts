@@ -8,6 +8,7 @@ import {
   orgUserRoles,
   permissions,
   users,
+  subaccountUserAssignments,
 } from '../db/schema/index.js';
 import { eq, and, isNull, inArray } from 'drizzle-orm';
 
@@ -507,6 +508,74 @@ router.delete(
 
       await db.delete(orgUserRoles).where(eq(orgUserRoles.id, existing.id));
       res.json({ message: 'Org role removed' });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ─── Current user permissions (for client-side nav filtering) ────────────────
+
+/**
+ * GET /api/my-permissions
+ * Returns the current user's org-level permission keys.
+ * system_admin gets a special '__system_admin__' marker.
+ */
+router.get(
+  '/api/my-permissions',
+  authenticate,
+  async (req, res) => {
+    try {
+      if (req.user!.role === 'system_admin') {
+        res.json({ permissions: ['__system_admin__'] });
+        return;
+      }
+
+      const organisationId = req.orgId ?? req.user!.organisationId;
+      if (!organisationId) {
+        res.json({ permissions: [] });
+        return;
+      }
+
+      const rows = await db
+        .select({ permissionKey: permissionSetItems.permissionKey })
+        .from(orgUserRoles)
+        .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, orgUserRoles.permissionSetId))
+        .where(and(eq(orgUserRoles.userId, req.user!.id), eq(orgUserRoles.organisationId, organisationId)));
+
+      res.json({ permissions: rows.map(r => r.permissionKey) });
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * GET /api/subaccounts/:subaccountId/my-permissions
+ * Returns the current user's effective permission keys for a specific subaccount.
+ * Combines subaccount-level assignments. system_admin gets '__system_admin__'.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/my-permissions',
+  authenticate,
+  async (req, res) => {
+    try {
+      if (req.user!.role === 'system_admin') {
+        res.json({ permissions: ['__system_admin__'] });
+        return;
+      }
+
+      const subaccountId = req.params.subaccountId;
+
+      const rows = await db
+        .select({ permissionKey: permissionSetItems.permissionKey })
+        .from(subaccountUserAssignments)
+        .innerJoin(permissionSetItems, eq(permissionSetItems.permissionSetId, subaccountUserAssignments.permissionSetId))
+        .where(and(eq(subaccountUserAssignments.userId, req.user!.id), eq(subaccountUserAssignments.subaccountId, subaccountId)));
+
+      res.json({ permissions: rows.map(r => r.permissionKey) });
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
