@@ -269,6 +269,485 @@ Build the action/approval layer as a general platform primitive. Use the support
 
 ---
 
-## End of Part 1
+---
 
-Part 2 covers: refined data model (new tables only), action state machines, execution layer design, review/approval system, skillExecutor integration strategy, Phase 1 support agent plan, and build sequence.
+# Part 2: Implementation Plan
+
+---
+
+## 6. New Data Model (Additions Only)
+
+These are the only new tables required. Everything else already exists.
+
+### 6.1 `actions`
+
+The central new object. Represents a proposed unit of work that may require approval before execution.
+
+```sql
+actions
+  id                  uuid PK
+  organisation_id     uuid FK → organisations (for scoping/isolation)
+  subaccount_id       uuid FK → subaccounts
+  agent_id            uuid FK → agents
+  agent_run_id        uuid FK → agent_runs nullable
+  parent_action_id    uuid FK → actions nullable (for grouped actions)
+
+  action_type         text NOT NULL  -- e.g. send_email, update_crm, create_task
+  action_category     text NOT NULL  -- api | worker | browser | devops
+  is_external         boolean NOT NULL DEFAULT false
+  gate_level          text NOT NULL  -- auto | review | block
+
+  status              text NOT NULL DEFAULT 'proposed'
+  idempotency_key     text NOT NULL
+  payload_json        jsonb NOT NULL
+  metadata_json       jsonb          -- category, priority, reasoning
+
+  result_json         jsonb nullable
+  error_json          jsonb nullable
+
+  approved_by         uuid FK → users nullable
+  approved_at         timestamp nullable
+  executed_at         timestamp nullable
+  retry_count         integer NOT NULL DEFAULT 0
+  max_retries         integer NOT NULL DEFAULT 3
+
+  created_at          timestamp NOT NULL DEFAULT now()
+  updated_at          timestamp NOT NULL DEFAULT now()
+
+UNIQUE (subaccount_id, idempotency_key)
+INDEX on (subaccount_id, status)
+INDEX on (agent_run_id)
+```
+
+**Valid statuses:** `proposed → pending_approval → approved → executing → completed`
+                    `proposed → pending_approval → rejected`
+                    `proposed → blocked`
+                    `proposed/executing → failed`
+                    `proposed → skipped` (duplicate detected)
+
+### 6.2 `action_events`
+
+Audit trail. Every status transition emits one row. Immutable.
+
+```sql
+action_events
+  id              uuid PK
+  organisation_id uuid FK → organisations
+  action_id       uuid FK → actions
+  event_type      text NOT NULL  -- see list below
+  actor_id        uuid FK → users nullable  -- null if system-driven
+  metadata_json   jsonb
+  created_at      timestamp NOT NULL DEFAULT now()
+
+INDEX on (action_id)
+```
+
+**Event types:** `created`, `validation_failed`, `queued_for_review`, `approved`, `edited_and_approved`, `rejected`, `execution_started`, `execution_completed`, `execution_failed`, `retry_scheduled`, `blocked`, `skipped_duplicate`
+
+### 6.3 `review_items`
+
+Human-facing projection of actions needing approval. One row per action that hits `pending_approval`.
+
+```sql
+review_items
+  id                    uuid PK
+  organisation_id       uuid FK → organisations
+  subaccount_id         uuid FK → subaccounts
+  action_id             uuid FK → actions UNIQUE
+  agent_run_id          uuid FK → agent_runs nullable
+
+  review_status         text NOT NULL DEFAULT 'pending'
+  review_payload_json   jsonb NOT NULL  -- full context for reviewer
+  human_edit_json       jsonb nullable  -- payload overrides applied by reviewer
+
+  reviewed_by           uuid FK → users nullable
+  reviewed_at           timestamp nullable
+  created_at            timestamp NOT NULL DEFAULT now()
+
+INDEX on (subaccount_id, review_status)
+```
+
+**Valid statuses:** `pending → edited_pending → approved → completed`
+                    `pending → rejected`
+
+`review_payload_json` must include everything the reviewer needs without leaving the page: sender, original content, agent reasoning, proposed payload.
+
+### 6.4 `integration_connections`
+
+Stored external service credentials per subaccount.
+
+```sql
+integration_connections
+  id                uuid PK
+  organisation_id   uuid FK → organisations
+  subaccount_id     uuid FK → subaccounts
+  provider_type     text NOT NULL  -- gmail | github | hubspot | custom
+  auth_type         text NOT NULL  -- oauth2 | api_key | service_account
+  connection_status text NOT NULL DEFAULT 'active'  -- active | revoked | error
+  display_name      text
+  config_json       jsonb          -- non-secret config (scopes, account id, etc.)
+  secrets_ref       text           -- reference to secrets manager / encrypted field
+  last_verified_at  timestamp nullable
+  created_at        timestamp NOT NULL DEFAULT now()
+  updated_at        timestamp NOT NULL DEFAULT now()
+
+UNIQUE (subaccount_id, provider_type)
+```
+
+### 6.5 `processed_resources`
+
+Deduplication log for external inputs polled across runs.
+
+```sql
+processed_resources
+  id                uuid PK
+  organisation_id   uuid FK → organisations
+  subaccount_id     uuid FK → subaccounts
+  integration_type  text NOT NULL  -- gmail | github | hubspot
+  resource_type     text NOT NULL  -- message | ticket | pr | contact
+  external_id       text NOT NULL  -- provider-native ID
+  agent_id          uuid FK → agents nullable
+  first_seen_at     timestamp NOT NULL DEFAULT now()
+  processed_at      timestamp NOT NULL DEFAULT now()
+
+UNIQUE (subaccount_id, integration_type, resource_type, external_id)
+INDEX on (subaccount_id, integration_type, resource_type)
+```
+
+---
+
+## 7. Action State Machine
+
+```
+proposed
+  ├─ gate=auto, is_external=false  →  approved  →  executing  →  completed
+  │                                                             →  failed
+  ├─ gate=review                   →  pending_approval
+  │     ├─ human approves          →  approved   →  executing  →  completed
+  │     ├─ human edits+approves    →  approved   →  executing  →  completed
+  │     └─ human rejects           →  rejected
+  ├─ gate=block                    →  blocked
+  └─ duplicate detected            →  skipped
+```
+
+**Enforcement rules:**
+- `pending_approval` → `approved` requires a `reviewed_by` user id and matching `review_items` record
+- `approved` → `executing` must atomically verify status=approved, set status=executing, emit event — all in one transaction
+- Backend refuses execution if status ≠ approved or if `executed_at` is already set
+- Frontend button availability is UI convenience only; backend always re-checks
+
+---
+
+## 8. Execution Layer Design
+
+### 8.1 ExecutionService
+
+New service: `server/services/executionLayerService.ts`
+
+Responsibilities:
+1. Receive an approved action
+2. Verify approval state (re-check in DB, not from caller)
+3. Check idempotency key — abort if already executed
+4. Resolve adapter from action_type registry
+5. Emit `execution_started` event
+6. Call adapter
+7. Persist result or error
+8. Transition action to `completed` or `failed`
+9. Emit completion event
+
+```typescript
+interface ExecutionAdapter {
+  execute(action: Action, connection: IntegrationConnection | null): Promise<ExecutionResult>
+}
+
+interface ExecutionResult {
+  success: boolean
+  result?: unknown
+  error?: string
+}
+```
+
+### 8.2 Adapter Registry
+
+Central map — not scattered logic:
+
+```typescript
+const adapterRegistry: Record<string, ExecutionAdapter> = {
+  send_email:    emailAdapter,
+  read_inbox:    emailAdapter,
+  create_task:   workerAdapter,   // internal, auto-gated
+  move_task:     workerAdapter,
+  update_record: apiAdapter,
+  fetch_url:     apiAdapter,
+  // future: open_pr → devopsAdapter
+  // future: click_button → browserAdapter
+}
+```
+
+### 8.3 Phase 1 Adapters
+
+**API Adapter** — covers all Phase 1 external calls (email, CRM reads/writes, URL fetches). Uses `integration_connections` for credentials.
+
+**Worker Adapter** — covers internal board operations (create_task, move_task, add_deliverable). These are `is_external=false`, `gate_level=auto`. Wraps the existing `skillExecutor` logic.
+
+Browser and DevOps adapters are architecture stubs only in Phase 1 — no implementation.
+
+---
+
+## 9. Integrating Actions with the Existing skillExecutor
+
+This is the most important implementation detail the v6 brief misses.
+
+### 9.1 Split: Direct Skills vs Action-Proposing Skills
+
+**Direct (no change needed):**
+- `web_search` — read-only, no side effects
+- `read_workspace` / `list_tasks` — read-only
+- `spawn_sub_agents` — internal orchestration
+- `trigger_process` — internal
+
+**Action-gated (new behaviour):**
+- `create_task` — `is_external=false`, `gate_level=auto` → executes immediately but creates an auditable action record
+- `move_task`, `reassign_task`, `add_deliverable` — same: auto-gated, internal
+- `send_email` (new) — `is_external=true`, `gate_level=review` → queues for human approval
+- `read_inbox` (new) — `is_external=true`, `gate_level=auto` → reads only, no approval needed
+- `update_record` (new) — `is_external=true`, `gate_level=review`
+
+### 9.2 How skillExecutor Changes
+
+For action-gated skills, `skillExecutor` no longer executes directly. Instead it:
+1. Constructs a structured action payload
+2. Calls `actionService.proposeAction(payload)`
+3. Returns the action id and status to the agent as the tool result
+
+The agent sees: `{ action_id: "...", status: "pending_approval", message: "Queued for review" }` and continues its run. The actual execution happens later when a human approves via the review queue.
+
+For auto-gated internal skills, the flow is: propose → immediately approve → execute → return result synchronously within the same tool call. The action record is created for auditability but execution isn't blocked.
+
+---
+
+## 10. Review / Approval System
+
+### 10.1 Backend: ReviewService
+
+New service: `server/services/reviewService.ts`
+
+Responsibilities:
+- `createReviewItem(action)` — called when an action hits `pending_approval`
+- `approveItem(reviewItemId, userId, edits?)` — validates ownership, applies edits, transitions action to approved, dispatches execution
+- `rejectItem(reviewItemId, userId)` — transitions action to rejected
+- `getReviewQueue(subaccountId)` — returns pending items with full review payload
+
+`approveItem` must be transaction-safe:
+```
+BEGIN
+  SELECT action WHERE id = ? FOR UPDATE
+  VERIFY status = 'pending_approval'
+  IF edits: merge edits into payload_json
+  UPDATE action SET status = 'approved', approved_by = ?, approved_at = now()
+  INSERT action_event (approved | edited_and_approved)
+  UPDATE review_item SET review_status = 'approved', reviewed_by = ?, reviewed_at = now()
+COMMIT
+→ dispatch to executionLayerService (outside transaction)
+```
+
+### 10.2 API Endpoints
+
+```
+GET    /api/subaccounts/:id/review-queue          -- list pending review items
+GET    /api/review-items/:id                       -- single item with full context
+POST   /api/review-items/:id/approve               -- approve (with optional payload edits)
+POST   /api/review-items/:id/reject                -- reject
+GET    /api/subaccounts/:id/actions                -- action history (all statuses)
+GET    /api/actions/:id/events                     -- full audit trail for one action
+```
+
+### 10.3 Review Queue UI
+
+New page: `client/src/pages/ReviewQueuePage.tsx`
+
+Each review item must display:
+- Agent name and run timestamp
+- Action type and category
+- Agent reasoning (from metadata_json)
+- Proposed payload (formatted per action type — email shows to/subject/body, CRM update shows field diffs)
+- Approve button
+- Edit payload → Approve button (inline editor for payload fields)
+- Reject button
+
+The kanban board is NOT the review queue. The board shows task work in progress. The review queue shows boundary actions awaiting approval. They are separate concerns.
+
+### 10.4 Pending Count Badge
+
+Add review queue pending count to the sidebar nav. Visible to manager+ roles. Pulls from a lightweight `GET /api/subaccounts/:id/review-queue/count` endpoint.
+
+---
+
+## 11. Phase 1 Reference Implementation: Support Agent
+
+The support agent is the first consumer of the new action/approval platform. It validates every new primitive.
+
+### 11.1 What the Support Agent Does
+
+**Internal (autonomous, no approval):**
+- Poll Gmail inbox via `read_inbox` skill
+- Skip processed message IDs (via `processed_resources`)
+- Skip self-sent messages
+- Classify each message (bug_report, billing, general, feature_request, account_access, refund_request, complaint, spam)
+- Assign priority (high / normal / low)
+- Retrieve prior thread context
+- Check workspace memory for known customer context
+- Draft reply
+- Self-review draft against quality rules
+- Create board task to track the conversation
+
+**Boundary (requires human approval):**
+- `send_email` action with `gate_level=review` — one per inbound message requiring a reply
+
+### 11.2 Support Agent Scheduled Flow
+
+```
+Scheduled trigger fires
+→ Create agent run
+→ Load workspace memory + support policies
+→ Call read_inbox (Gmail, since last_run_at)
+→ For each new message:
+    → Check processed_resources — skip if seen
+    → Classify + prioritise
+    → Draft reply
+    → Self-review (rewrite once if fails quality check)
+    → proposeAction(send_email, gate_level=review)
+    → Create/update board task linking to review item
+→ Write processed_resource entries
+→ Write run summary to memory
+→ Complete run
+```
+
+### 11.3 Support Agent Quality Rules
+
+Before creating the `send_email` action the agent must verify:
+- Reply directly addresses the question asked
+- Tone matches workspace preference (from memory)
+- No feature promises or delivery dates unless policy allows
+- No refunds or credits without policy support
+- Clear next step included
+- Concise unless complexity requires length
+
+If self-review fails → rewrite once → if still failing → create action with a `needs_review_flag` in metadata.
+
+### 11.4 send_email Action Payload
+
+```json
+{
+  "action_type": "send_email",
+  "action_category": "api",
+  "is_external": true,
+  "gate_level": "review",
+  "idempotency_key": "gmail:{thread_id}:reply:{message_id}",
+  "payload": {
+    "to": "customer@example.com",
+    "subject": "Re: Trouble logging in",
+    "body": "Hi Sarah, ...",
+    "thread_id": "18c4f8a12345",
+    "provider": "gmail"
+  },
+  "metadata": {
+    "category": "account_access",
+    "priority": "high",
+    "reasoning": "Customer cannot log in, active subscription"
+  }
+}
+```
+
+### 11.5 Gmail Integration
+
+Use the existing `emailService` patterns but add:
+- `GmailProvider` implementing `EmailProvider` interface: `listMessages`, `readMessage`, `sendMessage`, `createDraft`
+- OAuth2 credentials stored in `integration_connections`
+- Multi-tenant: each subaccount has its own Gmail connection
+- Self-sent filter: skip messages where `from` matches the connected account address
+
+Default schedule: every 2 hours during business hours, configurable per subaccount.
+
+---
+
+## 12. Build Sequence
+
+### Phase 1A — Platform Foundations (Build First)
+
+1. **Database migration** — add `actions`, `action_events`, `review_items`, `integration_connections`, `processed_resources`
+2. **ActionService** — create, validate, state transitions, legal transition enforcement
+3. **ExecutionLayerService** — adapter registry, idempotency checks, result persistence
+4. **WorkerAdapter** — wraps existing skillExecutor internal skills, creates action records for auditability
+5. **ReviewService** — createReviewItem, approveItem (transactional), rejectItem, getReviewQueue
+6. **Review API routes** — review queue endpoints, action history, action events
+7. **skillExecutor refactor** — split direct skills from action-proposing skills; action-gated skills call actionService.proposeAction
+
+### Phase 1B — Support Agent (First Consumer)
+
+8. **GmailProvider** — listMessages, readMessage, sendMessage (backed by integration_connections)
+9. **APIAdapter** — dispatches send_email and similar external calls through providers
+10. **`send_email` skill** — proposes action with gate_level=review
+11. **`read_inbox` skill** — direct, auto-gated, returns message list
+12. **Support agent prompt + skill config** — classification, drafting, self-review instructions
+13. **ProcessedResources enforcement** — check before processing, write after
+14. **Review Queue UI** — ReviewQueuePage with approve/edit/reject, pending count badge
+
+### Phase 1C — Hardening
+
+15. **Observability** — run trace viewer (system prompt, tool calls, tokens), cost estimate per run
+16. **Failure policies** — retry logic in ExecutionLayerService, dead letter handling
+17. **Integration connection UI** — connect/disconnect Gmail per subaccount
+18. **Permissions** — new permission types: REVIEW_VIEW, REVIEW_APPROVE
+19. **End-to-end tests** — full support agent flow, approval/rejection paths, deduplication
+
+### Phase 2 — Orchestrator + Second Agent
+
+20. **Orchestrator directives table + service**
+21. **Second agent type (marketing or ops)** — uses same action primitives
+22. **Browser adapter stub → implementation**
+
+---
+
+## 13. Testing Requirements
+
+### Action System
+
+- Action creation with valid/invalid payloads
+- State transition enforcement (illegal transitions rejected)
+- Idempotency key uniqueness — duplicate key returns existing action
+- `gate_level=review` → execution blocked without approval record
+- `gate_level=auto` → execution proceeds immediately
+- `gate_level=block` → never executes
+- Concurrent approval attempt — only one succeeds
+
+### Support Agent End-to-End
+
+- Inbox polling creates review items
+- Processed message IDs not re-processed across runs
+- Self-sent messages skipped
+- Classification and priority populated correctly
+- Approval triggers send
+- Rejection prevents send, no outbound email occurs
+- Edited payload used on send (not original)
+- Memory updated after run
+- Failures logged and visible in run record
+
+### Security
+
+- Action from subaccount A cannot be approved by user from subaccount B
+- Integration connection for subaccount A cannot be used by agent in subaccount B
+- Review approval requires REVIEW_APPROVE permission
+- Backend re-checks all state even if frontend bypassed
+
+---
+
+## 14. Success Criteria for Phase 1
+
+- [ ] Support agent runs autonomously on a real Gmail inbox for 5+ consecutive days without manual intervention
+- [ ] Zero outbound emails sent without human approval
+- [ ] Zero duplicate emails sent (idempotency works)
+- [ ] Review queue shows all pending items with sufficient context to approve without opening Gmail
+- [ ] Reviewer can edit the reply body before approving
+- [ ] All executions have a complete audit trail (action + action_events)
+- [ ] Same action/approval primitives visibly reusable — a second agent type could be added without changing the platform layer
