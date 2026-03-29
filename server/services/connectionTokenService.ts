@@ -51,6 +51,12 @@ export const connectionTokenService = {
     const iv = Buffer.from(parts[0], 'hex');
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = Buffer.from(parts[2], 'hex');
+    if (iv.length !== IV_LENGTH) {
+      throw { statusCode: 500, message: 'Invalid encrypted token: wrong IV length' };
+    }
+    if (authTag.length !== AUTH_TAG_LENGTH) {
+      throw { statusCode: 500, message: 'Invalid encrypted token: wrong auth tag length' };
+    }
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
     return decipher.update(encrypted) + decipher.final('utf8');
@@ -150,7 +156,10 @@ export const connectionTokenService = {
         if (!response.ok) {
           throw { statusCode: 400, message: `Gmail token refresh failed: ${response.status}` };
         }
-        const data = await response.json() as { access_token: string; expires_in: number; refresh_token?: string };
+        const data = await response.json() as { access_token?: string; expires_in?: number; refresh_token?: string };
+        if (!data.access_token) {
+          throw { statusCode: 400, message: 'Gmail token refresh returned no access token' };
+        }
         return {
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
@@ -172,7 +181,10 @@ export const connectionTokenService = {
         if (!response.ok) {
           throw { statusCode: 400, message: `HubSpot token refresh failed: ${response.status}` };
         }
-        const data = await response.json() as { access_token: string; expires_in: number; refresh_token: string };
+        const data = await response.json() as { access_token?: string; expires_in?: number; refresh_token?: string };
+        if (!data.access_token) {
+          throw { statusCode: 400, message: 'HubSpot token refresh returned no access token' };
+        }
         return {
           accessToken: data.access_token,
           refreshToken: data.refresh_token,

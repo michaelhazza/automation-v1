@@ -69,3 +69,17 @@ CREATE TABLE IF NOT EXISTS "process_connection_mappings" (
 
 CREATE INDEX IF NOT EXISTS "pcm_subaccount_process_idx" ON "process_connection_mappings" ("subaccount_id", "process_id");
 CREATE INDEX IF NOT EXISTS "pcm_connection_idx" ON "process_connection_mappings" ("connection_id");
+
+-- 7. Scope validation check constraints
+-- Ensures scope/org/subaccount combinations are always consistent
+ALTER TABLE "workflow_engines" ADD CONSTRAINT "workflow_engines_scope_check" CHECK (
+  (scope = 'system' AND organisation_id IS NULL AND subaccount_id IS NULL) OR
+  (scope = 'organisation' AND organisation_id IS NOT NULL AND subaccount_id IS NULL) OR
+  (scope = 'subaccount' AND organisation_id IS NOT NULL AND subaccount_id IS NOT NULL)
+);
+
+ALTER TABLE "processes" ADD CONSTRAINT "processes_scope_check" CHECK (
+  (scope = 'system' AND organisation_id IS NULL AND subaccount_id IS NULL) OR
+  (scope = 'organisation' AND organisation_id IS NOT NULL AND subaccount_id IS NULL) OR
+  (scope = 'subaccount' AND organisation_id IS NOT NULL AND subaccount_id IS NOT NULL)
+);

@@ -4,9 +4,9 @@
  */
 
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { processConnectionMappings, integrationConnections } from '../db/schema/index.js';
+import { processConnectionMappings, integrationConnections, processes } from '../db/schema/index.js';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -91,6 +91,49 @@ router.put(
       ));
 
     res.json(result);
+  })
+);
+
+// Clone a process into this subaccount (from system or org scope)
+router.post(
+  '/api/subaccounts/:subaccountId/processes/:processId/clone',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_CLONE),
+  asyncHandler(async (req, res) => {
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+    const [source] = await db.select()
+      .from(processes)
+      .where(and(eq(processes.id, req.params.processId), isNull(processes.deletedAt)));
+
+    if (!source) throw { statusCode: 404, message: 'Source process not found' };
+
+    // Can only clone system processes or processes from the same org
+    if (source.scope !== 'system' && source.organisationId !== req.orgId!) {
+      throw { statusCode: 403, message: 'Cannot clone processes from another organisation' };
+    }
+
+    const { name } = req.body;
+
+    const [cloned] = await db.insert(processes).values({
+      organisationId: req.orgId!,
+      workflowEngineId: null,
+      name: name || `${source.name} (Clone)`,
+      description: source.description,
+      webhookPath: source.webhookPath,
+      inputSchema: source.inputSchema,
+      outputSchema: source.outputSchema,
+      configSchema: source.configSchema,
+      defaultConfig: source.defaultConfig,
+      requiredConnections: source.requiredConnections,
+      scope: 'subaccount',
+      isEditable: true,
+      parentProcessId: source.id,
+      subaccountId: subaccount.id,
+      status: 'draft',
+    }).returning();
+
+    res.status(201).json(cloned);
   })
 );
 

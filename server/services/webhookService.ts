@@ -77,7 +77,11 @@ export const webhookService = {
       .createHmac('sha256', secret)
       .update(executionId)
       .digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+    // Validate lengths match before timingSafeEqual (prevents throw on mismatched lengths)
+    const tokenBuf = Buffer.from(token);
+    const expectedBuf = Buffer.from(expected);
+    if (tokenBuf.length !== expectedBuf.length) return false;
+    return crypto.timingSafeEqual(tokenBuf, expectedBuf);
   },
 
   /**

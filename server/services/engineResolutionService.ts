@@ -35,7 +35,16 @@ export const engineResolutionService = {
           eq(workflowEngines.status, 'active'),
           isNull(workflowEngines.deletedAt)
         ));
-      if (engine) return engine;
+      if (engine) {
+        // Validate engine belongs to the correct scope — prevent cross-tenant usage
+        if (engine.scope === 'organisation' && engine.organisationId !== orgId) {
+          throw { statusCode: 403, message: 'Process references an engine from a different organisation' };
+        }
+        if (engine.scope === 'subaccount' && engine.subaccountId !== subaccountId) {
+          throw { statusCode: 403, message: 'Process references an engine from a different subaccount' };
+        }
+        return engine;
+      }
       // Fall through if assigned engine is inactive/deleted
     }
 
