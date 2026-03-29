@@ -35,6 +35,11 @@ export const processes = pgTable(
     isEditable: boolean('is_editable').notNull().default(true),
     // Points to the upstream process this was cloned from
     parentProcessId: uuid('parent_process_id'),
+    // Living link to a system process — org admin sees name/description only;
+    // webhookPath, requiredConnections, and engine config are sourced from the system process at runtime
+    systemProcessId: uuid('system_process_id'),
+    // True when created via "link system process" — restricts what org admin can edit
+    isSystemManaged: boolean('is_system_managed').notNull().default(false),
     // Subaccount-native processes: subaccountId is set; org processes: subaccountId is null
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
@@ -55,6 +60,7 @@ export const processes = pgTable(
     statusIdx: index('processes_status_idx').on(table.status),
     scopeStatusIdx: index('processes_scope_status_idx').on(table.scope, table.status),
     parentProcessIdx: index('processes_parent_process_idx').on(table.parentProcessId),
+    systemProcessIdx: index('processes_system_process_idx').on(table.systemProcessId),
   })
 );
 

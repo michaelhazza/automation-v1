@@ -41,6 +41,11 @@ interface ExecutionContext {
 export const processResolutionService = {
   /**
    * Resolve everything needed to execute a process in a subaccount context.
+   *
+   * For system-managed processes the org-level record is the "face" shown to
+   * org admins (name, description, config overrides) while the actual
+   * execution details (webhookPath, requiredConnections, engine assignment)
+   * are sourced from the linked system process at runtime.
    */
   async resolveForExecution(
     processId: string,
@@ -63,18 +68,49 @@ export const processResolutionService = {
     // 2. Validate subaccount can access this process
     await processResolutionService.validateAccess(process, subaccountId, orgId);
 
-    // 3. Load connection mappings and validate
+    // 3. For system-managed processes, resolve the inner config from the system process.
+    //    The org process is the "shell"; the system process provides the execution blueprint.
+    const executionProcess = await processResolutionService.resolveSystemProcess(process);
+
+    // 4. Load connection mappings (keyed to the org/subaccount process id, but slot
+    //    definitions come from the resolved execution process)
     const { connections, connectionSnapshot } = await processResolutionService.resolveConnections(
-      process, subaccountId
+      executionProcess, subaccountId, process.id
     );
 
-    // 4. Resolve engine
-    const engine = await engineResolutionService.resolveEngine(process, subaccountId, orgId);
+    // 5. Resolve engine (use system process engine assignment if present)
+    const engine = await engineResolutionService.resolveEngine(executionProcess, subaccountId, orgId);
 
-    // 5. Merge config
-    const config = await processResolutionService.resolveConfig(process, subaccountId, configOverrides);
+    // 6. Merge config: system defaults → org link overrides → subaccount link overrides → per-run
+    const config = await processResolutionService.resolveConfig(process, subaccountId, configOverrides, executionProcess);
 
-    return { process, engine, connections, config, connectionSnapshot };
+    return { process: executionProcess, engine, connections, config, connectionSnapshot };
+  },
+
+  /**
+   * If the process is system-managed, load and return the linked system process.
+   * That provides webhookPath, requiredConnections, and workflowEngineId at runtime.
+   * Falls through unchanged for non-system-managed processes.
+   */
+  async resolveSystemProcess(process: Process): Promise<Process> {
+    if (!process.isSystemManaged || !process.systemProcessId) return process;
+
+    const [systemProcess] = await db.select()
+      .from(processes)
+      .where(and(
+        eq(processes.id, process.systemProcessId),
+        eq(processes.scope, 'system'),
+        isNull(processes.deletedAt)
+      ));
+
+    if (!systemProcess) {
+      throw { statusCode: 400, message: `Linked system process ${process.systemProcessId} not found or deleted` };
+    }
+    if (systemProcess.status !== 'active') {
+      throw { statusCode: 400, message: `Linked system process "${systemProcess.name}" is not active` };
+    }
+
+    return systemProcess;
   },
 
   /**
@@ -114,10 +150,19 @@ export const processResolutionService = {
 
   /**
    * Load and validate connection mappings for a process in a subaccount.
+   *
+   * @param process - The execution process (may be the system process for system-managed links).
+   *                  Its requiredConnections defines the required slots.
+   * @param subaccountId - The subaccount executing the process.
+   * @param mappingProcessId - The process id to look up connection mappings against.
+   *                           For system-managed org processes this is the org process id,
+   *                           not the system process id, because subaccounts map connections
+   *                           to the org-level shell they can see.
    */
   async resolveConnections(
     process: Process,
-    subaccountId: string
+    subaccountId: string,
+    mappingProcessId?: string
   ): Promise<{
     connections: Record<string, ResolvedConnection>;
     connectionSnapshot: Record<string, ConnectionSnapshot>;
@@ -127,12 +172,15 @@ export const processResolutionService = {
       return { connections: {}, connectionSnapshot: {} };
     }
 
-    // Load all mappings for this process + subaccount
+    // Load all mappings for this process + subaccount.
+    // Use mappingProcessId when provided (system-managed: org process id is what
+    // subaccounts configure their connections against).
+    const lookupId = mappingProcessId ?? process.id;
     const mappings = await db.select()
       .from(processConnectionMappings)
       .where(and(
         eq(processConnectionMappings.subaccountId, subaccountId),
-        eq(processConnectionMappings.processId, process.id)
+        eq(processConnectionMappings.processId, lookupId)
       ));
 
     const mappingByKey = new Map(mappings.map(m => [m.connectionKey, m]));
@@ -182,12 +230,25 @@ export const processResolutionService = {
 
   /**
    * Merge process default config with subaccount-level overrides and per-run overrides.
+   *
+   * For system-managed processes the config layers are:
+   *   system default_config → org process default_config → subaccount link overrides → per-run
+   *
+   * @param process - The org-level process (holds org config overrides).
+   * @param subaccountId - Subaccount executing the process.
+   * @param runOverrides - Per-execution overrides.
+   * @param systemProcess - The resolved system process (if applicable).
    */
   async resolveConfig(
     process: Process,
     subaccountId: string,
-    runOverrides?: Record<string, unknown>
+    runOverrides?: Record<string, unknown>,
+    systemProcess?: Process
   ): Promise<Record<string, unknown>> {
+    // For system-managed processes, start from the system default_config as the base
+    const systemBase = systemProcess
+      ? ((systemProcess.defaultConfig as Record<string, unknown>) ?? {})
+      : {};
     const base = (process.defaultConfig as Record<string, unknown>) ?? {};
 
     // Load subaccount link overrides
@@ -201,7 +262,7 @@ export const processResolutionService = {
     const linkOverrides = (link?.configOverrides as Record<string, unknown>) ?? {};
     const perRun = runOverrides ?? {};
 
-    // Merge: base ← link overrides ← per-run overrides
-    return { ...base, ...linkOverrides, ...perRun };
+    // Merge: system defaults ← org defaults ← subaccount link overrides ← per-run overrides
+    return { ...systemBase, ...base, ...linkOverrides, ...perRun };
   },
 };
