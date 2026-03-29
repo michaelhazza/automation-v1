@@ -218,6 +218,20 @@ export default function Layout({ user, children }: LayoutProps) {
   const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has(key);
   const hasAnyOrgPerm = orgPerms.size > 0;
 
+  // ── Review queue badge count ───────────────────────────────────────
+  const [reviewCount, setReviewCount] = useState(0);
+  useEffect(() => {
+    if (!activeClientId) { setReviewCount(0); return; }
+    const fetchCount = () => {
+      api.get(`/api/subaccounts/${activeClientId}/review-queue/count`)
+        .then(({ data }) => setReviewCount(data.count ?? 0))
+        .catch(() => setReviewCount(0));
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 30_000); // poll every 30s
+    return () => clearInterval(interval);
+  }, [activeClientId]);
+
   const handleSelectClient = (sa: ClientOption) => {
     setActiveClient(sa.id, sa.name);
     setActiveClientIdState(sa.id);
@@ -487,6 +501,14 @@ export default function Layout({ user, children }: LayoutProps) {
                   to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`}
                   icon={<Icons.executions />}
                   label="Scheduled Tasks"
+                />
+              )}
+              {/* Review queue — visible to anyone with review permissions */}
+              {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
+                <NavLink
+                  to={`/admin/subaccounts/${activeClientId}/review-queue`}
+                  icon={<Icons.queue />}
+                  label={reviewCount > 0 ? `Review (${reviewCount})` : 'Review'}
                 />
               )}
               {/* Org-admin level items */}

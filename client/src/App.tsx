@@ -48,6 +48,8 @@ const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPa
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
 const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
+const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
+const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 
 function PageLoader() {
   return (
@@ -165,6 +167,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
           </Route>
 
@@ -186,6 +190,12 @@ export default function App() {
           {/* Subaccount connections */}
           <Route path="/admin/subaccounts/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
           <Route path="/portal/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
+
+          {/* Review queue (portal access) */}
+          <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+
+          {/* Run trace viewer */}
+          <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
