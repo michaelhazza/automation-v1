@@ -1,8 +1,12 @@
 import { Router } from 'express';
+import { eq, and, isNull, desc } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { processes } from '../db/schema/index.js';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { processService } from '../services/processService.js';
 import { validateMultipart, parsePositiveInt } from '../middleware/validate.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -99,5 +103,53 @@ router.post('/api/processes/:id/deactivate', authenticate, requireOrgPermission(
     res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
   }
 });
+
+// ---------------------------------------------------------------------------
+// System process visibility and cloning
+// ---------------------------------------------------------------------------
+
+// List system processes available to this org
+router.get('/api/processes/system', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_VIEW), asyncHandler(async (req, res) => {
+  const rows = await db.select()
+    .from(processes)
+    .where(and(eq(processes.scope, 'system'), eq(processes.status, 'active'), isNull(processes.deletedAt)))
+    .orderBy(desc(processes.createdAt));
+  res.json(rows);
+}));
+
+// Clone a process into this org (from system or same org)
+router.post('/api/processes/:id/clone', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_CREATE), asyncHandler(async (req, res) => {
+  const [source] = await db.select()
+    .from(processes)
+    .where(and(eq(processes.id, req.params.id), isNull(processes.deletedAt)));
+
+  if (!source) throw { statusCode: 404, message: 'Source process not found' };
+
+  // Can only clone system processes or processes from the same org
+  if (source.scope !== 'system' && source.organisationId !== req.orgId!) {
+    throw { statusCode: 403, message: 'Cannot clone processes from another organisation' };
+  }
+
+  const { name } = req.body;
+
+  const [cloned] = await db.insert(processes).values({
+    organisationId: req.orgId!,
+    workflowEngineId: null, // engine resolved at runtime
+    name: name || `${source.name} (Clone)`,
+    description: source.description,
+    webhookPath: source.webhookPath,
+    inputSchema: source.inputSchema,
+    outputSchema: source.outputSchema,
+    configSchema: source.configSchema,
+    defaultConfig: source.defaultConfig,
+    requiredConnections: source.requiredConnections,
+    scope: 'organisation',
+    isEditable: true,
+    parentProcessId: source.id,
+    status: 'draft',
+  }).returning();
+
+  res.status(201).json(cloned);
+}));
 
 export default router;

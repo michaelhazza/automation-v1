@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workflowEngines } from '../db/schema/index.js';
@@ -26,6 +27,8 @@ export class EngineService {
     organisationId: string,
     data: { name: string; engineType: string; baseUrl: string; apiKey?: string }
   ) {
+    const hmacSecret = crypto.randomBytes(32).toString('hex');
+
     const [engine] = await db
       .insert(workflowEngines)
       .values({
@@ -34,6 +37,8 @@ export class EngineService {
         engineType: data.engineType as 'n8n',
         baseUrl: data.baseUrl,
         apiKey: data.apiKey,
+        scope: 'organisation',
+        hmacSecret,
         status: 'inactive',
         createdAt: new Date(),
         updatedAt: new Date(),

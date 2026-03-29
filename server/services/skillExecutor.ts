@@ -390,16 +390,30 @@ async function executeTriggerProcess(
   const processId = String(input.process_id ?? '');
   const inputData = String(input.input_data ?? '{}');
   const reason = String(input.reason ?? '');
+  const configOverridesStr = String(input.config_overrides ?? '{}');
 
   if (!processId) return { success: false, error: 'process_id is required' };
 
+  let configOverrides: Record<string, unknown> | undefined;
   try {
-    // Use a system user ID placeholder for autonomous runs
+    const parsed = JSON.parse(configOverridesStr);
+    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+      configOverrides = parsed;
+    }
+  } catch { /* ignore parse errors */ }
+
+  try {
     const result = await executeTriggerredProcess(
       context.organisationId,
       processId,
-      context.agentId, // use agentId as the triggerer for autonomous runs
-      inputData
+      context.agentId,
+      inputData,
+      {
+        subaccountId: context.subaccountId,
+        triggerType: 'agent',
+        triggerSourceId: context.runId,
+        configOverrides,
+      }
     );
 
     return {

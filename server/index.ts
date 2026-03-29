@@ -46,6 +46,11 @@ import workspaceMemoryRouter from './routes/workspaceMemory.js';
 import scheduledTasksRouter from './routes/scheduledTasks.js';
 import reviewItemsRouter from './routes/reviewItems.js';
 import actionsRouter from './routes/actions.js';
+import systemProcessesRouter from './routes/systemProcesses.js';
+import systemEnginesRouter from './routes/systemEngines.js';
+import integrationConnectionsRouter from './routes/integrationConnections.js';
+import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
+import subaccountEnginesRouter from './routes/subaccountEngines.js';
 
 const app = express();
 
@@ -95,6 +100,11 @@ app.use(workspaceMemoryRouter);
 app.use(scheduledTasksRouter);
 app.use(reviewItemsRouter);
 app.use(actionsRouter);
+app.use(systemProcessesRouter);
+app.use(systemEnginesRouter);
+app.use(integrationConnectionsRouter);
+app.use(processConnectionMappingsRouter);
+app.use(subaccountEnginesRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
