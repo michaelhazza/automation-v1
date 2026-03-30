@@ -196,6 +196,77 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
+// Subaccount usage by agent
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/subaccounts/:subaccountId/usage/agents',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+
+    const rows = await db
+      .select({
+        agentName:      llmRequests.agentName,
+        requestCount:   sql<number>`count(*)::int`,
+        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})::int`,
+        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})::int`,
+        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})::int`,
+        errorCount:     sql<number>`count(*) filter (where ${llmRequests.status} != 'success')::int`,
+      })
+      .from(llmRequests)
+      .where(
+        and(
+          eq(llmRequests.subaccountId, subaccountId),
+          eq(llmRequests.billingMonth, billingMonth),
+        ),
+      )
+      .groupBy(llmRequests.agentName)
+      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
+
+    res.json({ period: billingMonth, agents: rows });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Subaccount usage by model/provider
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/subaccounts/:subaccountId/usage/models',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+
+    const rows = await db
+      .select({
+        provider:       llmRequests.provider,
+        model:          llmRequests.model,
+        requestCount:   sql<number>`count(*)::int`,
+        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})::int`,
+        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})::int`,
+        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})::int`,
+        avgLatencyMs:   sql<number>`avg(${llmRequests.providerLatencyMs})::int`,
+      })
+      .from(llmRequests)
+      .where(
+        and(
+          eq(llmRequests.subaccountId, subaccountId),
+          eq(llmRequests.billingMonth, billingMonth),
+        ),
+      )
+      .groupBy(llmRequests.provider, llmRequests.model)
+      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
+
+    res.json({ period: billingMonth, models: rows });
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Subaccount usage by run
 // ---------------------------------------------------------------------------
 
