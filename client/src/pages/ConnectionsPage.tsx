@@ -20,7 +20,15 @@ interface Connection {
 const providerOptions = ['gmail', 'github', 'hubspot', 'slack', 'ghl', 'custom'];
 const authOptions = ['oauth2', 'api_key', 'service_account'];
 
-export default function ConnectionsPage({ user }: { user: User }) {
+const inputCls = 'block w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+const STATUS_STYLES: Record<string, string> = {
+  active: 'text-green-600',
+  revoked: 'text-red-600',
+  error: 'text-amber-600',
+};
+
+export default function ConnectionsPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,10 +48,8 @@ export default function ConnectionsPage({ user }: { user: User }) {
   const handleCreate = async () => {
     try {
       const payload: Record<string, unknown> = {
-        providerType: form.providerType,
-        authType: form.authType,
-        label: form.label || undefined,
-        displayName: form.displayName || undefined,
+        providerType: form.providerType, authType: form.authType,
+        label: form.label || undefined, displayName: form.displayName || undefined,
       };
       if (form.authType === 'oauth2') {
         if (form.accessToken) payload.accessToken = form.accessToken;
@@ -67,106 +73,100 @@ export default function ConnectionsPage({ user }: { user: User }) {
     load();
   };
 
-  if (loading) return <div>Loading...</div>;
-
-  const statusColors: Record<string, string> = {
-    active: '#16a34a',
-    revoked: '#dc2626',
-    error: '#f59e0b',
-  };
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
     <>
-      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="mb-6 flex justify-between items-center">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Connections</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage external service connections for this subaccount</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Connections</h1>
+          <p className="text-[14px] text-slate-500 mt-2 m-0">Manage external service connections for this subaccount</p>
         </div>
-        <button onClick={() => setShowCreate(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontWeight: 600 }}>
+        <button onClick={() => setShowCreate(true)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
           + Add Connection
         </button>
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>
-          {error}
-        </div>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-[14px] text-red-600">{error}</div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
-        {connections.map(c => (
-          <div key={c.id} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+        {connections.map((c) => (
+          <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="flex justify-between items-start mb-3">
               <div>
-                <div style={{ fontWeight: 700, fontSize: 16, color: '#1e293b', textTransform: 'capitalize' }}>{c.providerType}</div>
-                {c.label && <div style={{ fontSize: 13, color: '#64748b', marginTop: 2 }}>{c.label}</div>}
-                {c.displayName && <div style={{ fontSize: 13, color: '#64748b' }}>{c.displayName}</div>}
+                <div className="font-bold text-[16px] text-slate-800 capitalize">{c.providerType}</div>
+                {c.label && <div className="text-[13px] text-slate-500 mt-0.5">{c.label}</div>}
+                {c.displayName && <div className="text-[13px] text-slate-500">{c.displayName}</div>}
               </div>
-              <span style={{ color: statusColors[c.connectionStatus] ?? '#64748b', fontWeight: 600, fontSize: 13, textTransform: 'capitalize' }}>
+              <span className={`font-semibold text-[13px] capitalize ${STATUS_STYLES[c.connectionStatus] ?? 'text-slate-500'}`}>
                 {c.connectionStatus}
               </span>
             </div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>
+            <div className="text-[13px] text-slate-500 mb-3">
               Auth: {c.authType} | Token: {c.hasAccessToken ? 'Yes' : 'No'}
               {c.tokenExpiresAt && <> | Expires: {new Date(c.tokenExpiresAt).toLocaleDateString()}</>}
             </div>
             {c.connectionStatus === 'active' && (
-              <button onClick={() => handleRevoke(c.id)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
+              <button onClick={() => handleRevoke(c.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">
                 Revoke
               </button>
             )}
           </div>
         ))}
         {connections.length === 0 && (
-          <div style={{ gridColumn: '1 / -1', padding: '40px 0', textAlign: 'center', color: '#94a3b8' }}>No connections configured yet</div>
+          <div className="col-span-full py-12 text-center text-[14px] text-slate-400">No connections configured yet</div>
         )}
       </div>
 
       {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 }}>
-          <div style={{ background: '#fff', borderRadius: 12, padding: 32, width: 460 }}>
-            <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Add Connection</h2>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Provider</span>
-              <select value={form.providerType} onChange={e => setForm({ ...form, providerType: e.target.value })} style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }}>
-                {providerOptions.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Auth Type</span>
-              <select value={form.authType} onChange={e => setForm({ ...form, authType: e.target.value })} style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }}>
-                {authOptions.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </label>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Label (optional)</span>
-              <input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="e.g. Support Gmail" style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
-            </label>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Display Name (optional)</span>
-              <input value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
-            </label>
-            {form.authType === 'oauth2' && (
-              <>
-                <label style={{ display: 'block', marginBottom: 12 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Access Token</span>
-                  <input value={form.accessToken} onChange={e => setForm({ ...form, accessToken: e.target.value })} type="password" style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
-                </label>
-                <label style={{ display: 'block', marginBottom: 12 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Refresh Token</span>
-                  <input value={form.refreshToken} onChange={e => setForm({ ...form, refreshToken: e.target.value })} type="password" style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
-                </label>
-              </>
-            )}
-            {form.authType === 'api_key' && (
-              <label style={{ display: 'block', marginBottom: 12 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>API Key</span>
-                <input value={form.secretsRef} onChange={e => setForm({ ...form, secretsRef: e.target.value })} type="password" style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
+          <div className="bg-white rounded-xl p-8 w-[460px] shadow-xl">
+            <h2 className="text-[20px] font-bold text-slate-800 mb-5">Add Connection</h2>
+            <div className="flex flex-col gap-3">
+              <label>
+                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Provider</span>
+                <select value={form.providerType} onChange={(e) => setForm({ ...form, providerType: e.target.value })} className={inputCls}>
+                  {providerOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
               </label>
-            )}
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 20 }}>
-              <button onClick={() => setShowCreate(false)} style={{ background: '#e2e8f0', color: '#374151', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleCreate} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Add Connection</button>
+              <label>
+                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Auth Type</span>
+                <select value={form.authType} onChange={(e) => setForm({ ...form, authType: e.target.value })} className={inputCls}>
+                  {authOptions.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Label (optional)</span>
+                <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Support Gmail" className={inputCls} />
+              </label>
+              <label>
+                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Display Name (optional)</span>
+                <input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} className={inputCls} />
+              </label>
+              {form.authType === 'oauth2' && (
+                <>
+                  <label>
+                    <span className="block text-[14px] font-semibold text-slate-700 mb-1">Access Token</span>
+                    <input value={form.accessToken} onChange={(e) => setForm({ ...form, accessToken: e.target.value })} type="password" className={inputCls} />
+                  </label>
+                  <label>
+                    <span className="block text-[14px] font-semibold text-slate-700 mb-1">Refresh Token</span>
+                    <input value={form.refreshToken} onChange={(e) => setForm({ ...form, refreshToken: e.target.value })} type="password" className={inputCls} />
+                  </label>
+                </>
+              )}
+              {form.authType === 'api_key' && (
+                <label>
+                  <span className="block text-[14px] font-semibold text-slate-700 mb-1">API Key</span>
+                  <input value={form.secretsRef} onChange={(e) => setForm({ ...form, secretsRef: e.target.value })} type="password" className={inputCls} />
+                </label>
+              )}
+            </div>
+            <div className="flex gap-3 justify-end mt-6">
+              <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors">Cancel</button>
+              <button onClick={handleCreate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[13px] font-semibold transition-colors">Add Connection</button>
             </div>
           </div>
         </div>
