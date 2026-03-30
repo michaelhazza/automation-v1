@@ -195,8 +195,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               key={col.key}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, col.key)}
-              className="flex-1 min-w-[240px] flex flex-col bg-slate-50 rounded-xl border border-slate-200 min-h-[200px]"
-              style={{ maxWidth: columns.length <= 4 ? undefined : 320 }}
+              className={`flex-1 min-w-[240px] flex flex-col bg-slate-50 rounded-xl border border-slate-200 min-h-[200px] ${columns.length > 4 ? 'max-w-[320px]' : ''}`}
             >
               {/* Column header */}
               <div
