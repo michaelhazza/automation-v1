@@ -108,8 +108,7 @@ export default function DashboardPage({ user }: { user: User }) {
       {/* Empty state */}
       {agents.length === 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-12 mb-8 flex flex-col items-center text-center">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-4"
-            style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-4 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
             🤖
           </div>
           <p className="font-bold text-[17px] text-slate-900 mb-2">Welcome to Automation OS</p>
