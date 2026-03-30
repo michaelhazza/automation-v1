@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   agents,
@@ -168,15 +168,31 @@ export const agentExecutionService = {
         };
       }
 
-      // ── 2c. Snapshot DEC hash into triggerContext for reproducibility ──
+      // ── 2c. Snapshot DEC hash + iteration count into triggerContext ──
       try {
         const { hash: decHash } = await devContextService.getContext(request.subaccountId);
+
+        // Count prior runs for this task to determine current iteration
+        let iteration = 0;
+        if (request.taskId) {
+          const [{ total }] = await db
+            .select({ total: count() })
+            .from(agentRuns)
+            .where(and(
+              eq(agentRuns.taskId, request.taskId),
+              eq(agentRuns.subaccountId, request.subaccountId),
+            ));
+          // Subtract 1 because current run is already inserted
+          iteration = Math.max(0, Number(total) - 1);
+        }
+
         const existingCtx = (request.triggerContext ?? {}) as Record<string, unknown>;
         await db.update(agentRuns).set({
           triggerContext: {
             ...existingCtx,
             executionSnapshot: {
               decHash,
+              iteration,
               snapshotAt: new Date().toISOString(),
             },
           },

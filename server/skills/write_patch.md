@@ -7,48 +7,69 @@ isActive: true
 ```json
 {
   "name": "write_patch",
-  "description": "Propose a code change as a unified diff. This action requires human approval before the patch is applied. Always read the file first and include the current HEAD commit hash as base_commit.",
+  "description": "Propose a code change as a unified diff. This is a review-gated action — it enters the HITL approval queue and does NOT execute immediately. A human must approve it before it is applied. Requires a valid DEC with safeMode disabled.",
   "input_schema": {
     "type": "object",
     "properties": {
-      "file": { "type": "string", "description": "Relative path to the file to patch (e.g. \"src/services/userService.ts\")" },
-      "diff": { "type": "string", "description": "Unified diff format patch (--- a/file, +++ b/file, @@ ... @@ context)" },
-      "reasoning": { "type": "string", "description": "Explanation of why this change is needed and what it does" },
-      "base_commit": { "type": "string", "description": "Current HEAD commit hash. Fetch via run_command: git rev-parse HEAD" },
-      "intent": { "type": "string", "description": "Change intent: \"feature\", \"bugfix\", \"refactor\", \"test\", \"config\"" }
+      "file": { "type": "string", "description": "Path to the file to modify, relative to projectRoot" },
+      "diff": { "type": "string", "description": "Unified diff (--- / +++ / @@ format). Must be minimal and targeted." },
+      "base_commit": { "type": "string", "description": "The git commit hash this diff is based on. Read from executionSnapshot.baseCommit — do not run a shell command to obtain it." },
+      "intent": { "type": "string", "description": "Type of change: feature, bugfix, refactor, test, config" },
+      "reasoning": { "type": "string", "description": "Why this change is needed. The human reviewer sees only this field and the diff." }
     },
-    "required": ["file", "diff", "reasoning", "base_commit", "intent"]
+    "required": ["file", "diff", "base_commit", "reasoning"]
   }
 }
 ```
 
 ## Instructions
 
-Always read the target file before proposing a patch. Fetch the current HEAD commit hash with `git rev-parse HEAD` via run_command and pass it as `base_commit`. Keep patches small and focused — one logical change per patch. Human approval is required before the patch is applied.
+Always read the target file with `read_codebase` before proposing a patch. Get `base_commit` from `executionSnapshot.baseCommit` — never from a shell command. Keep patches small and focused on one logical concern. Human approval is required before execution.
 
 ## Methodology
 
-### Before Writing a Patch
-1. Read the target file with `read_codebase`.
-2. Run `git rev-parse HEAD` via `run_command` to get the base commit hash.
-3. Understand the existing patterns — match them in your change.
-4. Check if tests exist for the area you're changing.
+### Patch Constraints
+- Max files per patch: 5
+- Max lines changed per patch: 300
+- Larger changes must be split into multiple focused patches.
+- One logical concern per patch — never mix feature changes with refactoring.
 
-### Writing the Diff
-- Use unified diff format: `--- a/path`, `+++ b/path`, `@@ ... @@` hunks.
-- Include at least 3 lines of context around each change.
-- Keep diffs small: under 100 lines changed per patch when possible.
-- One logical concern per patch. Do not mix feature changes with refactoring.
+### Idempotency Check
+Before proposing any patch:
+1. Review `executionSnapshot.runHistory` for prior patches on this task.
+2. If an entry with the same `file` + same `intent` already exists in runHistory, do not submit a duplicate — update reasoning in context instead.
+3. If runHistory is unavailable, check `write_workspace` activity log for prior patch proposals on this task.
 
-### Reasoning Quality
-The reasoning field is shown to the human reviewer. Include:
-- Why the change is needed (the problem being solved).
-- What the change does (the mechanism).
-- Any risks or side effects to watch for.
+### Pre-Patch Checklist
+1. Target file read in full via `read_codebase`.
+2. `base_commit` sourced from `executionSnapshot.baseCommit`.
+3. Diff is minimal — only lines that need to change.
+4. No unrelated refactors or style changes included.
+5. No security vulnerabilities introduced (SQL injection, XSS, command injection, hardcoded secrets).
+6. Patch size within limits (5 files, 300 lines). Split if needed.
+7. Migration check: if change affects DB schema, env variables, or external integrations — write a migration plan to the board before submitting this patch.
 
-### Decision Rules
-- **One patch per logical change**: Do not bundle multiple concerns in one patch.
-- **Never patch without reading**: Always read the file first.
-- **Include base_commit**: Patches will be rejected if base_commit is missing or stale.
-- **Follow existing style**: Match indentation, naming, and patterns in surrounding code.
-- **safeMode check**: If safeMode is enabled for this project, write_patch is disabled.
+### Diff Format
+Standard unified diff format:
+```
+--- a/src/path/file.ts
++++ b/src/path/file.ts
+@@ -12,7 +12,8 @@
+ context line
+-old line
++new line
+ context line
+```
+Include at least 3 lines of context around each change.
+
+### After Approval
+write_patch is review-gated — your call returns `status: pending_approval`. After submitting:
+1. Write a progress note: "Patch proposed: [brief description]. Awaiting human approval."
+2. Do not submit a duplicate patch for the same change.
+3. After approval and execution, run tests to verify.
+
+### Rejection Handling
+If a patch is rejected:
+1. Read the rejection reason.
+2. Adjust approach and propose a revised patch.
+3. If rejected twice for the same file + intent: use the structured blocker format and escalate via `request_approval`.
