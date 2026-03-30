@@ -11,6 +11,9 @@ interface Agent {
   modelId: string;
   status: string;
   defaultSkillSlugs?: string[];
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalHours?: number | null;
+  heartbeatOffsetHours?: number;
 }
 
 // Default icons for agents that don't have a custom one set
@@ -39,6 +42,72 @@ function getSkillSummary(skillSlugs?: string[]): string {
   const named = skillSlugs.map(s => labels[s] || s.replace(/_/g, ' ')).slice(0, 3);
   const extra = skillSlugs.length > 3 ? ` +${skillSlugs.length - 3} more` : '';
   return named.join(', ') + extra;
+}
+
+// ── Heartbeat schedule timeline ──────────────────────────────────────────────
+function TeamHeartbeatView({ agents }: { agents: Agent[] }) {
+  const scheduled = agents.filter(a => a.heartbeatEnabled && a.heartbeatIntervalHours);
+  if (scheduled.length === 0) return null;
+
+  const HOUR_LABELS = [0, 4, 8, 12, 16, 20, 24];
+
+  return (
+    <div style={{ marginTop: 48 }}>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0f172a', margin: '0 0 4px', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 16 }}>💓</span> Heartbeat Schedule
+        </h2>
+        <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>When each agent wakes up and acts — across a 24h window</p>
+      </div>
+
+      <div style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 12, padding: '20px 24px' }}>
+        {/* Hour axis header */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12, paddingLeft: 180 }}>
+          {HOUR_LABELS.map((h) => (
+            <div key={h} style={{ flex: 1, fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>{h}h</div>
+          ))}
+        </div>
+
+        {/* Agent rows */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {scheduled.map((agent) => {
+            const interval = agent.heartbeatIntervalHours!;
+            const offset = agent.heartbeatOffsetHours ?? 0;
+            const runHours: number[] = [];
+            for (let h = offset; h < 24; h += interval) runHours.push(h);
+            const icon = agent.icon || getDefaultIcon(agent.id);
+
+            return (
+              <div key={agent.id} style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                {/* Agent label */}
+                <div style={{ width: 180, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, paddingRight: 16 }}>
+                  <span style={{ fontSize: 16 }}>{icon}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {agent.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>every {interval}h</div>
+                  </div>
+                </div>
+                {/* SVG row */}
+                <div style={{ flex: 1, position: 'relative', height: 28 }}>
+                  <svg width="100%" height="28" style={{ display: 'block' }}>
+                    <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#e2e8f0" strokeWidth="1.5" />
+                    {HOUR_LABELS.map((h) => (
+                      <line key={h} x1={`${h / 24 * 100}%`} y1="30%" x2={`${h / 24 * 100}%`} y2="70%" stroke="#e2e8f0" strokeWidth="1" />
+                    ))}
+                    {runHours.map((h) => (
+                      <circle key={h} cx={`${h / 24 * 100}%`} cy="50%" r="5" fill="#6366f1" />
+                    ))}
+                  </svg>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function AgentsPage({ user }: { user: User }) {
@@ -74,7 +143,7 @@ export default function AgentsPage({ user }: { user: User }) {
       {/* Header */}
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 30, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.03em' }}>
-          Your AI Team
+          Agents
         </h1>
         <p style={{ color: '#64748b', margin: 0, fontSize: 15 }}>
           Select an agent to start a conversation
@@ -248,6 +317,8 @@ export default function AgentsPage({ user }: { user: User }) {
           )}
         </>
       )}
+
+      <TeamHeartbeatView agents={agents} />
     </div>
   );
 }
