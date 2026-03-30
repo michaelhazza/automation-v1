@@ -457,10 +457,10 @@ export default function Layout({ user, children }: LayoutProps) {
               )}
               <NavItem to="/projects" icon={<Icons.projects />} label="Projects" />
               {hasOrgPerm('org.agents.view') && (
-                <NavItem to="/agents" icon={<Icons.agents />} label="AI Team" badge={liveAgentCount} />
+                <NavItem to="/agents" icon={<Icons.agents />} label="Agents" badge={liveAgentCount} />
               )}
               {hasOrgPerm('org.processes.view') && (
-                <NavItem to="/processes" icon={<Icons.automations />} label="Automations" />
+                <NavItem to="/processes" icon={<Icons.automations />} label="Processes" />
               )}
               <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
@@ -489,8 +489,6 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" icon={<Icons.clients />} label="Clients" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="AI Team" />}
-              {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Automations" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view')) && <NavItem to="/admin/settings" icon={<Icons.settings />} label="Settings" />}
               {isSystemAdmin && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />}
             </>
