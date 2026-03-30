@@ -15,25 +15,15 @@ interface SystemAgent {
   createdAt: string;
 }
 
-const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
-  active:   { bg: '#dcfce7', color: '#166534' },
-  inactive: { bg: '#fff7ed', color: '#9a3412' },
-  draft:    { bg: '#f1f5f9', color: '#475569' },
+const STATUS_CLS: Record<string, string> = {
+  active:   'bg-green-100 text-green-800',
+  inactive: 'bg-orange-50 text-orange-800',
+  draft:    'bg-slate-100 text-slate-600',
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_BADGE[status] ?? STATUS_BADGE.draft;
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 500,
-      background: s.bg,
-      color: s.color,
-      textTransform: 'capitalize',
-    }}>
+    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-medium capitalize ${STATUS_CLS[status] ?? STATUS_CLS.draft}`}>
       {status}
     </span>
   );
@@ -41,15 +31,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function PublishedBadge({ published }: { published: boolean }) {
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 500,
-      background: published ? '#dcfce7' : '#f1f5f9',
-      color: published ? '#166534' : '#475569',
-    }}>
+    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-medium ${published ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
       {published ? 'Yes' : 'No'}
     </span>
   );
@@ -148,59 +130,42 @@ export default function SystemAgentsPage({ user }: { user: User }) {
   };
 
   if (loading) {
-    return (
-      <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 14 }}>
-        Loading system agents...
-      </div>
-    );
+    return <div className="py-12 text-center text-slate-500 text-[14px]">Loading system agents...</div>;
   }
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>System Agents</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0', fontSize: 14 }}>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Agents</h1>
+          <p className="text-slate-500 mt-2 mb-0 text-[14px]">
             Manage platform-level agent definitions available across all organizations.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="flex gap-2 items-center">
           <input
             ref={fileInputRef}
             type="file"
             accept=".csv,text/csv"
-            style={{ display: 'none' }}
+            className="hidden"
             onChange={handleImportFile}
           />
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
-            style={{
-              padding: '10px 16px', background: '#fff', color: '#374151',
-              border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14,
-              cursor: importing ? 'not-allowed' : 'pointer', fontWeight: 500,
-              whiteSpace: 'nowrap', opacity: importing ? 0.6 : 1,
-            }}
+            className={`px-4 py-2.5 bg-white text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium whitespace-nowrap transition-colors ${importing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'}`}
           >
             {importing ? 'Importing…' : '↑ Import CSV'}
           </button>
           <button
             onClick={handleExport}
-            style={{
-              padding: '10px 16px', background: '#fff', color: '#374151',
-              border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14,
-              cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap',
-            }}
+            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
           >
             ↓ Export CSV
           </button>
           <button
             onClick={() => navigate('/system/agents/new')}
-            style={{
-              padding: '10px 20px', background: '#6366f1', color: '#fff',
-              border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500,
-              whiteSpace: 'nowrap',
-            }}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
           >
             + New System Agent
           </button>
@@ -208,15 +173,9 @@ export default function SystemAgentsPage({ user }: { user: User }) {
       </div>
 
       {importStatus && (
-        <div style={{
-          marginBottom: 16, padding: '10px 16px', borderRadius: 8, fontSize: 14,
-          background: importStatus.type === 'success' ? '#dcfce7' : '#fef2f2',
-          color: importStatus.type === 'success' ? '#166534' : '#dc2626',
-          border: `1px solid ${importStatus.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
+        <div className={`mb-4 px-4 py-2.5 rounded-lg text-[14px] flex justify-between items-center ${importStatus.type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
           <span>{importStatus.message}</span>
-          <button onClick={() => setImportStatus(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 16, padding: '0 4px' }}>×</button>
+          <button onClick={() => setImportStatus(null)} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">×</button>
         </div>
       )}
 
@@ -230,68 +189,68 @@ export default function SystemAgentsPage({ user }: { user: User }) {
         />
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {agents.length === 0 ? (
-          <div style={{ padding: '64px 48px', textAlign: 'center' }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>🤖</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 8 }}>No system agents yet</div>
-            <div style={{ fontSize: 14, color: '#64748b', marginBottom: 24 }}>Create your first system agent to get started.</div>
+          <div className="py-16 px-12 text-center">
+            <div className="text-[40px] mb-4">🤖</div>
+            <div className="text-[16px] font-semibold text-slate-800 mb-2">No system agents yet</div>
+            <div className="text-[14px] text-slate-500 mb-6">Create your first system agent to get started.</div>
             <button
               onClick={() => navigate('/system/agents/new')}
-              style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
             >
               + New System Agent
             </button>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full border-collapse text-[14px]">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Slug</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Status</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Published</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>System Skills</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Actions</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Name</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Slug</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Published</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">System Skills</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {agents.map((agent) => {
                 const skillCount = agent.defaultSystemSkillSlugs?.length ?? 0;
                 return (
-                  <tr key={agent.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '12px 16px' }}>
-                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{agent.name}</div>
+                  <tr key={agent.id}>
+                    <td className="px-4 py-3">
+                      <div className="font-semibold text-slate-800">{agent.name}</div>
                       {agent.description && (
-                        <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div className="text-[12px] text-slate-500 mt-0.5 max-w-[280px] overflow-hidden text-ellipsis whitespace-nowrap">
                           {agent.description}
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <code style={{ fontSize: 12, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, color: '#475569' }}>{agent.slug}</code>
+                    <td className="px-4 py-3">
+                      <code className="text-[12px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{agent.slug}</code>
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
+                    <td className="px-4 py-3">
                       <StatusBadge status={agent.status} />
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
+                    <td className="px-4 py-3">
                       <PublishedBadge published={agent.isPublished} />
                     </td>
-                    <td style={{ padding: '12px 16px', color: '#475569', fontSize: 13 }}>
+                    <td className="px-4 py-3 text-slate-600 text-[13px]">
                       {skillCount} {skillCount === 1 ? 'skill' : 'skills'}
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2 items-center flex-wrap">
                         <Link
                           to={`/system/agents/${agent.id}`}
-                          style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', textDecoration: 'none', fontWeight: 500 }}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[12px] font-medium no-underline transition-colors"
                         >
                           Edit
                         </Link>
                         {!agent.isPublished && (
                           <button
                             onClick={() => handlePublish(agent.id)}
-                            style={{ padding: '4px 10px', background: '#dcfce7', color: '#166534', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                            className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-800 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
                           >
                             Publish
                           </button>
@@ -299,20 +258,20 @@ export default function SystemAgentsPage({ user }: { user: User }) {
                         {agent.isPublished && (
                           <button
                             onClick={() => handleUnpublish(agent.id)}
-                            style={{ padding: '4px 10px', background: '#fff7ed', color: '#9a3412', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                            className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 text-orange-800 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
                           >
                             Unpublish
                           </button>
                         )}
                         <button
                           onClick={() => setDeleteId(agent.id)}
-                          style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                          className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
                         >
                           Delete
                         </button>
                       </div>
                       {actionError[agent.id] && (
-                        <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>{actionError[agent.id]}</div>
+                        <div className="text-[11px] text-red-600 mt-1">{actionError[agent.id]}</div>
                       )}
                     </td>
                   </tr>
