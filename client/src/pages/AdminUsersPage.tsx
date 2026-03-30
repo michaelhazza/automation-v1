@@ -14,13 +14,12 @@ interface OrgUser {
   lastLoginAt: string | null;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: '#16a34a',
-  inactive: '#6b7280',
-  pending: '#d97706',
+const STATUS_TEXT: Record<string, string> = {
+  active:   'text-green-600',
+  inactive: 'text-slate-500',
+  pending:  'text-amber-600',
 };
 
-// Roles that managers can assign; admins/system_admin can assign all non-system roles
 const MANAGER_ASSIGNABLE_ROLES = ['user', 'client_user'];
 const ADMIN_ASSIGNABLE_ROLES = ['org_admin', 'manager', 'user', 'client_user'];
 
@@ -95,53 +94,85 @@ export default function AdminUsersPage({ user }: { user: User }) {
     }
   };
 
-  const deleteUserName = deleteUserId
-    ? users.find((u) => u.id === deleteUserId)
-    : null;
+  const deleteUserObj = deleteUserId ? users.find((u) => u.id === deleteUserId) : null;
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div className="page-enter">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Users</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage team members and their access</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Users</h1>
+          <p className="text-sm text-slate-500 mt-2">Manage team members and their access</p>
         </div>
-        <button onClick={() => { setShowInviteForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button
+          onClick={() => { setShowInviteForm(true); setError(''); }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
           + Invite user
         </button>
       </div>
 
-      {success && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#16a34a', fontSize: 14 }}>{success}</div>}
-      {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>{error}</div>}
+      {success && (
+        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-5 text-sm text-green-700">{success}</div>
+      )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-sm text-red-600">{error}</div>
+      )}
 
       {showInviteForm && (
         <Modal title="Invite new user" onClose={() => setShowInviteForm(false)} maxWidth={520}>
-          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Email *</label>
-              <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Email *</label>
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>First name</label>
-              <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name</label>
+              <input
+                value={form.firstName}
+                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Last name</label>
-              <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name</label>
+              <input
+                value={form.lastName}
+                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Role *</label>
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Role *</label>
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
                 {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleInvite} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Send invitation</button>
-            <button onClick={() => setShowInviteForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button
+              onClick={handleInvite}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors"
+            >
+              Send invitation
+            </button>
+            <button
+              onClick={() => setShowInviteForm(false)}
+              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </Modal>
       )}
@@ -149,51 +180,64 @@ export default function AdminUsersPage({ user }: { user: User }) {
       {deleteUserId && (
         <ConfirmDialog
           title="Remove user"
-          message={`Remove ${deleteUserName ? `${deleteUserName.firstName} ${deleteUserName.lastName} (${deleteUserName.email})` : 'this user'} from the organisation? This action cannot be undone.`}
+          message={`Remove ${deleteUserObj ? `${deleteUserObj.firstName} ${deleteUserObj.lastName} (${deleteUserObj.email})` : 'this user'} from the organisation? This action cannot be undone.`}
           confirmLabel="Remove"
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteUserId(null)}
         />
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
           <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Email</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Role</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Last login</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Name</th>
+              <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Email</th>
+              <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Role</th>
+              <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+              <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Last login</th>
+              <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-50">
             {users.map((u) => (
-              <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>{u.firstName} {u.lastName}</td>
-                <td style={{ padding: '12px 16px', color: '#64748b' }}>{u.email}</td>
-                <td style={{ padding: '12px 16px' }}>
+              <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+                <td className="px-4 py-3 font-medium text-slate-800">{u.firstName} {u.lastName}</td>
+                <td className="px-4 py-3 text-slate-500 text-[13px]">{u.email}</td>
+                <td className="px-4 py-3">
                   {u.role === 'system_admin' || (isManager && !assignableRoles.includes(u.role)) ? (
-                    <span style={{ color: u.role === 'system_admin' ? '#7c3aed' : '#374151' }}>{u.role}</span>
+                    <span className={u.role === 'system_admin' ? 'text-violet-700 font-medium text-[13px]' : 'text-[13px] text-slate-600'}>{u.role}</span>
                   ) : (
-                    <select value={u.role} onChange={(e) => handleUpdateRole(u.id, e.target.value)} style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}>
+                    <select
+                      value={u.role}
+                      onChange={(e) => handleUpdateRole(u.id, e.target.value)}
+                      className="px-2 py-1 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    >
                       {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   )}
                 </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <select value={u.status} onChange={(e) => handleUpdateStatus(u.id, e.target.value)} style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, color: STATUS_COLORS[u.status] ?? '#374151' }}>
+                <td className="px-4 py-3">
+                  <select
+                    value={u.status}
+                    onChange={(e) => handleUpdateStatus(u.id, e.target.value)}
+                    className={`px-2 py-1 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ${STATUS_TEXT[u.status] ?? 'text-slate-600'}`}
+                  >
                     {['active', 'inactive'].map((s) => <option key={s} value={s}>{s}</option>)}
                     {u.status === 'pending' && <option value="pending">pending</option>}
                   </select>
                 </td>
-                <td style={{ padding: '12px 16px', color: '#64748b', fontSize: 13 }}>
+                <td className="px-4 py-3 text-[13px] text-slate-500">
                   {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
                 </td>
-                <td style={{ padding: '12px 16px' }}>
+                <td className="px-4 py-3">
                   {u.id !== user.id && (
-                    <button onClick={() => setDeleteUserId(u.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+                    <button
+                      onClick={() => setDeleteUserId(u.id)}
+                      className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors"
+                    >
+                      Remove
+                    </button>
                   )}
                 </td>
               </tr>
@@ -201,6 +245,6 @@ export default function AdminUsersPage({ user }: { user: User }) {
           </tbody>
         </table>
       </div>
-    </>
+    </div>
   );
 }
