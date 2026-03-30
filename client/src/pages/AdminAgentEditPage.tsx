@@ -1049,35 +1049,30 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       </SectionCard>
 
       {/* ── Section 4: Skills ── */}
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 20 }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
+        <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
           <div>
-            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b', display: 'inline' }}>
-              Skills
-            </h2>
+            <h2 className="m-0 text-[15px] font-semibold text-slate-900 inline">Skills</h2>
             {form.defaultSkillSlugs.length > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 999 }}>
+              <span className="ml-2 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-[2px] rounded-full">
                 {form.defaultSkillSlugs.length} selected
               </span>
             )}
-            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+            <div className="text-xs text-slate-500 mt-1">
               Select which capabilities this agent has access to. Skills provide tools and structured methodology guidance.
             </div>
           </div>
-          <Link
-            to="/admin/skills"
-            style={{ fontSize: 12, color: '#6366f1', textDecoration: 'none', fontWeight: 500, whiteSpace: 'nowrap' }}
-          >
+          <Link to="/admin/skills" className="text-xs text-indigo-500 no-underline font-medium whitespace-nowrap">
             Manage Skills
           </Link>
         </div>
-        <div style={{ padding: 20 }}>
+        <div className="p-5">
           {availableSkills.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontSize: 13 }}>
-              No skills available. <Link to="/admin/skills/new" style={{ color: '#6366f1' }}>Create one</Link>
+            <div className="text-center py-5 text-slate-500 text-[13px]">
+              No skills available. <Link to="/admin/skills/new" className="text-indigo-500">Create one</Link>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+            <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
               {availableSkills.map((skill) => {
                 const isSelected = form.defaultSkillSlugs.includes(skill.slug);
                 return (
@@ -1089,22 +1084,14 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                         : [...form.defaultSkillSlugs, skill.slug];
                       setForm({ ...form, defaultSkillSlugs: slugs });
                     }}
-                    style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px',
-                      background: isSelected ? '#eef2ff' : '#fafafa',
-                      border: `1.5px solid ${isSelected ? '#6366f1' : '#e2e8f0'}`,
-                      borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-                      transition: 'all 0.15s', fontFamily: 'inherit',
-                    }}
+                    className={`flex items-start gap-2.5 px-3.5 py-3 rounded-[10px] cursor-pointer text-left transition-all duration-150 font-[inherit] border-[1.5px] ${
+                      isSelected ? 'bg-indigo-50 border-indigo-500' : 'bg-gray-50 border-slate-200'
+                    }`}
                   >
                     {/* Checkbox */}
-                    <div style={{
-                      width: 20, height: 20, borderRadius: 6, flexShrink: 0, marginTop: 1,
-                      background: isSelected ? '#6366f1' : '#fff',
-                      border: `2px solid ${isSelected ? '#6366f1' : '#d1d5db'}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'all 0.15s',
-                    }}>
+                    <div className={`w-5 h-5 rounded-md shrink-0 mt-px border-2 flex items-center justify-center transition-all duration-150 ${
+                      isSelected ? 'bg-indigo-500 border-indigo-500' : 'bg-white border-gray-300'
+                    }`}>
                       {isSelected && (
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
@@ -1112,24 +1099,22 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                       )}
                     </div>
                     {/* Skill info */}
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{skill.name}</span>
-                        <span style={{
-                          fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 999,
-                          background: skill.skillType === 'built_in' ? '#ede9fe' : '#dbeafe',
-                          color: skill.skillType === 'built_in' ? '#6d28d9' : '#1d4ed8',
-                        }}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-[13px] font-semibold text-slate-900">{skill.name}</span>
+                        <span className={`text-[10px] font-semibold px-1.5 py-[1px] rounded-full ${
+                          skill.skillType === 'built_in' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'
+                        }`}>
                           {skill.skillType === 'built_in' ? 'Built-in' : 'Custom'}
                         </span>
                         {skill.methodology && (
-                          <span style={{ fontSize: 10, fontWeight: 500, padding: '1px 6px', borderRadius: 999, background: '#dcfce7', color: '#166534' }}>
+                          <span className="text-[10px] font-medium px-1.5 py-[1px] rounded-full bg-green-100 text-green-800">
                             Methodology
                           </span>
                         )}
                       </div>
                       {skill.description && (
-                        <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.4, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>
+                        <div className="text-[11px] text-slate-500 leading-snug overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>
                           {skill.description}
                         </div>
                       )}
@@ -1153,20 +1138,18 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         />
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 20 }}>
+      <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden mb-5">
         {/* Header */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
           <div>
-            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b', display: 'inline' }}>
-              Data Sources
-            </h2>
+            <h2 className="m-0 text-[15px] font-semibold text-slate-900 inline">Data Sources</h2>
             {(isNew ? pendingNewSources.length : dataSources.length) > 0 && (
-              <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 999 }}>
+              <span className="ml-2 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-[2px] rounded-full">
                 {isNew ? pendingNewSources.length : dataSources.length}
               </span>
             )}
             {isNew && (
-              <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+              <div className="text-xs text-slate-500 mt-1">
                 Configure knowledge sources for this agent. Sources will be attached when you click "Create Agent".
               </div>
             )}
@@ -1174,7 +1157,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           {!showDsForm && (
             <button
               onClick={openAddDs}
-              style={{ padding: '6px 14px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+              className="px-3.5 py-1.5 bg-indigo-500 text-white border-none rounded-md text-[13px] cursor-pointer font-medium"
             >
               + Add Data Source
             </button>
@@ -1186,18 +1169,16 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         {/* Source type legend */}
         {!showDsForm && (isNew ? pendingNewSources.length === 0 : dataSources.length === 0) && (
-          <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div className="py-8 px-5 text-center">
+            <div className="flex justify-center gap-2.5 flex-wrap mb-4">
               {SOURCE_TYPE_OPTIONS.map((t) => (
                 <SourceTypeBadge key={t.value} type={t.value} />
               ))}
             </div>
-            <div style={{ color: '#64748b', fontSize: 14, marginBottom: 8 }}>
-              No data sources configured yet.
-            </div>
+            <div className="text-slate-500 text-[14px] mb-2">No data sources configured yet.</div>
             <button
               onClick={openAddDs}
-              style={{ color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, textDecoration: 'underline', padding: 0 }}
+              className="text-indigo-500 bg-transparent border-none cursor-pointer text-[14px] underline p-0"
             >
               Add one
             </button>
@@ -1206,46 +1187,39 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         {/* Pending data sources list (new agent mode) */}
         {isNew && pendingNewSources.length > 0 && !showDsForm && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full border-collapse text-[14px]">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Name</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Type</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Source</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Actions</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Name</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Type</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Source</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Actions</th>
               </tr>
             </thead>
             <tbody>
               {pendingNewSources.map((pending) => (
-                <tr key={pending.tempId} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontWeight: 500, color: '#1e293b', fontSize: 13 }}>{pending.form.name}</div>
+                <tr key={pending.tempId} className="border-b border-slate-100">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-slate-900 text-[13px]">{pending.form.name}</div>
                     {pending.form.description && (
-                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{pending.form.description}</div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">{pending.form.description}</div>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
+                  <td className="px-4 py-3">
                     <SourceTypeBadge type={pending.form.sourceType} />
                   </td>
-                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td className="px-4 py-3 text-slate-600 text-xs max-w-[220px] overflow-hidden text-ellipsis whitespace-nowrap">
                     {pending.form.sourceType === 'file_upload'
                       ? (pending.fileName ?? 'File selected')
                       : pending.form.sourcePath}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        onClick={() => openEditPending(pending)}
-                        style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                      >
-                        Edit
-                      </button>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1.5">
+                      <button onClick={() => openEditPending(pending)} className="px-2.5 py-1 bg-slate-100 text-gray-700 border-none rounded-md text-xs cursor-pointer font-medium">Edit</button>
                       <button
                         onClick={() => setPendingNewSources((prev) => prev.filter((p) => p.tempId !== pending.tempId))}
-                        style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                      >
-                        Remove
-                      </button>
+                        className="px-2.5 py-1 bg-red-50 text-red-600 border-none rounded-md text-xs cursor-pointer font-medium"
+                      >Remove</button>
                     </div>
                   </td>
                 </tr>
@@ -1256,74 +1230,64 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         {/* Existing data sources list (edit mode) */}
         {!isNew && dataSources.length > 0 && !showDsForm && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full border-collapse text-[14px]">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Name</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Type</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Sync</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Path</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Last Status</th>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 12 }}>Actions</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Name</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Type</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Sync</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Path</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Last Status</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-gray-700 text-xs">Actions</th>
               </tr>
             </thead>
             <tbody>
               {dataSources.map((ds) => (
-                <tr key={ds.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontWeight: 500, color: '#1e293b', fontSize: 13 }}>{ds.name}</div>
+                <tr key={ds.id} className="border-b border-slate-100">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-slate-900 text-[13px]">{ds.name}</div>
                     {ds.description && (
-                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{ds.description}</div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">{ds.description}</div>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
+                  <td className="px-4 py-3">
                     <SourceTypeBadge type={ds.sourceType} />
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
+                  <td className="px-4 py-3">
                     {ds.sourceType === 'file_upload' ? (
-                      <span style={{ fontSize: 11, color: '#64748b' }}>Static</span>
+                      <span className="text-[11px] text-slate-500">Static</span>
                     ) : (
-                      <span style={{
-                        fontSize: 11,
-                        fontWeight: 500,
-                        padding: '2px 8px',
-                        borderRadius: 999,
-                        background: ds.syncMode === 'proactive' ? '#ede9fe' : '#f1f5f9',
-                        color: ds.syncMode === 'proactive' ? '#5b21b6' : '#475569',
-                      }}>
+                      <span className={`text-[11px] font-medium px-2 py-[2px] rounded-full ${
+                        ds.syncMode === 'proactive' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-600'
+                      }`}>
                         {ds.syncMode === 'proactive' ? `Proactive · ${ds.cacheMinutes}m` : `Lazy · ${ds.cacheMinutes}m`}
                       </span>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px', color: '#475569', fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td className="px-4 py-3 text-slate-600 text-xs max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap">
                     {ds.sourceType === 'file_upload' ? ds.sourcePath.split('/').pop() : ds.sourcePath}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
+                  <td className="px-4 py-3">
                     {ds.lastFetchStatus ? (
-                      <span style={{
-                        fontSize: 11,
-                        fontWeight: 500,
-                        color: ds.lastFetchStatus === 'ok' ? '#166534' : '#9a3412',
-                        background: ds.lastFetchStatus === 'ok' ? '#dcfce7' : '#fff7ed',
-                        padding: '2px 8px',
-                        borderRadius: 999,
-                      }}>
+                      <span className={`text-[11px] font-medium px-2 py-[2px] rounded-full ${
+                        ds.lastFetchStatus === 'ok' ? 'bg-green-100 text-green-800' : 'bg-orange-50 text-orange-800'
+                      }`}>
                         {ds.lastFetchStatus}
                       </span>
                     ) : (
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>
+                      <span className="text-[11px] text-slate-400">—</span>
                     )}
                     {testResults[ds.id] && (
-                      <div style={{ marginTop: 6 }}>
+                      <div className="mt-1.5">
                         {testResults[ds.id].error ? (
-                          <div style={{ fontSize: 11, color: '#dc2626' }}>{testResults[ds.id].error}</div>
+                          <div className="text-[11px] text-red-600">{testResults[ds.id].error}</div>
                         ) : (
-                          <div style={{ fontSize: 11, color: '#475569' }}>
+                          <div className="text-[11px] text-slate-600">
                             {testResults[ds.id].tokenCount != null && (
-                              <span style={{ fontWeight: 500, color: '#166534' }}>{testResults[ds.id].tokenCount} tokens</span>
+                              <span className="font-medium text-green-700">{testResults[ds.id].tokenCount} tokens</span>
                             )}
                             {testResults[ds.id].snippet && (
-                              <div style={{ marginTop: 4, fontFamily: 'monospace', fontSize: 10, color: '#64748b', background: '#f8fafc', padding: '4px 6px', borderRadius: 4, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <div className="mt-1 font-mono text-[10px] text-slate-500 bg-slate-50 px-1.5 py-1 rounded max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap">
                                 {testResults[ds.id].snippet}
                               </div>
                             )}
@@ -1332,27 +1296,17 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        onClick={() => openEditDs(ds)}
-                        style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                      >
-                        Edit
-                      </button>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1.5">
+                      <button onClick={() => openEditDs(ds)} className="px-2.5 py-1 bg-slate-100 text-gray-700 border-none rounded-md text-xs cursor-pointer font-medium">Edit</button>
                       <button
                         onClick={() => handleTestDs(ds.id)}
                         disabled={testingId === ds.id}
-                        style={{ padding: '4px 10px', background: '#f0f9ff', color: '#0284c7', border: 'none', borderRadius: 6, fontSize: 12, cursor: testingId === ds.id ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                        className={`px-2.5 py-1 bg-sky-50 text-sky-600 border-none rounded-md text-xs font-medium ${testingId === ds.id ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                       >
                         {testingId === ds.id ? 'Testing...' : 'Test'}
                       </button>
-                      <button
-                        onClick={() => setDeleteDsId(ds.id)}
-                        style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
-                      >
-                        Delete
-                      </button>
+                      <button onClick={() => setDeleteDsId(ds.id)} className="px-2.5 py-1 bg-red-50 text-red-600 border-none rounded-md text-xs cursor-pointer font-medium">Delete</button>
                     </div>
                   </td>
                 </tr>
