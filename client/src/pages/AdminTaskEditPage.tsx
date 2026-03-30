@@ -15,11 +15,12 @@ interface Process {
   outputSchema: string | null;
 }
 
-export default function AdminTaskEditPage({ user }: { user: User }) {
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+export default function AdminTaskEditPage({ user: _user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const [process, setProcess] = useState<Process | null>(null);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
-  const [engines, setEngines] = useState<{ id: string; name: string; status: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
@@ -30,37 +31,30 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
 
   useEffect(() => {
     const load = async () => {
-      const [processRes, catRes, engRes] = await Promise.all([
+      const [processRes, catRes] = await Promise.all([
         api.get(`/api/processes/${id}`),
         api.get('/api/categories'),
-        api.get('/api/engines'),
       ]);
       setProcess(processRes.data);
       setCategories(catRes.data);
-      setEngines(engRes.data);
       setLoading(false);
     };
     load();
   }, [id]);
 
   const handleSave = async () => {
-    setError('');
-    setSuccess('');
-    setSaving(true);
+    setError(''); setSuccess(''); setSaving(true);
     try {
       await api.patch(`/api/processes/${id}`, process);
       setSuccess('Automation saved successfully');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Save failed');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleTest = async () => {
-    setTestResult(null);
-    setTestLoading(true);
+    setTestResult(null); setTestLoading(true);
     try {
       let parsedInput: unknown = undefined;
       if (testInput.trim()) {
@@ -73,79 +67,93 @@ export default function AdminTaskEditPage({ user }: { user: User }) {
     } catch (err: unknown) {
       const e = err as { response?: { data?: unknown } };
       setTestResult({ error: e.response?.data });
-    } finally {
-      setTestLoading(false);
-    }
+    } finally { setTestLoading(false); }
   };
 
-  if (loading || !process) return <div>Loading...</div>;
+  if (loading || !process) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/admin/processes" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to automations</Link>
+    <div className="page-enter">
+      <div className="mb-4">
+        <Link to="/admin/processes" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
+          ← Back to automations
+        </Link>
       </div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 24 }}>Edit Automation: {process.name}</h1>
+      <h1 className="text-[26px] font-bold text-slate-800 mb-6">Edit Automation: {process.name}</h1>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 24 }}>
+      <div className="grid gap-6" style={{ gridTemplateColumns: '1fr 380px' }}>
         {/* Edit form */}
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0' }}>
-          {success && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#16a34a', fontSize: 13 }}>{success}</div>}
-          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gap: 16 }}>
+        <div className="bg-white border border-slate-200 rounded-xl p-6">
+          {success && <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{success}</div>}
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          <div className="grid gap-4">
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
-              <input type="text" value={process.name ?? ''} onChange={(e) => setProcess({ ...process, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+              <input type="text" value={process.name ?? ''} onChange={(e) => setProcess({ ...process, name: e.target.value })} className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Webhook path</label>
-              <input type="text" value={process.webhookPath ?? ''} onChange={(e) => setProcess({ ...process, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Webhook path</label>
+              <input type="text" value={process.webhookPath ?? ''} onChange={(e) => setProcess({ ...process, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Category</label>
-              <select value={process.orgCategoryId ?? ''} onChange={(e) => setProcess({ ...process, orgCategoryId: e.target.value || null })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13 }}>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Category</label>
+              <select value={process.orgCategoryId ?? ''} onChange={(e) => setProcess({ ...process, orgCategoryId: e.target.value || null })} className={inputCls}>
                 <option value="">No category</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
-              <textarea value={process.description ?? ''} onChange={(e) => setProcess({ ...process, description: e.target.value })} rows={3} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description</label>
+              <textarea value={process.description ?? ''} onChange={(e) => setProcess({ ...process, description: e.target.value })} rows={3} className={`${inputCls} resize-vertical`} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input schema / guidance</label>
-              <textarea value={process.inputSchema ?? ''} onChange={(e) => setProcess({ ...process, inputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Input schema / guidance</label>
+              <textarea value={process.inputSchema ?? ''} onChange={(e) => setProcess({ ...process, inputSchema: e.target.value })} rows={2} className={`${inputCls} resize-vertical`} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Output schema / description</label>
-              <textarea value={process.outputSchema ?? ''} onChange={(e) => setProcess({ ...process, outputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Output schema / description</label>
+              <textarea value={process.outputSchema ?? ''} onChange={(e) => setProcess({ ...process, outputSchema: e.target.value })} rows={2} className={`${inputCls} resize-vertical`} />
             </div>
           </div>
-          <button onClick={handleSave} disabled={saving} style={{ marginTop: 20, padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="mt-5 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
             {saving ? 'Saving...' : 'Save changes'}
           </button>
         </div>
 
         {/* Test panel */}
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', alignSelf: 'start' }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, color: '#1e293b' }}>Test mode</h2>
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Test input (JSON)</label>
-            <textarea value={testInput} onChange={(e) => setTestInput(e.target.value)} rows={4} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 12, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }} placeholder='{ "key": "value" }' />
+        <div className="bg-white border border-slate-200 rounded-xl p-6 self-start">
+          <h2 className="text-[16px] font-semibold text-slate-800 mb-4">Test mode</h2>
+          <div className="mb-3">
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Test input (JSON)</label>
+            <textarea
+              value={testInput}
+              onChange={(e) => setTestInput(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[12px] font-mono bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 resize-vertical"
+              placeholder='{ "key": "value" }'
+            />
           </div>
-          <button onClick={handleTest} disabled={testLoading} style={{ width: '100%', padding: '9px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: testLoading ? 'not-allowed' : 'pointer', opacity: testLoading ? 0.7 : 1 }}>
+          <button
+            onClick={handleTest}
+            disabled={testLoading}
+            className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white text-[13px] font-semibold rounded-lg transition-colors"
+          >
             {testLoading ? 'Running...' : 'Run test'}
           </button>
           {testResult !== null && (
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Result</div>
-              <pre style={{ background: '#f8fafc', padding: 12, borderRadius: 8, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#1e293b', border: '1px solid #e2e8f0', margin: 0 }}>
+            <div className="mt-4">
+              <div className="text-[12px] font-semibold text-slate-700 mb-1.5">Result</div>
+              <pre className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[11px] overflow-auto whitespace-pre-wrap break-words text-slate-800 m-0">
                 {JSON.stringify(testResult, null, 2)}
               </pre>
             </div>
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
