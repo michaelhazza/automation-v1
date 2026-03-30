@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { costAggregates } from '../db/schema/index.js';
+import { costAggregates, workspaceLimits, orgBudgets } from '../db/schema/index.js';
 import { sql, and, eq } from 'drizzle-orm';
 import type { LlmRequest } from '../db/schema/index.js';
 
@@ -126,15 +126,11 @@ export async function checkAlertThresholds(
 ): Promise<Array<{ type: string; entityId: string; pct: number; limitCents: number; spendCents: number }>> {
   const alerts: Array<{ type: string; entityId: string; pct: number; limitCents: number; spendCents: number }> = [];
 
-  // Import here to avoid circular dependencies
-  const { db: _db } = await import('../db/index.js');
-  const { workspaceLimits: _wl, orgBudgets: _ob } = await import('../db/schema/index.js');
-
   if (subaccountId) {
-    const [wsLimits] = await _db
+    const [wsLimits] = await db
       .select()
-      .from(_wl)
-      .where(eq(_wl.subaccountId, subaccountId));
+      .from(workspaceLimits)
+      .where(eq(workspaceLimits.subaccountId, subaccountId));
 
     if (wsLimits?.monthlyCostLimitCents && wsLimits.monthlyCostLimitCents > 0) {
       const [agg] = await db
@@ -159,10 +155,10 @@ export async function checkAlertThresholds(
     }
   }
 
-  const [orgBudget] = await _db
+  const [orgBudget] = await db
     .select()
-    .from(_ob)
-    .where(eq(_ob.organisationId, organisationId));
+    .from(orgBudgets)
+    .where(eq(orgBudgets.organisationId, organisationId));
 
   if (orgBudget?.monthlyCostLimitCents && orgBudget.monthlyCostLimitCents > 0) {
     const [agg] = await db

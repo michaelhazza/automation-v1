@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS "org_margin_configs" (
 
 -- Default platform margin row (NULL organisation_id = platform default)
 INSERT INTO "org_margin_configs" ("margin_multiplier", "fixed_fee_cents", "notes")
-VALUES (1.30, 0, 'Platform default margin')
-ON CONFLICT DO NOTHING;
+SELECT 1.30, 0, 'Platform default margin'
+WHERE NOT EXISTS (SELECT 1 FROM "org_margin_configs" WHERE "organisation_id" IS NULL);
 
 -- ---------------------------------------------------------------------------
 -- 3. llm_requests — append-only financial ledger

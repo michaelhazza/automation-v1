@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { llmPricing, orgMarginConfigs } from '../db/schema/index.js';
-import { and, isNull, lte, or } from 'drizzle-orm';
+import { and, gte, isNull, lte, or } from 'drizzle-orm';
 import { eq } from 'drizzle-orm';
 import { env } from '../lib/env.js';
 
@@ -61,7 +61,7 @@ export async function getPricing(
           eq(llmPricing.provider, provider),
           eq(llmPricing.model, model),
           lte(llmPricing.effectiveFrom, now),
-          or(isNull(llmPricing.effectiveTo), lte(now, llmPricing.effectiveTo!)),
+          or(isNull(llmPricing.effectiveTo), gte(llmPricing.effectiveTo!, now)),
         ),
       )
       .orderBy(llmPricing.effectiveFrom)

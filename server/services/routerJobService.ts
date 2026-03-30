@@ -1,5 +1,5 @@
 import { db } from '../db/index.js';
-import { llmRequests, budgetReservations } from '../db/schema/index.js';
+import { llmRequests, budgetReservations, costAggregates } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { costAggregateService } from './costAggregateService.js';
 
@@ -127,7 +127,6 @@ export async function cleanOldAggregates(): Promise<void> {
   const cutoffMinute = twoHoursAgo.toISOString().slice(0, 16); // 'YYYY-MM-DDTHH:mm'
 
   // Delete minute rows older than 2h
-  const { costAggregates } = await import('../db/schema/index.js');
   await db
     .delete(costAggregates)
     .where(
@@ -152,7 +151,6 @@ export async function generateMonthlyInvoices(): Promise<void> {
   console.info(`[routerJobService] Generating invoices for period ${period}`);
 
   // Get all subaccounts with spend in this period
-  const { costAggregates } = await import('../db/schema/index.js');
   const subaccountAggregates = await db
     .select()
     .from(costAggregates)
@@ -186,16 +184,15 @@ async function generateInvoiceForSubaccount(subaccountId: string, period: string
       ),
     );
 
-  const { costAggregates: _ca } = await import('../db/schema/index.js');
   const aggregateTotal = await db
-    .select({ total: _ca.totalCostCents })
-    .from(_ca)
+    .select({ total: costAggregates.totalCostCents })
+    .from(costAggregates)
     .where(
       and(
-        eq(_ca.entityType, 'subaccount'),
-        eq(_ca.entityId, subaccountId),
-        eq(_ca.periodType, 'monthly'),
-        eq(_ca.periodKey, period),
+        eq(costAggregates.entityType, 'subaccount'),
+        eq(costAggregates.entityId, subaccountId),
+        eq(costAggregates.periodType, 'monthly'),
+        eq(costAggregates.periodKey, period),
       ),
     );
 
