@@ -108,8 +108,8 @@ function JsonBlock({ data, maxHeight = 300 }: { data: unknown; maxHeight?: numbe
   return (
     <div>
       <pre
-        className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[12px] font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap break-words m-0"
-        style={{ maxHeight: expanded ? 'none' : maxHeight, overflow: expanded ? 'auto' : 'hidden' }}
+        className={`bg-slate-50 border border-slate-200 rounded-lg p-3 text-[12px] font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap break-words m-0 ${expanded ? 'overflow-auto' : 'overflow-hidden'}`}
+        style={{ maxHeight: expanded ? undefined : maxHeight }}
       >
         {text}
       </pre>
