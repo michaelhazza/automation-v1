@@ -29,19 +29,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex font-sans">
       {/* Left panel – brand */}
-      <div className="w-[440px] shrink-0 flex flex-col p-12 relative overflow-hidden"
-        style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)' }}>
+      <div className="w-[440px] shrink-0 flex flex-col p-12 relative overflow-hidden bg-[linear-gradient(160deg,#0f172a_0%,#1e1b4b_50%,#0f172a_100%)]">
         {/* Decorative blobs */}
-        <div className="absolute -top-16 -right-16 w-72 h-72 rounded-full pointer-events-none"
-          style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%)' }} />
-        <div className="absolute -bottom-20 -left-10 w-80 h-80 rounded-full pointer-events-none"
-          style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.2) 0%, transparent 70%)' }} />
+        <div className="absolute -top-16 -right-16 w-72 h-72 rounded-full pointer-events-none bg-[radial-gradient(circle,rgba(99,102,241,0.25)_0%,transparent_70%)]" />
+        <div className="absolute -bottom-20 -left-10 w-80 h-80 rounded-full pointer-events-none bg-[radial-gradient(circle,rgba(139,92,246,0.2)_0%,transparent_70%)]" />
 
         {/* Brand */}
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-16">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)', boxShadow: '0 4px 16px rgba(99,102,241,0.5)' }}>
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br from-indigo-500 to-violet-500 shadow-[0_4px_16px_rgba(99,102,241,0.5)]">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
               </svg>
@@ -64,8 +60,7 @@ export default function LoginPage() {
               { icon: '🛡️', text: 'Role-based access control & audit trails' },
               { icon: '📊', text: 'Real-time execution monitoring' },
             ].map(({ icon, text }) => (
-              <div key={text} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div key={text} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/[0.08]">
                 <span className="text-base">{icon}</span>
                 <span className="text-[13px] text-slate-300">{text}</span>
               </div>

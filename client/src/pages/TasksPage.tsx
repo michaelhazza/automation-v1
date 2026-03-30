@@ -51,19 +51,19 @@ export default function TasksPage({ user: _user }: { user: User }) {
 
   if (loading) {
     return (
-      <div className="page-enter flex flex-col gap-4">
-        <div className="skeleton h-9 w-48 rounded-lg" />
-        <div className="skeleton h-5 w-72 rounded" />
-        <div className="skeleton h-11 rounded-lg" />
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-          {[1,2,3,4,5,6].map((i) => <div key={i} className="skeleton h-36 rounded-xl" />)}
+      <div className="animate-[fadeIn_0.2s_ease-out_both] flex flex-col gap-4">
+        <div className="h-9 w-48 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-5 w-72 rounded bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-11 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+          {[1,2,3,4,5,6].map((i) => <div key={i} className="h-36 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">Automations</h1>
@@ -141,7 +141,7 @@ export default function TasksPage({ user: _user }: { user: User }) {
       {/* Grid / Empty */}
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center text-center">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" className="bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
@@ -162,7 +162,7 @@ export default function TasksPage({ user: _user }: { user: User }) {
           )}
         </div>
       ) : (
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
           {filtered.map((process) => {
             const cat = getCategoryForProcess(process);
             return (

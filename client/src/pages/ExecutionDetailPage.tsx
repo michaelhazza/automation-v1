@@ -65,7 +65,7 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
   if (!execution) return <div className="p-8 text-sm text-red-600">Execution not found</div>;
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-4">
         <Link to="/executions" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
           ← Back to executions
@@ -76,7 +76,7 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
       <div className="font-mono text-xs text-slate-400 mb-6">{execution.id}</div>
 
       {/* Stats grid */}
-      <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+      <div className="grid gap-4 mb-6 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
         {[
           {
             label: 'Status',

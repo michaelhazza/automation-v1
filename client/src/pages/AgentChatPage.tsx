@@ -257,11 +257,11 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
 
   if (loading) {
     return (
-      <div className="flex flex-col" style={{ height: 'calc(100vh - 64px)' }}>
+      <div className="flex flex-col h-[calc(100vh-64px)]">
         <div className="px-6 py-3 border-b border-slate-200 flex gap-3 items-center">
-          <div className="skeleton h-4.5 w-20 rounded" />
-          <div className="skeleton h-5.5 w-40 rounded" />
-          <div className="skeleton h-5 w-16 rounded-full" />
+          <div className="h-[18px] w-20 rounded bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+          <div className="h-[22px] w-40 rounded bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+          <div className="h-5 w-16 rounded-full bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
         </div>
         <div className="flex-1 flex items-center justify-center">
           <div className="w-8 h-8 border-[3px] border-slate-200 border-t-indigo-600 rounded-full animate-spin" />
@@ -283,7 +283,7 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const visibleMessages = messages.filter((m) => m.role !== 'tool_result');
 
   return (
-    <div className="flex flex-col bg-slate-50 overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
+    <div className="flex flex-col bg-slate-50 overflow-hidden h-[calc(100vh-64px)]">
       {/* Header */}
       <div className="flex items-center gap-3.5 px-5 py-3 bg-white border-b border-slate-200 shrink-0 z-10">
         <Link to="/agents" className="inline-flex items-center gap-1 text-indigo-600 no-underline text-[13px] font-semibold px-2.5 py-1.5 rounded-lg bg-violet-50 border border-indigo-200 shrink-0 transition-colors hover:bg-violet-100">
@@ -320,7 +320,7 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
               </div>
             ) : visibleMessages.length === 0 && !sending ? (
               <div className="flex flex-col items-center justify-center h-full px-6 py-10 text-center">
-                <div className="w-16 h-16 rounded-[18px] mb-5 flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
+                <div className="w-16 h-16 rounded-[18px] mb-5 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-500">
                   <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
                   </svg>
@@ -342,10 +342,9 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                     <div
                       className={`text-[14px] leading-relaxed break-words max-w-[70%] px-3.5 py-2.5 ${
                         msg.role === 'user'
-                          ? 'bg-indigo-600 text-white self-end'
-                          : 'bg-white text-slate-800 shadow-sm self-start'
+                          ? 'bg-indigo-600 text-white self-end rounded-[18px_18px_4px_18px]'
+                          : 'bg-white text-slate-800 shadow-sm self-start rounded-[18px_18px_18px_4px]'
                       }`}
-                      style={{ borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px' }}
                     >
                       {msg.role === 'user'
                         ? (msg.content ?? '').split('\n').map((line, i, arr) => <span key={i}>{line}{i < arr.length - 1 ? <br /> : null}</span>)

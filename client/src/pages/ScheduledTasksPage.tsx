@@ -81,12 +81,12 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
 
   if (loading) return (
     <div className="p-8">
-      <div className="skeleton h-48 rounded-xl" />
+      <div className="h-48 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
     </div>
   );
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
         <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline">&larr; Back</Link>
         <div className="flex justify-between items-center mt-2">

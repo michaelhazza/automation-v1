@@ -28,6 +28,13 @@ interface Props {
   onSelectClient: (id: string, name: string) => void;
 }
 
+const AVATAR_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#22c55e','#0ea5e9','#14b8a6'];
+const avatarColor = (str: string) => {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+};
+
 export default function CommandPalette({ isOpen, onClose, activeClientId, onSelectClient }: Props) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
@@ -93,107 +100,32 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
 
   if (!isOpen) return null;
 
-  const AVATAR_COLORS = ['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#22c55e','#0ea5e9','#14b8a6'];
-  const avatarColor = (str: string) => {
-    let h = 0;
-    for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
-    return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
-  };
-
-  let globalIdx = 0;
-
-  const renderGroup = (label: string, items: Result[]) => {
-    if (items.length === 0) return null;
-    return (
-      <div key={label}>
-        <div style={{ padding: '8px 14px 4px', fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          {label}
-        </div>
-        {items.map(r => {
-          const idx = globalIdx++;
-          const isSelected = idx === selected;
-          const key = r.kind === 'nav' ? r.item.to : r.item.id;
-          return (
-            <button
-              key={key}
-              onMouseEnter={() => setSelected(idx)}
-              onClick={() => execute(r)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                width: '100%', padding: '8px 14px', border: 'none', cursor: 'pointer',
-                background: isSelected ? 'rgba(99,102,241,0.12)' : 'transparent',
-                color: isSelected ? '#e2e8f0' : '#94a3b8',
-                fontSize: 13, fontWeight: 500, textAlign: 'left', fontFamily: 'inherit',
-                transition: 'background 0.05s',
-              }}
-            >
-              {r.kind === 'client' && (
-                <span style={{
-                  width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-                  background: avatarColor(r.item.name),
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 700, color: 'white',
-                }}>
-                  {r.item.name.split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase()}
-                </span>
-              )}
-              {r.kind === 'agent' && (
-                <span style={{
-                  width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-                  background: 'rgba(99,102,241,0.2)', color: '#a5b4fc',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
-                }}>🤖</span>
-              )}
-              {r.kind === 'nav' && (
-                <span style={{
-                  width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-                  background: 'rgba(255,255,255,0.05)', color: '#64748b',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11,
-                }}>→</span>
-              )}
-              <span style={{ flex: 1 }}>{r.item.name ?? (r as { item: NavEntry }).item.label}</span>
-              {r.kind === 'client' && r.item.id === activeClientId && (
-                <span style={{ fontSize: 10, color: '#22c55e' }}>active</span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // Reset globalIdx for render
-  globalIdx = 0;
   const navResults = results.filter(r => r.kind === 'nav');
   const clientResults = results.filter(r => r.kind === 'client');
   const agentResults = results.filter(r => r.kind === 'agent');
-  // Recount after filtering
   const navStart = 0;
   const clientStart = navResults.length;
   const agentStart = clientStart + clientResults.length;
 
+  const btnClass = (isSelected: boolean) =>
+    `flex items-center gap-2.5 w-full px-3.5 py-2 border-0 cursor-pointer text-[13px] font-medium text-left font-[inherit] transition-[background] duration-[50ms] ${
+      isSelected ? 'bg-indigo-500/[0.12] text-slate-200' : 'bg-transparent text-slate-400'
+    }`;
+
+  const groupHeaderClass = 'px-3.5 pt-2 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]';
+
   return (
     <div
       onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-        paddingTop: '12vh',
-      }}
+      className="fixed inset-0 z-[1000] bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[12vh]"
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 560, background: '#1e293b',
-          border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14,
-          boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
-          overflow: 'hidden', animation: 'fadeInScale 0.12s ease-out both',
-        }}
+        className="w-full max-w-[560px] bg-slate-800 border border-white/10 rounded-[14px] shadow-[0_24px_64px_rgba(0,0,0,0.7)] overflow-hidden animate-[fadeInScale_0.12s_ease-out_both]"
       >
         {/* Search input */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-white/[0.07]">
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
           <input
@@ -202,38 +134,27 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
             onChange={e => { setQuery(e.target.value); setSelected(0); }}
             onKeyDown={handleKeyDown}
             placeholder="Search pages, clients, agents..."
-            style={{
-              flex: 1, background: 'transparent', border: 'none', outline: 'none',
-              fontSize: 15, color: '#f1f5f9', fontFamily: 'inherit',
-            }}
+            className="flex-1 bg-transparent border-0 outline-none text-[15px] text-slate-100 font-[inherit]"
           />
-          <span style={{ fontSize: 11, color: '#334155', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>
-            esc
-          </span>
+          <span className="text-[11px] text-slate-600 bg-white/5 px-1.5 py-0.5 rounded">esc</span>
         </div>
 
         {/* Results */}
-        <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+        <div className="max-h-[380px] overflow-y-auto">
           {results.length === 0 && (
-            <div style={{ padding: '24px 16px', textAlign: 'center', color: '#475569', fontSize: 13 }}>
+            <div className="px-4 py-6 text-center text-slate-500 text-[13px]">
               No results for "{query}"
             </div>
           )}
-          {/* Render groups with correct index offsets */}
           {navResults.length > 0 && (
             <div>
-              <div style={{ padding: '8px 14px 4px', fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Navigate</div>
+              <div className={groupHeaderClass}>Navigate</div>
               {navResults.map((r, i) => {
                 const idx = navStart + i;
-                const isSelected = idx === selected;
                 const item = r.item as NavEntry;
                 return (
-                  <button key={item.to} onMouseEnter={() => setSelected(idx)} onClick={() => execute(r)} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 14px',
-                    border: 'none', cursor: 'pointer', background: isSelected ? 'rgba(99,102,241,0.12)' : 'transparent',
-                    color: isSelected ? '#e2e8f0' : '#94a3b8', fontSize: 13, fontWeight: 500, textAlign: 'left', fontFamily: 'inherit',
-                  }}>
-                    <span style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0, background: 'rgba(255,255,255,0.05)', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>→</span>
+                  <button key={item.to} onMouseEnter={() => setSelected(idx)} onClick={() => execute(r)} className={btnClass(idx === selected)}>
+                    <span className="w-6 h-6 rounded-md shrink-0 bg-white/5 text-slate-500 flex items-center justify-center text-[11px]">→</span>
                     <span>{item.label}</span>
                   </button>
                 );
@@ -242,22 +163,17 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
           )}
           {clientResults.length > 0 && (
             <div>
-              <div style={{ padding: '8px 14px 4px', fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Clients</div>
+              <div className={groupHeaderClass}>Clients</div>
               {clientResults.map((r, i) => {
                 const idx = clientStart + i;
-                const isSelected = idx === selected;
                 const item = r.item as Client;
                 const bg = avatarColor(item.name);
                 const inits = item.name.split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
                 return (
-                  <button key={item.id} onMouseEnter={() => setSelected(idx)} onClick={() => execute(r)} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 14px',
-                    border: 'none', cursor: 'pointer', background: isSelected ? 'rgba(99,102,241,0.12)' : 'transparent',
-                    color: isSelected ? '#e2e8f0' : '#94a3b8', fontSize: 13, fontWeight: 500, textAlign: 'left', fontFamily: 'inherit',
-                  }}>
-                    <span style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'white' }}>{inits}</span>
-                    <span style={{ flex: 1 }}>{item.name}</span>
-                    {item.id === activeClientId && <span style={{ fontSize: 10, color: '#22c55e' }}>active</span>}
+                  <button key={item.id} onMouseEnter={() => setSelected(idx)} onClick={() => execute(r)} className={btnClass(idx === selected)}>
+                    <span className="w-6 h-6 rounded-md shrink-0 flex items-center justify-center text-[10px] font-bold text-white" style={{ background: bg }}>{inits}</span>
+                    <span className="flex-1">{item.name}</span>
+                    {item.id === activeClientId && <span className="text-[10px] text-green-500">active</span>}
                   </button>
                 );
               })}
@@ -265,19 +181,14 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
           )}
           {agentResults.length > 0 && (
             <div>
-              <div style={{ padding: '8px 14px 4px', fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>AI Agents</div>
+              <div className={groupHeaderClass}>AI Agents</div>
               {agentResults.map((r, i) => {
                 const idx = agentStart + i;
-                const isSelected = idx === selected;
                 const item = r.item as Agent;
                 return (
-                  <button key={item.id} onMouseEnter={() => setSelected(idx)} onClick={() => execute(r)} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 14px',
-                    border: 'none', cursor: 'pointer', background: isSelected ? 'rgba(99,102,241,0.12)' : 'transparent',
-                    color: isSelected ? '#e2e8f0' : '#94a3b8', fontSize: 13, fontWeight: 500, textAlign: 'left', fontFamily: 'inherit',
-                  }}>
-                    <span style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0, background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>🤖</span>
-                    <span style={{ flex: 1 }}>{item.name}</span>
+                  <button key={item.id} onMouseEnter={() => setSelected(idx)} onClick={() => execute(r)} className={btnClass(idx === selected)}>
+                    <span className="w-6 h-6 rounded-md shrink-0 bg-indigo-500/20 text-indigo-300 flex items-center justify-center text-xs">🤖</span>
+                    <span className="flex-1">{item.name}</span>
                   </button>
                 );
               })}
@@ -286,7 +197,7 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
         </div>
 
         {/* Footer hint */}
-        <div style={{ padding: '8px 14px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', gap: 14, fontSize: 11, color: '#334155' }}>
+        <div className="px-3.5 py-2 border-t border-white/[0.06] flex gap-3.5 text-[11px] text-slate-700">
           <span>↑↓ navigate</span>
           <span>↵ select</span>
           <span>esc close</span>

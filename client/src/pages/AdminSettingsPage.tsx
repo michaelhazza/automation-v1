@@ -16,7 +16,7 @@ export default function AdminSettingsPage({ user, initialTab }: { user: User; in
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'board');
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">Settings</h1>
         <p className="text-sm text-slate-500 mt-1.5">Manage organisation configuration</p>

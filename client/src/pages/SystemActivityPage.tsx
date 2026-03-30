@@ -70,7 +70,7 @@ export default function SystemActivityPage({ user }: { user: User }) {
   const engineTypes = ['n8n', 'ghl', 'make', 'zapier', 'custom_webhook'];
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0 mb-1.5">Platform Activity</h1>
         <p className="text-slate-500 m-0 text-[14px]">Execution activity across all organisations and clients</p>
@@ -128,7 +128,7 @@ export default function SystemActivityPage({ user }: { user: User }) {
       {loading ? (
         <div className="flex flex-col gap-2">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="skeleton h-[52px] rounded-lg" />
+            <div key={i} className="h-[52px] rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
           ))}
         </div>
       ) : executions.length === 0 ? (

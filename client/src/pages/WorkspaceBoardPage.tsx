@@ -34,6 +34,8 @@ interface Task {
   createdAt: string;
 }
 
+const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] outline-none bg-white focus:ring-2 focus:ring-indigo-500';
+
 export default function WorkspaceBoardPage({ user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [columns, setColumns] = useState<BoardColumn[]>([]);
@@ -140,19 +142,19 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     }
   };
 
-  if (loading) return <div style={{ padding: 40 }}>Loading...</div>;
+  if (loading) return <div className="p-10">Loading...</div>;
 
   if (columns.length === 0) {
     return (
-      <div style={{ padding: 40 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Workspace Board</h1>
-        <p style={{ color: '#64748b' }}>
+      <div className="p-10">
+        <h1 className="text-[28px] font-bold text-slate-800 mb-2">Workspace Board</h1>
+        <p className="text-slate-500">
           This subaccount has no board configuration yet.{' '}
-          <Link to={`/admin/subaccounts/${subaccountId}`} style={{ color: '#6366f1' }}>
+          <Link to={`/admin/subaccounts/${subaccountId}`} className="text-indigo-500 no-underline hover:underline">
             Go to subaccount settings
           </Link>{' '}
           to initialise the board, or configure the{' '}
-          <Link to="/admin/settings" style={{ color: '#6366f1' }}>
+          <Link to="/admin/settings" className="text-indigo-500 no-underline hover:underline">
             organisation board
           </Link>{' '}
           first.
@@ -165,37 +167,27 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     tasks.filter(i => i.status === key).sort((a, b) => a.position - b.position);
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div className="h-full flex flex-col">
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexShrink: 0 }}>
+      <div className="flex justify-between items-center mb-4 shrink-0">
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', margin: 0 }}>
+          <h1 className="text-2xl font-bold text-slate-800 m-0">
             {subaccountName} — Workspace
           </h1>
-          <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
+          <div className="text-[13px] text-slate-400 mt-0.5">
             {tasks.length} task{tasks.length !== 1 ? 's' : ''} across {columns.length} columns
           </div>
         </div>
         <button
           onClick={() => setShowCreateForm(true)}
-          style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+          className="px-5 py-2.5 bg-indigo-500 text-white border-0 rounded-lg cursor-pointer text-[14px] font-semibold hover:bg-indigo-600 transition-colors"
         >
           + New Task
         </button>
       </div>
 
       {/* Board — fills width on desktop, horizontal scroll on mobile */}
-      <div
-        className="board-scroll"
-        style={{
-          display: 'flex',
-          gap: 12,
-          flex: 1,
-          overflowX: 'auto',
-          paddingBottom: 16,
-          minHeight: 0,
-        }}
-      >
+      <div className="flex gap-3 flex-1 overflow-x-auto pb-4 min-h-0 [scrollbar-width:thin]">
         {columns.map(col => {
           const colTasks = getColumnTasks(col.key);
           return (
@@ -203,39 +195,19 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               key={col.key}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, col.key)}
-              style={{
-                flex: '1 1 0',
-                minWidth: 240,
-                maxWidth: columns.length <= 4 ? undefined : 320,
-                display: 'flex',
-                flexDirection: 'column',
-                background: '#f8fafc',
-                borderRadius: 12,
-                border: '1px solid #e2e8f0',
-                minHeight: 200,
-              }}
+              className="flex-1 min-w-[240px] flex flex-col bg-slate-50 rounded-xl border border-slate-200 min-h-[200px]"
+              style={{ maxWidth: columns.length <= 4 ? undefined : 320 }}
             >
               {/* Column header */}
               <div
-                style={{
-                  padding: '10px 14px',
-                  borderBottom: `3px solid ${col.colour}`,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
+                className="px-3.5 py-2.5 flex justify-between items-center"
+                style={{ borderBottom: `3px solid ${col.colour}` }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>{col.label}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] font-semibold text-slate-800">{col.label}</span>
                   <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: col.colour,
-                      background: col.colour + '20',
-                      padding: '1px 7px',
-                      borderRadius: 10,
-                    }}
+                    className="text-[11px] font-bold px-[7px] py-px rounded-[10px]"
+                    style={{ color: col.colour, background: col.colour + '20' }}
                   >
                     {colTasks.length}
                   </span>
@@ -243,13 +215,13 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               </div>
 
               {/* Cards */}
-              <div style={{ flex: 1, padding: 8, display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto' }}>
+              <div className="flex-1 p-2 flex flex-col gap-2 overflow-y-auto">
                 {colTasks.map(task => (
                   <div
                     key={task.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, task.id)}
-                    style={{ opacity: dragItem === task.id ? 0.4 : 1 }}
+                    className={dragItem === task.id ? 'opacity-40' : ''}
                   >
                     <TaskCard
                       item={task}
@@ -258,7 +230,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
                   </div>
                 ))}
                 {colTasks.length === 0 && (
-                  <div style={{ padding: '20px 0', textAlign: 'center', color: '#cbd5e1', fontSize: 12, fontStyle: 'italic' }}>
+                  <div className="py-5 text-center text-slate-300 text-[12px] italic">
                     Drop tasks here
                   </div>
                 )}
@@ -283,29 +255,29 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
       {/* Create form modal */}
       {showCreateForm && (
         <Modal title="New Task" onClose={() => setShowCreateForm(false)} maxWidth={480}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Title *</label>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-600">Title *</label>
               <input
                 value={newTitle}
                 onChange={e => setNewTitle(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleCreate()}
                 placeholder="What needs to be done?"
                 autoFocus
-                style={inputStyle}
+                className={inputCls}
               />
             </div>
 
-            <div style={{ display: 'flex', gap: 12 }}>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Column</label>
-                <select value={newStatus} onChange={e => setNewStatus(e.target.value)} style={inputStyle}>
+            <div className="flex gap-3">
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-[12px] font-semibold text-slate-600">Column</label>
+                <select value={newStatus} onChange={e => setNewStatus(e.target.value)} className={inputCls}>
                   {columns.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                 </select>
               </div>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Priority</label>
-                <select value={newPriority} onChange={e => setNewPriority(e.target.value)} style={inputStyle}>
+              <div className="flex-1 flex flex-col gap-1">
+                <label className="text-[12px] font-semibold text-slate-600">Priority</label>
+                <select value={newPriority} onChange={e => setNewPriority(e.target.value)} className={inputCls}>
                   <option value="low">Low</option>
                   <option value="normal">Normal</option>
                   <option value="high">High</option>
@@ -314,9 +286,9 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Assign Agent</label>
-              <select value={newAgentId} onChange={e => setNewAgentId(e.target.value)} style={inputStyle}>
+            <div className="flex flex-col gap-1">
+              <label className="text-[12px] font-semibold text-slate-600">Assign Agent</label>
+              <select value={newAgentId} onChange={e => setNewAgentId(e.target.value)} className={inputCls}>
                 <option value="">Unassigned</option>
                 {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
@@ -325,17 +297,7 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
             <button
               onClick={handleCreate}
               disabled={!newTitle.trim()}
-              style={{
-                marginTop: 8,
-                padding: '10px 20px',
-                background: newTitle.trim() ? '#6366f1' : '#e2e8f0',
-                color: newTitle.trim() ? '#fff' : '#94a3b8',
-                border: 'none',
-                borderRadius: 8,
-                cursor: newTitle.trim() ? 'pointer' : 'not-allowed',
-                fontSize: 14,
-                fontWeight: 600,
-              }}
+              className={`mt-2 px-5 py-2.5 border-0 rounded-lg text-[14px] font-semibold transition-colors ${newTitle.trim() ? 'bg-indigo-500 hover:bg-indigo-600 text-white cursor-pointer' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
             >
               Create Task
             </button>
@@ -345,11 +307,3 @@ export default function WorkspaceBoardPage({ user }: { user: User }) {
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 8,
-  fontSize: 13,
-  outline: 'none',
-};

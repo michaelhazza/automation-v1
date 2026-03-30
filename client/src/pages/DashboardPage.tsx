@@ -49,19 +49,20 @@ export default function DashboardPage({ user }: { user: User }) {
   const activeAgents = agents.filter(a => a.status === 'active');
 
   if (loading) {
+    const skeletonCls = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded-md';
     return (
       <div className="flex flex-col gap-5">
-        <div className="skeleton h-9 w-64 rounded-lg" />
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
-          {[1,2,3,4].map(i => <div key={i} className="skeleton h-24 rounded-xl" />)}
+        <div className={`h-9 w-64 ${skeletonCls}`} />
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+          {[1,2,3,4].map(i => <div key={i} className={`h-24 rounded-xl ${skeletonCls}`} />)}
         </div>
-        <div className="skeleton h-48 rounded-xl" />
+        <div className={`h-48 rounded-xl ${skeletonCls}`} />
       </div>
     );
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       {/* Greeting */}
       <div className="mb-8">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
@@ -83,7 +84,7 @@ export default function DashboardPage({ user }: { user: User }) {
               View all agents →
             </Link>
           </div>
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
             {activeAgents.slice(0, 6).map((agent) => (
               <div
                 key={agent.id}
@@ -91,7 +92,7 @@ export default function DashboardPage({ user }: { user: User }) {
                 className="bg-white border-2 border-slate-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:border-indigo-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
               >
                 <div className="w-11 h-11 rounded-xl shrink-0 flex items-center justify-center text-[22px]"
-                  style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+                  className="bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
                   {agent.icon || getDefaultIcon(agent.id)}
                 </div>
                 <div className="min-w-0">
@@ -107,8 +108,7 @@ export default function DashboardPage({ user }: { user: User }) {
       {/* Empty state */}
       {agents.length === 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-12 mb-8 flex flex-col items-center text-center">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-4"
-            style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-4 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
             🤖
           </div>
           <p className="font-bold text-[17px] text-slate-900 mb-2">Welcome to Automation OS</p>

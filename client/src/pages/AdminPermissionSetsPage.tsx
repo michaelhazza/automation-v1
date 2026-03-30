@@ -79,7 +79,7 @@ export default function AdminPermissionSetsPage({ user: _user }: { user: User })
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-[28px] font-bold text-slate-800 m-0">Permission Sets</h1>

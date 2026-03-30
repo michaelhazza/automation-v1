@@ -111,7 +111,7 @@ export default function SystemSettingsPage({ user }: { user: User }) {
           </p>
         </div>
         <div className="px-6 py-5">
-          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
             {[
               { label: 'Documents', types: 'PDF, DOCX, XLSX, PPTX, TXT, CSV' },
               { label: 'Audio', types: 'MP3, WAV, M4A, FLAC, AAC, OGG' },

@@ -239,14 +239,14 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   if (loading) {
     return (
       <div className="p-8 max-w-4xl mx-auto">
-        <div className="skeleton h-7 w-48 rounded mb-4" />
-        {[1, 2, 3].map((i) => <div key={i} className="skeleton h-28 rounded-lg mb-3" />)}
+        <div className="h-7 w-48 rounded mb-4 bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        {[1, 2, 3].map((i) => <div key={i} className="h-28 rounded-lg mb-3 bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
       </div>
     );
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
         <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">
           &larr; Back to Subaccount
@@ -297,7 +297,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
 
       {items.length === 0 && (
         <div className="py-16 text-center bg-white border border-slate-200 rounded-xl">
-          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)' }}>
+          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-[linear-gradient(135deg,#f0fdf4,#dcfce7)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>

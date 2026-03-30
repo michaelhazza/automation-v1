@@ -60,7 +60,7 @@ export default function ScheduledTaskDetailPage({ user: _user }: { user: { id: s
     } catch { setError('Failed to load'); } finally { setLoading(false); }
   }
 
-  if (loading) return <div className="p-8"><div className="skeleton h-72 rounded-xl" /></div>;
+  if (loading) return <div className="p-8"><div className="h-72 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" /></div>;
   if (!detail) return <div className="p-8 text-red-700">Not found</div>;
 
   const successRate = detail.totalRuns > 0
@@ -68,7 +68,7 @@ export default function ScheduledTaskDetailPage({ user: _user }: { user: { id: s
     : 0;
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <Link to={`/admin/subaccounts/${subaccountId}/scheduled-tasks`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline">&larr; Back to Scheduled Tasks</Link>
 
       {error && <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg mt-3 mb-4 text-[14px]">{error}</div>}

@@ -163,168 +163,141 @@ export default function RecurrencePicker({ value, onChange }: Props) {
     emitCustom(freq, interval, byDay, byMonthDay, 'after', endDate, clamped);
   }
 
-  const unitLabel = interval === 1 ? freq : `${freq}s`;
-
   return (
     <div>
       {/* Recurrence panel */}
-      <div style={{
-        background: '#fafbfc', border: '1px solid #e2e8f0', borderRadius: 10,
-        padding: 20,
-      }}>
-          {/* Repeat every N unit */}
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: '#374151', marginBottom: 10 }}>Repeat every</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div className="bg-[#fafbfc] border border-slate-200 rounded-[10px] p-5">
+        {/* Repeat every N unit */}
+        <div className="mb-5">
+          <div className="text-sm font-medium text-gray-700 mb-2.5">Repeat every</div>
+          <div className="flex items-center gap-2.5">
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={interval}
+              onChange={e => handleIntervalChange(parseInt(e.target.value, 10) || 1)}
+              className="w-16 px-2.5 py-2 border border-gray-300 rounded-lg text-sm text-center font-[inherit] bg-white"
+            />
+            <select
+              value={freq}
+              onChange={e => handleFreqChange(e.target.value as FreqUnit)}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-[inherit] bg-white cursor-pointer"
+            >
+              <option value="day">day{interval > 1 ? 's' : ''}</option>
+              <option value="week">week{interval > 1 ? 's' : ''}</option>
+              <option value="month">month{interval > 1 ? 's' : ''}</option>
+              <option value="year">year{interval > 1 ? 's' : ''}</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Repeat on — weekday selector (weekly only) */}
+        {freq === 'week' && (
+          <div className="mb-5">
+            <div className="text-sm font-medium text-gray-700 mb-2.5">Repeat on</div>
+            <div className="flex gap-1.5">
+              {DAYS.map((d, i) => {
+                const active = byDay.includes(d.key);
+                return (
+                  <button
+                    key={d.key + i}
+                    type="button"
+                    onClick={() => toggleDay(d.key)}
+                    className={`w-9 h-9 rounded-full border-0 text-[13px] font-semibold cursor-pointer font-[inherit] transition-[background,color] duration-150 ${
+                      active ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Month day selector (monthly only) */}
+        {freq === 'month' && (
+          <div className="mb-5">
+            <div className="text-sm font-medium text-gray-700 mb-2.5">Repeat on</div>
+            <select
+              value={`day_${byMonthDay}`}
+              onChange={e => {
+                const val = e.target.value;
+                handleMonthDayChange(parseInt(val.replace('day_', ''), 10));
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm font-[inherit] bg-white cursor-pointer"
+            >
+              {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
+                <option key={d} value={`day_${d}`}>Monthly on day {d}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Ends */}
+        <div>
+          <div className="text-sm font-medium text-gray-700 mb-2.5">Ends</div>
+          <div className="flex flex-col gap-2.5">
+            {/* Never */}
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-800">
+              <input
+                type="radio"
+                name="endType"
+                checked={endType === 'never'}
+                onChange={() => handleEndTypeChange('never')}
+                className="w-[18px] h-[18px] accent-indigo-500"
+              />
+              Never
+            </label>
+
+            {/* On date */}
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-800">
+              <input
+                type="radio"
+                name="endType"
+                checked={endType === 'on'}
+                onChange={() => handleEndTypeChange('on')}
+                className="w-[18px] h-[18px] accent-indigo-500"
+              />
+              On
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => handleEndDateChange(e.target.value)}
+                disabled={endType !== 'on'}
+                className={`px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-[inherit] ${
+                  endType === 'on' ? 'bg-white text-slate-800' : 'bg-slate-100 text-slate-400'
+                }`}
+              />
+            </label>
+
+            {/* After N occurrences */}
+            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-800">
+              <input
+                type="radio"
+                name="endType"
+                checked={endType === 'after'}
+                onChange={() => handleEndTypeChange('after')}
+                className="w-[18px] h-[18px] accent-indigo-500"
+              />
+              After
               <input
                 type="number"
                 min={1}
-                max={99}
-                value={interval}
-                onChange={e => handleIntervalChange(parseInt(e.target.value, 10) || 1)}
-                style={{
-                  width: 64, padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 8,
-                  fontSize: 14, textAlign: 'center', fontFamily: 'inherit', background: '#fff',
-                }}
+                max={999}
+                value={endAfter}
+                onChange={e => handleEndAfterChange(parseInt(e.target.value, 10) || 1)}
+                disabled={endType !== 'after'}
+                className={`w-16 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] text-center font-[inherit] ${
+                  endType === 'after' ? 'bg-white text-slate-800' : 'bg-slate-100 text-slate-400'
+                }`}
               />
-              <select
-                value={freq}
-                onChange={e => handleFreqChange(e.target.value as FreqUnit)}
-                style={{
-                  padding: '8px 28px 8px 12px', border: '1px solid #d1d5db', borderRadius: 8,
-                  fontSize: 14, fontFamily: 'inherit', background: '#fff', cursor: 'pointer',
-                  appearance: 'auto',
-                }}
-              >
-                <option value="day">day{interval > 1 ? 's' : ''}</option>
-                <option value="week">week{interval > 1 ? 's' : ''}</option>
-                <option value="month">month{interval > 1 ? 's' : ''}</option>
-                <option value="year">year{interval > 1 ? 's' : ''}</option>
-              </select>
-            </div>
+              <span className={`text-sm ${endType === 'after' ? 'text-slate-600' : 'text-slate-400'}`}>occurrences</span>
+            </label>
           </div>
-
-          {/* Repeat on — weekday selector (weekly only) */}
-          {freq === 'week' && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: '#374151', marginBottom: 10 }}>Repeat on</div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {DAYS.map((d, i) => {
-                  const active = byDay.includes(d.key);
-                  return (
-                    <button
-                      key={d.key + i}
-                      type="button"
-                      onClick={() => toggleDay(d.key)}
-                      style={{
-                        width: 36, height: 36, borderRadius: '50%', border: 'none',
-                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                        fontFamily: 'inherit',
-                        background: active ? '#6366f1' : '#e2e8f0',
-                        color: active ? '#fff' : '#475569',
-                        transition: 'background 0.15s, color 0.15s',
-                      }}
-                    >
-                      {d.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Month day selector (monthly only) */}
-          {freq === 'month' && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, color: '#374151', marginBottom: 10 }}>Repeat on</div>
-              <select
-                value={`day_${byMonthDay}`}
-                onChange={e => {
-                  const val = e.target.value;
-                  handleMonthDayChange(parseInt(val.replace('day_', ''), 10));
-                }}
-                style={{
-                  padding: '8px 28px 8px 12px', border: '1px solid #d1d5db', borderRadius: 8,
-                  fontSize: 14, fontFamily: 'inherit', background: '#fff', cursor: 'pointer',
-                  appearance: 'auto',
-                }}
-              >
-                {Array.from({ length: 31 }, (_, i) => i + 1).map(d => (
-                  <option key={d} value={`day_${d}`}>Monthly on day {d}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Ends */}
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 500, color: '#374151', marginBottom: 10 }}>Ends</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {/* Never */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: '#1e293b' }}>
-                <input
-                  type="radio"
-                  name="endType"
-                  checked={endType === 'never'}
-                  onChange={() => handleEndTypeChange('never')}
-                  style={{ width: 18, height: 18, accentColor: '#6366f1' }}
-                />
-                Never
-              </label>
-
-              {/* On date */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: '#1e293b' }}>
-                <input
-                  type="radio"
-                  name="endType"
-                  checked={endType === 'on'}
-                  onChange={() => handleEndTypeChange('on')}
-                  style={{ width: 18, height: 18, accentColor: '#6366f1' }}
-                />
-                On
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={e => handleEndDateChange(e.target.value)}
-                  disabled={endType !== 'on'}
-                  style={{
-                    padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 8,
-                    fontSize: 13, fontFamily: 'inherit', background: endType === 'on' ? '#fff' : '#f1f5f9',
-                    color: endType === 'on' ? '#1e293b' : '#94a3b8',
-                  }}
-                />
-              </label>
-
-              {/* After N occurrences */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: '#1e293b' }}>
-                <input
-                  type="radio"
-                  name="endType"
-                  checked={endType === 'after'}
-                  onChange={() => handleEndTypeChange('after')}
-                  style={{ width: 18, height: 18, accentColor: '#6366f1' }}
-                />
-                After
-                <input
-                  type="number"
-                  min={1}
-                  max={999}
-                  value={endAfter}
-                  onChange={e => handleEndAfterChange(parseInt(e.target.value, 10) || 1)}
-                  disabled={endType !== 'after'}
-                  style={{
-                    width: 64, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 8,
-                    fontSize: 13, textAlign: 'center', fontFamily: 'inherit',
-                    background: endType === 'after' ? '#fff' : '#f1f5f9',
-                    color: endType === 'after' ? '#1e293b' : '#94a3b8',
-                  }}
-                />
-                <span style={{ color: endType === 'after' ? '#475569' : '#94a3b8', fontSize: 14 }}>occurrences</span>
-              </label>
-            </div>
-          </div>
-
         </div>
+      </div>
     </div>
   );
 }
