@@ -4,7 +4,7 @@ import {
   workspaceMemories,
   workspaceMemoryEntries,
 } from '../db/schema/index.js';
-import { callAnthropic } from './llmService.js';
+import { routeCall } from './llmRouter.js';
 import { taskService } from './taskService.js';
 import {
   EXTRACTION_MODEL,
@@ -115,16 +115,25 @@ export const workspaceMemoryService = {
     if (!runSummary || runSummary.trim().length < 20) return;
 
     try {
-      const response = await callAnthropic({
-        modelId: EXTRACTION_MODEL,
-        systemPrompt: `You are an insight extractor. Given an agent run summary, extract key insights as a JSON array.
+      const response = await routeCall({
+        messages: [{ role: 'user', content: `Agent run summary:\n\n${runSummary}` }],
+        system: `You are an insight extractor. Given an agent run summary, extract key insights as a JSON array.
 Each entry has "content" (string) and "entryType" (one of: "observation", "decision", "preference", "issue", "pattern").
 Focus on: client preferences, recurring patterns, important decisions, issues discovered, and anything future agents should know.
 Respond with ONLY valid JSON: { "entries": [...] }
 If there are no meaningful insights, respond with: { "entries": [] }`,
-        messages: [{ role: 'user', content: `Agent run summary:\n\n${runSummary}` }],
         temperature: 0.3,
         maxTokens: EXTRACTION_MAX_TOKENS,
+        context: {
+          organisationId,
+          subaccountId,
+          runId,
+          sourceType: 'agent_run',
+          agentName: agentId,
+          taskType: 'memory_compile',
+          provider: 'anthropic',
+          model: EXTRACTION_MODEL,
+        },
       });
 
       let entries: Array<{ content: string; entryType: string }> = [];
@@ -211,9 +220,8 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       parts.push(`\n## Current Board State\n${boardSnapshot}`);
     }
 
-    const response = await callAnthropic({
-      modelId: EXTRACTION_MODEL,
-      systemPrompt: `You are a workspace memory compiler. Produce TWO sections separated by the exact marker "---BOARD_SUMMARY---".
+    const response = await routeCall({
+      system: `You are a workspace memory compiler. Produce TWO sections separated by the exact marker "---BOARD_SUMMARY---".
 
 SECTION 1 (before the marker): Updated workspace memory document.
 Rules:
@@ -232,6 +240,14 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       messages: [{ role: 'user', content: parts.join('\n') }],
       temperature: 0.3,
       maxTokens: SUMMARY_MAX_TOKENS,
+      context: {
+        organisationId,
+        subaccountId,
+        sourceType: 'system',
+        taskType: 'memory_compile',
+        provider: 'anthropic',
+        model: EXTRACTION_MODEL,
+      },
     });
 
     // Parse the two sections from the single response
