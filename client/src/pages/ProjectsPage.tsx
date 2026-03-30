@@ -14,27 +14,19 @@ interface Project {
   updatedAt: string;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  active: 'Active',
-  completed: 'Completed',
-  archived: 'Archived',
+const STATUS_LABELS: Record<string, string> = { active: 'Active', completed: 'Completed', archived: 'Archived' };
+const STATUS_CLS: Record<string, string> = {
+  active:    'bg-green-100 text-green-700',
+  completed: 'bg-indigo-100 text-indigo-700',
+  archived:  'bg-slate-100 text-slate-500',
 };
 
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  active: { bg: 'rgba(34,197,94,0.12)', text: '#16a34a' },
-  completed: { bg: 'rgba(99,102,241,0.12)', text: '#6366f1' },
-  archived: { bg: 'rgba(100,116,139,0.12)', text: '#64748b' },
-};
+const PROJECT_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e', '#0ea5e9'];
 
-const PROJECT_COLORS = [
-  '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e',
-  '#f97316', '#eab308', '#22c55e', '#0ea5e9',
-];
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
-interface Props { user: User }
-
-export default function ProjectsPage({ user: _user }: Props) {
-  const navigate = useNavigate();
+export default function ProjectsPage({ user: _user }: { user: User }) {
+  const _navigate = useNavigate();
   const clientId = getActiveClientId();
   const clientName = getActiveClientName();
 
@@ -59,119 +51,75 @@ export default function ProjectsPage({ user: _user }: Props) {
     if (!newName.trim() || !clientId) return;
     setSaving(true);
     try {
-      const { data } = await api.post(`/api/subaccounts/${clientId}/projects`, {
-        name: newName.trim(),
-        description: newDesc.trim() || null,
-        color: newColor,
-      });
-      setProjects(p => [data, ...p]);
-      setShowNew(false);
-      setNewName('');
-      setNewDesc('');
-      setNewColor('#6366f1');
+      const { data } = await api.post(`/api/subaccounts/${clientId}/projects`, { name: newName.trim(), description: newDesc.trim() || null, color: newColor });
+      setProjects((p) => [data, ...p]);
+      setShowNew(false); setNewName(''); setNewDesc(''); setNewColor('#6366f1');
     } catch {
       // TODO: show error toast
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handleArchive = async (id: string) => {
     if (!clientId) return;
     await api.patch(`/api/subaccounts/${clientId}/projects/${id}`, { status: 'archived' });
-    setProjects(p => p.map(x => x.id === id ? { ...x, status: 'archived' as const } : x));
+    setProjects((p) => p.map((x) => x.id === id ? { ...x, status: 'archived' as const } : x));
   };
 
-  const filtered = filter === 'all' ? projects : projects.filter(p => p.status === filter);
-  const activeCount = projects.filter(p => p.status === 'active').length;
+  const filtered = filter === 'all' ? projects : projects.filter((p) => p.status === filter);
 
   if (!clientId) {
     return (
-      <div className="empty-state">
-        <div className="empty-state-icon">📁</div>
-        <div className="empty-state-title">No client selected</div>
-        <div className="empty-state-desc">Select a client from the sidebar to view projects.</div>
+      <div className="page-enter flex flex-col items-center justify-center py-20 text-center">
+        <div className="text-4xl mb-4">📁</div>
+        <div className="font-bold text-[18px] text-slate-900 mb-2">No client selected</div>
+        <div className="text-[14px] text-slate-500">Select a client from the sidebar to view projects.</div>
       </div>
     );
   }
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+    <div className="page-enter">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
-            Projects
-          </h1>
-          {clientName && (
-            <div style={{ fontSize: 13, color: '#64748b', marginTop: 3 }}>{clientName}</div>
-          )}
+          <h1 className="text-[22px] font-bold text-slate-900 tracking-tight m-0">Projects</h1>
+          {clientName && <div className="text-[13px] text-slate-500 mt-0.5">{clientName}</div>}
         </div>
-        <button className="btn btn-primary" onClick={() => setShowNew(true)}>
+        <button onClick={() => setShowNew(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
           + New Project
         </button>
       </div>
 
-      {/* Stats row */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-        {(['all', 'active', 'completed', 'archived'] as const).map(f => (
+      <div className="flex gap-2 mb-6">
+        {(['all', 'active', 'completed', 'archived'] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            style={{
-              padding: '6px 14px', borderRadius: 20, border: '1px solid',
-              fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              transition: 'all 0.1s',
-              borderColor: filter === f ? '#6366f1' : '#e2e8f0',
-              background: filter === f ? 'rgba(99,102,241,0.08)' : 'white',
-              color: filter === f ? '#6366f1' : '#64748b',
-            }}
+            className={`px-3.5 py-1.5 rounded-full border text-[12px] font-semibold cursor-pointer transition-colors ${filter === f ? 'border-indigo-500 bg-indigo-50 text-indigo-600' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}
           >
-            {f === 'all' ? `All (${projects.length})` : `${STATUS_LABELS[f]} (${projects.filter(p => p.status === f).length})`}
+            {f === 'all' ? `All (${projects.length})` : `${STATUS_LABELS[f]} (${projects.filter((p) => p.status === f).length})`}
           </button>
         ))}
       </div>
 
-      {/* New project form */}
       {showNew && (
-        <div className="card" style={{ marginBottom: 20, padding: 20 }}>
-          <div style={{ fontWeight: 600, fontSize: 14, color: '#0f172a', marginBottom: 14 }}>New Project</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <input
-              className="form-input"
-              placeholder="Project name"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleCreate()}
-              autoFocus
-            />
-            <input
-              className="form-input"
-              placeholder="Description (optional)"
-              value={newDesc}
-              onChange={e => setNewDesc(e.target.value)}
-            />
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5">
+          <div className="font-semibold text-[14px] text-slate-900 mb-3.5">New Project</div>
+          <div className="flex flex-col gap-3">
+            <input className={inputCls} placeholder="Project name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} autoFocus />
+            <input className={inputCls} placeholder="Description (optional)" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} />
             <div>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8, fontWeight: 500 }}>Colour</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {PROJECT_COLORS.map(c => (
-                  <button
-                    key={c}
-                    onClick={() => setNewColor(c)}
-                    style={{
-                      width: 24, height: 24, borderRadius: 6, background: c, border: 'none', cursor: 'pointer',
-                      boxShadow: newColor === c ? `0 0 0 2px white, 0 0 0 4px ${c}` : 'none',
-                      transition: 'box-shadow 0.15s',
-                    }}
-                  />
+              <div className="text-[12px] text-slate-500 font-medium mb-2">Colour</div>
+              <div className="flex gap-2">
+                {PROJECT_COLORS.map((c) => (
+                  <button key={c} onClick={() => setNewColor(c)} className="w-6 h-6 rounded-md border-0 cursor-pointer transition-shadow" style={{ background: c, boxShadow: newColor === c ? `0 0 0 2px white, 0 0 0 4px ${c}` : 'none' }} />
                 ))}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={!newName.trim() || saving}>
+            <div className="flex gap-2">
+              <button onClick={handleCreate} disabled={!newName.trim() || saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors">
                 {saving ? 'Creating…' : 'Create Project'}
               </button>
-              <button className="btn" onClick={() => { setShowNew(false); setNewName(''); setNewDesc(''); }}>
+              <button onClick={() => { setShowNew(false); setNewName(''); setNewDesc(''); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
                 Cancel
               </button>
             </div>
@@ -179,82 +127,54 @@ export default function ProjectsPage({ user: _user }: Props) {
         </div>
       )}
 
-      {/* Loading */}
       {loading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-          {[1, 2, 3].map(i => (
-            <div key={i} className="skeleton" style={{ height: 120, borderRadius: 10 }} />
-          ))}
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+          {[1, 2, 3].map((i) => <div key={i} className="skeleton h-28 rounded-xl" />)}
         </div>
       )}
 
-      {/* Empty state */}
       {!loading && filtered.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-state-icon">📁</div>
-          <div className="empty-state-title">
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="text-4xl mb-4">📁</div>
+          <div className="font-bold text-[18px] text-slate-900 mb-2">
             {filter === 'all' ? 'No projects yet' : `No ${filter} projects`}
           </div>
-          <div className="empty-state-desc">
+          <div className="text-[14px] text-slate-500">
             {filter === 'all' ? 'Create your first project to organise work for this client.' : `No projects with ${filter} status.`}
           </div>
           {filter === 'all' && (
-            <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => setShowNew(true)}>
+            <button onClick={() => setShowNew(true)} className="mt-3.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
               + New Project
             </button>
           )}
         </div>
       )}
 
-      {/* Project grid */}
       {!loading && filtered.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-          {filtered.map(project => {
-            const sc = STATUS_COLORS[project.status];
-            return (
-              <div
-                key={project.id}
-                className="card"
-                style={{ padding: 0, overflow: 'hidden', cursor: 'default' }}
-              >
-                {/* Color band */}
-                <div style={{ height: 4, background: project.color }} />
-                <div style={{ padding: 18 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ fontWeight: 600, fontSize: 14, color: '#0f172a', lineHeight: 1.3 }}>
-                      {project.name}
-                    </div>
-                    <span style={{
-                      fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-                      background: sc.bg, color: sc.text, flexShrink: 0,
-                    }}>
-                      {STATUS_LABELS[project.status]}
-                    </span>
-                  </div>
-                  {project.description && (
-                    <div style={{ fontSize: 13, color: '#64748b', marginTop: 6, lineHeight: 1.5 }}>
-                      {project.description}
-                    </div>
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+          {filtered.map((project) => (
+            <div key={project.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="h-1" style={{ background: project.color }} />
+              <div className="p-[18px]">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-semibold text-[14px] text-slate-900 leading-snug">{project.name}</div>
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${STATUS_CLS[project.status]}`}>
+                    {STATUS_LABELS[project.status]}
+                  </span>
+                </div>
+                {project.description && <div className="text-[13px] text-slate-500 mt-1.5 leading-relaxed">{project.description}</div>}
+                <div className="mt-3.5 flex items-center gap-2">
+                  <div className="text-[11px] text-slate-400">Created {new Date(project.createdAt).toLocaleDateString()}</div>
+                  <div className="flex-1" />
+                  {project.status === 'active' && (
+                    <button onClick={() => handleArchive(project.id)} className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-[11px] font-medium border-0 cursor-pointer transition-colors">
+                      Archive
+                    </button>
                   )}
-                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                      Created {new Date(project.createdAt).toLocaleDateString()}
-                    </div>
-                    <div style={{ flex: 1 }} />
-                    {project.status === 'active' && (
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '3px 10px', fontSize: 11 }}
-                        onClick={() => handleArchive(project.id)}
-                      >
-                        Archive
-                      </button>
-                    )}
-                  </div>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
     </div>
