@@ -98,7 +98,7 @@ export default function PortalPage({ user: _user }: { user: User }) {
               No processes found. {search && 'Try a different search term.'}
             </div>
           ) : (
-            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
               {filtered.map((process) => (
                 <Link key={process.id} to={`/portal/${subaccountId}/processes/${process.id}`} className="no-underline">
                   <div className="bg-white rounded-xl px-6 py-5 shadow-sm border border-slate-200 h-full hover:border-indigo-300 hover:shadow-md transition-all">
