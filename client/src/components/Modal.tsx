@@ -20,43 +20,23 @@ export default function Modal({ title, onClose, children, maxWidth = 520 }: Moda
   return createPortal(
     <div
       onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 1000,
-        background: 'rgba(15, 23, 42, 0.6)',
-        backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 24,
-        animation: 'fadeIn 0.15s ease-out both',
-      }}
+      className="fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6 animate-[fadeIn_0.15s_ease-out_both]"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: '#fff', borderRadius: 16, width: '100%', maxWidth,
-          boxShadow: '0 24px 64px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.12)',
-          maxHeight: 'calc(100vh - 48px)', overflow: 'auto',
-          animation: 'fadeInScale 0.18s ease-out both',
-        }}
+        className="bg-white rounded-2xl w-full shadow-[0_24px_64px_rgba(0,0,0,0.2),0_8px_24px_rgba(0,0,0,0.12)] max-h-[calc(100vh-48px)] overflow-auto animate-[fadeInScale_0.18s_ease-out_both]"
+        style={{ maxWidth }}
       >
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '20px 24px', borderBottom: '1px solid #f1f5f9',
-        }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0, letterSpacing: '-0.01em' }}>{title}</h2>
+        <div className="flex justify-between items-center px-6 py-5 border-b border-slate-100">
+          <h2 className="text-base font-bold text-slate-900 m-0 tracking-tight">{title}</h2>
           <button
             onClick={onClose}
-            style={{
-              background: '#f1f5f9', border: 'none', cursor: 'pointer',
-              color: '#64748b', width: 28, height: 28,
-              borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16, lineHeight: 1, transition: 'background 0.1s, color 0.1s',
-              fontFamily: 'inherit',
-            }}
+            className="bg-slate-100 border-0 cursor-pointer text-slate-500 w-7 h-7 rounded-md flex items-center justify-center text-base leading-none transition-[background,color] duration-100 font-[inherit] hover:bg-slate-200 hover:text-slate-700"
           >
             ×
           </button>
         </div>
-        <div style={{ padding: '20px 24px 24px' }}>
+        <div className="px-6 pt-5 pb-6">
           {children}
         </div>
       </div>
