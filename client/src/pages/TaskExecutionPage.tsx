@@ -176,10 +176,10 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
 
   if (loading) {
     return (
-      <div className="page-enter max-w-[760px]">
-        <div className="skeleton h-7 w-80 mb-2.5 rounded" />
-        <div className="skeleton h-5 w-[480px] mb-7 rounded" />
-        <div className="skeleton h-72 rounded-2xl" />
+      <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-[760px]">
+        <div className="h-7 w-80 mb-2.5 rounded bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-5 w-[480px] mb-7 rounded bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-72 rounded-2xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
       </div>
     );
   }
@@ -200,7 +200,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
   const isTerminal = execution && !isExecuting;
 
   return (
-    <div className="page-enter max-w-[780px]">
+    <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-[780px]">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 mb-5 text-[13px]">
         <Link to="/processes" className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">Automations</Link>
