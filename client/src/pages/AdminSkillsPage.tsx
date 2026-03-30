@@ -53,7 +53,7 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
   const custom = skills.filter((s) => s.skillType === 'custom');
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-start mb-6">
         <div>
           <h1 className="text-[28px] font-bold text-slate-800 m-0">Skills Library</h1>
