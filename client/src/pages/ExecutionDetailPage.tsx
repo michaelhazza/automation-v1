@@ -26,12 +26,13 @@ interface ExecFile {
   expiresAt: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  completed: '#16a34a',
-  failed: '#dc2626',
-  running: '#2563eb',
-  pending: '#d97706',
-  timeout: '#ea580c',
+const STATUS_STYLES: Record<string, string> = {
+  completed: 'text-green-600',
+  failed:    'text-red-600',
+  running:   'text-blue-600',
+  pending:   'text-amber-600',
+  timeout:   'text-orange-600',
+  cancelled: 'text-slate-500',
 };
 
 export default function ExecutionDetailPage({ user }: { user: User }) {
@@ -60,38 +61,58 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
     window.open(data.downloadUrl, '_blank');
   };
 
-  if (loading) return <div>Loading...</div>;
-  if (!execution) return <div style={{ color: '#dc2626' }}>Execution not found</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
+  if (!execution) return <div className="p-8 text-sm text-red-600">Execution not found</div>;
 
   return (
-    <>
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/executions" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to executions</Link>
+    <div className="page-enter">
+      <div className="mb-4">
+        <Link to="/executions" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
+          ← Back to executions
+        </Link>
       </div>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>Execution Detail</h1>
-      <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#64748b', marginBottom: 24 }}>{execution.id}</div>
 
-      {/* Status card */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
+      <h1 className="text-2xl font-bold text-slate-800 mb-1">Execution Detail</h1>
+      <div className="font-mono text-xs text-slate-400 mb-6">{execution.id}</div>
+
+      {/* Stats grid */}
+      <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
         {[
-          { label: 'Status', value: <span style={{ color: STATUS_COLORS[execution.status] ?? '#6b7280', fontWeight: 700 }}>{execution.status}</span> },
-          { label: 'Duration', value: execution.durationMs != null ? `${(execution.durationMs / 1000).toFixed(2)}s` : '-' },
-          { label: 'Started', value: execution.startedAt ? new Date(execution.startedAt).toLocaleString() : '-' },
-          { label: 'Completed', value: execution.completedAt ? new Date(execution.completedAt).toLocaleString() : '-' },
-          { label: 'Type', value: execution.isTestExecution ? 'Test' : 'Production' },
+          {
+            label: 'Status',
+            value: <span className={`font-bold capitalize ${STATUS_STYLES[execution.status] ?? 'text-slate-500'}`}>{execution.status}</span>,
+          },
+          {
+            label: 'Duration',
+            value: execution.durationMs != null ? `${(execution.durationMs / 1000).toFixed(2)}s` : '—',
+          },
+          {
+            label: 'Started',
+            value: execution.startedAt ? new Date(execution.startedAt).toLocaleString() : '—',
+          },
+          {
+            label: 'Completed',
+            value: execution.completedAt ? new Date(execution.completedAt).toLocaleString() : '—',
+          },
+          {
+            label: 'Type',
+            value: execution.isTestExecution ? (
+              <span className="text-sky-600 font-semibold">Test</span>
+            ) : 'Production',
+          },
         ].map((item) => (
-          <div key={item.label} style={{ background: '#fff', borderRadius: 10, padding: '16px 20px', border: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>{item.label}</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#1e293b' }}>{item.value}</div>
+          <div key={item.label} className="bg-white border border-slate-200 rounded-xl px-5 py-4">
+            <div className="text-xs text-slate-500 mb-1.5">{item.label}</div>
+            <div className="text-[15px] font-semibold text-slate-800">{item.value}</div>
           </div>
         ))}
       </div>
 
       {/* Input Data */}
       {execution.inputData != null && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 20, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, color: '#374151', margin: '0 0 12px' }}>Input Data</h2>
-          <pre style={{ background: '#f8fafc', padding: 16, borderRadius: 8, fontSize: 12, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#1e293b', border: '1px solid #e2e8f0', margin: 0 }}>
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+          <h2 className="text-[15px] font-semibold text-slate-700 mb-3">Input Data</h2>
+          <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs overflow-auto whitespace-pre-wrap break-words text-slate-800 m-0">
             {JSON.stringify(execution.inputData, null, 2)}
           </pre>
         </div>
@@ -99,9 +120,9 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
 
       {/* Output Data */}
       {execution.outputData != null && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 20, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, color: '#374151', margin: '0 0 12px' }}>Output Data</h2>
-          <pre style={{ background: '#f8fafc', padding: 16, borderRadius: 8, fontSize: 12, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#1e293b', border: '1px solid #e2e8f0', margin: 0 }}>
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+          <h2 className="text-[15px] font-semibold text-slate-700 mb-3">Output Data</h2>
+          <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs overflow-auto whitespace-pre-wrap break-words text-slate-800 m-0">
             {JSON.stringify(execution.outputData, null, 2)}
           </pre>
         </div>
@@ -109,11 +130,11 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
 
       {/* Error */}
       {execution.errorMessage && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: 20, marginBottom: 16 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Error</h2>
-          <p style={{ margin: 0, color: '#dc2626', fontSize: 14 }}>{execution.errorMessage}</p>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-4">
+          <h2 className="text-[15px] font-semibold text-red-700 mb-2">Error</h2>
+          <p className="text-sm text-red-600 m-0">{execution.errorMessage}</p>
           {isAdmin && execution.errorDetail != null && (
-            <pre style={{ background: '#fff', padding: 12, borderRadius: 8, fontSize: 11, overflow: 'auto', marginTop: 12, color: '#7f1d1d' }}>
+            <pre className="bg-white rounded-lg p-3 text-[11px] overflow-auto mt-3 text-red-900 m-0">
               {JSON.stringify(execution.errorDetail, null, 2)}
             </pre>
           )}
@@ -122,20 +143,27 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
 
       {/* Files */}
       {files.length > 0 && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 20, border: '1px solid #e2e8f0' }}>
-          <h2 style={{ fontSize: 15, fontWeight: 600, color: '#374151', margin: '0 0 12px' }}>Files</h2>
-          {files.map((f) => (
-            <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-              <span style={{ flex: 1, fontSize: 13, color: '#1e293b' }}>{f.fileName}</span>
-              <span style={{ fontSize: 11, color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: 4 }}>{f.fileType}</span>
-              {f.fileSizeBytes != null && <span style={{ fontSize: 12, color: '#64748b' }}>{Math.round(f.fileSizeBytes / 1024)}KB</span>}
-              <button onClick={() => handleDownload(f.id)} style={{ padding: '4px 12px', background: '#dbeafe', color: '#1d4ed8', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
-                Download
-              </button>
-            </div>
-          ))}
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <h2 className="text-[15px] font-semibold text-slate-700 mb-3">Files</h2>
+          <div className="divide-y divide-slate-100">
+            {files.map((f) => (
+              <div key={f.id} className="flex items-center gap-3 py-2.5">
+                <span className="flex-1 text-[13px] text-slate-800">{f.fileName}</span>
+                <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded">{f.fileType}</span>
+                {f.fileSizeBytes != null && (
+                  <span className="text-xs text-slate-500">{Math.round(f.fileSizeBytes / 1024)}KB</span>
+                )}
+                <button
+                  onClick={() => handleDownload(f.id)}
+                  className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  Download
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
