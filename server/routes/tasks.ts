@@ -29,10 +29,10 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { title, description, brief, status, priority, assignedAgentId, createdByAgentId, processId, dueDate } = req.body as {
+    const { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate } = req.body as {
       title?: string; description?: string; brief?: string; status?: string;
       priority?: 'low' | 'normal' | 'high' | 'urgent';
-      assignedAgentId?: string; createdByAgentId?: string; processId?: string; dueDate?: string;
+      assignedAgentId?: string; assignedAgentIds?: string[]; createdByAgentId?: string; processId?: string; dueDate?: string;
     };
     if (!title) {
       res.status(400).json({ error: 'title is required' });
@@ -40,7 +40,7 @@ router.post(
     }
     const item = await taskService.createTask(
       req.orgId!, req.params.subaccountId,
-      { title, description, brief, status, priority, assignedAgentId, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
+      { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate: dueDate ? new Date(dueDate) : undefined },
       req.user!.id
     );
     res.status(201).json(item);
@@ -64,13 +64,15 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { title, description, brief, status, priority, assignedAgentId, processId, dueDate } = req.body as Record<string, unknown>;
+    const { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, processId, dueDate } = req.body as Record<string, unknown>;
     const item = await taskService.updateTask(
       req.params.itemId, req.orgId!,
       {
         title: title as string | undefined, description: description as string | undefined,
         brief: brief as string | undefined, status: status as string | undefined,
-        priority: priority as any, assignedAgentId: assignedAgentId as string | null | undefined,
+        priority: priority as any,
+        assignedAgentId: assignedAgentId as string | null | undefined,
+        assignedAgentIds: assignedAgentIds as string[] | null | undefined,
         processId: processId as string | null | undefined,
         dueDate: dueDate === null ? null : dueDate ? new Date(dueDate as string) : undefined,
       },

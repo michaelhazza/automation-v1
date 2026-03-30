@@ -147,6 +147,131 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
   },
+
+  // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
+
+  read_codebase: {
+    actionType: 'read_codebase',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['file_path'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['permission_failure', 'validation_failure'],
+    },
+  },
+
+  search_codebase: {
+    actionType: 'search_codebase',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['query', 'search_type', 'file_pattern', 'max_results'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['permission_failure', 'validation_failure'],
+    },
+  },
+
+  run_tests: {
+    actionType: 'run_tests',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['test_filter'],
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['permission_failure', 'execution_failure'],
+    },
+  },
+
+  analyze_endpoint: {
+    actionType: 'analyze_endpoint',
+    actionCategory: 'api',
+    isExternal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['url', 'method', 'headers', 'body', 'expected_status'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_failure'],
+    },
+  },
+
+  report_bug: {
+    actionType: 'report_bug',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['title', 'description', 'severity', 'confidence', 'steps_to_reproduce', 'expected_behavior', 'actual_behavior'],
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'fixed',
+      retryOn: ['db_error'],
+      doNotRetryOn: [],
+    },
+  },
+
+  // ── Dev/QA devops actions ──────────────────────────────────────────────────
+
+  write_patch: {
+    actionType: 'write_patch',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['file', 'diff', 'reasoning', 'base_commit', 'intent'],
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      // base_commit_mismatch and patch_size_exceeded require agent to re-propose
+      doNotRetryOn: ['base_commit_mismatch', 'patch_size_exceeded', 'permission_failure'],
+    },
+  },
+
+  run_command: {
+    actionType: 'run_command',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['command'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['execution_failure', 'timeout'],
+      doNotRetryOn: ['permission_failure', 'validation_failure'],
+    },
+  },
+
+  create_pr: {
+    actionType: 'create_pr',
+    actionCategory: 'devops',
+    isExternal: true,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['title', 'description', 'branch'],
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['execution_failure', 'timeout', 'network_error'],
+      doNotRetryOn: ['validation_failure', 'environment_failure'],
+    },
+  },
 };
 
 /** Check if an action type is known */

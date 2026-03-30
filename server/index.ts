@@ -136,7 +136,7 @@ async function start() {
   await agentService.scheduleAllProactiveSources();
   await boardService.seedDefaultTemplate();
   await skillService.seedBuiltInSkills();
-  await systemSkillService.seedSystemSkills();
+  // System skills are file-based (server/skills/*.md) — no seeding needed.
   await agentScheduleService.initialize();
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   app.listen(PORT, '0.0.0.0', () => {

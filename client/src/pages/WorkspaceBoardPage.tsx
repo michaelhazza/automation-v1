@@ -27,7 +27,8 @@ interface Task {
   status: string;
   priority: string;
   position: number;
-  assignedAgent: { id: string; name: string; slug: string } | null;
+  assignedAgents: Array<{ id: string; name: string | null; slug: string | null }>;
+  assignedAgent: { id: string; name: string | null; slug: string | null } | null;
   assignedAgentId: string | null;
   dueDate: string | null;
   createdAt: string;

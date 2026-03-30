@@ -21,6 +21,8 @@ export const tasks = pgTable(
     priority: text('priority').notNull().default('normal').$type<'low' | 'normal' | 'high' | 'urgent'>(),
     assignedAgentId: uuid('assigned_agent_id')
       .references(() => agents.id),
+    // All agents assigned to this task (may include the primary assignedAgentId)
+    assignedAgentIds: jsonb('assigned_agent_ids').$type<string[]>().default([]),
     createdByAgentId: uuid('created_by_agent_id')
       .references(() => agents.id),
     processId: uuid('process_id')

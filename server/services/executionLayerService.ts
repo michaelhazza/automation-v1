@@ -4,6 +4,7 @@ import { actions, integrationConnections } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { apiAdapter } from './adapters/apiAdapter.js';
+import { devopsAdapter } from './adapters/devopsAdapter.js';
 import type { ExecutionAdapter, ExecutionResult } from './adapters/workerAdapter.js';
 
 // ---------------------------------------------------------------------------
@@ -13,9 +14,9 @@ import type { ExecutionAdapter, ExecutionResult } from './adapters/workerAdapter
 // Adapter registry — maps action_category to adapter
 const adapterRegistry: Record<string, ExecutionAdapter> = {
   api: apiAdapter,
+  devops: devopsAdapter,
   // worker adapter is set dynamically to avoid circular imports
   // browser: stub — Phase 2
-  // devops: stub — Phase 2
 };
 
 /**
