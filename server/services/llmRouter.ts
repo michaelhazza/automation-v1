@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { llmRequests, TASK_TYPES, SOURCE_TYPES } from '../db/schema/index.js';
 import type { TaskType, SourceType } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProviderAdapter } from './providers/registry.js';
 import { pricingService } from './pricingService.js';
@@ -316,7 +316,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     routerOverheadMs,
   });
 
-  // ── 12. Write ledger (ON CONFLICT DO NOTHING — idempotent) ──────────────
+  // ── 12. Write ledger — upsert so a successful retry overwrites a prior error row ──
   await db
     .insert(llmRequests)
     .values({
@@ -350,7 +350,28 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       billingMonth,
       billingDay,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [llmRequests.idempotencyKey],
+      // Only overwrite if the existing row is an error state — never downgrade success.
+      set: {
+        providerRequestId:   providerResponse.providerRequestId,
+        tokensIn:            providerResponse.tokensIn,
+        tokensOut:           providerResponse.tokensOut,
+        providerTokensIn:    providerResponse.tokensIn,
+        providerTokensOut:   providerResponse.tokensOut,
+        costRaw:             String(costResult.costRaw),
+        costWithMargin:      String(costResult.costWithMargin),
+        costWithMarginCents: costResult.costWithMarginCents,
+        responsePayloadHash,
+        providerLatencyMs,
+        routerOverheadMs,
+        status:              callStatus,
+        errorMessage:        null,
+        attemptNumber,
+      },
+      // Drizzle where clause: only update if current row is not already a success
+      where: sql`${llmRequests.status} != 'success'`,
+    });
 
   // ── 13. Commit reservation with actual cost (releases delta) ─────────────
   if (reservationId) {
