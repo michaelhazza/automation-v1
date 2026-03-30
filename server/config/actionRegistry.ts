@@ -147,6 +147,54 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
   },
+
+  // ── Dev/QA devops actions ──────────────────────────────────────────────────
+
+  write_patch: {
+    actionType: 'write_patch',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['file', 'diff', 'reasoning', 'base_commit', 'intent'],
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      // base_commit_mismatch and patch_size_exceeded require agent to re-propose
+      doNotRetryOn: ['base_commit_mismatch', 'patch_size_exceeded', 'permission_failure'],
+    },
+  },
+
+  run_command: {
+    actionType: 'run_command',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['command'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['execution_failure', 'timeout'],
+      doNotRetryOn: ['permission_failure', 'validation_failure'],
+    },
+  },
+
+  create_pr: {
+    actionType: 'create_pr',
+    actionCategory: 'devops',
+    isExternal: true,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['title', 'description', 'branch'],
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['execution_failure', 'timeout', 'network_error'],
+      doNotRetryOn: ['validation_failure', 'environment_failure'],
+    },
+  },
 };
 
 /** Check if an action type is known */

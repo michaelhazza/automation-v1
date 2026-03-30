@@ -1,7 +1,12 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, count } from 'drizzle-orm';
+import { readFile } from 'fs/promises';
+import { resolve, join } from 'path';
+import { glob } from 'fs/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { env } from '../lib/env.js';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentRuns, tasks } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
 import { agentExecutionService } from './agentExecutionService.js';
@@ -9,6 +14,7 @@ import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
+import { devContextService, assertPathInRoot } from './devContextService.js';
 import {
   MAX_HANDOFF_DEPTH,
   MAX_TASK_TITLE_LENGTH,
@@ -19,6 +25,8 @@ import {
   SUB_AGENT_TIMEOUT_BUFFER,
   type TaskPriority,
 } from '../config/limits.js';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Skill Executor — executes tool calls for autonomous agent runs
@@ -62,7 +70,7 @@ export const skillExecutor = {
     switch (skillName) {
       // ── Direct skills (no action record) ──────────────────────────────
       case 'web_search':
-        return executeWebSearch(input);
+        return executeWebSearch(input, context);
       case 'read_workspace':
         return executeReadWorkspace(input, context);
       case 'write_workspace':
@@ -93,6 +101,26 @@ export const skillExecutor = {
         return proposeReviewGatedAction('update_record', input, context);
       case 'request_approval':
         return proposeReviewGatedAction('request_approval', input, context);
+
+      // ── Dev/QA auto-gated skills ──────────────────────────────────────────
+      case 'read_codebase':
+        return executeWithActionAudit('read_codebase', input, context, () => executeReadCodebase(input, context));
+      case 'search_codebase':
+        return executeWithActionAudit('search_codebase', input, context, () => executeSearchCodebase(input, context));
+      case 'run_tests':
+        return executeWithActionAudit('run_tests', input, context, () => executeRunTests(input, context));
+      case 'analyze_endpoint':
+        return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
+      case 'report_bug':
+        return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
+
+      // ── Dev review-gated skills (safeMode-checked) ───────────────────────
+      case 'write_patch':
+        return proposeDevopsAction('write_patch', input, context);
+      case 'run_command':
+        return proposeDevopsAction('run_command', input, context);
+      case 'create_pr':
+        return proposeDevopsAction('create_pr', input, context);
 
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
@@ -235,7 +263,7 @@ async function proposeReviewGatedAction(
 // Web Search (Tavily)
 // ---------------------------------------------------------------------------
 
-async function executeWebSearch(input: Record<string, unknown>): Promise<unknown> {
+async function executeWebSearch(input: Record<string, unknown>, context: SkillExecutionContext): Promise<unknown> {
   const apiKey = env.TAVILY_API_KEY;
   if (!apiKey) {
     return { success: false, error: 'Web search is not configured (TAVILY_API_KEY not set)' };
@@ -273,6 +301,9 @@ async function executeWebSearch(input: Record<string, unknown>): Promise<unknown
       }>;
     };
 
+    // Per-subaccount Tavily usage logging for billing
+    logSearchUsage(context.subaccountId, context.organisationId, context.runId).catch(() => undefined);
+
     return {
       success: true,
       answer: data.answer ?? null,
@@ -287,6 +318,21 @@ async function executeWebSearch(input: Record<string, unknown>): Promise<unknown
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Search failed: ${errMsg}` };
   }
+}
+
+function logSearchUsage(subaccountId: string, organisationId: string, runId: string): Promise<void> {
+  // Structured usage log for per-subaccount Tavily billing tracking.
+  // Log aggregation (e.g. Datadog, CloudWatch) captures this for billing.
+  console.log(JSON.stringify({
+    event: 'platform_usage',
+    service: 'tavily_search',
+    calls: 1,
+    subaccountId,
+    organisationId,
+    runId,
+    timestamp: new Date().toISOString(),
+  }));
+  return Promise.resolve();
 }
 
 // ---------------------------------------------------------------------------
@@ -977,5 +1023,406 @@ async function executeFetchUrl(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Fetch failed: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// proposeDevopsAction — safeMode-checked proposal for write_patch / run_command / create_pr
+// ---------------------------------------------------------------------------
+
+async function proposeDevopsAction(
+  actionType: 'write_patch' | 'run_command' | 'create_pr',
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  let devCtxResult;
+  try {
+    devCtxResult = await devContextService.getContext(context.subaccountId);
+  } catch (err) {
+    const msg = (err as { message?: string }).message ?? String(err);
+    return { success: false, error: `Cannot load dev execution context: ${msg}` };
+  }
+
+  const { context: devCtx } = devCtxResult;
+
+  // safeMode blocks all code-modification actions
+  if (devCtx.safeMode) {
+    return {
+      success: false,
+      error: `safeMode is enabled for this subaccount. ${actionType} is not allowed. Disable safeMode in devContext settings to permit code changes.`,
+      errorCode: 'permission_failure',
+    };
+  }
+
+  // write_patch: validate patchLimits before proposing
+  if (actionType === 'write_patch') {
+    const diff = String(input.diff ?? '');
+    const lineCount = diff.split('\n').length;
+    if (lineCount > devCtx.patchLimits.maxLinesChanged) {
+      return {
+        success: false,
+        error: `Patch exceeds maxLinesChanged limit (${lineCount} lines > ${devCtx.patchLimits.maxLinesChanged}). Split the change into smaller patches.`,
+        errorCode: 'patch_size_exceeded',
+      };
+    }
+  }
+
+  // run_command: enforce maxCommandsPerRun cost limit
+  if (actionType === 'run_command') {
+    const [countRow] = await db
+      .select({ total: count() })
+      .from(actions)
+      .where(
+        and(
+          eq(actions.agentRunId, context.runId),
+          eq(actions.actionType, 'run_command')
+        )
+      );
+    const commandCount = Number(countRow?.total ?? 0);
+    if (commandCount >= devCtx.costLimits.maxCommandsPerRun) {
+      return {
+        success: false,
+        error: `Command limit reached (${commandCount}/${devCtx.costLimits.maxCommandsPerRun} per run). Cannot run more commands in this agent run.`,
+        errorCode: 'permission_failure',
+      };
+    }
+  }
+
+  return proposeReviewGatedAction(actionType, input, context);
+}
+
+// ---------------------------------------------------------------------------
+// Read Codebase — read a file from DEC projectRoot with path validation
+// ---------------------------------------------------------------------------
+
+const READ_CODEBASE_MAX_BYTES = 50 * 1024; // 50 KB
+
+async function executeReadCodebase(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const filePath = String(input.file_path ?? '');
+  if (!filePath) return { success: false, error: 'file_path is required' };
+
+  try {
+    const { context: devCtx } = await devContextService.getContext(context.subaccountId);
+    const absolutePath = resolve(devCtx.projectRoot, filePath);
+
+    assertPathInRoot(absolutePath, devCtx.projectRoot);
+
+    const raw = await readFile(absolutePath, 'utf8');
+    const rawBytes = Buffer.byteLength(raw, 'utf8');
+    const truncated = rawBytes > READ_CODEBASE_MAX_BYTES;
+    const content = truncated
+      ? Buffer.from(raw, 'utf8').slice(0, READ_CODEBASE_MAX_BYTES).toString('utf8')
+      : raw;
+
+    return {
+      success: true,
+      file_path: filePath,
+      content,
+      truncated,
+      size_bytes: rawBytes,
+    };
+  } catch (err) {
+    const e = err as { message?: string; code?: string; statusCode?: number };
+    if (e.statusCode === 403) return { success: false, error: e.message ?? 'Access denied' };
+    if (e.code === 'ENOENT') return { success: false, error: `File not found: ${filePath}` };
+    return { success: false, error: e.message ?? String(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Search Codebase — grep content or glob filenames, scoped to projectRoot
+// ---------------------------------------------------------------------------
+
+async function executeSearchCodebase(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const query = String(input.query ?? '');
+  const searchType = String(input.search_type ?? 'content'); // 'content' | 'filename'
+  const filePattern = input.file_pattern ? String(input.file_pattern) : undefined;
+  const maxResults = Math.min(Number(input.max_results ?? 20), 50);
+
+  if (!query) return { success: false, error: 'query is required' };
+
+  try {
+    const { context: devCtx } = await devContextService.getContext(context.subaccountId);
+    const root = devCtx.projectRoot;
+
+    if (searchType === 'filename') {
+      const pattern = filePattern ?? `**/*${query}*`;
+      const matches: string[] = [];
+      for await (const file of glob(pattern, { cwd: root })) {
+        const strFile = String(file);
+        matches.push(strFile);
+        if (matches.length >= maxResults) break;
+      }
+      return {
+        success: true,
+        search_type: 'filename',
+        query,
+        results: matches.map(f => ({ file: f })),
+        total: matches.length,
+      };
+    }
+
+    // Content search using grep
+    const includeArg = filePattern ? `--include=${filePattern}` : '--include=*';
+    const grepArgs = ['-r', '-n', '--max-count=5', includeArg, query, root];
+
+    const { stdout } = await execFileAsync('grep', grepArgs, {
+      cwd: root,
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    }).catch((err: { stdout?: string; code?: number }) => {
+      // grep exits 1 when no matches — not a real failure
+      if (err.code === 1) return { stdout: '' };
+      throw err;
+    });
+
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    const results = lines.slice(0, maxResults).map(line => {
+      const colonIdx = line.indexOf(':');
+      const secondColon = line.indexOf(':', colonIdx + 1);
+      const file = line.slice(root.length + 1, colonIdx);
+      const lineNum = secondColon !== -1 ? line.slice(colonIdx + 1, secondColon) : '';
+      const content = secondColon !== -1 ? line.slice(secondColon + 1) : line.slice(colonIdx + 1);
+      return { file, line: lineNum ? Number(lineNum) : undefined, content: content.trim() };
+    });
+
+    return {
+      success: true,
+      search_type: 'content',
+      query,
+      results,
+      total: results.length,
+      truncated: lines.length > maxResults,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Search failed: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Run Tests — execute DEC testCommand, enforce maxTestRunsPerTask limit
+// ---------------------------------------------------------------------------
+
+async function executeRunTests(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  let devCtxResult;
+  try {
+    devCtxResult = await devContextService.getContext(context.subaccountId);
+  } catch (err) {
+    const msg = (err as { message?: string }).message ?? String(err);
+    return { success: false, error: `Cannot load dev execution context: ${msg}` };
+  }
+
+  const { context: devCtx } = devCtxResult;
+
+  // Enforce maxTestRunsPerTask cost limit
+  if (context.taskId) {
+    const [countRow] = await db
+      .select({ total: count() })
+      .from(actions)
+      .where(
+        and(
+          eq(actions.taskId, context.taskId),
+          eq(actions.actionType, 'run_tests')
+        )
+      );
+    const runCount = Number(countRow?.total ?? 0);
+    if (runCount >= devCtx.costLimits.maxTestRunsPerTask) {
+      return {
+        success: false,
+        error: `Test run limit reached (${runCount}/${devCtx.costLimits.maxTestRunsPerTask} per task). Cannot run more tests for this task.`,
+        errorCode: 'permission_failure',
+      };
+    }
+  }
+
+  const testFilter = input.test_filter ? String(input.test_filter) : undefined;
+  const baseCommand = devCtx.testCommand;
+  const command = testFilter ? `${baseCommand} ${testFilter}` : baseCommand;
+
+  const [cmd, ...args] = command.split(' ');
+  const start = Date.now();
+
+  try {
+    const { stdout, stderr } = await execFileAsync(cmd, args, {
+      cwd: devCtx.projectRoot,
+      timeout: devCtx.resourceLimits.commandTimeoutMs,
+      maxBuffer: devCtx.resourceLimits.maxOutputBytes,
+      env: { ...process.env, ...devCtx.env },
+    }).catch((err: { stdout?: string; stderr?: string; code?: number }) => {
+      // Non-zero exit = test failures; still capture output
+      return { stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    });
+
+    const durationMs = Date.now() - start;
+    const output = (stdout + (stderr ? `\nSTDERR:\n${stderr}` : '')).slice(
+      0,
+      devCtx.resourceLimits.maxOutputBytes
+    );
+    const truncated = (stdout + stderr).length > devCtx.resourceLimits.maxOutputBytes;
+
+    // Basic pass/fail detection from output
+    const passed = /\d+ passed/.exec(output)?.[0] ?? null;
+    const failed = /\d+ failed/.exec(output)?.[0] ?? null;
+
+    return {
+      success: true,
+      command,
+      output,
+      truncated,
+      duration_ms: durationMs,
+      passed,
+      failed,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Test execution failed: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Analyze Endpoint — HTTP request with timing and expected-status validation
+// ---------------------------------------------------------------------------
+
+async function executeAnalyzeEndpoint(
+  input: Record<string, unknown>,
+  _context: SkillExecutionContext
+): Promise<unknown> {
+  const url = String(input.url ?? '');
+  if (!url) return { success: false, error: 'url is required' };
+
+  const method = String(input.method ?? 'GET').toUpperCase();
+  const expectedStatus = input.expected_status ? Number(input.expected_status) : undefined;
+  const headers: Record<string, string> = {};
+  if (input.headers && typeof input.headers === 'object') {
+    for (const [k, v] of Object.entries(input.headers as Record<string, unknown>)) {
+      headers[k] = String(v);
+    }
+  }
+
+  const start = Date.now();
+
+  try {
+    const fetchOptions: RequestInit = {
+      method,
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    };
+
+    if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && input.body) {
+      fetchOptions.body = String(input.body);
+      if (!headers['Content-Type'] && !headers['content-type']) {
+        headers['Content-Type'] = 'application/json';
+      }
+    }
+
+    const response = await fetch(url, fetchOptions);
+    const durationMs = Date.now() - start;
+    const bodyText = await response.text();
+    const truncated = bodyText.length > 10000;
+    const content = truncated ? bodyText.slice(0, 10000) : bodyText;
+
+    const statusOk = expectedStatus !== undefined
+      ? response.status === expectedStatus
+      : response.ok;
+
+    return {
+      success: true,
+      url,
+      method,
+      status_code: response.status,
+      status_ok: statusOk,
+      expected_status: expectedStatus,
+      content,
+      truncated,
+      content_type: response.headers.get('content-type') ?? undefined,
+      duration_ms: durationMs,
+      headers: Object.fromEntries(response.headers.entries()),
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Endpoint analysis failed: ${errMsg}`, duration_ms: Date.now() - start };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Report Bug — create a structured board task with severity/confidence metadata
+// ---------------------------------------------------------------------------
+
+async function executeReportBug(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const title = String(input.title ?? '').slice(0, MAX_TASK_TITLE_LENGTH);
+  if (!title) return { success: false, error: 'title is required' };
+
+  const description = input.description ? String(input.description).slice(0, MAX_TASK_DESCRIPTION_LENGTH) : undefined;
+  const severity = String(input.severity ?? 'medium'); // low | medium | high | critical
+  const confidence = Number(input.confidence ?? 0.8);
+  const stepsToReproduce = input.steps_to_reproduce ? String(input.steps_to_reproduce) : undefined;
+  const expectedBehavior = input.expected_behavior ? String(input.expected_behavior) : undefined;
+  const actualBehavior = input.actual_behavior ? String(input.actual_behavior) : undefined;
+
+  const brief = [
+    description,
+    stepsToReproduce ? `**Steps to reproduce:**\n${stepsToReproduce}` : null,
+    expectedBehavior ? `**Expected:** ${expectedBehavior}` : null,
+    actualBehavior ? `**Actual:** ${actualBehavior}` : null,
+    `**Severity:** ${severity}`,
+    `**Confidence:** ${(confidence * 100).toFixed(0)}%`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, MAX_TASK_DESCRIPTION_LENGTH);
+
+  // Map severity to task priority
+  const priorityMap: Record<string, string> = {
+    critical: 'urgent',
+    high: 'high',
+    medium: 'normal',
+    low: 'low',
+  };
+  const priority = (priorityMap[severity] ?? 'normal') as 'urgent' | 'high' | 'normal' | 'low';
+
+  try {
+    const task = await taskService.createTask(
+      context.organisationId,
+      context.subaccountId,
+      {
+        title: `[BUG] ${title}`,
+        description,
+        brief,
+        status: 'inbox',
+        priority,
+        createdByAgentId: context.agentId,
+      }
+    );
+
+    await taskService.addActivity(task.id, {
+      activityType: 'note',
+      message: `Bug reported by QA agent — severity: ${severity}, confidence: ${(confidence * 100).toFixed(0)}%`,
+      agentId: context.agentId,
+    });
+
+    return {
+      success: true,
+      task_id: task.id,
+      title: task.title,
+      severity,
+      confidence,
+      _created_task: true,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to report bug: ${errMsg}` };
   }
 }

@@ -9,6 +9,7 @@ import {
   taskDeliverables,
 } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
+import { devContextService } from './devContextService.js';
 import { skillService } from './skillService.js';
 import { systemSkillService } from './systemSkillService.js';
 import { systemAgents } from '../db/schema/index.js';
@@ -165,6 +166,24 @@ export const agentExecutionService = {
           tasksUpdated: 0,
           deliverablesCreated: 0,
         };
+      }
+
+      // ── 2c. Snapshot DEC hash into triggerContext for reproducibility ──
+      try {
+        const { hash: decHash } = await devContextService.getContext(request.subaccountId);
+        const existingCtx = (request.triggerContext ?? {}) as Record<string, unknown>;
+        await db.update(agentRuns).set({
+          triggerContext: {
+            ...existingCtx,
+            executionSnapshot: {
+              decHash,
+              snapshotAt: new Date().toISOString(),
+            },
+          },
+          updatedAt: new Date(),
+        }).where(eq(agentRuns.id, run.id));
+      } catch {
+        // DEC not configured for this subaccount — skip snapshot (non-dev agents)
       }
 
       // ── 3. Load training data ───────────────────────────────────────────
