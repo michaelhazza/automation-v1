@@ -69,7 +69,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
 
   if (!clientId) {
     return (
-      <div className="page-enter flex flex-col items-center justify-center py-20 text-center">
+      <div className="animate-[fadeIn_0.2s_ease-out_both] flex flex-col items-center justify-center py-20 text-center">
         <div className="text-4xl mb-4">📁</div>
         <div className="font-bold text-[18px] text-slate-900 mb-2">No client selected</div>
         <div className="text-[14px] text-slate-500">Select a client from the sidebar to view projects.</div>
@@ -78,7 +78,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-[22px] font-bold text-slate-900 tracking-tight m-0">Projects</h1>
@@ -128,8 +128,8 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
       )}
 
       {loading && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-          {[1, 2, 3].map((i) => <div key={i} className="skeleton h-28 rounded-xl" />)}
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+          {[1, 2, 3].map((i) => <div key={i} className="h-28 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
         </div>
       )}
 
@@ -151,7 +151,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
       )}
 
       {!loading && filtered.length > 0 && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
           {filtered.map((project) => (
             <div key={project.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
               <div className="h-1" style={{ background: project.color }} />
