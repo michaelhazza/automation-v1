@@ -39,3 +39,4 @@ export * from './integrationConnections';
 export * from './processedResources';
 export * from './workspaceLimits';
 export * from './processConnectionMappings';
+export * from './projects';
