@@ -91,7 +91,7 @@ export default function ConnectionsPage({ user: _user }: { user: User }) {
         <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-[14px] text-red-600">{error}</div>
       )}
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
         {connections.map((c) => (
           <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="flex justify-between items-start mb-3">
