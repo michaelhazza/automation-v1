@@ -3,38 +3,29 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-interface Agent {
-  id: string;
-  name: string;
-  description?: string;
-  icon?: string;
-  status: string;
+interface Agent { id: string; name: string; description?: string; icon?: string; status: string; }
+interface Execution { id: string; processId: string; status: string; createdAt: string; durationMs: number | null; isTestExecution: boolean; }
+
+const DEFAULT_ICONS = ['\u{1F50D}','\u{1F4CA}','\u{1F4DD}','\u{1F4E3}','\u{1F916}','\u{2699}\uFE0F','\u{1F4AC}','\u{1F4C8}','\u{2728}','\u{1F3AF}'];
+function getDefaultIcon(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+  return DEFAULT_ICONS[Math.abs(h) % DEFAULT_ICONS.length];
 }
 
-interface Execution {
-  id: string;
-  processId: string;
-  status: string;
-  createdAt: string;
-  durationMs: number | null;
-  isTestExecution: boolean;
-}
-
-const DEFAULT_ICONS = [
-  '\u{1F50D}', '\u{1F4CA}', '\u{1F4DD}', '\u{1F4E3}', '\u{1F916}',
-  '\u{2699}\uFE0F', '\u{1F4AC}', '\u{1F4C8}', '\u{2728}', '\u{1F3AF}',
-];
-
-function getDefaultIcon(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
-  return DEFAULT_ICONS[Math.abs(hash) % DEFAULT_ICONS.length];
-}
+const STATUS_STYLES: Record<string, string> = {
+  running:   'bg-blue-50 text-blue-700 border-blue-200',
+  completed: 'bg-green-50 text-green-700 border-green-200',
+  failed:    'bg-red-50 text-red-700 border-red-200',
+  pending:   'bg-amber-50 text-amber-700 border-amber-200',
+  timeout:   'bg-orange-50 text-orange-700 border-orange-200',
+  cancelled: 'bg-slate-100 text-slate-600 border-slate-200',
+};
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`badge badge-${status}`}>
-      <span className="badge-dot" />
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold border ${STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
       {status}
     </span>
   );
@@ -47,21 +38,10 @@ export default function DashboardPage({ user }: { user: User }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [agentRes, execRes] = await Promise.all([
-          api.get('/api/agents'),
-          api.get('/api/executions', { params: { limit: 5 } }),
-        ]);
-        setAgents(agentRes.data);
-        setExecutions(execRes.data);
-      } catch {
-        // silently handle
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    Promise.all([api.get('/api/agents'), api.get('/api/executions', { params: { limit: 5 } })])
+      .then(([a, e]) => { setAgents(a.data); setExecutions(e.data); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   const hour = new Date().getHours();
@@ -70,14 +50,12 @@ export default function DashboardPage({ user }: { user: User }) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <div className="skeleton" style={{ height: 36, width: 280, marginBottom: 8 }} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="skeleton" style={{ height: 100, borderRadius: 14 }} />
-          ))}
+      <div className="flex flex-col gap-5">
+        <div className="skeleton h-9 w-64 rounded-lg" />
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+          {[1,2,3,4].map(i => <div key={i} className="skeleton h-24 rounded-xl" />)}
         </div>
-        <div className="skeleton" style={{ height: 200, borderRadius: 14 }} />
+        <div className="skeleton h-48 rounded-xl" />
       </div>
     );
   }
@@ -85,94 +63,56 @@ export default function DashboardPage({ user }: { user: User }) {
   return (
     <div className="page-enter">
       {/* Greeting */}
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.03em' }}>
+      <div className="mb-8">
+        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">
           {greeting}, {user.firstName}
         </h1>
-        <p style={{ color: '#64748b', marginTop: 6, fontSize: 14 }}>
+        <p className="text-sm text-slate-500 mt-1.5">
           {activeAgents.length > 0
             ? `You have ${activeAgents.length} AI team member${activeAgents.length === 1 ? '' : 's'} ready to help.`
-            : "Let's get your AI team set up."
-          }
+            : "Let's get your AI team set up."}
         </p>
       </div>
 
-      {/* Quick access: Active agents */}
+      {/* Quick Chat agents */}
       {activeAgents.length > 0 && (
-        <div style={{ marginBottom: 32 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-              Quick Chat
-            </h2>
-            <Link to="/agents" style={{ fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>
-              View all agents
+        <div className="mb-8">
+          <div className="flex justify-between items-center mb-3.5">
+            <h2 className="text-[17px] font-bold text-slate-900 tracking-tight m-0">Quick Chat</h2>
+            <Link to="/agents" className="text-[13px] text-indigo-600 hover:text-indigo-700 font-semibold no-underline">
+              View all agents →
             </Link>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
-            {activeAgents.slice(0, 6).map((agent) => {
-              const icon = agent.icon || getDefaultIcon(agent.id);
-              return (
-                <div
-                  key={agent.id}
-                  onClick={() => navigate(`/agents/${agent.id}`)}
-                  style={{
-                    background: '#fff',
-                    border: '1.5px solid #e8ecf7',
-                    borderRadius: 14,
-                    padding: '16px 18px',
-                    cursor: 'pointer',
-                    transition: 'box-shadow 0.15s, border-color 0.15s, transform 0.1s',
-                    display: 'flex', alignItems: 'center', gap: 12,
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.boxShadow = '0 4px 16px rgba(99,102,241,0.1)';
-                    (e.currentTarget as HTMLDivElement).style.borderColor = '#a5b4fc';
-                    (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.boxShadow = '';
-                    (e.currentTarget as HTMLDivElement).style.borderColor = '#e8ecf7';
-                    (e.currentTarget as HTMLDivElement).style.transform = '';
-                  }}
-                >
-                  <div style={{
-                    width: 42, height: 42, borderRadius: 12, flexShrink: 0,
-                    background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22,
-                  }}>
-                    {icon}
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {agent.name}
-                    </div>
-                    {agent.description && (
-                      <div style={{ fontSize: 12, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {agent.description}
-                      </div>
-                    )}
-                  </div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+            {activeAgents.slice(0, 6).map((agent) => (
+              <div
+                key={agent.id}
+                onClick={() => navigate(`/agents/${agent.id}`)}
+                className="bg-white border-2 border-slate-100 rounded-xl p-4 flex items-center gap-3 cursor-pointer hover:border-indigo-200 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+              >
+                <div className="w-11 h-11 rounded-xl shrink-0 flex items-center justify-center text-[22px]"
+                  style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+                  {agent.icon || getDefaultIcon(agent.id)}
                 </div>
-              );
-            })}
+                <div className="min-w-0">
+                  <div className="font-bold text-slate-900 text-sm truncate">{agent.name}</div>
+                  {agent.description && <div className="text-xs text-slate-400 truncate">{agent.description}</div>}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Empty state for new users */}
+      {/* Empty state */}
       {agents.length === 0 && (
-        <div className="card empty-state" style={{ padding: '48px 32px', marginBottom: 32 }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: 18, marginBottom: 16,
-            background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
-          }}>
-            {'\u{1F916}'}
+        <div className="bg-white border border-slate-200 rounded-xl p-12 mb-8 flex flex-col items-center text-center">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl mb-4"
+            style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+            🤖
           </div>
-          <p style={{ margin: '0 0 8px', fontWeight: 700, fontSize: 17, color: '#0f172a' }}>
-            Welcome to Automation OS
-          </p>
-          <p style={{ margin: '0 0 20px', fontSize: 14, color: '#64748b', maxWidth: 380, textAlign: 'center', lineHeight: 1.6 }}>
+          <p className="font-bold text-[17px] text-slate-900 mb-2">Welcome to Automation OS</p>
+          <p className="text-sm text-slate-500 max-w-sm leading-relaxed">
             Your AI team will appear here once they are set up.
             Ask your administrator to create agents and assign them to your account.
           </p>
@@ -182,44 +122,36 @@ export default function DashboardPage({ user }: { user: User }) {
       {/* Recent activity */}
       {executions.length > 0 && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <h2 style={{ fontSize: 17, fontWeight: 700, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
-              Recent Activity
-            </h2>
-            <Link to="/executions" style={{ fontSize: 13, color: '#6366f1', textDecoration: 'none', fontWeight: 600 }}>
-              View all
+          <div className="flex justify-between items-center mb-3.5">
+            <h2 className="text-[17px] font-bold text-slate-900 tracking-tight m-0">Recent Activity</h2>
+            <Link to="/executions" className="text-[13px] text-indigo-600 hover:text-indigo-700 font-semibold no-underline">
+              View all →
             </Link>
           </div>
-          <div className="card" style={{ overflow: 'hidden' }}>
-            <table className="data-table">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
               <thead>
-                <tr>
-                  <th>Run</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>When</th>
+                <tr className="border-b border-slate-100">
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Run</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Duration</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">When</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-50">
                 {executions.map((exec) => (
-                  <tr key={exec.id}>
-                    <td>
-                      <Link
-                        to={`/executions/${exec.id}`}
-                        style={{ color: '#6366f1', fontSize: 12, fontWeight: 600, textDecoration: 'none' }}
-                      >
+                  <tr key={exec.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-5 py-3">
+                      <Link to={`/executions/${exec.id}`} className="text-indigo-600 hover:text-indigo-700 text-xs font-semibold font-mono no-underline">
                         {exec.id.substring(0, 8)}
                       </Link>
                     </td>
-                    <td><StatusBadge status={exec.status} /></td>
-                    <td style={{ color: '#64748b', fontSize: 13 }}>
-                      {exec.durationMs != null ? `${(exec.durationMs / 1000).toFixed(1)}s` : '\u2014'}
+                    <td className="px-5 py-3"><StatusBadge status={exec.status} /></td>
+                    <td className="px-5 py-3 text-slate-500 text-[13px]">
+                      {exec.durationMs != null ? `${(exec.durationMs / 1000).toFixed(1)}s` : '—'}
                     </td>
-                    <td style={{ color: '#64748b', fontSize: 13 }}>
-                      {new Date(exec.createdAt).toLocaleString(undefined, {
-                        month: 'short', day: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      })}
+                    <td className="px-5 py-3 text-slate-500 text-[13px]">
+                      {new Date(exec.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </td>
                   </tr>
                 ))}
