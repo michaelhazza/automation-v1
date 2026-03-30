@@ -27,6 +27,7 @@ import {
   createDefaultPipeline,
   hashToolCall,
   executeWithRetry,
+  checkWorkspaceLimits,
   type MiddlewareContext,
   type MiddlewarePipeline,
 } from './middleware/index.js';
@@ -134,6 +135,37 @@ export const agentExecutionService = {
       const timeoutMs = saLink.timeoutSeconds * 1000;
 
       await db.update(agentRuns).set({ tokenBudget }).where(eq(agentRuns.id, run.id));
+
+      // ── 2b. Workspace limit check (pre-run guard) ─────────────────────
+      const limitCheck = await checkWorkspaceLimits(request.subaccountId, tokenBudget);
+      if (!limitCheck.allowed) {
+        const durationMs = Date.now() - startTime;
+        await db.update(agentRuns).set({
+          status: 'failed',
+          errorMessage: limitCheck.reason ?? 'Workspace limit exceeded',
+          errorDetail: {
+            type: 'workspace_limit',
+            dailyUsed: limitCheck.dailyUsed,
+            dailyLimit: limitCheck.dailyLimit,
+            requestedBudget: tokenBudget,
+          },
+          completedAt: new Date(),
+          durationMs,
+          updatedAt: new Date(),
+        }).where(eq(agentRuns.id, run.id));
+
+        return {
+          runId: run.id,
+          status: 'failed',
+          summary: null,
+          totalToolCalls: 0,
+          totalTokens: 0,
+          durationMs,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+        };
+      }
 
       // ── 3. Load training data ───────────────────────────────────────────
       const dataSourceContents = await agentService.fetchAgentDataSources(request.agentId);
@@ -262,6 +294,7 @@ export const agentExecutionService = {
 
       await db.update(agentRuns).set({
         systemPromptSnapshot: fullSystemPrompt,
+        memoryStateAtStart: memory ?? null,
         skillsUsed: [
           ...(systemAgentRecord ? ((systemAgentRecord.defaultSystemSkillSlugs ?? []) as string[]).map(s => `system:${s}`) : []),
           ...skillSlugs,

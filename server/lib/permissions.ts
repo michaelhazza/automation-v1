@@ -26,6 +26,11 @@ export const ORG_PERMISSIONS = {
   // Workflow engines
   ENGINES_VIEW: 'org.engines.view',
   ENGINES_MANAGE: 'org.engines.manage',
+  // System process visibility
+  PROCESSES_VIEW_SYSTEM: 'org.processes.view_system',
+  PROCESSES_CLONE: 'org.processes.clone',
+  // Cross-subaccount connection overview
+  CONNECTIONS_VIEW: 'org.connections.view',
   // Process categories
   CATEGORIES_VIEW: 'org.categories.view',
   CATEGORIES_MANAGE: 'org.categories.manage',
@@ -45,6 +50,9 @@ export const ORG_PERMISSIONS = {
   // Workspace
   WORKSPACE_VIEW: 'org.workspace.view',
   WORKSPACE_MANAGE: 'org.workspace.manage',
+  // Review
+  REVIEW_VIEW: 'org.review.view',
+  REVIEW_APPROVE: 'org.review.approve',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -66,11 +74,20 @@ export const SUBACCOUNT_PERMISSIONS = {
   USERS_REMOVE: 'subaccount.users.remove',
   // Categories
   CATEGORIES_MANAGE: 'subaccount.categories.manage',
+  // Connections
+  CONNECTIONS_VIEW: 'subaccount.connections.view',
+  CONNECTIONS_MANAGE: 'subaccount.connections.manage',
+  // Process configuration (connection mappings, config overrides)
+  PROCESSES_CLONE: 'subaccount.processes.clone',
+  PROCESSES_CONFIGURE: 'subaccount.processes.configure',
   // Settings
   SETTINGS_EDIT: 'subaccount.settings.edit',
   // Workspace
   WORKSPACE_VIEW: 'subaccount.workspace.view',
   WORKSPACE_MANAGE: 'subaccount.workspace.manage',
+  // Review
+  REVIEW_VIEW: 'subaccount.review.view',
+  REVIEW_APPROVE: 'subaccount.review.approve',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -87,6 +104,11 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.PROCESSES_DELETE,   description: 'Delete org processes',            groupName: 'org.processes' },
   { key: ORG_PERMISSIONS.PROCESSES_ACTIVATE, description: 'Activate/deactivate processes',   groupName: 'org.processes' },
   { key: ORG_PERMISSIONS.PROCESSES_TEST,     description: 'Test-execute processes',          groupName: 'org.processes' },
+  // org.processes (system visibility + clone)
+  { key: ORG_PERMISSIONS.PROCESSES_VIEW_SYSTEM, description: 'View system processes available to this org', groupName: 'org.processes' },
+  { key: ORG_PERMISSIONS.PROCESSES_CLONE,       description: 'Clone a system process into the org',        groupName: 'org.processes' },
+  // org.connections
+  { key: ORG_PERMISSIONS.CONNECTIONS_VIEW, description: 'View connection status across subaccounts', groupName: 'org.connections' },
   // org.executions
   { key: ORG_PERMISSIONS.EXECUTIONS_VIEW, description: 'View all org executions',    groupName: 'org.executions' },
   // org.users
@@ -119,6 +141,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CREATE,  description: 'Create subaccount-specific processes',       groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EDIT,    description: 'Edit subaccount processes',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_DELETE,  description: 'Delete subaccount processes',                groupName: 'subaccount.processes' },
+  // subaccount.connections
+  { key: SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW,   description: 'View connections for this subaccount',         groupName: 'subaccount.connections' },
+  { key: SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE, description: 'Create/edit/revoke connections',               groupName: 'subaccount.connections' },
+  // subaccount.processes (clone + configure)
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CLONE,     description: 'Clone org/system process into subaccount',    groupName: 'subaccount.processes' },
+  { key: SUBACCOUNT_PERMISSIONS.PROCESSES_CONFIGURE, description: 'Configure connection mappings and overrides', groupName: 'subaccount.processes' },
   // subaccount.executions
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW,     description: 'View own execution history',         groupName: 'subaccount.executions' },
   { key: SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW_ALL, description: 'View all subaccount executions',     groupName: 'subaccount.executions' },
@@ -137,6 +165,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.workspace
   { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,   description: 'View workspace board and tasks in portal',   groupName: 'subaccount.workspace' },
   { key: SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE, description: 'Manage workspace tasks in portal',           groupName: 'subaccount.workspace' },
+  // org.review
+  { key: ORG_PERMISSIONS.REVIEW_VIEW,     description: 'View review queue and items',              groupName: 'org.review' },
+  { key: ORG_PERMISSIONS.REVIEW_APPROVE,  description: 'Approve or reject review items',           groupName: 'org.review' },
+  // subaccount.review
+  { key: SUBACCOUNT_PERMISSIONS.REVIEW_VIEW,    description: 'View review queue in portal',              groupName: 'subaccount.review' },
+  { key: SUBACCOUNT_PERMISSIONS.REVIEW_APPROVE, description: 'Approve or reject review items in portal', groupName: 'subaccount.review' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

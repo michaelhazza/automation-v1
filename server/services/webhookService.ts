@@ -32,16 +32,17 @@ export const webhookService = {
    * Returns the URL the external engine should POST results back to.
    * Format: <WEBHOOK_BASE_URL>/api/webhooks/callback/<executionId>
    *
-   * A HMAC token is appended as a query param so we can verify authenticity
-   * without requiring the engine to send extra headers.
+   * Uses per-engine HMAC secret when provided, falls back to global
+   * WEBHOOK_SECRET for backward compatibility with older executions.
    */
-  buildReturnUrl(executionId: string): string {
+  buildReturnUrl(executionId: string, engineHmacSecret?: string): string {
     const base = (env.WEBHOOK_BASE_URL ?? '').replace(/\/$/, '');
     const path = `/api/webhooks/callback/${executionId}`;
 
-    if (env.WEBHOOK_SECRET) {
+    const secret = engineHmacSecret ?? env.WEBHOOK_SECRET;
+    if (secret) {
       const token = crypto
-        .createHmac('sha256', env.WEBHOOK_SECRET)
+        .createHmac('sha256', secret)
         .update(executionId)
         .digest('hex');
       return `${base}${path}?token=${token}`;
@@ -51,19 +52,36 @@ export const webhookService = {
   },
 
   /**
-   * Verifies an incoming callback token (if WEBHOOK_SECRET is set).
-   * Returns true when:
-   *   - WEBHOOK_SECRET is not configured (open mode), OR
-   *   - The provided token matches the expected HMAC.
+   * Compute the HMAC signature for an outbound request to an engine.
+   * Included as X-Webhook-Signature header.
    */
-  verifyCallbackToken(executionId: string, token?: string): boolean {
-    if (!env.WEBHOOK_SECRET) return true;
-    if (!token) return false;
-    const expected = crypto
-      .createHmac('sha256', env.WEBHOOK_SECRET)
+  signOutboundRequest(executionId: string, hmacSecret: string): string {
+    return crypto
+      .createHmac('sha256', hmacSecret)
       .update(executionId)
       .digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  },
+
+  /**
+   * Verifies an incoming callback token.
+   * Accepts a per-engine secret or falls back to global WEBHOOK_SECRET.
+   * Returns true when:
+   *   - Neither per-engine nor global secret is configured (open mode), OR
+   *   - The provided token matches the expected HMAC.
+   */
+  verifyCallbackToken(executionId: string, token?: string, engineHmacSecret?: string): boolean {
+    const secret = engineHmacSecret ?? env.WEBHOOK_SECRET;
+    if (!secret) return true;
+    if (!token) return false;
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(executionId)
+      .digest('hex');
+    // Validate lengths match before timingSafeEqual (prevents throw on mismatched lengths)
+    const tokenBuf = Buffer.from(token);
+    const expectedBuf = Buffer.from(expected);
+    if (tokenBuf.length !== expectedBuf.length) return false;
+    return crypto.timingSafeEqual(tokenBuf, expectedBuf);
   },
 
   /**
@@ -81,7 +99,12 @@ export const webhookService = {
   async buildOutboundPayload(
     executionId: string,
     inputData: unknown,
-    returnWebhookUrl: string
+    returnWebhookUrl: string,
+    options?: {
+      auth?: Record<string, { access_token: string }>;
+      config?: Record<string, unknown>;
+      processId?: string;
+    }
   ): Promise<Record<string, unknown>> {
     // Fetch any files that were uploaded for this execution
     const files = await db
@@ -139,13 +162,47 @@ export const webhookService = {
         ? (inputData as Record<string, unknown>)
         : { data: inputData };
 
-    return {
-      ...userInput,
+    const payload: Record<string, unknown> = {
+      execution_id: executionId,
+      input: userInput,
       _meta: {
         executionId,
         returnWebhookUrl,
         files: signedFiles,
       },
     };
+
+    // Inject auth tokens (connection tokens keyed by slot name)
+    if (options?.auth && Object.keys(options.auth).length > 0) {
+      payload.auth = options.auth;
+    }
+
+    // Inject merged config
+    if (options?.config && Object.keys(options.config).length > 0) {
+      payload.config = options.config;
+    }
+
+    if (options?.processId) {
+      payload.process_id = options.processId;
+    }
+
+    return payload;
+  },
+
+  /**
+   * Build a redacted copy of the outbound payload for audit storage.
+   * Replaces auth tokens with "[REDACTED]".
+   */
+  redactPayloadForAudit(payload: Record<string, unknown>): Record<string, unknown> {
+    const redacted = { ...payload };
+    if (redacted.auth && typeof redacted.auth === 'object') {
+      const authKeys = Object.keys(redacted.auth as Record<string, unknown>);
+      const redactedAuth: Record<string, string> = {};
+      for (const key of authKeys) {
+        redactedAuth[key] = '[REDACTED]';
+      }
+      redacted.auth = redactedAuth;
+    }
+    return redacted;
   },
 };

@@ -1,4 +1,23 @@
-# Phase I: Autonomous Foundations — Development Plan
+# Three-Level Process Framework — Spec Development
+
+## Current Task
+- [x] Digest original brief against existing codebase
+- [x] Get user feedback on gaps and decisions
+- [x] Research all existing schema, services, and patterns
+- [ ] Write tailored spec to `tasks/three-level-process-spec.md`
+- [ ] Review spec with user
+
+## Decisions Made
+- Keep "processes" terminology (not "automations")
+- Linking-with-overrides pattern (like subaccountAgents), not clone-to-own
+- Allow multiple connections per provider per subaccount
+- Per-engine HMAC keys, mandatory, auto-generated
+- Extend existing tables where possible (not new entities)
+- No live data to migrate — clean slate
+
+---
+
+# Phase I: Autonomous Foundations — Development Plan (Previous)
 
 **Scope:** Recommendations 1, 2, 4, 5 from the Strategic Recommendations spec
 **Target:** 4-6 weeks

@@ -1,4 +1,4 @@
-import { pgTable, uuid, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { subaccounts } from './subaccounts';
 import { processes } from './processes';
 import { subaccountCategories } from './subaccountCategories';
@@ -16,6 +16,10 @@ export const subaccountProcessLinks = pgTable(
     subaccountCategoryId: uuid('subaccount_category_id')
       .references(() => subaccountCategories.id),
     isActive: boolean('is_active').notNull().default(true),
+    // Per-subaccount config overrides (merged with process.default_config at execution time)
+    configOverrides: jsonb('config_overrides'),
+    // Override input schema for this subaccount (rare, for advanced customisation)
+    customInputSchema: text('custom_input_schema'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },

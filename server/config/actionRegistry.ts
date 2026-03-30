@@ -119,6 +119,34 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'not_found'],
     },
   },
+  fetch_url: {
+    actionType: 'fetch_url',
+    actionCategory: 'api',
+    isExternal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['url', 'method', 'headers', 'body'],
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error'],
+    },
+  },
+  request_approval: {
+    actionType: 'request_approval',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['title', 'description', 'context', 'options'],
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+  },
 };
 
 /** Check if an action type is known */

@@ -47,6 +47,9 @@ const envSchema = z.object({
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
   // Tavily AI search API key for agent web search skill
   TAVILY_API_KEY: z.string().optional(),
+  // AES-256-GCM key for encrypting OAuth tokens in integration_connections.
+  // Must be 64 hex chars (32 bytes). Generate via: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  TOKEN_ENCRYPTION_KEY: z.string().length(64).optional(),
 });
 
 export const env = envSchema.parse(process.env);

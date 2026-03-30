@@ -143,14 +143,24 @@ export async function executeTriggerredProcess(
   organisationId: string,
   processId: string,
   userId: string,
-  inputDataStr: string
+  inputDataStr: string,
+  options?: {
+    subaccountId?: string;
+    triggerType?: 'manual' | 'agent' | 'scheduled' | 'webhook';
+    triggerSourceId?: string;
+    configOverrides?: Record<string, unknown>;
+  }
 ): Promise<{ executionId: string; processName: string; status: string }> {
+  // Support system processes (no orgId) and org processes
   const [process] = await db
     .select()
     .from(processes)
-    .where(and(eq(processes.id, processId), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
+    .where(and(eq(processes.id, processId), isNull(processes.deletedAt)));
 
   if (!process) throw new Error(`Process ${processId} not found`);
+  if (process.organisationId && process.organisationId !== organisationId) {
+    throw new Error(`Process ${processId} not found`);
+  }
   if (process.status !== 'active') throw new Error(`Process ${process.name} is not active`);
 
   let inputData: unknown = {};
@@ -168,11 +178,15 @@ export async function executeTriggerredProcess(
       organisationId,
       processId,
       triggeredByUserId: userId,
+      subaccountId: options?.subaccountId ?? null,
       status: 'pending',
       inputData: inputData as Record<string, unknown>,
       engineType: 'agent_triggered',
       processSnapshot: process as unknown as Record<string, unknown>,
       isTestExecution: false,
+      triggerType: options?.triggerType ?? 'agent',
+      triggerSourceId: options?.triggerSourceId ?? null,
+      resolvedConfig: options?.configOverrides ?? null,
       retryCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),

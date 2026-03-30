@@ -45,6 +45,11 @@ const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
+const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
+const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
+const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
+const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
+const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 
 function PageLoader() {
   return (
@@ -162,6 +167,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
           </Route>
 
@@ -176,7 +183,19 @@ export default function App() {
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
+            <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
+            <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
           </Route>
+
+          {/* Subaccount connections */}
+          <Route path="/admin/subaccounts/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
+          <Route path="/portal/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
+
+          {/* Review queue (portal access) */}
+          <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+
+          {/* Run trace viewer */}
+          <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />

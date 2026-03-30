@@ -15,9 +15,9 @@
  */
 
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, users } from '../db/schema/index.js';
+import { executions, users, workflowEngines } from '../db/schema/index.js';
 import { webhookService } from '../services/webhookService.js';
 import { emailService } from '../services/emailService.js';
 
@@ -28,15 +28,7 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
   const token = req.query.token as string | undefined;
 
   // ------------------------------------------------------------------
-  // 1. Verify the HMAC token (no-op when WEBHOOK_SECRET is not set)
-  // ------------------------------------------------------------------
-  if (!webhookService.verifyCallbackToken(executionId, token)) {
-    res.status(401).json({ error: 'Invalid or missing webhook token' });
-    return;
-  }
-
-  // ------------------------------------------------------------------
-  // 2. Look up the execution
+  // 1. Look up the execution first to find the engine's HMAC secret
   // ------------------------------------------------------------------
   const [execution] = await db
     .select()
@@ -46,6 +38,22 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
   if (!execution) {
     // Return 200 to prevent the engine from retrying indefinitely
     res.status(200).json({ received: true, note: 'Execution not found — already processed or invalid' });
+    return;
+  }
+
+  // ------------------------------------------------------------------
+  // 2. Verify the HMAC token using per-engine secret (falls back to global)
+  // ------------------------------------------------------------------
+  let engineHmacSecret: string | undefined;
+  if (execution.engineId) {
+    const [engine] = await db.select()
+      .from(workflowEngines)
+      .where(eq(workflowEngines.id, execution.engineId));
+    engineHmacSecret = engine?.hmacSecret;
+  }
+
+  if (!webhookService.verifyCallbackToken(executionId, token, engineHmacSecret)) {
+    res.status(401).json({ error: 'Invalid or missing webhook token' });
     return;
   }
 

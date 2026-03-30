@@ -5,6 +5,7 @@ import { toolRestrictionMiddleware } from './toolRestriction.js';
 
 export { hashToolCall } from './loopDetection.js';
 export { classifyError, executeWithRetry } from './errorHandling.js';
+export { checkWorkspaceLimits } from './workspaceLimitCheck.js';
 export type {
   MiddlewareContext,
   PreCallResult,
