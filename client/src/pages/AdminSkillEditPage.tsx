@@ -4,78 +4,43 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 
 interface SkillForm {
-  name: string;
-  slug: string;
-  description: string;
-  instructions: string;
-  methodology: string;
-  definition: string; // JSON string
-  isActive: boolean;
+  name: string; slug: string; description: string;
+  instructions: string; methodology: string; definition: string; isActive: boolean;
 }
 
 const EMPTY_FORM: SkillForm = {
-  name: '',
-  slug: '',
-  description: '',
-  instructions: '',
-  methodology: '',
-  definition: JSON.stringify({
-    name: '',
-    description: '',
-    input_schema: { type: 'object', properties: {}, required: [] },
-  }, null, 2),
+  name: '', slug: '', description: '', instructions: '', methodology: '',
+  definition: JSON.stringify({ name: '', description: '', input_schema: { type: 'object', properties: {}, required: [] } }, null, 2),
   isActive: true,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 8,
-  fontSize: 13,
-  boxSizing: 'border-box',
-  color: '#1e293b',
-  background: '#fff',
-  fontFamily: 'inherit',
-};
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  minHeight: 120,
-  resize: 'vertical' as const,
-  lineHeight: 1.5,
-};
-
-const monoTextareaStyle: React.CSSProperties = {
-  ...textareaStyle,
-  fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-  fontSize: 12,
-  minHeight: 160,
 };
 
 function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 20 }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9' }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b' }}>{title}</h2>
-        {subtitle && <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>{subtitle}</div>}
+    <div className="bg-white border border-slate-200 rounded-xl mb-5">
+      <div className="px-5 py-4 border-b border-slate-100">
+        <h2 className="m-0 text-[15px] font-semibold text-slate-800">{title}</h2>
+        {subtitle && <div className="text-[12px] text-slate-500 mt-1">{subtitle}</div>}
       </div>
-      <div style={{ padding: 20 }}>{children}</div>
+      <div className="p-5">{children}</div>
     </div>
   );
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>{label}</label>
+    <div className="mb-4">
+      <label className="block text-[13px] font-medium text-slate-700 mb-1.5">{label}</label>
       {children}
-      {hint && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{hint}</div>}
+      {hint && <div className="text-[12px] text-slate-400 mt-1">{hint}</div>}
     </div>
   );
 }
 
-export default function AdminSkillEditPage({ user }: { user: User }) {
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-400';
+const textareaCls = `${inputCls} resize-vertical min-h-[120px]`;
+const monoCls = `${textareaCls} font-mono text-[12px] min-h-[160px]`;
+
+export default function AdminSkillEditPage({ user: _user }: { user: User }) {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isNew = id === 'new';
@@ -93,305 +58,140 @@ export default function AdminSkillEditPage({ user }: { user: User }) {
       const { data } = await api.get(`/api/skills/${skillId}`);
       setIsBuiltIn(data.skillType === 'built_in');
       setForm({
-        name: data.name ?? '',
-        slug: data.slug ?? '',
-        description: data.description ?? '',
-        instructions: data.instructions ?? '',
-        methodology: data.methodology ?? '',
-        definition: JSON.stringify(data.definition, null, 2),
-        isActive: data.isActive,
+        name: data.name ?? '', slug: data.slug ?? '', description: data.description ?? '',
+        instructions: data.instructions ?? '', methodology: data.methodology ?? '',
+        definition: JSON.stringify(data.definition, null, 2), isActive: data.isActive,
       });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    if (!isNew && id) loadSkill(id);
-  }, [id, isNew]);
+  useEffect(() => { if (!isNew && id) loadSkill(id); }, [id, isNew]);
 
   const handleSave = async () => {
-    setSaveError('');
-    setSaveSuccess('');
-
+    setSaveError(''); setSaveSuccess('');
     if (!form.name.trim()) { setSaveError('Name is required.'); return; }
     if (!form.slug.trim()) { setSaveError('Slug is required.'); return; }
-
     let definition: object;
-    try {
-      definition = JSON.parse(form.definition);
-    } catch {
-      setSaveError('Tool definition must be valid JSON.');
-      return;
-    }
-
+    try { definition = JSON.parse(form.definition); } catch { setSaveError('Tool definition must be valid JSON.'); return; }
     setSaving(true);
     try {
-      const payload = {
-        name: form.name,
-        slug: form.slug,
-        description: form.description || null,
-        instructions: form.instructions || null,
-        methodology: form.methodology || null,
-        definition,
-        isActive: form.isActive,
-      };
-
+      const payload = { name: form.name, slug: form.slug, description: form.description || null, instructions: form.instructions || null, methodology: form.methodology || null, definition, isActive: form.isActive };
       if (isNew) {
         const { data } = await api.post('/api/skills', payload);
         navigate(`/admin/skills/${data.id}`, { replace: true });
       } else {
         await api.patch(`/api/skills/${id}`, payload);
-        setSaveSuccess('Skill saved successfully.');
-        loadSkill(id!);
+        setSaveSuccess('Skill saved successfully.'); loadSkill(id!);
       }
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setSaveError(e.response?.data?.error ?? 'Failed to save.');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
-  const autoSlug = (name: string) => {
-    return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-  };
+  const autoSlug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 
-  if (loading) {
-    return <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 14 }}>Loading...</div>;
-  }
+  if (loading) return <div className="p-12 text-center text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div className="page-enter">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <button
-            onClick={() => navigate('/admin/skills')}
-            style={{ background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, padding: 0, marginBottom: 8, fontFamily: 'inherit' }}
-          >
-            &larr; Back to Skills
+          <button onClick={() => navigate('/admin/skills')} className="text-[13px] text-indigo-600 hover:text-indigo-700 bg-transparent border-0 cursor-pointer p-0 mb-2">
+            ← Back to Skills
           </button>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">
             {isNew ? 'New Custom Skill' : isBuiltIn ? `${form.name} (Built-in)` : form.name}
           </h1>
           {isBuiltIn && (
-            <p style={{ color: '#64748b', margin: '8px 0 0', fontSize: 13 }}>
+            <p className="text-[13px] text-slate-500 mt-2">
               Built-in skills are read-only. View the tool definition and methodology to understand what this skill does.
             </p>
           )}
         </div>
         {!isBuiltIn && (
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              padding: '10px 24px', background: saving ? '#94a3b8' : '#6366f1', color: '#fff',
-              border: 'none', borderRadius: 8, fontSize: 14, cursor: saving ? 'default' : 'pointer', fontWeight: 500,
-            }}
-          >
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white text-sm font-semibold rounded-lg transition-colors">
             {saving ? 'Saving...' : isNew ? 'Create Skill' : 'Save Changes'}
           </button>
         )}
       </div>
 
-      {/* Messages */}
-      {saveSuccess && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#166534', fontSize: 13 }}>
-          {saveSuccess}
-        </div>
-      )}
-      {saveError && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
-          {saveError}
-        </div>
-      )}
+      {saveSuccess && <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{saveSuccess}</div>}
+      {saveError && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-red-600">{saveError}</div>}
 
-      {/* Basic Info */}
       <SectionCard title="Basic Information">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="grid grid-cols-2 gap-4">
           <Field label="Name" hint="Human-readable name for this skill">
-            <input
-              value={form.name}
-              onChange={(e) => {
-                const name = e.target.value;
-                setForm({ ...form, name, ...(isNew ? { slug: autoSlug(name) } : {}) });
-              }}
-              style={inputStyle}
-              disabled={isBuiltIn}
-              placeholder="e.g. Real Estate Listing Analysis"
-            />
+            <input value={form.name} onChange={(e) => { const name = e.target.value; setForm({ ...form, name, ...(isNew ? { slug: autoSlug(name) } : {}) }); }} className={inputCls} disabled={isBuiltIn} placeholder="e.g. Real Estate Listing Analysis" />
           </Field>
           <Field label="Slug" hint="Unique identifier used in agent configuration">
-            <input
-              value={form.slug}
-              onChange={(e) => setForm({ ...form, slug: e.target.value })}
-              style={{ ...inputStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}
-              disabled={isBuiltIn || !isNew}
-              placeholder="e.g. real_estate_listing_analysis"
-            />
+            <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className={`${inputCls} font-mono text-[12px]`} disabled={isBuiltIn || !isNew} placeholder="e.g. real_estate_listing_analysis" />
           </Field>
         </div>
         <Field label="Description" hint="Brief description shown in the skills library">
-          <textarea
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-            style={{ ...textareaStyle, minHeight: 60 }}
-            disabled={isBuiltIn}
-            placeholder="Describe what this skill enables an agent to do..."
-          />
+          <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${textareaCls} min-h-[60px]`} disabled={isBuiltIn} placeholder="Describe what this skill enables an agent to do..." />
         </Field>
       </SectionCard>
 
-      {/* Tool Definition */}
       <SectionCard title="Tool Definition" subtitle="The Anthropic tool schema that defines the function the agent can call. Must include name, description, and input_schema.">
         <Field label="Definition (JSON)" hint="Follows the Anthropic tool_use format: { name, description, input_schema }">
-          <textarea
-            value={form.definition}
-            onChange={(e) => setForm({ ...form, definition: e.target.value })}
-            style={{ ...monoTextareaStyle, minHeight: 200 }}
-            disabled={isBuiltIn}
-            placeholder='{ "name": "...", "description": "...", "input_schema": { "type": "object", "properties": {}, "required": [] } }'
-          />
+          <textarea value={form.definition} onChange={(e) => setForm({ ...form, definition: e.target.value })} className={`${monoCls} min-h-[200px]`} disabled={isBuiltIn} placeholder='{ "name": "...", "description": "...", "input_schema": { "type": "object", "properties": {}, "required": [] } }' />
         </Field>
       </SectionCard>
 
-      {/* Instructions */}
       <SectionCard title="Instructions" subtitle="Short guidance injected into the agent's system prompt. Tells the agent when and why to use this skill.">
         <Field label="Instructions" hint="One or two sentences. This appears alongside the tool definition in the prompt.">
-          <textarea
-            value={form.instructions}
-            onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-            style={{ ...textareaStyle, minHeight: 80 }}
-            disabled={isBuiltIn}
-            placeholder="e.g. Use this skill to analyse property listings and identify pricing opportunities..."
-          />
+          <textarea value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} className={`${textareaCls} min-h-[80px]`} disabled={isBuiltIn} placeholder="e.g. Use this skill to analyse property listings and identify pricing opportunities..." />
         </Field>
       </SectionCard>
 
-      {/* Methodology */}
-      <SectionCard
-        title="Methodology"
-        subtitle="The structured workflow document that guides how the agent uses this skill. Include phases, decision rules, quality criteria, and common mistakes. Written in Markdown."
-      >
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <button
-            onClick={() => setMethodologyPreview(false)}
-            style={{
-              padding: '4px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-              background: !methodologyPreview ? '#1e293b' : '#fff', color: !methodologyPreview ? '#fff' : '#374151',
-              fontFamily: 'inherit', fontWeight: 500,
-            }}
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => setMethodologyPreview(true)}
-            style={{
-              padding: '4px 12px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-              background: methodologyPreview ? '#1e293b' : '#fff', color: methodologyPreview ? '#fff' : '#374151',
-              fontFamily: 'inherit', fontWeight: 500,
-            }}
-          >
-            Preview
-          </button>
+      <SectionCard title="Methodology" subtitle="The structured workflow document that guides how the agent uses this skill. Include phases, decision rules, quality criteria, and common mistakes. Written in Markdown.">
+        <div className="flex gap-2 mb-3">
+          {['Edit', 'Preview'].map((tab) => {
+            const isActive = tab === 'Edit' ? !methodologyPreview : methodologyPreview;
+            return (
+              <button key={tab} onClick={() => setMethodologyPreview(tab === 'Preview')} className={`px-3 py-1 border rounded-md text-[12px] font-medium transition-colors ${isActive ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                {tab}
+              </button>
+            );
+          })}
         </div>
-
         {!methodologyPreview ? (
           <Field label="Methodology (Markdown)" hint="Write the full workflow: phases, decision trees, quality criteria, common mistakes. This is what makes the skill powerful.">
-            <textarea
-              value={form.methodology}
-              onChange={(e) => setForm({ ...form, methodology: e.target.value })}
-              style={{ ...monoTextareaStyle, minHeight: 300 }}
-              disabled={isBuiltIn}
-              placeholder={`## Skill Methodology
-
-### Phase 1: ...
-Describe the first phase of the workflow.
-
-### Phase 2: ...
-Describe the second phase.
-
-### Decision Rules
-- **When to use**: ...
-- **When not to use**: ...
-
-### Quality Bar
-- What does "good" look like?
-
-### Common Mistakes
-- What to avoid...`}
-            />
+            <textarea value={form.methodology} onChange={(e) => setForm({ ...form, methodology: e.target.value })} className={`${monoCls} min-h-[300px]`} disabled={isBuiltIn} placeholder={`## Skill Methodology\n\n### Phase 1: ...\n...`} />
           </Field>
         ) : (
-          <div style={{
-            background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8,
-            padding: 20, fontSize: 13, lineHeight: 1.7, color: '#1e293b',
-            minHeight: 200, whiteSpace: 'pre-wrap', fontFamily: 'inherit',
-          }}>
-            {form.methodology || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No methodology written yet.</span>}
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 text-[13px] leading-relaxed text-slate-800 min-h-[200px] whitespace-pre-wrap">
+            {form.methodology || <span className="text-slate-400 italic">No methodology written yet.</span>}
           </div>
         )}
-
         {!form.methodology && !isBuiltIn && (
-          <div style={{
-            marginTop: 12, padding: '12px 16px', background: '#fffbeb', border: '1px solid #fef3c7',
-            borderRadius: 8, fontSize: 12, color: '#92400e', lineHeight: 1.5,
-          }}>
-            <strong>Tip:</strong> Skills without a methodology still work, but agents won&apos;t have structured guidance on <em>how</em> to use the tool effectively.
-            A good methodology includes workflow phases, decision rules for when to use the skill, quality criteria, and common mistakes to avoid.
+          <div className="mt-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-800 leading-relaxed">
+            <strong>Tip:</strong> Skills without a methodology still work, but agents won't have structured guidance on <em>how</em> to use the tool effectively.
           </div>
         )}
       </SectionCard>
 
-      {/* Status */}
       {!isNew && !isBuiltIn && (
         <SectionCard title="Status">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <label style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>Active</label>
-            <button
-              onClick={() => setForm({ ...form, isActive: !form.isActive })}
-              style={{
-                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
-                background: form.isActive ? '#6366f1' : '#d1d5db',
-                position: 'relative', transition: 'background 0.2s',
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, borderRadius: 9, background: '#fff',
-                position: 'absolute', top: 3,
-                left: form.isActive ? 23 : 3, transition: 'left 0.2s',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-              }} />
+          <div className="flex items-center gap-3">
+            <label className="text-[13px] font-medium text-slate-700">Active</label>
+            <button onClick={() => setForm({ ...form, isActive: !form.isActive })} className={`relative w-11 h-6 rounded-full border-0 cursor-pointer transition-colors ${form.isActive ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+              <div className={`absolute top-[3px] w-[18px] h-[18px] rounded-full bg-white shadow transition-all ${form.isActive ? 'left-[23px]' : 'left-[3px]'}`} />
             </button>
-            <span style={{ fontSize: 12, color: '#64748b' }}>
-              {form.isActive ? 'Skill is available for agents to use' : 'Skill is disabled and will not be available'}
-            </span>
+            <span className="text-[12px] text-slate-500">{form.isActive ? 'Skill is available for agents to use' : 'Skill is disabled and will not be available'}</span>
           </div>
         </SectionCard>
       )}
 
-      {/* Bottom save button */}
       {!isBuiltIn && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
-          <button
-            onClick={() => navigate('/admin/skills')}
-            style={{ padding: '10px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500, fontFamily: 'inherit' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              padding: '10px 24px', background: saving ? '#94a3b8' : '#6366f1', color: '#fff',
-              border: 'none', borderRadius: 8, fontSize: 14, cursor: saving ? 'default' : 'pointer', fontWeight: 500, fontFamily: 'inherit',
-            }}
-          >
+        <div className="flex justify-end gap-3 mt-2">
+          <button onClick={() => navigate('/admin/skills')} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white text-sm font-semibold rounded-lg transition-colors">
             {saving ? 'Saving...' : isNew ? 'Create Skill' : 'Save Changes'}
           </button>
         </div>
       )}
-    </>
+    </div>
   );
 }
