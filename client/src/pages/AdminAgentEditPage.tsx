@@ -1072,7 +1072,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               No skills available. <Link to="/admin/skills/new" className="text-indigo-500">Create one</Link>
             </div>
           ) : (
-            <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+            <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
               {availableSkills.map((skill) => {
                 const isSelected = form.defaultSkillSlugs.includes(skill.slug);
                 return (
@@ -1114,7 +1114,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                         )}
                       </div>
                       {skill.description && (
-                        <div className="text-[11px] text-slate-500 leading-snug overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>
+                        <div className="text-[11px] text-slate-500 line-clamp-2">
                           {skill.description}
                         </div>
                       )}
@@ -1318,48 +1318,37 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
       {/* ── Section 6: Heartbeat ── */}
       <SectionCard title="Heartbeat">
-        <p style={{ margin: '0 0 18px', fontSize: 13.5, color: '#64748b', lineHeight: 1.6 }}>
+        <p className="m-0 mb-[18px] text-[13.5px] text-slate-500 leading-relaxed">
           Heartbeats keep your agent active — it wakes up on a schedule, checks its tasks, and acts autonomously.
         </p>
 
         {/* Enable toggle */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
+        <label className="flex items-center gap-2.5 cursor-pointer mb-5">
           <div
             onClick={() => setForm({ ...form, heartbeatEnabled: !form.heartbeatEnabled })}
-            style={{
-              width: 40, height: 22, borderRadius: 11, position: 'relative', cursor: 'pointer', flexShrink: 0,
-              background: form.heartbeatEnabled ? '#6366f1' : '#e2e8f0',
-              transition: 'background 0.15s',
-            }}
+            className={`w-10 h-[22px] rounded-[11px] relative cursor-pointer shrink-0 transition-colors duration-150 ${form.heartbeatEnabled ? 'bg-indigo-500' : 'bg-slate-200'}`}
           >
-            <div style={{
-              position: 'absolute', top: 3, left: form.heartbeatEnabled ? 21 : 3,
-              width: 16, height: 16, borderRadius: '50%', background: 'white',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.15s',
-            }} />
+            <div className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow-sm transition-[left] duration-150 ${form.heartbeatEnabled ? 'left-[21px]' : 'left-[3px]'}`} />
           </div>
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Enable heartbeat</span>
+          <span className="text-[14px] font-semibold text-slate-900">Enable heartbeat</span>
         </label>
 
         {form.heartbeatEnabled && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div className="flex flex-col gap-5">
             {/* Frequency */}
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Frequency</div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="text-[13px] font-semibold text-gray-700 mb-2">Frequency</div>
+              <div className="flex gap-2">
                 {([4, 8, 12, 24] as const).map((h) => (
                   <button
                     key={h}
                     type="button"
                     onClick={() => setForm({ ...form, heartbeatIntervalHours: h })}
-                    style={{
-                      padding: '7px 18px', borderRadius: 8, border: '2px solid',
-                      borderColor: form.heartbeatIntervalHours === h ? '#6366f1' : '#e2e8f0',
-                      background: form.heartbeatIntervalHours === h ? '#eef2ff' : 'white',
-                      color: form.heartbeatIntervalHours === h ? '#4f46e5' : '#64748b',
-                      fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                      transition: 'all 0.1s',
-                    }}
+                    className={`px-[18px] py-[7px] rounded-lg border-2 text-[13px] font-semibold cursor-pointer transition-all duration-100 ${
+                      form.heartbeatIntervalHours === h
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 bg-white text-slate-500'
+                    }`}
                   >
                     Every {h}h
                   </button>
@@ -1369,29 +1358,28 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
             {/* Offset */}
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Start offset</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>
+              <div className="text-[13px] font-semibold text-gray-700 mb-1">Start offset</div>
+              <div className="text-xs text-slate-400 mb-2">
                 Stagger agents to spread load — e.g. Content Writer at 0h, SEO Agent at 2h, Social Manager at 4h
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="flex items-center gap-2.5">
                 <select
                   value={form.heartbeatOffsetHours}
                   onChange={(e) => setForm({ ...form, heartbeatOffsetHours: Number(e.target.value) })}
-                  className="form-select"
-                  style={{ width: 120 }}
+                  className={`${inputCls} w-[120px]`}
                 >
                   {Array.from({ length: 24 }, (_, i) => (
                     <option key={i} value={i}>{i === 0 ? 'No offset' : `+${i}h offset`}</option>
                   ))}
                 </select>
-                <span style={{ fontSize: 13, color: '#64748b' }}>within each cycle</span>
+                <span className="text-[13px] text-slate-500">within each cycle</span>
               </div>
             </div>
 
             {/* Timeline preview */}
             {form.heartbeatIntervalHours && (
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10 }}>Schedule preview (24h)</div>
+                <div className="text-[13px] font-semibold text-gray-700 mb-2.5">Schedule preview (24h)</div>
                 <HeartbeatTimeline
                   agentName={form.name || 'This agent'}
                   intervalHours={form.heartbeatIntervalHours}
@@ -1404,20 +1392,11 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       </SectionCard>
 
       {/* Save button */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 28 }}>
+      <div className="flex gap-3 mb-7">
         <button
           onClick={handleSave}
           disabled={saving}
-          style={{
-            padding: '10px 24px',
-            background: saving ? '#a5b4fc' : '#6366f1',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
+          className={`px-6 py-2.5 text-white border-none rounded-lg text-[14px] font-semibold transition-colors ${saving ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-500 cursor-pointer'}`}
         >
           {saving
             ? (isNew ? 'Creating...' : 'Saving...')
@@ -1425,7 +1404,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </button>
         <button
           onClick={() => navigate('/admin/agents')}
-          style={{ padding: '10px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer' }}
+          className="px-5 py-2.5 bg-slate-100 text-gray-700 border-none rounded-lg text-[14px] cursor-pointer"
         >
           Cancel
         </button>
