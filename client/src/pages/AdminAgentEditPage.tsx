@@ -29,6 +29,9 @@ interface AgentForm {
   outputSize: string;
   allowModelOverride: number;
   defaultSkillSlugs: string[];
+  heartbeatEnabled: boolean;
+  heartbeatIntervalHours: number | null;
+  heartbeatOffsetHours: number;
 }
 
 interface Agent extends AgentForm {
@@ -169,6 +172,9 @@ const EMPTY_AGENT_FORM: AgentForm = {
   outputSize: 'standard',
   allowModelOverride: 1,
   defaultSkillSlugs: [],
+  heartbeatEnabled: false,
+  heartbeatIntervalHours: null,
+  heartbeatOffsetHours: 0,
 };
 
 // ─── Helper components ───────────────────────────────────────────────────────
@@ -206,6 +212,46 @@ function SourceTypeBadge({ type }: { type: string }) {
     }}>
       {label}
     </span>
+  );
+}
+
+// ── Heartbeat Timeline ───────────────────────────────────────────────────────
+function HeartbeatTimeline({ agentName, intervalHours, offsetHours }: { agentName: string; intervalHours: number; offsetHours: number }) {
+  const runHours: number[] = [];
+  for (let h = offsetHours; h < 24; h += intervalHours) runHours.push(h);
+
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', width: 130, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {agentName}
+        </span>
+        <span style={{ fontSize: 11, color: '#94a3b8', width: 70, flexShrink: 0 }}>every {intervalHours}h</span>
+        {/* SVG timeline */}
+        <svg width="100%" height="28" viewBox="0 0 480 28" preserveAspectRatio="none" style={{ flex: 1, minWidth: 0 }}>
+          {/* Base line */}
+          <line x1="0" y1="14" x2="480" y2="14" stroke="#d1d5db" strokeWidth="1.5" />
+          {/* Hour ticks */}
+          {[0, 4, 8, 12, 16, 20, 24].map((h) => (
+            <line key={h} x1={h / 24 * 480} y1="10" x2={h / 24 * 480} y2="18" stroke="#d1d5db" strokeWidth="1" />
+          ))}
+          {/* Run dots */}
+          {runHours.map((h) => (
+            <circle key={h} cx={h / 24 * 480} cy="14" r="5" fill="#6366f1" />
+          ))}
+        </svg>
+      </div>
+      {/* Hour labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 202, fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+        {[0, 4, 8, 12, 16, 20, 24].map((h) => (
+          <span key={h}>{h === 24 ? '' : `${h}h`}</span>
+        ))}
+      </div>
+      {/* Run times list */}
+      <div style={{ marginTop: 10, paddingLeft: 202, fontSize: 12, color: '#6366f1', fontWeight: 500 }}>
+        Runs at: {runHours.map(h => `${String(h).padStart(2, '0')}:00`).join('  ·  ')} UTC
+      </div>
+    </div>
   );
 }
 
@@ -307,6 +353,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         outputSize: data.outputSize ?? 'standard',
         allowModelOverride: data.allowModelOverride ?? 1,
         defaultSkillSlugs: data.defaultSkillSlugs ?? [],
+        heartbeatEnabled: data.heartbeatEnabled ?? false,
+        heartbeatIntervalHours: data.heartbeatIntervalHours ?? null,
+        heartbeatOffsetHours: data.heartbeatOffsetHours ?? 0,
       });
       setDataSources(data.dataSources ?? []);
     } finally {
@@ -1372,6 +1421,93 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </table>
         )}
       </div>
+
+      {/* ── Section 6: Heartbeat ── */}
+      <SectionCard title="Heartbeat">
+        <p style={{ margin: '0 0 18px', fontSize: 13.5, color: '#64748b', lineHeight: 1.6 }}>
+          Heartbeats keep your agent active — it wakes up on a schedule, checks its tasks, and acts autonomously.
+        </p>
+
+        {/* Enable toggle */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
+          <div
+            onClick={() => setForm({ ...form, heartbeatEnabled: !form.heartbeatEnabled })}
+            style={{
+              width: 40, height: 22, borderRadius: 11, position: 'relative', cursor: 'pointer', flexShrink: 0,
+              background: form.heartbeatEnabled ? '#6366f1' : '#e2e8f0',
+              transition: 'background 0.15s',
+            }}
+          >
+            <div style={{
+              position: 'absolute', top: 3, left: form.heartbeatEnabled ? 21 : 3,
+              width: 16, height: 16, borderRadius: '50%', background: 'white',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.15s',
+            }} />
+          </div>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Enable heartbeat</span>
+        </label>
+
+        {form.heartbeatEnabled && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* Frequency */}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Frequency</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {([4, 8, 12, 24] as const).map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setForm({ ...form, heartbeatIntervalHours: h })}
+                    style={{
+                      padding: '7px 18px', borderRadius: 8, border: '2px solid',
+                      borderColor: form.heartbeatIntervalHours === h ? '#6366f1' : '#e2e8f0',
+                      background: form.heartbeatIntervalHours === h ? '#eef2ff' : 'white',
+                      color: form.heartbeatIntervalHours === h ? '#4f46e5' : '#64748b',
+                      fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    Every {h}h
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Offset */}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Start offset</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>
+                Stagger agents to spread load — e.g. Content Writer at 0h, SEO Agent at 2h, Social Manager at 4h
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <select
+                  value={form.heartbeatOffsetHours}
+                  onChange={(e) => setForm({ ...form, heartbeatOffsetHours: Number(e.target.value) })}
+                  className="form-select"
+                  style={{ width: 120 }}
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{i === 0 ? 'No offset' : `+${i}h offset`}</option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 13, color: '#64748b' }}>within each cycle</span>
+              </div>
+            </div>
+
+            {/* Timeline preview */}
+            {form.heartbeatIntervalHours && (
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 10 }}>Schedule preview (24h)</div>
+                <HeartbeatTimeline
+                  agentName={form.name || 'This agent'}
+                  intervalHours={form.heartbeatIntervalHours}
+                  offsetHours={form.heartbeatOffsetHours}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </SectionCard>
 
       {/* Save button */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 28 }}>
