@@ -38,50 +38,81 @@ export default function ProfileSettingsPage({ user }: { user: User }) {
     }
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ maxWidth: 480 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Profile Settings</h1>
-        <p style={{ color: '#64748b', marginBottom: 32 }}>Update your personal information and password.</p>
+    <div className="max-w-[480px]">
+      <h1 className="text-[28px] font-bold text-slate-800 mb-2">Profile Settings</h1>
+      <p className="text-sm text-slate-500 mb-8">Update your personal information and password.</p>
 
-        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 16px', marginBottom: 24, fontSize: 13 }}>
-          <strong>Role:</strong> {user.role} &nbsp;|&nbsp; <strong>Email:</strong> {user.email}
+      <div className="bg-sky-50 border border-sky-200 rounded-lg px-4 py-3 mb-6 text-[13px] text-sky-800">
+        <strong>Role:</strong> {user.role} &nbsp;|&nbsp; <strong>Email:</strong> {user.email}
+      </div>
+
+      {success && (
+        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-5 text-sm text-green-700">
+          {success}
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 p-6">
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name</label>
+            <input
+              type="text"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name</label>
+            <input
+              type="text"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
+          </div>
         </div>
 
-        {success && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#16a34a', fontSize: 14 }}>{success}</div>}
-        {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>{error}</div>}
-
-        <form onSubmit={handleSubmit} style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>First name</label>
-              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>Last name</label>
-              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
-            </div>
+        <div className="border-t border-slate-100 pt-5 mb-5">
+          <div className="text-sm font-semibold text-slate-700 mb-3">Change password (optional)</div>
+          <div className="mb-3">
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Current password</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
           </div>
-
-          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 20, marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Change password (optional)</div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>Current password</label>
-              <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>New password</label>
-              <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
-            </div>
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">New password</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            />
           </div>
+        </div>
 
-          <button type="submit" style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
-            Save changes
-          </button>
-        </form>
-      </div>
-    </>
+        <button
+          type="submit"
+          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          Save changes
+        </button>
+      </form>
+    </div>
   );
 }
