@@ -13,7 +13,9 @@ interface Engine {
   lastTestStatus: string | null;
 }
 
-export default function AdminEnginesPage({ user, embedded }: { user: User; embedded?: boolean }) {
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+export default function AdminEnginesPage({ user: _user, embedded }: { user: User; embedded?: boolean }) {
   const [engines, setEngines] = useState<Engine[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -58,8 +60,7 @@ export default function AdminEnginesPage({ user, embedded }: { user: User; embed
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
     await api.delete(`/api/engines/${deleteId}`);
-    setDeleteId(null);
-    load();
+    setDeleteId(null); load();
   };
 
   const handleToggle = async (engine: Engine) => {
@@ -68,48 +69,51 @@ export default function AdminEnginesPage({ user, embedded }: { user: User; embed
     load();
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div>
+      <div className="flex justify-between items-center mb-6">
         {!embedded ? (
           <div>
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Workflow Engines</h1>
-            <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage automation engine connections</p>
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Workflow Engines</h1>
+            <p className="text-sm text-slate-500 mt-2">Manage automation engine connections</p>
           </div>
         ) : <div />}
-        <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button
+          onClick={() => { setShowForm(true); setError(''); }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
           + Add engine
         </button>
       </div>
 
       {showForm && (
         <Modal title="New engine" onClose={() => setShowForm(false)} maxWidth={560}>
-          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          <div className="grid grid-cols-2 gap-4 mb-6">
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Engine type</label>
-              <select value={form.engineType} onChange={(e) => setForm({ ...form, engineType: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Engine type</label>
+              <select value={form.engineType} onChange={(e) => setForm({ ...form, engineType: e.target.value })} className={inputCls}>
                 {['n8n', 'ghl', 'make', 'zapier', 'custom_webhook'].map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Base URL</label>
-              <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} placeholder="https://your-n8n.example.com" />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Base URL</label>
+              <input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://your-n8n.example.com" className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>API Key (optional)</label>
-              <input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">API Key (optional)</label>
+              <input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} className={inputCls} />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
-            <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Create</button>
+            <button onClick={() => setShowForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
           </div>
         </Modal>
       )}
@@ -124,28 +128,42 @@ export default function AdminEnginesPage({ user, embedded }: { user: User; embed
         />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="flex flex-col gap-4">
         {engines.length === 0 ? (
-          <div style={{ background: '#fff', borderRadius: 10, padding: '48px', textAlign: 'center', color: '#64748b', border: '1px solid #e2e8f0' }}>No engines configured yet.</div>
+          <div className="bg-white border border-slate-200 rounded-xl py-12 text-center text-sm text-slate-500">
+            No engines configured yet.
+          </div>
         ) : engines.map((engine) => (
-          <div key={engine.id} style={{ background: '#fff', borderRadius: 10, padding: '20px 24px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div key={engine.id} className="bg-white border border-slate-200 rounded-xl px-6 py-5 flex justify-between items-center">
             <div>
-              <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 4 }}>{engine.name}</div>
-              <div style={{ fontSize: 12, color: '#64748b' }}>{engine.engineType}</div>
-              {testResults[engine.id] && <div style={{ fontSize: 12, color: '#2563eb', marginTop: 4 }}>{testResults[engine.id]}</div>}
-              {engine.lastTestedAt && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>Last tested: {new Date(engine.lastTestedAt).toLocaleString()} — {engine.lastTestStatus}</div>}
+              <div className="font-semibold text-slate-800 mb-1">{engine.name}</div>
+              <div className="text-xs text-slate-500">{engine.engineType}</div>
+              {testResults[engine.id] && (
+                <div className="text-xs text-blue-600 mt-1">{testResults[engine.id]}</div>
+              )}
+              {engine.lastTestedAt && (
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Last tested: {new Date(engine.lastTestedAt).toLocaleString()} — {engine.lastTestStatus}
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: engine.status === 'active' ? '#16a34a' : '#6b7280', fontWeight: 500 }}>{engine.status}</span>
-              <button onClick={() => handleTest(engine.id)} style={{ padding: '6px 14px', background: '#f0f9ff', color: '#0284c7', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Test</button>
-              <button onClick={() => handleToggle(engine)} style={{ padding: '6px 14px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
+            <div className="flex gap-2.5 items-center">
+              <span className={`text-xs font-medium ${engine.status === 'active' ? 'text-green-600' : 'text-slate-500'}`}>
+                {engine.status}
+              </span>
+              <button onClick={() => handleTest(engine.id)} className="px-3.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-[13px] font-medium transition-colors">
+                Test
+              </button>
+              <button onClick={() => handleToggle(engine)} className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors">
                 {engine.status === 'active' ? 'Deactivate' : 'Activate'}
               </button>
-              <button onClick={() => setDeleteId(engine.id)} style={{ padding: '6px 14px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Delete</button>
+              <button onClick={() => setDeleteId(engine.id)} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-[13px] font-medium transition-colors">
+                Delete
+              </button>
             </div>
           </div>
         ))}
       </div>
-    </>
+    </div>
   );
 }
