@@ -37,69 +37,62 @@ export default function SystemSettingsPage({ user }: { user: User }) {
     }
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
     <>
-      <div style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>System Settings</h1>
-        <p style={{ color: '#64748b', margin: '8px 0 0' }}>Platform-wide configuration for all organisations</p>
+      <div className="mb-8">
+        <h1 className="text-[28px] font-bold text-slate-800 m-0">System Settings</h1>
+        <p className="text-slate-500 mt-2 mb-0">Platform-wide configuration for all organisations</p>
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-red-600 text-[14px]">
           {error}
         </div>
       )}
       {success && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#16a34a', fontSize: 14 }}>
+        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-5 text-green-700 text-[14px]">
           {success}
         </div>
       )}
 
       {/* File Upload Settings */}
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 24 }}>
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: 0 }}>File Uploads</h2>
-          <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
+      <div className="bg-white rounded-xl border border-slate-200 mb-6">
+        <div className="px-6 py-5 border-b border-slate-100">
+          <h2 className="text-[16px] font-semibold text-slate-800 m-0">File Uploads</h2>
+          <p className="text-slate-500 text-[13px] mt-1 mb-0">
             Controls the maximum size of files users can attach when running tasks. Files are stored in Cloudflare R2.
           </p>
         </div>
-        <div style={{ padding: '24px' }}>
-          <div style={{ maxWidth: 400 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>
+        <div className="p-6">
+          <div className="max-w-[400px]">
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
               Maximum upload size per file (MB)
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <div className="flex items-center gap-3 mb-2">
               <input
                 type="number"
                 min={1}
                 max={500}
                 value={maxUploadSizeMb}
                 onChange={(e) => setMaxUploadSizeMb(parseInt(e.target.value, 10) || 1)}
-                style={{ width: 120, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }}
+                className="w-[120px] px-3 py-2 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <span style={{ fontSize: 13, color: '#64748b' }}>MB</span>
+              <span className="text-[13px] text-slate-500">MB</span>
             </div>
-            <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-              <strong style={{ color: '#64748b' }}>Recommended: 200 MB.</strong> This covers most audio files (MP3, WAV),
+            <div className="text-[12px] text-slate-400 leading-relaxed">
+              <strong className="text-slate-500">Recommended: 200 MB.</strong> This covers most audio files (MP3, WAV),
               documents (PDF, DOCX, XLSX), images, and short video clips. Increase to 500 MB if users
               regularly upload longer videos. The absolute server ceiling is 500 MB regardless of this value.
             </div>
 
-            {/* Quick-pick presets */}
-            <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+            <div className="flex gap-2 mt-4 flex-wrap">
               {[10, 50, 100, 200, 500].map((preset) => (
                 <button
                   key={preset}
                   onClick={() => setMaxUploadSizeMb(preset)}
-                  style={{
-                    padding: '4px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
-                    border: '1px solid #d1d5db',
-                    background: maxUploadSizeMb === preset ? '#2563eb' : '#f8fafc',
-                    color: maxUploadSizeMb === preset ? '#fff' : '#374151',
-                    fontWeight: maxUploadSizeMb === preset ? 600 : 400,
-                  }}
+                  className={`px-3 py-1 text-[12px] rounded-md border cursor-pointer transition-colors ${maxUploadSizeMb === preset ? 'bg-indigo-600 border-indigo-600 text-white font-semibold' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
                 >
                   {preset} MB
                 </button>
@@ -110,15 +103,15 @@ export default function SystemSettingsPage({ user }: { user: User }) {
       </div>
 
       {/* Accepted file types info */}
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 32 }}>
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: 0 }}>Accepted File Types</h2>
-          <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
+      <div className="bg-white rounded-xl border border-slate-200 mb-8">
+        <div className="px-6 py-5 border-b border-slate-100">
+          <h2 className="text-[16px] font-semibold text-slate-800 m-0">Accepted File Types</h2>
+          <p className="text-slate-500 text-[13px] mt-1 mb-0">
             All common file types are accepted. The system does not restrict by type.
           </p>
         </div>
-        <div style={{ padding: '20px 24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+        <div className="px-6 py-5">
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
             {[
               { label: 'Documents', types: 'PDF, DOCX, XLSX, PPTX, TXT, CSV' },
               { label: 'Audio', types: 'MP3, WAV, M4A, FLAC, AAC, OGG' },
@@ -127,9 +120,9 @@ export default function SystemSettingsPage({ user }: { user: User }) {
               { label: 'Archives', types: 'ZIP, TAR, GZ, 7Z' },
               { label: 'Other', types: 'Any other file type' },
             ].map(({ label, types }) => (
-              <div key={label} style={{ background: '#f8fafc', borderRadius: 8, padding: '12px 14px' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 12, color: '#64748b' }}>{types}</div>
+              <div key={label} className="bg-slate-50 rounded-lg px-3.5 py-3">
+                <div className="text-[13px] font-semibold text-slate-700 mb-1">{label}</div>
+                <div className="text-[12px] text-slate-500">{types}</div>
               </div>
             ))}
           </div>
@@ -139,7 +132,7 @@ export default function SystemSettingsPage({ user }: { user: User }) {
       <button
         onClick={handleSave}
         disabled={saving}
-        style={{ padding: '10px 28px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1 }}
+        className={`px-7 py-2.5 text-white text-[14px] font-semibold border-0 rounded-lg transition-colors ${saving ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
       >
         {saving ? 'Saving...' : 'Save settings'}
       </button>

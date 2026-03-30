@@ -37,22 +37,13 @@ interface Organisation {
   name: string;
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  completed: '#16a34a',
-  failed: '#dc2626',
-  running: '#2563eb',
-  pending: '#d97706',
-  timeout: '#ea580c',
-  cancelled: '#6b7280',
-};
-
-const STATUS_BG: Record<string, string> = {
-  completed: '#f0fdf4',
-  failed: '#fef2f2',
-  running: '#eff6ff',
-  pending: '#fffbeb',
-  timeout: '#fff7ed',
-  cancelled: '#f9fafb',
+const STATUS_CLS: Record<string, string> = {
+  completed: 'bg-green-50 text-green-700 border-green-200',
+  failed: 'bg-red-50 text-red-700 border-red-200',
+  running: 'bg-blue-50 text-blue-700 border-blue-200',
+  pending: 'bg-amber-50 text-amber-700 border-amber-200',
+  timeout: 'bg-orange-50 text-orange-700 border-orange-200',
+  cancelled: 'bg-slate-50 text-slate-600 border-slate-200',
 };
 
 const ENGINE_COLORS: Record<string, string> = {
@@ -65,8 +56,7 @@ const ENGINE_COLORS: Record<string, string> = {
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
-  const d = new Date(iso);
-  return d.toLocaleString();
+  return new Date(iso).toLocaleString();
 }
 
 function formatDuration(ms: number | null): string {
@@ -77,28 +67,17 @@ function formatDuration(ms: number | null): string {
 
 function JsonBlock({ data, label }: { data: unknown; label: string }) {
   const [open, setOpen] = useState(false);
-  if (data == null) return <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>;
+  if (data == null) return <span className="text-slate-400 text-[12px]">—</span>;
   return (
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#2563eb', fontSize: 12, textDecoration: 'underline' }}
+        className="bg-transparent border-0 p-0 cursor-pointer text-blue-600 text-[12px] underline"
       >
         {open ? 'Hide' : 'View'} {label}
       </button>
       {open && (
-        <pre style={{
-          marginTop: 6,
-          background: '#0f172a',
-          color: '#e2e8f0',
-          padding: '10px 12px',
-          borderRadius: 6,
-          fontSize: 11,
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-          maxHeight: 300,
-        }}>
+        <pre className="mt-1.5 bg-slate-900 text-slate-200 px-3 py-2.5 rounded-md text-[11px] overflow-auto whitespace-pre-wrap break-all max-h-[300px]">
           {JSON.stringify(data, null, 2)}
         </pre>
       )}
@@ -109,59 +88,44 @@ function JsonBlock({ data, label }: { data: unknown; label: string }) {
 function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => void }) {
   const issues: { label: string; desc: string; severity: 'error' | 'warn' | 'ok' }[] = [];
 
-  // Check for callback not received
   if (['completed', 'failed', 'timeout'].includes(row.status)) {
     if (!row.callbackReceivedAt && row.returnWebhookUrl) {
       issues.push({ label: 'Callback not received', desc: 'The engine was called but no callback was received at the return webhook URL. This may indicate an n8n workflow error or misconfigured callback URL.', severity: 'warn' });
     }
   }
-
-  // Check for error message
   if (row.errorMessage) {
     issues.push({ label: 'Execution error', desc: row.errorMessage, severity: 'error' });
   }
-
-  // Check retries
   if (row.retryCount > 0) {
     issues.push({ label: `Retried ${row.retryCount} time(s)`, desc: 'The engine call was retried due to network errors.', severity: 'warn' });
   }
-
-  // Check timeout
   if (row.status === 'timeout') {
     issues.push({ label: 'Execution timed out', desc: 'The process did not complete within the configured timeout window.', severity: 'error' });
   }
-
-  // No issues
   if (issues.length === 0 && row.status === 'completed') {
     issues.push({ label: 'No issues detected', desc: 'Execution completed successfully with no diagnostic concerns.', severity: 'ok' });
   }
 
+  const issueCls = (sev: 'error' | 'warn' | 'ok') => {
+    if (sev === 'error') return 'bg-red-50 border border-red-200';
+    if (sev === 'warn') return 'bg-amber-50 border border-amber-200';
+    return 'bg-green-50 border border-green-200';
+  };
+
   return createPortal(
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-      padding: '40px 16px', overflowY: 'auto',
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: 12, width: '100%', maxWidth: 780,
-        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-        marginBottom: 40,
-      }}>
-        {/* Header */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div className="fixed inset-0 z-[1000] bg-black/50 flex items-start justify-center px-4 py-10 overflow-y-auto">
+      <div className="bg-white rounded-xl w-full max-w-[780px] shadow-2xl mb-10">
+        <div className="px-6 py-5 border-b border-slate-200 flex justify-between items-start">
           <div>
-            <div style={{ fontWeight: 700, fontSize: 17, color: '#1e293b', marginBottom: 4 }}>
-              Execution Diagnostics
-            </div>
-            <div style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace' }}>{row.id}</div>
+            <div className="font-bold text-[17px] text-slate-800 mb-1">Execution Diagnostics</div>
+            <div className="text-[12px] text-slate-500 font-mono">{row.id}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#94a3b8', lineHeight: 1, padding: '0 4px' }}>×</button>
+          <button onClick={onClose} className="bg-transparent border-0 text-[22px] cursor-pointer text-slate-400 hover:text-slate-600 leading-none px-1">×</button>
         </div>
 
-        <div style={{ padding: '20px 24px' }}>
+        <div className="p-6">
           {/* Overview */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+          <div className="grid grid-cols-2 gap-3 mb-5">
             {[
               { label: 'Organisation', value: row.organisationName ?? row.organisationId },
               { label: 'Process', value: row.processName ?? row.processId },
@@ -176,60 +140,52 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
               { label: 'Test execution', value: row.isTestExecution ? 'Yes' : 'No' },
               { label: 'Notify on complete', value: row.notifyOnComplete ? 'Yes' : 'No' },
             ].map(({ label, value }) => (
-              <div key={label} style={{ background: '#f8fafc', borderRadius: 8, padding: '10px 14px' }}>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
-                <div style={{ fontSize: 13, color: '#1e293b', fontWeight: 500, wordBreak: 'break-all' }}>{value}</div>
+              <div key={label} className="bg-slate-50 rounded-lg px-3.5 py-2.5">
+                <div className="text-[11px] text-slate-500 mb-0.5 uppercase tracking-wider">{label}</div>
+                <div className="text-[13px] text-slate-800 font-medium break-all">{value}</div>
               </div>
             ))}
           </div>
 
           {/* Diagnostic issues */}
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b', marginBottom: 10 }}>Diagnostics</div>
+          <div className="mb-5">
+            <div className="font-semibold text-[14px] text-slate-800 mb-2.5">Diagnostics</div>
             {issues.map((issue, i) => (
-              <div key={i} style={{
-                display: 'flex', gap: 12, alignItems: 'flex-start',
-                padding: '10px 14px', borderRadius: 8, marginBottom: 8,
-                background: issue.severity === 'error' ? '#fef2f2' : issue.severity === 'warn' ? '#fffbeb' : '#f0fdf4',
-                border: `1px solid ${issue.severity === 'error' ? '#fecaca' : issue.severity === 'warn' ? '#fde68a' : '#bbf7d0'}`,
-              }}>
-                <span style={{ fontSize: 16, flexShrink: 0 }}>
+              <div key={i} className={`flex gap-3 items-start px-3.5 py-2.5 rounded-lg mb-2 ${issueCls(issue.severity)}`}>
+                <span className="text-[16px] shrink-0">
                   {issue.severity === 'error' ? '❌' : issue.severity === 'warn' ? '⚠️' : '✅'}
                 </span>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 13, color: '#1e293b', marginBottom: 2 }}>{issue.label}</div>
-                  <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.5 }}>{issue.desc}</div>
+                  <div className="font-semibold text-[13px] text-slate-800 mb-0.5">{issue.label}</div>
+                  <div className="text-[12px] text-slate-600 leading-relaxed">{issue.desc}</div>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Webhook / callback URLs */}
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b', marginBottom: 10 }}>Webhook & Callback</div>
-
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Return webhook URL (sent to engine)</div>
+          {/* Webhook & Callback */}
+          <div className="mb-5">
+            <div className="font-semibold text-[14px] text-slate-800 mb-2.5">Webhook & Callback</div>
+            <div className="mb-2.5">
+              <div className="text-[12px] text-slate-500 mb-1">Return webhook URL (sent to engine)</div>
               {row.returnWebhookUrl ? (
-                <code style={{ fontSize: 12, background: '#f1f5f9', padding: '6px 10px', borderRadius: 6, display: 'block', wordBreak: 'break-all', color: '#0f172a' }}>
+                <code className="text-[12px] bg-slate-100 px-2.5 py-1.5 rounded-md block break-all text-slate-900">
                   {row.returnWebhookUrl}
                 </code>
               ) : (
-                <span style={{ color: '#94a3b8', fontSize: 12 }}>Not set</span>
+                <span className="text-slate-400 text-[12px]">Not set</span>
               )}
             </div>
-
-            <div style={{ marginBottom: 10 }}>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4 }}>Callback received at</div>
-              <div style={{ fontSize: 13, color: '#1e293b' }}>
+            <div className="mb-2.5">
+              <div className="text-[12px] text-slate-500 mb-1">Callback received at</div>
+              <div className="text-[13px] text-slate-800">
                 {row.callbackReceivedAt
                   ? formatDate(row.callbackReceivedAt)
-                  : <span style={{ color: '#dc2626', fontWeight: 500 }}>No callback received</span>
+                  : <span className="text-red-600 font-medium">No callback received</span>
                 }
               </div>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="flex flex-col gap-2">
               <JsonBlock data={row.outboundPayload} label="outbound payload (sent to engine)" />
               <JsonBlock data={row.callbackPayload} label="callback payload (received from engine)" />
               <JsonBlock data={row.errorDetail} label="error detail" />
@@ -238,7 +194,7 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
 
           {/* Process snapshot */}
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b', marginBottom: 10 }}>Process Snapshot</div>
+            <div className="font-semibold text-[14px] text-slate-800 mb-2.5">Process Snapshot</div>
             <JsonBlock data={row.processSnapshot} label="process configuration at time of execution" />
           </div>
         </div>
@@ -251,6 +207,8 @@ function DiagnosticPanel({ row, onClose }: { row: ExecutionRow; onClose: () => v
 const STATUSES = ['', 'pending', 'running', 'completed', 'failed', 'timeout', 'cancelled'];
 const ENGINE_TYPES = ['', 'n8n', 'ghl', 'make', 'zapier', 'custom_webhook'];
 
+const filterInputCls = 'px-2.5 py-1.5 border border-slate-200 rounded-lg text-[13px] bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
 export default function SystemProcessQueuePage({ user }: { user: User }) {
   const [rows, setRows] = useState<ExecutionRow[]>([]);
   const [orgs, setOrgs] = useState<Organisation[]>([]);
@@ -258,7 +216,6 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<ExecutionRow | null>(null);
 
-  // Filters
   const [filterOrg, setFilterOrg] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [filterEngine, setFilterEngine] = useState('');
@@ -309,43 +266,20 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
   const handlePrev = () => fetchExecutions(Math.max(0, offset - LIMIT));
   const handleNext = () => fetchExecutions(offset + LIMIT);
 
-  const selectStyle: React.CSSProperties = {
-    padding: '7px 10px',
-    border: '1px solid #d1d5db',
-    borderRadius: 7,
-    fontSize: 13,
-    background: '#fff',
-    color: '#1e293b',
-    cursor: 'pointer',
-  };
-
-  const inputStyle: React.CSSProperties = {
-    padding: '7px 10px',
-    border: '1px solid #d1d5db',
-    borderRadius: 7,
-    fontSize: 13,
-    color: '#1e293b',
-    background: '#fff',
-  };
-
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>System Task Queue</h1>
-        <p style={{ fontSize: 14, color: '#64748b', margin: 0 }}>
+      <div className="mb-6">
+        <h1 className="text-[24px] font-bold text-slate-800 mb-1">System Task Queue</h1>
+        <p className="text-[14px] text-slate-500 m-0">
           All process executions across every organisation. Use diagnostic tools to investigate failures.
         </p>
       </div>
 
       {/* Filters */}
-      <div style={{
-        background: '#fff', borderRadius: 10, padding: '16px 20px',
-        border: '1px solid #e2e8f0', marginBottom: 20,
-        display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-end',
-      }}>
+      <div className="bg-white rounded-xl px-5 py-4 border border-slate-200 mb-5 flex flex-wrap gap-3 items-end">
         <div>
-          <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>Organisation</label>
-          <select value={filterOrg} onChange={(e) => setFilterOrg(e.target.value)} style={{ ...selectStyle, minWidth: 160 }}>
+          <label className="block text-[12px] text-slate-500 mb-1 font-medium">Organisation</label>
+          <select value={filterOrg} onChange={(e) => setFilterOrg(e.target.value)} className={`${filterInputCls} min-w-[160px]`}>
             <option value="">All organisations</option>
             {orgs.map((o) => (
               <option key={o.id} value={o.id}>{o.name}</option>
@@ -354,8 +288,8 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>Status</label>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={selectStyle}>
+          <label className="block text-[12px] text-slate-500 mb-1 font-medium">Status</label>
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={filterInputCls}>
             {STATUSES.map((s) => (
               <option key={s} value={s}>{s || 'All statuses'}</option>
             ))}
@@ -363,8 +297,8 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>Engine</label>
-          <select value={filterEngine} onChange={(e) => setFilterEngine(e.target.value)} style={selectStyle}>
+          <label className="block text-[12px] text-slate-500 mb-1 font-medium">Engine</label>
+          <select value={filterEngine} onChange={(e) => setFilterEngine(e.target.value)} className={filterInputCls}>
             {ENGINE_TYPES.map((e) => (
               <option key={e} value={e}>{e || 'All engines'}</option>
             ))}
@@ -372,31 +306,31 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>From</label>
-          <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} style={inputStyle} />
+          <label className="block text-[12px] text-slate-500 mb-1 font-medium">From</label>
+          <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} className={filterInputCls} />
         </div>
 
         <div>
-          <label style={{ display: 'block', fontSize: 12, color: '#64748b', marginBottom: 4, fontWeight: 500 }}>To</label>
-          <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} style={inputStyle} />
+          <label className="block text-[12px] text-slate-500 mb-1 font-medium">To</label>
+          <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} className={filterInputCls} />
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="flex gap-2">
           <button
             onClick={handleSearch}
-            style={{ padding: '7px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            className="px-5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
           >
             Search
           </button>
           <button
             onClick={() => { setFilterOrg(''); setFilterStatus(''); setFilterEngine(''); setFilterFrom(''); setFilterTo(''); }}
-            style={{ padding: '7px 14px', background: '#f1f5f9', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, cursor: 'pointer' }}
+            className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[13px] cursor-pointer transition-colors"
           >
             Reset
           </button>
           <button
             onClick={() => fetchExecutions(offset)}
-            style={{ padding: '7px 14px', background: '#f1f5f9', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, cursor: 'pointer' }}
+            className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-[13px] cursor-pointer transition-colors"
             title="Refresh"
           >
             ↻ Refresh
@@ -405,24 +339,24 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', color: '#dc2626', fontSize: 13, marginBottom: 16 }}>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-600 text-[13px] mb-4">
           {error}
         </div>
       )}
 
       {/* Table */}
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontSize: 14 }}>Loading...</div>
+          <div className="py-10 text-center text-slate-500 text-[14px]">Loading...</div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#64748b', fontSize: 14 }}>No executions found for the selected filters.</div>
+          <div className="py-10 text-center text-slate-500 text-[14px]">No executions found for the selected filters.</div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[13px]">
               <thead>
-                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <tr className="bg-slate-50 border-b border-slate-200">
                   {['Created', 'Organisation', 'Process', 'User', 'Engine', 'Status', 'Duration', 'Retries', 'Callback', 'Actions'].map((h) => (
-                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <th key={h} className="px-3.5 py-2.5 text-left font-semibold text-slate-600 whitespace-nowrap text-[11px] uppercase tracking-wider">
                       {h}
                     </th>
                   ))}
@@ -431,73 +365,59 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
               <tbody>
                 {rows.map((row, i) => {
                   const callbackMissing = ['completed', 'failed', 'timeout'].includes(row.status) && !row.callbackReceivedAt && !!row.returnWebhookUrl;
+                  const engineColor = ENGINE_COLORS[row.engineType] ?? '#6b7280';
                   return (
-                    <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: '#64748b', fontSize: 12 }}>
+                    <tr key={row.id} className={`border-b border-slate-100 ${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
+                      <td className="px-3.5 py-2.5 whitespace-nowrap text-slate-500 text-[12px]">
                         {formatDate(row.createdAt)}
                       </td>
-                      <td style={{ padding: '10px 14px', maxWidth: 140 }}>
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1e293b', fontWeight: 500 }} title={row.organisationName ?? row.organisationId}>
-                          {row.organisationName ?? <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{row.organisationId.slice(0, 8)}</span>}
+                      <td className="px-3.5 py-2.5 max-w-[140px]">
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-slate-800 font-medium" title={row.organisationName ?? row.organisationId}>
+                          {row.organisationName ?? <span className="text-slate-400 font-mono text-[11px]">{row.organisationId.slice(0, 8)}</span>}
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', maxWidth: 160 }}>
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#1e293b' }} title={row.processName ?? row.processId}>
-                          {row.processName ?? <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{row.processId.slice(0, 8)}</span>}
+                      <td className="px-3.5 py-2.5 max-w-[160px]">
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-slate-800" title={row.processName ?? row.processId}>
+                          {row.processName ?? <span className="text-slate-400 font-mono text-[11px]">{row.processId.slice(0, 8)}</span>}
                           {row.isTestExecution && (
-                            <span style={{ marginLeft: 6, fontSize: 10, background: '#e0e7ff', color: '#3730a3', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>TEST</span>
+                            <span className="ml-1.5 text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">TEST</span>
                           )}
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', maxWidth: 160 }}>
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569', fontSize: 12 }} title={row.userEmail ?? ''}>
+                      <td className="px-3.5 py-2.5 max-w-[160px]">
+                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-slate-500 text-[12px]" title={row.userEmail ?? ''}>
                           {row.userEmail ?? '—'}
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                          fontSize: 11, fontWeight: 600,
-                          background: `${ENGINE_COLORS[row.engineType] ?? '#6b7280'}22`,
-                          color: ENGINE_COLORS[row.engineType] ?? '#6b7280',
-                        }}>
+                      <td className="px-3.5 py-2.5 whitespace-nowrap">
+                        <span className="inline-block px-2 py-0.5 rounded text-[11px] font-semibold" style={{ background: `${engineColor}22`, color: engineColor }}>
                           {row.engineType}
                         </span>
                       </td>
-                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          display: 'inline-block', padding: '2px 9px', borderRadius: 5,
-                          fontSize: 11, fontWeight: 700,
-                          background: STATUS_BG[row.status] ?? '#f9fafb',
-                          color: STATUS_COLOR[row.status] ?? '#6b7280',
-                          border: `1px solid ${STATUS_COLOR[row.status] ?? '#e2e8f0'}44`,
-                        }}>
+                      <td className="px-3.5 py-2.5 whitespace-nowrap">
+                        <span className={`inline-block px-2.5 py-0.5 rounded text-[11px] font-bold border ${STATUS_CLS[row.status] ?? 'bg-slate-50 text-slate-600 border-slate-200'}`}>
                           {row.status}
                         </span>
                       </td>
-                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: '#64748b', fontSize: 12 }}>
+                      <td className="px-3.5 py-2.5 whitespace-nowrap text-slate-500 text-[12px]">
                         {formatDuration(row.durationMs)}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center', color: row.retryCount > 0 ? '#ea580c' : '#64748b', fontWeight: row.retryCount > 0 ? 700 : 400 }}>
+                      <td className={`px-3.5 py-2.5 text-center ${row.retryCount > 0 ? 'text-orange-600 font-bold' : 'text-slate-500'}`}>
                         {row.retryCount}
                       </td>
-                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                      <td className="px-3.5 py-2.5 whitespace-nowrap">
                         {callbackMissing ? (
-                          <span style={{ color: '#dc2626', fontSize: 12, fontWeight: 600 }}>⚠ Missing</span>
+                          <span className="text-red-600 text-[12px] font-semibold">⚠ Missing</span>
                         ) : row.callbackReceivedAt ? (
-                          <span style={{ color: '#16a34a', fontSize: 12 }}>Received</span>
+                          <span className="text-green-600 text-[12px]">Received</span>
                         ) : (
-                          <span style={{ color: '#94a3b8', fontSize: 12 }}>—</span>
+                          <span className="text-slate-400 text-[12px]">—</span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
+                      <td className="px-3.5 py-2.5 whitespace-nowrap">
                         <button
                           onClick={() => setSelected(row)}
-                          style={{
-                            padding: '4px 12px', background: '#eff6ff', color: '#2563eb',
-                            border: '1px solid #bfdbfe', borderRadius: 6, fontSize: 12,
-                            cursor: 'pointer', fontWeight: 500,
-                          }}
+                          className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-md text-[12px] cursor-pointer font-medium transition-colors"
                         >
                           Diagnose
                         </button>
@@ -512,22 +432,22 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
 
         {/* Pagination */}
         {!loading && rows.length > 0 && (
-          <div style={{ padding: '12px 20px', borderTop: '1px solid #f1f5f9', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: '#64748b' }}>
+          <div className="px-5 py-3 border-t border-slate-100 flex gap-2 items-center justify-between">
+            <span className="text-[12px] text-slate-500">
               Showing {offset + 1}–{offset + rows.length}
             </span>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="flex gap-2">
               <button
                 onClick={handlePrev}
                 disabled={offset === 0}
-                style={{ padding: '5px 14px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, cursor: offset === 0 ? 'not-allowed' : 'pointer', opacity: offset === 0 ? 0.5 : 1 }}
+                className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 border border-slate-200 rounded-md text-[13px] cursor-pointer transition-colors"
               >
                 Previous
               </button>
               <button
                 onClick={handleNext}
                 disabled={rows.length < LIMIT}
-                style={{ padding: '5px 14px', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 13, cursor: rows.length < LIMIT ? 'not-allowed' : 'pointer', opacity: rows.length < LIMIT ? 0.5 : 1 }}
+                className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 border border-slate-200 rounded-md text-[13px] cursor-pointer transition-colors"
               >
                 Next
               </button>
@@ -536,7 +456,6 @@ export default function SystemProcessQueuePage({ user }: { user: User }) {
         )}
       </div>
 
-      {/* Diagnostic panel modal */}
       {selected && <DiagnosticPanel row={selected} onClose={() => setSelected(null)} />}
     </div>
   );
