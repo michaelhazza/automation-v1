@@ -244,19 +244,19 @@ export default function ReviewQueuePage({ user }: { user: { id: string; role: st
       const p = payload as Record<string, unknown>;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {p.to && (
+          {!!p.to && (
             <div style={{ fontSize: 13 }}>
               <span style={{ color: '#64748b', fontWeight: 500 }}>To: </span>
               <span style={{ color: '#0f172a' }}>{String(p.to)}</span>
             </div>
           )}
-          {p.subject && (
+          {!!p.subject && (
             <div style={{ fontSize: 13 }}>
               <span style={{ color: '#64748b', fontWeight: 500 }}>Subject: </span>
               <span style={{ color: '#0f172a', fontWeight: 500 }}>{String(p.subject)}</span>
             </div>
           )}
-          {p.body && (
+          {!!p.body && (
             <div style={{
               fontSize: 13, color: '#374151', background: '#f8fafc',
               padding: '8px 12px', borderRadius: 6, border: '1px solid #e2e8f0',
