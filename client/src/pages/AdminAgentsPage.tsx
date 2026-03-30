@@ -90,7 +90,7 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-[28px] font-bold text-slate-800 m-0">Agents</h1>
