@@ -11,7 +11,9 @@ interface Category {
   colour: string | null;
 }
 
-export default function AdminCategoriesPage({ user, embedded }: { user: User; embedded?: boolean }) {
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+export default function AdminCategoriesPage({ user: _user, embedded }: { user: User; embedded?: boolean }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -36,10 +38,7 @@ export default function AdminCategoriesPage({ user, embedded }: { user: User; em
       } else {
         await api.post('/api/categories', form);
       }
-      setShowForm(false);
-      setEditId(null);
-      setForm({ name: '', description: '', colour: '#6366f1' });
-      load();
+      setShowForm(false); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Save failed');
@@ -49,54 +48,55 @@ export default function AdminCategoriesPage({ user, embedded }: { user: User; em
   const handleEdit = (cat: Category) => {
     setEditId(cat.id);
     setForm({ name: cat.name, description: cat.description ?? '', colour: cat.colour ?? '#6366f1' });
-    setError('');
-    setShowForm(true);
+    setError(''); setShowForm(true);
   };
 
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
     await api.delete(`/api/categories/${deleteId}`);
-    setDeleteId(null);
-    load();
+    setDeleteId(null); load();
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div>
+      <div className="flex justify-between items-center mb-6">
         {!embedded ? (
           <div>
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Automation Categories</h1>
-            <p style={{ color: '#64748b', margin: '8px 0 0' }}>Organise automations and control access via categories</p>
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Automation Categories</h1>
+            <p className="text-sm text-slate-500 mt-2">Organise automations and control access via categories</p>
           </div>
         ) : <div />}
-        <button onClick={() => { setShowForm(true); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button
+          onClick={() => { setShowForm(true); setEditId(null); setForm({ name: '', description: '', colour: '#6366f1' }); setError(''); }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
           + Add category
         </button>
       </div>
 
       {showForm && (
         <Modal title={editId ? 'Edit category' : 'New category'} onClose={() => setShowForm(false)} maxWidth={480}>
-          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          <div className="mb-3">
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
           </div>
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
-            <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} />
+          <div className="mb-3">
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description</label>
+            <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} className={`${inputCls} resize-vertical`} />
           </div>
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Colour</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <input type="color" value={form.colour} onChange={(e) => setForm({ ...form, colour: e.target.value })} style={{ width: 40, height: 32, border: 'none', cursor: 'pointer' }} />
-              <span style={{ fontSize: 13, color: '#64748b' }}>{form.colour}</span>
+          <div className="mb-6">
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Colour</label>
+            <div className="flex items-center gap-3">
+              <input type="color" value={form.colour} onChange={(e) => setForm({ ...form, colour: e.target.value })} className="w-10 h-8 border-0 cursor-pointer rounded" />
+              <span className="text-[13px] text-slate-500">{form.colour}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleSave} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Save</button>
-            <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button onClick={handleSave} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Save</button>
+            <button onClick={() => setShowForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
           </div>
         </Modal>
       )}
@@ -111,25 +111,25 @@ export default function AdminCategoriesPage({ user, embedded }: { user: User; em
         />
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
         {categories.length === 0 ? (
-          <div style={{ background: '#fff', borderRadius: 10, padding: '48px', textAlign: 'center', color: '#64748b', border: '1px solid #e2e8f0', gridColumn: '1 / -1' }}>
+          <div className="col-span-full bg-white border border-slate-200 rounded-xl py-12 text-center text-sm text-slate-500">
             No categories yet.
           </div>
         ) : categories.map((cat) => (
-          <div key={cat.id} style={{ background: '#fff', borderRadius: 10, padding: '20px 24px', border: '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              {cat.colour && <span style={{ width: 14, height: 14, borderRadius: '50%', background: cat.colour, flexShrink: 0 }} />}
-              <div style={{ fontWeight: 600, color: '#1e293b' }}>{cat.name}</div>
+          <div key={cat.id} className="bg-white border border-slate-200 rounded-xl px-6 py-5">
+            <div className="flex items-center gap-2.5 mb-2">
+              {cat.colour && <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ background: cat.colour }} />}
+              <div className="font-semibold text-slate-800">{cat.name}</div>
             </div>
-            {cat.description && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>{cat.description}</div>}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => handleEdit(cat)} style={{ padding: '4px 12px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Edit</button>
-              <button onClick={() => setDeleteId(cat.id)} style={{ padding: '4px 12px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+            {cat.description && <div className="text-[13px] text-slate-500 mb-3">{cat.description}</div>}
+            <div className="flex gap-2">
+              <button onClick={() => handleEdit(cat)} className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors">Edit</button>
+              <button onClick={() => setDeleteId(cat.id)} className="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Delete</button>
             </div>
           </div>
         ))}
       </div>
-    </>
+    </div>
   );
 }
