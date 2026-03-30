@@ -101,12 +101,64 @@ function CollapsibleSection({ title, defaultOpen = false, children, badge }: { t
   );
 }
 
+// Mask API keys, bearer tokens, JWTs, and secret-looking values from displayed text.
+// Masking is on by default; users can toggle to reveal.
+const SECRET_PATTERNS: Array<[RegExp, (m: string, p1: string, p2: string) => string]> = [
+  // Anthropic / OpenAI style keys: sk-..., pk-...
+  [/(sk-[A-Za-z0-9]{6})[A-Za-z0-9-_]{10,}/g,
+   (_, p1) => `${p1}${'*'.repeat(16)}`],
+  [/(pk-[A-Za-z0-9]{6})[A-Za-z0-9-_]{10,}/g,
+   (_, p1) => `${p1}${'*'.repeat(16)}`],
+  // JSON field: "api_key": "value", "secret": "value", etc.
+  [/("(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret|password|authorization|x-api-key)"\s*:\s*")([^"]{6,})/gi,
+   (_, p1, p2) => `${p1}${'*'.repeat(Math.min(p2.length, 16))}`],
+  // URL query params: api_key=xxx, token=xxx
+  [/((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret|password)=)([^&\s"]{6,})/gi,
+   (_, p1, p2) => `${p1}${'*'.repeat(Math.min(p2.length, 16))}`],
+  // Bearer tokens
+  [/(Bearer\s+)([A-Za-z0-9._\-+/]{20,})/gi,
+   (_, p1, p2) => `${p1}${'*'.repeat(Math.min(p2.length, 20))}`],
+  // JWTs: three base64url segments separated by dots (eyX...eyX...xxx)
+  [/(ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.)[A-Za-z0-9_-]{10,}/g,
+   (_, header_payload) => `${header_payload}${'*'.repeat(16)}`],
+];
+
+function maskSecrets(text: string): string {
+  let out = text;
+  for (const [pattern, replacer] of SECRET_PATTERNS) {
+    // Reset lastIndex for global regexes
+    pattern.lastIndex = 0;
+    out = out.replace(pattern, replacer as Parameters<typeof out.replace>[1]);
+  }
+  return out;
+}
+
 function JsonBlock({ data, maxHeight = 300 }: { data: unknown; maxHeight?: number }) {
   const [expanded, setExpanded] = useState(false);
-  const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const [masked, setMasked] = useState(true);
+  const rawText = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const text = masked ? maskSecrets(rawText) : rawText;
   const isLong = text.length > 500;
+  const hasMaskedContent = maskSecrets(rawText) !== rawText;
+
   return (
     <div>
+      {hasMaskedContent && (
+        <div className="flex items-center justify-end mb-1">
+          <button
+            onClick={() => setMasked(m => !m)}
+            className="flex items-center gap-1 border-0 bg-transparent text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer font-medium p-0"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {masked
+                ? <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>
+                : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
+              }
+            </svg>
+            {masked ? 'Show secrets' : 'Mask secrets'}
+          </button>
+        </div>
+      )}
       <pre
         className={`bg-slate-50 border border-slate-200 rounded-lg p-3 text-[12px] font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap break-words m-0 ${expanded ? 'overflow-auto' : 'overflow-hidden'}`}
         style={{ maxHeight: expanded ? undefined : maxHeight }}

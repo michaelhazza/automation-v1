@@ -6,8 +6,8 @@ import { agentScheduleService } from '../services/agentScheduleService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
-import { subaccountAgents } from '../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { subaccountAgents, agentRuns } from '../db/schema/index.js';
+import { eq, and, gte, sql } from 'drizzle-orm';
 
 const router = Router();
 
@@ -243,6 +243,58 @@ router.get(
       });
 
       res.json(stats);
+    } catch (err: unknown) {
+      const e = err as { statusCode?: number; message?: string };
+      res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+    }
+  }
+);
+
+// ─── Daily run activity breakdown (for activity charts) ─────────────────────
+
+router.get(
+  '/api/agent-activity/daily',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  async (req, res) => {
+    try {
+      const { subaccountId, sinceDays } = req.query;
+      const days = Math.min(Number(sinceDays ?? 14), 90);
+
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+
+      const conditions = [
+        gte(agentRuns.createdAt, since),
+        eq(agentRuns.organisationId, req.orgId!),
+      ] as ReturnType<typeof eq>[];
+      if (subaccountId) conditions.push(eq(agentRuns.subaccountId, subaccountId as string));
+
+      const rows = await db
+        .select({
+          date: sql<string>`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`,
+          completed: sql<number>`count(*) filter (where ${agentRuns.status} = 'completed')::int`,
+          failed: sql<number>`count(*) filter (where ${agentRuns.status} = 'failed')::int`,
+          timeout: sql<number>`count(*) filter (where ${agentRuns.status} = 'timeout' or ${agentRuns.status} = 'budget_exceeded')::int`,
+          other: sql<number>`count(*) filter (where ${agentRuns.status} not in ('completed','failed','timeout','budget_exceeded'))::int`,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(agentRuns)
+        .where(and(...conditions))
+        .groupBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`)
+        .orderBy(sql`to_char(${agentRuns.createdAt}, 'YYYY-MM-DD')`);
+
+      // Fill in missing days with zeros
+      const result: Array<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }> = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = d.toISOString().slice(0, 10);
+        const found = rows.find(r => r.date === dateStr);
+        result.push(found ?? { date: dateStr, completed: 0, failed: 0, timeout: 0, other: 0, total: 0 });
+      }
+
+      res.json(result);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
       res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });

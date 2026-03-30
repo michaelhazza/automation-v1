@@ -4,6 +4,10 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
 
+// Live run counts per agent (polled from subaccount live-status isn't per-agent,
+// so we use a simple org-level stat to show the total running count in the header)
+
+
 interface Agent {
   id: string;
   name: string;
@@ -37,6 +41,8 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'draft'>('all');
+  const [liveRunCount, setLiveRunCount] = useState(0);
 
   const load = async () => {
     setLoading(true);
@@ -49,6 +55,16 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Poll for live running agent count (org-wide, status=running)
+  useEffect(() => {
+    const fetchLive = () => api.get('/api/agent-activity', { params: { status: 'running', limit: 100 } })
+      .then(({ data }) => setLiveRunCount(Array.isArray(data) ? data.length : 0))
+      .catch(() => {});
+    fetchLive();
+    const t = setInterval(fetchLive, 15_000);
+    return () => clearInterval(t);
+  }, []);
 
   const handleActivate = async (id: string) => {
     setActionError((prev) => ({ ...prev, [id]: '' }));
@@ -86,15 +102,35 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-sm text-slate-500">Loading agents...</div>;
+    return (
+      <div className="flex flex-col gap-4 animate-[fadeIn_0.2s_ease-out_both]">
+        <div className="h-9 w-48 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-[300px] rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+      </div>
+    );
   }
+
+  const activeCount   = agents.filter(a => a.status === 'active').length;
+  const inactiveCount = agents.filter(a => a.status === 'inactive').length;
+  const draftCount    = agents.filter(a => a.status === 'draft').length;
+
+  const filtered = statusFilter === 'all' ? agents :
+    agents.filter(a => a.status === statusFilter);
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-start mb-6">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Agents</h1>
-          <p className="text-sm text-slate-500 mt-2">Create and manage AI agent configurations</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Agents</h1>
+            {liveRunCount > 0 && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-full text-[12px] font-semibold text-blue-700">
+                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                {liveRunCount} running
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-slate-500 mt-1.5">Create and manage AI agent configurations</p>
         </div>
         <button
           onClick={() => navigate('/admin/agents/new')}
@@ -103,6 +139,30 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
           + New Agent
         </button>
       </div>
+
+      {/* Status filter tabs */}
+      {agents.length > 0 && (
+        <div className="flex gap-1 mb-4">
+          {([
+            { id: 'all',      label: `All (${agents.length})` },
+            { id: 'active',   label: `Active (${activeCount})` },
+            { id: 'inactive', label: `Inactive (${inactiveCount})` },
+            { id: 'draft',    label: `Draft (${draftCount})` },
+          ] as const).map(f => (
+            <button
+              key={f.id}
+              onClick={() => setStatusFilter(f.id)}
+              className={`px-3.5 py-1.5 rounded-lg text-[12px] font-semibold border-0 cursor-pointer transition-colors [font-family:inherit] ${
+                statusFilter === f.id
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {deleteId && (
         <ConfirmDialog
@@ -131,16 +191,18 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Name</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Model</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Data Sources</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Created</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Name</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Model</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Data Sources</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Created</th>
+                <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {agents.map((agent) => {
+              {filtered.length === 0 ? (
+                <tr><td colSpan={6} className="py-10 text-center text-sm text-slate-400">No agents match this filter</td></tr>
+              ) : filtered.map((agent) => {
                 const dsCount = agent.dataSourceCount ?? agent.dataSources?.length ?? 0;
                 return (
                   <tr key={agent.id} className="hover:bg-slate-50 transition-colors">

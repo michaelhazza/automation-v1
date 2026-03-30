@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { RunActivityChart } from '../components/ActivityCharts';
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -274,6 +275,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState('');
   const [saveError, setSaveError] = useState('');
+
+  // Tab
+  const [agentTab, setAgentTab] = useState<'config' | 'runs' | 'usage'>('config');
 
   // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
@@ -883,6 +887,28 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         )}
       </div>
 
+      {/* Tab bar — only for existing agents */}
+      {!isNew && (
+        <div className="flex gap-0.5 border-b border-slate-200 mb-6">
+          {(['config', 'runs', 'usage'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setAgentTab(t)}
+              className={`px-4 py-2.5 text-[13px] font-semibold border-0 bg-transparent cursor-pointer transition-colors border-b-2 -mb-px [font-family:inherit] capitalize ${
+                agentTab === t
+                  ? 'text-indigo-600 border-indigo-500'
+                  : 'text-slate-500 border-transparent hover:text-slate-800'
+              }`}
+            >
+              {t === 'config' ? 'Configuration' : t === 'runs' ? 'Run History' : 'Usage & Costs'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Config tab (existing form) ──────────────────────────────────── */}
+      {(isNew || agentTab === 'config') && <>
+
       {/* Global feedback */}
       {saveSuccess && (
         <div className="bg-green-50 border border-green-200 rounded-lg px-3.5 py-2.5 mb-4 text-green-700 text-[13px]">
@@ -1409,6 +1435,250 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           Cancel
         </button>
       </div>
+      </> /* end config tab */}
+
+      {/* ── Runs tab ────────────────────────────────────────────────────── */}
+      {!isNew && agentTab === 'runs' && id && <AgentRunsTab agentId={id} />}
+
+      {/* ── Usage tab ───────────────────────────────────────────────────── */}
+      {!isNew && agentTab === 'usage' && id && <AgentUsageTab agentId={id} />}
+
     </>
+  );
+}
+
+// ─── Agent Runs Tab ──────────────────────────────────────────────────────────
+
+interface RunRow {
+  id: string; agentName: string; subaccountName: string; runType: string;
+  status: string; totalTokens: number; totalToolCalls: number;
+  durationMs: number | null; createdAt: string; subaccountId: string;
+}
+
+const RUN_STATUS_STYLES: Record<string, string> = {
+  completed:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+  failed:          'bg-red-50 text-red-700 border-red-200',
+  running:         'bg-blue-50 text-blue-700 border-blue-200',
+  pending:         'bg-slate-100 text-slate-600 border-slate-200',
+  timeout:         'bg-amber-50 text-amber-700 border-amber-200',
+  cancelled:       'bg-slate-100 text-slate-400 border-slate-200',
+  budget_exceeded: 'bg-amber-100 text-amber-800 border-amber-200',
+  loop_detected:   'bg-amber-100 text-amber-800 border-amber-200',
+};
+
+function RunStatusBadge({ status }: { status: string }) {
+  const cls = RUN_STATUS_STYLES[status] ?? RUN_STATUS_STYLES.pending;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold border ${cls}`}>
+      {status.replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+function AgentRunsTab({ agentId }: { agentId: string }) {
+  const [runs, setRuns] = useState<RunRow[]>([]);
+  const [daily, setDaily] = useState<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [r, d] = await Promise.all([
+        api.get('/api/agent-activity', { params: { agentId, limit: 50 } }),
+        api.get('/api/agent-activity/daily', { params: { sinceDays: 14 } }),
+      ]);
+      setRuns(r.data);
+      setDaily(d.data);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [agentId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = statusFilter === 'all' ? runs : runs.filter(r => r.status === statusFilter);
+  const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
+
+  return (
+    <div>
+      {/* Mini activity chart */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-[14px] font-bold text-slate-900 m-0">Run Activity (14 days)</h3>
+          <span className="text-[12px] text-slate-400">{daily.reduce((s, d) => s + d.total, 0)} total</span>
+        </div>
+        {loading
+          ? <div className={`h-[100px] ${shimmer}`} />
+          : <RunActivityChart data={daily} height={100} />
+        }
+      </div>
+
+      {/* Status filter tabs */}
+      <div className="flex gap-1 mb-4">
+        {['all', 'completed', 'failed', 'running', 'timeout'].map(s => (
+          <button
+            key={s}
+            onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border-0 cursor-pointer transition-colors [font-family:inherit] capitalize ${
+              statusFilter === s
+                ? 'bg-indigo-100 text-indigo-700'
+                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            {s === 'all' ? `All (${runs.length})` : s.replace(/_/g, ' ')}
+          </button>
+        ))}
+      </div>
+
+      {/* Runs table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50/50">
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Run</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Client</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tokens</th>
+              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Duration</th>
+              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">When</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {loading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i}>
+                  {[...Array(6)].map((_, j) => (
+                    <td key={j} className="px-4 py-3">
+                      <div className={`h-4 ${shimmer}`} style={{ width: j === 0 ? '80px' : j === 1 ? '100px' : '70px' }} />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-sm">No runs yet</td></tr>
+            ) : (
+              filtered.map(run => (
+                <tr key={run.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <Link
+                      to={`/admin/subaccounts/${run.subaccountId}/runs/${run.id}`}
+                      className="font-mono text-[12px] text-indigo-600 hover:text-indigo-700 no-underline"
+                    >
+                      {run.id.substring(0, 8)}
+                    </Link>
+                    <div className="text-[11px] text-slate-400 capitalize">{run.runType}</div>
+                  </td>
+                  <td className="px-4 py-3 text-[13px] text-slate-600">{run.subaccountName}</td>
+                  <td className="px-4 py-3"><RunStatusBadge status={run.status} /></td>
+                  <td className="px-4 py-3 text-right text-[13px] text-slate-500">{run.totalTokens.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right text-[13px] text-slate-500">
+                    {run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right text-[12px] text-slate-400">
+                    {new Date(run.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Agent Usage Tab ─────────────────────────────────────────────────────────
+
+interface AgentMonthlyUsage {
+  entityId: string;
+  totalCostCents: number;
+  requestCount: number;
+  tokensIn?: number;
+  tokensOut?: number;
+}
+
+function AgentUsageTab({ agentId }: { agentId: string }) {
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
+  const [usage, setUsage] = useState<AgentMonthlyUsage | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const prevMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const nextMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m, 1);
+    const now = new Date();
+    const nowStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return next > nowStr ? nowStr : next;
+  };
+  const monthLabel = (ym: string) => {
+    const [y, m] = ym.split('-');
+    return new Date(Number(y), Number(m) - 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  };
+  const fmt = (c: number | null | undefined) => {
+    if (c == null) return '—';
+    return `$${(c / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  const fmtTok = (n: number | null | undefined) => {
+    if (n == null) return '—';
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+    return String(n);
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    // Agent aggregates are keyed as "orgId:agentId" — fetch via org usage agents endpoint
+    // and find this agent's row
+    api.get('/api/agent-activity/stats', { params: { sinceDays: 30 } })
+      .then(() => {})
+      .catch(() => {});
+
+    // Use the cost aggregates scoped to this agent via the invoice-style query
+    // We'll query the org usage/agents list and look for matching agentId pattern
+    // Since agent cost aggregates use entityId = "orgId:agentId", we use the subaccount billing
+    // endpoint isn't ideal here — instead surface what we can via stats
+    setUsage(null);
+    setLoading(false);
+  }, [agentId, month]);
+
+  const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
+
+  return (
+    <div>
+      {/* Month navigator */}
+      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2 mb-6 w-fit">
+        <button onClick={() => setMonth(m => prevMonth(m))}
+          className="text-slate-400 hover:text-slate-700 bg-transparent border-0 cursor-pointer p-0.5">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span className="text-[13px] font-semibold text-slate-700 min-w-[130px] text-center">{monthLabel(month)}</span>
+        <button onClick={() => setMonth(m => nextMonth(m))} disabled={month >= thisMonth}
+          className="text-slate-400 hover:text-slate-700 bg-transparent border-0 cursor-pointer p-0.5 disabled:opacity-30">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <p className="text-[13px] text-slate-500 mb-4">
+          Agent-level cost data is aggregated across all clients. To see a breakdown by client, go to the client's
+          {' '}<strong>Usage & Costs</strong> page and filter by this agent.
+        </p>
+        {loading ? (
+          <div className="space-y-3">
+            {[...Array(3)].map((_, i) => <div key={i} className={`h-5 ${shimmer}`} />)}
+          </div>
+        ) : (
+          <div className="text-[13px] text-slate-400 italic">
+            Detailed per-agent cost breakdown coming soon. Use the client Usage pages for now.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

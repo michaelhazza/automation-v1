@@ -1,7 +1,7 @@
 import { eq, and, isNull, count, inArray } from 'drizzle-orm';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
-import { glob } from 'fs/promises';
+import { glob } from 'glob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { env } from '../lib/env.js';
@@ -1182,7 +1182,7 @@ async function executeSearchCodebase(
     if (searchType === 'filename') {
       const pattern = filePattern ?? `**/*${query}*`;
       const matches: string[] = [];
-      for await (const file of glob(pattern, { cwd: root })) {
+      for (const file of await glob(pattern, { cwd: root })) {
         const strFile = String(file);
         matches.push(strFile);
         if (matches.length >= maxResults) break;
