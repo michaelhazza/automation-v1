@@ -1,0 +1,223 @@
+import { db } from '../db/index.js';
+import { llmPricing, orgMarginConfigs } from '../db/schema/index.js';
+import { and, gte, isNull, lte, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
+import { env } from '../lib/env.js';
+
+// ---------------------------------------------------------------------------
+// Failsafe pricing — used when DB is unavailable on cache miss.
+// Always the most expensive known rate per model — never undercharge.
+// ---------------------------------------------------------------------------
+
+const FAILSAFE_PRICING: Record<string, { inputRate: number; outputRate: number }> = {
+  'anthropic:claude-opus-4-6':   { inputRate: 0.015,    outputRate: 0.075    },
+  'anthropic:claude-sonnet-4-6': { inputRate: 0.003,    outputRate: 0.015    },
+  'anthropic:claude-haiku-4-5':  { inputRate: 0.00025,  outputRate: 0.00125  },
+  'openai:gpt-4o':               { inputRate: 0.0025,   outputRate: 0.01     },
+  'openai:gpt-4o-mini':          { inputRate: 0.00015,  outputRate: 0.0006   },
+  'gemini:gemini-2.0-flash':     { inputRate: 0.0001,   outputRate: 0.0004   },
+  '__default__':                 { inputRate: 0.015,    outputRate: 0.075    },
+};
+
+// ---------------------------------------------------------------------------
+// In-process caches — 1 hour TTL
+// ---------------------------------------------------------------------------
+
+interface PricingCache {
+  data: { inputRate: number; outputRate: number };
+  expiresAt: number;
+}
+
+interface MarginCache {
+  data: { multiplier: number; fixedFeeCents: number };
+  expiresAt: number;
+}
+
+const pricingCache = new Map<string, PricingCache>();
+const marginCache = new Map<string, MarginCache>();
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// ---------------------------------------------------------------------------
+// Pricing lookup
+// ---------------------------------------------------------------------------
+
+export async function getPricing(
+  provider: string,
+  model: string,
+): Promise<{ inputRate: number; outputRate: number }> {
+  const cacheKey = `${provider}:${model}`;
+  const cached = pricingCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  try {
+    const now = new Date();
+    const [row] = await db
+      .select()
+      .from(llmPricing)
+      .where(
+        and(
+          eq(llmPricing.provider, provider),
+          eq(llmPricing.model, model),
+          lte(llmPricing.effectiveFrom, now),
+          or(isNull(llmPricing.effectiveTo), gte(llmPricing.effectiveTo!, now)),
+        ),
+      )
+      .orderBy(llmPricing.effectiveFrom)
+      .limit(1);
+
+    if (!row) {
+      console.warn(`[pricingService] No pricing row for ${cacheKey}, using failsafe`);
+      return FAILSAFE_PRICING[cacheKey] ?? FAILSAFE_PRICING['__default__'];
+    }
+
+    const data = {
+      inputRate:  parseFloat(row.inputRate),
+      outputRate: parseFloat(row.outputRate),
+    };
+
+    pricingCache.set(cacheKey, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+    return data;
+  } catch {
+    console.warn(`[pricingService] DB unavailable for pricing lookup ${cacheKey}, using failsafe`);
+    return FAILSAFE_PRICING[cacheKey] ?? FAILSAFE_PRICING['__default__'];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Margin resolution — org override wins over platform default
+// ---------------------------------------------------------------------------
+
+export async function getMargin(
+  orgId: string,
+): Promise<{ multiplier: number; fixedFeeCents: number }> {
+  const cached = marginCache.get(orgId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  try {
+    // Try org-specific override first
+    const [orgRow] = await db
+      .select()
+      .from(orgMarginConfigs)
+      .where(eq(orgMarginConfigs.organisationId, orgId))
+      .orderBy(orgMarginConfigs.effectiveFrom)
+      .limit(1);
+
+    if (orgRow) {
+      const data = {
+        multiplier:     parseFloat(orgRow.marginMultiplier),
+        fixedFeeCents:  orgRow.fixedFeeCents,
+      };
+      marginCache.set(orgId, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+      return data;
+    }
+
+    // Fall back to platform default (null organisation_id)
+    const [defaultRow] = await db
+      .select()
+      .from(orgMarginConfigs)
+      .where(isNull(orgMarginConfigs.organisationId))
+      .limit(1);
+
+    const data = defaultRow
+      ? { multiplier: parseFloat(defaultRow.marginMultiplier), fixedFeeCents: defaultRow.fixedFeeCents }
+      : { multiplier: env.PLATFORM_MARGIN_MULTIPLIER, fixedFeeCents: 0 };
+
+    marginCache.set(orgId, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+    return data;
+  } catch {
+    console.warn(`[pricingService] DB unavailable for margin lookup orgId=${orgId}, using env default`);
+    return { multiplier: env.PLATFORM_MARGIN_MULTIPLIER, fixedFeeCents: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cost calculation
+// costWithMargin = (costRaw * multiplier) + (fixedFeeCents / 100)
+// ---------------------------------------------------------------------------
+
+export interface CostResult {
+  costRaw:             number;
+  costWithMargin:      number;
+  costWithMarginCents: number;
+  marginMultiplier:    number;
+  fixedFeeCents:       number;
+}
+
+export async function calculateCost(
+  provider: string,
+  model:    string,
+  tokensIn: number,
+  tokensOut: number,
+  orgId:    string,
+): Promise<CostResult> {
+  const [pricing, margin] = await Promise.all([
+    getPricing(provider, model),
+    getMargin(orgId),
+  ]);
+
+  const costRaw =
+    (tokensIn  / 1000) * pricing.inputRate +
+    (tokensOut / 1000) * pricing.outputRate;
+
+  const costWithMargin =
+    costRaw * margin.multiplier + margin.fixedFeeCents / 100;
+
+  return {
+    costRaw,
+    costWithMargin,
+    costWithMarginCents: Math.round(costWithMargin * 100),
+    marginMultiplier:    margin.multiplier,
+    fixedFeeCents:       margin.fixedFeeCents,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Estimate cost before the call (uses maxTokensPerRequest as upper bound)
+// ---------------------------------------------------------------------------
+
+export async function estimateCost(
+  provider:           string,
+  model:              string,
+  maxTokensPerRequest: number,
+  orgId:              string,
+): Promise<number> {
+  // Conservative: assume all tokens are output (higher rate)
+  const pricing = await getPricing(provider, model);
+  const margin  = await getMargin(orgId);
+  const worstCaseRaw = (maxTokensPerRequest / 1000) * pricing.outputRate;
+  const worstCaseWithMargin = worstCaseRaw * margin.multiplier + margin.fixedFeeCents / 100;
+  return Math.round(worstCaseWithMargin * 100); // cents
+}
+
+// ---------------------------------------------------------------------------
+// Cache management
+// ---------------------------------------------------------------------------
+
+export function invalidatePricingCache(provider?: string, model?: string): void {
+  if (provider && model) {
+    pricingCache.delete(`${provider}:${model}`);
+  } else {
+    pricingCache.clear();
+  }
+}
+
+export function invalidateMarginCache(orgId?: string): void {
+  if (orgId) {
+    marginCache.delete(orgId);
+  } else {
+    marginCache.clear();
+  }
+}
+
+export const pricingService = {
+  getPricing,
+  getMargin,
+  calculateCost,
+  estimateCost,
+  invalidatePricingCache,
+  invalidateMarginCache,
+};

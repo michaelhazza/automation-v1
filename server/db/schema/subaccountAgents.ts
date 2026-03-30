@@ -39,6 +39,10 @@ export const subaccountAgents = pgTable(
     // ── Subaccount-specific prompt additions ─────────────────────────────
     customInstructions: text('custom_instructions'),
 
+    // ── Cost caps ───────────────────────────────────────────────────────
+    maxCostPerRunCents: integer('max_cost_per_run_cents'),
+    maxLlmCallsPerRun: integer('max_llm_calls_per_run'),
+
     // ── Run tracking ────────────────────────────────────────────────────
     lastRunAt: timestamp('last_run_at'),
     nextRunAt: timestamp('next_run_at'),

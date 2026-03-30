@@ -15,13 +15,14 @@ import { systemSkillService } from './systemSkillService.js';
 import { systemAgents } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import {
-  callAnthropic,
   buildSystemPrompt,
   getOrgProcessesForTools,
   approxTokens,
   type LLMMessage,
   type AnthropicTool,
 } from './llmService.js';
+import { routeCall } from './llmRouter.js';
+import type { LLMCallContext } from './llmRouter.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import {
@@ -343,6 +344,14 @@ export const agentExecutionService = {
       const loopResult = await runAgenticLoop({
         runId: run.id,
         agent,
+        routerCtx: {
+          organisationId:    request.organisationId,
+          subaccountId:      request.subaccountId,
+          runId:             run.id,
+          subaccountAgentId: request.subaccountAgentId,
+          agentName:         agent.name,
+          sourceType:        'agent_run',
+        },
         systemPrompt: fullSystemPrompt,
         tools: enhancedTools,
         tokenBudget,
@@ -441,7 +450,8 @@ export const agentExecutionService = {
 
 interface LoopParams {
   runId: string;
-  agent: { modelId: string; temperature: number; maxTokens: number };
+  agent: { modelId: string; modelProvider: string; temperature: number; maxTokens: number };
+  routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model'>;
   systemPrompt: string;
   tools: AnthropicTool[];
   tokenBudget: number;
@@ -469,7 +479,7 @@ interface LoopResult {
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
-    runId, agent, systemPrompt, tools, tokenBudget,
+    runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline,
   } = params;
@@ -513,33 +523,31 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       const result = mw.execute(mwCtx);
       if (result.action === 'stop') {
         messages.push({ role: 'user', content: result.reason });
-        const wrapUp = await callAnthropic({
-          modelId: agent.modelId,
-          systemPrompt,
+        const wrapUp = await routeCall({
           messages,
+          system: systemPrompt,
           temperature: agent.temperature,
           maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
+          context: { ...routerCtx, taskType: 'general', provider: agent.modelProvider, model: agent.modelId },
         });
         lastTextContent = wrapUp.content;
-        totalTokensUsed += approxTokens(wrapUp.content) + approxTokens(result.reason);
+        totalTokensUsed += (wrapUp.tokensIn ?? 0) + (wrapUp.tokensOut ?? 0);
         finalStatus = result.status;
         break outerLoop;
       }
     }
 
     // ── Call LLM ──────────────────────────────────────────────────────
-    const response = await callAnthropic({
-      modelId: agent.modelId,
-      systemPrompt,
+    const response = await routeCall({
       messages,
+      system: systemPrompt,
       tools: tools.length > 0 ? tools : undefined,
       temperature: agent.temperature,
       maxTokens: agent.maxTokens,
+      context: { ...routerCtx, taskType: 'development', provider: agent.modelProvider, model: agent.modelId },
     });
 
-    const estimatedInputTokens = approxTokens(JSON.stringify(messages));
-    const estimatedOutputTokens = approxTokens(JSON.stringify(response.content) + JSON.stringify(response.toolCalls ?? ''));
-    totalTokensUsed += estimatedInputTokens + estimatedOutputTokens;
+    totalTokensUsed += (response.tokensIn ?? 0) + (response.tokensOut ?? 0);
 
     lastTextContent = response.content;
 
@@ -581,12 +589,12 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             })),
           });
           messages.push({ role: 'user', content: result.reason });
-          const wrapUp = await callAnthropic({
-            modelId: agent.modelId,
-            systemPrompt,
+          const wrapUp = await routeCall({
             messages,
+            system: systemPrompt,
             temperature: agent.temperature,
             maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
+            context: { ...routerCtx, taskType: 'general', provider: agent.modelProvider, model: agent.modelId },
           });
           lastTextContent = wrapUp.content;
           finalStatus = result.status;

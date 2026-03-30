@@ -11,6 +11,7 @@ import { boardService } from './services/boardService.js';
 import { skillService } from './services/skillService.js';
 import { systemSkillService } from './services/systemSkillService.js';
 import { agentScheduleService } from './services/agentScheduleService.js';
+import { routerJobService } from './services/routerJobService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +53,7 @@ import integrationConnectionsRouter from './routes/integrationConnections.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
+import llmUsageRouter from './routes/llmUsage.js';
 
 const app = express();
 
@@ -107,6 +109,7 @@ app.use(integrationConnectionsRouter);
 app.use(processConnectionMappingsRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
+app.use(llmUsageRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
@@ -140,6 +143,7 @@ async function start() {
   await skillService.seedBuiltInSkills();
   // System skills are file-based (server/skills/*.md) — no seeding needed.
   await agentScheduleService.initialize();
+  await routerJobService.initializeRouterJobs();
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);

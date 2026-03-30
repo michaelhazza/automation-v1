@@ -4,13 +4,13 @@ import { agents, agentConversations, agentMessages } from '../db/schema/index.js
 import { isNull } from 'drizzle-orm';
 import { agentService } from './agentService.js';
 import {
-  callAnthropic,
   buildSystemPrompt,
   buildProcessTools,
   getOrgProcessesForTools,
   executeTriggerredProcess,
   type LLMMessage,
 } from './llmService.js';
+import { routeCall } from './llmRouter.js';
 import { env } from '../lib/env.js';
 
 // ---------------------------------------------------------------------------
@@ -234,13 +234,21 @@ export const conversationService = {
     const tools = buildProcessTools(orgProcesses);
 
     // ── 8. Call LLM ───────────────────────────────────────────────────────────
-    let llmResponse = await callAnthropic({
-      modelId: agent.modelId,
-      systemPrompt,
+    let llmResponse = await routeCall({
       messages: llmMessages,
+      system: systemPrompt,
       tools: tools.length > 0 ? tools : undefined,
       temperature: agent.temperature,
       maxTokens: agent.maxTokens,
+      context: {
+        organisationId,
+        userId,
+        sourceType: 'agent_run',
+        agentName: agent.name,
+        taskType: 'general',
+        provider: agent.modelProvider ?? 'anthropic',
+        model: agent.modelId,
+      },
     });
 
     // ── 9. Handle tool calls (agent-to-process chaining) ──────────────────────
@@ -337,13 +345,21 @@ export const conversationService = {
       ];
 
       // Get the final response after tool use
-      llmResponse = await callAnthropic({
-        modelId: agent.modelId,
-        systemPrompt,
+      llmResponse = await routeCall({
         messages: continuationMessages,
+        system: systemPrompt,
         tools: tools.length > 0 ? tools : undefined,
         temperature: agent.temperature,
         maxTokens: agent.maxTokens,
+        context: {
+          organisationId,
+          userId,
+          sourceType: 'agent_run',
+          agentName: agent.name,
+          taskType: 'process_trigger',
+          provider: agent.modelProvider ?? 'anthropic',
+          model: agent.modelId,
+        },
       });
 
       // Save final assistant response

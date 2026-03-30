@@ -43,6 +43,13 @@ const envSchema = z.object({
   APP_BASE_URL: z.string().optional().default('http://localhost:5173'),
   // AI Agent / LLM configuration
   ANTHROPIC_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  // LLM Router — platform-level safety caps
+  PLATFORM_MONTHLY_COST_LIMIT_CENTS: z.coerce.number().optional(),
+  PLATFORM_MAX_REQUESTS_PER_MINUTE: z.coerce.number().optional().default(60),
+  // Platform default margin multiplier (e.g. 1.30 = 30% markup)
+  PLATFORM_MARGIN_MULTIPLIER: z.coerce.number().optional().default(1.30),
   // Maximum messages to include in chat context (recent N messages)
   AGENT_CONTEXT_MESSAGES: z.coerce.number().optional().default(20),
   // Tavily AI search API key for agent web search skill
