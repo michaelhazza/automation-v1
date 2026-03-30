@@ -50,6 +50,7 @@ const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
+const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 
 function PageLoader() {
   return (
@@ -199,6 +200,9 @@ export default function App() {
 
           {/* Client-level settings (subaccount admins — Categories, Automations, Members) */}
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
+
+          {/* Projects */}
+          <Route path="/projects" element={<ProjectsPage user={user!} />} />
 
           {/* AI Agents */}
           <Route path="/agents" element={<AgentsPage user={user!} />} />
