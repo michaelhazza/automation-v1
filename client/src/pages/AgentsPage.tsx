@@ -51,7 +51,7 @@ function TeamHeartbeatView({ agents }: { agents: Agent[] }) {
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl px-6 py-5">
-        <div className="flex items-center mb-3" style={{ paddingLeft: 180 }}>
+        <div className="flex items-center mb-3 pl-[180px]">
           {HOUR_LABELS.map((h) => (
             <div key={h} className="flex-1 text-[11px] text-slate-400 font-medium">{h}h</div>
           ))}
@@ -65,7 +65,7 @@ function TeamHeartbeatView({ agents }: { agents: Agent[] }) {
             const icon = agent.icon || getDefaultIcon(agent.id);
             return (
               <div key={agent.id} className="flex items-center">
-                <div className="shrink-0 flex items-center gap-2 pr-4" style={{ width: 180 }}>
+                <div className="shrink-0 flex items-center gap-2 pr-4 w-[180px]">
                   <span className="text-base">{icon}</span>
                   <div className="min-w-0">
                     <div className="text-[13px] font-semibold text-slate-900 truncate">{agent.name}</div>
@@ -73,7 +73,7 @@ function TeamHeartbeatView({ agents }: { agents: Agent[] }) {
                   </div>
                 </div>
                 <div className="flex-1 relative h-7">
-                  <svg width="100%" height="28" style={{ display: 'block' }}>
+                  <svg width="100%" height="28" className="block">
                     <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#e2e8f0" strokeWidth="1.5" />
                     {HOUR_LABELS.map((h) => (
                       <line key={h} x1={`${(h / 24) * 100}%`} y1="30%" x2={`${(h / 24) * 100}%`} y2="70%" stroke="#e2e8f0" strokeWidth="1" />
@@ -103,11 +103,11 @@ export default function AgentsPage({ user: _user }: { user: User }) {
 
   if (loading) {
     return (
-      <div className="page-enter flex flex-col gap-4">
-        <div className="skeleton h-9 w-72 rounded-lg" />
-        <div className="skeleton h-5 w-80 rounded" />
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
-          {[1,2,3,4,5,6].map((i) => <div key={i} className="skeleton h-48 rounded-2xl" />)}
+      <div className="animate-[fadeIn_0.2s_ease-out_both] flex flex-col gap-4">
+        <div className="h-9 w-72 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-5 w-80 rounded bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+          {[1,2,3,4,5,6].map((i) => <div key={i} className="h-48 rounded-2xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
         </div>
       </div>
     );
@@ -117,7 +117,7 @@ export default function AgentsPage({ user: _user }: { user: User }) {
   const setupAgents = agents.filter((a) => a.status !== 'active');
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-8">
         <h1 className="text-[30px] font-extrabold text-slate-900 tracking-tight m-0">Agents</h1>
         <p className="text-[15px] text-slate-500 mt-1.5">Select an agent to start a conversation</p>
@@ -125,7 +125,7 @@ export default function AgentsPage({ user: _user }: { user: User }) {
 
       {agents.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl py-14 px-8 flex flex-col items-center text-center">
-          <div className="w-18 h-18 rounded-2xl flex items-center justify-center text-4xl mb-5" style={{ background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)', width: 72, height: 72 }}>
+          <div className="w-[72px] h-[72px] rounded-2xl flex items-center justify-center text-4xl mb-5 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
             🤖
           </div>
           <p className="font-bold text-[18px] text-slate-900 mb-2">No team members yet</p>
@@ -137,7 +137,7 @@ export default function AgentsPage({ user: _user }: { user: User }) {
       ) : (
         <>
           {activeAgents.length > 0 && (
-            <div className={`grid gap-4 ${setupAgents.length > 0 ? 'mb-10' : ''}`} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+            <div className={`grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))] ${setupAgents.length > 0 ? 'mb-10' : ''}`}>
               {activeAgents.map((agent) => {
                 const icon = agent.icon || getDefaultIcon(agent.id);
                 const skillSummary = getSkillSummary(agent.defaultSkillSlugs);
@@ -148,7 +148,7 @@ export default function AgentsPage({ user: _user }: { user: User }) {
                     className="bg-white border-2 border-slate-100 rounded-2xl p-6 cursor-pointer flex flex-col gap-3.5 hover:border-indigo-300 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-150"
                   >
                     <div className="flex items-start justify-between">
-                      <div className="w-13 h-13 rounded-xl flex items-center justify-center text-[26px] shrink-0" style={{ width: 52, height: 52, background: 'linear-gradient(135deg, #f5f3ff, #ede9fe)' }}>
+                      <div className="w-[52px] h-[52px] rounded-xl flex items-center justify-center text-[26px] shrink-0 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
                         {icon}
                       </div>
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-green-50 border border-green-200 text-green-700">
@@ -193,7 +193,7 @@ export default function AgentsPage({ user: _user }: { user: User }) {
                 <h2 className="text-[16px] font-bold text-slate-500 m-0">Setting Up ({setupAgents.length})</h2>
                 <p className="text-[13px] text-slate-400 mt-1">These agents are being configured and will be available soon.</p>
               </div>
-              <div className="grid gap-4 opacity-60" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+              <div className="grid gap-4 opacity-60 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
                 {setupAgents.map((agent) => {
                   const icon = agent.icon || getDefaultIcon(agent.id);
                   return (
