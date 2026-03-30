@@ -88,6 +88,23 @@ export default function DashboardPage({ user }: { user: User }) {
     ? Math.round((stats.completedRuns / stats.totalRuns) * 100)
     : null;
 
+  // Trend: compare yesterday vs day-before-yesterday using daily data
+  const today     = daily.length >= 1 ? daily[daily.length - 1] : null;
+  const yesterday = daily.length >= 2 ? daily[daily.length - 2] : null;
+  const todayRuns = today?.total ?? 0;
+  const yestRuns  = yesterday?.total ?? 0;
+  const runsDelta = yestRuns > 0 ? todayRuns - yestRuns : null;
+
+  const todaySuccessRate = today && today.total > 0
+    ? Math.round((today.completed / today.total) * 100)
+    : null;
+  const yestSuccessRate = yesterday && yesterday.total > 0
+    ? Math.round((yesterday.completed / yesterday.total) * 100)
+    : null;
+  const rateDelta = todaySuccessRate !== null && yestSuccessRate !== null
+    ? todaySuccessRate - yestSuccessRate
+    : null;
+
   const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded-md';
 
   if (loading) {
@@ -136,7 +153,10 @@ export default function DashboardPage({ user }: { user: User }) {
         <MetricCard
           label="Runs (7 days)"
           value={stats?.totalRuns ?? 0}
-          sub={stats?.failedRuns ? `${stats.failedRuns} failed` : 'all good'}
+          sub={runsDelta !== null
+            ? `${runsDelta > 0 ? '↑' : runsDelta < 0 ? '↓' : '→'} ${Math.abs(runsDelta)} vs yesterday`
+            : stats?.failedRuns ? `${stats.failedRuns} failed` : 'all good'
+          }
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="5 3 19 12 5 21 5 3"/>
@@ -148,7 +168,10 @@ export default function DashboardPage({ user }: { user: User }) {
         <MetricCard
           label="Success Rate"
           value={successRate !== null ? `${successRate}%` : '—'}
-          sub={stats?.totalRuns ? `${stats.completedRuns} of ${stats.totalRuns} runs` : 'no runs yet'}
+          sub={rateDelta !== null
+            ? `${rateDelta > 0 ? '↑' : rateDelta < 0 ? '↓' : '→'} ${Math.abs(rateDelta)}pp vs yesterday`
+            : stats?.totalRuns ? `${stats.completedRuns} of ${stats.totalRuns} runs` : 'no runs yet'
+          }
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"/>

@@ -56,15 +56,13 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
 
   useEffect(() => { load(); }, []);
 
-  // Poll for live running agent count (org-wide)
+  // Poll for live running agent count (org-wide, status=running)
   useEffect(() => {
-    const fetch = () => api.get('/api/agent-activity/stats', { params: { sinceDays: 1 } })
-      .then(({ data }) => {
-        // "running" is approximate — use the live status endpoint if available
-        setLiveRunCount(0); // placeholder; actual live count comes from subaccount context
-      }).catch(() => {});
-    fetch();
-    const t = setInterval(fetch, 15_000);
+    const fetchLive = () => api.get('/api/agent-activity', { params: { status: 'running', limit: 100 } })
+      .then(({ data }) => setLiveRunCount(Array.isArray(data) ? data.length : 0))
+      .catch(() => {});
+    fetchLive();
+    const t = setInterval(fetchLive, 15_000);
     return () => clearInterval(t);
   }, []);
 

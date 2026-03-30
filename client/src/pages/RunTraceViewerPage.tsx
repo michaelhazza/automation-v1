@@ -101,20 +101,34 @@ function CollapsibleSection({ title, defaultOpen = false, children, badge }: { t
   );
 }
 
-// Mask API keys, bearer tokens, and secret-looking values from displayed text
-const SECRET_PATTERNS = [
-  // API keys: sk-..., pk-..., api_key=..., apikey=..., key=..., token=..., secret=..., password=..., bearer ...
-  /(sk-[A-Za-z0-9]{6})[A-Za-z0-9-_]{10,}/g,
-  /(pk-[A-Za-z0-9]{6})[A-Za-z0-9-_]{10,}/g,
-  /("(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret|password|authorization)"\s*:\s*")([^"]{8,})/gi,
-  /((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret|password)=)([^&\s"]{8,})/gi,
-  /(Bearer\s+)([A-Za-z0-9._\-+/]{20,})/gi,
+// Mask API keys, bearer tokens, JWTs, and secret-looking values from displayed text.
+// Masking is on by default; users can toggle to reveal.
+const SECRET_PATTERNS: Array<[RegExp, (m: string, p1: string, p2: string) => string]> = [
+  // Anthropic / OpenAI style keys: sk-..., pk-...
+  [/(sk-[A-Za-z0-9]{6})[A-Za-z0-9-_]{10,}/g,
+   (_, p1) => `${p1}${'*'.repeat(16)}`],
+  [/(pk-[A-Za-z0-9]{6})[A-Za-z0-9-_]{10,}/g,
+   (_, p1) => `${p1}${'*'.repeat(16)}`],
+  // JSON field: "api_key": "value", "secret": "value", etc.
+  [/("(?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret|password|authorization|x-api-key)"\s*:\s*")([^"]{6,})/gi,
+   (_, p1, p2) => `${p1}${'*'.repeat(Math.min(p2.length, 16))}`],
+  // URL query params: api_key=xxx, token=xxx
+  [/((?:api[_-]?key|apikey|access[_-]?token|auth[_-]?token|secret|password)=)([^&\s"]{6,})/gi,
+   (_, p1, p2) => `${p1}${'*'.repeat(Math.min(p2.length, 16))}`],
+  // Bearer tokens
+  [/(Bearer\s+)([A-Za-z0-9._\-+/]{20,})/gi,
+   (_, p1, p2) => `${p1}${'*'.repeat(Math.min(p2.length, 20))}`],
+  // JWTs: three base64url segments separated by dots (eyX...eyX...xxx)
+  [/(ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.)[A-Za-z0-9_-]{10,}/g,
+   (_, header_payload) => `${header_payload}${'*'.repeat(16)}`],
 ];
 
 function maskSecrets(text: string): string {
   let out = text;
-  for (const pat of SECRET_PATTERNS) {
-    out = out.replace(pat, (_, prefix, secret) => `${prefix}${'*'.repeat(Math.min(secret?.length ?? 8, 16))}`);
+  for (const [pattern, replacer] of SECRET_PATTERNS) {
+    // Reset lastIndex for global regexes
+    pattern.lastIndex = 0;
+    out = out.replace(pattern, replacer as Parameters<typeof out.replace>[1]);
   }
   return out;
 }

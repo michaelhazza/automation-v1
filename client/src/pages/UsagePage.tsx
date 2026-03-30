@@ -232,7 +232,10 @@ export default function UsagePage({ user: _user }: { user: User }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-[26px] font-extrabold text-slate-900 tracking-tight m-0">Usage & Costs</h1>
-          <p className="text-sm text-slate-500 mt-1">LLM spending, token usage, and budget tracking</p>
+          <p className="text-sm text-slate-500 mt-1">
+            LLM spending, token usage, and budget tracking
+            <span className="ml-2 text-[11px] text-slate-400 font-normal">(cost totals update within ~30s of activity)</span>
+          </p>
         </div>
 
         {/* Month navigator */}
@@ -332,7 +335,10 @@ export default function UsagePage({ user: _user }: { user: User }) {
       {/* Run activity chart */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[14px] font-bold text-slate-900 m-0">Run Activity (14 days)</h3>
+          <div>
+            <h3 className="text-[14px] font-bold text-slate-900 m-0">Run Activity</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5 m-0">Rolling 14-day window — independent of the month selector above</p>
+          </div>
           <span className="text-[12px] text-slate-400">
             {daily.reduce((s, d) => s + d.total, 0)} total runs
           </span>

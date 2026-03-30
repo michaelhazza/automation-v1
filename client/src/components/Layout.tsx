@@ -548,7 +548,7 @@ export default function Layout({ user, children }: LayoutProps) {
             </svg>
             <span className="flex-1 font-medium">
               {budgetAlert.pct >= 0.95
-                ? `Budget almost exhausted — ${Math.round(budgetAlert.pct * 100)}% of monthly limit used ($${(budgetAlert.spent / 100).toFixed(2)} of $${(budgetAlert.limit / 100).toFixed(2)})`
+                ? `Budget almost exhausted — ${Math.round(budgetAlert.pct * 100)}% of monthly limit used ($${(budgetAlert.spent / 100).toFixed(2)} of $${(budgetAlert.limit / 100).toFixed(2)}). Near limit — figures may update shortly.`
                 : `Budget warning — ${Math.round(budgetAlert.pct * 100)}% of monthly limit used ($${(budgetAlert.spent / 100).toFixed(2)} of $${(budgetAlert.limit / 100).toFixed(2)})`
               }
             </span>
