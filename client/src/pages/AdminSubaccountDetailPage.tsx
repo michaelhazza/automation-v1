@@ -223,7 +223,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   if (!sa) return <div className="p-8 text-sm text-red-600">{error || 'Subaccount not found'}</div>;
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       {mode === 'admin' && (
         <div className="mb-4">
           <Link to="/admin/subaccounts" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">

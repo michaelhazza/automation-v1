@@ -111,7 +111,7 @@ export default function AdminCategoriesPage({ user: _user, embedded }: { user: U
         />
       )}
 
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
         {categories.length === 0 ? (
           <div className="col-span-full bg-white border border-slate-200 rounded-xl py-12 text-center text-sm text-slate-500">
             No categories yet.
