@@ -94,7 +94,7 @@ export default function AdminSkillEditPage({ user: _user }: { user: User }) {
   if (loading) return <div className="p-12 text-center text-sm text-slate-500">Loading...</div>;
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-center mb-6">
         <div>
           <button onClick={() => navigate('/admin/skills')} className="text-[13px] text-indigo-600 hover:text-indigo-700 bg-transparent border-0 cursor-pointer p-0 mb-2">

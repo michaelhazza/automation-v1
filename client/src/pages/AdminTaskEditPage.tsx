@@ -73,7 +73,7 @@ export default function AdminTaskEditPage({ user: _user }: { user: User }) {
   if (loading || !process) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-4">
         <Link to="/admin/processes" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
           ← Back to automations
@@ -81,7 +81,7 @@ export default function AdminTaskEditPage({ user: _user }: { user: User }) {
       </div>
       <h1 className="text-[26px] font-bold text-slate-800 mb-6">Edit Automation: {process.name}</h1>
 
-      <div className="grid gap-6" style={{ gridTemplateColumns: '1fr 380px' }}>
+      <div className="grid gap-6 [grid-template-columns:1fr_380px]">
         {/* Edit form */}
         <div className="bg-white border border-slate-200 rounded-xl p-6">
           {success && <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{success}</div>}
