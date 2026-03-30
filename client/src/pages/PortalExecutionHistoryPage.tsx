@@ -16,13 +16,13 @@ interface Execution {
   createdAt: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  completed: '#16a34a',
-  failed: '#dc2626',
-  running: '#2563eb',
-  pending: '#d97706',
-  timeout: '#ea580c',
-  cancelled: '#6b7280',
+const STATUS_CLS: Record<string, string> = {
+  completed: 'text-green-600',
+  failed: 'text-red-600',
+  running: 'text-blue-600',
+  pending: 'text-amber-600',
+  timeout: 'text-orange-600',
+  cancelled: 'text-slate-500',
 };
 
 export default function PortalExecutionHistoryPage({ user }: { user: User }) {
@@ -37,50 +37,50 @@ export default function PortalExecutionHistoryPage({ user }: { user: User }) {
       .finally(() => setLoading(false));
   }, [subaccountId]);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>My Executions</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Your process execution history in this subaccount</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">My Executions</h1>
+          <p className="text-slate-500 mt-2 mb-0">Your process execution history in this subaccount</p>
         </div>
         <Link
           to={`/portal/${subaccountId}`}
-          style={{ padding: '10px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', textDecoration: 'none' }}
+          className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[14px] no-underline transition-colors"
         >
           ← Back to processes
         </Link>
       </div>
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {executions.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>No executions yet.</div>
+          <div className="py-12 text-center text-slate-500">No executions yet.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full border-collapse text-[14px]">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Execution</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Duration</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Date</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Execution</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Duration</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Date</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {executions.map((exec) => (
-                <tr key={exec.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: 12, color: '#64748b' }}>{exec.id.slice(0, 8)}…</td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{ color: STATUS_COLORS[exec.status] ?? '#6b7280', fontWeight: 500 }}>{exec.status}</span>
+                <tr key={exec.id}>
+                  <td className="px-4 py-3 font-mono text-[12px] text-slate-500">{exec.id.slice(0, 8)}…</td>
+                  <td className="px-4 py-3">
+                    <span className={`font-medium ${STATUS_CLS[exec.status] ?? 'text-slate-500'}`}>{exec.status}</span>
                     {exec.errorMessage && (
-                      <div style={{ fontSize: 12, color: '#dc2626', marginTop: 2 }}>{exec.errorMessage}</div>
+                      <div className="text-[12px] text-red-600 mt-0.5">{exec.errorMessage}</div>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px', color: '#64748b' }}>
+                  <td className="px-4 py-3 text-slate-500">
                     {exec.durationMs != null ? `${(exec.durationMs / 1000).toFixed(1)}s` : '-'}
                   </td>
-                  <td style={{ padding: '12px 16px', color: '#64748b' }}>
+                  <td className="px-4 py-3 text-slate-500">
                     {new Date(exec.createdAt).toLocaleString()}
                   </td>
                 </tr>

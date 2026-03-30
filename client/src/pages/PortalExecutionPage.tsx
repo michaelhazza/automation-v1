@@ -31,12 +31,12 @@ interface StagedFile {
   error?: string;
 }
 
-const STATUS_COLOR: Record<string, string> = {
-  completed: '#16a34a',
-  failed: '#dc2626',
-  running: '#2563eb',
-  pending: '#d97706',
-  timeout: '#ea580c',
+const STATUS_CLS: Record<string, string> = {
+  completed: 'text-green-600',
+  failed: 'text-red-600',
+  running: 'text-blue-600',
+  pending: 'text-amber-600',
+  timeout: 'text-orange-600',
 };
 
 function formatBytes(bytes: number): string {
@@ -44,16 +44,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
-
-const spinnerStyle: React.CSSProperties = {
-  width: 36,
-  height: 36,
-  border: '3px solid #e2e8f0',
-  borderTopColor: '#2563eb',
-  borderRadius: '50%',
-  animation: 'spin 0.8s linear infinite',
-  flexShrink: 0,
-};
 
 export default function PortalExecutionPage({ user }: { user: User }) {
   const { subaccountId, processId } = useParams<{ subaccountId: string; processId: string }>();
@@ -134,7 +124,6 @@ export default function PortalExecutionPage({ user }: { user: User }) {
       const execId = execData.id;
       setExecution({ id: execId, status: execData.status, outputData: null, errorMessage: null, durationMs: null });
 
-      // Upload staged files
       for (let i = 0; i < stagedFiles.length; i++) {
         const { file } = stagedFiles[i];
         setUploadProgress(`Uploading file ${i + 1} of ${stagedFiles.length}: ${file.name}`);
@@ -154,8 +143,8 @@ export default function PortalExecutionPage({ user }: { user: User }) {
     }
   };
 
-  if (loading) return <div>Loading...</div>;
-  if (!process) return <div style={{ color: '#dc2626', padding: 32 }}>Automation not found</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
+  if (!process) return <div className="text-red-600 p-8">Automation not found</div>;
 
   const hasInvalidFiles = stagedFiles.some((f) => f.error);
   const isExecuting = execution && ['pending', 'running'].includes(execution.status);
@@ -163,82 +152,82 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   return (
     <>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <div style={{ marginBottom: 16 }}>
-        <Link to={`/portal/${subaccountId}`} style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to automations</Link>
+      <div className="mb-4">
+        <Link to={`/portal/${subaccountId}`} className="text-blue-600 text-[13px] no-underline">← Back to automations</Link>
       </div>
-      <div style={{ maxWidth: 760 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>{process.name}</h1>
-        {process.description && <p style={{ color: '#64748b', marginBottom: 24 }}>{process.description}</p>}
+      <div className="max-w-[760px]">
+        <h1 className="text-[26px] font-bold text-slate-800 mb-2">{process.name}</h1>
+        {process.description && <p className="text-slate-500 mb-6">{process.description}</p>}
 
         {process.outputSchema && (
-          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#166534' }}>
+          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-5 text-[13px] text-green-800">
             <strong>Expected output:</strong> {process.outputSchema}
           </div>
         )}
 
         {process.inputSchema && (
-          <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#0c4a6e' }}>
+          <div className="bg-sky-50 border border-sky-200 rounded-lg px-4 py-3 mb-5 text-[13px] text-sky-800">
             <strong>Input guidance:</strong> {process.inputSchema}
           </div>
         )}
 
         {!execution && (
-          <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', marginBottom: 24 }}>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Input Data (JSON or plain text)</label>
+          <div className="bg-white rounded-xl p-6 border border-slate-200 mb-6">
+            <div className="mb-5">
+              <label className="block text-[13px] font-semibold text-slate-700 mb-2">Input Data (JSON or plain text)</label>
               <textarea
                 value={inputData}
                 onChange={(e) => setInputData(e.target.value)}
                 placeholder='{ "key": "value" } or plain text'
                 rows={5}
-                style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box' }}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[13px] font-mono resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Attach files (optional)</label>
-              <input ref={fileInputRef} type="file" multiple onChange={(e) => { if (e.target.files) { addFiles(e.target.files); e.target.value = ''; } }} style={{ display: 'none' }} />
+            <div className="mb-5">
+              <label className="block text-[13px] font-semibold text-slate-700 mb-2">Attach files (optional)</label>
+              <input ref={fileInputRef} type="file" multiple onChange={(e) => { if (e.target.files) { addFiles(e.target.files); e.target.value = ''; } }} className="hidden" />
               <div
                 ref={dropZoneRef}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={(e) => { if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setDragOver(false); }}
                 onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
-                style={{ border: `2px dashed ${dragOver ? '#2563eb' : '#d1d5db'}`, borderRadius: 10, padding: '28px 20px', textAlign: 'center', cursor: 'pointer', background: dragOver ? '#eff6ff' : '#fafafa' }}
+                className={`border-2 border-dashed rounded-xl py-8 px-6 text-center cursor-pointer transition-colors ${dragOver ? 'border-blue-400 bg-blue-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white'}`}
               >
-                <div style={{ fontSize: 28, marginBottom: 8 }}>📁</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: dragOver ? '#2563eb' : '#374151', marginBottom: 4 }}>
+                <div className="text-3xl mb-2">📁</div>
+                <div className={`text-[14px] font-medium mb-1 ${dragOver ? 'text-blue-600' : 'text-slate-700'}`}>
                   {dragOver ? 'Drop files here' : 'Drag & drop files here, or click to browse'}
                 </div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>Max {maxUploadSizeMb} MB per file</div>
+                <div className="text-[12px] text-slate-400">Max {maxUploadSizeMb} MB per file</div>
               </div>
               {stagedFiles.length > 0 && (
-                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="mt-2.5 flex flex-col gap-1.5">
                   {stagedFiles.map((sf) => (
-                    <div key={sf.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: sf.error ? '#fef2f2' : '#f8fafc', border: `1px solid ${sf.error ? '#fecaca' : '#e2e8f0'}`, borderRadius: 8 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sf.file.name}</div>
-                        <div style={{ fontSize: 11, color: sf.error ? '#dc2626' : '#64748b' }}>{sf.error ?? formatBytes(sf.file.size)}</div>
+                    <div key={sf.id} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border ${sf.error ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-medium text-slate-800 truncate">{sf.file.name}</div>
+                        <div className={`text-[11px] ${sf.error ? 'text-red-600' : 'text-slate-500'}`}>{sf.error ?? formatBytes(sf.file.size)}</div>
                       </div>
-                      <button onClick={(e) => { e.stopPropagation(); removeFile(sf.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 18 }}>×</button>
+                      <button onClick={(e) => { e.stopPropagation(); removeFile(sf.id); }} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-red-400 text-lg leading-none transition-colors">×</button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', marginBottom: 20 }}>
-              <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#2563eb' }} />
-              <span style={{ fontSize: 13, color: '#374151' }}>Email me when this process completes</span>
+            <label className="flex items-center gap-2.5 cursor-pointer mb-5">
+              <input type="checkbox" checked={notifyOnComplete} onChange={(e) => setNotifyOnComplete(e.target.checked)} className="w-4 h-4 cursor-pointer accent-blue-600" />
+              <span className="text-[13px] text-slate-700">Email me when this process completes</span>
             </label>
 
-            {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
-            {uploadProgress && <div style={{ fontSize: 13, color: '#2563eb', marginBottom: 16 }}>{uploadProgress}</div>}
+            {error && <div className="text-red-600 text-[13px] mb-4">{error}</div>}
+            {uploadProgress && <div className="text-blue-600 text-[13px] mb-4">{uploadProgress}</div>}
 
             <button
               onClick={handleSubmit}
               disabled={submitting || hasInvalidFiles}
-              style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: (submitting || hasInvalidFiles) ? 'not-allowed' : 'pointer', opacity: (submitting || hasInvalidFiles) ? 0.7 : 1 }}
+              className={`px-6 py-2.5 text-white text-[14px] font-semibold rounded-lg border-0 transition-colors ${submitting || hasInvalidFiles ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'}`}
             >
               {submitting ? (uploadProgress ? 'Uploading...' : 'Submitting...') : 'Run Automation'}
             </button>
@@ -246,45 +235,45 @@ export default function PortalExecutionPage({ user }: { user: User }) {
         )}
 
         {isExecuting && (
-          <div style={{ background: '#fff', borderRadius: 10, padding: '32px 24px', border: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, textAlign: 'center' }}>
-            <div style={spinnerStyle} />
+          <div className="bg-white rounded-xl px-6 py-8 border border-slate-200 mb-6 flex flex-col items-center gap-4 text-center">
+            <div style={{ width: 36, height: 36, border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
             <div>
-              <div style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 6 }}>Executing... please wait</div>
-              <div style={{ fontSize: 13, color: '#64748b' }}>
-                Status: <span style={{ color: STATUS_COLOR[execution.status] ?? '#6b7280', fontWeight: 600 }}>{execution.status}</span>
+              <div className="text-[16px] font-semibold text-slate-800 mb-1.5">Executing... please wait</div>
+              <div className="text-[13px] text-slate-500">
+                Status: <span className={`font-semibold ${STATUS_CLS[execution.status] ?? 'text-slate-500'}`}>{execution.status}</span>
               </div>
             </div>
           </div>
         )}
 
         {execution && !isExecuting && (
-          <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="bg-white rounded-xl p-6 border border-slate-200">
+            <div className="flex justify-between items-center mb-4">
               <div>
-                <span style={{ fontWeight: 600, fontSize: 16 }}>Execution status: </span>
-                <span style={{ color: STATUS_COLOR[execution.status] ?? '#6b7280', fontWeight: 700 }}>{execution.status}</span>
+                <span className="font-semibold text-[16px]">Execution status: </span>
+                <span className={`font-bold ${STATUS_CLS[execution.status] ?? 'text-slate-500'}`}>{execution.status}</span>
               </div>
-              {execution.durationMs != null && <span style={{ fontSize: 13, color: '#64748b' }}>{(execution.durationMs / 1000).toFixed(1)}s</span>}
+              {execution.durationMs != null && <span className="text-[13px] text-slate-500">{(execution.durationMs / 1000).toFixed(1)}s</span>}
             </div>
 
             {execution.status === 'completed' && execution.outputData != null && (
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: '#374151' }}>Output</div>
-                <pre style={{ background: '#f8fafc', padding: 16, borderRadius: 8, fontSize: 12, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#1e293b', border: '1px solid #e2e8f0' }}>
+              <div className="mb-4">
+                <div className="font-semibold text-[13px] text-slate-700 mb-2">Output</div>
+                <pre className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-[12px] overflow-auto whitespace-pre-wrap break-words text-slate-800">
                   {JSON.stringify(execution.outputData, null, 2)}
                 </pre>
               </div>
             )}
 
             {execution.errorMessage && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', color: '#dc2626', fontSize: 13 }}>
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-600 text-[13px] mb-4">
                 {execution.errorMessage}
               </div>
             )}
 
             <button
               onClick={() => { setExecution(null); setInputData(''); setStagedFiles([]); setNotifyOnComplete(false); if (pollRef.current) clearInterval(pollRef.current); }}
-              style={{ marginTop: 16, padding: '8px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
             >
               Run again
             </button>
