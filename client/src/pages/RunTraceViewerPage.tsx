@@ -139,9 +139,9 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
 
   if (loading) {
     return (
-      <div className="page-enter">
+      <div className="animate-[fadeIn_0.2s_ease-out_both]">
         <div className="flex flex-col gap-3">
-          {[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 rounded-xl" />)}
+          {[1, 2, 3].map((i) => <div key={i} className="h-12 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
         </div>
       </div>
     );
@@ -149,7 +149,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
 
   if (error || !run) {
     return (
-      <div className="page-enter">
+      <div className="animate-[fadeIn_0.2s_ease-out_both]">
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-700 text-[14px]">{error ?? 'Run not found'}</div>
       </div>
     );
@@ -159,7 +159,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const toolCalls: ToolCallEntry[] = Array.isArray(run.toolCallsLog) ? run.toolCallsLog : [];
 
   return (
-    <div className="page-enter max-w-[960px] mx-auto">
+    <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-[960px] mx-auto">
       <div className="mb-4 text-[13px] text-slate-500 flex items-center gap-1.5">
         <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
           {run.subaccountName ?? 'Workspace'}
@@ -188,7 +188,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
         <div className="mt-2 text-[12px] text-slate-400 font-mono">ID: {run.id}</div>
       </div>
 
-      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+      <div className="grid gap-3 mb-4 [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
         {[
           { label: 'Input Tokens', value: run.inputTokens.toLocaleString() },
           { label: 'Output Tokens', value: run.outputTokens.toLocaleString() },
