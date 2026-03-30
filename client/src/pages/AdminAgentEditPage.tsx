@@ -120,20 +120,6 @@ const SOURCE_TYPE_OPTIONS = [
 
 const CONTENT_TYPE_OPTIONS = ['auto', 'json', 'csv', 'markdown', 'text'];
 
-const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
-  active:   { bg: '#dcfce7', color: '#166534' },
-  inactive: { bg: '#fff7ed', color: '#9a3412' },
-  draft:    { bg: '#f1f5f9', color: '#475569' },
-};
-
-const SOURCE_TYPE_BADGE: Record<string, { bg: string; color: string }> = {
-  r2:          { bg: '#eff6ff', color: '#1d4ed8' },
-  s3:          { bg: '#f0fdf4', color: '#15803d' },
-  http_url:    { bg: '#faf5ff', color: '#7e22ce' },
-  google_docs: { bg: '#fef9c3', color: '#854d0e' },
-  dropbox:     { bg: '#e0f2fe', color: '#0369a1' },
-  file_upload: { bg: '#fdf2f8', color: '#9d174d' },
-};
 
 // Source types that support live sync (everything except file_upload)
 const LIVE_SOURCE_TYPES = new Set(['r2', 's3', 'http_url', 'google_docs', 'dropbox']);
@@ -180,36 +166,30 @@ const EMPTY_AGENT_FORM: AgentForm = {
 // ─── Helper components ───────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_BADGE[status] ?? STATUS_BADGE.draft;
+  const cls: Record<string, string> = {
+    active:   'bg-green-100 text-green-800',
+    inactive: 'bg-orange-50 text-orange-800',
+    draft:    'bg-slate-100 text-slate-600',
+  };
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 999,
-      fontSize: 12,
-      fontWeight: 600,
-      background: s.bg,
-      color: s.color,
-      textTransform: 'capitalize',
-    }}>
+    <span className={`inline-block px-[10px] py-[2px] rounded-full text-xs font-semibold capitalize ${cls[status] ?? cls.draft}`}>
       {status}
     </span>
   );
 }
 
 function SourceTypeBadge({ type }: { type: string }) {
-  const s = SOURCE_TYPE_BADGE[type] ?? { bg: '#f1f5f9', color: '#475569' };
+  const cls: Record<string, string> = {
+    r2:          'bg-blue-50 text-blue-700',
+    s3:          'bg-green-50 text-green-700',
+    http_url:    'bg-violet-50 text-violet-700',
+    google_docs: 'bg-yellow-50 text-yellow-800',
+    dropbox:     'bg-sky-100 text-sky-700',
+    file_upload: 'bg-pink-50 text-pink-800',
+  };
   const label = SOURCE_TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;
   return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 8px',
-      borderRadius: 999,
-      fontSize: 11,
-      fontWeight: 600,
-      background: s.bg,
-      color: s.color,
-    }}>
+    <span className={`inline-block px-2 py-[2px] rounded-full text-[11px] font-semibold ${cls[type] ?? 'bg-slate-100 text-slate-600'}`}>
       {label}
     </span>
   );
@@ -221,14 +201,14 @@ function HeartbeatTimeline({ agentName, intervalHours, offsetHours }: { agentNam
   for (let h = offsetHours; h < 24; h += intervalHours) runHours.push(h);
 
   return (
-    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '14px 18px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', width: 130, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+    <div className="bg-slate-50 border border-slate-200 rounded-[10px] px-[18px] py-[14px]">
+      <div className="flex items-center gap-3 mb-1">
+        <span className="text-xs font-semibold text-gray-700 w-[130px] shrink-0 overflow-hidden text-ellipsis whitespace-nowrap">
           {agentName}
         </span>
-        <span style={{ fontSize: 11, color: '#94a3b8', width: 70, flexShrink: 0 }}>every {intervalHours}h</span>
+        <span className="text-[11px] text-slate-400 w-[70px] shrink-0">every {intervalHours}h</span>
         {/* SVG timeline */}
-        <svg width="100%" height="28" viewBox="0 0 480 28" preserveAspectRatio="none" style={{ flex: 1, minWidth: 0 }}>
+        <svg width="100%" height="28" viewBox="0 0 480 28" preserveAspectRatio="none" className="flex-1 min-w-0">
           {/* Base line */}
           <line x1="0" y1="14" x2="480" y2="14" stroke="#d1d5db" strokeWidth="1.5" />
           {/* Hour ticks */}
@@ -242,13 +222,13 @@ function HeartbeatTimeline({ agentName, intervalHours, offsetHours }: { agentNam
         </svg>
       </div>
       {/* Hour labels */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 202, fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+      <div className="flex justify-between pl-[202px] text-[10px] text-slate-400 mt-0.5">
         {[0, 4, 8, 12, 16, 20, 24].map((h) => (
           <span key={h}>{h === 24 ? '' : `${h}h`}</span>
         ))}
       </div>
       {/* Run times list */}
-      <div style={{ marginTop: 10, paddingLeft: 202, fontSize: 12, color: '#6366f1', fontWeight: 500 }}>
+      <div className="mt-2.5 pl-[202px] text-xs text-indigo-500 font-medium">
         Runs at: {runHours.map(h => `${String(h).padStart(2, '0')}:00`).join('  ·  ')} UTC
       </div>
     </div>
@@ -257,11 +237,11 @@ function HeartbeatTimeline({ agentName, intervalHours, offsetHours }: { agentNam
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 20 }}>
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9' }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#1e293b' }}>{title}</h2>
+    <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
+      <div className="px-5 py-4 border-b border-slate-100">
+        <h2 className="m-0 text-[15px] font-semibold text-slate-900">{title}</h2>
       </div>
-      <div style={{ padding: '20px' }}>
+      <div className="p-5">
         {children}
       </div>
     </div>
@@ -270,28 +250,15 @@ function SectionCard({ title, children }: { title: string; children: React.React
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>{label}</label>
+    <div className="mb-4">
+      <label className="block text-[13px] font-medium text-gray-700 mb-1.5">{label}</label>
       {children}
-      {hint && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>{hint}</div>}
+      {hint && <div className="text-xs text-slate-400 mt-1">{hint}</div>}
     </div>
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 8,
-  fontSize: 13,
-  boxSizing: 'border-box',
-  color: '#1e293b',
-  background: '#fff',
-};
-
-const selectStyle: React.CSSProperties = {
-  ...inputStyle,
-};
+const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] text-slate-900 bg-white';
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
