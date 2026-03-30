@@ -604,7 +604,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
   if (loading) {
     return (
-      <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 14 }}>
+      <div className="py-12 text-center text-slate-500 text-[14px]">
         Loading agent...
       </div>
     );
@@ -612,32 +612,32 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
   // Shared data source inline form
   const renderDsForm = () => (
-    <div style={{ padding: '20px', borderBottom: '1px solid #e2e8f0', background: '#fafbff' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', marginBottom: 16 }}>
+    <div className="p-5 border-b border-slate-200 bg-[#fafbff]">
+      <div className="text-[14px] font-semibold text-slate-900 mb-4">
         {editingDsId || editingTempId ? 'Edit Data Source' : 'New Data Source'}
       </div>
       {dsFormError && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 14, color: '#dc2626', fontSize: 13 }}>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3.5 text-red-600 text-[13px]">
           {dsFormError}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <div style={{ gridColumn: '1 / -1' }}>
+      <div className="grid grid-cols-2 gap-3.5">
+        <div className="col-span-2">
           <Field label="Name *">
             <input
               value={dsForm.name}
               onChange={(e) => setDsForm({ ...dsForm, name: e.target.value })}
-              style={inputStyle}
+              className={inputCls}
               placeholder="e.g. Product Catalog"
             />
           </Field>
         </div>
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div className="col-span-2">
           <Field label="Description">
             <input
               value={dsForm.description}
               onChange={(e) => setDsForm({ ...dsForm, description: e.target.value })}
-              style={inputStyle}
+              className={inputCls}
               placeholder="Optional description"
             />
           </Field>
@@ -649,7 +649,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               setDsForm({ ...dsForm, sourceType: e.target.value, sourcePath: '' });
               setDsFormFile(null);
             }}
-            style={selectStyle}
+            className={inputCls}
           >
             {SOURCE_TYPE_OPTIONS.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
@@ -660,7 +660,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           <select
             value={dsForm.contentType}
             onChange={(e) => setDsForm({ ...dsForm, contentType: e.target.value })}
-            style={selectStyle}
+            className={inputCls}
           >
             {CONTENT_TYPE_OPTIONS.map((t) => (
               <option key={t} value={t}>{t}</option>
@@ -670,42 +670,34 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         {/* Source path / file picker — conditional on type */}
         {dsForm.sourceType === 'file_upload' ? (
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field label="File *" hint="Upload a file (PDF, CSV, TXT, JSON, Markdown, DOCX, etc.)">
               <div
-                style={{
-                  border: '2px dashed #d1d5db',
-                  borderRadius: 8,
-                  padding: '16px',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  background: dsFormFile ? '#f0fdf4' : '#fafafa',
-                  transition: 'background 0.15s',
-                }}
+                className={`border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer transition-colors duration-150 ${dsFormFile ? 'bg-green-50' : 'bg-gray-50'}`}
                 onClick={() => fileInputRef.current?.click()}
               >
                 {dsFormFile ? (
-                  <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 500 }}>
+                  <div className="text-[13px] text-green-600 font-medium">
                     {dsFormFile.name} ({(dsFormFile.size / 1024).toFixed(1)} KB)
-                    <div style={{ fontSize: 12, color: '#64748b', marginTop: 4, fontWeight: 400 }}>Click to change file</div>
+                    <div className="text-xs text-slate-500 mt-1 font-normal">Click to change file</div>
                   </div>
                 ) : editingDsId && dataSources.find((ds) => ds.id === editingDsId)?.sourcePath ? (
-                  <div style={{ fontSize: 13, color: '#64748b' }}>
-                    <div style={{ fontWeight: 500, color: '#1e293b', marginBottom: 4 }}>
+                  <div className="text-[13px] text-slate-500">
+                    <div className="font-medium text-slate-900 mb-1">
                       Current: {dataSources.find((ds) => ds.id === editingDsId)?.sourcePath.split('/').pop()}
                     </div>
                     Click to replace with a new file
                   </div>
                 ) : (
-                  <div style={{ fontSize: 13, color: '#64748b' }}>
-                    <div style={{ fontSize: 20, marginBottom: 6 }}>📁</div>
+                  <div className="text-[13px] text-slate-500">
+                    <div className="text-xl mb-1.5">📁</div>
                     Click to select a file
                   </div>
                 )}
                 <input
                   ref={fileInputRef}
                   type="file"
-                  style={{ display: 'none' }}
+                  className="hidden"
                   accept=".pdf,.csv,.txt,.json,.md,.markdown,.docx,.xlsx,.xml"
                   onChange={(e) => {
                     const file = e.target.files?.[0] ?? null;
@@ -716,7 +708,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </Field>
           </div>
         ) : (
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field
               label={
                 dsForm.sourceType === 'google_docs' ? 'Google Docs URL *'
@@ -728,7 +720,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               <input
                 value={dsForm.sourcePath}
                 onChange={(e) => setDsForm({ ...dsForm, sourcePath: e.target.value })}
-                style={inputStyle}
+                className={inputCls}
                 placeholder={
                   dsForm.sourceType === 'http_url' ? 'https://...'
                   : dsForm.sourceType === 'google_docs' ? 'https://docs.google.com/document/d/...'
@@ -742,7 +734,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         {/* Google Docs API key (optional) */}
         {dsForm.sourceType === 'google_docs' && (
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field
               label="Google Docs API Key (optional)"
               hint="Required for private documents. Leave empty for publicly published docs."
@@ -750,7 +742,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               <input
                 value={dsForm.googleApiKey}
                 onChange={(e) => setDsForm({ ...dsForm, googleApiKey: e.target.value })}
-                style={inputStyle}
+                className={inputCls}
                 type="password"
                 placeholder="AIza..."
               />
@@ -760,7 +752,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         {/* Sync mode — only for live source types */}
         {LIVE_SOURCE_TYPES.has(dsForm.sourceType) && (
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field
               label="Sync Mode"
               hint={
@@ -769,24 +761,15 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                   : 'Source is re-fetched the first time the agent is used after the refresh interval expires.'
               }
             >
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div className="flex gap-2.5">
                 {(['lazy', 'proactive'] as const).map((mode) => (
                   <label
                     key={mode}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '8px 14px',
-                      border: `2px solid ${dsForm.syncMode === mode ? '#6366f1' : '#d1d5db'}`,
-                      borderRadius: 8,
-                      cursor: 'pointer',
-                      background: dsForm.syncMode === mode ? '#eef2ff' : '#fff',
-                      fontSize: 13,
-                      fontWeight: dsForm.syncMode === mode ? 600 : 400,
-                      color: dsForm.syncMode === mode ? '#4338ca' : '#374151',
-                      transition: 'all 0.1s',
-                    }}
+                    className={`flex items-center gap-2 px-3.5 py-2 border-2 rounded-lg cursor-pointer text-[13px] transition-all duration-100 ${
+                      dsForm.syncMode === mode
+                        ? 'border-indigo-500 bg-indigo-50 font-semibold text-indigo-700'
+                        : 'border-gray-300 bg-white font-normal text-gray-700'
+                    }`}
                   >
                     <input
                       type="radio"
@@ -794,7 +777,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                       value={mode}
                       checked={dsForm.syncMode === mode}
                       onChange={() => setDsForm({ ...dsForm, syncMode: mode })}
-                      style={{ display: 'none' }}
+                      className="hidden"
                     />
                     {mode === 'lazy' ? 'Lazy (on demand)' : 'Proactive (background sync)'}
                   </label>
@@ -815,7 +798,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               min={1}
               value={dsForm.cacheMinutes}
               onChange={(e) => setDsForm({ ...dsForm, cacheMinutes: parseInt(e.target.value) || 60 })}
-              style={inputStyle}
+              className={inputCls}
             />
           </Field>
         )}
@@ -825,7 +808,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             type="number"
             value={dsForm.priority}
             onChange={(e) => setDsForm({ ...dsForm, priority: parseInt(e.target.value) || 0 })}
-            style={inputStyle}
+            className={inputCls}
           />
         </Field>
         <Field label="Max Token Budget" hint="Max tokens this source contributes to context">
@@ -833,30 +816,21 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             type="number"
             value={dsForm.maxTokenBudget}
             onChange={(e) => setDsForm({ ...dsForm, maxTokenBudget: parseInt(e.target.value) || 1000 })}
-            style={inputStyle}
+            className={inputCls}
           />
         </Field>
       </div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+      <div className="flex gap-2.5 mt-1">
         <button
           onClick={handleSaveDs}
           disabled={dsSaving}
-          style={{
-            padding: '8px 20px',
-            background: dsSaving ? '#a5b4fc' : '#6366f1',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 8,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: dsSaving ? 'not-allowed' : 'pointer',
-          }}
+          className={`px-5 py-2 text-white border-none rounded-lg text-[13px] font-medium transition-colors ${dsSaving ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-500 cursor-pointer'}`}
         >
           {dsSaving ? 'Saving...' : editingDsId || editingTempId ? 'Update' : isNew ? 'Add to Agent' : 'Add Source'}
         </button>
         <button
           onClick={cancelDsForm}
-          style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+          className="px-5 py-2 bg-slate-100 text-gray-700 border-none rounded-lg text-[13px] cursor-pointer"
         >
           Cancel
         </button>
