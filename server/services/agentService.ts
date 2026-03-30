@@ -420,6 +420,9 @@ export const agentService = {
       status: a.status,
       systemAgentId: a.systemAgentId,
       isSystemManaged: a.isSystemManaged,
+      heartbeatEnabled: a.heartbeatEnabled,
+      heartbeatIntervalHours: a.heartbeatIntervalHours,
+      heartbeatOffsetHours: a.heartbeatOffsetHours,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -440,6 +443,9 @@ export const agentService = {
       status: a.status,
       systemAgentId: a.systemAgentId,
       isSystemManaged: a.isSystemManaged,
+      heartbeatEnabled: a.heartbeatEnabled,
+      heartbeatIntervalHours: a.heartbeatIntervalHours,
+      heartbeatOffsetHours: a.heartbeatOffsetHours,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -478,6 +484,9 @@ export const agentService = {
       status: agent.status,
       systemAgentId: agent.systemAgentId,
       isSystemManaged: agent.isSystemManaged,
+      heartbeatEnabled: agent.heartbeatEnabled,
+      heartbeatIntervalHours: agent.heartbeatIntervalHours,
+      heartbeatOffsetHours: agent.heartbeatOffsetHours,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
       dataSources: sources.map((s) => ({
@@ -559,6 +568,9 @@ export const agentService = {
       allowModelOverride: number;
       defaultSkillSlugs: string[];
       icon: string;
+      heartbeatEnabled: boolean;
+      heartbeatIntervalHours: number | null;
+      heartbeatOffsetHours: number;
     }>
   ) {
     const [existing] = await db
@@ -587,6 +599,9 @@ export const agentService = {
     if (data.allowModelOverride !== undefined) update.allowModelOverride = data.allowModelOverride;
     if (data.defaultSkillSlugs !== undefined) update.defaultSkillSlugs = data.defaultSkillSlugs;
     if (data.icon !== undefined) update.icon = data.icon;
+    if (data.heartbeatEnabled !== undefined) update.heartbeatEnabled = data.heartbeatEnabled;
+    if (data.heartbeatIntervalHours !== undefined) update.heartbeatIntervalHours = data.heartbeatIntervalHours;
+    if (data.heartbeatOffsetHours !== undefined) update.heartbeatOffsetHours = data.heartbeatOffsetHours;
 
     const [updated] = await db
       .update(agents)
