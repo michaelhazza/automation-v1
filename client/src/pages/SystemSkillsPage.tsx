@@ -15,11 +15,6 @@ interface SystemSkill {
   createdAt: string;
 }
 
-const STATUS_BADGE: Record<string, { bg: string; color: string }> = {
-  active:   { bg: '#dcfce7', color: '#166534' },
-  inactive: { bg: '#fff7ed', color: '#9a3412' },
-};
-
 export default function SystemSkillsPage({ user }: { user: User }) {
   const navigate = useNavigate();
   const [skills, setSkills] = useState<SystemSkill[]>([]);
@@ -53,25 +48,21 @@ export default function SystemSkillsPage({ user }: { user: User }) {
   };
 
   if (loading) {
-    return <div style={{ padding: 48, textAlign: 'center', color: '#64748b', fontSize: 14 }}>Loading...</div>;
+    return <div className="py-12 text-center text-slate-500 text-[14px]">Loading...</div>;
   }
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>System Skills</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0', fontSize: 14 }}>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Skills</h1>
+          <p className="text-slate-500 mt-2 mb-0 text-[14px]">
             Platform-level skills that handle task board interactions and core agent capabilities. These are automatically attached to system agents and hidden from organisation admins.
           </p>
         </div>
         <button
           onClick={() => navigate('/system/skills/new')}
-          style={{
-            padding: '10px 20px', background: '#6366f1', color: '#fff',
-            border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500,
-            whiteSpace: 'nowrap',
-          }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
         >
           + New System Skill
         </button>
@@ -87,62 +78,58 @@ export default function SystemSkillsPage({ user }: { user: User }) {
         />
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {skills.length === 0 ? (
-          <div style={{ padding: '48px 32px', textAlign: 'center' }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>&#128295;</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#1e293b', marginBottom: 6 }}>No system skills yet</div>
-            <div style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>Create system skills to define core capabilities.</div>
+          <div className="py-12 px-8 text-center">
+            <div className="text-[36px] mb-3">🔧</div>
+            <div className="text-[15px] font-semibold text-slate-800 mb-1.5">No system skills yet</div>
+            <div className="text-[13px] text-slate-500 mb-4">Create system skills to define core capabilities.</div>
             <button
               onClick={() => navigate('/system/skills/new')}
-              style={{ padding: '8px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
             >
               + Create System Skill
             </button>
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full border-collapse text-[14px]">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Slug</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Methodology</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151', fontSize: 13 }}>Active</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: '#374151', fontSize: 13 }}>Actions</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Name</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Slug</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Methodology</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Active</th>
+                <th className="px-4 py-3 text-right font-semibold text-slate-700 text-[13px]">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {skills.map((skill) => (
-                <tr key={skill.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{skill.name}</div>
-                    {skill.description && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{skill.description}</div>}
+                <tr key={skill.id}>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold text-slate-800">{skill.name}</div>
+                    {skill.description && <div className="text-[12px] text-slate-500 mt-0.5">{skill.description}</div>}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <code style={{ fontSize: 12, background: '#f1f5f9', padding: '2px 6px', borderRadius: 4, color: '#475569' }}>{skill.slug}</code>
+                  <td className="px-4 py-3">
+                    <code className="text-[12px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{skill.slug}</code>
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
+                  <td className="px-4 py-3">
                     {skill.methodology ? (
-                      <span style={{ fontSize: 12, color: '#166534', background: '#dcfce7', padding: '2px 8px', borderRadius: 4 }}>Has methodology</span>
+                      <span className="text-[12px] text-green-800 bg-green-100 px-2 py-0.5 rounded">Has methodology</span>
                     ) : (
-                      <span style={{ fontSize: 12, color: '#9a3412', background: '#fff7ed', padding: '2px 8px', borderRadius: 4 }}>No methodology</span>
+                      <span className="text-[12px] text-orange-800 bg-orange-50 px-2 py-0.5 rounded">No methodology</span>
                     )}
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{
-                      display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 500,
-                      background: skill.isActive ? STATUS_BADGE.active.bg : STATUS_BADGE.inactive.bg,
-                      color: skill.isActive ? STATUS_BADGE.active.color : STATUS_BADGE.inactive.color,
-                    }}>
+                  <td className="px-4 py-3">
+                    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-medium ${skill.isActive ? 'bg-green-100 text-green-800' : 'bg-orange-50 text-orange-800'}`}>
                       {skill.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </td>
-                  <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
-                      <Link to={`/system/skills/${skill.id}`} style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, textDecoration: 'none', fontWeight: 500 }}>Edit</Link>
-                      <button onClick={() => setDeleteId(skill.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}>Delete</button>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex gap-2 justify-end items-center">
+                      <Link to={`/system/skills/${skill.id}`} className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[12px] font-medium no-underline transition-colors">Edit</Link>
+                      <button onClick={() => setDeleteId(skill.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors">Delete</button>
                     </div>
-                    {actionError[skill.id] && <div style={{ fontSize: 11, color: '#dc2626', marginTop: 4 }}>{actionError[skill.id]}</div>}
+                    {actionError[skill.id] && <div className="text-[11px] text-red-600 mt-1">{actionError[skill.id]}</div>}
                   </td>
                 </tr>
               ))}
