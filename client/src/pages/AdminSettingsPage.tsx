@@ -15,31 +15,24 @@ const TAB_LABELS: Record<SettingsTab, string> = {
 export default function AdminSettingsPage({ user, initialTab }: { user: User; initialTab?: SettingsTab }) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'board');
 
-  const tabStyle = (tab: SettingsTab): React.CSSProperties => ({
-    padding: '8px 16px',
-    border: 'none',
-    borderBottom: `2px solid ${activeTab === tab ? '#2563eb' : 'transparent'}`,
-    background: 'transparent',
-    color: activeTab === tab ? '#2563eb' : '#64748b',
-    fontWeight: activeTab === tab ? 600 : 400,
-    fontSize: 14,
-    cursor: 'pointer',
-  });
-
   return (
     <div className="page-enter">
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.03em' }}>
-          Settings
-        </h1>
-        <p style={{ color: '#64748b', margin: 0, fontSize: 14 }}>
-          Manage organisation configuration
-        </p>
+      <div className="mb-6">
+        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">Settings</h1>
+        <p className="text-sm text-slate-500 mt-1.5">Manage organisation configuration</p>
       </div>
 
-      <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
-        {(Object.keys(TAB_LABELS) as SettingsTab[]).map(tab => (
-          <button key={tab} style={tabStyle(tab)} onClick={() => setActiveTab(tab)}>
+      <div className="border-b border-slate-200 mb-6 flex gap-1">
+        {(Object.keys(TAB_LABELS) as SettingsTab[]).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors ${
+              activeTab === tab
+                ? 'border-indigo-600 text-indigo-600 font-semibold'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
             {TAB_LABELS[tab]}
           </button>
         ))}
