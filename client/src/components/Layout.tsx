@@ -32,7 +32,7 @@ function toInitials(name: string) {
 const Ico = ({ children, size = 15 }: { children: React.ReactNode; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
-    style={{ flexShrink: 0 }}>{children}</svg>
+    className="shrink-0">{children}</svg>
 );
 
 const Icons = {
@@ -108,25 +108,18 @@ function NavItem({
   const { pathname } = useLocation();
   const active = exact ? pathname === to : pathname === to || pathname.startsWith(to + '/');
   return (
-    <Link to={to} style={{
-      display: 'flex', alignItems: 'center', gap: 9,
-      padding: '7px 12px', margin: '1px 6px', borderRadius: 7,
-      fontSize: 13, fontWeight: 500, textDecoration: 'none',
-      color: active ? '#f1f5f9' : '#94a3b8',
-      background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
-      transition: 'color 0.1s, background 0.1s',
-    }}
-      onMouseEnter={e => { if (!active) { (e.currentTarget as HTMLAnchorElement).style.color = '#e2e8f0'; (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.04)'; } }}
-      onMouseLeave={e => { if (!active) { (e.currentTarget as HTMLAnchorElement).style.color = '#94a3b8'; (e.currentTarget as HTMLAnchorElement).style.background = 'transparent'; } }}
+    <Link
+      to={to}
+      className={`flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium no-underline transition-[color,background] duration-100 ${
+        active
+          ? 'text-slate-100 bg-white/[0.08]'
+          : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+      }`}
     >
-      <span style={{ color: active ? '#a5b4fc' : 'inherit' }}>{icon}</span>
-      <span style={{ flex: 1 }}>{label}</span>
+      <span className={active ? 'text-indigo-300' : ''}>{icon}</span>
+      <span className="flex-1">{label}</span>
       {!!badge && badge > 0 && (
-        <span style={{
-          minWidth: 18, height: 18, borderRadius: 9, padding: '0 5px',
-          background: '#6366f1', color: 'white', fontSize: 10, fontWeight: 700,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
+        <span className="min-w-[18px] h-[18px] rounded-[9px] px-[5px] bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
@@ -136,7 +129,7 @@ function NavItem({
 
 function NavSection({ label }: { label: string }) {
   return (
-    <div style={{ padding: '14px 18px 4px', fontSize: 10, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+    <div className="px-[18px] pt-[14px] pb-1 text-[10px] font-bold text-slate-700 uppercase tracking-[0.1em]">
       {label}
     </div>
   );
@@ -278,7 +271,7 @@ export default function Layout({ user, children }: LayoutProps) {
   const breadcrumbs = buildBreadcrumbs(location.pathname, activeClientName);
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: "'Inter', -apple-system, system-ui, sans-serif" }}>
+    <div className="flex h-screen overflow-hidden">
       <CommandPalette
         isOpen={cmdOpen}
         onClose={() => setCmdOpen(false)}
@@ -287,58 +280,46 @@ export default function Layout({ user, children }: LayoutProps) {
       />
 
       {/* ── Icon Rail ─────────────────────────────────────────────────── */}
-      <aside style={{
-        width: 56, background: '#080e1a', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', paddingTop: 10, paddingBottom: 10,
-        borderRight: '1px solid rgba(255,255,255,0.05)', flexShrink: 0, gap: 4,
-      }}>
+      <aside className="w-14 bg-[#080e1a] flex flex-col items-center pt-2.5 pb-2.5 border-r border-white/5 shrink-0 gap-1">
         {/* App logo */}
-        <Link to="/" style={{ textDecoration: 'none', marginBottom: 6 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10, cursor: 'pointer',
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(99,102,241,0.4)',
-          }}>
+        <Link to="/" className="no-underline mb-1.5">
+          <div className="w-9 h-9 rounded-[10px] cursor-pointer bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-[0_2px_8px_rgba(99,102,241,0.4)]">
             <Icons.bolt />
           </div>
         </Link>
 
         {/* Org picker — system admin only */}
         {isSystemAdmin && (
-          <div ref={orgPickerRef} style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}>
+          <div ref={orgPickerRef} className="relative w-full flex justify-center">
             <button
               onClick={() => setOrgPickerOpen(o => !o)}
               title={activeOrgName ?? 'Select organisation'}
-              style={{
-                width: 36, height: 36, borderRadius: 8, border: 'none', cursor: 'pointer',
-                background: activeOrgId ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.06)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: activeOrgId ? '#a5b4fc' : '#475569',
-                transition: 'background 0.15s', fontFamily: 'inherit',
-              }}
+              className={`w-9 h-9 rounded-lg border-none cursor-pointer flex items-center justify-center transition-colors duration-150 [font-family:inherit] ${
+                activeOrgId
+                  ? 'bg-indigo-500/25 text-indigo-300'
+                  : 'bg-white/[0.06] text-slate-600'
+              }`}
             >
               <Icons.platform />
             </button>
             {orgPickerOpen && (
-              <div style={{
-                position: 'absolute', left: 44, top: 0, zIndex: 300,
-                background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 10, boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
-                width: 220, maxHeight: 280, overflowY: 'auto',
-              }}>
-                <div style={{ padding: '8px 12px 5px', fontSize: 10, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              <div className="absolute left-11 top-0 z-[300] bg-slate-800 border border-white/10 rounded-[10px] shadow-[0_16px_48px_rgba(0,0,0,0.6)] w-[220px] max-h-[280px] overflow-y-auto">
+                <div className="px-3 pt-2 pb-[5px] text-[10px] font-bold text-slate-600 uppercase tracking-[0.1em]">
                   Organisation
                 </div>
-                {orgs.length === 0 && <div style={{ padding: '10px 14px', color: '#475569', fontSize: 12 }}>No organisations</div>}
+                {orgs.length === 0 && (
+                  <div className="px-[14px] py-[10px] text-slate-600 text-xs">No organisations</div>
+                )}
                 {orgs.map(org => (
-                  <button key={org.id} onClick={() => handleSelectOrg(org)} style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px',
-                    background: org.id === activeOrgId ? 'rgba(99,102,241,0.15)' : 'transparent',
-                    color: org.id === activeOrgId ? '#a5b4fc' : '#cbd5e1',
-                    border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
-                    fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-                  }}>
+                  <button
+                    key={org.id}
+                    onClick={() => handleSelectOrg(org)}
+                    className={`block w-full text-left px-[14px] py-[9px] border-0 border-b border-white/5 text-[13px] cursor-pointer [font-family:inherit] transition-colors ${
+                      org.id === activeOrgId
+                        ? 'bg-indigo-500/[0.15] text-indigo-300'
+                        : 'bg-transparent text-slate-300'
+                    }`}
+                  >
                     {org.name}
                   </button>
                 ))}
@@ -349,7 +330,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
         {/* Divider above client icons */}
         {hasOrgContext && subaccounts.length > 0 && (
-          <div style={{ width: 24, height: 1, background: 'rgba(255,255,255,0.07)', margin: '2px 0' }} />
+          <div className="w-6 h-px bg-white/[0.07] my-0.5" />
         )}
 
         {/* Client icons */}
@@ -357,95 +338,73 @@ export default function Layout({ user, children }: LayoutProps) {
           const isActive = sa.id === activeClientId;
           const bg = avatarColor(sa.name);
           return (
-            <div key={sa.id} style={{ position: 'relative', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div key={sa.id} className="relative w-full flex items-center justify-center">
               {isActive && (
-                <div style={{
-                  position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
-                  width: 3, height: 20, borderRadius: '0 3px 3px 0', background: 'white',
-                }} />
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-[3px] bg-white" />
               )}
               <button
                 onClick={() => handleSelectClient(sa)}
                 title={sa.name}
-                style={{
-                  width: 36, height: 36, border: 'none', cursor: 'pointer',
-                  borderRadius: isActive ? 10 : 14,
-                  background: bg, color: 'white',
-                  fontSize: 12, fontWeight: 700, letterSpacing: '-0.02em',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  opacity: isActive ? 1 : 0.55,
-                  boxShadow: isActive ? `0 0 0 2px rgba(255,255,255,0.2)` : 'none',
-                  transition: 'border-radius 0.15s, opacity 0.15s, box-shadow 0.15s',
-                  fontFamily: 'inherit',
-                }}
-                onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.opacity = '0.85'; }}
-                onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.opacity = '0.55'; }}
+                style={{ background: bg }}
+                className={`w-9 h-9 border-none cursor-pointer text-white text-xs font-bold tracking-[-0.02em] flex items-center justify-center [font-family:inherit] transition-[border-radius,opacity,box-shadow] duration-150 ${
+                  isActive
+                    ? 'rounded-[10px] opacity-100 shadow-[0_0_0_2px_rgba(255,255,255,0.2)]'
+                    : 'rounded-[14px] opacity-[0.55] hover:opacity-[0.85]'
+                }`}
               >
                 {toInitials(sa.name)}
               </button>
               {sa.status !== 'active' && (
-                <div style={{
-                  position: 'absolute', bottom: 2, right: 7,
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: sa.status === 'suspended' ? '#f59e0b' : '#64748b',
-                  border: '1.5px solid #080e1a',
-                }} />
+                <div className={`absolute bottom-0.5 right-[7px] w-2 h-2 rounded-full border-[1.5px] border-[#080e1a] ${
+                  sa.status === 'suspended' ? 'bg-amber-400' : 'bg-slate-500'
+                }`} />
               )}
             </div>
           );
         })}
 
-        <div style={{ flex: 1 }} />
+        <div className="flex-1" />
 
         {/* User avatar */}
         <button
           onClick={() => navigate('/settings')}
           title={`${user.firstName} ${user.lastName}`}
-          style={{
-            width: 32, height: 32, borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)',
-            cursor: 'pointer', background: 'linear-gradient(135deg, #334155, #475569)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: 'inherit',
-          }}
+          className="w-8 h-8 rounded-lg border border-white/10 cursor-pointer bg-gradient-to-br from-slate-700 to-slate-600 flex items-center justify-center text-[11px] font-bold text-slate-200 [font-family:inherit]"
         >
           {userInitials}
         </button>
       </aside>
 
       {/* ── Main Sidebar ──────────────────────────────────────────────── */}
-      <aside className="sidebar-scroll" style={{
-        width: 220, background: '#0f172a', display: 'flex', flexDirection: 'column',
-        borderRight: '1px solid rgba(255,255,255,0.05)', flexShrink: 0,
-        overflowY: 'auto', overflowX: 'hidden',
-      }}>
+      <aside className="sidebar-scroll w-[220px] bg-slate-900 flex flex-col border-r border-white/5 shrink-0 overflow-y-auto overflow-x-hidden">
         {/* Context header */}
-        <div style={{ padding: '14px 18px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="px-[18px] pt-[14px] pb-3 border-b border-white/5">
           {activeClientId && activeClientName ? (
             <>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div className="text-[13px] font-bold text-slate-100 overflow-hidden text-ellipsis whitespace-nowrap">
                 {activeClientName}
               </div>
-              <div style={{ fontSize: 11, color: '#334155', marginTop: 2 }}>Client workspace</div>
+              <div className="text-[11px] text-slate-700 mt-0.5">Client workspace</div>
             </>
           ) : hasOrgContext ? (
             <>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>
+              <div className="text-[13px] font-bold text-slate-100">
                 {isSystemAdmin ? (activeOrgName ?? 'Organisation') : 'Organisation'}
               </div>
-              <div style={{ fontSize: 11, color: '#334155', marginTop: 2 }}>Org workspace</div>
+              <div className="text-[11px] text-slate-700 mt-0.5">Org workspace</div>
             </>
           ) : isSystemAdmin ? (
             <>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>Platform</div>
-              <div style={{ fontSize: 11, color: '#334155', marginTop: 2 }}>System admin</div>
+              <div className="text-[13px] font-bold text-slate-100">Platform</div>
+              <div className="text-[11px] text-slate-700 mt-0.5">System admin</div>
             </>
           ) : (
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>Automation OS</div>
+            <div className="text-[13px] font-bold text-slate-100">Automation OS</div>
           )}
         </div>
 
         {/* Navigation */}
-        <div style={{ flex: 1, paddingTop: 4, paddingBottom: 4 }}>
+        <div className="flex-1 py-1">
 
           <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
 
@@ -510,20 +469,11 @@ export default function Layout({ user, children }: LayoutProps) {
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '6px 6px 8px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="px-1.5 pt-1.5 pb-2 border-t border-white/5">
           <NavItem to="/settings" exact icon={<Icons.settings />} label="Profile Settings" />
           <button
             onClick={handleLogout}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 9,
-              padding: '7px 12px', width: 'calc(100% - 12px)', margin: '1px 6px',
-              border: 'none', cursor: 'pointer', borderRadius: 7,
-              background: 'transparent', color: '#475569',
-              fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
-              transition: 'color 0.1s, background 0.1s',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#f1f5f9'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = '#475569'; (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+            className="flex items-center gap-[9px] px-3 py-[7px] w-[calc(100%-12px)] mx-1.5 my-px border-none cursor-pointer rounded-[7px] bg-transparent text-slate-600 text-[13px] font-medium [font-family:inherit] transition-[color,background] duration-100 hover:text-slate-100 hover:bg-white/[0.04]"
           >
             <Icons.logout />
             <span>Sign out</span>
@@ -532,26 +482,19 @@ export default function Layout({ user, children }: LayoutProps) {
       </aside>
 
       {/* ── Main content ──────────────────────────────────────────────── */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f8fafc' }}>
+      <main className="flex-1 flex flex-col overflow-hidden bg-slate-50">
 
         {/* Breadcrumb bar */}
-        <div style={{
-          height: 42, padding: '0 16px 0 24px', display: 'flex', alignItems: 'center',
-          background: 'white', borderBottom: '1px solid #e2e8f0', flexShrink: 0,
-          fontSize: 13, gap: 6,
-        }}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="h-[42px] pr-4 pl-6 flex items-center bg-white border-b border-slate-200 shrink-0 text-[13px] gap-1.5">
+          <div className="flex-1 flex items-center gap-1.5">
             {breadcrumbs.length === 0
-              ? <span style={{ color: '#1e293b', fontWeight: 600 }}>Dashboard</span>
+              ? <span className="text-slate-900 font-semibold">Dashboard</span>
               : breadcrumbs.map((crumb, i) => (
-                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {i > 0 && <span style={{ color: '#cbd5e1' }}>›</span>}
+                <span key={i} className="flex items-center gap-1.5">
+                  {i > 0 && <span className="text-slate-300">›</span>}
                   {i === breadcrumbs.length - 1
-                    ? <span style={{ color: '#1e293b', fontWeight: 600 }}>{crumb.label}</span>
-                    : <Link to={crumb.to} style={{ color: '#64748b', textDecoration: 'none' }}
-                        onMouseEnter={e => (e.currentTarget.style.color = '#6366f1')}
-                        onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
-                      >{crumb.label}</Link>
+                    ? <span className="text-slate-900 font-semibold">{crumb.label}</span>
+                    : <Link to={crumb.to} className="text-slate-500 no-underline hover:text-indigo-500 transition-colors duration-100">{crumb.label}</Link>
                   }
                 </span>
               ))
@@ -560,24 +503,16 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* Cmd+K trigger */}
           <button
             onClick={() => setCmdOpen(true)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
-              background: '#f1f5f9', border: '1px solid #e2e8f0',
-              color: '#94a3b8', fontSize: 12, fontFamily: 'inherit',
-              transition: 'border-color 0.1s, color 0.1s',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#6366f1'; (e.currentTarget as HTMLButtonElement).style.color = '#6366f1'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#e2e8f0'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md cursor-pointer bg-slate-100 border border-slate-200 text-slate-400 text-xs [font-family:inherit] transition-[border-color,color] duration-100 hover:border-indigo-500 hover:text-indigo-500"
           >
             <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <span>Search</span>
-            <span style={{ fontSize: 10, opacity: 0.6 }}>⌘K</span>
+            <span className="text-[10px] opacity-60">⌘K</span>
           </button>
         </div>
 
         {/* Page content */}
-        <div style={{ flex: 1, overflow: 'auto', padding: '28px 24px' }} className="page-enter">
+        <div className="flex-1 overflow-auto py-7 px-6 page-enter">
           {children}
         </div>
       </main>
