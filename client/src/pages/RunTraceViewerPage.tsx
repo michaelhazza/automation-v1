@@ -3,10 +3,6 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface ToolCallEntry {
   tool?: string;
   name?: string;
@@ -57,28 +53,21 @@ interface RunDetail {
   updatedAt: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const STATUS_BADGE: Record<string, string> = {
+  completed:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+  failed:          'bg-red-50 text-red-700 border-red-200',
+  running:         'bg-blue-50 text-blue-700 border-blue-200',
+  pending:         'bg-slate-100 text-slate-600 border-slate-200',
+  timeout:         'bg-amber-50 text-amber-700 border-amber-200',
+  cancelled:       'bg-slate-100 text-slate-400 border-slate-200',
+  loop_detected:   'bg-amber-100 text-amber-800 border-amber-200',
+  budget_exceeded: 'bg-amber-100 text-amber-800 border-amber-200',
+};
 
 function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, { bg: string; fg: string; border: string }> = {
-    completed: { bg: '#ecfdf5', fg: '#059669', border: '#a7f3d0' },
-    failed: { bg: '#fef2f2', fg: '#dc2626', border: '#fecaca' },
-    running: { bg: '#eff6ff', fg: '#2563eb', border: '#bfdbfe' },
-    pending: { bg: '#f8fafc', fg: '#64748b', border: '#e2e8f0' },
-    timeout: { bg: '#fffbeb', fg: '#d97706', border: '#fde68a' },
-    cancelled: { bg: '#f8fafc', fg: '#94a3b8', border: '#e2e8f0' },
-    loop_detected: { bg: '#fef3c7', fg: '#b45309', border: '#fde68a' },
-    budget_exceeded: { bg: '#fef3c7', fg: '#b45309', border: '#fde68a' },
-  };
-  const c = colors[status] ?? colors.pending;
+  const cls = STATUS_BADGE[status] ?? STATUS_BADGE.pending;
   return (
-    <span style={{
-      display: 'inline-block', padding: '3px 10px', borderRadius: 9999,
-      fontSize: 12, fontWeight: 600, background: c.bg, color: c.fg,
-      border: `1px solid ${c.border}`,
-    }}>
+    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-semibold border ${cls}`}>
       {status.replace(/_/g, ' ')}
     </span>
   );
@@ -93,57 +82,24 @@ function formatDuration(ms: number | null): string {
 
 function formatTimestamp(ts: string | null): string {
   if (!ts) return '--';
-  return new Date(ts).toLocaleString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
+  return new Date(ts).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-// ---------------------------------------------------------------------------
-// Collapsible section
-// ---------------------------------------------------------------------------
-
-function CollapsibleSection({
-  title, defaultOpen = false, children, badge,
-}: {
-  title: string; defaultOpen?: boolean; children: React.ReactNode; badge?: React.ReactNode;
-}) {
+function CollapsibleSection({ title, defaultOpen = false, children, badge }: { title: string; defaultOpen?: boolean; children: React.ReactNode; badge?: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{
-      background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
-      marginBottom: 16, overflow: 'hidden',
-    }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 18px', border: 'none', background: 'none', cursor: 'pointer',
-          fontSize: 14, fontWeight: 700, color: '#0f172a', textAlign: 'left',
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            display: 'inline-block', width: 18, textAlign: 'center',
-            transition: 'transform 0.15s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-            fontSize: 12, color: '#94a3b8',
-          }}>&#9654;</span>
+    <div className="bg-white rounded-xl border border-slate-200 mb-4 overflow-hidden">
+      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-4 py-3.5 border-0 bg-transparent cursor-pointer text-[14px] font-bold text-slate-900 text-left">
+        <span className="flex items-center gap-2">
+          <span className={`inline-block w-4 text-center text-[12px] text-slate-400 transition-transform ${open ? 'rotate-90' : ''}`}>&#9654;</span>
           {title}
           {badge}
         </span>
       </button>
-      {open && (
-        <div style={{ padding: '0 18px 16px', borderTop: '1px solid #f1f5f9' }}>
-          {children}
-        </div>
-      )}
+      {open && <div className="px-4 pb-4 border-t border-slate-50">{children}</div>}
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Collapsible JSON block
-// ---------------------------------------------------------------------------
 
 function JsonBlock({ data, maxHeight = 300 }: { data: unknown; maxHeight?: number }) {
   const [expanded, setExpanded] = useState(false);
@@ -151,23 +107,14 @@ function JsonBlock({ data, maxHeight = 300 }: { data: unknown; maxHeight?: numbe
   const isLong = text.length > 500;
   return (
     <div>
-      <pre style={{
-        background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6,
-        padding: 12, fontSize: 12, fontFamily: 'ui-monospace, monospace',
-        color: '#334155', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-        maxHeight: expanded ? 'none' : maxHeight, overflow: 'hidden',
-        margin: 0,
-      }}>
+      <pre
+        className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[12px] font-mono text-slate-700 overflow-x-auto whitespace-pre-wrap break-words m-0"
+        style={{ maxHeight: expanded ? 'none' : maxHeight, overflow: expanded ? 'auto' : 'hidden' }}
+      >
         {text}
       </pre>
       {isLong && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          style={{
-            marginTop: 4, border: 'none', background: 'none', color: '#6366f1',
-            fontSize: 12, cursor: 'pointer', fontWeight: 600, padding: 0,
-          }}
-        >
+        <button onClick={() => setExpanded(!expanded)} className="mt-1 border-0 bg-transparent text-indigo-600 text-[12px] cursor-pointer font-semibold p-0">
           {expanded ? 'Show less' : 'Show more'}
         </button>
       )}
@@ -175,11 +122,7 @@ function JsonBlock({ data, maxHeight = 300 }: { data: unknown; maxHeight?: numbe
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
-
-export default function RunTraceViewerPage({ user }: { user: User }) {
+export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const { runId } = useParams<{ subaccountId: string; runId: string }>();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -196,11 +139,9 @@ export default function RunTraceViewerPage({ user }: { user: User }) {
 
   if (loading) {
     return (
-      <div className="page-enter" style={{ padding: 32 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {[1, 2, 3].map(i => (
-            <div key={i} className="skeleton" style={{ height: 48, borderRadius: 8 }} />
-          ))}
+      <div className="page-enter">
+        <div className="flex flex-col gap-3">
+          {[1, 2, 3].map((i) => <div key={i} className="skeleton h-12 rounded-xl" />)}
         </div>
       </div>
     );
@@ -208,86 +149,46 @@ export default function RunTraceViewerPage({ user }: { user: User }) {
 
   if (error || !run) {
     return (
-      <div className="page-enter" style={{ padding: 32 }}>
-        <div style={{
-          background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10,
-          padding: 24, color: '#dc2626', fontSize: 14,
-        }}>
-          {error ?? 'Run not found'}
-        </div>
+      <div className="page-enter">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-700 text-[14px]">{error ?? 'Run not found'}</div>
       </div>
     );
   }
 
-  const budgetPct = run.tokenBudget > 0
-    ? Math.min(100, Math.round((run.totalTokens / run.tokenBudget) * 100))
-    : 0;
-
+  const budgetPct = run.tokenBudget > 0 ? Math.min(100, Math.round((run.totalTokens / run.tokenBudget) * 100)) : 0;
   const toolCalls: ToolCallEntry[] = Array.isArray(run.toolCallsLog) ? run.toolCallsLog : [];
 
   return (
-    <div className="page-enter" style={{ maxWidth: 960, margin: '0 auto' }}>
-      {/* Breadcrumb */}
-      <div style={{ marginBottom: 16, fontSize: 13, color: '#64748b' }}>
-        <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} style={{ color: '#6366f1', textDecoration: 'none', fontWeight: 500 }}>
+    <div className="page-enter max-w-[960px] mx-auto">
+      <div className="mb-4 text-[13px] text-slate-500 flex items-center gap-1.5">
+        <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
           {run.subaccountName ?? 'Workspace'}
         </Link>
-        <span style={{ margin: '0 6px' }}>/</span>
+        <span>/</span>
         <span>Run Trace</span>
       </div>
 
-      {/* ── Run header ──────────────────────────────────────────────── */}
-      <div style={{
-        background: '#fff', borderRadius: 12, border: '1px solid #e2e8f0',
-        padding: '20px 24px', marginBottom: 16,
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+      <div className="bg-white rounded-xl border border-slate-200 px-6 py-5 mb-4">
+        <div className="flex justify-between items-start flex-wrap gap-3">
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.02em' }}>
-              {run.agentName ?? 'Agent Run'}
-            </h1>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13, color: '#64748b' }}>
+            <h1 className="text-[22px] font-extrabold text-slate-900 tracking-tight mb-1.5">{run.agentName ?? 'Agent Run'}</h1>
+            <div className="flex gap-2.5 items-center flex-wrap text-[13px] text-slate-500">
               <StatusBadge status={run.status} />
-              <span style={{
-                background: '#f1f5f9', padding: '2px 8px', borderRadius: 6,
-                fontSize: 11.5, fontWeight: 600, color: '#475569',
-              }}>
-                {run.runType}
-              </span>
-              {run.executionMode !== 'api' && (
-                <span style={{
-                  background: '#f5f3ff', padding: '2px 8px', borderRadius: 6,
-                  fontSize: 11.5, fontWeight: 600, color: '#7c3aed',
-                }}>
-                  {run.executionMode}
-                </span>
-              )}
-              {run.isSubAgent === 1 && (
-                <span style={{
-                  background: '#ecfdf5', padding: '2px 8px', borderRadius: 6,
-                  fontSize: 11.5, fontWeight: 600, color: '#059669',
-                }}>
-                  sub-agent
-                </span>
-              )}
+              <span className="bg-slate-100 px-2 py-0.5 rounded text-[11.5px] font-semibold text-slate-600">{run.runType}</span>
+              {run.executionMode !== 'api' && <span className="bg-violet-50 px-2 py-0.5 rounded text-[11.5px] font-semibold text-violet-700">{run.executionMode}</span>}
+              {run.isSubAgent === 1 && <span className="bg-emerald-50 px-2 py-0.5 rounded text-[11.5px] font-semibold text-emerald-700">sub-agent</span>}
             </div>
           </div>
-          <div style={{ textAlign: 'right', fontSize: 13, color: '#64748b', lineHeight: 1.8 }}>
+          <div className="text-right text-[13px] text-slate-500 leading-7">
             <div><strong>Duration:</strong> {formatDuration(run.durationMs)}</div>
             <div><strong>Started:</strong> {formatTimestamp(run.startedAt)}</div>
             <div><strong>Completed:</strong> {formatTimestamp(run.completedAt)}</div>
           </div>
         </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
-          ID: {run.id}
-        </div>
+        <div className="mt-2 text-[12px] text-slate-400 font-mono">ID: {run.id}</div>
       </div>
 
-      {/* ── Token summary ───────────────────────────────────────────── */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-        gap: 12, marginBottom: 16,
-      }}>
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
         {[
           { label: 'Input Tokens', value: run.inputTokens.toLocaleString() },
           { label: 'Output Tokens', value: run.outputTokens.toLocaleString() },
@@ -295,252 +196,132 @@ export default function RunTraceViewerPage({ user }: { user: User }) {
           { label: 'Budget Used', value: `${budgetPct}%` },
           { label: 'Tool Calls', value: run.totalToolCalls.toString() },
         ].map(({ label, value }) => (
-          <div key={label} style={{
-            background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
-            padding: '14px 16px', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              {label}
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>{value}</div>
+          <div key={label} className="bg-white rounded-xl border border-slate-200 py-3.5 px-4 text-center">
+            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</div>
+            <div className="text-[20px] font-extrabold text-slate-900">{value}</div>
           </div>
         ))}
       </div>
 
-      {/* ── Budget bar ──────────────────────────────────────────────── */}
-      <div style={{
-        background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
-        padding: '12px 16px', marginBottom: 16,
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b', marginBottom: 6 }}>
+      <div className="bg-white rounded-xl border border-slate-200 px-4 py-3 mb-4">
+        <div className="flex justify-between text-[12px] text-slate-500 mb-1.5">
           <span>Token Budget</span>
           <span>{run.totalTokens.toLocaleString()} / {run.tokenBudget.toLocaleString()}</span>
         </div>
-        <div style={{ background: '#f1f5f9', borderRadius: 999, height: 8, overflow: 'hidden' }}>
-          <div style={{
-            height: '100%', borderRadius: 999,
-            width: `${budgetPct}%`,
-            background: budgetPct >= 90 ? '#ef4444' : budgetPct >= 70 ? '#f59e0b' : '#22c55e',
-            transition: 'width 0.3s ease',
-          }} />
+        <div className="bg-slate-100 rounded-full h-2 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${budgetPct >= 90 ? 'bg-red-500' : budgetPct >= 70 ? 'bg-amber-400' : 'bg-green-500'}`}
+            style={{ width: `${budgetPct}%` }}
+          />
         </div>
       </div>
 
-      {/* ── Summary ─────────────────────────────────────────────────── */}
       {run.summary && (
         <CollapsibleSection title="Run Summary" defaultOpen>
-          <p style={{ margin: '12px 0 0', fontSize: 14, color: '#334155', lineHeight: 1.7 }}>
-            {run.summary}
-          </p>
+          <p className="mt-3 text-[14px] text-slate-700 leading-relaxed">{run.summary}</p>
         </CollapsibleSection>
       )}
 
-      {/* ── System prompt snapshot ──────────────────────────────────── */}
       {run.systemPromptSnapshot && (
         <CollapsibleSection
           title="System Prompt Snapshot"
-          badge={
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8', marginLeft: 8 }}>
-              ~{run.systemPromptTokens.toLocaleString()} tokens
-            </span>
-          }
+          badge={<span className="text-[11px] font-medium text-slate-400 ml-2">~{run.systemPromptTokens.toLocaleString()} tokens</span>}
         >
-          <div style={{ marginTop: 12 }}>
-            <JsonBlock data={run.systemPromptSnapshot} maxHeight={400} />
-          </div>
+          <div className="mt-3"><JsonBlock data={run.systemPromptSnapshot} maxHeight={400} /></div>
         </CollapsibleSection>
       )}
 
-      {/* ── Memory state at start ───────────────────────────────────── */}
       {run.memoryStateAtStart && (
         <CollapsibleSection title="Memory State at Start">
-          <div style={{ marginTop: 12 }}>
-            <JsonBlock data={run.memoryStateAtStart} maxHeight={300} />
-          </div>
+          <div className="mt-3"><JsonBlock data={run.memoryStateAtStart} maxHeight={300} /></div>
         </CollapsibleSection>
       )}
 
-      {/* ── Tool calls timeline ─────────────────────────────────────── */}
       {toolCalls.length > 0 && (
         <CollapsibleSection
           title="Tool Calls Timeline"
           defaultOpen
-          badge={
-            <span style={{
-              fontSize: 11, fontWeight: 600, color: '#fff', background: '#6366f1',
-              padding: '2px 8px', borderRadius: 999, marginLeft: 8,
-            }}>
-              {toolCalls.length}
-            </span>
-          }
+          badge={<span className="text-[11px] font-semibold text-white bg-indigo-600 px-2 py-0.5 rounded-full ml-2">{toolCalls.length}</span>}
         >
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {toolCalls.map((tc, i) => {
-              const toolName = tc.tool ?? tc.name ?? 'unknown';
-              return (
-                <ToolCallCard key={i} index={i} toolName={toolName} entry={tc} subaccountId={run.subaccountId} />
-              );
-            })}
+          <div className="mt-3 flex flex-col gap-2.5">
+            {toolCalls.map((tc, i) => (
+              <ToolCallCard key={i} index={i} toolName={tc.tool ?? tc.name ?? 'unknown'} entry={tc} subaccountId={run.subaccountId} />
+            ))}
           </div>
         </CollapsibleSection>
       )}
 
-      {/* ── Error section ───────────────────────────────────────────── */}
       {(run.status === 'failed' || run.errorMessage) && (
         <CollapsibleSection title="Error Details" defaultOpen>
-          <div style={{ marginTop: 12 }}>
-            {run.errorMessage && (
-              <div style={{
-                background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8,
-                padding: 14, fontSize: 13, color: '#dc2626', marginBottom: 10,
-                fontWeight: 500,
-              }}>
-                {run.errorMessage}
-              </div>
-            )}
-            {run.errorDetail && (
-              <JsonBlock data={run.errorDetail} />
-            )}
+          <div className="mt-3">
+            {run.errorMessage && <div className="bg-red-50 border border-red-200 rounded-lg p-3.5 text-[13px] text-red-700 font-medium mb-2.5">{run.errorMessage}</div>}
+            {run.errorDetail && <JsonBlock data={run.errorDetail} />}
           </div>
         </CollapsibleSection>
       )}
 
-      {/* ── Impact summary ──────────────────────────────────────────── */}
       {(run.tasksCreated > 0 || run.tasksUpdated > 0 || run.deliverablesCreated > 0) && (
         <CollapsibleSection title="Impact Summary" defaultOpen>
-          <div style={{ marginTop: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <div className="mt-3 flex gap-4 flex-wrap">
             {[
-              { label: 'Tasks Created', value: run.tasksCreated, color: '#059669' },
-              { label: 'Tasks Updated', value: run.tasksUpdated, color: '#2563eb' },
-              { label: 'Deliverables Created', value: run.deliverablesCreated, color: '#7c3aed' },
-            ].filter(x => x.value > 0).map(({ label, value, color }) => (
-              <div key={label} style={{
-                background: '#f8fafc', borderRadius: 8, padding: '10px 16px',
-                border: '1px solid #e2e8f0',
-              }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {label}
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
+              { label: 'Tasks Created', value: run.tasksCreated, cls: 'text-emerald-700' },
+              { label: 'Tasks Updated', value: run.tasksUpdated, cls: 'text-blue-700' },
+              { label: 'Deliverables Created', value: run.deliverablesCreated, cls: 'text-violet-700' },
+            ].filter((x) => x.value > 0).map(({ label, value, cls }) => (
+              <div key={label} className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5">
+                <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{label}</div>
+                <div className={`text-[22px] font-extrabold ${cls}`}>{value}</div>
               </div>
             ))}
           </div>
         </CollapsibleSection>
       )}
 
-      {/* ── Skills used ─────────────────────────────────────────────── */}
       {run.skillsUsed && (run.skillsUsed as string[]).length > 0 && (
         <CollapsibleSection title="Skills Used">
-          <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div className="mt-3 flex gap-1.5 flex-wrap">
             {(run.skillsUsed as string[]).map((slug, i) => (
-              <span key={i} style={{
-                background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe',
-                padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-              }}>
-                {slug}
-              </span>
+              <span key={i} className="bg-violet-50 text-violet-700 border border-violet-200 px-2.5 py-0.5 rounded text-[12px] font-semibold">{slug}</span>
             ))}
           </div>
         </CollapsibleSection>
       )}
 
-      {/* Bottom spacer */}
-      <div style={{ height: 40 }} />
+      <div className="h-10" />
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Tool call card sub-component
-// ---------------------------------------------------------------------------
-
-function ToolCallCard({
-  index, toolName, entry, subaccountId,
-}: {
-  index: number; toolName: string; entry: ToolCallEntry; subaccountId: string;
-}) {
+function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number; toolName: string; entry: ToolCallEntry; subaccountId: string }) {
   const [showInput, setShowInput] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
 
   return (
-    <div style={{
-      background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8,
-      padding: '12px 14px',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            width: 22, height: 22, borderRadius: 6, background: '#6366f1',
-            color: '#fff', fontSize: 11, fontWeight: 700,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          }}>
+    <div className="bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-3">
+      <div className="flex justify-between items-center flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="w-[22px] h-[22px] rounded-md bg-indigo-600 text-white text-[11px] font-bold flex items-center justify-center shrink-0">
             {index + 1}
           </span>
-          <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', fontFamily: 'ui-monospace, monospace' }}>
-            {toolName}
-          </span>
+          <span className="font-bold text-[13px] text-slate-900 font-mono">{toolName}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {entry.durationMs != null && (
-            <span style={{ fontSize: 11.5, color: '#64748b', fontWeight: 500 }}>
-              {formatDuration(entry.durationMs)}
-            </span>
-          )}
+        <div className="flex items-center gap-2">
+          {entry.durationMs != null && <span className="text-[11.5px] text-slate-500 font-medium">{formatDuration(entry.durationMs)}</span>}
           {entry.actionId && (
-            <Link
-              to={`/admin/subaccounts/${subaccountId}/workspace`}
-              style={{
-                fontSize: 11, color: '#6366f1', fontWeight: 600,
-                textDecoration: 'none', background: '#ede9fe',
-                padding: '2px 7px', borderRadius: 4,
-              }}
-            >
-              action
-            </Link>
+            <Link to={`/admin/subaccounts/${subaccountId}/workspace`} className="text-[11px] text-indigo-600 font-semibold no-underline bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">action</Link>
           )}
         </div>
       </div>
-
-      {/* Toggle buttons */}
-      <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+      <div className="mt-2 flex gap-1.5">
         {entry.input != null && (
-          <button
-            onClick={() => setShowInput(!showInput)}
-            style={{
-              border: '1px solid #e2e8f0', borderRadius: 5, padding: '3px 10px',
-              fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
-              background: showInput ? '#6366f1' : '#fff',
-              color: showInput ? '#fff' : '#64748b',
-            }}
-          >
-            Input
-          </button>
+          <button onClick={() => setShowInput(!showInput)} className={`border rounded-md px-2.5 py-0.5 text-[11.5px] font-semibold cursor-pointer transition-colors ${showInput ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>Input</button>
         )}
         {entry.output != null && (
-          <button
-            onClick={() => setShowOutput(!showOutput)}
-            style={{
-              border: '1px solid #e2e8f0', borderRadius: 5, padding: '3px 10px',
-              fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
-              background: showOutput ? '#6366f1' : '#fff',
-              color: showOutput ? '#fff' : '#64748b',
-            }}
-          >
-            Output
-          </button>
+          <button onClick={() => setShowOutput(!showOutput)} className={`border rounded-md px-2.5 py-0.5 text-[11.5px] font-semibold cursor-pointer transition-colors ${showOutput ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>Output</button>
         )}
       </div>
-
-      {showInput && entry.input != null && (
-        <div style={{ marginTop: 8 }}>
-          <JsonBlock data={entry.input} maxHeight={200} />
-        </div>
-      )}
-      {showOutput && entry.output != null && (
-        <div style={{ marginTop: 8 }}>
-          <JsonBlock data={entry.output} maxHeight={200} />
-        </div>
-      )}
+      {showInput && entry.input != null && <div className="mt-2"><JsonBlock data={entry.input} maxHeight={200} /></div>}
+      {showOutput && entry.output != null && <div className="mt-2"><JsonBlock data={entry.output} maxHeight={200} /></div>}
     </div>
   );
 }

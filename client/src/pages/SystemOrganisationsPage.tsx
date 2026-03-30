@@ -25,47 +25,24 @@ interface OrgUser {
   lastLoginAt: string | null;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: '#16a34a',
-  inactive: '#6b7280',
-  pending: '#d97706',
-};
-
 const ADMIN_ASSIGNABLE_ROLES = ['org_admin', 'manager', 'user', 'client_user'];
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '8px 12px',
-  border: '1px solid #d1d5db',
-  borderRadius: 8,
-  fontSize: 13,
-  boxSizing: 'border-box',
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 13,
-  fontWeight: 500,
-  marginBottom: 6,
-};
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+const labelCls = 'block text-[13px] font-medium text-slate-700 mb-1.5';
 
 export default function SystemOrganisationsPage({ user: _user }: { user: User }) {
-  // Org list
   const [orgs, setOrgs] = useState<Organisation[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Create org
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState({ name: '', slug: '', plan: 'starter', adminEmail: '', adminFirstName: '', adminLastName: '' });
   const [createError, setCreateError] = useState('');
 
-  // Edit org
   const [editOrg, setEditOrg] = useState<Organisation | null>(null);
   const [editForm, setEditForm] = useState({ name: '', description: '' });
   const [editError, setEditError] = useState('');
 
-  // Users dialog
   const [usersOrg, setUsersOrg] = useState<Organisation | null>(null);
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
@@ -85,8 +62,6 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
 
   useEffect(() => { loadOrgs(); }, []);
 
-  // ── Create org ──────────────────────────────────────────────────────────────
-
   const handleCreate = async () => {
     setCreateError('');
     try {
@@ -100,8 +75,6 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
     }
   };
 
-  // ── Inline plan / status updates ────────────────────────────────────────────
-
   const handleUpdateStatus = async (id: string, status: string) => {
     await api.patch(`/api/organisations/${id}`, { status });
     loadOrgs();
@@ -112,8 +85,6 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
     loadOrgs();
   };
 
-  // ── Delete org ───────────────────────────────────────────────────────────────
-
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
     await api.delete(`/api/organisations/${deleteId}`);
@@ -122,8 +93,6 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
   };
 
   const deleteOrgName = deleteId ? orgs.find((o) => o.id === deleteId) : null;
-
-  // ── Edit org dialog ──────────────────────────────────────────────────────────
 
   const openEditDialog = (org: Organisation) => {
     setEditOrg(org);
@@ -148,8 +117,6 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
       setEditError(e.response?.data?.error ?? 'Failed to update organisation');
     }
   };
-
-  // ── Users dialog ─────────────────────────────────────────────────────────────
 
   const loadOrgUsers = async (orgId: string) => {
     const { data } = await api.get('/api/users', { headers: { 'X-Organisation-Id': orgId } });
@@ -255,57 +222,57 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
 
   const removeUserTarget = removeUserId ? orgUsers.find((u) => u.id === removeUserId) : null;
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
     <>
-      {/* ── Page header ──────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      {/* Page header */}
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Organisations</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage all organisations on the platform</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Organisations</h1>
+          <p className="text-slate-500 mt-2 mb-0">Manage all organisations on the platform</p>
         </div>
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div className="flex gap-3">
           <Link
             to="/system/users"
-            style={{ padding: '10px 20px', background: '#f8fafc', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500, textDecoration: 'none', display: 'inline-block' }}
+            className="px-5 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium no-underline hover:bg-slate-100 transition-colors"
           >
             System Admins
           </Link>
           <button
             onClick={() => { setShowCreateForm(true); setCreateError(''); }}
-            style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
           >
             + Create organisation
           </button>
         </div>
       </div>
 
-      {/* ── Create org modal ─────────────────────────────────────────────── */}
+      {/* Create org modal */}
       {showCreateForm && (
         <Modal title="New organisation" onClose={() => setShowCreateForm(false)} maxWidth={600}>
-          {createError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{createError}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-            <div><label style={labelStyle}>Name *</label><input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Slug *</label><input value={createForm.slug} onChange={(e) => setCreateForm({ ...createForm, slug: e.target.value })} style={inputStyle} /></div>
+          {createError && <div className="text-red-600 text-[13px] mb-3">{createError}</div>}
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div><label className={labelCls}>Name *</label><input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Slug *</label><input value={createForm.slug} onChange={(e) => setCreateForm({ ...createForm, slug: e.target.value })} className={inputCls} /></div>
             <div>
-              <label style={labelStyle}>Plan *</label>
-              <select value={createForm.plan} onChange={(e) => setCreateForm({ ...createForm, plan: e.target.value })} style={inputStyle}>
+              <label className={labelCls}>Plan *</label>
+              <select value={createForm.plan} onChange={(e) => setCreateForm({ ...createForm, plan: e.target.value })} className={inputCls}>
                 {['starter', 'pro', 'agency'].map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
-            <div><label style={labelStyle}>Admin email *</label><input type="email" value={createForm.adminEmail} onChange={(e) => setCreateForm({ ...createForm, adminEmail: e.target.value })} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Admin first name *</label><input value={createForm.adminFirstName} onChange={(e) => setCreateForm({ ...createForm, adminFirstName: e.target.value })} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Admin last name *</label><input value={createForm.adminLastName} onChange={(e) => setCreateForm({ ...createForm, adminLastName: e.target.value })} style={inputStyle} /></div>
+            <div><label className={labelCls}>Admin email *</label><input type="email" value={createForm.adminEmail} onChange={(e) => setCreateForm({ ...createForm, adminEmail: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Admin first name *</label><input value={createForm.adminFirstName} onChange={(e) => setCreateForm({ ...createForm, adminFirstName: e.target.value })} className={inputCls} /></div>
+            <div><label className={labelCls}>Admin last name *</label><input value={createForm.adminLastName} onChange={(e) => setCreateForm({ ...createForm, adminLastName: e.target.value })} className={inputCls} /></div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
-            <button onClick={() => setShowCreateForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Create</button>
+            <button onClick={() => setShowCreateForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Cancel</button>
           </div>
         </Modal>
       )}
 
-      {/* ── Delete org confirm ───────────────────────────────────────────── */}
+      {/* Delete org confirm */}
       {deleteId && (
         <ConfirmDialog
           title="Delete organisation"
@@ -316,52 +283,47 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
         />
       )}
 
-      {/* ── Edit org dialog ──────────────────────────────────────────────── */}
+      {/* Edit org dialog */}
       {editOrg && (
         <Modal title={`Edit — ${editOrg.name}`} onClose={() => setEditOrg(null)} maxWidth={520}>
-          {editError && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{editError}</div>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
+          {editError && <div className="text-red-600 text-[13px] mb-3">{editError}</div>}
+          <div className="flex flex-col gap-3.5 mb-6">
             <div>
-              <label style={labelStyle}>Name *</label>
-              <input
-                value={editForm.name}
-                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                style={inputStyle}
-              />
+              <label className={labelCls}>Name *</label>
+              <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className={inputCls} />
             </div>
             <div>
-              <label style={labelStyle}>Description</label>
+              <label className={labelCls}>Description</label>
               <textarea
                 value={editForm.description}
                 onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                 rows={4}
                 placeholder="Optional description for this organisation"
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleEditSave} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Save changes</button>
-            <button onClick={() => setEditOrg(null)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button onClick={handleEditSave} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Save changes</button>
+            <button onClick={() => setEditOrg(null)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Cancel</button>
           </div>
         </Modal>
       )}
 
-      {/* ── Users dialog ─────────────────────────────────────────────────── */}
+      {/* Users dialog */}
       {usersOrg && (
         <Modal title={`Users — ${usersOrg.name}`} onClose={closeUsersDialog} maxWidth={820}>
           {usersSuccess && (
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#16a34a', fontSize: 13 }}>
+            <div className="bg-green-50 border border-green-200 rounded-lg px-3.5 py-2.5 mb-3.5 text-green-700 text-[13px]">
               {usersSuccess}
             </div>
           )}
           {usersError && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#dc2626', fontSize: 13 }}>
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 mb-3.5 text-red-600 text-[13px]">
               {usersError}
             </div>
           )}
 
-          {/* Remove user confirmation */}
           {removeUserId && (
             <ConfirmDialog
               title="Remove user"
@@ -372,21 +334,20 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             />
           )}
 
-          {/* Reset password dialog */}
           {resetPasswordUserId && (
-            <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 8px', color: '#0c4a6e' }}>
+            <div className="bg-sky-50 border border-sky-200 rounded-lg p-4 mb-4">
+              <h3 className="text-[14px] font-semibold text-sky-900 mb-2">
                 Reset password for {orgUsers.find(u => u.id === resetPasswordUserId)?.email}
               </h3>
-              <div style={{ marginBottom: 10 }}>
-                <label style={labelStyle}>New password *</label>
-                <div style={{ display: 'flex', gap: 8 }}>
+              <div className="mb-2.5">
+                <label className={labelCls}>New password *</label>
+                <div className="flex gap-2">
                   <input
                     type="text"
                     value={resetPasswordValue}
                     onChange={(e) => setResetPasswordValue(e.target.value)}
                     placeholder="Minimum 8 characters"
-                    style={{ ...inputStyle, flex: 1 }}
+                    className={`${inputCls} flex-1`}
                   />
                   <button
                     type="button"
@@ -399,23 +360,23 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
                       pw += String(Math.floor(Math.random() * 10));
                       setResetPasswordValue(pw);
                     }}
-                    style={{ padding: '8px 14px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #7dd3fc', borderRadius: 8, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', fontWeight: 500 }}
+                    className="px-3.5 py-2 bg-sky-100 hover:bg-sky-200 text-sky-700 border border-sky-300 rounded-lg text-[12px] font-medium cursor-pointer whitespace-nowrap transition-colors"
                   >
                     Generate
                   </button>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="flex gap-2">
                 <button
                   onClick={handleResetPassword}
                   disabled={resetPasswordValue.length < 8}
-                  style={{ padding: '7px 16px', background: resetPasswordValue.length < 8 ? '#93c5fd' : '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: resetPasswordValue.length < 8 ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                  className={`px-4 py-1.5 text-white border-0 rounded-lg text-[13px] font-medium transition-colors ${resetPasswordValue.length < 8 ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'}`}
                 >
                   Reset password
                 </button>
                 <button
                   onClick={() => { setResetPasswordUserId(null); setResetPasswordValue(''); }}
-                  style={{ padding: '7px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+                  className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
                 >
                   Cancel
                 </button>
@@ -423,116 +384,116 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             </div>
           )}
 
-          {/* Invite user form */}
           {showInviteForm ? (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginBottom: 16 }}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 12px', color: '#1e293b' }}>Invite new user</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={labelStyle}>Email *</label>
-                  <input type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} style={inputStyle} />
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4">
+              <h3 className="text-[14px] font-semibold text-slate-800 mb-3">Invite new user</h3>
+              <div className="grid grid-cols-2 gap-2.5 mb-3">
+                <div className="col-span-2">
+                  <label className={labelCls}>Email *</label>
+                  <input type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} className={inputCls} />
                 </div>
                 <div>
-                  <label style={labelStyle}>First name</label>
-                  <input value={inviteForm.firstName} onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })} style={inputStyle} />
+                  <label className={labelCls}>First name</label>
+                  <input value={inviteForm.firstName} onChange={(e) => setInviteForm({ ...inviteForm, firstName: e.target.value })} className={inputCls} />
                 </div>
                 <div>
-                  <label style={labelStyle}>Last name</label>
-                  <input value={inviteForm.lastName} onChange={(e) => setInviteForm({ ...inviteForm, lastName: e.target.value })} style={inputStyle} />
+                  <label className={labelCls}>Last name</label>
+                  <input value={inviteForm.lastName} onChange={(e) => setInviteForm({ ...inviteForm, lastName: e.target.value })} className={inputCls} />
                 </div>
                 <div>
-                  <label style={labelStyle}>Role *</label>
-                  <select value={inviteForm.role} onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })} style={inputStyle}>
+                  <label className={labelCls}>Role *</label>
+                  <select value={inviteForm.role} onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value })} className={inputCls}>
                     {ADMIN_ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={handleInviteUser} style={{ padding: '7px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Send invitation</button>
+              <div className="flex gap-2">
+                <button onClick={handleInviteUser} className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Send invitation</button>
                 <button
                   onClick={() => { setShowInviteForm(false); setInviteForm({ email: '', role: 'user', firstName: '', lastName: '' }); }}
-                  style={{ padding: '7px 16px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+                  className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
                 >
                   Cancel
                 </button>
               </div>
             </div>
           ) : (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+            <div className="flex justify-end mb-3">
               <button
                 onClick={() => { setShowInviteForm(true); setUsersError(''); setUsersSuccess(''); }}
-                style={{ padding: '7px 14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
               >
                 + Invite user
               </button>
             </div>
           )}
 
-          {/* Users table */}
           {loadingUsers ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: 14 }}>Loading users...</div>
+            <div className="py-6 text-center text-slate-500 text-[14px]">Loading users...</div>
           ) : (
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <table className="w-full border-collapse text-[13px]">
                 <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Email</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Role</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Last login</th>
-                    <th style={{ padding: '10px 14px' }}></th>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-3.5 py-2.5 text-left font-semibold text-slate-700">Name</th>
+                    <th className="px-3.5 py-2.5 text-left font-semibold text-slate-700">Email</th>
+                    <th className="px-3.5 py-2.5 text-left font-semibold text-slate-700">Role</th>
+                    <th className="px-3.5 py-2.5 text-left font-semibold text-slate-700">Status</th>
+                    <th className="px-3.5 py-2.5 text-left font-semibold text-slate-700">Last login</th>
+                    <th className="px-3.5 py-2.5"></th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-50">
                   {orgUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>No users found</td>
+                      <td colSpan={6} className="py-6 text-center text-slate-500">No users found</td>
                     </tr>
                   ) : orgUsers.map((u) => (
-                    <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '10px 14px', fontWeight: 500, color: '#1e293b' }}>{u.firstName} {u.lastName}</td>
-                      <td style={{ padding: '10px 14px', color: '#64748b' }}>{u.email}</td>
-                      <td style={{ padding: '10px 14px' }}>
+                    <tr key={u.id}>
+                      <td className="px-3.5 py-2.5 font-medium text-slate-800">{u.firstName} {u.lastName}</td>
+                      <td className="px-3.5 py-2.5 text-slate-500">{u.email}</td>
+                      <td className="px-3.5 py-2.5">
                         {u.role === 'system_admin' ? (
-                          <span style={{ color: '#7c3aed', fontWeight: 500 }}>{u.role}</span>
+                          <span className="text-violet-700 font-medium">{u.role}</span>
                         ) : (
                           <select
                             value={u.role}
                             onChange={(e) => handleUpdateUserRole(u.id, e.target.value)}
-                            style={{ padding: '3px 7px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12 }}
+                            className="px-1.5 py-0.5 border border-slate-200 rounded-md text-[12px] bg-white"
                           >
                             {ADMIN_ASSIGNABLE_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                           </select>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td className="px-3.5 py-2.5">
                         <select
                           value={u.status}
                           onChange={(e) => handleUpdateUserStatus(u.id, e.target.value)}
-                          style={{ padding: '3px 7px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 12, color: STATUS_COLORS[u.status] ?? '#374151' }}
+                          className={`px-1.5 py-0.5 border border-slate-200 rounded-md text-[12px] bg-white ${u.status === 'active' ? 'text-green-600' : u.status === 'inactive' ? 'text-slate-500' : 'text-amber-600'}`}
                         >
                           <option value="active">active</option>
                           <option value="inactive">inactive</option>
                           {u.status === 'pending' && <option value="pending">pending</option>}
                         </select>
                       </td>
-                      <td style={{ padding: '10px 14px', color: '#64748b', fontSize: 12 }}>
+                      <td className="px-3.5 py-2.5 text-slate-500 text-[12px]">
                         {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
                       </td>
-                      <td style={{ padding: '10px 14px', display: 'flex', gap: 6 }}>
-                        <button
-                          onClick={() => { setResetPasswordUserId(u.id); setResetPasswordValue(''); setUsersError(''); setUsersSuccess(''); }}
-                          style={{ padding: '3px 8px', background: '#f0f9ff', color: '#0284c7', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-                        >
-                          Reset pw
-                        </button>
-                        <button
-                          onClick={() => setRemoveUserId(u.id)}
-                          style={{ padding: '3px 8px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-                        >
-                          Remove
-                        </button>
+                      <td className="px-3.5 py-2.5">
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => { setResetPasswordUserId(u.id); setResetPasswordValue(''); setUsersError(''); setUsersSuccess(''); }}
+                            className="px-2 py-0.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border-0 rounded-md text-[12px] cursor-pointer transition-colors"
+                          >
+                            Reset pw
+                          </button>
+                          <button
+                            onClick={() => setRemoveUserId(u.id)}
+                            className="px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] cursor-pointer transition-colors"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -543,53 +504,57 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
         </Modal>
       )}
 
-      {/* ── Organisations table ───────────────────────────────────────────── */}
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+      {/* Organisations table */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table className="w-full border-collapse text-[14px]">
           <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Slug</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Plan</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Created</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Name</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Slug</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Plan</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Created</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-50">
             {orgs.map((org) => (
-              <tr key={org.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>{org.name}</td>
-                <td style={{ padding: '12px 16px', color: '#64748b', fontFamily: 'monospace', fontSize: 13 }}>{org.slug}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <select value={org.plan} onChange={(e) => handleUpdatePlan(org.id, e.target.value)} style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}>
+              <tr key={org.id}>
+                <td className="px-4 py-3 font-medium text-slate-800">{org.name}</td>
+                <td className="px-4 py-3 text-slate-500 font-mono text-[13px]">{org.slug}</td>
+                <td className="px-4 py-3">
+                  <select value={org.plan} onChange={(e) => handleUpdatePlan(org.id, e.target.value)} className="px-2 py-1 border border-slate-200 rounded-md text-[13px] bg-white">
                     {['starter', 'pro', 'agency'].map((p) => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </td>
-                <td style={{ padding: '12px 16px' }}>
-                  <select value={org.status} onChange={(e) => handleUpdateStatus(org.id, e.target.value)} style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, color: org.status === 'active' ? '#16a34a' : '#dc2626' }}>
+                <td className="px-4 py-3">
+                  <select
+                    value={org.status}
+                    onChange={(e) => handleUpdateStatus(org.id, e.target.value)}
+                    className={`px-2 py-1 border border-slate-200 rounded-md text-[13px] bg-white ${org.status === 'active' ? 'text-green-600' : 'text-red-600'}`}
+                  >
                     <option value="active">active</option>
                     <option value="suspended">suspended</option>
                   </select>
                 </td>
-                <td style={{ padding: '12px 16px', color: '#64748b', fontSize: 13 }}>{new Date(org.createdAt).toLocaleDateString()}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                <td className="px-4 py-3 text-slate-500 text-[13px]">{new Date(org.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-3">
+                  <div className="flex gap-2">
                     <button
                       onClick={() => openUsersDialog(org)}
-                      style={{ padding: '4px 10px', background: '#f0fdf4', color: '#16a34a', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                      className="px-2.5 py-1 bg-green-50 hover:bg-green-100 text-green-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
                     >
                       Users
                     </button>
                     <button
                       onClick={() => openEditDialog(org)}
-                      style={{ padding: '4px 10px', background: '#eff6ff', color: '#2563eb', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 500 }}
+                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => setDeleteId(org.id)}
-                      style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                      className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 border-0 rounded-md text-[12px] cursor-pointer transition-colors"
                     >
                       Delete
                     </button>

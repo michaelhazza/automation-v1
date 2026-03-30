@@ -51,6 +51,7 @@ import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
+import projectsRouter from './routes/projects.js';
 
 const app = express();
 
@@ -105,6 +106,7 @@ app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
 app.use(processConnectionMappingsRouter);
 app.use(subaccountEnginesRouter);
+app.use(projectsRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

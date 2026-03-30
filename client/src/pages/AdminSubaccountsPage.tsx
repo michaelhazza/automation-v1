@@ -13,13 +13,13 @@ interface Subaccount {
   createdAt: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: '#16a34a',
-  suspended: '#d97706',
-  inactive: '#6b7280',
+const STATUS_STYLES: Record<string, string> = {
+  active:    'text-green-600',
+  suspended: 'text-amber-600',
+  inactive:  'text-slate-500',
 };
 
-export default function AdminSubaccountsPage({ user }: { user: User }) {
+export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
   const [subaccounts, setSubaccounts] = useState<Subaccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -54,9 +54,9 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
       const status = e.response?.status;
       const serverMessage = e.response?.data?.error;
       if (status === 403) {
-        setError(serverMessage ?? 'You do not have permission to create subaccounts. Contact your organisation administrator.');
+        setError(serverMessage ?? 'You do not have permission to create subaccounts.');
       } else if (status === 409) {
-        setError(serverMessage ?? 'A subaccount with this slug already exists. Please choose a different slug.');
+        setError(serverMessage ?? 'A subaccount with this slug already exists.');
       } else {
         setError(serverMessage ?? 'Failed to create subaccount. Please try again.');
       }
@@ -70,18 +70,18 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
     load();
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div className="page-enter">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Subaccounts</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage client subaccounts and their portal access</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Subaccounts</h1>
+          <p className="text-sm text-slate-500 mt-2">Manage client subaccounts and their portal access</p>
         </div>
         <button
           onClick={() => { setShowForm(true); setError(''); }}
-          style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
         >
           + New subaccount
         </button>
@@ -89,31 +89,31 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
 
       {showForm && (
         <Modal title="New subaccount" onClose={() => setShowForm(false)} maxWidth={480}>
-          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          <div className="grid gap-4 mb-6">
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name *</label>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name *</label>
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Slug (optional — auto-derived from name)</label>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Slug (optional — auto-derived from name)</label>
               <input
                 value={form.slug}
                 onChange={(e) => setForm({ ...form, slug: e.target.value })}
                 placeholder="e.g. my-client"
-                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Status</label>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Status</label>
               <select
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -121,9 +121,19 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
               </select>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
-            <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button
+              onClick={handleCreate}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors"
+            >
+              Create
+            </button>
+            <button
+              onClick={() => setShowForm(false)}
+              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </Modal>
       )}
@@ -138,38 +148,40 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
         />
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {subaccounts.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>No subaccounts yet.</div>
+          <div className="py-12 text-center text-sm text-slate-500">No subaccounts yet.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full text-sm">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Slug</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Name</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Slug</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {subaccounts.map((sa) => (
-                <tr key={sa.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>{sa.name}</td>
-                  <td style={{ padding: '12px 16px', color: '#64748b', fontFamily: 'monospace', fontSize: 13 }}>{sa.slug}</td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{ color: STATUS_COLORS[sa.status] ?? '#6b7280', fontWeight: 500 }}>{sa.status}</span>
+                <tr key={sa.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-slate-800">{sa.name}</td>
+                  <td className="px-4 py-3 font-mono text-[13px] text-slate-500">{sa.slug}</td>
+                  <td className="px-4 py-3">
+                    <span className={`font-medium capitalize text-[13px] ${STATUS_STYLES[sa.status] ?? 'text-slate-500'}`}>
+                      {sa.status}
+                    </span>
                   </td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
                       <Link
                         to={`/admin/subaccounts/${sa.id}`}
-                        style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', textDecoration: 'none' }}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
                       >
                         Manage
                       </Link>
                       <button
                         onClick={() => setDeleteId(sa.id)}
-                        style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                        className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors"
                       >
                         Delete
                       </button>
@@ -181,6 +193,6 @@ export default function AdminSubaccountsPage({ user }: { user: User }) {
           </table>
         )}
       </div>
-    </>
+    </div>
   );
 }

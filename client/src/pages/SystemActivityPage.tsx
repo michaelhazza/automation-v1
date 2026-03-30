@@ -13,9 +13,25 @@ interface Execution {
   createdAt: string;
 }
 
+const STATUS_CLS: Record<string, string> = {
+  completed: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+  running: 'bg-blue-100 text-blue-700',
+  pending: 'bg-amber-100 text-amber-700',
+  timeout: 'bg-orange-100 text-orange-700',
+  cancelled: 'bg-slate-100 text-slate-600',
+};
+
 function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge badge-${status}`}><span className="badge-dot" />{status}</span>;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${STATUS_CLS[status] ?? 'bg-slate-100 text-slate-600'}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+      {status}
+    </span>
+  );
 }
+
+const selectCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 export default function SystemActivityPage({ user }: { user: User }) {
   const [executions, setExecutions] = useState<Execution[]>([]);
@@ -55,58 +71,46 @@ export default function SystemActivityPage({ user }: { user: User }) {
 
   return (
     <div className="page-enter">
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: '0 0 6px', letterSpacing: '-0.03em' }}>
-          Platform Activity
-        </h1>
-        <p style={{ color: '#64748b', margin: 0, fontSize: 14 }}>
-          Execution activity across all organisations and clients
-        </p>
+      <div className="mb-6">
+        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0 mb-1.5">Platform Activity</h1>
+        <p className="text-slate-500 m-0 text-[14px]">Execution activity across all organisations and clients</p>
       </div>
 
       {/* Filter bar */}
-      <div className="card" style={{ padding: '16px 20px', marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ flex: '1 1 160px', minWidth: 140 }}>
-            <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-              Status
-            </label>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="form-select">
+      <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 mb-5">
+        <div className="flex gap-3 flex-wrap items-end">
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Status</label>
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={selectCls}>
               <option value="">All statuses</option>
               {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 
-          <div style={{ flex: '1 1 160px', minWidth: 140 }}>
-            <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-              Engine
-            </label>
-            <select value={filterEngineType} onChange={(e) => setFilterEngineType(e.target.value)} className="form-select">
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Engine</label>
+            <select value={filterEngineType} onChange={(e) => setFilterEngineType(e.target.value)} className={selectCls}>
               <option value="">All engines</option>
               {engineTypes.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
           </div>
 
-          <div style={{ flex: '1 1 148px', minWidth: 130 }}>
-            <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-              From
-            </label>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="form-input" style={{ fontSize: 13 }} />
+          <div className="flex-1 min-w-[130px]">
+            <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">From</label>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={selectCls} />
           </div>
 
-          <div style={{ flex: '1 1 148px', minWidth: 130 }}>
-            <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 }}>
-              To
-            </label>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="form-input" style={{ fontSize: 13 }} />
+          <div className="flex-1 min-w-[130px]">
+            <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">To</label>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={selectCls} />
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            <button onClick={() => { setOffset(0); load(); }} className="btn btn-primary" style={{ fontSize: 13.5 }}>
+          <div className="flex gap-2 items-end">
+            <button onClick={() => { setOffset(0); load(); }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13.5px] font-medium cursor-pointer transition-colors">
               Apply
             </button>
             {hasFilters && (
-              <button onClick={handleClearFilters} className="btn btn-ghost" style={{ fontSize: 13 }}>Clear</button>
+              <button onClick={handleClearFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Clear</button>
             )}
           </div>
         </div>
@@ -114,71 +118,68 @@ export default function SystemActivityPage({ user }: { user: User }) {
 
       {/* Results summary */}
       {!loading && (
-        <div style={{ marginBottom: 12, fontSize: 13, color: '#64748b' }}>
-          <strong style={{ color: '#0f172a' }}>{executions.length}</strong> execution{executions.length !== 1 ? 's' : ''} shown
-          {hasFilters && <span style={{ marginLeft: 8, fontSize: 12, color: '#6366f1', fontWeight: 500 }}>(filtered)</span>}
+        <div className="mb-3 text-[13px] text-slate-500">
+          <strong className="text-slate-900">{executions.length}</strong> execution{executions.length !== 1 ? 's' : ''} shown
+          {hasFilters && <span className="ml-2 text-[12px] text-indigo-600 font-medium">(filtered)</span>}
         </div>
       )}
 
       {/* Table */}
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="flex flex-col gap-2">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="skeleton" style={{ height: 52, borderRadius: 8 }} />
+            <div key={i} className="skeleton h-[52px] rounded-lg" />
           ))}
         </div>
       ) : executions.length === 0 ? (
-        <div className="card empty-state">
-          <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16, color: '#0f172a' }}>No executions found</p>
-          <p style={{ margin: 0, fontSize: 13.5, color: '#64748b' }}>
+        <div className="bg-white border border-slate-200 rounded-xl py-12 text-center">
+          <p className="m-0 mb-1.5 font-bold text-[16px] text-slate-900">No executions found</p>
+          <p className="m-0 text-[13.5px] text-slate-500">
             {hasFilters ? 'Try adjusting your filters.' : 'No automation activity recorded yet.'}
           </p>
         </div>
       ) : (
-        <div className="card" style={{ overflow: 'hidden' }}>
-          <table className="data-table">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full border-collapse text-[14px]">
             <thead>
-              <tr>
-                <th>Created</th>
-                <th>Organisation</th>
-                <th>Automation</th>
-                <th>User</th>
-                <th>Engine</th>
-                <th>Status</th>
-                <th>Duration</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Created</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Organisation</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Automation</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">User</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Engine</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700">Duration</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {executions.map((exec) => (
                 <tr key={exec.id}>
-                  <td style={{ color: '#64748b', fontSize: 13, whiteSpace: 'nowrap' }}>
+                  <td className="px-4 py-3 text-slate-500 text-[13px] whitespace-nowrap">
                     {new Date(exec.createdAt).toLocaleString(undefined, {
                       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                     })}
                   </td>
-                  <td style={{ color: '#374151', fontSize: 13.5, fontWeight: 500 }}>
+                  <td className="px-4 py-3 text-slate-700 text-[13.5px] font-medium">
                     {exec.organisationName ?? '—'}
                   </td>
-                  <td style={{ color: '#374151', fontSize: 13.5, fontWeight: 500 }}>
-                    {exec.processName ?? <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Unknown</span>}
+                  <td className="px-4 py-3 text-slate-700 text-[13.5px] font-medium">
+                    {exec.processName ?? <span className="text-slate-400 italic">Unknown</span>}
                   </td>
-                  <td style={{ color: '#64748b', fontSize: 13 }}>
+                  <td className="px-4 py-3 text-slate-500 text-[13px]">
                     {exec.userEmail ?? '—'}
                   </td>
-                  <td>
+                  <td className="px-4 py-3">
                     {exec.engineType ? (
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, padding: '2px 8px',
-                        borderRadius: 9999, background: '#f1f5f9', color: '#475569',
-                      }}>
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                         {exec.engineType}
                       </span>
                     ) : '—'}
                   </td>
-                  <td><StatusBadge status={exec.status} /></td>
-                  <td style={{ color: '#64748b', fontSize: 13 }}>
+                  <td className="px-4 py-3"><StatusBadge status={exec.status} /></td>
+                  <td className="px-4 py-3 text-slate-500 text-[13px]">
                     {exec.durationMs != null ? (
-                      <span style={{ fontWeight: 500 }}>{(exec.durationMs / 1000).toFixed(1)}s</span>
+                      <span className="font-medium">{(exec.durationMs / 1000).toFixed(1)}s</span>
                     ) : '—'}
                   </td>
                 </tr>
@@ -190,20 +191,18 @@ export default function SystemActivityPage({ user }: { user: User }) {
 
       {/* Pagination */}
       {!loading && executions.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <div className="flex justify-end gap-2 mt-4">
           <button
             onClick={() => setOffset(Math.max(0, offset - limit))}
             disabled={offset === 0}
-            className="btn btn-secondary"
-            style={{ fontSize: 13 }}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
           >
             Previous
           </button>
           <button
             onClick={() => setOffset(offset + limit)}
             disabled={executions.length < limit}
-            className="btn btn-secondary"
-            style={{ fontSize: 13 }}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
           >
             Next
           </button>

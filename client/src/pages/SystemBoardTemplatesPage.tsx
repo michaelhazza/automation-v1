@@ -21,6 +21,8 @@ const defaultColumns: BoardColumn[] = [
   { key: 'done', label: 'Done', colour: '#22c55e', description: 'Completed', locked: true },
 ];
 
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[14px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
 export default function SystemBoardTemplatesPage({ user: _user }: { user: User }) {
   const [templates, setTemplates] = useState<BoardTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,42 +94,46 @@ export default function SystemBoardTemplatesPage({ user: _user }: { user: User }
     }
   };
 
-  if (loading) return <div style={{ padding: 40 }}>Loading...</div>;
+  if (loading) return <div className="p-10 text-sm text-slate-500">Loading...</div>;
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Board Templates</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-[28px] font-bold text-slate-800 m-0">Board Templates</h1>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
-          style={{ padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg cursor-pointer text-[14px] font-semibold transition-colors"
         >
           + New Template
         </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {templates.length === 0 && <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No templates yet. Create one to get started.</div>}
+      <div className="flex flex-col gap-3">
+        {templates.length === 0 && (
+          <div className="text-slate-400 italic">No templates yet. Create one to get started.</div>
+        )}
         {templates.map(t => (
-          <div key={t.id} style={{ padding: 16, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div>
-                <span style={{ fontSize: 16, fontWeight: 600, color: '#1e293b' }}>{t.name}</span>
+          <div key={t.id} className="p-4 bg-white border border-slate-200 rounded-xl">
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[16px] font-semibold text-slate-800">{t.name}</span>
                 {t.isDefault && (
-                  <span style={{ marginLeft: 8, fontSize: 11, background: '#dbeafe', color: '#2563eb', padding: '2px 8px', borderRadius: 4 }}>
-                    Default
-                  </span>
+                  <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Default</span>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => openEdit(t)} style={linkBtnStyle}>Edit</button>
-                <button onClick={() => setDeleteId(t.id)} style={{ ...linkBtnStyle, color: '#ef4444' }}>Delete</button>
+              <div className="flex gap-2">
+                <button onClick={() => openEdit(t)} className="bg-transparent border-0 text-indigo-600 cursor-pointer text-[13px] font-semibold hover:text-indigo-800 transition-colors">Edit</button>
+                <button onClick={() => setDeleteId(t.id)} className="bg-transparent border-0 text-red-500 cursor-pointer text-[13px] font-semibold hover:text-red-700 transition-colors">Delete</button>
               </div>
             </div>
-            {t.description && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>{t.description}</div>}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+            {t.description && <div className="text-[13px] text-slate-500 mb-2">{t.description}</div>}
+            <div className="flex gap-1.5 flex-wrap">
               {t.columns.map(c => (
-                <span key={c.key} style={{ fontSize: 11, padding: '3px 10px', background: c.colour + '20', color: c.colour, borderRadius: 4, fontWeight: 600 }}>
+                <span
+                  key={c.key}
+                  className="text-[11px] px-2.5 py-0.5 rounded font-semibold"
+                  style={{ background: `${c.colour}20`, color: c.colour }}
+                >
                   {c.label}{c.locked ? ' 🔒' : ''}
                 </span>
               ))}
@@ -138,21 +144,21 @@ export default function SystemBoardTemplatesPage({ user: _user }: { user: User }
 
       {showForm && (
         <Modal title={editId ? 'Edit Template' : 'New Template'} onClose={() => { setShowForm(false); resetForm(); }} maxWidth={560}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {error && <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>}
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Template name" style={inputStyle} />
-            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Description" rows={2} style={{ ...inputStyle, resize: 'vertical' as const }} />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#475569' }}>
+          <div className="flex flex-col gap-3">
+            {error && <div className="text-red-500 text-[13px]">{error}</div>}
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Template name" className={inputCls} />
+            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Description" rows={2} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[14px] bg-white resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <label className="flex items-center gap-2 text-[13px] text-slate-600 cursor-pointer">
               <input type="checkbox" checked={isDefault} onChange={e => setIsDefault(e.target.checked)} /> Set as default template
             </label>
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 8 }}>Columns</div>
+            <div className="mt-2">
+              <div className="text-[13px] font-semibold text-slate-600 mb-2">Columns</div>
               <BoardColumnEditor columns={columns} onChange={setColumns} />
             </div>
             <button
               onClick={handleSave}
               disabled={!name || columns.length === 0}
-              style={{ marginTop: 8, padding: '10px 20px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+              className="mt-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg cursor-pointer text-[14px] font-semibold transition-colors"
             >
               {editId ? 'Save Changes' : 'Create Template'}
             </button>
@@ -172,6 +178,3 @@ export default function SystemBoardTemplatesPage({ user: _user }: { user: User }
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = { padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14 };
-const linkBtnStyle: React.CSSProperties = { background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', fontSize: 13, fontWeight: 600 };

@@ -41,6 +41,11 @@ export const agents = pgTable(
     // Default skills assigned to this agent (copied to subaccountAgents on link)
     defaultSkillSlugs: jsonb('default_skill_slugs').$type<string[]>(),
     // Lifecycle
+    // Heartbeat — automatic scheduled runs
+    heartbeatEnabled: boolean('heartbeat_enabled').notNull().default(false),
+    heartbeatIntervalHours: integer('heartbeat_interval_hours'),
+    heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
+    // Lifecycle
     status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),

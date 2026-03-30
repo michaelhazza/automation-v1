@@ -1,8 +1,5 @@
 /**
  * PortalPage — subaccount member's process browser.
- *
- * Displays processes available in the selected subaccount, grouped by category.
- * Subaccount members execute processes via the portal execution endpoint.
  */
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -19,18 +16,10 @@ interface PortalProcess {
   source: 'linked' | 'native';
 }
 
-interface Category {
-  id: string;
-  name: string;
-  colour: string | null;
-}
+interface Category { id: string; name: string; colour: string | null; }
+interface SubaccountInfo { id: string; name: string; }
 
-interface SubaccountInfo {
-  id: string;
-  name: string;
-}
-
-export default function PortalPage({ user }: { user: User }) {
+export default function PortalPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [subaccount, setSubaccount] = useState<SubaccountInfo | null>(null);
   const [processes, setProcesses] = useState<PortalProcess[]>([]);
@@ -43,55 +32,43 @@ export default function PortalPage({ user }: { user: User }) {
   useEffect(() => {
     if (!subaccountId) return;
     api.get(`/api/portal/${subaccountId}/processes`)
-      .then(({ data }) => {
-        setSubaccount(data.subaccount);
-        setProcesses(data.processes ?? []);
-        setCategories(data.categories ?? []);
-      })
-      .catch((err) => {
-        const e = err as { response?: { data?: { error?: string } } };
-        setError(e.response?.data?.error ?? 'Failed to load processes');
-      })
+      .then(({ data }) => { setSubaccount(data.subaccount); setProcesses(data.processes ?? []); setCategories(data.categories ?? []); })
+      .catch((err) => { const e = err as { response?: { data?: { error?: string } } }; setError(e.response?.data?.error ?? 'Failed to load processes'); })
       .finally(() => setLoading(false));
   }, [subaccountId]);
 
   const filtered = processes.filter((t) => {
-    const matchSearch =
-      !search ||
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      (t.description ?? '').toLowerCase().includes(search.toLowerCase());
+    const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || (t.description ?? '').toLowerCase().includes(search.toLowerCase());
     const matchCat = !selectedCategory || t.category?.id === selectedCategory;
     return matchSearch && matchCat;
   });
 
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div style={{ color: '#dc2626', padding: 32 }}>{error}</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
+  if (error) return <div className="text-red-600 p-8">{error}</div>;
 
   return (
     <>
-      <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
-        {subaccount?.name ?? 'Portal'}
-      </h1>
-      <p style={{ color: '#64748b', marginBottom: 28 }}>Select a process to run an automation.</p>
+      <h1 className="text-[28px] font-bold text-slate-800 mb-1">{subaccount?.name ?? 'Portal'}</h1>
+      <p className="text-slate-500 mb-7">Select a process to run an automation.</p>
 
-      <div style={{ display: 'flex', gap: 24 }}>
-        {/* Sidebar filters */}
-        <div style={{ width: 200, flexShrink: 0 }}>
-          <div style={{ marginBottom: 12 }}>
+      <div className="flex gap-6">
+        {/* Sidebar */}
+        <div className="w-[200px] shrink-0">
+          <div className="mb-3">
             <input
               type="text"
               placeholder="Search processes..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           {categories.length > 0 && (
             <>
-              <div style={{ fontWeight: 600, color: '#374151', fontSize: 13, marginBottom: 8 }}>Categories</div>
+              <div className="font-semibold text-slate-700 text-[13px] mb-2">Categories</div>
               <div
                 onClick={() => setSelectedCategory('')}
-                style={{ padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, background: !selectedCategory ? '#dbeafe' : 'transparent', color: !selectedCategory ? '#1d4ed8' : '#374151', marginBottom: 4 }}
+                className={`px-3 py-2 rounded-lg cursor-pointer text-[13px] mb-1 ${!selectedCategory ? 'bg-blue-100 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
               >
                 All
               </div>
@@ -99,47 +76,42 @@ export default function PortalPage({ user }: { user: User }) {
                 <div
                   key={cat.id}
                   onClick={() => setSelectedCategory(cat.id)}
-                  style={{ padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, background: selectedCategory === cat.id ? '#dbeafe' : 'transparent', color: selectedCategory === cat.id ? '#1d4ed8' : '#374151', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}
+                  className={`px-3 py-2 rounded-lg cursor-pointer text-[13px] mb-1 flex items-center gap-2 ${selectedCategory === cat.id ? 'bg-blue-100 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
                 >
-                  {cat.colour && <span style={{ width: 10, height: 10, borderRadius: '50%', background: cat.colour, flexShrink: 0 }} />}
+                  {cat.colour && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: cat.colour }} />}
                   {cat.name}
                 </div>
               ))}
             </>
           )}
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
-            <Link
-              to={`/portal/${subaccountId}/executions`}
-              style={{ display: 'block', fontSize: 13, color: '#2563eb', textDecoration: 'none', padding: '8px 0' }}
-            >
+          <div className="mt-5 pt-4 border-t border-slate-200">
+            <Link to={`/portal/${subaccountId}/executions`} className="block text-[13px] text-blue-600 no-underline hover:underline py-2">
               View my executions →
             </Link>
           </div>
         </div>
 
         {/* Process grid */}
-        <div style={{ flex: 1 }}>
+        <div className="flex-1">
           {filtered.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px', color: '#64748b', background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+            <div className="py-12 text-center text-slate-500 bg-white rounded-xl border border-slate-200">
               No processes found. {search && 'Try a different search term.'}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
               {filtered.map((process) => (
-                <Link key={process.id} to={`/portal/${subaccountId}/processes/${process.id}`} style={{ textDecoration: 'none' }}>
-                  <div style={{ background: '#fff', borderRadius: 10, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', border: '1px solid #e2e8f0', height: '100%', boxSizing: 'border-box' }}>
+                <Link key={process.id} to={`/portal/${subaccountId}/processes/${process.id}`} className="no-underline">
+                  <div className="bg-white rounded-xl px-6 py-5 shadow-sm border border-slate-200 h-full hover:border-indigo-300 hover:shadow-md transition-all">
                     {process.category && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                        {process.category.colour && <span style={{ width: 8, height: 8, borderRadius: '50%', background: process.category.colour }} />}
-                        <span style={{ fontSize: 11, color: '#64748b' }}>{process.category.name}</span>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        {process.category.colour && <span className="w-2 h-2 rounded-full" style={{ background: process.category.colour }} />}
+                        <span className="text-[11px] text-slate-500">{process.category.name}</span>
                       </div>
                     )}
-                    <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: 8, fontSize: 16 }}>{process.name}</div>
-                    {process.description && (
-                      <div style={{ fontSize: 13, color: '#64748b', lineHeight: 1.5, marginBottom: 12 }}>{process.description}</div>
-                    )}
+                    <div className="font-semibold text-slate-800 mb-2 text-[16px]">{process.name}</div>
+                    {process.description && <div className="text-[13px] text-slate-500 leading-relaxed mb-3">{process.description}</div>}
                     {process.inputSchema && (
-                      <div style={{ fontSize: 12, color: '#0284c7', background: '#f0f9ff', padding: '6px 10px', borderRadius: 6 }}>
+                      <div className="text-[12px] text-sky-700 bg-sky-50 px-2.5 py-1.5 rounded-lg">
                         {process.inputSchema.substring(0, 80)}{process.inputSchema.length > 80 ? '...' : ''}
                       </div>
                     )}

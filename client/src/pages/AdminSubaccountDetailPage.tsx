@@ -6,67 +6,27 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 
-interface Subaccount {
-  id: string;
-  name: string;
-  slug: string;
-  status: string;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  description: string | null;
-  colour: string | null;
-}
-
-interface ProcessLink {
-  linkId: string;
-  processId: string;
-  processName: string;
-  processStatus: string;
-  isActive: boolean;
-  subaccountCategoryId: string | null;
-}
-
-interface NativeProcess {
-  id: string;
-  name: string;
-  status: string;
-}
-
-interface Member {
-  assignmentId: string;
-  userId: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  status: string;
-  permissionSetId: string;
-  permissionSetName: string;
-}
-
-interface OrgProcess {
-  id: string;
-  name: string;
-  status: string;
-}
-
-interface PermissionSet {
-  id: string;
-  name: string;
-}
-
-interface OrgMember {
-  userId: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-}
+interface Subaccount { id: string; name: string; slug: string; status: string; }
+interface Category { id: string; name: string; description: string | null; colour: string | null; }
+interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
+interface NativeProcess { id: string; name: string; status: string; }
+interface Member { assignmentId: string; userId: string; email: string; firstName: string; lastName: string; status: string; permissionSetId: string; permissionSetName: string; }
+interface OrgProcess { id: string; name: string; status: string; }
+interface PermissionSet { id: string; name: string; }
+interface OrgMember { userId: string; email: string; firstName: string; lastName: string; }
 
 type ActiveTab = 'board' | 'categories' | 'processes' | 'members' | 'settings';
 
-export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { user: User; mode?: 'client' | 'admin' }) {
+const TAB_LABELS: Record<ActiveTab, string> = {
+  board: 'Board Config', categories: 'Categories', processes: 'Automations',
+  members: 'Members', settings: 'Settings',
+};
+
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+const btnPrimary = 'px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors';
+const btnSecondary = 'px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors';
+
+export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' }: { user: User; mode?: 'client' | 'admin' }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [sa, setSa] = useState<Subaccount | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -84,26 +44,21 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
-  // Category form
   const [showCatForm, setShowCatForm] = useState(false);
   const [catForm, setCatForm] = useState({ name: '', description: '', colour: '#6366f1' });
   const [deleteCatId, setDeleteCatId] = useState<string | null>(null);
 
-  // Process link form
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
   const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
-  // Member form
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [memberForm, setMemberForm] = useState({ userId: '', permissionSetId: '' });
   const [removeMemberId, setRemoveMemberId] = useState<string | null>(null);
 
-  // Settings form
   const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active' });
   const [settingsSaved, setSettingsSaved] = useState('');
 
-  // Board config
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
   const [boardLoading, setBoardLoading] = useState(false);
   const [boardSaving, setBoardSaving] = useState(false);
@@ -118,7 +73,6 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
         api.get(`/api/subaccounts/${subaccountId}/processes`),
         api.get(`/api/subaccounts/${subaccountId}/members`),
       ];
-      // Load board config for client mode
       if (mode === 'client') {
         requests.push(api.get(`/api/subaccounts/${subaccountId}/board-config`).catch(() => ({ data: null })));
       }
@@ -129,9 +83,7 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
       setNativeProcesses(processRes.data.nativeProcesses ?? []);
       setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
-      if (boardRes?.data?.columns) {
-        setBoardColumns(boardRes.data.columns);
-      }
+      if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to load subaccount');
@@ -151,20 +103,13 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
     setOrgMembers(membersRes.data);
   };
 
-  useEffect(() => {
-    load();
-    loadOrgData();
-  }, [subaccountId]);
-
-  // ─── Categories ───────────────────────────────────────────────────────────
+  useEffect(() => { load(); loadOrgData(); }, [subaccountId]);
 
   const handleCreateCategory = async () => {
     setError('');
     try {
       await api.post(`/api/subaccounts/${subaccountId}/categories`, catForm);
-      setShowCatForm(false);
-      setCatForm({ name: '', description: '', colour: '#6366f1' });
-      load();
+      setShowCatForm(false); setCatForm({ name: '', description: '', colour: '#6366f1' }); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to create category');
@@ -174,11 +119,8 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
   const handleDeleteCategory = async () => {
     if (!deleteCatId) return;
     await api.delete(`/api/subaccounts/${subaccountId}/categories/${deleteCatId}`);
-    setDeleteCatId(null);
-    load();
+    setDeleteCatId(null); load();
   };
-
-  // ─── Process links ──────────────────────────────────────────────────────────
 
   const handleCreateLink = async () => {
     setError('');
@@ -187,9 +129,7 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
         processId: linkForm.processId,
         subaccountCategoryId: linkForm.subaccountCategoryId || undefined,
       });
-      setShowLinkForm(false);
-      setLinkForm({ processId: '', subaccountCategoryId: '' });
-      load();
+      setShowLinkForm(false); setLinkForm({ processId: '', subaccountCategoryId: '' }); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to link automation');
@@ -199,8 +139,7 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
   const handleDeleteLink = async () => {
     if (!deleteLinkId) return;
     await api.delete(`/api/subaccounts/${subaccountId}/processes/${deleteLinkId}`);
-    setDeleteLinkId(null);
-    load();
+    setDeleteLinkId(null); load();
   };
 
   const handleToggleLinkActive = async (link: ProcessLink) => {
@@ -208,15 +147,11 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
     load();
   };
 
-  // ─── Members ──────────────────────────────────────────────────────────────
-
   const handleAddMember = async () => {
     setError('');
     try {
       await api.post(`/api/subaccounts/${subaccountId}/members`, memberForm);
-      setShowMemberForm(false);
-      setMemberForm({ userId: '', permissionSetId: '' });
-      load();
+      setShowMemberForm(false); setMemberForm({ userId: '', permissionSetId: '' }); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to add member');
@@ -226,8 +161,7 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
   const handleRemoveMember = async () => {
     if (!removeMemberId) return;
     await api.delete(`/api/subaccounts/${subaccountId}/members/${removeMemberId}`);
-    setRemoveMemberId(null);
-    load();
+    setRemoveMemberId(null); load();
   };
 
   const handleUpdateMemberRole = async (userId: string, permissionSetId: string) => {
@@ -235,26 +169,19 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
     load();
   };
 
-  // ─── Settings ─────────────────────────────────────────────────────────────
-
   const handleSaveSettings = async () => {
-    setError('');
-    setSettingsSaved('');
+    setError(''); setSettingsSaved('');
     try {
       await api.patch(`/api/subaccounts/${subaccountId}`, settingsForm);
-      setSettingsSaved('Saved successfully');
-      load();
+      setSettingsSaved('Saved successfully'); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to save settings');
     }
   };
 
-  // ─── Board Config ─────────────────────────────────────────────────────────
-
   const handleSaveBoardConfig = async () => {
-    setBoardSaving(true);
-    setBoardMsg('');
+    setBoardSaving(true); setBoardMsg('');
     try {
       await api.patch(`/api/subaccounts/${subaccountId}/board-config`, { columns: boardColumns });
       setBoardMsg('Board configuration saved.');
@@ -262,14 +189,11 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setBoardMsg(e.response?.data?.error ?? 'Failed to save board config');
-    } finally {
-      setBoardSaving(false);
-    }
+    } finally { setBoardSaving(false); }
   };
 
   const handleResetFromOrg = async () => {
-    setBoardSaving(true);
-    setBoardMsg('');
+    setBoardSaving(true); setBoardMsg('');
     try {
       await api.post(`/api/subaccounts/${subaccountId}/board-config/push`);
       const { data } = await api.get(`/api/subaccounts/${subaccountId}/board-config`);
@@ -279,14 +203,11 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setBoardMsg(e.response?.data?.error ?? 'Failed to reset board config');
-    } finally {
-      setBoardSaving(false);
-    }
+    } finally { setBoardSaving(false); }
   };
 
   const handleInitBoard = async () => {
-    setBoardLoading(true);
-    setBoardMsg('');
+    setBoardLoading(true); setBoardMsg('');
     try {
       const { data } = await api.post(`/api/subaccounts/${subaccountId}/board-config/init`);
       if (data?.columns) setBoardColumns(data.columns);
@@ -295,90 +216,69 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setBoardMsg(e.response?.data?.error ?? 'Failed to initialise board');
-    } finally {
-      setBoardLoading(false);
-    }
+    } finally { setBoardLoading(false); }
   };
 
-  if (loading) return <div>Loading...</div>;
-  if (!sa) return <div style={{ padding: 40, color: '#dc2626' }}>{error || 'Subaccount not found'}</div>;
-
-  const tabStyle = (tab: ActiveTab): React.CSSProperties => ({
-    padding: '8px 16px',
-    border: 'none',
-    borderBottom: `2px solid ${activeTab === tab ? '#2563eb' : 'transparent'}`,
-    background: 'transparent',
-    color: activeTab === tab ? '#2563eb' : '#64748b',
-    fontWeight: activeTab === tab ? 600 : 400,
-    fontSize: 14,
-    cursor: 'pointer',
-  });
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
+  if (!sa) return <div className="p-8 text-sm text-red-600">{error || 'Subaccount not found'}</div>;
 
   return (
-    <>
+    <div className="page-enter">
       {mode === 'admin' && (
-        <div style={{ marginBottom: 16 }}>
-          <Link to="/admin/subaccounts" style={{ color: '#2563eb', fontSize: 13, textDecoration: 'none' }}>← Back to subaccounts</Link>
+        <div className="mb-4">
+          <Link to="/admin/subaccounts" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
+            ← Back to subaccounts
+          </Link>
         </div>
       )}
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
+
+      <h1 className="text-[26px] font-bold text-slate-800 mb-1">
         {mode === 'client' ? `${sa.name} Settings` : sa.name}
       </h1>
-      {mode === 'admin' && (
-        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, fontFamily: 'monospace' }}>{sa.slug}</div>
-      )}
-      {mode === 'client' && (
-        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>Manage categories, automations and members</div>
-      )}
+      {mode === 'admin' && <div className="font-mono text-[13px] text-slate-400 mb-6">{sa.slug}</div>}
+      {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage categories, automations and members</div>}
 
       {/* Tabs */}
       {visibleTabs.length > 1 && (
-        <div style={{ borderBottom: '1px solid #e2e8f0', marginBottom: 24, display: 'flex', gap: 4 }}>
-          {visibleTabs.map((tab) => {
-            const tabLabels: Record<ActiveTab, string> = { board: 'Board Config', categories: 'Categories', processes: 'Automations', members: 'Members', settings: 'Settings' };
-            return (
-            <button key={tab} style={tabStyle(tab)} onClick={() => { setActiveTab(tab); setError(''); }}>
-              {tabLabels[tab]}
+        <div className="border-b border-slate-200 mb-6 flex gap-1">
+          {visibleTabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => { setActiveTab(tab); setError(''); }}
+              className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors ${
+                activeTab === tab
+                  ? 'border-indigo-600 text-indigo-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {TAB_LABELS[tab]}
             </button>
-            );
-          })}
+          ))}
         </div>
       )}
 
-      {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+      {error && <div className="text-[13px] text-red-600 mb-4">{error}</div>}
 
-      {/* ─── Board Config tab ─── */}
+      {/* Board Config */}
       {activeTab === 'board' && (
         <div>
           {boardColumns.length === 0 ? (
-            <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', padding: 32, textAlign: 'center' }}>
-              <p style={{ color: '#64748b', marginBottom: 16 }}>No board configuration yet. Initialise from the organisation board config.</p>
-              {boardMsg && <div style={{ color: boardMsg.includes('Failed') ? '#ef4444' : '#22c55e', fontSize: 13, marginBottom: 12 }}>{boardMsg}</div>}
-              <button
-                onClick={handleInitBoard}
-                disabled={boardLoading}
-                style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
-              >
+            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
+              <p className="text-slate-500 text-sm mb-4">No board configuration yet. Initialise from the organisation board config.</p>
+              {boardMsg && <div className={`text-[13px] mb-3 ${boardMsg.includes('Failed') ? 'text-red-500' : 'text-green-600'}`}>{boardMsg}</div>}
+              <button onClick={handleInitBoard} disabled={boardLoading} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
                 {boardLoading ? 'Initialising...' : 'Initialise from Org'}
               </button>
             </div>
           ) : (
             <>
-              {boardMsg && <div style={{ color: boardMsg.includes('Failed') ? '#ef4444' : '#22c55e', fontSize: 13, marginBottom: 12 }}>{boardMsg}</div>}
+              {boardMsg && <div className={`text-[13px] mb-3 ${boardMsg.includes('Failed') ? 'text-red-500' : 'text-green-600'}`}>{boardMsg}</div>}
               <BoardColumnEditor columns={boardColumns} onChange={setBoardColumns} />
-              <div style={{ marginTop: 20, display: 'flex', gap: 12 }}>
-                <button
-                  onClick={handleSaveBoardConfig}
-                  disabled={boardSaving}
-                  style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
-                >
+              <div className="mt-5 flex gap-3">
+                <button onClick={handleSaveBoardConfig} disabled={boardSaving} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors">
                   {boardSaving ? 'Saving...' : 'Save Changes'}
                 </button>
-                <button
-                  onClick={handleResetFromOrg}
-                  disabled={boardSaving}
-                  style={{ padding: '10px 24px', background: '#f1f5f9', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}
-                >
+                <button onClick={handleResetFromOrg} disabled={boardSaving} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-sm font-medium rounded-lg transition-colors">
                   {boardSaving ? 'Resetting...' : 'Reset from Org'}
                 </button>
               </div>
@@ -387,33 +287,35 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
         </div>
       )}
 
-      {/* ─── Categories tab ─── */}
+      {/* Categories */}
       {activeTab === 'categories' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Portal categories</h2>
-            <button onClick={() => setShowCatForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Add category</button>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-[18px] font-semibold text-slate-800 m-0">Portal categories</h2>
+            <button onClick={() => setShowCatForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+              + Add category
+            </button>
           </div>
 
           {showCatForm && (
             <Modal title="New category" onClose={() => setShowCatForm(false)} maxWidth={400}>
-              <div style={{ display: 'grid', gap: 14, marginBottom: 20 }}>
+              <div className="grid gap-3.5 mb-5">
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name *</label>
-                  <input value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name *</label>
+                  <input value={catForm.name} onChange={(e) => setCatForm({ ...catForm, name: e.target.value })} className={inputCls} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
-                  <input value={catForm.description} onChange={(e) => setCatForm({ ...catForm, description: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description</label>
+                  <input value={catForm.description} onChange={(e) => setCatForm({ ...catForm, description: e.target.value })} className={inputCls} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Colour</label>
-                  <input type="color" value={catForm.colour} onChange={(e) => setCatForm({ ...catForm, colour: e.target.value })} style={{ height: 36, width: 60, padding: 2, border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer' }} />
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Colour</label>
+                  <input type="color" value={catForm.colour} onChange={(e) => setCatForm({ ...catForm, colour: e.target.value })} className="h-9 w-14 p-0.5 border border-slate-200 rounded-md cursor-pointer" />
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button onClick={handleCreateCategory} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Create</button>
-                <button onClick={() => setShowCatForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <div className="flex gap-3">
+                <button onClick={handleCreateCategory} className={btnPrimary}>Create</button>
+                <button onClick={() => setShowCatForm(false)} className={btnSecondary}>Cancel</button>
               </div>
             </Modal>
           )}
@@ -422,28 +324,30 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
             <ConfirmDialog title="Delete category" message="Delete this category?" confirmLabel="Delete" onConfirm={handleDeleteCategory} onCancel={() => setDeleteCatId(null)} />
           )}
 
-          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             {categories.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No categories yet.</div>
+              <div className="py-8 text-center text-sm text-slate-500">No categories yet.</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Description</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
-                </tr></thead>
-                <tbody>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Name</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Description</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
                   {categories.map((cat) => (
-                    <tr key={cat.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          {cat.colour && <span style={{ width: 12, height: 12, borderRadius: '50%', background: cat.colour, flexShrink: 0 }} />}
-                          <span style={{ fontWeight: 500 }}>{cat.name}</span>
+                    <tr key={cat.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {cat.colour && <span className="w-3 h-3 rounded-full shrink-0" style={{ background: cat.colour }} />}
+                          <span className="font-medium text-slate-800">{cat.name}</span>
                         </div>
                       </td>
-                      <td style={{ padding: '12px 16px', color: '#64748b' }}>{cat.description ?? '-'}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <button onClick={() => setDeleteCatId(cat.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+                      <td className="px-4 py-3 text-slate-500 text-[13px]">{cat.description ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => setDeleteCatId(cat.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Delete</button>
                       </td>
                     </tr>
                   ))}
@@ -454,35 +358,37 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
         </>
       )}
 
-      {/* ─── Processes tab ─── */}
+      {/* Processes */}
       {activeTab === 'processes' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Linked org automations</h2>
-            <button onClick={() => setShowLinkForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Link automation</button>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-[18px] font-semibold text-slate-800 m-0">Linked org automations</h2>
+            <button onClick={() => setShowLinkForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+              + Link automation
+            </button>
           </div>
 
           {showLinkForm && (
             <Modal title="Link automation to client" onClose={() => setShowLinkForm(false)} maxWidth={400}>
-              <div style={{ display: 'grid', gap: 14, marginBottom: 20 }}>
+              <div className="grid gap-3.5 mb-5">
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Org automation *</label>
-                  <select value={linkForm.processId} onChange={(e) => setLinkForm({ ...linkForm, processId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Org automation *</label>
+                  <select value={linkForm.processId} onChange={(e) => setLinkForm({ ...linkForm, processId: e.target.value })} className={inputCls}>
                     <option value="">Select automation...</option>
                     {orgProcesses.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Portal category (optional)</label>
-                  <select value={linkForm.subaccountCategoryId} onChange={(e) => setLinkForm({ ...linkForm, subaccountCategoryId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Portal category (optional)</label>
+                  <select value={linkForm.subaccountCategoryId} onChange={(e) => setLinkForm({ ...linkForm, subaccountCategoryId: e.target.value })} className={inputCls}>
                     <option value="">No category</option>
                     {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button onClick={handleCreateLink} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Link</button>
-                <button onClick={() => setShowLinkForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <div className="flex gap-3">
+                <button onClick={handleCreateLink} className={btnPrimary}>Link</button>
+                <button onClick={() => setShowLinkForm(false)} className={btnSecondary}>Cancel</button>
               </div>
             </Modal>
           )}
@@ -491,29 +397,34 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
             <ConfirmDialog title="Remove automation link" message="Remove this automation from the client?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
           )}
 
-          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden', marginBottom: 24 }}>
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6">
             {linkedProcesses.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No automations linked yet.</div>
+              <div className="py-8 text-center text-sm text-slate-500">No automations linked yet.</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Automation</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Active in portal</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
-                </tr></thead>
-                <tbody>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Automation</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Active in portal</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
                   {linkedProcesses.map((link) => (
-                    <tr key={link.linkId} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px 16px', fontWeight: 500 }}>{link.processName}</td>
-                      <td style={{ padding: '12px 16px', color: '#64748b' }}>{link.processStatus}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <button onClick={() => handleToggleLinkActive(link)} style={{ padding: '3px 10px', background: link.isActive ? '#dcfce7' : '#f1f5f9', color: link.isActive ? '#16a34a' : '#6b7280', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                    <tr key={link.linkId} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-800">{link.processName}</td>
+                      <td className="px-4 py-3 text-[13px] text-slate-500">{link.processStatus}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleToggleLinkActive(link)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${link.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
                           {link.isActive ? 'Active' : 'Hidden'}
                         </button>
                       </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <button onClick={() => setDeleteLinkId(link.linkId)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+                      <td className="px-4 py-3">
+                        <button onClick={() => setDeleteLinkId(link.linkId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Remove</button>
                       </td>
                     </tr>
                   ))}
@@ -524,18 +435,20 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
 
           {nativeProcesses.length > 0 && (
             <>
-              <h3 style={{ fontSize: 15, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Client-native automations</h3>
-              <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                  <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Automation</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-                  </tr></thead>
-                  <tbody>
+              <h3 className="text-[15px] font-semibold text-slate-700 mb-3">Client-native automations</h3>
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Automation</th>
+                      <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
                     {nativeProcesses.map((t) => (
-                      <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '12px 16px', fontWeight: 500 }}>{t.name}</td>
-                        <td style={{ padding: '12px 16px', color: '#64748b' }}>{t.status}</td>
+                      <tr key={t.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-medium text-slate-800">{t.name}</td>
+                        <td className="px-4 py-3 text-[13px] text-slate-500">{t.status}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -546,35 +459,37 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
         </>
       )}
 
-      {/* ─── Members tab ─── */}
+      {/* Members */}
       {activeTab === 'members' && (
         <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#1e293b' }}>Members</h2>
-            <button onClick={() => setShowMemberForm(true)} style={{ padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>+ Add member</button>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-[18px] font-semibold text-slate-800 m-0">Members</h2>
+            <button onClick={() => setShowMemberForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+              + Add member
+            </button>
           </div>
 
           {showMemberForm && (
             <Modal title="Add member" onClose={() => setShowMemberForm(false)} maxWidth={400}>
-              <div style={{ display: 'grid', gap: 14, marginBottom: 20 }}>
+              <div className="grid gap-3.5 mb-5">
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>User *</label>
-                  <select value={memberForm.userId} onChange={(e) => setMemberForm({ ...memberForm, userId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">User *</label>
+                  <select value={memberForm.userId} onChange={(e) => setMemberForm({ ...memberForm, userId: e.target.value })} className={inputCls}>
                     <option value="">Select user...</option>
                     {orgMembers.map((m) => <option key={m.userId} value={m.userId}>{m.firstName} {m.lastName} ({m.email})</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Permission set *</label>
-                  <select value={memberForm.permissionSetId} onChange={(e) => setMemberForm({ ...memberForm, permissionSetId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Permission set *</label>
+                  <select value={memberForm.permissionSetId} onChange={(e) => setMemberForm({ ...memberForm, permissionSetId: e.target.value })} className={inputCls}>
                     <option value="">Select permission set...</option>
                     {permissionSets.map((ps) => <option key={ps.id} value={ps.id}>{ps.name}</option>)}
                   </select>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button onClick={handleAddMember} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Add</button>
-                <button onClick={() => setShowMemberForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <div className="flex gap-3">
+                <button onClick={handleAddMember} className={btnPrimary}>Add</button>
+                <button onClick={() => setShowMemberForm(false)} className={btnSecondary}>Cancel</button>
               </div>
             </Modal>
           )}
@@ -583,34 +498,36 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
             <ConfirmDialog title="Remove member" message="Remove this member's access to the subaccount?" confirmLabel="Remove" onConfirm={handleRemoveMember} onCancel={() => setRemoveMemberId(null)} />
           )}
 
-          <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
             {members.length === 0 ? (
-              <div style={{ padding: 32, textAlign: 'center', color: '#64748b' }}>No members yet.</div>
+              <div className="py-8 text-center text-sm text-slate-500">No members yet.</div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                <thead><tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>User</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Permission set</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
-                </tr></thead>
-                <tbody>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">User</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Permission set</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
                   {members.map((m) => (
-                    <tr key={m.assignmentId} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 500 }}>{m.firstName} {m.lastName}</div>
-                        <div style={{ fontSize: 12, color: '#64748b' }}>{m.email}</div>
+                    <tr key={m.assignmentId} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-800">{m.firstName} {m.lastName}</div>
+                        <div className="text-xs text-slate-500">{m.email}</div>
                       </td>
-                      <td style={{ padding: '12px 16px' }}>
+                      <td className="px-4 py-3">
                         <select
                           value={m.permissionSetId}
                           onChange={(e) => handleUpdateMemberRole(m.userId, e.target.value)}
-                          style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                          className="px-2.5 py-1.5 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
                         >
                           {permissionSets.map((ps) => <option key={ps.id} value={ps.id}>{ps.name}</option>)}
                         </select>
                       </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <button onClick={() => setRemoveMemberId(m.userId)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Remove</button>
+                      <td className="px-4 py-3">
+                        <button onClick={() => setRemoveMemberId(m.userId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Remove</button>
                       </td>
                     </tr>
                   ))}
@@ -621,32 +538,36 @@ export default function AdminSubaccountDetailPage({ user, mode = 'admin' }: { us
         </>
       )}
 
-      {/* ─── Settings tab ─── */}
+      {/* Settings */}
       {activeTab === 'settings' && (
-        <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e2e8f0', maxWidth: 480 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, margin: '0 0 20px', color: '#1e293b' }}>Subaccount settings</h2>
-          {settingsSaved && <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#16a34a', fontSize: 13 }}>{settingsSaved}</div>}
-          <div style={{ display: 'grid', gap: 16, marginBottom: 20 }}>
+        <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
+          <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Subaccount settings</h2>
+          {settingsSaved && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{settingsSaved}</div>
+          )}
+          <div className="grid gap-4 mb-5">
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name</label>
-              <input value={settingsForm.name} onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+              <input value={settingsForm.name} onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })} className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Slug</label>
-              <input value={settingsForm.slug} onChange={(e) => setSettingsForm({ ...settingsForm, slug: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Slug</label>
+              <input value={settingsForm.slug} onChange={(e) => setSettingsForm({ ...settingsForm, slug: e.target.value })} className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Status</label>
-              <select value={settingsForm.status} onChange={(e) => setSettingsForm({ ...settingsForm, status: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Status</label>
+              <select value={settingsForm.status} onChange={(e) => setSettingsForm({ ...settingsForm, status: e.target.value })} className={inputCls}>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
                 <option value="suspended">Suspended</option>
               </select>
             </div>
           </div>
-          <button onClick={handleSaveSettings} style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Save changes</button>
+          <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+            Save changes
+          </button>
         </div>
       )}
-    </>
+    </div>
   );
 }

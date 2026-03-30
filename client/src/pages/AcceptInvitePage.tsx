@@ -18,10 +18,7 @@ export default function AcceptInvitePage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
+    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
     setLoading(true);
     try {
       const { data } = await api.post('/api/auth/invite/accept', { token, password, firstName, lastName });
@@ -37,47 +34,53 @@ export default function AcceptInvitePage() {
 
   if (!token) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', color: '#dc2626' }}>
-          <h2>Invalid invitation link</h2>
-          <p>No token found in URL. Please check your invitation email.</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="text-center text-red-600">
+          <h2 className="text-xl font-bold mb-2">Invalid invitation link</h2>
+          <p className="text-sm">No token found in URL. Please check your invitation email.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9' }}>
-      <div style={{ background: '#fff', borderRadius: 12, padding: '40px 48px', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', width: 400 }}>
-        <h1 style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 700, color: '#1e293b' }}>Accept Invitation</h1>
-        <p style={{ margin: '0 0 28px', color: '#64748b', fontSize: 14 }}>Set up your account to join your organisation</p>
+    <div className="min-h-screen flex items-center justify-center bg-slate-100">
+      <div className="bg-white rounded-xl shadow-lg p-10 w-[400px]">
+        <h1 className="text-2xl font-bold text-slate-800 mb-2">Accept Invitation</h1>
+        <p className="text-sm text-slate-500 mb-7">Set up your account to join your organisation</p>
 
         {error && (
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-red-600 text-sm mb-5">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>First name</label>
-              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name</label>
+              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} required
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>Last name</label>
-              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name</label>
+              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} required
+                className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
             </div>
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>Password</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} placeholder="Min. 8 characters" />
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8}
+              placeholder="Min. 8 characters"
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
           </div>
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: '#374151', marginBottom: 6 }}>Confirm password</label>
-            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required style={{ width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Confirm password</label>
+            <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required
+              className="w-full px-3.5 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
           </div>
-          <button type="submit" disabled={loading} style={{ width: '100%', padding: '11px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}>
+          <button type="submit" disabled={loading}
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-[15px] font-semibold rounded-lg transition-colors">
             {loading ? 'Setting up...' : 'Activate account'}
           </button>
         </form>

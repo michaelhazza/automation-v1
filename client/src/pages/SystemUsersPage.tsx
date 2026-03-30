@@ -14,11 +14,13 @@ interface SystemUser {
   createdAt: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  active: '#16a34a',
-  inactive: '#6b7280',
-  pending: '#d97706',
+const STATUS_CLS: Record<string, string> = {
+  active: 'text-green-600',
+  inactive: 'text-slate-500',
+  pending: 'text-amber-600',
 };
+
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 export default function SystemUsersPage({ user }: { user: User }) {
   const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
@@ -56,80 +58,72 @@ export default function SystemUsersPage({ user }: { user: User }) {
     }
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>System Admins</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Manage platform-level administrator accounts</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Admins</h1>
+          <p className="text-slate-500 mt-2 mb-0">Manage platform-level administrator accounts</p>
         </div>
         <button
           onClick={() => { setShowInviteForm(true); setError(''); setSuccess(''); }}
-          style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
         >
           + Invite system admin
         </button>
       </div>
 
       {success && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#16a34a', fontSize: 14 }}>
+        <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mb-5 text-green-700 text-[14px]">
           {success}
         </div>
       )}
       {error && !showInviteForm && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-red-600 text-[14px]">
           {error}
         </div>
       )}
 
       {showInviteForm && (
         <Modal title="Invite system admin" onClose={() => { setShowInviteForm(false); setError(''); }} maxWidth={520}>
-          <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 16px' }}>
+          <p className="text-[13px] text-slate-500 m-0 mb-4">
             The invited person will receive full platform admin access.
           </p>
           {error && (
-            <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>
+            <div className="text-red-600 text-[13px] mb-3">{error}</div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Email *</label>
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Email *</label>
               <input
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
+                className={inputCls}
                 placeholder="admin@example.com"
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>First name</label>
-              <input
-                value={form.firstName}
-                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
-              />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name</label>
+              <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className={inputCls} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Last name</label>
-              <input
-                value={form.lastName}
-                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
-              />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name</label>
+              <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className={inputCls} />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
+          <div className="flex gap-3">
             <button
               onClick={handleInvite}
-              style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
             >
               Send invitation
             </button>
             <button
               onClick={() => { setShowInviteForm(false); setError(''); }}
-              style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}
+              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
             >
               Cancel
             </button>
@@ -137,43 +131,43 @@ export default function SystemUsersPage({ user }: { user: User }) {
         </Modal>
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table className="w-full border-collapse text-[14px]">
           <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Email</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Last login</th>
-              <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Joined</th>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Name</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Email</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Last login</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">Joined</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-50">
             {systemUsers.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>
+                <td colSpan={5} className="py-6 px-4 text-center text-slate-400 text-[14px]">
                   No system admins found.
                 </td>
               </tr>
             )}
             {systemUsers.map((u) => (
-              <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>
+              <tr key={u.id}>
+                <td className="px-4 py-3 font-medium text-slate-800">
                   {u.firstName || u.lastName ? `${u.firstName} ${u.lastName}`.trim() : '—'}
                   {u.id === user.id && (
-                    <span style={{ marginLeft: 8, fontSize: 11, background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: 4 }}>You</span>
+                    <span className="ml-2 text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">You</span>
                   )}
                 </td>
-                <td style={{ padding: '12px 16px', color: '#64748b' }}>{u.email}</td>
-                <td style={{ padding: '12px 16px' }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: STATUS_COLORS[u.status] ?? '#374151' }}>
+                <td className="px-4 py-3 text-slate-500">{u.email}</td>
+                <td className="px-4 py-3">
+                  <span className={`text-[12px] font-medium ${STATUS_CLS[u.status] ?? 'text-slate-700'}`}>
                     {u.status}
                   </span>
                 </td>
-                <td style={{ padding: '12px 16px', color: '#64748b', fontSize: 13 }}>
+                <td className="px-4 py-3 text-slate-500 text-[13px]">
                   {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : 'Never'}
                 </td>
-                <td style={{ padding: '12px 16px', color: '#64748b', fontSize: 13 }}>
+                <td className="px-4 py-3 text-slate-500 text-[13px]">
                   {new Date(u.createdAt).toLocaleDateString()}
                 </td>
               </tr>

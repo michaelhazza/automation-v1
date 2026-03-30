@@ -14,6 +14,8 @@ interface SystemEngine {
   createdAt: string;
 }
 
+const inputCls = 'block w-full mt-1 px-3 py-2 border border-slate-200 rounded-md text-[14px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
 export default function SystemEnginesPage({ user }: { user: User }) {
   const [engines, setEngines] = useState<SystemEngine[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,70 +56,74 @@ export default function SystemEnginesPage({ user }: { user: User }) {
     load();
   };
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
     <>
-      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="mb-6 flex justify-between items-center">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>System Engines</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Platform-level execution engines (fallback for all orgs/subaccounts)</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Engines</h1>
+          <p className="text-slate-500 mt-2 mb-0">Platform-level execution engines (fallback for all orgs/subaccounts)</p>
         </div>
-        <button onClick={() => setShowCreate(true)} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontWeight: 600 }}>
+        <button onClick={() => setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg px-5 py-2.5 cursor-pointer font-semibold transition-colors">
           + New Engine
         </button>
       </div>
 
       {error && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 14 }}>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 text-red-600 text-[14px]">
           {error}
         </div>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-            <th style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontSize: 13 }}>Name</th>
-            <th style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontSize: 13 }}>Type</th>
-            <th style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontSize: 13 }}>Base URL</th>
-            <th style={{ textAlign: 'left', padding: '12px 16px', color: '#64748b', fontSize: 13 }}>Status</th>
-            <th style={{ textAlign: 'right', padding: '12px 16px', color: '#64748b', fontSize: 13 }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {engines.map(e => (
-            <tr key={e.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-              <td style={{ padding: '12px 16px', fontWeight: 600, color: '#1e293b' }}>{e.name}</td>
-              <td style={{ padding: '12px 16px', fontSize: 13, color: '#475569', textTransform: 'uppercase' }}>{e.engineType}</td>
-              <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: 13, color: '#475569' }}>{e.baseUrl}</td>
-              <td style={{ padding: '12px 16px' }}>
-                <span style={{ color: e.status === 'active' ? '#16a34a' : '#94a3b8', fontWeight: 600, fontSize: 13 }}>{e.status}</span>
-              </td>
-              <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                <button onClick={() => handleToggleStatus(e)} style={{ background: e.status === 'active' ? '#f59e0b' : '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, marginRight: 8 }}>
-                  {e.status === 'active' ? 'Deactivate' : 'Activate'}
-                </button>
-                <button onClick={() => handleDelete(e.id)} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>Delete</button>
-              </td>
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table className="w-full border-collapse text-[14px]">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 text-[13px]">Name</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 text-[13px]">Type</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 text-[13px]">Base URL</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 text-[13px]">Status</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 text-[13px]">Actions</th>
             </tr>
-          ))}
-          {engines.length === 0 && (
-            <tr><td colSpan={5} style={{ padding: '40px 16px', textAlign: 'center', color: '#94a3b8' }}>No system engines yet</td></tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {engines.map(e => (
+              <tr key={e.id}>
+                <td className="px-4 py-3 font-semibold text-slate-800">{e.name}</td>
+                <td className="px-4 py-3 text-[13px] text-slate-600 uppercase">{e.engineType}</td>
+                <td className="px-4 py-3 font-mono text-[13px] text-slate-600">{e.baseUrl}</td>
+                <td className="px-4 py-3">
+                  <span className={`font-semibold text-[13px] ${e.status === 'active' ? 'text-green-600' : 'text-slate-400'}`}>{e.status}</span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => handleToggleStatus(e)} className={`px-3 py-1 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors ${e.status === 'active' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-600 hover:bg-green-700'}`}>
+                      {e.status === 'active' ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button onClick={() => handleDelete(e.id)} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {engines.length === 0 && (
+              <tr><td colSpan={5} className="py-10 text-center text-slate-400">No system engines yet</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 50 }}>
-          <div style={{ background: '#fff', borderRadius: 12, padding: 32, width: 460 }}>
-            <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>New System Engine</h2>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Name</span>
-              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
+        <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
+          <div className="bg-white rounded-xl p-8 w-[460px]">
+            <h2 className="m-0 mb-5 text-[20px] font-bold text-slate-800">New System Engine</h2>
+            <label className="block mb-3">
+              <span className="text-[14px] font-semibold text-slate-700">Name</span>
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className={inputCls} />
             </label>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Engine Type</span>
-              <select value={form.engineType} onChange={e => setForm({ ...form, engineType: e.target.value })} style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }}>
+            <label className="block mb-3">
+              <span className="text-[14px] font-semibold text-slate-700">Engine Type</span>
+              <select value={form.engineType} onChange={e => setForm({ ...form, engineType: e.target.value })} className={inputCls}>
                 <option value="n8n">n8n</option>
                 <option value="make">Make</option>
                 <option value="zapier">Zapier</option>
@@ -125,17 +131,17 @@ export default function SystemEnginesPage({ user }: { user: User }) {
                 <option value="custom_webhook">Custom Webhook</option>
               </select>
             </label>
-            <label style={{ display: 'block', marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Base URL</span>
-              <input value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://n8n.example.com" style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
+            <label className="block mb-3">
+              <span className="text-[14px] font-semibold text-slate-700">Base URL</span>
+              <input value={form.baseUrl} onChange={e => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://n8n.example.com" className={inputCls} />
             </label>
-            <label style={{ display: 'block', marginBottom: 20 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>API Key (optional)</span>
-              <input value={form.apiKey} onChange={e => setForm({ ...form, apiKey: e.target.value })} type="password" style={{ display: 'block', width: '100%', marginTop: 4, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 6 }} />
+            <label className="block mb-5">
+              <span className="text-[14px] font-semibold text-slate-700">API Key (optional)</span>
+              <input value={form.apiKey} onChange={e => setForm({ ...form, apiKey: e.target.value })} type="password" className={inputCls} />
             </label>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowCreate(false)} style={{ background: '#e2e8f0', color: '#374151', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
-              <button onClick={handleCreate} style={{ background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontWeight: 600 }}>Create</button>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md cursor-pointer transition-colors">Cancel</button>
+              <button onClick={handleCreate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-md cursor-pointer font-semibold transition-colors">Create</button>
             </div>
           </div>
         </div>

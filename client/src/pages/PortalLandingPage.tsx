@@ -14,7 +14,7 @@ interface SubaccountEntry {
   status: string;
 }
 
-export default function PortalLandingPage({ user }: { user: User }) {
+export default function PortalLandingPage({ user: _user }: { user: User }) {
   const navigate = useNavigate();
   const [subaccounts, setSubaccounts] = useState<SubaccountEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,49 +23,39 @@ export default function PortalLandingPage({ user }: { user: User }) {
     api.get('/api/portal/my-subaccounts')
       .then(({ data }) => {
         setSubaccounts(data);
-        // Auto-redirect if user has exactly one subaccount
-        if (data.length === 1) {
-          navigate(`/portal/${data[0].id}`, { replace: true });
-        }
+        if (data.length === 1) navigate(`/portal/${data[0].id}`, { replace: true });
       })
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   if (subaccounts.length === 0) {
     return (
-      <div style={{ maxWidth: 480, margin: '60px auto', textAlign: 'center' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>No portal access</h2>
-        <p style={{ color: '#64748b', fontSize: 14 }}>
-          You haven't been assigned to any subaccounts yet. Contact your administrator for access.
-        </p>
+      <div className="max-w-[480px] mx-auto mt-16 text-center">
+        <div className="text-5xl mb-4">🔒</div>
+        <h2 className="text-[22px] font-bold text-slate-800 mb-2">No portal access</h2>
+        <p className="text-[14px] text-slate-500">You haven't been assigned to any subaccounts yet. Contact your administrator for access.</p>
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: 560, margin: '40px auto' }}>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Select subaccount</h1>
-      <p style={{ color: '#64748b', marginBottom: 28 }}>Choose which subaccount you'd like to access.</p>
-      <div style={{ display: 'grid', gap: 12 }}>
+    <div className="max-w-[560px] mx-auto mt-10">
+      <h1 className="text-[26px] font-bold text-slate-800 mb-2">Select subaccount</h1>
+      <p className="text-slate-500 mb-7">Choose which subaccount you'd like to access.</p>
+      <div className="flex flex-col gap-3">
         {subaccounts.map((sa) => (
           <button
             key={sa.id}
             onClick={() => navigate(`/portal/${sa.id}`)}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '16px 20px', background: '#fff', border: '1px solid #e2e8f0',
-              borderRadius: 10, cursor: 'pointer', textAlign: 'left',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
-            }}
+            className="flex items-center justify-between px-5 py-4 bg-white border border-slate-200 rounded-xl cursor-pointer text-left shadow-sm hover:border-indigo-300 hover:shadow-md transition-all"
           >
             <div>
-              <div style={{ fontWeight: 600, fontSize: 16, color: '#1e293b', marginBottom: 2 }}>{sa.name}</div>
-              <div style={{ fontSize: 13, color: '#64748b', fontFamily: 'monospace' }}>{sa.slug}</div>
+              <div className="font-semibold text-[16px] text-slate-800 mb-0.5">{sa.name}</div>
+              <div className="text-[13px] text-slate-500 font-mono">{sa.slug}</div>
             </div>
-            <span style={{ color: '#94a3b8', fontSize: 20 }}>→</span>
+            <span className="text-slate-400 text-xl">→</span>
           </button>
         ))}
       </div>

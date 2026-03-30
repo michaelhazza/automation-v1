@@ -3,19 +3,8 @@ import api from '../lib/api';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 import { type User } from '../lib/auth';
 
-interface BoardConfig {
-  id: string;
-  columns: BoardColumn[];
-  sourceTemplateId: string | null;
-}
-
-interface BoardTemplate {
-  id: string;
-  name: string;
-  description: string | null;
-  columns: BoardColumn[];
-  isDefault: boolean;
-}
+interface BoardConfig { id: string; columns: BoardColumn[]; sourceTemplateId: string | null; }
+interface BoardTemplate { id: string; name: string; description: string | null; columns: BoardColumn[]; isDefault: boolean; }
 
 export default function AdminBoardConfigPage({ user: _user, embedded }: { user: User; embedded?: boolean }) {
   const [config, setConfig] = useState<BoardConfig | null>(null);
@@ -36,9 +25,7 @@ export default function AdminBoardConfigPage({ user: _user, embedded }: { user: 
       ]);
       setConfig(configRes.data);
       setTemplates(templatesRes.data);
-      if (configRes.data) {
-        setColumns(configRes.data.columns);
-      }
+      if (configRes.data) setColumns(configRes.data.columns);
     } finally {
       setLoading(false);
     }
@@ -50,8 +37,7 @@ export default function AdminBoardConfigPage({ user: _user, embedded }: { user: 
     setError('');
     try {
       await api.post('/api/board-config/init', { templateId });
-      setSuccess('Board configuration initialised from template');
-      load();
+      setSuccess('Board configuration initialised from template'); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to initialise');
@@ -59,75 +45,65 @@ export default function AdminBoardConfigPage({ user: _user, embedded }: { user: 
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    setError('');
-    setSuccess('');
+    setSaving(true); setError(''); setSuccess('');
     try {
       await api.patch('/api/board-config', { columns });
-      setSuccess('Board configuration saved');
-      load();
+      setSuccess('Board configuration saved'); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const handlePushAll = async () => {
-    setPushing(true);
-    setError('');
-    setSuccess('');
+    setPushing(true); setError(''); setSuccess('');
     try {
       const { data } = await api.post('/api/board-config/push-all');
       setSuccess(`Board config pushed to ${data.pushed} client${data.pushed !== 1 ? 's' : ''}`);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to push');
-    } finally {
-      setPushing(false);
-    }
+    } finally { setPushing(false); }
   };
 
-  if (loading) return <div style={{ padding: 40 }}>Loading...</div>;
+  if (loading) return <div className="p-10 text-sm text-slate-500">Loading...</div>;
 
-  // No config yet — show template picker
   if (!config) {
     return (
       <div>
         {!embedded && (
           <>
-            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Board Configuration</h1>
-            <p style={{ color: '#64748b', marginBottom: 24 }}>
+            <h1 className="text-[28px] font-bold text-slate-800 mb-2">Board Configuration</h1>
+            <p className="text-sm text-slate-500 mb-6">
               Select a board template to initialise your organisation's board. This defines the default columns for all new subaccounts.
             </p>
           </>
         )}
 
-        {error && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+        {error && <div className="text-[13px] text-red-500 mb-3">{error}</div>}
 
         {templates.length === 0 ? (
-          <div style={{ color: '#94a3b8', fontStyle: 'italic' }}>No templates available. Ask your system administrator to create one.</div>
+          <div className="text-sm text-slate-400 italic">No templates available. Ask your system administrator to create one.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {templates.map(t => (
-              <div key={t.id} style={{ padding: 16, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <div>
-                    <span style={{ fontSize: 16, fontWeight: 600 }}>{t.name}</span>
-                    {t.isDefault && <span style={{ marginLeft: 8, fontSize: 11, background: '#dbeafe', color: '#2563eb', padding: '2px 8px', borderRadius: 4 }}>Default</span>}
+          <div className="flex flex-col gap-3">
+            {templates.map((t) => (
+              <div key={t.id} className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[16px] font-semibold text-slate-800">{t.name}</span>
+                    {t.isDefault && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">Default</span>}
                   </div>
                   <button
                     onClick={() => handleInit(t.id)}
-                    style={{ padding: '8px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors"
                   >
                     Use This Template
                   </button>
                 </div>
-                {t.description && <div style={{ fontSize: 13, color: '#64748b', marginBottom: 8 }}>{t.description}</div>}
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
-                  {t.columns.map(c => (
-                    <span key={c.key} style={{ fontSize: 11, padding: '3px 10px', background: c.colour + '20', color: c.colour, borderRadius: 4, fontWeight: 600 }}>
+                {t.description && <div className="text-[13px] text-slate-500 mb-2">{t.description}</div>}
+                <div className="flex gap-1.5 flex-wrap">
+                  {t.columns.map((c) => (
+                    <span key={c.key} className="text-[11px] px-2.5 py-1 rounded font-semibold" style={{ background: `${c.colour}20`, color: c.colour }}>
                       {c.label}{c.locked ? ' 🔒' : ''}
                     </span>
                   ))}
@@ -140,35 +116,34 @@ export default function AdminBoardConfigPage({ user: _user, embedded }: { user: 
     );
   }
 
-  // Config exists — show editor
   return (
     <div>
       {!embedded && (
         <>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginBottom: 8 }}>Board Configuration</h1>
-          <p style={{ color: '#64748b', marginBottom: 24 }}>
+          <h1 className="text-[28px] font-bold text-slate-800 mb-2">Board Configuration</h1>
+          <p className="text-sm text-slate-500 mb-6">
             Customise your organisation's board columns. Locked columns cannot be removed. Changes here do not automatically apply to existing subaccounts — use "Push to Subaccounts" for that.
           </p>
         </>
       )}
 
-      {error && <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-      {success && <div style={{ color: '#22c55e', fontSize: 13, marginBottom: 12 }}>{success}</div>}
+      {error && <div className="text-[13px] text-red-500 mb-3">{error}</div>}
+      {success && <div className="text-[13px] text-green-600 mb-3">{success}</div>}
 
       <BoardColumnEditor columns={columns} onChange={setColumns} />
 
-      <div style={{ marginTop: 20, display: 'flex', gap: 12 }}>
+      <div className="mt-5 flex gap-3">
         <button
           onClick={handleSave}
           disabled={saving}
-          style={{ padding: '10px 24px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 600 }}
+          className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors"
         >
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
         <button
           onClick={handlePushAll}
           disabled={pushing}
-          style={{ padding: '10px 24px', background: '#f1f5f9', color: '#374151', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}
+          className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-sm font-medium rounded-lg transition-colors"
         >
           {pushing ? 'Pushing...' : 'Push to All Clients'}
         </button>

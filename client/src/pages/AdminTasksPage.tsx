@@ -14,26 +14,18 @@ interface Process {
   workflowEngineId: string;
 }
 
-interface Category {
-  id: string;
-  name: string;
-  colour: string | null;
-}
+interface Category { id: string; name: string; colour: string | null; }
+interface Engine { id: string; name: string; status: string; engineType: string; }
 
-interface Engine {
-  id: string;
-  name: string;
-  status: string;
-  engineType: string;
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  active: '#16a34a',
-  inactive: '#6b7280',
-  draft: '#d97706',
+const STATUS_TEXT: Record<string, string> = {
+  active:   'text-green-600',
+  inactive: 'text-slate-500',
+  draft:    'text-amber-600',
 };
 
-export default function AdminTasksPage({ user }: { user: User }) {
+const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+
+export default function AdminTasksPage({ user: _user }: { user: User }) {
   const [processes, setProcesses] = useState<Process[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [engines, setEngines] = useState<Engine[]>([]);
@@ -69,15 +61,8 @@ export default function AdminTasksPage({ user }: { user: User }) {
     }
   };
 
-  const handleActivate = async (id: string) => {
-    await api.post(`/api/processes/${id}/activate`);
-    load();
-  };
-
-  const handleDeactivate = async (id: string) => {
-    await api.post(`/api/processes/${id}/deactivate`);
-    load();
-  };
+  const handleActivate = async (id: string) => { await api.post(`/api/processes/${id}/activate`); load(); };
+  const handleDeactivate = async (id: string) => { await api.post(`/api/processes/${id}/deactivate`); load(); };
 
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
@@ -88,48 +73,65 @@ export default function AdminTasksPage({ user }: { user: User }) {
 
   const catMap = Object.fromEntries(categories.map((c) => [c.id, c]));
 
-  if (loading) return <div>Loading...</div>;
+  if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
 
   return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+    <div className="page-enter">
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1e293b', margin: 0 }}>Manage Automations</h1>
-          <p style={{ color: '#64748b', margin: '8px 0 0' }}>Create and configure automations</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Manage Automations</h1>
+          <p className="text-sm text-slate-500 mt-2">Create and configure automations</p>
         </div>
-        <button onClick={() => { setShowForm(true); setError(''); }} style={{ padding: '10px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}>
+        <button
+          onClick={() => { setShowForm(true); setError(''); }}
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
           + Create automation
         </button>
       </div>
 
       {showForm && (
         <Modal title="New process" onClose={() => setShowForm(false)} maxWidth={640}>
-          {error && <div style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
-            <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Name *</label>
-              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
-            <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Engine *</label>
-              <select value={form.workflowEngineId} onChange={(e) => setForm({ ...form, workflowEngineId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          <div className="grid grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name *</label>
+              <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Engine *</label>
+              <select value={form.workflowEngineId} onChange={(e) => setForm({ ...form, workflowEngineId: e.target.value })} className={inputCls}>
                 <option value="">Select engine...</option>
                 {engines.filter((e) => e.status === 'active').map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Description</label>
-              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Webhook path *</label>
-              <input value={form.webhookPath} onChange={(e) => setForm({ ...form, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} /></div>
-            <div><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Category</label>
-              <select value={form.orgCategoryId} onChange={(e) => setForm({ ...form, orgCategoryId: e.target.value })} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}>
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description</label>
+              <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} className={`${inputCls} resize-vertical`} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Webhook path *</label>
+              <input value={form.webhookPath} onChange={(e) => setForm({ ...form, webhookPath: e.target.value })} placeholder="/webhook/my-workflow-id" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Category</label>
+              <select value={form.orgCategoryId} onChange={(e) => setForm({ ...form, orgCategoryId: e.target.value })} className={inputCls}>
                 <option value="">No category</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Input schema / guidance</label>
-              <textarea value={form.inputSchema} onChange={(e) => setForm({ ...form, inputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
-            <div style={{ gridColumn: '1 / -1' }}><label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6 }}>Output schema / description</label>
-              <textarea value={form.outputSchema} onChange={(e) => setForm({ ...form, outputSchema: e.target.value })} rows={2} style={{ width: '100%', padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', resize: 'vertical' }} /></div>
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Input schema / guidance</label>
+              <textarea value={form.inputSchema} onChange={(e) => setForm({ ...form, inputSchema: e.target.value })} rows={2} className={`${inputCls} resize-vertical`} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Output schema / description</label>
+              <textarea value={form.outputSchema} onChange={(e) => setForm({ ...form, outputSchema: e.target.value })} rows={2} className={`${inputCls} resize-vertical`} />
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button onClick={handleCreate} style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Create</button>
-            <button onClick={() => setShowForm(false)} style={{ padding: '8px 20px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <div className="flex gap-3">
+            <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">Create</button>
+            <button onClick={() => setShowForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
           </div>
         </Modal>
       )}
@@ -144,36 +146,53 @@ export default function AdminTasksPage({ user }: { user: User }) {
         />
       )}
 
-      <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {processes.length === 0 ? (
-          <div style={{ padding: '48px', textAlign: 'center', color: '#64748b' }}>No processes yet.</div>
+          <div className="py-12 text-center text-sm text-slate-500">No processes yet.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <table className="w-full text-sm">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Name</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Category</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Status</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 600, color: '#374151' }}>Actions</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Name</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Category</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-50">
               {processes.map((process) => (
-                <tr key={process.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '12px 16px', fontWeight: 500, color: '#1e293b' }}>{process.name}</td>
-                  <td style={{ padding: '12px 16px', color: '#64748b' }}>{process.orgCategoryId ? catMap[process.orgCategoryId]?.name : '-'}</td>
-                  <td style={{ padding: '12px 16px' }}>
-                    <span style={{ color: STATUS_COLORS[process.status] ?? '#6b7280', fontWeight: 500 }}>{process.status}</span>
+                <tr key={process.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-slate-800">{process.name}</td>
+                  <td className="px-4 py-3 text-[13px] text-slate-500">
+                    {process.orgCategoryId ? catMap[process.orgCategoryId]?.name : '—'}
                   </td>
-                  <td style={{ padding: '12px 16px', display: 'flex', gap: 8 }}>
-                    <Link to={`/admin/processes/${process.id}`} style={{ padding: '4px 10px', background: '#f1f5f9', color: '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', textDecoration: 'none' }}>Edit</Link>
-                    {process.status !== 'active' && (
-                      <button onClick={() => handleActivate(process.id)} style={{ padding: '4px 10px', background: '#dcfce7', color: '#16a34a', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Activate</button>
-                    )}
-                    {process.status === 'active' && (
-                      <button onClick={() => handleDeactivate(process.id)} style={{ padding: '4px 10px', background: '#fef9c3', color: '#a16207', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Deactivate</button>
-                    )}
-                    <button onClick={() => setDeleteId(process.id)} style={{ padding: '4px 10px', background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>Delete</button>
+                  <td className="px-4 py-3">
+                    <span className={`font-medium capitalize text-[13px] ${STATUS_TEXT[process.status] ?? 'text-slate-500'}`}>
+                      {process.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <Link
+                        to={`/admin/processes/${process.id}`}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
+                      >
+                        Edit
+                      </Link>
+                      {process.status !== 'active' && (
+                        <button onClick={() => handleActivate(process.id)} className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-md text-xs font-medium transition-colors">
+                          Activate
+                        </button>
+                      )}
+                      {process.status === 'active' && (
+                        <button onClick={() => handleDeactivate(process.id)} className="px-2.5 py-1 bg-yellow-50 hover:bg-yellow-100 text-yellow-700 rounded-md text-xs font-medium transition-colors">
+                          Deactivate
+                        </button>
+                      )}
+                      <button onClick={() => setDeleteId(process.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -181,6 +200,6 @@ export default function AdminTasksPage({ user }: { user: User }) {
           </table>
         )}
       </div>
-    </>
+    </div>
   );
 }
