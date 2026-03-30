@@ -1,4 +1,4 @@
-import { eq, and, isNull, count } from 'drizzle-orm';
+import { eq, and, isNull, count, inArray } from 'drizzle-orm';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { glob } from 'fs/promises';
@@ -1054,7 +1054,7 @@ async function proposeDevopsAction(
     };
   }
 
-  // write_patch: validate patchLimits before proposing
+  // write_patch: validate patchLimits + maxPatchAttemptsPerTask before proposing
   if (actionType === 'write_patch') {
     const diff = String(input.diff ?? '');
     const lineCount = diff.split('\n').length;
@@ -1064,6 +1064,34 @@ async function proposeDevopsAction(
         error: `Patch exceeds maxLinesChanged limit (${lineCount} lines > ${devCtx.patchLimits.maxLinesChanged}). Split the change into smaller patches.`,
         errorCode: 'patch_size_exceeded',
       };
+    }
+
+    // Enforce maxPatchAttemptsPerTask across all runs for this task
+    if (context.taskId) {
+      const taskRunRows = await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(eq(agentRuns.taskId, context.taskId));
+      const taskRunIds = taskRunRows.map(r => r.id);
+      const patchCount = taskRunIds.length
+        ? await db
+            .select({ total: count() })
+            .from(actions)
+            .where(and(inArray(actions.agentRunId, taskRunIds), eq(actions.actionType, 'write_patch')))
+            .then(rows => Number(rows[0]?.total ?? 0))
+        : 0;
+      if (patchCount >= devCtx.costLimits.maxPatchAttemptsPerTask) {
+        return {
+          success: false,
+          error: `Patch attempt limit reached (${patchCount}/${devCtx.costLimits.maxPatchAttemptsPerTask} per task). Cannot propose more patches for this task without human review.`,
+          errorCode: 'permission_failure',
+        };
+      }
+    }
+
+    // Auto-inject task_id so devopsAdapter can manage the correct branch
+    if (context.taskId) {
+      input = { ...input, task_id: context.taskId };
     }
   }
 
@@ -1225,17 +1253,20 @@ async function executeRunTests(
   const { context: devCtx } = devCtxResult;
 
   // Enforce maxTestRunsPerTask cost limit
+  // actions table has no taskId column; count via agentRuns.taskId → actions.agentRunId
   if (context.taskId) {
-    const [countRow] = await db
-      .select({ total: count() })
-      .from(actions)
-      .where(
-        and(
-          eq(actions.taskId, context.taskId),
-          eq(actions.actionType, 'run_tests')
-        )
-      );
-    const runCount = Number(countRow?.total ?? 0);
+    const taskRunRows = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.taskId, context.taskId));
+    const taskRunIds = taskRunRows.map(r => r.id);
+    const runCount = taskRunIds.length
+      ? await db
+          .select({ total: count() })
+          .from(actions)
+          .where(and(inArray(actions.agentRunId, taskRunIds), eq(actions.actionType, 'run_tests')))
+          .then(rows => Number(rows[0]?.total ?? 0))
+      : 0;
     if (runCount >= devCtx.costLimits.maxTestRunsPerTask) {
       return {
         success: false,

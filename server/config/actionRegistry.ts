@@ -148,6 +148,83 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
   },
 
+  // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
+
+  read_codebase: {
+    actionType: 'read_codebase',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['file_path'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['permission_failure', 'validation_failure'],
+    },
+  },
+
+  search_codebase: {
+    actionType: 'search_codebase',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['query', 'search_type', 'file_pattern', 'max_results'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['permission_failure', 'validation_failure'],
+    },
+  },
+
+  run_tests: {
+    actionType: 'run_tests',
+    actionCategory: 'devops',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['test_filter'],
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['permission_failure', 'execution_failure'],
+    },
+  },
+
+  analyze_endpoint: {
+    actionType: 'analyze_endpoint',
+    actionCategory: 'api',
+    isExternal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['url', 'method', 'headers', 'body', 'expected_status'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_failure'],
+    },
+  },
+
+  report_bug: {
+    actionType: 'report_bug',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: true,
+    payloadFields: ['title', 'description', 'severity', 'confidence', 'steps_to_reproduce', 'expected_behavior', 'actual_behavior'],
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'fixed',
+      retryOn: ['db_error'],
+      doNotRetryOn: [],
+    },
+  },
+
   // ── Dev/QA devops actions ──────────────────────────────────────────────────
 
   write_patch: {

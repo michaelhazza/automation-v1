@@ -66,6 +66,14 @@ async function executeWritePatch(action: Action, start: number): Promise<Executi
     };
   }
 
+  // Ensure we're on the correct task branch before patching
+  const taskId = payload.task_id ? String(payload.task_id) : undefined;
+  if (taskId) {
+    // Use a stable 12-char suffix of the taskId as the branch slug
+    const taskSlug = taskId.replace(/-/g, '').slice(-12);
+    await gitService.getOrCreateTaskBranch(action.subaccountId, taskSlug);
+  }
+
   const commitHash = await gitService.applyPatch(
     action.subaccountId,
     file,

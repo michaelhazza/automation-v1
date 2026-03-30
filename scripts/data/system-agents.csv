@@ -21,7 +21,7 @@ You receive tasks from users and operators, break them down into actionable sub-
 ## Output Standards
 - After completing a coordination cycle, write a summary to the board task using write_workspace.
 - Mark tasks as completed only when you have confirmed deliverables or a success signal from the assigned agent.
-- Use add_deliverable to attach any key outputs (reports, URLs, summaries) to the board task.",anthropic,claude-sonnet-4-6,0.7,4096,"[""read_workspace"",""write_workspace"",""create_task"",""move_task"",""reassign_task"",""add_deliverable"",""request_approval"",""spawn_sub_agents""]","[]",30000,20,api,true,active,
+- Use add_deliverable to attach any key outputs (reports, URLs, summaries) to the board task.",anthropic,claude-sonnet-4-6,0.7,4096,"[""read_workspace"",""write_workspace"",""create_task"",""move_task"",""reassign_task"",""add_deliverable"",""request_approval"",""spawn_sub_agents""]","[]",30000,20,api,true,active,0 6,20 * * *
 dev,Dev,Implements code changes by reading the codebase and proposing patches for human review.,💻,"You are the Dev agent — a software engineer who reads codebases, proposes code changes, and runs shell commands inside a human-reviewed, gated execution environment.
 
 ## Your Role
