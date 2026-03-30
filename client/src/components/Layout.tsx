@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import CommandPalette from './CommandPalette';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { User } from '../lib/auth';
 import api from '../lib/api';
@@ -167,6 +168,9 @@ export default function Layout({ user, children }: LayoutProps) {
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
 
+  // Command palette
+  const [cmdOpen, setCmdOpen] = useState(false);
+
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
   const hasAnyOrgPerm = orgPerms.size > 0;
   const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has(key);
@@ -223,6 +227,20 @@ export default function Layout({ user, children }: LayoutProps) {
     return () => clearInterval(t);
   }, [activeClientId]);
 
+  // Cmd+K to open command palette
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setCmdOpen(o => !o); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  const handleSelectClientFromPalette = useCallback((id: string, name: string) => {
+    setActiveClientIdState(id);
+    setActiveClientNameState(name);
+  }, []);
+
   // Close org picker on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -261,6 +279,12 @@ export default function Layout({ user, children }: LayoutProps) {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: "'Inter', -apple-system, system-ui, sans-serif" }}>
+      <CommandPalette
+        isOpen={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        activeClientId={activeClientId}
+        onSelectClient={handleSelectClientFromPalette}
+      />
 
       {/* ── Icon Rail ─────────────────────────────────────────────────── */}
       <aside style={{
@@ -513,26 +537,46 @@ export default function Layout({ user, children }: LayoutProps) {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f8fafc' }}>
 
         {/* Breadcrumb bar */}
-        {breadcrumbs.length > 0 && (
-          <div style={{
-            height: 42, padding: '0 24px', display: 'flex', alignItems: 'center',
-            background: 'white', borderBottom: '1px solid #e2e8f0', flexShrink: 0,
-            fontSize: 13, gap: 6,
-          }}>
-            {breadcrumbs.map((crumb, i) => (
-              <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {i > 0 && <span style={{ color: '#cbd5e1' }}>›</span>}
-                {i === breadcrumbs.length - 1
-                  ? <span style={{ color: '#1e293b', fontWeight: 600 }}>{crumb.label}</span>
-                  : <Link to={crumb.to} style={{ color: '#64748b', textDecoration: 'none' }}
-                      onMouseEnter={e => (e.currentTarget.style.color = '#6366f1')}
-                      onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
-                    >{crumb.label}</Link>
-                }
-              </span>
-            ))}
+        <div style={{
+          height: 42, padding: '0 16px 0 24px', display: 'flex', alignItems: 'center',
+          background: 'white', borderBottom: '1px solid #e2e8f0', flexShrink: 0,
+          fontSize: 13, gap: 6,
+        }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {breadcrumbs.length === 0
+              ? <span style={{ color: '#1e293b', fontWeight: 600 }}>Dashboard</span>
+              : breadcrumbs.map((crumb, i) => (
+                <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {i > 0 && <span style={{ color: '#cbd5e1' }}>›</span>}
+                  {i === breadcrumbs.length - 1
+                    ? <span style={{ color: '#1e293b', fontWeight: 600 }}>{crumb.label}</span>
+                    : <Link to={crumb.to} style={{ color: '#64748b', textDecoration: 'none' }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#6366f1')}
+                        onMouseLeave={e => (e.currentTarget.style.color = '#64748b')}
+                      >{crumb.label}</Link>
+                  }
+                </span>
+              ))
+            }
           </div>
-        )}
+          {/* Cmd+K trigger */}
+          <button
+            onClick={() => setCmdOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+              background: '#f1f5f9', border: '1px solid #e2e8f0',
+              color: '#94a3b8', fontSize: 12, fontFamily: 'inherit',
+              transition: 'border-color 0.1s, color 0.1s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#6366f1'; (e.currentTarget as HTMLButtonElement).style.color = '#6366f1'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#e2e8f0'; (e.currentTarget as HTMLButtonElement).style.color = '#94a3b8'; }}
+          >
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search</span>
+            <span style={{ fontSize: 10, opacity: 0.6 }}>⌘K</span>
+          </button>
+        </div>
 
         {/* Page content */}
         <div style={{ flex: 1, overflow: 'auto', padding: '28px 24px' }} className="page-enter">
