@@ -23,11 +23,11 @@ interface TaskCardProps {
   isDragging?: boolean;
 }
 
-const priorityColours: Record<string, string> = {
-  urgent: '#ef4444',
-  high: '#f59e0b',
-  normal: '#6366f1',
-  low: '#94a3b8',
+const priorityBg: Record<string, string> = {
+  urgent: 'bg-red-500',
+  high: 'bg-amber-500',
+  normal: 'bg-indigo-500',
+  low: 'bg-slate-400',
 };
 
 export default function TaskCard({ item, onClick, provided, isDragging }: TaskCardProps) {
@@ -45,62 +45,46 @@ export default function TaskCard({ item, onClick, provided, isDragging }: TaskCa
   const MAX_VISIBLE = 3;
   const visibleAgents = agents.slice(0, MAX_VISIBLE);
   const overflow = agents.length - MAX_VISIBLE;
+  const isOverdue = item.dueDate && new Date(item.dueDate) < new Date();
 
   return (
     <div
       {...refProps}
       onClick={onClick}
-      style={{
-        padding: '10px 12px',
-        background: '#fff',
-        border: '1px solid #e2e8f0',
-        borderRadius: 8,
-        cursor: 'pointer',
-        boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.15)' : '0 1px 2px rgba(0,0,0,0.04)',
-        transform: isDragging ? 'rotate(2deg)' : 'none',
-        transition: 'box-shadow 0.15s, transform 0.15s',
-        display: 'flex',
-        flexDirection: 'column' as const,
-        gap: 6,
-      }}
+      className={`px-3 py-2.5 bg-white border border-slate-200 rounded-lg cursor-pointer transition-[box-shadow,transform] duration-150 flex flex-col gap-1.5 ${
+        isDragging
+          ? 'shadow-[0_4px_12px_rgba(0,0,0,0.15)] rotate-2'
+          : 'shadow-[0_1px_2px_rgba(0,0,0,0.04)]'
+      }`}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="flex items-center gap-1.5">
         <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: priorityColours[item.priority] ?? '#6366f1',
-            flexShrink: 0,
-          }}
+          className={`w-2 h-2 rounded-full shrink-0 ${priorityBg[item.priority] ?? 'bg-indigo-500'}`}
         />
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+        <span className="text-[13px] font-semibold text-slate-800 leading-[1.3] truncate">
           {item.title}
         </span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: '#94a3b8' }}>
+      <div className="flex items-center justify-between text-[11px] text-slate-400">
         {agents.length > 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' as const }}>
+          <div className="flex items-center gap-1 flex-wrap">
             {visibleAgents.map(a => (
-              <span
-                key={a.id}
-                style={{ background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, color: '#475569' }}
-              >
+              <span key={a.id} className="bg-slate-100 px-1.5 py-px rounded text-slate-600">
                 {a.name}
               </span>
             ))}
             {overflow > 0 && (
-              <span style={{ background: '#e2e8f0', padding: '1px 6px', borderRadius: 4, color: '#64748b' }}>
+              <span className="bg-slate-200 px-1.5 py-px rounded text-slate-500">
                 +{overflow}
               </span>
             )}
           </div>
         ) : (
-          <span style={{ fontStyle: 'italic' }}>Unassigned</span>
+          <span className="italic">Unassigned</span>
         )}
         {item.dueDate && (
-          <span style={{ color: new Date(item.dueDate) < new Date() ? '#ef4444' : '#64748b' }}>
+          <span className={isOverdue ? 'text-red-500' : 'text-slate-500'}>
             {new Date(item.dueDate).toLocaleDateString()}
           </span>
         )}
