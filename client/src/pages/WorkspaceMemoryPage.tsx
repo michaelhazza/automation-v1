@@ -86,14 +86,14 @@ export default function WorkspaceMemoryPage({ user: _user }: { user: { id: strin
   if (loading) {
     return (
       <div className="p-8">
-        <div className="skeleton h-6 w-48 rounded mb-4" />
-        <div className="skeleton h-48 rounded-xl" />
+        <div className="h-6 w-48 rounded mb-4 bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-48 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
       </div>
     );
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
         <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">&larr; Back to Subaccount</Link>
         <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Workspace Memory</h1>

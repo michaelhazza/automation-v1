@@ -26,7 +26,7 @@ export default function OrgSettingsPage({ user: _user }: { user: User }) {
 
   if (!orgId) {
     return (
-      <div className="page-enter p-10">
+      <div className="animate-[fadeIn_0.2s_ease-out_both] p-10">
         <h1 className="text-[28px] font-extrabold text-slate-900 mb-2">Organisation Settings</h1>
         <p className="text-[14px] text-slate-500">Select an organisation from the sidebar to view settings.</p>
       </div>
@@ -34,7 +34,7 @@ export default function OrgSettingsPage({ user: _user }: { user: User }) {
   }
 
   return (
-    <div className="page-enter">
+    <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
         <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0 mb-1.5">Organisation Settings</h1>
         <p className="text-[14px] text-slate-500 m-0">Manage settings for {orgName ?? 'your organisation'}</p>
@@ -104,8 +104,8 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
   if (loading) {
     return (
       <div>
-        <div className="skeleton h-8 w-72 rounded-lg mb-6" />
-        <div className="skeleton h-48 rounded-xl" />
+        <div className="h-8 w-72 rounded-lg mb-6 bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
+        <div className="h-48 rounded-xl bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
       </div>
     );
   }
