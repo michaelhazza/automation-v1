@@ -126,6 +126,63 @@ export const systemAgentService = {
     return updated;
   },
 
+  /**
+   * Upsert a system agent by slug. Used by the CSV import endpoint.
+   * Returns { created: true } when inserted, { created: false } when updated.
+   */
+  async upsertBySlug(data: {
+    slug: string;
+    name: string;
+    description?: string | null;
+    icon?: string | null;
+    masterPrompt: string;
+    modelProvider?: string;
+    modelId?: string;
+    temperature?: number;
+    maxTokens?: number;
+    defaultSystemSkillSlugs?: string[];
+    defaultOrgSkillSlugs?: string[];
+    defaultTokenBudget?: number;
+    defaultMaxToolCalls?: number;
+    executionMode?: string;
+    isPublished?: boolean;
+    status?: string;
+    defaultScheduleCron?: string | null;
+  }): Promise<{ agent: typeof systemAgents.$inferSelect; created: boolean }> {
+    const [existing] = await db
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(and(eq(systemAgents.slug, data.slug), isNull(systemAgents.deletedAt)));
+
+    const values = {
+      name: data.name,
+      description: data.description ?? null,
+      icon: data.icon ?? null,
+      masterPrompt: data.masterPrompt,
+      modelProvider: data.modelProvider ?? 'anthropic',
+      modelId: data.modelId ?? 'claude-sonnet-4-6',
+      temperature: data.temperature ?? 0.7,
+      maxTokens: data.maxTokens ?? 4096,
+      defaultSystemSkillSlugs: data.defaultSystemSkillSlugs ?? [],
+      defaultOrgSkillSlugs: data.defaultOrgSkillSlugs ?? [],
+      defaultTokenBudget: data.defaultTokenBudget ?? 30000,
+      defaultMaxToolCalls: data.defaultMaxToolCalls ?? 20,
+      executionMode: (data.executionMode as 'api' | 'headless') ?? 'api',
+      isPublished: data.isPublished ?? false,
+      status: (data.status as 'draft' | 'active' | 'inactive') ?? 'draft',
+      defaultScheduleCron: data.defaultScheduleCron ?? null,
+      updatedAt: new Date(),
+    };
+
+    if (existing) {
+      const [agent] = await db.update(systemAgents).set(values).where(eq(systemAgents.id, existing.id)).returning();
+      return { agent, created: false };
+    }
+
+    const [agent] = await db.insert(systemAgents).values({ ...values, slug: data.slug, createdAt: new Date() }).returning();
+    return { agent, created: true };
+  },
+
   async deleteAgent(id: string) {
     const [existing] = await db.select().from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -61,6 +61,9 @@ export default function SystemAgentsPage({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -96,6 +99,41 @@ export default function SystemAgentsPage({ user }: { user: User }) {
     }
   };
 
+  const handleExport = async () => {
+    const response = await api.get('/api/system/agents/export', { responseType: 'blob' });
+    const url = URL.createObjectURL(response.data as Blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'system-agents.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    setImporting(true);
+    setImportStatus(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post('/api/system/agents/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setImportStatus({ type: 'success', message: `${data.message}${data.errors?.length ? ` (${data.errors.length} skipped)` : ''}` });
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setImportStatus({ type: 'error', message: e.response?.data?.error ?? 'Import failed' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
     try {
@@ -126,17 +164,61 @@ export default function SystemAgentsPage({ user }: { user: User }) {
             Manage platform-level agent definitions available across all organizations.
           </p>
         </div>
-        <button
-          onClick={() => navigate('/system/agents/new')}
-          style={{
-            padding: '10px 20px', background: '#6366f1', color: '#fff',
-            border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          + New System Agent
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={handleImportFile}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            style={{
+              padding: '10px 16px', background: '#fff', color: '#374151',
+              border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14,
+              cursor: importing ? 'not-allowed' : 'pointer', fontWeight: 500,
+              whiteSpace: 'nowrap', opacity: importing ? 0.6 : 1,
+            }}
+          >
+            {importing ? 'Importing…' : '↑ Import CSV'}
+          </button>
+          <button
+            onClick={handleExport}
+            style={{
+              padding: '10px 16px', background: '#fff', color: '#374151',
+              border: '1px solid #d1d5db', borderRadius: 8, fontSize: 14,
+              cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap',
+            }}
+          >
+            ↓ Export CSV
+          </button>
+          <button
+            onClick={() => navigate('/system/agents/new')}
+            style={{
+              padding: '10px 20px', background: '#6366f1', color: '#fff',
+              border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontWeight: 500,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            + New System Agent
+          </button>
+        </div>
       </div>
+
+      {importStatus && (
+        <div style={{
+          marginBottom: 16, padding: '10px 16px', borderRadius: 8, fontSize: 14,
+          background: importStatus.type === 'success' ? '#dcfce7' : '#fef2f2',
+          color: importStatus.type === 'success' ? '#166534' : '#dc2626',
+          border: `1px solid ${importStatus.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>{importStatus.message}</span>
+          <button onClick={() => setImportStatus(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: 16, padding: '0 4px' }}>×</button>
+        </div>
+      )}
 
       {deleteId && (
         <ConfirmDialog
