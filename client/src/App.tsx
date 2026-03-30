@@ -54,22 +54,16 @@ const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 
 function PageLoader() {
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300 }}>
-      <div style={{
-        width: 32, height: 32,
-        border: '3px solid #e2e8f0',
-        borderTopColor: '#6366f1',
-        borderRadius: '50%',
-        animation: 'spin 0.8s linear infinite',
-      }} />
+    <div className="flex justify-center items-center min-h-[300px]">
+      <div className="w-8 h-8 border-[3px] border-slate-200 border-t-indigo-500 rounded-full [animation:spin_0.8s_linear_infinite]" />
     </div>
   );
 }
 
 function ProtectedLayout({ user, loading }: { user: User | null; loading: boolean }) {
   if (loading) return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-      <div style={{ width: 36, height: 36, border: '3px solid #e2e8f0', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+    <div className="flex justify-center items-center min-h-screen">
+      <div className="w-9 h-9 border-[3px] border-slate-200 border-t-indigo-500 rounded-full [animation:spin_0.8s_linear_infinite]" />
     </div>
   );
   if (!user) return <Navigate to="/login" replace />;
