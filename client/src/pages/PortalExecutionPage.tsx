@@ -151,7 +151,6 @@ export default function PortalExecutionPage({ user }: { user: User }) {
 
   return (
     <>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <div className="mb-4">
         <Link to={`/portal/${subaccountId}`} className="text-blue-600 text-[13px] no-underline">← Back to automations</Link>
       </div>
@@ -236,7 +235,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
 
         {isExecuting && (
           <div className="bg-white rounded-xl px-6 py-8 border border-slate-200 mb-6 flex flex-col items-center gap-4 text-center">
-            <div style={{ width: 36, height: 36, border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+            <div className="w-9 h-9 rounded-full border-[3px] border-slate-200 border-t-blue-600 animate-spin shrink-0" />
             <div>
               <div className="text-[16px] font-semibold text-slate-800 mb-1.5">Executing... please wait</div>
               <div className="text-[13px] text-slate-500">
