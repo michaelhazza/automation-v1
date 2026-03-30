@@ -841,31 +841,31 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   return (
     <>
       {/* Back link + header */}
-      <div style={{ marginBottom: 16 }}>
-        <Link to="/admin/agents" style={{ color: '#6366f1', fontSize: 13, textDecoration: 'none' }}>
+      <div className="mb-4">
+        <Link to="/admin/agents" className="text-indigo-500 text-[13px] no-underline">
           &larr; Back to agents
         </Link>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+      <div className="flex justify-between items-start mb-6">
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: '#1e293b', margin: 0 }}>
+          <h1 className="text-[26px] font-bold text-slate-900 m-0">
             {isNew ? 'New Agent' : `Edit Agent: ${agent?.name ?? ''}`}
           </h1>
           {!isNew && agent && (
-            <p style={{ margin: '6px 0 0', color: '#64748b', fontSize: 13 }}>
+            <p className="mt-1.5 mb-0 text-slate-500 text-[13px]">
               Created {new Date(agent.createdAt).toLocaleDateString()}
             </p>
           )}
         </div>
         {!isNew && agent && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="flex items-center gap-2.5">
             <StatusBadge status={agent.status} />
             {agent.status !== 'active' && (
               <button
                 onClick={handleActivate}
                 disabled={statusLoading}
-                style={{ padding: '6px 14px', background: '#dcfce7', color: '#166534', border: 'none', borderRadius: 6, fontSize: 13, cursor: statusLoading ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                className={`px-3.5 py-1.5 bg-green-100 text-green-800 border-none rounded-md text-[13px] font-medium ${statusLoading ? 'cursor-not-allowed' : 'cursor-pointer'}`}
               >
                 Activate
               </button>
@@ -874,7 +874,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               <button
                 onClick={handleDeactivate}
                 disabled={statusLoading}
-                style={{ padding: '6px 14px', background: '#fff7ed', color: '#9a3412', border: 'none', borderRadius: 6, fontSize: 13, cursor: statusLoading ? 'not-allowed' : 'pointer', fontWeight: 500 }}
+                className={`px-3.5 py-1.5 bg-orange-50 text-orange-800 border-none rounded-md text-[13px] font-medium ${statusLoading ? 'cursor-not-allowed' : 'cursor-pointer'}`}
               >
                 Deactivate
               </button>
@@ -885,34 +885,33 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
       {/* Global feedback */}
       {saveSuccess && (
-        <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#16a34a', fontSize: 13 }}>
+        <div className="bg-green-50 border border-green-200 rounded-lg px-3.5 py-2.5 mb-4 text-green-700 text-[13px]">
           {saveSuccess}
         </div>
       )}
       {saveError && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '10px 14px', marginBottom: 16, color: '#dc2626', fontSize: 13 }}>
+        <div className="bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 mb-4 text-red-600 text-[13px]">
           {saveError}
         </div>
       )}
 
       {/* ── Section 1: Basic Info ── */}
       <SectionCard title="Basic Info">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="grid grid-cols-2 gap-4">
           {/* Icon picker */}
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field label="Icon" hint="Choose an icon that represents this agent's role">
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <div className="flex flex-wrap gap-1.5">
                 {ICON_OPTIONS.map((ico) => (
                   <button
                     key={ico}
                     type="button"
                     onClick={() => setForm({ ...form, icon: form.icon === ico ? '' : ico })}
-                    style={{
-                      width: 40, height: 40, borderRadius: 10, border: `2px solid ${form.icon === ico ? '#6366f1' : '#e2e8f0'}`,
-                      background: form.icon === ico ? '#eef2ff' : '#fafafa',
-                      cursor: 'pointer', fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'all 0.1s',
-                    }}
+                    className={`w-10 h-10 rounded-[10px] border-2 cursor-pointer text-xl flex items-center justify-center transition-all duration-100 ${
+                      form.icon === ico
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-slate-200 bg-gray-50'
+                    }`}
                   >
                     {ico}
                   </button>
@@ -920,24 +919,24 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               </div>
             </Field>
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field label="Name *">
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 placeholder="e.g. Customer Support Agent"
-                style={inputStyle}
+                className={inputCls}
               />
             </Field>
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
+          <div className="col-span-2">
             <Field label="Description" hint="Describe what this agent does in first person, e.g. 'I research your competitors and report weekly'">
               <textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 rows={2}
                 placeholder="e.g. I research your competitors and deliver weekly insight reports"
-                style={{ ...inputStyle, resize: 'vertical' }}
+                className={`${inputCls} resize-y`}
               />
             </Field>
           </div>
@@ -947,7 +946,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Section 2: Agent Prompt ── */}
       {agent?.isSystemManaged ? (
         <SectionCard title="Agent Prompt">
-          <div style={{ padding: '12px 16px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 8, marginBottom: 16, fontSize: 13, color: '#5b21b6' }}>
+          <div className="px-4 py-3 bg-violet-50 border border-violet-200 rounded-lg mb-4 text-[13px] text-violet-800">
             This agent&apos;s core system prompt is managed at the platform level and cannot be edited here.
             You can add additional instructions below that will be layered on top of the system prompt.
           </div>
@@ -960,7 +959,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               onChange={(e) => setForm({ ...form, additionalPrompt: e.target.value })}
               rows={10}
               placeholder="Add your organisation-specific instructions here..."
-              style={{ ...inputStyle, resize: 'vertical', minHeight: 200, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6 }}
+              className={`${inputCls} resize-y min-h-[200px] font-mono leading-relaxed`}
             />
           </Field>
         </SectionCard>
@@ -975,7 +974,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               onChange={(e) => setForm({ ...form, masterPrompt: e.target.value })}
               rows={10}
               placeholder="You are a helpful assistant that..."
-              style={{ ...inputStyle, resize: 'vertical', minHeight: 200, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.6 }}
+              className={`${inputCls} resize-y min-h-[200px] font-mono leading-relaxed`}
             />
           </Field>
         </SectionCard>
@@ -983,12 +982,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
       {/* ── Section 3: Model Configuration ── */}
       <SectionCard title="Model Configuration">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="grid grid-cols-2 gap-4">
           <Field label="Model Provider">
             <select
               value="anthropic"
               disabled
-              style={{ ...selectStyle, background: '#f8fafc', color: '#64748b', cursor: 'not-allowed' }}
+              className={`${inputCls} bg-slate-50 text-slate-500 cursor-not-allowed`}
             >
               <option value="anthropic">Anthropic</option>
             </select>
@@ -997,7 +996,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             <select
               value={form.modelId}
               onChange={(e) => setForm({ ...form, modelId: e.target.value })}
-              style={selectStyle}
+              className={inputCls}
             >
               {MODEL_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
@@ -1006,12 +1005,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </Field>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+        <div className="grid grid-cols-2 gap-4 mt-4">
           <Field label="Response Mode" hint={RESPONSE_MODE_OPTIONS.find((o) => o.value === form.responseMode)?.description}>
             <select
               value={form.responseMode}
               onChange={(e) => setForm({ ...form, responseMode: e.target.value })}
-              style={selectStyle}
+              className={inputCls}
             >
               {RESPONSE_MODE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -1022,7 +1021,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             <select
               value={form.outputSize}
               onChange={(e) => setForm({ ...form, outputSize: e.target.value })}
-              style={selectStyle}
+              className={inputCls}
             >
               {OUTPUT_SIZE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -1031,17 +1030,17 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </Field>
         </div>
 
-        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#374151' }}>
+        <div className="mt-4 flex items-center gap-2.5">
+          <label className="flex items-center gap-2 cursor-pointer text-[13px] font-medium text-gray-700">
             <input
               type="checkbox"
               checked={form.allowModelOverride === 1}
               onChange={(e) => setForm({ ...form, allowModelOverride: e.target.checked ? 1 : 0 })}
-              style={{ width: 16, height: 16, cursor: 'pointer' }}
+              className="w-4 h-4 cursor-pointer"
             />
             Allow Model Override
           </label>
-          <span style={{ fontSize: 12, color: '#94a3b8' }}>
+          <span className="text-xs text-slate-400">
             {form.allowModelOverride === 1
               ? 'Sub-accounts can override the model for this agent'
               : 'Model settings are locked — sub-accounts cannot change them'}
