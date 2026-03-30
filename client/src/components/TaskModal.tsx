@@ -32,8 +32,8 @@ interface TaskData {
   brief: string | null;
   status: string;
   priority: string;
-  assignedAgentId: string | null;
-  assignedAgent: Agent | null;
+  assignedAgentIds: string[];
+  assignedAgents: Agent[];
   dueDate: string | null;
   activities: Activity[];
   deliverables: Deliverable[];
@@ -65,13 +65,13 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Edit form
+  // Edit form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [brief, setBrief] = useState('');
   const [status, setStatus] = useState('');
   const [priority, setPriority] = useState('normal');
-  const [assignedAgentId, setAssignedAgentId] = useState<string>('');
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState('');
 
   // Activity form
@@ -87,7 +87,13 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
       setBrief(data.brief ?? '');
       setStatus(data.status);
       setPriority(data.priority);
-      setAssignedAgentId(data.assignedAgentId ?? '');
+      // Prefer the new assignedAgentIds array; fall back to legacy singular
+      const ids: string[] = data.assignedAgentIds?.length
+        ? data.assignedAgentIds
+        : data.assignedAgentId
+          ? [data.assignedAgentId]
+          : [];
+      setSelectedAgentIds(ids);
       setDueDate(data.dueDate ? data.dueDate.slice(0, 10) : '');
     } finally {
       setLoading(false);
@@ -95,6 +101,12 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
   };
 
   useEffect(() => { load(); }, [itemId]);
+
+  const toggleAgent = (agentId: string) => {
+    setSelectedAgentIds(prev =>
+      prev.includes(agentId) ? prev.filter(id => id !== agentId) : [...prev, agentId]
+    );
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -106,7 +118,7 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
         brief: brief || null,
         status,
         priority,
-        assignedAgentId: assignedAgentId || null,
+        assignedAgentIds: selectedAgentIds,
         dueDate: dueDate || null,
       });
       onSaved();
@@ -170,30 +182,30 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
           {error && <div style={{ color: '#ef4444', fontSize: 13 }}>{error}</div>}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Title</label>
+            <label style={labelStyle}>Title</label>
             <input value={title} onChange={e => setTitle(e.target.value)} style={inputStyle} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Description</label>
+            <label style={labelStyle}>Description</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' as const }} />
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Brief</label>
+            <label style={labelStyle}>Brief</label>
             <textarea value={brief} onChange={e => setBrief(e.target.value)} rows={4} style={{ ...inputStyle, resize: 'vertical' as const }} />
           </div>
 
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Status</label>
+              <label style={labelStyle}>Status</label>
               <select value={status} onChange={e => setStatus(e.target.value)} style={inputStyle}>
                 {columns.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select>
             </div>
 
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Priority</label>
+              <label style={labelStyle}>Priority</label>
               <select value={priority} onChange={e => setPriority(e.target.value)} style={inputStyle}>
                 <option value="low">Low</option>
                 <option value="normal">Normal</option>
@@ -203,19 +215,55 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Assigned Agent</label>
-              <select value={assignedAgentId} onChange={e => setAssignedAgentId(e.target.value)} style={inputStyle}>
-                <option value="">Unassigned</option>
-                {agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={labelStyle}>
+              Assigned Agents
+              {selectedAgentIds.length > 0 && (
+                <span style={{ marginLeft: 6, fontSize: 11, color: '#6366f1', fontWeight: 400 }}>
+                  {selectedAgentIds.length} selected
+                </span>
+              )}
+            </label>
+            {agents.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>No agents available</div>
+            ) : (
+              <div style={{
+                border: '1px solid #d1d5db',
+                borderRadius: 8,
+                maxHeight: 160,
+                overflowY: 'auto' as const,
+              }}>
+                {agents.map((a, i) => (
+                  <label
+                    key={a.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '7px 12px',
+                      cursor: 'pointer',
+                      borderBottom: i < agents.length - 1 ? '1px solid #f1f5f9' : 'none',
+                      background: selectedAgentIds.includes(a.id) ? '#f5f3ff' : 'transparent',
+                      fontSize: 13,
+                      color: '#1e293b',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedAgentIds.includes(a.id)}
+                      onChange={() => toggleAgent(a.id)}
+                      style={{ accentColor: '#6366f1' }}
+                    />
+                    {a.name}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Due Date</label>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={inputStyle} />
-            </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <label style={labelStyle}>Due Date</label>
+            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={inputStyle} />
           </div>
 
           <button
@@ -304,6 +352,12 @@ export default function TaskModal({ subaccountId, itemId, agents, columns, onClo
     </Modal>
   );
 }
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: '#475569',
+};
 
 const inputStyle: React.CSSProperties = {
   padding: '8px 12px',

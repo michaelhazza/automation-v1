@@ -446,10 +446,15 @@ async function executeCreateTask(
   const title = String(input.title ?? '').slice(0, MAX_TASK_TITLE_LENGTH);
   if (!title) return { success: false, error: 'title is required' };
 
-  const assignedAgentId = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
+  // Support both singular assigned_agent_id and plural assigned_agent_ids array
+  const rawSingular = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
+  const rawPlural = Array.isArray(input.assigned_agent_ids)
+    ? (input.assigned_agent_ids as unknown[]).map(String)
+    : rawSingular ? [rawSingular] : [];
+  const assignedAgentIds = [...new Set(rawPlural.filter(Boolean))];
 
   // Self-assignment prevention
-  if (assignedAgentId === context.agentId) {
+  if (assignedAgentIds.includes(context.agentId)) {
     return { success: false, error: 'Cannot assign a task to yourself — this would create an infinite loop. Assign to a different agent or leave unassigned.' };
   }
 
@@ -464,7 +469,7 @@ async function executeCreateTask(
   const currentDepth = context.handoffDepth ?? 0;
 
   // Check handoff depth BEFORE creating the task to avoid orphans
-  if (assignedAgentId && currentDepth + 1 > MAX_HANDOFF_DEPTH) {
+  if (assignedAgentIds.length > 0 && currentDepth + 1 > MAX_HANDOFF_DEPTH) {
     return {
       success: false,
       error: `Handoff depth limit (${MAX_HANDOFF_DEPTH}) reached. Cannot assign task to another agent at this depth. Create the task without assignment instead.`,
@@ -481,34 +486,37 @@ async function executeCreateTask(
         brief: input.brief ? String(input.brief) : undefined,
         priority,
         status: input.status ? String(input.status) : 'inbox',
-        assignedAgentId,
+        assignedAgentIds: assignedAgentIds.length ? assignedAgentIds : undefined,
         createdByAgentId: context.agentId,
         handoffSourceRunId: context.runId,
         handoffContext: handoffContext ? { message: handoffContext } : undefined,
-        handoffDepth: assignedAgentId ? currentDepth + 1 : 0,
+        handoffDepth: assignedAgentIds.length ? currentDepth + 1 : 0,
       }
     );
 
-    // Trigger handoff if assigned to another agent
-    let handoffEnqueued = false;
-    if (assignedAgentId) {
-      handoffEnqueued = await enqueueHandoff({
-        taskId: item.id,
-        agentId: assignedAgentId,
-        subaccountId: context.subaccountId,
-        organisationId: context.organisationId,
-        sourceRunId: context.runId,
-        handoffDepth: currentDepth + 1,
-        handoffContext,
-      });
-    }
+    // Trigger a handoff for every assigned agent
+    const handoffResults = await Promise.all(
+      assignedAgentIds.map(agentId =>
+        enqueueHandoff({
+          taskId: item.id,
+          agentId,
+          subaccountId: context.subaccountId,
+          organisationId: context.organisationId,
+          sourceRunId: context.runId,
+          handoffDepth: currentDepth + 1,
+          handoffContext,
+        })
+      )
+    );
+    const handoffsEnqueued = handoffResults.filter(Boolean).length;
 
     return {
       success: true,
       task_id: item.id,
       title: item.title,
       status: item.status,
-      handoff_enqueued: handoffEnqueued,
+      assigned_agent_ids: assignedAgentIds,
+      handoffs_enqueued: handoffsEnqueued,
       _created_task: true,
     };
   } catch (err) {
@@ -688,14 +696,21 @@ async function executeReassignTask(
   context: SkillExecutionContext
 ): Promise<unknown> {
   const taskId = String(input.task_id ?? '');
-  const assignedAgentId = String(input.assigned_agent_id ?? '');
   const handoffContext = input.handoff_context ? String(input.handoff_context) : undefined;
 
   if (!taskId) return { success: false, error: 'task_id is required' };
-  if (!assignedAgentId) return { success: false, error: 'assigned_agent_id is required' };
+
+  // Support both singular and plural agent assignment
+  const rawSingular = input.assigned_agent_id ? String(input.assigned_agent_id) : undefined;
+  const rawPlural = Array.isArray(input.assigned_agent_ids)
+    ? (input.assigned_agent_ids as unknown[]).map(String)
+    : rawSingular ? [rawSingular] : [];
+  const assignedAgentIds = [...new Set(rawPlural.filter(Boolean))];
+
+  if (!assignedAgentIds.length) return { success: false, error: 'assigned_agent_id or assigned_agent_ids is required' };
 
   // Self-assignment prevention
-  if (assignedAgentId === context.agentId) {
+  if (assignedAgentIds.includes(context.agentId)) {
     return { success: false, error: 'Cannot reassign a task to yourself. Choose a different agent.' };
   }
 
@@ -705,14 +720,10 @@ async function executeReassignTask(
   }
 
   try {
-    const task = await taskService.getTask(taskId, context.organisationId);
-
-    // Update the task assignment
     await taskService.updateTask(taskId, context.organisationId, {
-      assignedAgentId,
+      assignedAgentIds,
     });
 
-    // Update handoff tracking on the task
     await db.update(tasks).set({
       handoffSourceRunId: context.runId,
       handoffContext: handoffContext ? { message: handoffContext } : null,
@@ -720,29 +731,33 @@ async function executeReassignTask(
       updatedAt: new Date(),
     }).where(eq(tasks.id, taskId));
 
-    // Log activity
     await taskService.addActivity(taskId, {
       activityType: 'assigned',
-      message: `Reassigned to another agent${handoffContext ? ` — ${handoffContext}` : ''}`,
+      message: `Reassigned to ${assignedAgentIds.length} agent${assignedAgentIds.length > 1 ? 's' : ''}${handoffContext ? ` — ${handoffContext}` : ''}`,
       agentId: context.agentId,
     });
 
-    // Trigger handoff
-    const handoffEnqueued = await enqueueHandoff({
-      taskId,
-      agentId: assignedAgentId,
-      subaccountId: context.subaccountId,
-      organisationId: context.organisationId,
-      sourceRunId: context.runId,
-      handoffDepth: currentDepth + 1,
-      handoffContext,
-    });
+    // Trigger a handoff for every assigned agent
+    const handoffResults = await Promise.all(
+      assignedAgentIds.map(agentId =>
+        enqueueHandoff({
+          taskId,
+          agentId,
+          subaccountId: context.subaccountId,
+          organisationId: context.organisationId,
+          sourceRunId: context.runId,
+          handoffDepth: currentDepth + 1,
+          handoffContext,
+        })
+      )
+    );
+    const handoffsEnqueued = handoffResults.filter(Boolean).length;
 
     return {
       success: true,
       task_id: taskId,
-      new_agent_id: assignedAgentId,
-      handoff_enqueued: handoffEnqueued,
+      assigned_agent_ids: assignedAgentIds,
+      handoffs_enqueued: handoffsEnqueued,
       _updated_task: true,
     };
   } catch (err) {

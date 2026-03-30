@@ -1,4 +1,4 @@
-import { eq, and, isNull, desc, asc, ilike } from 'drizzle-orm';
+import { eq, and, isNull, desc, asc, ilike, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   tasks,
@@ -9,6 +9,26 @@ import {
 } from '../db/schema/index.js';
 
 const POSITION_GAP = 1000;
+
+// Resolve an array of agent IDs to full agent objects in one query
+async function resolveAgents(ids: string[]): Promise<Array<{ id: string; name: string | null; slug: string | null }>> {
+  if (!ids.length) return [];
+  return db
+    .select({ id: agents.id, name: agents.name, slug: agents.slug })
+    .from(agents)
+    .where(inArray(agents.id, ids));
+}
+
+// Build the assignedAgents array and keep assignedAgentId in sync (first element = primary)
+function mergeAgentIds(
+  assignedAgentId: string | undefined | null,
+  assignedAgentIds: string[] | undefined | null
+): { agentId: string | null; agentIds: string[] } {
+  const ids = assignedAgentIds ?? (assignedAgentId ? [assignedAgentId] : []);
+  const deduped = [...new Set(ids.filter(Boolean))];
+  const primary = deduped[0] ?? null;
+  return { agentId: primary, agentIds: deduped };
+}
 
 export const taskService = {
   // ─── Tasks (Kanban Cards) ──────────────────────────────────────────────────
@@ -29,21 +49,31 @@ export const taskService = {
     if (filters?.assignedAgentId) conditions.push(eq(tasks.assignedAgentId, filters.assignedAgentId));
     if (filters?.search) conditions.push(ilike(tasks.title, `%${filters.search}%`));
 
-    const items = await db
-      .select({
-        item: tasks,
-        agentName: agents.name,
-        agentSlug: agents.slug,
-      })
+    const rows = await db
+      .select({ item: tasks })
       .from(tasks)
-      .leftJoin(agents, eq(agents.id, tasks.assignedAgentId))
       .where(and(...conditions))
       .orderBy(asc(tasks.position), desc(tasks.createdAt));
 
-    return items.map(({ item, agentName, agentSlug }) => ({
-      ...item,
-      assignedAgent: item.assignedAgentId ? { id: item.assignedAgentId, name: agentName, slug: agentSlug } : null,
-    }));
+    // Collect all unique agent IDs across all tasks in one query
+    const rawAllIds = rows.flatMap(r => {
+      const ids = r.item.assignedAgentIds as string[] | null;
+      return ids?.length ? ids : r.item.assignedAgentId ? [r.item.assignedAgentId] : [];
+    }) as string[];
+    const allIds = [...new Set(rawAllIds)];
+    const agentMap = new Map((await resolveAgents(allIds)).map(a => [a.id, a]));
+
+    return rows.map(({ item }) => {
+      const rawIds = item.assignedAgentIds as string[] | null;
+      const ids = rawIds?.length ? rawIds : item.assignedAgentId ? [item.assignedAgentId] : [];
+      const assignedAgents = ids.map(id => agentMap.get(id)).filter(Boolean) as Array<{ id: string; name: string | null; slug: string | null }>;
+      return {
+        ...item,
+        assignedAgents,
+        // Keep legacy singular field for backward compat
+        assignedAgent: assignedAgents[0] ?? null,
+      };
+    });
   },
 
   async getTask(id: string, organisationId: string) {
@@ -54,29 +84,21 @@ export const taskService = {
 
     if (!item) throw { statusCode: 404, message: 'Task not found' };
 
-    const activities = await db
-      .select()
-      .from(taskActivities)
-      .where(eq(taskActivities.taskId, id))
-      .orderBy(desc(taskActivities.createdAt));
+    const [activitiesRows, deliverablesRows] = await Promise.all([
+      db.select().from(taskActivities).where(eq(taskActivities.taskId, id)).orderBy(desc(taskActivities.createdAt)),
+      db.select().from(taskDeliverables).where(eq(taskDeliverables.taskId, id)).orderBy(desc(taskDeliverables.createdAt)),
+    ]);
 
-    const deliverables = await db
-      .select()
-      .from(taskDeliverables)
-      .where(eq(taskDeliverables.taskId, id))
-      .orderBy(desc(taskDeliverables.createdAt));
+    const ids = (item.assignedAgentIds as string[] | null) ?? (item.assignedAgentId ? [item.assignedAgentId] : []);
+    const assignedAgents = await resolveAgents(ids);
 
-    // Get assigned agent info
-    let assignedAgent = null;
-    if (item.assignedAgentId) {
-      const [agent] = await db
-        .select({ id: agents.id, name: agents.name, slug: agents.slug })
-        .from(agents)
-        .where(eq(agents.id, item.assignedAgentId));
-      assignedAgent = agent ?? null;
-    }
-
-    return { ...item, assignedAgent, activities, deliverables };
+    return {
+      ...item,
+      assignedAgents,
+      assignedAgent: assignedAgents[0] ?? null,
+      activities: activitiesRows,
+      deliverables: deliverablesRows,
+    };
   },
 
   async createTask(
@@ -89,6 +111,7 @@ export const taskService = {
       status?: string;
       priority?: 'low' | 'normal' | 'high' | 'urgent';
       assignedAgentId?: string;
+      assignedAgentIds?: string[];
       createdByAgentId?: string;
       processId?: string;
       dueDate?: Date;
@@ -102,11 +125,10 @@ export const taskService = {
   ) {
     const status = data.status ?? 'inbox';
 
-    // Validate status matches a board column
     await this._validateStatus(organisationId, subaccountId, status);
-
-    // Calculate position (append to end of column)
     const position = await this._nextPosition(subaccountId, status);
+
+    const { agentId, agentIds } = mergeAgentIds(data.assignedAgentId, data.assignedAgentIds);
 
     const [item] = await db
       .insert(tasks)
@@ -118,7 +140,8 @@ export const taskService = {
         brief: data.brief ?? null,
         status,
         priority: data.priority ?? 'normal',
-        assignedAgentId: data.assignedAgentId ?? null,
+        assignedAgentId: agentId,
+        assignedAgentIds: agentIds,
         createdByAgentId: data.createdByAgentId ?? null,
         processId: data.processId ?? null,
         position,
@@ -133,7 +156,6 @@ export const taskService = {
       })
       .returning();
 
-    // Auto-create "created" activity
     await db.insert(taskActivities).values({
       taskId: item.id,
       userId: userId ?? null,
@@ -156,6 +178,7 @@ export const taskService = {
       status?: string;
       priority?: 'low' | 'normal' | 'high' | 'urgent';
       assignedAgentId?: string | null;
+      assignedAgentIds?: string[] | null;
       processId?: string | null;
       dueDate?: Date | null;
     },
@@ -178,9 +201,36 @@ export const taskService = {
     if (data.brief !== undefined) update.brief = data.brief;
     if (data.status !== undefined) update.status = data.status;
     if (data.priority !== undefined) update.priority = data.priority;
-    if (data.assignedAgentId !== undefined) update.assignedAgentId = data.assignedAgentId;
     if (data.processId !== undefined) update.processId = data.processId;
     if (data.dueDate !== undefined) update.dueDate = data.dueDate;
+
+    // Agent assignment — handle both singular and plural
+    const agentIdsChanging = data.assignedAgentIds !== undefined || data.assignedAgentId !== undefined;
+    if (agentIdsChanging) {
+      const { agentId, agentIds } = mergeAgentIds(
+        data.assignedAgentId,
+        data.assignedAgentIds
+      );
+      update.assignedAgentId = agentId;
+      update.assignedAgentIds = agentIds;
+
+      // Log assignment change if the agent list actually changed
+      const prevIds = (existing.assignedAgentIds as string[] | null) ?? (existing.assignedAgentId ? [existing.assignedAgentId] : []);
+      const newIdsStr = JSON.stringify(agentIds.sort());
+      const prevIdsStr = JSON.stringify(prevIds.sort());
+      if (newIdsStr !== prevIdsStr) {
+        const agentObjs = await resolveAgents(agentIds);
+        const names = agentObjs.map(a => a.name ?? 'Unknown').join(', ');
+        await db.insert(taskActivities).values({
+          taskId: id,
+          userId: userId ?? null,
+          activityType: 'assigned',
+          message: agentIds.length ? `Assigned to ${names}` : 'Unassigned',
+          metadata: { agentIds },
+          createdAt: new Date(),
+        });
+      }
+    }
 
     const [updated] = await db
       .update(tasks)
@@ -188,7 +238,6 @@ export const taskService = {
       .where(eq(tasks.id, id))
       .returning();
 
-    // Auto-log status changes
     if (data.status && data.status !== existing.status) {
       await db.insert(taskActivities).values({
         taskId: id,
@@ -196,24 +245,6 @@ export const taskService = {
         activityType: 'status_changed',
         message: `Status changed from "${existing.status}" to "${data.status}"`,
         metadata: { from: existing.status, to: data.status },
-        createdAt: new Date(),
-      });
-    }
-
-    // Auto-log assignment changes
-    if (data.assignedAgentId !== undefined && data.assignedAgentId !== existing.assignedAgentId) {
-      let agentName = 'Unassigned';
-      if (data.assignedAgentId) {
-        const [agent] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, data.assignedAgentId));
-        agentName = agent?.name ?? 'Unknown agent';
-      }
-
-      await db.insert(taskActivities).values({
-        taskId: id,
-        userId: userId ?? null,
-        activityType: 'assigned',
-        message: data.assignedAgentId ? `Assigned to ${agentName}` : 'Unassigned',
-        metadata: { agentId: data.assignedAgentId },
         createdAt: new Date(),
       });
     }
@@ -344,10 +375,7 @@ export const taskService = {
       .from(boardConfigs)
       .where(and(eq(boardConfigs.organisationId, organisationId), eq(boardConfigs.subaccountId, subaccountId)));
 
-    if (!config) {
-      // No board config — accept any status (graceful degradation)
-      return;
-    }
+    if (!config) return;
 
     const columns = config.columns as Array<{ key: string }>;
     if (!columns.some(c => c.key === status)) {

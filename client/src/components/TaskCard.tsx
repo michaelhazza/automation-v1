@@ -1,9 +1,16 @@
+interface Agent {
+  id: string;
+  name: string | null;
+  slug: string | null;
+}
+
 interface TaskCardProps {
   item: {
     id: string;
     title: string;
     priority: string;
-    assignedAgent?: { id: string; name: string; slug: string } | null;
+    assignedAgents?: Agent[];
+    assignedAgent?: Agent | null;
     dueDate?: string | null;
     createdAt: string;
   };
@@ -27,6 +34,17 @@ export default function TaskCard({ item, onClick, provided, isDragging }: TaskCa
   const refProps = provided
     ? { ref: provided.innerRef, ...provided.draggableProps, ...provided.dragHandleProps }
     : {};
+
+  // Prefer the new assignedAgents array; fall back to legacy singular field
+  const agents = item.assignedAgents?.length
+    ? item.assignedAgents
+    : item.assignedAgent
+      ? [item.assignedAgent]
+      : [];
+
+  const MAX_VISIBLE = 3;
+  const visibleAgents = agents.slice(0, MAX_VISIBLE);
+  const overflow = agents.length - MAX_VISIBLE;
 
   return (
     <div
@@ -62,10 +80,22 @@ export default function TaskCard({ item, onClick, provided, isDragging }: TaskCa
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, color: '#94a3b8' }}>
-        {item.assignedAgent ? (
-          <span style={{ background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, color: '#475569' }}>
-            {item.assignedAgent.name}
-          </span>
+        {agents.length > 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' as const }}>
+            {visibleAgents.map(a => (
+              <span
+                key={a.id}
+                style={{ background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, color: '#475569' }}
+              >
+                {a.name}
+              </span>
+            ))}
+            {overflow > 0 && (
+              <span style={{ background: '#e2e8f0', padding: '1px 6px', borderRadius: 4, color: '#64748b' }}>
+                +{overflow}
+              </span>
+            )}
+          </div>
         ) : (
           <span style={{ fontStyle: 'italic' }}>Unassigned</span>
         )}
