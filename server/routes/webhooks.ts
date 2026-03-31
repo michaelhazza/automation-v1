@@ -20,6 +20,7 @@ import { db } from '../db/index.js';
 import { executions, users, workflowEngines } from '../db/schema/index.js';
 import { webhookService } from '../services/webhookService.js';
 import { emailService } from '../services/emailService.js';
+import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 
 const router = Router();
 
@@ -100,7 +101,25 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
     .where(eq(executions.id, executionId));
 
   // ------------------------------------------------------------------
-  // 5. Send completion notification if the user opted in
+  // 5. Emit real-time WebSocket updates
+  // ------------------------------------------------------------------
+  const finalStatus = isErrorPayload ? 'failed' : 'completed';
+  emitExecutionUpdate(executionId, 'execution:status', {
+    status: finalStatus,
+    outputData: isErrorPayload ? null : callbackPayload,
+    errorMessage: isErrorPayload
+      ? String(callbackPayload.error ?? callbackPayload.message ?? 'External engine reported an error')
+      : null,
+    durationMs: execution.startedAt ? now.getTime() - execution.startedAt.getTime() : null,
+  });
+  if (execution.subaccountId) {
+    emitSubaccountUpdate(execution.subaccountId, 'execution:status_changed', {
+      executionId, status: finalStatus,
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // 6. Send completion notification if the user opted in
   // ------------------------------------------------------------------
   if (execution.notifyOnComplete && execution.triggeredByUserId) {
     try {
@@ -120,7 +139,7 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
   }
 
   // ------------------------------------------------------------------
-  // 6. Acknowledge immediately so the engine doesn't retry
+  // 7. Acknowledge immediately so the engine doesn't retry
   // ------------------------------------------------------------------
   res.status(200).json({ received: true, executionId, status: isErrorPayload ? 'failed' : 'completed' });
 });

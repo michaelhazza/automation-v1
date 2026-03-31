@@ -7,6 +7,7 @@ import {
   boardConfigs,
   agents,
 } from '../db/schema/index.js';
+import { emitSubaccountUpdate } from '../websocket/emitters.js';
 
 const POSITION_GAP = 1000;
 
@@ -165,6 +166,10 @@ export const taskService = {
       createdAt: new Date(),
     });
 
+    emitSubaccountUpdate(subaccountId, 'task:created', {
+      taskId: item.id, title: data.title, status,
+    });
+
     return item;
   },
 
@@ -246,6 +251,10 @@ export const taskService = {
         message: `Status changed from "${existing.status}" to "${data.status}"`,
         metadata: { from: existing.status, to: data.status },
         createdAt: new Date(),
+      });
+
+      emitSubaccountUpdate(existing.subaccountId, 'task:status_changed', {
+        taskId: id, from: existing.status, to: data.status,
       });
     }
 

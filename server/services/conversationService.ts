@@ -12,6 +12,7 @@ import {
 } from './llmService.js';
 import { routeCall } from './llmRouter.js';
 import { env } from '../lib/env.js';
+import { emitConversationUpdate } from '../websocket/emitters.js';
 
 // ---------------------------------------------------------------------------
 // Conversation CRUD
@@ -234,6 +235,8 @@ export const conversationService = {
     const tools = buildProcessTools(orgProcesses);
 
     // ── 8. Call LLM ───────────────────────────────────────────────────────────
+    emitConversationUpdate(conversationId, 'conversation:typing', { isTyping: true });
+
     let llmResponse = await routeCall({
       messages: llmMessages,
       system: systemPrompt,
@@ -271,6 +274,10 @@ export const conversationService = {
             createdAt: new Date(),
           })
         .returning();
+
+      emitConversationUpdate(conversationId, 'conversation:tool_use', {
+        toolCalls: llmResponse.toolCalls!.map(tc => ({ name: tc.name })),
+      });
 
       // Process each tool call
       const toolResults: Array<{ tool_use_id: string; content: string }> = [];
@@ -374,6 +381,11 @@ export const conversationService = {
         })
         .returning();
 
+      emitConversationUpdate(conversationId, 'conversation:message', {
+        message: { id: finalMsg.id, role: 'assistant', content: llmResponse.content, createdAt: finalMsg.createdAt },
+        triggeredExecutionId: triggeredExecutionId ?? null,
+      });
+
       return {
         userMessageId: userMsg.id,
         assistantMessageId: finalMsg.id,
@@ -392,6 +404,11 @@ export const conversationService = {
         createdAt: new Date(),
       })
       .returning();
+
+    emitConversationUpdate(conversationId, 'conversation:message', {
+      message: { id: assistantMsg.id, role: 'assistant', content: llmResponse.content, createdAt: assistantMsg.createdAt },
+      triggeredExecutionId: null,
+    });
 
     return {
       userMessageId: userMsg.id,

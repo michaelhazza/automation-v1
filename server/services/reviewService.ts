@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { actions, reviewItems, actionEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
+import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,13 @@ export const reviewService = {
         createdAt: new Date(),
       })
       .returning();
+
+    // Emit real-time update so the review queue badge increments
+    if (action.subaccountId) {
+      emitSubaccountUpdate(action.subaccountId, 'review:item_created', {
+        reviewItemId: item.id, actionType: reviewPayload.actionType,
+      });
+    }
 
     return item;
   },

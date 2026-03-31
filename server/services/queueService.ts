@@ -6,6 +6,7 @@ import { webhookService } from './webhookService.js';
 import { processResolutionService } from './processResolutionService.js';
 import { env } from '../lib/env.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
+import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -103,6 +104,13 @@ async function processExecution(executionId: string): Promise<void> {
     .update(executions)
     .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
     .where(eq(executions.id, executionId));
+
+  emitExecutionUpdate(executionId, 'execution:status', { status: 'running' });
+  if (execution.subaccountId) {
+    emitSubaccountUpdate(execution.subaccountId, 'execution:status_changed', {
+      executionId, status: 'running',
+    });
+  }
 
   const processSnapshot = execution.processSnapshot as Record<string, unknown> | null;
   if (!processSnapshot) {
@@ -235,6 +243,19 @@ async function processExecution(executionId: string): Promise<void> {
         })
         .where(eq(executions.id, executionId));
 
+      // Emit real-time status update
+      emitExecutionUpdate(executionId, 'execution:status', {
+        status: successful ? 'completed' : 'failed',
+        outputData: successful ? outputData : null,
+        errorMessage: successful ? null : `Engine response status ${response.status}`,
+        durationMs,
+      });
+      if (execution.subaccountId) {
+        emitSubaccountUpdate(execution.subaccountId, 'execution:status_changed', {
+          executionId, status: successful ? 'completed' : 'failed',
+        });
+      }
+
       // Send completion notification only if user opted in
       if (execution.notifyOnComplete && execution.triggeredByUserId) {
         try {
@@ -269,6 +290,16 @@ async function processExecution(executionId: string): Promise<void> {
             updatedAt: new Date(),
           })
           .where(eq(executions.id, executionId));
+
+        emitExecutionUpdate(executionId, 'execution:status', {
+          status: 'timeout', errorMessage: 'Execution timed out after 30 seconds',
+          durationMs: Date.now() - start,
+        });
+        if (execution.subaccountId) {
+          emitSubaccountUpdate(execution.subaccountId, 'execution:status_changed', {
+            executionId, status: 'timeout',
+          });
+        }
         return;
       }
 
@@ -295,6 +326,15 @@ async function processExecution(executionId: string): Promise<void> {
           updatedAt: new Date(),
         })
         .where(eq(executions.id, executionId));
+
+      emitExecutionUpdate(executionId, 'execution:status', {
+        status: 'failed', errorMessage, durationMs: Date.now() - start,
+      });
+      if (execution.subaccountId) {
+        emitSubaccountUpdate(execution.subaccountId, 'execution:status_changed', {
+          executionId, status: 'failed',
+        });
+      }
       return;
     }
   }
