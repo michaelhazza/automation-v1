@@ -61,6 +61,17 @@ const EXECUTION_QUEUE_NAME = 'execution-run';
 const LOCK_ID_CLEANUP_FILES        = 7001;
 const LOCK_ID_CLEANUP_RESERVATIONS = 7002;
 
+function serializeError(err: unknown): { message: string; name: string; stack?: string } {
+  if (err instanceof Error) {
+    return {
+      message: err.message,
+      name: err.name,
+      ...(env.NODE_ENV !== 'production' && { stack: err.stack }),
+    };
+  }
+  return { message: String(err), name: 'UnknownError' };
+}
+
 async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
   const result = await db.execute(sql`SELECT pg_try_advisory_lock(${lockId}) AS acquired`);
   const acquired = (result.rows?.[0] as { acquired?: boolean } | undefined)?.acquired;
@@ -447,7 +458,7 @@ export const queueService = {
         await withAdvisoryLock(LOCK_ID_CLEANUP_FILES, () =>
           queueService.cleanupExpiredExecutionFiles().then(() => undefined)
         ).catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:cleanup_execution_files_error', error: String(err) }));
+          console.error(JSON.stringify({ event: 'maintenance:cleanup_execution_files_error', ...serializeError(err) }));
         });
       }, 60 * 60 * 1000); // every hour
 
@@ -455,7 +466,7 @@ export const queueService = {
         await withAdvisoryLock(LOCK_ID_CLEANUP_RESERVATIONS, () =>
           queueService.cleanupExpiredBudgetReservations().then(() => undefined)
         ).catch((err: unknown) => {
-          console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', error: String(err) }));
+          console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', ...serializeError(err) }));
         });
       }, 5 * 60 * 1000); // every 5 minutes
 
