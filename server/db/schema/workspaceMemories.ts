@@ -1,4 +1,20 @@
-import { pgTable, uuid, text, integer, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, real, integer, boolean, timestamp, index, uniqueIndex, customType } from 'drizzle-orm/pg-core';
+
+// pgvector custom type — stores embedding as vector(1536) in Postgres
+const vector = customType<{ data: number[] | null }>({
+  dataType() { return 'vector(1536)'; },
+  toDriver(val: number[] | null): string | null {
+    if (val === null) return null;
+    return `[${val.join(',')}]`;
+  },
+  fromDriver(val: unknown): number[] | null {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'string') {
+      return val.replace(/^\[|\]$/g, '').split(',').map(Number);
+    }
+    return null;
+  },
+});
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -24,6 +40,9 @@ export const workspaceMemories = pgTable(
 
     // Compressed board state for context offloading
     boardSummary: text('board_summary'),
+
+    // Quality threshold — entries below this score are excluded from summaries
+    qualityThreshold: real('quality_threshold').notNull().default(0.5),
 
     // Summarisation trigger
     runsSinceSummary: integer('runs_since_summary').notNull().default(0),
@@ -76,6 +95,12 @@ export const workspaceMemoryEntries = pgTable(
 
     // Whether this entry has been rolled into the compiled summary
     includedInSummary: boolean('included_in_summary').notNull().default(false),
+
+    // Quality score (0.0–1.0), computed at insertion time
+    qualityScore: real('quality_score'),
+
+    // Semantic embedding for vector search (populated asynchronously)
+    embedding: vector('embedding'),
 
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },

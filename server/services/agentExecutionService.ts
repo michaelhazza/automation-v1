@@ -25,6 +25,7 @@ import { routeCall } from './llmRouter.js';
 import type { LLMCallContext } from './llmRouter.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
+import { triggerService } from './triggerService.js';
 import {
   createDefaultPipeline,
   hashToolCall,
@@ -361,12 +362,24 @@ export const agentExecutionService = {
       }
 
       // Add workspace memory (with prompt injection boundaries)
+      // Pass task context for semantic retrieval when available
+      const taskContextForMemory = targetItem
+        ? `${targetItem.title ?? ''}${targetItem.description ? ' ' + targetItem.description : ''}`
+        : undefined;
+
       const memory = await workspaceMemoryService.getMemoryForPrompt(
         request.organisationId,
-        request.subaccountId
+        request.subaccountId,
+        taskContextForMemory
       );
       if (memory) {
         systemPromptParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
+      }
+
+      // Add workspace entities
+      const entities = await workspaceMemoryService.getEntitiesForPrompt(request.subaccountId);
+      if (entities) {
+        systemPromptParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
       }
 
       if (workspaceContext) {
@@ -449,8 +462,7 @@ export const agentExecutionService = {
         runId: run.id, agentId: request.agentId, status: finalStatus,
       });
 
-      // ── 10. Extract insights for workspace memory ─────────────────────
-      // Awaited (not fire-and-forget) so failures are visible in run logs
+      // ── 10. Extract insights for workspace memory + entities ─────────────
       if (loopResult.summary) {
         try {
           await workspaceMemoryService.extractRunInsights(
@@ -463,7 +475,36 @@ export const agentExecutionService = {
         } catch (err) {
           console.error(`[AgentExecution] Memory extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
         }
+
+        // Entity extraction (non-blocking)
+        workspaceMemoryService.extractEntities(
+          run.id,
+          request.organisationId,
+          request.subaccountId,
+          loopResult.summary
+        ).catch(err => {
+          console.error(`[AgentExecution] Entity extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
+        });
       }
+
+      // ── 11. Fire agent_completed triggers (non-blocking) ─────────────────
+      triggerService.checkAndFire(
+        request.subaccountId,
+        request.organisationId,
+        'agent_completed',
+        {
+          runId: run.id,
+          agentId: request.agentId,
+          subaccountAgentId: request.subaccountAgentId,
+          status: finalStatus,
+        }
+      ).catch((err: unknown) => {
+        console.error('[AgentExecution] agent_completed trigger failed', {
+          subaccountId: request.subaccountId,
+          eventType: 'agent_completed',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
 
       return {
         runId: run.id,

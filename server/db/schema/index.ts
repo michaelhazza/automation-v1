@@ -31,6 +31,8 @@ export * from './tasks';
 export * from './taskActivities';
 export * from './taskDeliverables';
 export * from './workspaceMemories';
+export * from './workspaceEntities';
+export * from './agentTriggers';
 export * from './scheduledTasks';
 export * from './actions';
 export * from './actionEvents';

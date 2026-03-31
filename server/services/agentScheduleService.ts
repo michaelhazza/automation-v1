@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { subaccountAgents, agents } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
+import { setTriggerJobSender } from './triggerService.js';
 import { isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,7 @@ type PgBoss = {
 
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
+const AGENT_TRIGGERED_QUEUE = 'agent-triggered-run';
 
 async function getBoss(): Promise<PgBoss> {
   if (boss) return boss;
@@ -142,6 +144,11 @@ export const agentScheduleService = {
       return pgboss.send(name, data);
     });
 
+    // Wire up the trigger job sender so triggerService can enqueue triggered runs
+    setTriggerJobSender(async (name: string, data: object) => {
+      return pgboss.send(name, data);
+    });
+
     // Register the worker that processes scheduled agent runs
     await pgboss.work(AGENT_RUN_QUEUE, async (job) => {
       const data = job.data as {
@@ -203,6 +210,42 @@ export const agentScheduleService = {
         });
       } catch (err) {
         console.error(`[AgentScheduler] Handoff run failed:`, err);
+      }
+    });
+
+    // Register the worker that processes event-triggered agent runs
+    await pgboss.work(AGENT_TRIGGERED_QUEUE, async (job) => {
+      const data = job.data as {
+        subaccountAgentId: string;
+        subaccountId: string;
+        organisationId: string;
+        triggerContext: Record<string, unknown>;
+      };
+
+      // Look up agentId from the subaccountAgentId
+      const { db } = await import('../db/index.js');
+      const { subaccountAgents } = await import('../db/schema/index.js');
+      const { eq } = await import('drizzle-orm');
+      const [saLink] = await db.select().from(subaccountAgents).where(eq(subaccountAgents.id, data.subaccountAgentId)).limit(1);
+      if (!saLink) {
+        console.error(`[AgentScheduler] Triggered run: subaccountAgent ${data.subaccountAgentId} not found`);
+        return;
+      }
+
+      console.log(`[AgentScheduler] Running triggered agent: ${saLink.agentId} for subaccount ${data.subaccountId}`);
+
+      try {
+        await agentExecutionService.executeRun({
+          agentId: saLink.agentId,
+          subaccountId: data.subaccountId,
+          subaccountAgentId: data.subaccountAgentId,
+          organisationId: data.organisationId,
+          runType: 'triggered',
+          executionMode: 'api',
+          triggerContext: data.triggerContext,
+        });
+      } catch (err) {
+        console.error(`[AgentScheduler] Triggered run failed:`, err);
       }
     });
 

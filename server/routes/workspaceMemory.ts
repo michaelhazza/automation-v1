@@ -35,7 +35,7 @@ router.get(
   }
 );
 
-// ─── Update workspace memory summary manually ──────────────────────────────
+// ─── Update workspace memory summary and/or quality threshold ─────────────
 
 router.put(
   '/api/subaccounts/:subaccountId/memory',
@@ -44,23 +44,39 @@ router.put(
   async (req, res) => {
     try {
       const { subaccountId } = req.params;
-      const { summary } = req.body;
+      const { summary, qualityThreshold } = req.body;
 
-      if (typeof summary !== 'string') {
-        res.status(400).json({ error: 'summary (string) is required' });
+      if (summary !== undefined && typeof summary !== 'string') {
+        res.status(400).json({ error: 'summary must be a string' });
         return;
       }
 
-      if (summary.length > MAX_SUMMARY_LENGTH) {
+      if (summary !== undefined && summary.length > MAX_SUMMARY_LENGTH) {
         res.status(400).json({ error: `Summary exceeds maximum length of ${MAX_SUMMARY_LENGTH} characters` });
         return;
       }
 
-      const updated = await workspaceMemoryService.updateSummary(
-        req.orgId!,
-        subaccountId,
-        summary
-      );
+      if (qualityThreshold !== undefined) {
+        const t = Number(qualityThreshold);
+        if (isNaN(t) || t < 0 || t > 1) {
+          res.status(400).json({ error: 'qualityThreshold must be a number between 0 and 1' });
+          return;
+        }
+      }
+
+      let updated;
+      if (summary !== undefined) {
+        updated = await workspaceMemoryService.updateSummary(req.orgId!, subaccountId, summary);
+      }
+      if (qualityThreshold !== undefined) {
+        updated = await workspaceMemoryService.updateQualityThreshold(
+          req.orgId!, subaccountId, Number(qualityThreshold)
+        );
+      }
+
+      if (!updated) {
+        updated = await workspaceMemoryService.getMemory(req.orgId!, subaccountId);
+      }
 
       res.json(updated);
     } catch (err: unknown) {
