@@ -148,10 +148,10 @@ export default function App() {
             <Route path="/admin/processes" element={<AdminProcessesPage user={user!} />} />
             <Route path="/admin/processes/:id" element={<AdminProcessEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
-            <Route path="/admin/settings" element={<AdminSettingsPage user={user!} />} />
-            <Route path="/admin/board-config" element={<Navigate to="/admin/settings" replace />} />
-            <Route path="/admin/categories" element={<Navigate to="/admin/settings" replace />} />
-            <Route path="/admin/engines" element={<Navigate to="/admin/settings" replace />} />
+            <Route path="/admin/settings" element={<Navigate to="/admin/org-settings" replace />} />
+            <Route path="/admin/board-config" element={<Navigate to="/admin/org-settings" replace />} />
+            <Route path="/admin/categories" element={<Navigate to="/admin/org-settings" replace />} />
+            <Route path="/admin/engines" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/permission-sets" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />

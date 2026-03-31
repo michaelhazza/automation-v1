@@ -170,7 +170,7 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-export default function UsagePage({ user: _user }: { user: User }) {
+export default function UsagePage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
 
   const thisMonth = new Date().toISOString().slice(0, 7);
@@ -230,6 +230,7 @@ export default function UsagePage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-5xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
+        {!embedded && (
         <div>
           <h1 className="text-[26px] font-extrabold text-slate-900 tracking-tight m-0">Usage & Costs</h1>
           <p className="text-sm text-slate-500 mt-1">
@@ -237,6 +238,7 @@ export default function UsagePage({ user: _user }: { user: User }) {
             <span className="ml-2 text-[11px] text-slate-400 font-normal">(cost totals update within ~30s of activity)</span>
           </p>
         </div>
+        )}
 
         {/* Month navigator */}
         <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">

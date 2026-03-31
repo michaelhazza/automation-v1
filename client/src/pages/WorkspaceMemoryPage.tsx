@@ -33,7 +33,7 @@ const ENTRY_TYPE_CLS: Record<string, string> = {
 
 type ActiveTab = 'summary' | 'entries' | 'board';
 
-export default function WorkspaceMemoryPage({ user: _user }: { user: { id: string; role: string } }) {
+export default function WorkspaceMemoryPage({ user: _user, embedded = false }: { user: { id: string; role: string }; embedded?: boolean }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [memory, setMemory] = useState<WorkspaceMemory | null>(null);
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
@@ -94,11 +94,13 @@ export default function WorkspaceMemoryPage({ user: _user }: { user: { id: strin
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
-      <div className="mb-6">
-        <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">&larr; Back to Subaccount</Link>
-        <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Workspace Memory</h1>
-        <p className="text-[14px] text-slate-500 m-0">Shared knowledge compiled from agent runs in this workspace.</p>
-      </div>
+      {!embedded && (
+        <div className="mb-6">
+          <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">&larr; Back to Client</Link>
+          <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Workspace Memory</h1>
+          <p className="text-[14px] text-slate-500 m-0">Shared knowledge compiled from agent runs in this workspace.</p>
+        </div>
+      )}
 
       {error && (
         <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg mb-4 text-[14px] flex justify-between items-center">

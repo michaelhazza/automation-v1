@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -6,20 +6,20 @@ import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
 
+const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
+const UsagePage = lazy(() => import('./UsagePage'));
+
 interface Subaccount { id: string; name: string; slug: string; status: string; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
-interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
-interface NativeProcess { id: string; name: string; status: string; }
 interface Member { assignmentId: string; userId: string; email: string; firstName: string; lastName: string; status: string; permissionSetId: string; permissionSetName: string; }
-interface OrgProcess { id: string; name: string; status: string; }
 interface PermissionSet { id: string; name: string; }
 interface OrgMember { userId: string; email: string; firstName: string; lastName: string; }
 
-type ActiveTab = 'board' | 'categories' | 'processes' | 'members' | 'settings';
+type ActiveTab = 'settings' | 'board' | 'categories' | 'members' | 'memory' | 'usage';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
-  board: 'Board Config', categories: 'Categories', processes: 'Automations',
-  members: 'Members', settings: 'Settings',
+  settings: 'Settings', board: 'Board Config', categories: 'Categories',
+  members: 'Members', memory: 'Memory', usage: 'Usage & Costs',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -30,27 +30,20 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [sa, setSa] = useState<Subaccount | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [linkedProcesses, setLinkedProcesses] = useState<ProcessLink[]>([]);
-  const [nativeProcesses, setNativeProcesses] = useState<NativeProcess[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [orgProcesses, setOrgProcesses] = useState<OrgProcess[]>([]);
   const [permissionSets, setPermissionSets] = useState<PermissionSet[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
 
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['board', 'categories', 'members']
-    : ['processes', 'settings'];
+    : ['settings', 'board', 'categories', 'members', 'memory', 'usage'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
   const [showCatForm, setShowCatForm] = useState(false);
   const [catForm, setCatForm] = useState({ name: '', description: '', colour: '#6366f1' });
   const [deleteCatId, setDeleteCatId] = useState<string | null>(null);
-
-  const [showLinkForm, setShowLinkForm] = useState(false);
-  const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
-  const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [memberForm, setMemberForm] = useState({ userId: '', permissionSetId: '' });
@@ -67,20 +60,14 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const load = async () => {
     if (!subaccountId) return;
     try {
-      const requests: Promise<any>[] = [
+      const [saRes, catRes, memberRes, boardRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
-        api.get(`/api/subaccounts/${subaccountId}/processes`),
         api.get(`/api/subaccounts/${subaccountId}/members`),
-      ];
-      if (mode === 'client') {
-        requests.push(api.get(`/api/subaccounts/${subaccountId}/board-config`).catch(() => ({ data: null })));
-      }
-      const [saRes, catRes, processRes, memberRes, boardRes] = await Promise.all(requests);
+        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch(() => ({ data: null })),
+      ]);
       setSa(saRes.data);
       setCategories(catRes.data);
-      setLinkedProcesses(processRes.data.linkedProcesses ?? []);
-      setNativeProcesses(processRes.data.nativeProcesses ?? []);
       setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
@@ -93,13 +80,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   };
 
   const loadOrgData = async () => {
-    const [psRes, processesRes, membersRes] = await Promise.all([
+    const [psRes, membersRes] = await Promise.all([
       api.get('/api/permission-sets').catch(() => ({ data: [] })),
-      api.get('/api/processes').catch(() => ({ data: [] })),
       api.get('/api/org/members').catch(() => ({ data: [] })),
     ]);
     setPermissionSets(psRes.data);
-    setOrgProcesses(processesRes.data.filter((t: OrgProcess) => t.status === 'active'));
     setOrgMembers(membersRes.data);
   };
 
@@ -120,31 +105,6 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
     if (!deleteCatId) return;
     await api.delete(`/api/subaccounts/${subaccountId}/categories/${deleteCatId}`);
     setDeleteCatId(null); load();
-  };
-
-  const handleCreateLink = async () => {
-    setError('');
-    try {
-      await api.post(`/api/subaccounts/${subaccountId}/processes`, {
-        processId: linkForm.processId,
-        subaccountCategoryId: linkForm.subaccountCategoryId || undefined,
-      });
-      setShowLinkForm(false); setLinkForm({ processId: '', subaccountCategoryId: '' }); load();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to link automation');
-    }
-  };
-
-  const handleDeleteLink = async () => {
-    if (!deleteLinkId) return;
-    await api.delete(`/api/subaccounts/${subaccountId}/processes/${deleteLinkId}`);
-    setDeleteLinkId(null); load();
-  };
-
-  const handleToggleLinkActive = async (link: ProcessLink) => {
-    await api.patch(`/api/subaccounts/${subaccountId}/processes/${link.linkId}`, { isActive: !link.isActive });
-    load();
   };
 
   const handleAddMember = async () => {
@@ -236,7 +196,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         {mode === 'client' ? `${sa.name} Settings` : sa.name}
       </h1>
       {mode === 'admin' && <div className="font-mono text-[13px] text-slate-400 mb-6">{sa.slug}</div>}
-      {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage categories, automations and members</div>}
+      {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage board config, categories, and members</div>}
 
       {/* Tabs */}
       {visibleTabs.length > 1 && (
@@ -358,107 +318,6 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         </>
       )}
 
-      {/* Processes */}
-      {activeTab === 'processes' && (
-        <>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-[18px] font-semibold text-slate-800 m-0">Linked org automations</h2>
-            <button onClick={() => setShowLinkForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
-              + Link automation
-            </button>
-          </div>
-
-          {showLinkForm && (
-            <Modal title="Link automation to client" onClose={() => setShowLinkForm(false)} maxWidth={400}>
-              <div className="grid gap-3.5 mb-5">
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Org automation *</label>
-                  <select value={linkForm.processId} onChange={(e) => setLinkForm({ ...linkForm, processId: e.target.value })} className={inputCls}>
-                    <option value="">Select automation...</option>
-                    {orgProcesses.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Portal category (optional)</label>
-                  <select value={linkForm.subaccountCategoryId} onChange={(e) => setLinkForm({ ...linkForm, subaccountCategoryId: e.target.value })} className={inputCls}>
-                    <option value="">No category</option>
-                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button onClick={handleCreateLink} className={btnPrimary}>Link</button>
-                <button onClick={() => setShowLinkForm(false)} className={btnSecondary}>Cancel</button>
-              </div>
-            </Modal>
-          )}
-
-          {deleteLinkId && (
-            <ConfirmDialog title="Remove automation link" message="Remove this automation from the client?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
-          )}
-
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6">
-            {linkedProcesses.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-500">No automations linked yet.</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Automation</th>
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Active in portal</th>
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {linkedProcesses.map((link) => (
-                    <tr key={link.linkId} className="hover:bg-slate-50">
-                      <td className="px-4 py-3 font-medium text-slate-800">{link.processName}</td>
-                      <td className="px-4 py-3 text-[13px] text-slate-500">{link.processStatus}</td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => handleToggleLinkActive(link)}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${link.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                        >
-                          {link.isActive ? 'Active' : 'Hidden'}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => setDeleteLinkId(link.linkId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Remove</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {nativeProcesses.length > 0 && (
-            <>
-              <h3 className="text-[15px] font-semibold text-slate-700 mb-3">Client-native automations</h3>
-              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Automation</th>
-                      <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {nativeProcesses.map((t) => (
-                      <tr key={t.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-800">{t.name}</td>
-                        <td className="px-4 py-3 text-[13px] text-slate-500">{t.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
       {/* Members */}
       {activeTab === 'members' && (
         <>
@@ -541,7 +400,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       {/* Settings */}
       {activeTab === 'settings' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
-          <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Subaccount settings</h2>
+          <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Client settings</h2>
           {settingsSaved && (
             <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{settingsSaved}</div>
           )}
@@ -567,6 +426,20 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
             Save changes
           </button>
         </div>
+      )}
+
+      {/* Memory */}
+      {activeTab === 'memory' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading memory...</div>}>
+          <WorkspaceMemoryPage user={_user as any} embedded />
+        </Suspense>
+      )}
+
+      {/* Usage & Costs */}
+      {activeTab === 'usage' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading usage data...</div>}>
+          <UsagePage user={_user as any} embedded />
+        </Suspense>
       )}
     </div>
   );
