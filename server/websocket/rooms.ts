@@ -1,16 +1,26 @@
 /**
- * WebSocket room management.
+ * WebSocket room management with multi-tenant isolation.
  *
- * When a client connects, it can join rooms scoped to specific resources
- * (executions, agent runs, conversations, subaccounts). The server emits
- * events to these rooms so only interested clients receive updates.
+ * When a client connects, it can join rooms scoped to specific resources.
+ * All join requests are validated server-side against the user's org context
+ * so a user cannot subscribe to another org's resources.
  */
 
 import type { Socket } from 'socket.io';
+import { eq, and } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { executions, agentRuns, agentConversations, subaccounts } from '../db/schema/index.js';
+
+// UUID format check — reject malformed IDs early
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUUID(id: unknown): id is string {
+  return typeof id === 'string' && UUID_RE.test(id);
+}
 
 /**
  * Handle a newly authenticated socket connection.
- * Sets up listeners for room join/leave requests.
+ * Sets up listeners for room join/leave requests with server-side validation.
  */
 export function handleConnection(socket: Socket): void {
   const user = socket.data.user;
@@ -24,47 +34,83 @@ export function handleConnection(socket: Socket): void {
   // Auto-join the org room so org-wide broadcasts reach this user
   socket.join(`org:${orgId}`);
 
-  // ── Join a subaccount room ──────────────────────────────────────────────
-  socket.on('join:subaccount', (subaccountId: string) => {
-    if (typeof subaccountId !== 'string') return;
-    socket.join(`subaccount:${subaccountId}`);
+  // ── Join a subaccount room (validated against org ownership) ─────────
+  socket.on('join:subaccount', async (subaccountId: unknown) => {
+    if (!isValidUUID(subaccountId)) return;
+    try {
+      const [sa] = await db.select({ id: subaccounts.id })
+        .from(subaccounts)
+        .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, orgId)));
+      if (!sa) return; // silently reject — wrong org
+      socket.join(`subaccount:${subaccountId}`);
+    } catch {
+      // DB error — silently reject
+    }
   });
 
-  socket.on('leave:subaccount', (subaccountId: string) => {
-    if (typeof subaccountId !== 'string') return;
+  socket.on('leave:subaccount', (subaccountId: unknown) => {
+    if (!isValidUUID(subaccountId)) return;
     socket.leave(`subaccount:${subaccountId}`);
   });
 
-  // ── Join an execution room (for live status updates) ────────────────────
-  socket.on('join:execution', (executionId: string) => {
-    if (typeof executionId !== 'string') return;
-    socket.join(`execution:${executionId}`);
+  // ── Join an execution room (validated against org ownership) ────────
+  socket.on('join:execution', async (executionId: unknown) => {
+    if (!isValidUUID(executionId)) return;
+    try {
+      const [exec] = await db.select({ id: executions.id })
+        .from(executions)
+        .where(and(eq(executions.id, executionId), eq(executions.organisationId, orgId)));
+      if (!exec) return;
+      socket.join(`execution:${executionId}`);
+    } catch {
+      // DB error — silently reject
+    }
   });
 
-  socket.on('leave:execution', (executionId: string) => {
-    if (typeof executionId !== 'string') return;
+  socket.on('leave:execution', (executionId: unknown) => {
+    if (!isValidUUID(executionId)) return;
     socket.leave(`execution:${executionId}`);
   });
 
-  // ── Join an agent run room (for live trace) ─────────────────────────────
-  socket.on('join:agent-run', (runId: string) => {
-    if (typeof runId !== 'string') return;
-    socket.join(`agent-run:${runId}`);
+  // ── Join an agent run room (validated against org ownership) ─────────
+  socket.on('join:agent-run', async (runId: unknown) => {
+    if (!isValidUUID(runId)) return;
+    try {
+      const [run] = await db.select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.organisationId, orgId)));
+      if (!run) return;
+      socket.join(`agent-run:${runId}`);
+    } catch {
+      // DB error — silently reject
+    }
   });
 
-  socket.on('leave:agent-run', (runId: string) => {
-    if (typeof runId !== 'string') return;
+  socket.on('leave:agent-run', (runId: unknown) => {
+    if (!isValidUUID(runId)) return;
     socket.leave(`agent-run:${runId}`);
   });
 
-  // ── Join a conversation room (for streaming messages) ───────────────────
-  socket.on('join:conversation', (conversationId: string) => {
-    if (typeof conversationId !== 'string') return;
-    socket.join(`conversation:${conversationId}`);
+  // ── Join a conversation room (validated against org ownership) ──────
+  socket.on('join:conversation', async (conversationId: unknown) => {
+    if (!isValidUUID(conversationId)) return;
+    try {
+      const [conv] = await db.select({ id: agentConversations.id })
+        .from(agentConversations)
+        .where(and(
+          eq(agentConversations.id, conversationId),
+          eq(agentConversations.organisationId, orgId),
+          eq(agentConversations.userId, user.id)
+        ));
+      if (!conv) return; // wrong org or not the conversation owner
+      socket.join(`conversation:${conversationId}`);
+    } catch {
+      // DB error — silently reject
+    }
   });
 
-  socket.on('leave:conversation', (conversationId: string) => {
-    if (typeof conversationId !== 'string') return;
+  socket.on('leave:conversation', (conversationId: unknown) => {
+    if (!isValidUUID(conversationId)) return;
     socket.leave(`conversation:${conversationId}`);
   });
 

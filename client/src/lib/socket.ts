@@ -1,17 +1,63 @@
 /**
- * Socket.IO client singleton.
+ * Socket.IO client singleton with reconnect resync and hybrid fallback.
  *
  * Provides a single persistent WebSocket connection per authenticated session.
- * The connection is established when the user is authenticated and torn down
- * on logout or token expiry.
  *
- * Components subscribe to events via the useSocket hook (see hooks/useSocket.ts).
+ * On reconnect:
+ *   - Fires a 'socket:reconnected' custom event so components can re-fetch baseline state
+ *   - Re-joins rooms automatically (Socket.IO handles this)
+ *
+ * Hybrid fallback:
+ *   - Exposes connection state so components can fall back to polling when disconnected
+ *   - Fires 'socket:disconnected' / 'socket:connected' for state tracking
  */
 
 import { io, Socket } from 'socket.io-client';
 import { getToken } from './auth';
 
 let socket: Socket | null = null;
+let connected = false;
+
+// ─── Connection state listeners ──────────────────────────────────────────────
+
+type ConnectionListener = (isConnected: boolean) => void;
+const connectionListeners = new Set<ConnectionListener>();
+
+export function onConnectionChange(listener: ConnectionListener): () => void {
+  connectionListeners.add(listener);
+  // Immediately notify of current state
+  listener(connected);
+  return () => { connectionListeners.delete(listener); };
+}
+
+function notifyConnectionChange(isConnected: boolean): void {
+  connected = isConnected;
+  for (const listener of connectionListeners) {
+    try { listener(isConnected); } catch { /* ignore listener errors */ }
+  }
+}
+
+// ─── Reconnect listeners (for REST resync) ────────────────────────────────────
+
+type ReconnectListener = () => void;
+const reconnectListeners = new Set<ReconnectListener>();
+
+export function onReconnect(listener: ReconnectListener): () => void {
+  reconnectListeners.add(listener);
+  return () => { reconnectListeners.delete(listener); };
+}
+
+function notifyReconnect(): void {
+  for (const listener of reconnectListeners) {
+    try { listener(); } catch { /* ignore listener errors */ }
+  }
+}
+
+// ─── Socket management ──────────────────────────────────────────────────────
+
+export function isSocketConnected(): boolean {
+  return connected;
+}
 
 /**
  * Get or create the Socket.IO client connection.
@@ -46,8 +92,23 @@ export function getSocket(): Socket | null {
     reconnectionAttempts: Infinity,
   });
 
+  socket.on('connect', () => {
+    notifyConnectionChange(true);
+  });
+
+  socket.on('disconnect', () => {
+    notifyConnectionChange(false);
+  });
+
+  // On reconnect, notify listeners to re-fetch baseline state via REST
+  socket.io.on('reconnect', () => {
+    notifyConnectionChange(true);
+    notifyReconnect();
+  });
+
   socket.on('connect_error', (err) => {
     console.warn('[Socket] Connection error:', err.message);
+    notifyConnectionChange(false);
     // If auth fails, don't keep retrying — the token is likely invalid
     if (err.message === 'Authentication required') {
       socket?.disconnect();
@@ -65,6 +126,7 @@ export function disconnectSocket(): void {
     socket.disconnect();
     socket = null;
   }
+  notifyConnectionChange(false);
 }
 
 /**

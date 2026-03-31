@@ -32,7 +32,17 @@ export function initWebSocket(httpServer: HTTPServer): SocketIOServer {
   io.use(authenticateSocket);
 
   // Set up room management on successful connection
-  io.on('connection', handleConnection);
+  io.on('connection', (socket) => {
+    const userId = socket.data.user?.id ?? 'unknown';
+    const orgId = socket.data.orgId ?? 'unknown';
+    console.log(`[WebSocket] Client connected — user: ${userId}, org: ${orgId}, transport: ${socket.conn.transport.name}`);
+
+    socket.on('disconnect', (reason) => {
+      console.log(`[WebSocket] Client disconnected — user: ${userId}, reason: ${reason}`);
+    });
+
+    handleConnection(socket);
+  });
 
   console.log('[WebSocket] Socket.IO initialised');
   return io;

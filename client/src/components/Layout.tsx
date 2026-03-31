@@ -263,7 +263,24 @@ export default function Layout({ user, children }: LayoutProps) {
     api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch(() => {});
   }, [activeClientId]);
 
+  // Resync function — re-fetch all badge counts from REST (used on reconnect)
+  const resyncBadges = useCallback(() => {
+    if (!activeClientId) return;
+    api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
+    api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch(() => {});
+    api.get(`/api/subaccounts/${activeClientId}/usage/summary`)
+      .then(({ data }) => {
+        const spent = data.monthly?.totalCostCents ?? 0;
+        const limit = data.limits?.monthlyCostLimitCents;
+        if (!limit || limit <= 0) { setBudgetAlert(null); return; }
+        const pct = spent / limit;
+        if (pct >= 0.75) setBudgetAlert({ pct, spent, limit });
+        else setBudgetAlert(null);
+      }).catch(() => {});
+  }, [activeClientId]);
+
   // WebSocket: subscribe to subaccount room for live updates
+  // On reconnect, re-fetch baseline state via REST to avoid stale counts
   useSocketRoom('subaccount', activeClientId, {
     'live:agent_started': () => setLiveAgentCount(c => c + 1),
     'live:agent_completed': () => setLiveAgentCount(c => Math.max(0, c - 1)),
@@ -277,7 +294,7 @@ export default function Layout({ user, children }: LayoutProps) {
       if (d.pct !== undefined && d.pct >= 0.75) setBudgetAlert({ pct: d.pct, spent: d.spent ?? 0, limit: d.limit ?? 0 });
       else setBudgetAlert(null);
     },
-  });
+  }, resyncBadges);
 
   // Dynamic nav: projects + agents for active client
   useEffect(() => {

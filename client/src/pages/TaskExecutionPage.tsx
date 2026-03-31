@@ -100,7 +100,18 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
   }, [id]);
 
   // WebSocket: listen for execution status updates
+  // On reconnect, re-fetch current execution state from REST (baseline resync)
   const executionId = execution?.id ?? null;
+  const resyncExecution = useCallback(() => {
+    if (!executionId) return;
+    api.get(`/api/executions/${executionId}`).then(({ data }) => {
+      setExecution(data);
+      if (data.status === 'completed') {
+        api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [executionId]);
+
   useSocketRoom('execution', executionId, {
     'execution:status': (data: unknown) => {
       const d = data as { status: string; outputData?: unknown; errorMessage?: string | null; durationMs?: number | null };
@@ -109,7 +120,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
         api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch(() => {});
       }
     },
-  });
+  }, resyncExecution);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const maxBytes = maxUploadSizeMb * 1024 * 1024;

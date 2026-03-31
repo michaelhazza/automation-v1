@@ -75,13 +75,21 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   }, [subaccountId, processId]);
 
   // WebSocket: listen for execution status updates
+  // On reconnect, re-fetch current execution state from REST
   const executionId = execution?.id ?? null;
+  const resyncExecution = useCallback(() => {
+    if (!executionId || !subaccountId) return;
+    api.get(`/api/portal/${subaccountId}/executions/${executionId}`).then(({ data }) => {
+      setExecution(data);
+    }).catch(() => {});
+  }, [executionId, subaccountId]);
+
   useSocketRoom('execution', executionId, {
     'execution:status': (data: unknown) => {
       const d = data as { status: string; outputData?: unknown; errorMessage?: string | null; durationMs?: number | null };
       setExecution(prev => prev ? { ...prev, status: d.status, outputData: d.outputData ?? prev.outputData, errorMessage: d.errorMessage ?? prev.errorMessage, durationMs: d.durationMs ?? prev.durationMs } : prev);
     },
-  });
+  }, resyncExecution);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const maxBytes = maxUploadSizeMb * 1024 * 1024;
