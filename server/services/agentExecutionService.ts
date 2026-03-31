@@ -41,6 +41,7 @@ import {
   MAX_CROSS_AGENT_TASKS,
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
+import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,6 +121,15 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       })
       .returning();
+
+    // Emit run started event
+    emitAgentRunUpdate(run.id, 'agent:run:started', {
+      agentId: request.agentId, subaccountId: request.subaccountId,
+      runType: request.runType, status: 'running',
+    });
+    emitSubaccountUpdate(request.subaccountId, 'live:agent_started', {
+      runId: run.id, agentId: request.agentId,
+    });
 
     try {
       // ── 2. Load agent config ────────────────────────────────────────────
@@ -389,6 +399,16 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       }).where(eq(subaccountAgents.id, request.subaccountAgentId));
 
+      // Emit run completed event
+      emitAgentRunUpdate(run.id, 'agent:run:completed', {
+        status: finalStatus, summary: loopResult.summary,
+        totalToolCalls: loopResult.totalToolCalls, totalTokens: loopResult.totalTokens,
+        tasksCreated: loopResult.tasksCreated, durationMs,
+      });
+      emitSubaccountUpdate(request.subaccountId, 'live:agent_completed', {
+        runId: run.id, agentId: request.agentId, status: finalStatus,
+      });
+
       // ── 10. Extract insights for workspace memory ─────────────────────
       // Awaited (not fire-and-forget) so failures are visible in run logs
       if (loopResult.summary) {
@@ -428,6 +448,14 @@ export const agentExecutionService = {
         durationMs,
         updatedAt: new Date(),
       }).where(eq(agentRuns.id, run.id));
+
+      // Emit run failed event
+      emitAgentRunUpdate(run.id, 'agent:run:failed', {
+        status: 'failed', errorMessage, durationMs,
+      });
+      emitSubaccountUpdate(request.subaccountId, 'live:agent_completed', {
+        runId: run.id, agentId: request.agentId, status: 'failed',
+      });
 
       return {
         runId: run.id,
@@ -536,6 +564,11 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         break outerLoop;
       }
     }
+
+    // Emit iteration event for live trace
+    emitAgentRunUpdate(runId, 'agent:run:iteration', {
+      iteration, tokensUsed: totalTokensUsed, toolCallsCount: totalToolCalls,
+    });
 
     // ── Call LLM ──────────────────────────────────────────────────────
     const response = await routeCall({
@@ -667,7 +700,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         }
       }
 
-      toolCallsLog.push({
+      const logEntry = {
         tool: toolCall.name,
         input: toolCall.input,
         output: resultContent.length > MAX_TOOL_OUTPUT_LOG_LENGTH
@@ -676,6 +709,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         durationMs: toolDurationMs,
         iteration,
         retried,
+      };
+      toolCallsLog.push(logEntry);
+
+      // Emit tool call event for live trace
+      emitAgentRunUpdate(runId, 'agent:run:tool_call', {
+        tool: toolCall.name, durationMs: toolDurationMs, iteration,
+        totalToolCalls, tokensUsed: totalTokensUsed,
       });
 
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });

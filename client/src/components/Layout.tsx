@@ -8,6 +8,8 @@ import {
   removeActiveOrg, getActiveOrgId, getActiveOrgName, setActiveOrg,
   getActiveClientId, getActiveClientName, setActiveClient, removeActiveClient,
 } from '../lib/auth';
+import { useSocketRoom } from '../hooks/useSocket';
+import { getSocket, disconnectSocket, reconnectSocket } from '../lib/socket';
 
 interface LayoutProps {
   user: User;
@@ -249,23 +251,33 @@ export default function Layout({ user, children }: LayoutProps) {
     } else { setClientPerms(new Set()); }
   }, [activeClientId, isSystemAdmin]);
 
-  // Review queue badge
+  // Review queue badge — initial load + WebSocket updates
   useEffect(() => {
     if (!activeClientId) { setReviewCount(0); return; }
-    const fetch = () => api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
-    fetch();
-    const t = setInterval(fetch, 30_000);
-    return () => clearInterval(t);
+    api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
   }, [activeClientId]);
 
-  // Live agent badge
+  // Live agent badge — initial load + WebSocket updates
   useEffect(() => {
     if (!activeClientId) { setLiveAgentCount(0); return; }
-    const fetch = () => api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch(() => {});
-    fetch();
-    const t = setInterval(fetch, 15_000);
-    return () => clearInterval(t);
+    api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch(() => {});
   }, [activeClientId]);
+
+  // WebSocket: subscribe to subaccount room for live updates
+  useSocketRoom('subaccount', activeClientId, {
+    'live:agent_started': () => setLiveAgentCount(c => c + 1),
+    'live:agent_completed': () => setLiveAgentCount(c => Math.max(0, c - 1)),
+    'review:item_updated': () => {
+      // Re-fetch count on any review change
+      if (activeClientId) api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
+    },
+    'review:item_created': () => setReviewCount(c => c + 1),
+    'budget:update': (data: unknown) => {
+      const d = data as { pct?: number; spent?: number; limit?: number };
+      if (d.pct !== undefined && d.pct >= 0.75) setBudgetAlert({ pct: d.pct, spent: d.spent ?? 0, limit: d.limit ?? 0 });
+      else setBudgetAlert(null);
+    },
+  });
 
   // Dynamic nav: projects + agents for active client
   useEffect(() => {
@@ -278,10 +290,10 @@ export default function Layout({ user, children }: LayoutProps) {
     ).catch(() => setNavAgents([]));
   }, [activeClientId]);
 
-  // Budget alert — check monthly spend vs limit for active client
+  // Budget alert — initial load (updates come via WebSocket 'budget:update')
   useEffect(() => {
     if (!activeClientId) { setBudgetAlert(null); return; }
-    const check = () => api.get(`/api/subaccounts/${activeClientId}/usage/summary`)
+    api.get(`/api/subaccounts/${activeClientId}/usage/summary`)
       .then(({ data }) => {
         const spent = data.monthly?.totalCostCents ?? 0;
         const limit = data.limits?.monthlyCostLimitCents;
@@ -290,10 +302,13 @@ export default function Layout({ user, children }: LayoutProps) {
         if (pct >= 0.75) setBudgetAlert({ pct, spent, limit });
         else setBudgetAlert(null);
       }).catch(() => {});
-    check();
-    const t = setInterval(check, 120_000); // every 2 min
-    return () => clearInterval(t);
   }, [activeClientId]);
+
+  // Initialise WebSocket connection
+  useEffect(() => {
+    getSocket();
+    return () => { /* Keep connection alive across Layout re-renders */ };
+  }, []);
 
   // Cmd+K to open command palette
   useEffect(() => {
@@ -326,6 +341,7 @@ export default function Layout({ user, children }: LayoutProps) {
     removeActiveClient();
     setActiveClientIdState(null);
     setActiveClientNameState(null);
+    reconnectSocket(); // Reconnect with new org context
     navigate('/');
   };
 
@@ -337,6 +353,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout'); } finally {
+      disconnectSocket();
       removeToken(); removeUserRole(); removeActiveOrg(); removeActiveClient();
       navigate('/login');
     }

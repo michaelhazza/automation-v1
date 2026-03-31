@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback, KeyboardEvent } from '
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import { useSocketRoom } from '../hooks/useSocket';
 
 interface Agent {
   id: string;
@@ -164,6 +165,30 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
 
   const scrollToBottom = useCallback(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, []);
   useEffect(() => { scrollToBottom(); }, [messages, sending, scrollToBottom]);
+
+  // WebSocket: listen for live conversation updates
+  useSocketRoom('conversation', activeConvId, {
+    'conversation:typing': (data: unknown) => {
+      const d = data as { isTyping?: boolean };
+      // Typing indicator is already shown via `sending` state;
+      // this is useful if another user/tab sends a message
+      if (d.isTyping && !sending) setSending(true);
+    },
+    'conversation:message': (data: unknown) => {
+      const d = data as { message?: Message; triggeredExecutionId?: string };
+      if (d.message) {
+        setMessages(prev => {
+          // Avoid duplicates
+          if (prev.some(m => m.id === d.message!.id)) return prev;
+          return [...prev, d.message!];
+        });
+        setSending(false);
+      }
+    },
+    'conversation:tool_use': () => {
+      // Keep the typing indicator visible during tool execution
+    },
+  });
 
   useEffect(() => {
     const ta = textareaRef.current;

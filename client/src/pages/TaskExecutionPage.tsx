@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import { useSocketRoom } from '../hooks/useSocket';
 
 interface Process {
   id: string;
@@ -86,7 +87,6 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
   const [dragOver, setDragOver] = useState(false);
   const [notifyOnComplete, setNotifyOnComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -97,8 +97,19 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
       setProcess(processRes.data);
       setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
     }).finally(() => setLoading(false));
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [id]);
+
+  // WebSocket: listen for execution status updates
+  const executionId = execution?.id ?? null;
+  useSocketRoom('execution', executionId, {
+    'execution:status': (data: unknown) => {
+      const d = data as { status: string; outputData?: unknown; errorMessage?: string | null; durationMs?: number | null };
+      setExecution(prev => prev ? { ...prev, status: d.status, outputData: d.outputData ?? prev.outputData, errorMessage: d.errorMessage ?? prev.errorMessage, durationMs: d.durationMs ?? prev.durationMs } : prev);
+      if (['completed', 'failed', 'timeout', 'cancelled'].includes(d.status) && d.status === 'completed' && executionId) {
+        api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch(() => {});
+      }
+    },
+  });
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const maxBytes = maxUploadSizeMb * 1024 * 1024;
@@ -113,22 +124,6 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setDragOver(true); };
   const handleDragLeave = (e: React.DragEvent) => { if (!dropZoneRef.current?.contains(e.relatedTarget as Node)) setDragOver(false); };
   const handleDrop = (e: React.DragEvent) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files); };
-
-  const pollExecution = (execId: string) => {
-    pollRef.current = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/api/executions/${execId}`);
-        setExecution(data);
-        if (['completed', 'failed', 'timeout', 'cancelled'].includes(data.status)) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          if (data.status === 'completed') {
-            const { data: files } = await api.get(`/api/executions/${execId}/files`);
-            setExecFiles(files);
-          }
-        }
-      } catch { /* ignore poll errors */ }
-    }, 2000);
-  };
 
   const handleSubmit = async () => {
     setError('');
@@ -155,7 +150,6 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
         await api.post('/api/files/upload', formData);
       }
       setUploadProgress('');
-      pollExecution(execId);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to submit process');
@@ -171,7 +165,6 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
   const handleReset = () => {
     setExecution(null); setInputData(''); setStagedFiles([]);
     setExecFiles([]); setNotifyOnComplete(false);
-    if (pollRef.current) clearInterval(pollRef.current);
   };
 
   if (loading) {

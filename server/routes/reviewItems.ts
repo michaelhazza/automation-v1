@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { reviewService } from '../services/reviewService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { emitSubaccountUpdate } from '../websocket/emitters.js';
 
 const router = Router();
 
@@ -65,6 +66,9 @@ router.post(
     try {
       const { edits } = req.body;
       const result = await reviewService.approveItem(req.params.id, req.orgId!, req.userId!, edits);
+      // Emit review count change to subaccount listeners
+      const subaccountId = req.params.subaccountId ?? (result as Record<string, unknown>)?.subaccountId;
+      if (subaccountId) emitSubaccountUpdate(String(subaccountId), 'review:item_updated', { action: 'approved' });
       res.json(result);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -82,6 +86,8 @@ router.post(
   async (req, res) => {
     try {
       const result = await reviewService.rejectItem(req.params.id, req.orgId!, req.userId!);
+      const subaccountId = req.params.subaccountId ?? (result as Record<string, unknown>)?.subaccountId;
+      if (subaccountId) emitSubaccountUpdate(String(subaccountId), 'review:item_updated', { action: 'rejected' });
       res.json(result);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };

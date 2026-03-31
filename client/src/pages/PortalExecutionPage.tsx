@@ -8,6 +8,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import { useSocketRoom } from '../hooks/useSocket';
 
 interface Process {
   id: string;
@@ -59,7 +60,6 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   const [dragOver, setDragOver] = useState(false);
   const [notifyOnComplete, setNotifyOnComplete] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -72,9 +72,16 @@ export default function PortalExecutionPage({ user }: { user: User }) {
       setProcess(found ?? null);
       setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
     }).finally(() => setLoading(false));
-
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [subaccountId, processId]);
+
+  // WebSocket: listen for execution status updates
+  const executionId = execution?.id ?? null;
+  useSocketRoom('execution', executionId, {
+    'execution:status': (data: unknown) => {
+      const d = data as { status: string; outputData?: unknown; errorMessage?: string | null; durationMs?: number | null };
+      setExecution(prev => prev ? { ...prev, status: d.status, outputData: d.outputData ?? prev.outputData, errorMessage: d.errorMessage ?? prev.errorMessage, durationMs: d.durationMs ?? prev.durationMs } : prev);
+    },
+  });
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const maxBytes = maxUploadSizeMb * 1024 * 1024;
@@ -87,18 +94,6 @@ export default function PortalExecutionPage({ user }: { user: User }) {
   }, [maxUploadSizeMb]);
 
   const removeFile = (fileId: string) => setStagedFiles((prev) => prev.filter((f) => f.id !== fileId));
-
-  const pollExecution = (execId: string) => {
-    pollRef.current = setInterval(async () => {
-      try {
-        const { data } = await api.get(`/api/portal/${subaccountId}/executions/${execId}`);
-        setExecution(data);
-        if (['completed', 'failed', 'timeout', 'cancelled'].includes(data.status)) {
-          if (pollRef.current) clearInterval(pollRef.current);
-        }
-      } catch { /* ignore poll errors */ }
-    }, 2000);
-  };
 
   const handleSubmit = async () => {
     setError('');
@@ -133,8 +128,6 @@ export default function PortalExecutionPage({ user }: { user: User }) {
         await api.post('/api/files/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       }
       setUploadProgress('');
-
-      pollExecution(execId);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to submit process');
@@ -271,7 +264,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
             )}
 
             <button
-              onClick={() => { setExecution(null); setInputData(''); setStagedFiles([]); setNotifyOnComplete(false); if (pollRef.current) clearInterval(pollRef.current); }}
+              onClick={() => { setExecution(null); setInputData(''); setStagedFiles([]); setNotifyOnComplete(false); }}
               className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
             >
               Run again
