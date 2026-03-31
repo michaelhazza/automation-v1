@@ -322,6 +322,16 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         actualProvider = provider;
         actualModel = mappedModel;
         attemptNumber = attempt;
+
+        if (provider !== ctx.provider || mappedModel !== ctx.model) {
+          console.info('[llmRouter] provider_fallback_used', {
+            requestedProvider: ctx.provider, requestedModel: ctx.model,
+            actualProvider: provider, actualModel: mappedModel,
+            attemptNumber,
+            organisationId: ctx.organisationId, runId: ctx.runId,
+          });
+        }
+
         break providerLoop;
       } catch (err: unknown) {
         lastError = err;
