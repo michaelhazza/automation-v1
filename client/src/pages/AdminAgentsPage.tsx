@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
-import TeamHeartbeatView from '../components/TeamHeartbeatView';
+import HeartbeatEditor from '../components/HeartbeatEditor';
 
 const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
 
@@ -251,12 +251,19 @@ export default function AdminAgentsPage({ user }: { user: User }) {
 
       {/* Heartbeat Tab */}
       {pageTab === 'heartbeat' && (
-        <TeamHeartbeatView agents={agents.map(a => ({
-          id: a.id, name: a.name, icon: a.icon,
-          heartbeatEnabled: a.heartbeatEnabled,
-          heartbeatIntervalHours: a.heartbeatIntervalHours,
-          heartbeatOffsetHours: a.heartbeatOffsetHours,
-        }))} compact />
+        <HeartbeatEditor
+          levelLabel="agent"
+          agents={agents.map(a => ({
+            id: a.id, name: a.name, icon: a.icon,
+            heartbeatEnabled: a.heartbeatEnabled,
+            heartbeatIntervalHours: a.heartbeatIntervalHours,
+            heartbeatOffsetHours: a.heartbeatOffsetHours,
+          }))}
+          onUpdate={async (agentId, config) => {
+            await api.patch(`/api/agents/${agentId}`, config);
+            load();
+          }}
+        />
       )}
 
       {/* List Tab */}

@@ -62,9 +62,14 @@ export const subaccountAgentService = {
 
     if (!agent) throw { statusCode: 404, message: 'Agent not found in this organisation' };
 
-    // Load full agent to get default skill slugs
+    // Load full agent to get default skill slugs + heartbeat config
     const [fullAgent] = await db
-      .select({ defaultSkillSlugs: agents.defaultSkillSlugs })
+      .select({
+        defaultSkillSlugs: agents.defaultSkillSlugs,
+        heartbeatEnabled: agents.heartbeatEnabled,
+        heartbeatIntervalHours: agents.heartbeatIntervalHours,
+        heartbeatOffsetHours: agents.heartbeatOffsetHours,
+      })
       .from(agents)
       .where(eq(agents.id, agentId));
 
@@ -76,6 +81,9 @@ export const subaccountAgentService = {
         agentId,
         isActive: true,
         skillSlugs: fullAgent?.defaultSkillSlugs ?? null,
+        heartbeatEnabled: fullAgent?.heartbeatEnabled ?? false,
+        heartbeatIntervalHours: fullAgent?.heartbeatIntervalHours ?? null,
+        heartbeatOffsetHours: fullAgent?.heartbeatOffsetHours ?? 0,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -124,6 +132,9 @@ export const subaccountAgentService = {
     parentSubaccountAgentId?: string | null;
     agentRole?: string | null;
     agentTitle?: string | null;
+    heartbeatEnabled?: boolean;
+    heartbeatIntervalHours?: number | null;
+    heartbeatOffsetHours?: number;
   }) {
     const [link] = await db
       .select()
@@ -136,6 +147,9 @@ export const subaccountAgentService = {
     if (data.isActive !== undefined) update.isActive = data.isActive;
     if (data.agentRole !== undefined) update.agentRole = data.agentRole;
     if (data.agentTitle !== undefined) update.agentTitle = data.agentTitle;
+    if (data.heartbeatEnabled !== undefined) update.heartbeatEnabled = data.heartbeatEnabled;
+    if (data.heartbeatIntervalHours !== undefined) update.heartbeatIntervalHours = data.heartbeatIntervalHours;
+    if (data.heartbeatOffsetHours !== undefined) update.heartbeatOffsetHours = data.heartbeatOffsetHours;
 
     if ('parentSubaccountAgentId' in data) {
       const parentId = data.parentSubaccountAgentId;

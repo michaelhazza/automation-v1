@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
-import TeamHeartbeatView from '../components/TeamHeartbeatView';
+import HeartbeatEditor from '../components/HeartbeatEditor';
 import SystemCompanyTemplatesPage from './SystemCompanyTemplatesPage';
 
 interface SystemAgent {
@@ -366,28 +366,19 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Heartbeat Tab */}
       {activeTab === 'heartbeat' && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6">
-          <h2 className="text-[16px] font-extrabold text-slate-900 tracking-tight m-0 flex items-center gap-2 mb-1">
-            <span>💓</span> Default Schedules
-          </h2>
-          <p className="text-[13px] text-slate-500 mb-5">Default cron schedules assigned to system agents. Heartbeat intervals are configured at the organisation level when agents are installed.</p>
-          <div className="flex flex-col gap-2">
-            {agents.filter(a => (a as any).defaultScheduleCron).length === 0 ? (
-              <div className="text-[13px] text-slate-400 py-4 text-center">No system agents have default schedules configured.</div>
-            ) : (
-              agents.filter(a => (a as any).defaultScheduleCron).map(agent => (
-                <div key={agent.id} className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-lg">
-                  <span className="text-[15px]">🤖</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-slate-900">{agent.name}</div>
-                    <div className="text-[11px] text-slate-500">{agent.agentRole ?? 'No role'}</div>
-                  </div>
-                  <code className="text-[12px] bg-white border border-slate-200 px-2 py-1 rounded text-slate-600">{(agent as any).defaultScheduleCron}</code>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        <HeartbeatEditor
+          levelLabel="system agent"
+          agents={agents.map(a => ({
+            id: a.id, name: a.name, icon: null,
+            heartbeatEnabled: (a as any).heartbeatEnabled ?? false,
+            heartbeatIntervalHours: (a as any).heartbeatIntervalHours ?? null,
+            heartbeatOffsetHours: (a as any).heartbeatOffsetHours ?? 0,
+          }))}
+          onUpdate={async (agentId, config) => {
+            await api.patch(`/api/system/agents/${agentId}`, config);
+            load();
+          }}
+        />
       )}
 
       {/* List Tab */}

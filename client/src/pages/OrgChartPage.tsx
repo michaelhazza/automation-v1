@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User, getActiveClientId, getActiveClientName } from '../lib/auth';
-import TeamHeartbeatView, { type HeartbeatAgent } from '../components/TeamHeartbeatView';
+import HeartbeatEditor from '../components/HeartbeatEditor';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -136,7 +136,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
   const activeClientName = getActiveClientName();
 
   const [agents, setAgents] = useState<Omit<AgentNode, 'children'>[]>([]);
-  const [heartbeatAgents, setHeartbeatAgents] = useState<HeartbeatAgent[]>([]);
+  const [heartbeatAgents, setHeartbeatAgents] = useState<{ id: string; agentId: string; name: string; icon: string | null; heartbeatEnabled: boolean; heartbeatIntervalHours: number | null; heartbeatOffsetHours: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Pan & zoom
@@ -153,14 +153,18 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
     Promise.all([
       api.get(`/api/subaccounts/${activeClientId}/agents`),
       api.get('/api/agents').catch(() => ({ data: [] })),
-    ]).then(([saRes, orgRes]) => {
-      setAgents(saRes.data);
-      // Map org agents to heartbeat format
-      setHeartbeatAgents((orgRes.data as any[]).map((a: any) => ({
-        id: a.id, name: a.name, icon: a.icon,
-        heartbeatEnabled: a.heartbeatEnabled,
-        heartbeatIntervalHours: a.heartbeatIntervalHours,
-        heartbeatOffsetHours: a.heartbeatOffsetHours,
+    ]).then(([saRes, _orgRes]) => {
+      const saData = saRes.data as any[];
+      setAgents(saData);
+      // Map subaccount agents to heartbeat format (these are the execution-level configs)
+      setHeartbeatAgents(saData.filter((a: any) => a.isActive).map((a: any) => ({
+        id: a.id, // subaccount agent link ID
+        agentId: a.agentId,
+        name: a.agent?.name ?? 'Unknown',
+        icon: a.agent?.icon ?? null,
+        heartbeatEnabled: a.heartbeatEnabled ?? false,
+        heartbeatIntervalHours: a.heartbeatIntervalHours ?? null,
+        heartbeatOffsetHours: a.heartbeatOffsetHours ?? 0,
       })));
     }).catch(() => { setAgents([]); setHeartbeatAgents([]); })
       .finally(() => setLoading(false));
@@ -359,8 +363,25 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
         </div>
       </div>
 
-      {/* Heartbeat Schedule */}
-      <TeamHeartbeatView agents={heartbeatAgents} />
+      {/* Heartbeat Schedule — editable at company/subaccount level (this is where heartbeats actually run) */}
+      <div className="mt-6">
+        <HeartbeatEditor
+          levelLabel="agent"
+          agents={heartbeatAgents}
+          onUpdate={async (linkId, config) => {
+            await api.patch(`/api/subaccounts/${activeClientId}/agents/${linkId}`, config);
+            // Refresh
+            const { data } = await api.get(`/api/subaccounts/${activeClientId}/agents`);
+            setHeartbeatAgents((data as any[]).filter((a: any) => a.isActive).map((a: any) => ({
+              id: a.id, agentId: a.agentId,
+              name: a.agent?.name ?? 'Unknown', icon: a.agent?.icon ?? null,
+              heartbeatEnabled: a.heartbeatEnabled ?? false,
+              heartbeatIntervalHours: a.heartbeatIntervalHours ?? null,
+              heartbeatOffsetHours: a.heartbeatOffsetHours ?? 0,
+            })));
+          }}
+        />
+      </div>
     </div>
   );
 }

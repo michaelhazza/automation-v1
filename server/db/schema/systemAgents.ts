@@ -41,6 +41,11 @@ export const systemAgents = pgTable('system_agents', {
   defaultTokenBudget: integer('default_token_budget').notNull().default(30000),
   defaultMaxToolCalls: integer('default_max_tool_calls').notNull().default(20),
 
+  // Heartbeat defaults (blueprint — copied to org agents on install)
+  heartbeatEnabled: boolean('heartbeat_enabled').notNull().default(false),
+  heartbeatIntervalHours: integer('heartbeat_interval_hours'),
+  heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
+
   // Execution mode preference
   executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless'>(),
 
