@@ -20,7 +20,6 @@ const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
-const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const SystemTaskQueuePage = lazy(() => import('./pages/SystemTaskQueuePage'));
 const PortalLandingPage = lazy(() => import('./pages/PortalLandingPage'));
@@ -37,7 +36,6 @@ const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
-const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
 const SystemAgentsPage = lazy(() => import('./pages/SystemAgentsPage'));
 const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
@@ -175,11 +173,9 @@ export default function App() {
 
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
-            <Route path="/system/users" element={<SystemUsersPage user={user!} />} />
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
-            <Route path="/system/board-templates" element={<SystemBoardTemplatesPage user={user!} />} />
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />

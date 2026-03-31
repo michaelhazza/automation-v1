@@ -490,8 +490,6 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
-              <NavItem to="/system/board-templates" icon={<Icons.boardTpl />} label="Board Templates" />
-              <NavItem to="/system/users" icon={<Icons.team />} label="System Admins" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}
