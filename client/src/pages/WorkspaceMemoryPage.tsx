@@ -96,7 +96,7 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       {!embedded && (
         <div className="mb-6">
-          <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">&larr; Back to Client</Link>
+          <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">&larr; Back to Company</Link>
           <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Workspace Memory</h1>
           <p className="text-[14px] text-slate-500 m-0">Shared knowledge compiled from agent runs in this workspace.</p>
         </div>

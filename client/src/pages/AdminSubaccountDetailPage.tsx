@@ -227,7 +227,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       {mode === 'admin' && (
         <div className="mb-4">
           <Link to="/admin/subaccounts" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
-            ← Back to subaccounts
+            ← Back to companies
           </Link>
         </div>
       )}
@@ -270,7 +270,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
           </div>
 
           {showLinkForm && (
-            <Modal title="Link workflow to client" onClose={() => setShowLinkForm(false)} maxWidth={400}>
+            <Modal title="Link workflow to company" onClose={() => setShowLinkForm(false)} maxWidth={400}>
               <div className="grid gap-3.5 mb-5">
                 <div>
                   <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Org workflow *</label>
@@ -295,7 +295,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
           )}
 
           {deleteLinkId && (
-            <ConfirmDialog title="Remove workflow link" message="Remove this workflow from the client?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
+            <ConfirmDialog title="Remove workflow link" message="Remove this workflow from the company?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
           )}
 
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -517,7 +517,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       {/* Settings */}
       {activeTab === 'settings' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
-          <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Client settings</h2>
+          <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Company settings</h2>
           {settingsSaved && (
             <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{settingsSaved}</div>
           )}

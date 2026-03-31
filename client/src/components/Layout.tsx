@@ -65,7 +65,7 @@ const Icons = {
 // ── Breadcrumb derivation from URL ─────────────────────────────────────────
 const SEG: Record<string, string | null> = {
   admin: null, system: null,
-  subaccounts: 'Clients', agents: 'AI Team', processes: 'Workflows',
+  subaccounts: 'Companies', agents: 'AI Team', processes: 'Workflows',
   executions: 'Activity', workspace: 'Tasks', memory: 'Memory',
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
@@ -444,7 +444,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <div className="text-[13px] font-bold text-slate-100 overflow-hidden text-ellipsis whitespace-nowrap">
                 {activeClientName}
               </div>
-              <div className="text-[11px] text-slate-700 mt-0.5">Client workspace</div>
+              <div className="text-[11px] text-slate-700 mt-0.5">Company workspace</div>
             </>
           ) : hasOrgContext ? (
             <>
@@ -539,7 +539,10 @@ export default function Layout({ user, children }: LayoutProps) {
             <>
               <NavSection label="Company" />
               {hasOrgPerm('org.subaccounts.edit') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage Client" />
+                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
+              )}
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
               )}
               {hasOrgPerm('org.subaccounts.view') && (
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
@@ -552,7 +555,7 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasAnyOrgPerm && (
             <>
               <NavSection label="Organisation" />
-              {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Clients" />}
+              {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}

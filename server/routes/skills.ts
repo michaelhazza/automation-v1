@@ -5,6 +5,18 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
+// ─── List all skills (built-in + custom) for the skills library page ──
+
+router.get('/api/skills/all', authenticate, async (req, res) => {
+  try {
+    const skills = await skillService.listSkills(req.orgId!);
+    res.json(skills);
+  } catch (err: unknown) {
+    const e = err as { statusCode?: number; message?: string };
+    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+  }
+});
+
 // ─── List skills (org-specific custom skills only; built-in skills are now system-level) ──
 
 router.get('/api/skills', authenticate, async (req, res) => {

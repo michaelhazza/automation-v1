@@ -566,7 +566,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
       {/* Header */}
       <div className="mb-6">
         <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">
-          &larr; Back to Client
+          &larr; Back to Company
         </Link>
         <div className="flex justify-between items-center">
           <div>

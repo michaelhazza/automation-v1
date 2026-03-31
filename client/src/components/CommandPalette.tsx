@@ -14,7 +14,7 @@ const NAV_ITEMS: NavEntry[] = [
   { label: 'Workflows', to: '/processes', keywords: 'processes automations' },
   { label: 'Activity', to: '/executions', keywords: 'executions history' },
   { label: 'Profile Settings', to: '/settings' },
-  { label: 'Clients', to: '/admin/subaccounts', keywords: 'subaccounts' },
+  { label: 'Companies', to: '/admin/subaccounts', keywords: 'subaccounts clients' },
   { label: 'Team', to: '/admin/users', keywords: 'users' },
   { label: 'AI Team', to: '/admin/agents', keywords: 'agents' },
   { label: 'Organisations', to: '/system/organisations' },
@@ -133,7 +133,7 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
             value={query}
             onChange={e => { setQuery(e.target.value); setSelected(0); }}
             onKeyDown={handleKeyDown}
-            placeholder="Search pages, clients, agents..."
+            placeholder="Search pages, companies, agents..."
             className="flex-1 bg-transparent border-0 outline-none text-[15px] text-slate-100 font-[inherit]"
           />
           <span className="text-[11px] text-slate-600 bg-white/5 px-1.5 py-0.5 rounded">esc</span>
@@ -163,7 +163,7 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
           )}
           {clientResults.length > 0 && (
             <div>
-              <div className={groupHeaderClass}>Clients</div>
+              <div className={groupHeaderClass}>Companies</div>
               {clientResults.map((r, i) => {
                 const idx = clientStart + i;
                 const item = r.item as Client;
