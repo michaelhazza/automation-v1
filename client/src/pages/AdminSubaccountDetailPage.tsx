@@ -11,14 +11,16 @@ const UsagePage = lazy(() => import('./UsagePage'));
 
 interface Subaccount { id: string; name: string; slug: string; status: string; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
+interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
+interface OrgProcess { id: string; name: string; status: string; }
 interface Member { assignmentId: string; userId: string; email: string; firstName: string; lastName: string; status: string; permissionSetId: string; permissionSetName: string; }
 interface PermissionSet { id: string; name: string; }
 interface OrgMember { userId: string; email: string; firstName: string; lastName: string; }
 
-type ActiveTab = 'settings' | 'board' | 'categories' | 'members' | 'memory' | 'usage';
+type ActiveTab = 'settings' | 'workflows' | 'board' | 'categories' | 'members' | 'memory' | 'usage';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
-  settings: 'Settings', board: 'Board Config', categories: 'Categories',
+  settings: 'Settings', workflows: 'Workflows', board: 'Board Config', categories: 'Categories',
   members: 'Members', memory: 'Memory', usage: 'Usage & Costs',
 };
 
@@ -30,6 +32,8 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [sa, setSa] = useState<Subaccount | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [linkedProcesses, setLinkedProcesses] = useState<ProcessLink[]>([]);
+  const [orgProcesses, setOrgProcesses] = useState<OrgProcess[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [permissionSets, setPermissionSets] = useState<PermissionSet[]>([]);
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
@@ -37,13 +41,18 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['board', 'categories', 'members']
-    : ['settings', 'board', 'categories', 'members', 'memory', 'usage'];
+    : ['settings', 'workflows', 'board', 'categories', 'members', 'memory', 'usage'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
   const [showCatForm, setShowCatForm] = useState(false);
   const [catForm, setCatForm] = useState({ name: '', description: '', colour: '#6366f1' });
   const [deleteCatId, setDeleteCatId] = useState<string | null>(null);
+
+  // Workflow linking state
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
+  const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [memberForm, setMemberForm] = useState({ userId: '', permissionSetId: '' });
@@ -60,14 +69,16 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const load = async () => {
     if (!subaccountId) return;
     try {
-      const [saRes, catRes, memberRes, boardRes] = await Promise.all([
+      const [saRes, catRes, processRes, memberRes, boardRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
+        api.get(`/api/subaccounts/${subaccountId}/processes`).catch(() => ({ data: { linkedProcesses: [] } })),
         api.get(`/api/subaccounts/${subaccountId}/members`),
         api.get(`/api/subaccounts/${subaccountId}/board-config`).catch(() => ({ data: null })),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);
+      setLinkedProcesses(processRes.data.linkedProcesses ?? []);
       setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
@@ -80,11 +91,13 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   };
 
   const loadOrgData = async () => {
-    const [psRes, membersRes] = await Promise.all([
+    const [psRes, processesRes, membersRes] = await Promise.all([
       api.get('/api/permission-sets').catch(() => ({ data: [] })),
+      api.get('/api/processes').catch(() => ({ data: [] })),
       api.get('/api/org/members').catch(() => ({ data: [] })),
     ]);
     setPermissionSets(psRes.data);
+    setOrgProcesses((processesRes.data as OrgProcess[]).filter(t => t.status === 'active'));
     setOrgMembers(membersRes.data);
   };
 
@@ -99,6 +112,33 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       const e = err as { response?: { data?: { error?: string } } };
       setError(e.response?.data?.error ?? 'Failed to create category');
     }
+  };
+
+  // ── Workflow link handlers ──────────────────────────────────────────────────
+
+  const handleCreateLink = async () => {
+    setError('');
+    try {
+      await api.post(`/api/subaccounts/${subaccountId}/processes`, {
+        processId: linkForm.processId,
+        subaccountCategoryId: linkForm.subaccountCategoryId || undefined,
+      });
+      setShowLinkForm(false); setLinkForm({ processId: '', subaccountCategoryId: '' }); load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to link workflow');
+    }
+  };
+
+  const handleDeleteLink = async () => {
+    if (!deleteLinkId) return;
+    await api.delete(`/api/subaccounts/${subaccountId}/processes/${deleteLinkId}`);
+    setDeleteLinkId(null); load();
+  };
+
+  const handleToggleLinkActive = async (link: ProcessLink) => {
+    await api.patch(`/api/subaccounts/${subaccountId}/processes/${link.linkId}`, { isActive: !link.isActive });
+    load();
   };
 
   const handleDeleteCategory = async () => {
@@ -218,6 +258,83 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       )}
 
       {error && <div className="text-[13px] text-red-600 mb-4">{error}</div>}
+
+      {/* Workflows */}
+      {activeTab === 'workflows' && (
+        <>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-[18px] font-semibold text-slate-800 m-0">Linked workflows</h2>
+            <button onClick={() => setShowLinkForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
+              + Link workflow
+            </button>
+          </div>
+
+          {showLinkForm && (
+            <Modal title="Link workflow to client" onClose={() => setShowLinkForm(false)} maxWidth={400}>
+              <div className="grid gap-3.5 mb-5">
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Org workflow *</label>
+                  <select value={linkForm.processId} onChange={(e) => setLinkForm({ ...linkForm, processId: e.target.value })} className={inputCls}>
+                    <option value="">Select workflow...</option>
+                    {orgProcesses.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Portal category (optional)</label>
+                  <select value={linkForm.subaccountCategoryId} onChange={(e) => setLinkForm({ ...linkForm, subaccountCategoryId: e.target.value })} className={inputCls}>
+                    <option value="">No category</option>
+                    {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={handleCreateLink} className={btnPrimary}>Link</button>
+                <button onClick={() => setShowLinkForm(false)} className={btnSecondary}>Cancel</button>
+              </div>
+            </Modal>
+          )}
+
+          {deleteLinkId && (
+            <ConfirmDialog title="Remove workflow link" message="Remove this workflow from the client?" confirmLabel="Remove" onConfirm={handleDeleteLink} onCancel={() => setDeleteLinkId(null)} />
+          )}
+
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            {linkedProcesses.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-500">No workflows linked yet.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Workflow</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Active in portal</th>
+                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {linkedProcesses.map((link) => (
+                    <tr key={link.linkId} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-800">{link.processName}</td>
+                      <td className="px-4 py-3 text-[13px] text-slate-500 capitalize">{link.processStatus}</td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleToggleLinkActive(link)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${link.isActive ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                        >
+                          {link.isActive ? 'Active' : 'Hidden'}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button onClick={() => setDeleteLinkId(link.linkId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Remove</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Board Config */}
       {activeTab === 'board' && (
