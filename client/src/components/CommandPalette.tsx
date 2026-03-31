@@ -11,7 +11,7 @@ interface NavEntry { label: string; to: string; keywords?: string; }
 const NAV_ITEMS: NavEntry[] = [
   { label: 'Dashboard', to: '/', keywords: 'home' },
   { label: 'Projects', to: '/projects' },
-  { label: 'Automations', to: '/processes', keywords: 'processes' },
+  { label: 'Workflows', to: '/processes', keywords: 'processes automations' },
   { label: 'Activity', to: '/executions', keywords: 'executions history' },
   { label: 'Profile Settings', to: '/settings' },
   { label: 'Clients', to: '/admin/subaccounts', keywords: 'subaccounts' },

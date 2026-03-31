@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 
+// ── Review types ─────────────────────────────────────────────────────────────
+
 interface ReviewPayload {
   actionType: string;
   reasoning: string;
@@ -31,6 +33,28 @@ interface RunGroup {
   items: ReviewItem[];
 }
 
+// ── Issue (task) types ────────────────────────────────────────────────────────
+
+interface Issue {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  assignedAgentId: string | null;
+  createdAt: string;
+}
+
+interface SubaccountAgent {
+  id: string;
+  agentId: string;
+  agentRole: string | null;
+  parentSubaccountAgentId: string | null;
+  agent: { name: string; icon: string | null };
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
 const ACTION_BADGE: Record<string, string> = {
   send_email:    'bg-blue-100 text-blue-800',
   update_record: 'bg-green-100 text-green-800',
@@ -38,11 +62,145 @@ const ACTION_BADGE: Record<string, string> = {
   delete_record: 'bg-red-100 text-red-800',
 };
 
+const PRIORITY_CLS: Record<string, string> = {
+  urgent: 'bg-red-100 text-red-700',
+  high:   'bg-orange-100 text-orange-700',
+  normal: 'bg-slate-100 text-slate-600',
+  low:    'bg-green-100 text-green-700',
+};
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+type Tab = 'issues' | 'review';
+
+// ── New Issue Modal ───────────────────────────────────────────────────────────
+
+function NewIssueModal({
+  subaccountId,
+  agents,
+  onCreated,
+  onClose,
+}: {
+  subaccountId: string;
+  agents: SubaccountAgent[];
+  onCreated: () => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Pick CEO agent, fall back to orchestrator, fall back to top-level (no parent)
+  const defaultAgent =
+    agents.find((a) => a.agentRole === 'ceo') ??
+    agents.find((a) => a.agentRole === 'orchestrator') ??
+    agents.find((a) => !a.parentSubaccountAgentId) ??
+    null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) { setError('Title is required'); return; }
+    setSaving(true); setError('');
+    try {
+      await api.post(`/api/subaccounts/${subaccountId}/tasks`, {
+        title: title.trim(),
+        description: description.trim() || undefined,
+        status: 'inbox',
+        priority,
+        assignedAgentId: defaultAgent?.agentId ?? undefined,
+      });
+      onCreated();
+      onClose();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setError(msg ?? 'Failed to create issue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h2 className="text-[17px] font-bold text-slate-900 m-0">New Issue</h2>
+          <button onClick={onClose} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
+          {defaultAgent && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-[13px] text-amber-800">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+              Will be assigned to <strong>{defaultAgent.agent.name}</strong>
+              {defaultAgent.agentRole && <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[11px] font-semibold capitalize">{defaultAgent.agentRole}</span>}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Title</label>
+            <input
+              autoFocus
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="What needs to be done?"
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Add more context..."
+              rows={4}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Priority</label>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as typeof priority)}
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+
+          {error && <p className="text-[13px] text-red-600 m-0">{error}</p>}
+
+          <div className="flex gap-2 justify-end pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving || !title.trim()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors">
+              {saving ? 'Creating...' : 'Create Issue'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function ReviewQueuePage({ user: _user }: { user: { id: string; role: string } }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
-  const [items, setItems] = useState<ReviewItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+
+  // Tab
+  const [tab, setTab] = useState<Tab>('issues');
+
+  // Review state
+  const [reviewItems, setReviewItems] = useState<ReviewItem[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(true);
   const [groupByRun, setGroupByRun] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedReasoning, setExpandedReasoning] = useState<Set<string>>(new Set());
@@ -50,23 +208,58 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   const [editPayload, setEditPayload] = useState('');
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
+  // Issues state
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [issuesLoading, setIssuesLoading] = useState(true);
+  const [agents, setAgents] = useState<SubaccountAgent[]>([]);
+  const [showNewIssue, setShowNewIssue] = useState(false);
+
+  const [error, setError] = useState('');
+
+  // ── Loaders ───────────────────────────────────────────────────────────────
+
+  const loadReview = useCallback(async () => {
     if (!subaccountId) return;
-    setLoading(true); setError('');
+    setReviewLoading(true); setError('');
     try {
       const res = await api.get(`/api/subaccounts/${subaccountId}/review-queue`);
       const sorted = (res.data as ReviewItem[]).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      setItems(sorted); setSelectedIds(new Set()); setEditingId(null);
+      setReviewItems(sorted); setSelectedIds(new Set()); setEditingId(null);
     } catch {
       setError('Failed to load review queue');
-    } finally { setLoading(false); }
+    } finally { setReviewLoading(false); }
   }, [subaccountId]);
 
-  useEffect(() => { load(); }, [load]);
+  const loadIssues = useCallback(async () => {
+    if (!subaccountId) return;
+    setIssuesLoading(true);
+    try {
+      const res = await api.get(`/api/subaccounts/${subaccountId}/tasks`, { params: { status: 'inbox' } });
+      setIssues(res.data as Issue[]);
+    } catch {
+      // silently fail — show empty state
+    } finally { setIssuesLoading(false); }
+  }, [subaccountId]);
+
+  const loadAgents = useCallback(async () => {
+    if (!subaccountId) return;
+    try {
+      const res = await api.get(`/api/subaccounts/${subaccountId}/agents`);
+      setAgents(res.data as SubaccountAgent[]);
+    } catch { /* ignore */ }
+  }, [subaccountId]);
+
+  useEffect(() => {
+    loadReview();
+    loadIssues();
+    loadAgents();
+  }, [loadReview, loadIssues, loadAgents]);
+
+  // ── Review actions ────────────────────────────────────────────────────────
 
   const withActionLoading = async (id: string, fn: () => Promise<void>) => {
     setActionLoading((prev) => new Set(prev).add(id));
-    try { await fn(); await load(); } catch { setError('Action failed. Please try again.'); }
+    try { await fn(); await loadReview(); } catch { setError('Action failed. Please try again.'); }
     finally {
       setActionLoading((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
@@ -86,7 +279,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     const ids = Array.from(selectedIds);
     if (!ids.length) return;
     setActionLoading(new Set(ids));
-    try { await api.post('/api/review-items/bulk-approve', { ids }); await load(); } catch { setError('Bulk approve failed.'); }
+    try { await api.post('/api/review-items/bulk-approve', { ids }); await loadReview(); } catch { setError('Bulk approve failed.'); }
     finally { setActionLoading(new Set()); }
   };
 
@@ -94,21 +287,21 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     const ids = Array.from(selectedIds);
     if (!ids.length) return;
     setActionLoading(new Set(ids));
-    try { await api.post('/api/review-items/bulk-reject', { ids }); await load(); } catch { setError('Bulk reject failed.'); }
+    try { await api.post('/api/review-items/bulk-reject', { ids }); await loadReview(); } catch { setError('Bulk reject failed.'); }
     finally { setActionLoading(new Set()); }
   };
 
   const handleApproveRun = async (runItems: ReviewItem[]) => {
     const ids = runItems.map((i) => i.id);
     setActionLoading(new Set(ids));
-    try { await api.post('/api/review-items/bulk-approve', { ids }); await load(); } catch { setError('Approve all in run failed.'); }
+    try { await api.post('/api/review-items/bulk-approve', { ids }); await loadReview(); } catch { setError('Approve all in run failed.'); }
     finally { setActionLoading(new Set()); }
   };
 
   const handleRejectRun = async (runItems: ReviewItem[]) => {
     const ids = runItems.map((i) => i.id);
     setActionLoading(new Set(ids));
-    try { await api.post('/api/review-items/bulk-reject', { ids }); await load(); } catch { setError('Reject all in run failed.'); }
+    try { await api.post('/api/review-items/bulk-reject', { ids }); await loadReview(); } catch { setError('Reject all in run failed.'); }
     finally { setActionLoading(new Set()); }
   };
 
@@ -117,7 +310,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   };
 
   const toggleSelectAll = () => {
-    setSelectedIds(selectedIds.size === items.length ? new Set() : new Set(items.map((i) => i.id)));
+    setSelectedIds(selectedIds.size === reviewItems.length ? new Set() : new Set(reviewItems.map((i) => i.id)));
   };
 
   const toggleReasoning = (id: string) => {
@@ -132,7 +325,7 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   const groupedByRun = (): RunGroup[] => {
     const map = new Map<string, RunGroup>();
     const ungrouped: ReviewItem[] = [];
-    for (const item of items) {
+    for (const item of reviewItems) {
       if (item.agentRunId) {
         if (!map.has(item.agentRunId)) map.set(item.agentRunId, { agentRunId: item.agentRunId, agentName: item.reviewPayloadJson.agentName ?? 'Unknown Agent', items: [] });
         map.get(item.agentRunId)!.items.push(item);
@@ -144,6 +337,8 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   };
 
   const formatActionType = (type: string) => type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+  // ── Render helpers ────────────────────────────────────────────────────────
 
   const renderProposedPayload = (item: ReviewItem) => {
     const payload = item.reviewPayloadJson.proposedPayload;
@@ -236,36 +431,170 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     );
   };
 
-  if (loading) {
-    return (
-      <div className="p-8 max-w-4xl mx-auto">
-        <div className="h-7 w-48 rounded mb-4 bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />
-        {[1, 2, 3].map((i) => <div key={i} className="h-28 rounded-lg mb-3 bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
+  // ── Tab: Issues ───────────────────────────────────────────────────────────
+
+  const renderIssues = () => {
+    if (issuesLoading) return (
+      <div className="flex flex-col gap-3">
+        {[1, 2, 3].map((i) => <div key={i} className="h-20 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
       </div>
     );
-  }
+
+    if (issues.length === 0) return (
+      <div className="py-16 text-center bg-white border border-slate-200 rounded-xl">
+        <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-[linear-gradient(135deg,#f0f9ff,#e0f2fe)]">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0284c7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <p className="font-bold text-[16px] text-slate-900 mb-1.5">No open issues</p>
+        <p className="text-[13.5px] text-slate-500 mb-4">Create an issue to assign work to your AI team.</p>
+        <button
+          onClick={() => setShowNewIssue(true)}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+        >
+          + New Issue
+        </button>
+      </div>
+    );
+
+    return (
+      <div className="flex flex-col gap-2">
+        {issues.map((issue) => (
+          <div key={issue.id} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-lg hover:border-slate-300 transition-colors">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap mb-1">
+                <span className="font-semibold text-[14px] text-slate-900 truncate">{issue.title}</span>
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${PRIORITY_CLS[issue.priority] ?? PRIORITY_CLS.normal}`}>
+                  {issue.priority}
+                </span>
+              </div>
+              {issue.description && (
+                <p className="text-[13px] text-slate-500 m-0 leading-relaxed line-clamp-2">{issue.description}</p>
+              )}
+              <p className="text-[12px] text-slate-400 mt-1 m-0">
+                Created {new Date(issue.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ── Tab: Review ───────────────────────────────────────────────────────────
+
+  const renderReview = () => {
+    if (reviewLoading) return (
+      <div className="flex flex-col gap-3">
+        {[1, 2, 3].map((i) => <div key={i} className="h-28 rounded-lg bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite]" />)}
+      </div>
+    );
+
+    return (
+      <>
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 px-4 py-2.5 bg-sky-50 border border-sky-200 rounded-lg mb-4">
+            <input type="checkbox" checked={selectedIds.size === reviewItems.length} onChange={toggleSelectAll} className="cursor-pointer accent-indigo-500" />
+            <span className="text-[13px] text-slate-800 font-medium">{selectedIds.size} selected</span>
+            <div className="ml-auto flex gap-2">
+              <button onClick={handleBulkApprove} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve Selected</button>
+              <button onClick={handleBulkReject} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject Selected</button>
+            </div>
+          </div>
+        )}
+
+        {reviewItems.length > 0 && selectedIds.size === 0 && (
+          <div className="flex items-center gap-2 mb-3">
+            <input type="checkbox" checked={false} onChange={toggleSelectAll} className="cursor-pointer accent-indigo-500" />
+            <span className="text-[13px] text-slate-500">Select all ({reviewItems.length} item{reviewItems.length !== 1 ? 's' : ''})</span>
+          </div>
+        )}
+
+        {reviewItems.length === 0 && (
+          <div className="py-16 text-center bg-white border border-slate-200 rounded-xl">
+            <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-[linear-gradient(135deg,#f0fdf4,#dcfce7)]">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <p className="font-bold text-[16px] text-slate-900 mb-1.5">No pending review items</p>
+            <p className="text-[13.5px] text-slate-500">When agents propose actions that require approval, they will appear here.</p>
+          </div>
+        )}
+
+        {!groupByRun && reviewItems.length > 0 && (
+          <div className="flex flex-col gap-3">
+            {reviewItems.map((item) => renderItemCard(item))}
+          </div>
+        )}
+
+        {groupByRun && reviewItems.length > 0 && (
+          <div className="flex flex-col gap-5">
+            {groupedByRun().map((group) => (
+              <div key={group.agentRunId} className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="flex justify-between items-center px-4 py-3 bg-slate-50 border-b border-slate-200">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-[14px] font-semibold text-slate-800">{group.agentName}</span>
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
+                      {group.items.length} action{group.items.length !== 1 ? 's' : ''}
+                    </span>
+                    {group.agentRunId !== '__ungrouped__' && (
+                      <span className="text-[12px] text-slate-400 font-mono">{group.agentRunId.substring(0, 8)}...</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => handleApproveRun(group.items)} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve All in Run</button>
+                    <button onClick={() => handleRejectRun(group.items)} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject All in Run</button>
+                  </div>
+                </div>
+                <div className="divide-y divide-slate-50">
+                  {group.items.map((item) => renderItemCard(item))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  // ── Main render ───────────────────────────────────────────────────────────
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
+      {/* Header */}
       <div className="mb-6">
         <Link to={`/admin/subaccounts/${subaccountId}`} className="text-[14px] text-indigo-600 hover:text-indigo-700 no-underline mb-2 inline-block">
-          &larr; Back to Subaccount
+          &larr; Back to Client
         </Link>
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Review Queue</h1>
-            <p className="text-[14px] text-slate-500 m-0">Approve or reject agent-proposed actions before they execute.</p>
+            <h1 className="text-[24px] font-bold text-slate-900 mt-2 mb-1">Inbox</h1>
+            <p className="text-[14px] text-slate-500 m-0">Issues assigned to your AI team and agent actions awaiting approval.</p>
           </div>
           <div className="flex gap-2 items-center">
-            <button
-              onClick={() => setGroupByRun(!groupByRun)}
-              className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-colors border ${groupByRun ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-            >
-              {groupByRun ? 'Grouped by Run' : 'Group by Run'}
-            </button>
-            <button onClick={load} className="px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[13px] text-slate-600 transition-colors">
-              Refresh
-            </button>
+            {tab === 'review' && (
+              <button
+                onClick={() => setGroupByRun(!groupByRun)}
+                className={`px-4 py-2 rounded-lg text-[13px] font-medium transition-colors border ${groupByRun ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+              >
+                {groupByRun ? 'Grouped by Run' : 'Group by Run'}
+              </button>
+            )}
+            {tab === 'review' && (
+              <button onClick={loadReview} className="px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-[13px] text-slate-600 transition-colors">
+                Refresh
+              </button>
+            )}
+            {tab === 'issues' && (
+              <button
+                onClick={() => setShowNewIssue(true)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+              >
+                + New Issue
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -277,67 +606,40 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
         </div>
       )}
 
-      {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-sky-50 border border-sky-200 rounded-lg mb-4">
-          <input type="checkbox" checked={selectedIds.size === items.length} onChange={toggleSelectAll} className="cursor-pointer accent-indigo-500" />
-          <span className="text-[13px] text-slate-800 font-medium">{selectedIds.size} selected</span>
-          <div className="ml-auto flex gap-2">
-            <button onClick={handleBulkApprove} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve Selected</button>
-            <button onClick={handleBulkReject} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject Selected</button>
-          </div>
-        </div>
-      )}
+      {/* Tabs */}
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6 w-fit">
+        <button
+          onClick={() => setTab('issues')}
+          className={`px-4 py-1.5 rounded-lg text-[13px] font-medium transition-colors border-0 cursor-pointer ${tab === 'issues' ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          Issues
+          {issues.length > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[11px] font-bold">{issues.length}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab('review')}
+          className={`px-4 py-1.5 rounded-lg text-[13px] font-medium transition-colors border-0 cursor-pointer ${tab === 'review' ? 'bg-white text-slate-900 shadow-sm' : 'bg-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          Needs Review
+          {reviewItems.length > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded-full text-[11px] font-bold">{reviewItems.length}</span>
+          )}
+        </button>
+      </div>
 
-      {items.length > 0 && selectedIds.size === 0 && (
-        <div className="flex items-center gap-2 mb-3">
-          <input type="checkbox" checked={false} onChange={toggleSelectAll} className="cursor-pointer accent-indigo-500" />
-          <span className="text-[13px] text-slate-500">Select all ({items.length} item{items.length !== 1 ? 's' : ''})</span>
-        </div>
-      )}
+      {/* Tab content */}
+      {tab === 'issues' && renderIssues()}
+      {tab === 'review' && renderReview()}
 
-      {items.length === 0 && (
-        <div className="py-16 text-center bg-white border border-slate-200 rounded-xl">
-          <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-[linear-gradient(135deg,#f0fdf4,#dcfce7)]">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
-          <p className="font-bold text-[16px] text-slate-900 mb-1.5">No pending review items</p>
-          <p className="text-[13.5px] text-slate-500">When agents propose actions that require approval, they will appear here.</p>
-        </div>
-      )}
-
-      {!groupByRun && items.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {items.map((item) => renderItemCard(item))}
-        </div>
-      )}
-
-      {groupByRun && items.length > 0 && (
-        <div className="flex flex-col gap-5">
-          {groupedByRun().map((group) => (
-            <div key={group.agentRunId} className="border border-slate-200 rounded-xl overflow-hidden">
-              <div className="flex justify-between items-center px-4 py-3 bg-slate-50 border-b border-slate-200">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-[14px] font-semibold text-slate-800">{group.agentName}</span>
-                  <span className="text-[11px] font-bold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full">
-                    {group.items.length} action{group.items.length !== 1 ? 's' : ''}
-                  </span>
-                  {group.agentRunId !== '__ungrouped__' && (
-                    <span className="text-[12px] text-slate-400 font-mono">{group.agentRunId.substring(0, 8)}...</span>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => handleApproveRun(group.items)} className="px-3.5 py-1.5 bg-green-600 hover:bg-green-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Approve All in Run</button>
-                  <button onClick={() => handleRejectRun(group.items)} className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Reject All in Run</button>
-                </div>
-              </div>
-              <div className="divide-y divide-slate-50">
-                {group.items.map((item) => renderItemCard(item))}
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* New Issue modal */}
+      {showNewIssue && subaccountId && (
+        <NewIssueModal
+          subaccountId={subaccountId}
+          agents={agents}
+          onCreated={loadIssues}
+          onClose={() => setShowNewIssue(false)}
+        />
       )}
     </div>
   );

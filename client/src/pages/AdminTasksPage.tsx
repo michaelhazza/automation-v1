@@ -79,14 +79,14 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Manage Automations</h1>
-          <p className="text-sm text-slate-500 mt-2">Create and configure automations</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Manage Workflows</h1>
+          <p className="text-sm text-slate-500 mt-2">Create and configure workflows</p>
         </div>
         <button
           onClick={() => { setShowForm(true); setError(''); }}
           className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
         >
-          + Create automation
+          + Create workflow
         </button>
       </div>
 

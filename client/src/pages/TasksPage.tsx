@@ -66,9 +66,9 @@ export default function TasksPage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">Automations</h1>
+        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">Workflows</h1>
         <p className="text-sm text-slate-500 mt-1.5">
-          {processes.length} automation{processes.length !== 1 ? 's' : ''} available to run
+          {processes.length} workflow{processes.length !== 1 ? 's' : ''} available to run
         </p>
       </div>
 
@@ -81,7 +81,7 @@ export default function TasksPage({ user: _user }: { user: User }) {
         </div>
         <input
           type="text"
-          placeholder="Search automations by name or description..."
+          placeholder="Search workflows by name or description..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-10 pr-10 py-2.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"

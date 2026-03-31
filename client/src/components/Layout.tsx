@@ -65,7 +65,7 @@ const Icons = {
 // ── Breadcrumb derivation from URL ─────────────────────────────────────────
 const SEG: Record<string, string | null> = {
   admin: null, system: null,
-  subaccounts: 'Clients', agents: 'AI Team', processes: 'Automations',
+  subaccounts: 'Clients', agents: 'AI Team', processes: 'Workflows',
   executions: 'Activity', workspace: 'Tasks', memory: 'Memory',
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
@@ -443,7 +443,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to="/agents" icon={<Icons.agents />} label="Agents" badge={liveAgentCount} />
               )}
               {hasOrgPerm('org.processes.view') && (
-                <NavItem to="/processes" icon={<Icons.automations />} label="Processes" />
+                <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
               )}
               <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (

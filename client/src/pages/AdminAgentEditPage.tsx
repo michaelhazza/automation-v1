@@ -1055,6 +1055,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               className={inputCls}
             >
               <option value="">None</option>
+              <option value="ceo">CEO</option>
               <option value="orchestrator">Orchestrator</option>
               <option value="specialist">Specialist</option>
               <option value="worker">Worker</option>

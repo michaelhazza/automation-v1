@@ -3,6 +3,7 @@ import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { processes } from './processes';
+import { projects } from './projects';
 
 export const tasks = pgTable(
   'tasks',
@@ -27,6 +28,8 @@ export const tasks = pgTable(
       .references(() => agents.id),
     processId: uuid('process_id')
       .references(() => processes.id),
+    projectId: uuid('project_id')
+      .references(() => projects.id),
     position: integer('position').notNull().default(0),
     dueDate: timestamp('due_date'),
 
@@ -53,6 +56,7 @@ export const tasks = pgTable(
     subaccountStatusIdx: index('tasks_subaccount_status_idx').on(table.subaccountId, table.status),
     assignedAgentIdx: index('tasks_assigned_agent_idx').on(table.assignedAgentId),
     statusIdx: index('tasks_status_idx').on(table.status),
+    projectIdx: index('tasks_project_idx').on(table.projectId),
   })
 );
 
