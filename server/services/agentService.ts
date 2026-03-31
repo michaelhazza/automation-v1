@@ -1,6 +1,7 @@
 import { eq, and, isNull, asc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agents, agentDataSources, users } from '../db/schema/index.js';
+import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { approxTokens, resolveTemperature, resolveMaxTokens } from './llmService.js';
@@ -423,6 +424,9 @@ export const agentService = {
       heartbeatEnabled: a.heartbeatEnabled,
       heartbeatIntervalHours: a.heartbeatIntervalHours,
       heartbeatOffsetHours: a.heartbeatOffsetHours,
+      parentAgentId: a.parentAgentId,
+      agentRole: a.agentRole,
+      agentTitle: a.agentTitle,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -446,6 +450,9 @@ export const agentService = {
       heartbeatEnabled: a.heartbeatEnabled,
       heartbeatIntervalHours: a.heartbeatIntervalHours,
       heartbeatOffsetHours: a.heartbeatOffsetHours,
+      parentAgentId: a.parentAgentId,
+      agentRole: a.agentRole,
+      agentTitle: a.agentTitle,
       createdAt: a.createdAt,
       updatedAt: a.updatedAt,
     }));
@@ -487,6 +494,9 @@ export const agentService = {
       heartbeatEnabled: agent.heartbeatEnabled,
       heartbeatIntervalHours: agent.heartbeatIntervalHours,
       heartbeatOffsetHours: agent.heartbeatOffsetHours,
+      parentAgentId: agent.parentAgentId,
+      agentRole: agent.agentRole,
+      agentTitle: agent.agentTitle,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
       dataSources: sources.map((s) => ({
@@ -602,6 +612,18 @@ export const agentService = {
     if (data.heartbeatEnabled !== undefined) update.heartbeatEnabled = data.heartbeatEnabled;
     if (data.heartbeatIntervalHours !== undefined) update.heartbeatIntervalHours = data.heartbeatIntervalHours;
     if (data.heartbeatOffsetHours !== undefined) update.heartbeatOffsetHours = data.heartbeatOffsetHours;
+    if (data.agentRole !== undefined) update.agentRole = data.agentRole;
+    if (data.agentTitle !== undefined) update.agentTitle = data.agentTitle;
+
+    // Handle parentAgentId with hierarchy validation
+    if ('parentAgentId' in data) {
+      const parentId = (data as { parentAgentId?: string | null }).parentAgentId;
+      if (parentId) {
+        const validation = await validateHierarchy('agents', id, parentId);
+        if (!validation.valid) throw { statusCode: 400, message: validation.error };
+      }
+      update.parentAgentId = parentId ?? null;
+    }
 
     const [updated] = await db
       .update(agents)
@@ -618,6 +640,12 @@ export const agentService = {
       .from(agents)
       .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'Agent not found' };
+
+    // Draft agents require a masterPrompt before activation
+    // System-managed agents inherit their prompt at runtime, so they are exempt
+    if (!existing.isSystemManaged && !existing.masterPrompt?.trim()) {
+      throw { statusCode: 400, message: 'Cannot activate agent: masterPrompt is required. Add a prompt before activating.' };
+    }
 
     const [updated] = await db
       .update(agents)
@@ -874,6 +902,22 @@ export const agentService = {
     if (proactiveSources.length > 0) {
       console.log(`[SYNC] Scheduled ${proactiveSources.length} proactive data source(s) for background sync`);
     }
+  },
+
+  /**
+   * Return org agents as a nested tree structure.
+   */
+  async getTree(organisationId: string) {
+    const allAgents = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)))
+      .orderBy(agents.name);
+
+    return buildTree(
+      allAgents.map(a => ({ ...a, sortOrder: 0 })),
+      (a) => a.parentAgentId
+    );
   },
 
   fetchAgentDataSources,

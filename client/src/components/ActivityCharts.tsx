@@ -18,7 +18,9 @@ function formatDateLabel(dateStr: string, idx: number, total: number): string {
 
 // ─── Run Activity Chart ────────────────────────────────────────────────────────
 export function RunActivityChart({ data, height = 140 }: { data: DayBucket[]; height?: number }) {
-  if (!data || data.length === 0) {
+  const hasAnyActivity = data && data.length > 0 && data.some(d => d.total > 0);
+
+  if (!data || data.length === 0 || !hasAnyActivity) {
     return (
       <div className="flex items-center justify-center h-[140px] text-sm text-slate-400">
         No activity data yet
@@ -140,7 +142,9 @@ export function RunActivityChart({ data, height = 140 }: { data: DayBucket[]; he
 
 // ─── Success Rate Chart ────────────────────────────────────────────────────────
 export function SuccessRateChart({ data, height = 140 }: { data: DayBucket[]; height?: number }) {
-  if (!data || data.length === 0) {
+  const hasAnyActivity = data && data.length > 0 && data.some(d => d.total > 0);
+
+  if (!data || data.length === 0 || !hasAnyActivity) {
     return (
       <div className="flex items-center justify-center h-[140px] text-sm text-slate-400">
         No data yet

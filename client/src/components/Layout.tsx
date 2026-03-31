@@ -441,6 +441,9 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.agents.view') && (
                 <NavItem to="/agents" icon={<Icons.agents />} label="Agents" badge={liveAgentCount} />
               )}
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to="/admin/agent-templates" icon={<Icons.automations />} label="Templates" />
+              )}
               {hasOrgPerm('org.processes.view') && (
                 <NavItem to="/processes" icon={<Icons.automations />} label="Processes" />
               )}

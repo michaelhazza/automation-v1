@@ -23,6 +23,11 @@ export const agents = pgTable(
     description: text('description'),
     // Display icon/emoji for the agent card UI
     icon: text('icon'),
+
+    // ── Hierarchy ──────────────────────────────────────────────────────
+    parentAgentId: uuid('parent_agent_id'),
+    agentRole: text('agent_role'),
+    agentTitle: text('agent_title'),
     // For org-created agents: the full system prompt
     // For system-managed agents: the org's additional prompt layered on top
     masterPrompt: text('master_prompt').notNull().default(''),

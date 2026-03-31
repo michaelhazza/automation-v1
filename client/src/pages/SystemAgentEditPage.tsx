@@ -10,6 +10,11 @@ interface SystemSkill {
   description: string | null;
 }
 
+interface SystemAgentOption {
+  id: string;
+  name: string;
+}
+
 interface AgentForm {
   name: string;
   icon: string;
@@ -26,6 +31,9 @@ interface AgentForm {
   defaultTokenBudget: number;
   defaultMaxToolCalls: number;
   isPublished: boolean;
+  parentSystemAgentId: string;
+  agentRole: string;
+  agentTitle: string;
 }
 
 const EMPTY_FORM: AgentForm = {
@@ -44,6 +52,9 @@ const EMPTY_FORM: AgentForm = {
   defaultTokenBudget: 0,
   defaultMaxToolCalls: 0,
   isPublished: false,
+  parentSystemAgentId: '',
+  agentRole: '',
+  agentTitle: '',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -94,6 +105,7 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
   const [saveSuccess, setSaveSuccess] = useState('');
   const [saveError, setSaveError] = useState('');
   const [systemSkills, setSystemSkills] = useState<SystemSkill[]>([]);
+  const [allAgents, setAllAgents] = useState<SystemAgentOption[]>([]);
   const [publishing, setPublishing] = useState(false);
 
   const loadAgent = async (agentId: string) => {
@@ -117,6 +129,9 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
         defaultTokenBudget: data.defaultTokenBudget ?? 0,
         defaultMaxToolCalls: data.defaultMaxToolCalls ?? 0,
         isPublished: data.isPublished ?? false,
+        parentSystemAgentId: data.parentSystemAgentId ?? '',
+        agentRole: data.agentRole ?? '',
+        agentTitle: data.agentTitle ?? '',
       });
     } finally {
       setLoading(false);
@@ -132,9 +147,19 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
     }
   };
 
+  const loadAllAgents = async () => {
+    try {
+      const { data } = await api.get('/api/system/agents');
+      setAllAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })));
+    } catch {
+      // non-critical
+    }
+  };
+
   useEffect(() => {
     if (!isNew && id) loadAgent(id);
     loadSystemSkills();
+    loadAllAgents();
   }, [id, isNew]);
 
   const handleSave = async () => {
@@ -165,6 +190,9 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
         defaultScheduleCron: form.defaultScheduleCron || null,
         defaultTokenBudget: form.defaultTokenBudget || null,
         defaultMaxToolCalls: form.defaultMaxToolCalls || null,
+        parentSystemAgentId: form.parentSystemAgentId || null,
+        agentRole: form.agentRole || null,
+        agentTitle: form.agentTitle || null,
       };
 
       if (isNew) {
@@ -263,6 +291,40 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
         <Field label="Description">
           <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className={`${textareaCls} min-h-[60px]`} rows={2} placeholder="Brief description of what this agent does..." />
         </Field>
+      </SectionCard>
+
+      <SectionCard title="Hierarchy" subtitle="Configure this agent's position in the agent hierarchy. Phase 1 is structural/visual only.">
+        <div className="grid grid-cols-3 gap-4">
+          <Field label="Reports to">
+            <select
+              value={form.parentSystemAgentId}
+              onChange={(e) => setForm({ ...form, parentSystemAgentId: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">None (root agent)</option>
+              {allAgents
+                .filter((a) => a.id !== id)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+            </select>
+          </Field>
+          <Field label="Role">
+            <select
+              value={form.agentRole}
+              onChange={(e) => setForm({ ...form, agentRole: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">None</option>
+              <option value="orchestrator">Orchestrator</option>
+              <option value="specialist">Specialist</option>
+              <option value="worker">Worker</option>
+            </select>
+          </Field>
+          <Field label="Title">
+            <input value={form.agentTitle} onChange={(e) => setForm({ ...form, agentTitle: e.target.value })} className={inputCls} placeholder="e.g. Head of Research" />
+          </Field>
+        </div>
       </SectionCard>
 
       <SectionCard

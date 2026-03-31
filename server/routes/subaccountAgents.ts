@@ -45,6 +45,18 @@ router.post(
   })
 );
 
+// Tree must be before :agentId param routes to avoid matching "tree" as an ID
+router.get(
+  '/api/subaccounts/:subaccountId/agents/tree',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const tree = await subaccountAgentService.getTree(req.orgId!, req.params.subaccountId);
+    res.json(tree);
+  })
+);
+
 router.delete(
   '/api/subaccounts/:subaccountId/agents/:agentId',
   authenticate,
@@ -62,12 +74,18 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { isActive } = req.body as { isActive?: boolean };
-    if (isActive === undefined) {
-      res.status(400).json({ error: 'isActive is required' });
-      return;
-    }
-    const updated = await subaccountAgentService.toggleActive(req.orgId!, req.params.linkId, isActive);
+    const { isActive, parentSubaccountAgentId, agentRole, agentTitle } = req.body as {
+      isActive?: boolean;
+      parentSubaccountAgentId?: string | null;
+      agentRole?: string | null;
+      agentTitle?: string | null;
+    };
+    const updated = await subaccountAgentService.updateLink(req.orgId!, req.params.linkId, {
+      isActive,
+      parentSubaccountAgentId,
+      agentRole,
+      agentTitle,
+    });
     res.json(updated);
   })
 );
