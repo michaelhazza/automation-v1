@@ -234,7 +234,7 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
         </div>
         <div className="flex gap-3">
           <Link
-            to="/system/users"
+            to="/system/settings?tab=system-admins"
             className="px-5 py-2.5 bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium no-underline hover:bg-slate-100 transition-colors"
           >
             System Admins

@@ -72,11 +72,11 @@ export default function SystemProcessesPage({ user }: { user: User }) {
     <>
       <div className="mb-6 flex justify-between items-center">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Processes</h1>
-          <p className="text-slate-500 mt-2 mb-0">Platform-level process templates available to all organisations</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Workflows</h1>
+          <p className="text-slate-500 mt-2 mb-0">Platform-level workflow templates available to all organisations</p>
         </div>
         <button onClick={() => setShowCreate(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg px-5 py-2.5 cursor-pointer font-semibold transition-colors">
-          + New Process
+          + New Workflow
         </button>
       </div>
 

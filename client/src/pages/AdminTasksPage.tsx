@@ -12,6 +12,15 @@ interface Process {
   status: string;
   orgCategoryId: string | null;
   workflowEngineId: string;
+  isSystemManaged: boolean;
+  systemProcessId: string | null;
+}
+
+interface SystemProcess {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
 }
 
 interface Category { id: string; name: string; colour: string | null; }
@@ -35,6 +44,12 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
   const [error, setError] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  // Link system workflow state
+  const [showLinkSystem, setShowLinkSystem] = useState(false);
+  const [systemProcesses, setSystemProcesses] = useState<SystemProcess[]>([]);
+  const [selectedSystemId, setSelectedSystemId] = useState('');
+  const [linkLoading, setLinkLoading] = useState(false);
+
   const load = async () => {
     const [processRes, catRes, engRes] = await Promise.all([
       api.get('/api/processes'),
@@ -57,7 +72,7 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
       load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to create process');
+      setError(e.response?.data?.error ?? 'Failed to create workflow');
     }
   };
 
@@ -71,6 +86,36 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
     load();
   };
 
+  const openLinkSystem = async () => {
+    setShowLinkSystem(true);
+    setSelectedSystemId('');
+    setError('');
+    try {
+      const { data } = await api.get('/api/processes/system');
+      // Filter out already-linked system processes
+      const linkedIds = new Set(processes.filter(p => p.systemProcessId).map(p => p.systemProcessId));
+      setSystemProcesses((data as SystemProcess[]).filter(sp => !linkedIds.has(sp.id)));
+    } catch {
+      setSystemProcesses([]);
+    }
+  };
+
+  const handleLinkSystem = async () => {
+    if (!selectedSystemId) return;
+    setLinkLoading(true);
+    setError('');
+    try {
+      await api.post(`/api/processes/link-system/${selectedSystemId}`);
+      setShowLinkSystem(false);
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to link system workflow');
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
   const catMap = Object.fromEntries(categories.map((c) => [c.id, c]));
 
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
@@ -79,19 +124,64 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Manage Automations</h1>
-          <p className="text-sm text-slate-500 mt-2">Create and configure automations</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Manage Workflows</h1>
+          <p className="text-sm text-slate-500 mt-2">Create and configure workflows</p>
         </div>
-        <button
-          onClick={() => { setShowForm(true); setError(''); }}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          + Create automation
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={openLinkSystem}
+            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-sm font-medium rounded-lg transition-colors"
+          >
+            Link System Workflow
+          </button>
+          <button
+            onClick={() => { setShowForm(true); setError(''); }}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            + Create workflow
+          </button>
+        </div>
       </div>
 
+      {/* Link System Workflow modal */}
+      {showLinkSystem && (
+        <Modal title="Link System Workflow" onClose={() => setShowLinkSystem(false)} maxWidth={480}>
+          <p className="text-[13px] text-slate-500 mb-4 mt-0">
+            Link a platform-level workflow to your organisation. The workflow configuration is managed by the platform and stays in sync automatically.
+          </p>
+          {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
+          {systemProcesses.length === 0 ? (
+            <p className="text-[13px] text-slate-400 py-4 text-center">No available system workflows to link.</p>
+          ) : (
+            <div className="mb-5">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">System Workflow</label>
+              <select
+                value={selectedSystemId}
+                onChange={(e) => setSelectedSystemId(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">Select a system workflow...</option>
+                {systemProcesses.map((sp) => (
+                  <option key={sp.id} value={sp.id}>{sp.name}{sp.description ? ` — ${sp.description}` : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={handleLinkSystem}
+              disabled={!selectedSystemId || linkLoading}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors"
+            >
+              {linkLoading ? 'Linking...' : 'Link Workflow'}
+            </button>
+            <button onClick={() => setShowLinkSystem(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">Cancel</button>
+          </div>
+        </Modal>
+      )}
+
       {showForm && (
-        <Modal title="New process" onClose={() => setShowForm(false)} maxWidth={640}>
+        <Modal title="New workflow" onClose={() => setShowForm(false)} maxWidth={640}>
           {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div>
@@ -138,8 +228,8 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
 
       {deleteId && (
         <ConfirmDialog
-          title="Delete process"
-          message="Are you sure you want to delete this process? This action cannot be undone."
+          title="Delete workflow"
+          message="Are you sure you want to delete this workflow? This action cannot be undone."
           confirmLabel="Delete"
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteId(null)}
@@ -148,12 +238,13 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {processes.length === 0 ? (
-          <div className="py-12 text-center text-sm text-slate-500">No processes yet.</div>
+          <div className="py-12 text-center text-sm text-slate-500">No workflows yet. Create one or link a system workflow.</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Name</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Source</th>
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Category</th>
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
@@ -163,6 +254,13 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
               {processes.map((process) => (
                 <tr key={process.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3 font-medium text-slate-800">{process.name}</td>
+                  <td className="px-4 py-3">
+                    {process.isSystemManaged ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-700">System</span>
+                    ) : (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600">Custom</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-[13px] text-slate-500">
                     {process.orgCategoryId ? catMap[process.orgCategoryId]?.name : '—'}
                   </td>
@@ -173,12 +271,14 @@ export default function AdminTasksPage({ user: _user }: { user: User }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
-                      <Link
-                        to={`/admin/processes/${process.id}`}
-                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
-                      >
-                        Edit
-                      </Link>
+                      {!process.isSystemManaged && (
+                        <Link
+                          to={`/admin/processes/${process.id}`}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
+                        >
+                          Edit
+                        </Link>
+                      )}
                       {process.status !== 'active' && (
                         <button onClick={() => handleActivate(process.id)} className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-md text-xs font-medium transition-colors">
                           Activate

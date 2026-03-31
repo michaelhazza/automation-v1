@@ -3,6 +3,9 @@ import api from '../lib/api';
 import { User, getActiveOrgId, getActiveOrgName } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import AdminBoardConfigPage from './AdminBoardConfigPage';
+import AdminCategoriesPage from './AdminCategoriesPage';
+import AdminEnginesPage from './AdminEnginesPage';
 
 interface OrgData {
   id: string;
@@ -14,20 +17,35 @@ interface OrgData {
   createdAt: string;
 }
 
-type ActiveTab = 'general' | 'permissions';
+type ActiveTab = 'board' | 'categories' | 'engines' | 'general' | 'permissions';
+
+const TAB_LABELS: Record<ActiveTab, string> = {
+  board: 'Board Config',
+  categories: 'Categories',
+  engines: 'Engines',
+  general: 'General',
+  permissions: 'Permissions',
+};
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
-export default function OrgSettingsPage({ user: _user }: { user: User }) {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('general');
+export default function OrgSettingsPage({ user }: { user: User }) {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('board');
 
   const orgId = getActiveOrgId();
   const orgName = getActiveOrgName();
+  const isSystemAdmin = user.role === 'system_admin';
+
+  // Non-system-admins see: board, categories, engines
+  // System admins additionally see: general, permissions
+  const visibleTabs: ActiveTab[] = isSystemAdmin
+    ? ['board', 'categories', 'engines', 'general', 'permissions']
+    : ['board', 'categories', 'engines'];
 
   if (!orgId) {
     return (
       <div className="animate-[fadeIn_0.2s_ease-out_both] p-10">
-        <h1 className="text-[28px] font-extrabold text-slate-900 mb-2">Organisation Settings</h1>
+        <h1 className="text-[28px] font-extrabold text-slate-900 mb-2">Manage Organisation</h1>
         <p className="text-[14px] text-slate-500">Select an organisation from the sidebar to view settings.</p>
       </div>
     );
@@ -36,22 +54,25 @@ export default function OrgSettingsPage({ user: _user }: { user: User }) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-6">
-        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0 mb-1.5">Organisation Settings</h1>
+        <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0 mb-1.5">Manage Organisation</h1>
         <p className="text-[14px] text-slate-500 m-0">Manage settings for {orgName ?? 'your organisation'}</p>
       </div>
 
       <div className="flex gap-1 border-b border-slate-200 mb-6">
-        {(['general', 'permissions'] as ActiveTab[]).map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-[14px] border-b-2 -mb-px transition-colors capitalize ${activeTab === tab ? 'border-indigo-600 text-indigo-600 font-semibold' : 'border-transparent text-slate-500 hover:text-slate-700 font-normal'}`}
+            className={`px-4 py-2 text-[14px] border-b-2 -mb-px transition-colors ${activeTab === tab ? 'border-indigo-600 text-indigo-600 font-semibold' : 'border-transparent text-slate-500 hover:text-slate-700 font-normal'}`}
           >
-            {tab}
+            {TAB_LABELS[tab]}
           </button>
         ))}
       </div>
 
+      {activeTab === 'board' && <AdminBoardConfigPage user={user} embedded />}
+      {activeTab === 'categories' && <AdminCategoriesPage user={user} embedded />}
+      {activeTab === 'engines' && <AdminEnginesPage user={user} embedded />}
       {activeTab === 'general' && <GeneralTab orgId={orgId} orgName={orgName} />}
       {activeTab === 'permissions' && <PermissionsTab />}
     </div>

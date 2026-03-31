@@ -93,7 +93,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
       <div className="flex justify-between items-start mb-6">
         <div>
           <h1 className="text-[28px] font-extrabold text-slate-900 tracking-tight m-0">Execution History</h1>
-          <p className="text-sm text-slate-500 mt-1.5">Audit trail of all automation runs</p>
+          <p className="text-sm text-slate-500 mt-1.5">Audit trail of all workflow runs</p>
         </div>
         {isAdmin && (
           <button
@@ -112,13 +112,13 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
       <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 mb-5">
         <div className="flex gap-3 flex-wrap items-end">
           <div className="flex-1 min-w-[160px]">
-            <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Automation</label>
+            <label className="block text-[11.5px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Workflow</label>
             <select
               value={filterProcessId}
               onChange={(e) => setFilterProcessId(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <option value="">All processes</option>
+              <option value="">All workflows</option>
               {processes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
@@ -201,7 +201,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
           </div>
           <p className="font-bold text-[16px] text-slate-900 mb-1.5">No executions found</p>
           <p className="text-[13.5px] text-slate-500 mb-5">
-            {hasFilters ? 'Try adjusting your filters.' : 'Run an automation to start your execution history.'}
+            {hasFilters ? 'Try adjusting your filters.' : 'Run a workflow to start your execution history.'}
           </p>
           {hasFilters ? (
             <button onClick={handleClearFilters} className="px-4 py-2 border border-slate-200 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors">
@@ -209,7 +209,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
             </button>
           ) : (
             <Link to="/processes" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg no-underline transition-colors">
-              Browse Automations
+              Browse Workflows
             </Link>
           )}
         </div>
@@ -219,7 +219,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Execution</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Automation</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Workflow</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Duration</th>
                 <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Created</th>

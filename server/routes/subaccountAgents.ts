@@ -74,17 +74,23 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { isActive, parentSubaccountAgentId, agentRole, agentTitle } = req.body as {
+    const { isActive, parentSubaccountAgentId, agentRole, agentTitle, heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours } = req.body as {
       isActive?: boolean;
       parentSubaccountAgentId?: string | null;
       agentRole?: string | null;
       agentTitle?: string | null;
+      heartbeatEnabled?: boolean;
+      heartbeatIntervalHours?: number | null;
+      heartbeatOffsetHours?: number;
     };
     const updated = await subaccountAgentService.updateLink(req.orgId!, req.params.linkId, {
       isActive,
       parentSubaccountAgentId,
       agentRole,
       agentTitle,
+      heartbeatEnabled,
+      heartbeatIntervalHours,
+      heartbeatOffsetHours,
     });
     res.json(updated);
   })

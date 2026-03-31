@@ -65,13 +65,14 @@ const Icons = {
 // ── Breadcrumb derivation from URL ─────────────────────────────────────────
 const SEG: Record<string, string | null> = {
   admin: null, system: null,
-  subaccounts: 'Clients', agents: 'AI Team', processes: 'Automations',
+  subaccounts: 'Companies', agents: 'AI Team', processes: 'Workflows',
   executions: 'Activity', workspace: 'Tasks', memory: 'Memory',
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
   'review-queue': 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace',
-  'org-settings': 'Org Settings', connections: 'Connections', projects: 'Projects',
+  'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
+  'agent-templates': 'Team Templates',
   'admin-settings': 'Settings',
   usage: 'Usage & Costs',
 };
@@ -105,10 +106,11 @@ function buildBreadcrumbs(pathname: string, clientName: string | null) {
 
 // ── NavItem ────────────────────────────────────────────────────────────────
 function NavItem({
-  to, icon, label, badge, exact = false,
-}: { to: string; icon: React.ReactNode; label: string; badge?: number; exact?: boolean }) {
+  to, icon, label, badge, badgeLabel, exact = false,
+}: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean }) {
   const { pathname } = useLocation();
-  const active = exact ? pathname === to : pathname === to || pathname.startsWith(to + '/');
+  const baseTo = to.split('?')[0]; // ignore query params for matching
+  const active = exact ? pathname === baseTo : pathname === baseTo || pathname.startsWith(baseTo + '/');
   return (
     <Link
       to={to}
@@ -119,20 +121,38 @@ function NavItem({
       }`}
     >
       <span className={active ? 'text-indigo-300' : ''}>{icon}</span>
-      <span className="flex-1">{label}</span>
-      {!!badge && badge > 0 && (
+      <span className="flex-1 truncate">{label}</span>
+      {badgeLabel ? (
+        <span className="flex items-center gap-1 text-[11px] font-semibold text-blue-400">
+          <span className="w-[6px] h-[6px] rounded-full bg-blue-400 animate-pulse" />
+          {badgeLabel}
+        </span>
+      ) : !!badge && badge > 0 ? (
         <span className="min-w-[18px] h-[18px] rounded-[9px] px-[5px] bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">
           {badge > 99 ? '99+' : badge}
         </span>
-      )}
+      ) : null}
     </Link>
   );
 }
 
-function NavSection({ label }: { label: string }) {
+// ── NavSectionAction (+ button) ────────────────────────────────────────────
+function NavSectionAction({ onClick }: { onClick: () => void }) {
   return (
-    <div className="px-[18px] pt-[14px] pb-1 text-[10px] font-bold text-slate-700 uppercase tracking-[0.1em]">
-      {label}
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="w-[16px] h-[16px] flex items-center justify-center rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.08] border-0 bg-transparent cursor-pointer transition-colors text-[13px] leading-none p-0"
+    >
+      +
+    </button>
+  );
+}
+
+function NavSection({ label, action }: { label: string; action?: React.ReactNode }) {
+  return (
+    <div className="px-[18px] pt-[14px] pb-1 text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] flex items-center justify-between">
+      <span>{label}</span>
+      {action}
     </div>
   );
 }
@@ -162,6 +182,27 @@ export default function Layout({ user, children }: LayoutProps) {
   // Badges
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
+
+  // Inline create modals
+  const [showCreateProject, setShowCreateProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectColor, setNewProjectColor] = useState('#6366f1');
+  const [createProjectLoading, setCreateProjectLoading] = useState(false);
+
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
+
+  // New Issue modal
+  const [showNewIssue, setShowNewIssue] = useState(false);
+  const [newIssueTitle, setNewIssueTitle] = useState('');
+  const [newIssueDesc, setNewIssueDesc] = useState('');
+  const [newIssuePriority, setNewIssuePriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
+  const [newIssueLoading, setNewIssueLoading] = useState(false);
+
+  // Dynamic nav lists
+  interface NavProject { id: string; name: string; color: string; status: string; }
+  interface NavAgent { id: string; agentId: string; agent: { name: string; icon: string | null; status: string }; agentRole: string | null; isActive: boolean; }
+  const [navProjects, setNavProjects] = useState<NavProject[]>([]);
+  const [navAgents, setNavAgents] = useState<NavAgent[]>([]);
 
   // Budget alert
   interface BudgetAlert { pct: number; spent: number; limit: number; }
@@ -224,6 +265,17 @@ export default function Layout({ user, children }: LayoutProps) {
     fetch();
     const t = setInterval(fetch, 15_000);
     return () => clearInterval(t);
+  }, [activeClientId]);
+
+  // Dynamic nav: projects + agents for active client
+  useEffect(() => {
+    if (!activeClientId) { setNavProjects([]); setNavAgents([]); return; }
+    api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data }) =>
+      setNavProjects((data as NavProject[]).filter(p => p.status === 'active').slice(0, 12))
+    ).catch(() => setNavProjects([]));
+    api.get(`/api/subaccounts/${activeClientId}/agents`).then(({ data }) =>
+      setNavAgents((data as NavAgent[]).filter(a => a.isActive))
+    ).catch(() => setNavAgents([]));
   }, [activeClientId]);
 
   // Budget alert — check monthly spend vs limit for active client
@@ -407,7 +459,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <div className="text-[13px] font-bold text-slate-100 overflow-hidden text-ellipsis whitespace-nowrap">
                 {activeClientName}
               </div>
-              <div className="text-[11px] text-slate-700 mt-0.5">Client workspace</div>
+              <div className="text-[11px] text-slate-700 mt-0.5">Company workspace</div>
             </>
           ) : hasOrgContext ? (
             <>
@@ -427,58 +479,111 @@ export default function Layout({ user, children }: LayoutProps) {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 py-1">
+        <div className="flex-1 py-1 overflow-y-auto overflow-x-hidden">
 
-          <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
-
-          {/* ── Client section */}
+          {/* ── Top controls — always visible when client selected */}
           {hasOrgContext && activeClientId && (
             <>
+              <button
+                onClick={() => setShowNewIssue(true)}
+                className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
+              >
+                <span><Icons.bolt /></span>
+                <span className="flex-1">New Issue</span>
+              </button>
+              <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined} />
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/review-queue`} icon={<Icons.inbox />} label="Inbox" badge={reviewCount} />
-              )}
-              <NavItem to="/projects" icon={<Icons.projects />} label="Projects" />
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to="/agents" icon={<Icons.agents />} label="Agents" badge={liveAgentCount} />
-              )}
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to="/admin/agent-templates" icon={<Icons.automations />} label="Templates" />
-              )}
-              {hasOrgPerm('org.processes.view') && (
-                <NavItem to="/processes" icon={<Icons.automations />} label="Processes" />
-              )}
-              <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
-              )}
-              {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
-              )}
-              {hasOrgPerm('org.workspace.manage') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/memory`} icon={<Icons.memory />} label="Memory" />
-              )}
-              {hasOrgPerm('org.subaccounts.view') && (
-                <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
-              )}
-              {(hasClientPerm('subaccount.categories.manage') || hasClientPerm('subaccount.users.view')) && (
-                <NavItem to={`/client-settings/${activeClientId}`} icon={<Icons.settings />} label="Client Settings" />
-              )}
-              {hasOrgPerm('org.subaccounts.edit') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}`} icon={<Icons.settings />} label="Manage Client" />
-              )}
-              {hasOrgPerm('org.settings.view') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/usage`} icon={<Icons.usage />} label="Usage & Costs" />
               )}
             </>
           )}
 
-          {/* ── Org section — no client selected */}
-          {hasOrgContext && !activeClientId && hasAnyOrgPerm && (
+          {/* ── Fallback dashboard when no client selected */}
+          {!(hasOrgContext && activeClientId) && (
+            <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
+          )}
+
+          {/* ── Work section */}
+          {hasOrgContext && activeClientId && (
             <>
-              {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" icon={<Icons.clients />} label="Clients" />}
+              <NavSection label="Work" />
+              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
+              )}
+              {hasOrgPerm('org.processes.view') && (
+                <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
+              )}
+              {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
+              )}
+            </>
+          )}
+
+          {/* ── Projects section — dynamic list */}
+          {hasOrgContext && activeClientId && (
+            <>
+              <NavSection label="Projects" action={<NavSectionAction onClick={() => setShowCreateProject(true)} />} />
+              {navProjects.length === 0 && (
+                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No projects yet</div>
+              )}
+              {navProjects.map((p) => (
+                <NavItem
+                  key={p.id}
+                  to={`/projects/${p.id}`}
+                  icon={<span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: p.color }} />}
+                  label={p.name}
+                />
+              ))}
+            </>
+          )}
+
+          {/* ── Agents section — dynamic list */}
+          {hasOrgContext && activeClientId && hasOrgPerm('org.agents.view') && (
+            <>
+              <NavSection label="Agents" action={<NavSectionAction onClick={() => setShowCreateAgent(true)} />} />
+              {navAgents.length === 0 && (
+                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No agents yet</div>
+              )}
+              {navAgents.map((a) => (
+                <NavItem
+                  key={a.id}
+                  to={`/agents/${a.agentId}`}
+                  icon={a.agent.icon ? <span className="text-[13px] shrink-0 leading-none">{a.agent.icon}</span> : <Icons.agents />}
+                  label={a.agent.name}
+                />
+              ))}
+            </>
+          )}
+
+          {/* ── Company section */}
+          {hasOrgContext && activeClientId && (
+            <>
+              <NavSection label="Company" />
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
+              )}
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
+              )}
+              {hasOrgPerm('org.subaccounts.view') && (
+                <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
+              )}
+              <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+              {hasOrgPerm('org.subaccounts.edit') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
+              )}
+            </>
+          )}
+
+          {/* ── Organisation section — always shown when org context exists */}
+          {hasOrgContext && hasAnyOrgPerm && (
+            <>
+              <NavSection label="Organisation" />
+              {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
+              {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view')) && <NavItem to="/admin/settings" icon={<Icons.settings />} label="Settings" />}
-              {isSystemAdmin && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />}
+              {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
           )}
 
@@ -488,10 +593,9 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Platform" />
               <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
+              <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
-              <NavItem to="/system/board-templates" icon={<Icons.boardTpl />} label="Board Templates" />
-              <NavItem to="/system/users" icon={<Icons.team />} label="System Admins" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}
@@ -575,6 +679,136 @@ export default function Layout({ user, children }: LayoutProps) {
           {children}
         </div>
       </main>
+
+      {/* ── Create Project modal ──────────────────────────────────────── */}
+      {showCreateProject && activeClientId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Project</h2>
+              <button onClick={() => setShowCreateProject(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newProjectName.trim() || createProjectLoading) return;
+              setCreateProjectLoading(true);
+              try {
+                const { data } = await api.post(`/api/subaccounts/${activeClientId}/projects`, { name: newProjectName.trim(), color: newProjectColor });
+                setShowCreateProject(false);
+                setNewProjectName('');
+                setNewProjectColor('#6366f1');
+                // Refresh projects list and navigate
+                api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data: p }) =>
+                  setNavProjects((p as NavProject[]).filter(pr => pr.status === 'active').slice(0, 12))
+                );
+                navigate(`/projects/${data.id}`);
+              } catch { /* ignore */ }
+              finally { setCreateProjectLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+                <input autoFocus type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="Project name" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Colour</label>
+                <div className="flex gap-2">
+                  {['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#22c55e','#0ea5e9','#eab308'].map(c => (
+                    <button key={c} type="button" onClick={() => setNewProjectColor(c)} className={`w-7 h-7 rounded-full border-2 cursor-pointer transition-all ${newProjectColor === c ? 'border-slate-900 scale-110' : 'border-transparent'}`} style={{ background: c }} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => setShowCreateProject(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Agent dialog ──────────────────────────────────────────── */}
+      {showCreateAgent && activeClientId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">Add Agent</h2>
+              <button onClick={() => setShowCreateAgent(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-6">
+              <p className="text-[13px] text-slate-500 mb-4 mt-0">Agents are managed at the organisation level. Use Team Templates to load agent teams into this company.</p>
+              <div className="flex flex-col gap-2">
+                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
+                  <div className="text-[14px] font-semibold text-slate-800">Manage Org Agents</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5">Create, edit, and configure agents at the organisation level</div>
+                </button>
+                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents?tab=team-templates'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
+                  <div className="text-[14px] font-semibold text-slate-800">Load Team Template</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5">Browse and apply a team template to this company</div>
+                </button>
+              </div>
+              <div className="flex justify-end mt-4">
+                <button onClick={() => setShowCreateAgent(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── New Issue modal ───────────────────────────────────────────── */}
+      {showNewIssue && activeClientId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Issue</h2>
+              <button onClick={() => setShowNewIssue(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newIssueTitle.trim() || newIssueLoading) return;
+              setNewIssueLoading(true);
+              try {
+                // Find top-level agent (no parent) to auto-assign
+                const agentsRes = await api.get(`/api/subaccounts/${activeClientId}/agents`).catch(() => ({ data: [] }));
+                const topAgent = (agentsRes.data as any[]).find((a: any) => a.isActive && !a.parentSubaccountAgentId);
+                await api.post(`/api/subaccounts/${activeClientId}/tasks`, {
+                  title: newIssueTitle.trim(),
+                  description: newIssueDesc.trim() || undefined,
+                  status: 'inbox',
+                  priority: newIssuePriority,
+                  assignedAgentId: topAgent?.agentId ?? undefined,
+                });
+                setShowNewIssue(false);
+                setNewIssueTitle('');
+                setNewIssueDesc('');
+                setNewIssuePriority('normal');
+              } catch { /* ignore */ }
+              finally { setNewIssueLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Title</label>
+                <input autoFocus type="text" value={newIssueTitle} onChange={(e) => setNewIssueTitle(e.target.value)} placeholder="What needs to be done?" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+                <textarea value={newIssueDesc} onChange={(e) => setNewIssueDesc(e.target.value)} placeholder="Add more context..." rows={3} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Priority</label>
+                <select value={newIssuePriority} onChange={(e) => setNewIssuePriority(e.target.value as typeof newIssuePriority)} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="low">Low</option>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => setShowNewIssue(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newIssueTitle.trim() || newIssueLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{newIssueLoading ? 'Creating...' : 'Create Issue'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -20,7 +20,6 @@ const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'));
 const AdminSubaccountsPage = lazy(() => import('./pages/AdminSubaccountsPage'));
 const AdminSubaccountDetailPage = lazy(() => import('./pages/AdminSubaccountDetailPage'));
 const SystemOrganisationsPage = lazy(() => import('./pages/SystemOrganisationsPage'));
-const SystemUsersPage = lazy(() => import('./pages/SystemUsersPage'));
 const SystemSettingsPage = lazy(() => import('./pages/SystemSettingsPage'));
 const SystemTaskQueuePage = lazy(() => import('./pages/SystemTaskQueuePage'));
 const PortalLandingPage = lazy(() => import('./pages/PortalLandingPage'));
@@ -37,7 +36,6 @@ const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
-const SystemBoardTemplatesPage = lazy(() => import('./pages/SystemBoardTemplatesPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
 const SystemAgentsPage = lazy(() => import('./pages/SystemAgentsPage'));
 const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
@@ -52,7 +50,8 @@ const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
+const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
 
 function PageLoader() {
@@ -150,10 +149,10 @@ export default function App() {
             <Route path="/admin/processes" element={<AdminProcessesPage user={user!} />} />
             <Route path="/admin/processes/:id" element={<AdminProcessEditPage user={user!} />} />
             <Route path="/admin/users" element={<AdminUsersPage user={user!} />} />
-            <Route path="/admin/settings" element={<AdminSettingsPage user={user!} />} />
-            <Route path="/admin/board-config" element={<Navigate to="/admin/settings" replace />} />
-            <Route path="/admin/categories" element={<Navigate to="/admin/settings" replace />} />
-            <Route path="/admin/engines" element={<Navigate to="/admin/settings" replace />} />
+            <Route path="/admin/settings" element={<Navigate to="/admin/org-settings" replace />} />
+            <Route path="/admin/board-config" element={<Navigate to="/admin/org-settings" replace />} />
+            <Route path="/admin/categories" element={<Navigate to="/admin/org-settings" replace />} />
+            <Route path="/admin/engines" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/permission-sets" element={<Navigate to="/admin/org-settings" replace />} />
             <Route path="/admin/subaccounts" element={<AdminSubaccountsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="admin" />} />
@@ -162,7 +161,7 @@ export default function App() {
             <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/agents" element={<SubaccountAgentsPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
@@ -175,11 +174,9 @@ export default function App() {
 
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
-            <Route path="/system/users" element={<SystemUsersPage user={user!} />} />
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
-            <Route path="/system/board-templates" element={<SystemBoardTemplatesPage user={user!} />} />
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
@@ -202,10 +199,14 @@ export default function App() {
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
 
           {/* Projects */}
-          <Route path="/projects" element={<ProjectsPage user={user!} />} />
+          <Route path="/projects" element={<Navigate to="/" replace />} />
+          <Route path="/projects/:id" element={<ProjectDetailPage user={user!} />} />
+
+          {/* Org Chart */}
+          <Route path="/org-chart" element={<OrgChartPage user={user!} />} />
 
           {/* AI Agents */}
-          <Route path="/agents" element={<AgentsPage user={user!} />} />
+          <Route path="/agents" element={<Navigate to="/" replace />} />
           <Route path="/agents/:id" element={<AgentChatPage user={user!} />} />
 
           {/* Client portal routes */}

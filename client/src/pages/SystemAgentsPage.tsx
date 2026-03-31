@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import HeartbeatEditor from '../components/HeartbeatEditor';
+import SystemCompanyTemplatesPage from './SystemCompanyTemplatesPage';
 
 interface SystemAgent {
   id: string;
@@ -44,9 +46,10 @@ function PublishedBadge({ published }: { published: boolean }) {
   );
 }
 
-type ActiveTab = 'list' | 'hierarchy';
+type ActiveTab = 'list' | 'hierarchy' | 'company-templates' | 'heartbeat';
 
 const ROLE_CLS: Record<string, string> = {
+  ceo: 'bg-amber-100 text-amber-800',
   orchestrator: 'bg-purple-100 text-purple-800',
   specialist: 'bg-blue-100 text-blue-800',
   worker: 'bg-slate-100 text-slate-700',
@@ -117,11 +120,21 @@ function HierarchyTreeRow({
   );
 }
 
+const VALID_TABS = new Set<string>(['list', 'hierarchy', 'company-templates', 'heartbeat']);
+
 export default function SystemAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const initialTab = tabParam && VALID_TABS.has(tabParam) ? (tabParam as ActiveTab) : 'list';
   const [agents, setAgents] = useState<SystemAgent[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('list');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
+
+  const switchTab = (tab: ActiveTab) => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'list' ? {} : { tab });
+  };
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
@@ -291,17 +304,17 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {(['list', 'hierarchy'] as const).map((tab) => (
+        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['hierarchy', 'Team Templates'], ['company-templates', 'Company Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => switchTab(tab as ActiveTab)}
             className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer ${
               activeTab === tab
                 ? 'border-indigo-600 text-indigo-600 font-semibold'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            {tab === 'list' ? 'Agents' : 'Hierarchy'}
+            {label}
           </button>
         ))}
       </div>
@@ -346,6 +359,26 @@ export default function SystemAgentsPage({ user }: { user: User }) {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Company Templates Tab */}
+      {activeTab === 'company-templates' && <SystemCompanyTemplatesPage user={user} />}
+
+      {/* Heartbeat Tab */}
+      {activeTab === 'heartbeat' && (
+        <HeartbeatEditor
+          levelLabel="system agent"
+          agents={agents.map(a => ({
+            id: a.id, name: a.name, icon: null,
+            heartbeatEnabled: (a as any).heartbeatEnabled ?? false,
+            heartbeatIntervalHours: (a as any).heartbeatIntervalHours ?? null,
+            heartbeatOffsetHours: (a as any).heartbeatOffsetHours ?? 0,
+          }))}
+          onUpdate={async (agentId, config) => {
+            await api.patch(`/api/system/agents/${agentId}`, config);
+            load();
+          }}
+        />
       )}
 
       {/* List Tab */}

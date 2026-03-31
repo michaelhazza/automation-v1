@@ -1,5 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
@@ -16,29 +15,99 @@ interface Template {
   createdAt: string;
 }
 
-interface ImportSummary {
-  template: { id: string; name: string; version: number };
-  summary: {
-    total: number;
-    matchedSystemAgent: number;
-    matchedOrgAgent: number;
-    blueprint: number;
-    blueprintsRequiringPrompt: number;
-    slugsRenamed: Array<{ final: string; original: string }>;
-    updateConflicts: Array<{ agentName: string; field: string; reason: string }>;
-    unresolvedParents: string[];
-    depthWarning: number | null;
-  };
+interface CompanyTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  agentCount: number;
+  version: number;
+}
+
+interface CompanyTemplateDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  agentCount: number;
+  slots: Array<{
+    id: string;
+    blueprintSlug: string;
+    blueprintName: string | null;
+    blueprintRole: string | null;
+    blueprintTitle: string | null;
+    systemAgentId: string | null;
+    parentSlotId: string | null;
+  }>;
+  tree: unknown[];
 }
 
 const SOURCE_BADGE: Record<string, { cls: string; label: string }> = {
   manual: { cls: 'bg-slate-100 text-slate-600', label: 'Manual' },
-  paperclip_import: { cls: 'bg-blue-100 text-blue-700', label: 'Paperclip' },
+  paperclip_import: { cls: 'bg-blue-100 text-blue-700', label: 'Imported' },
   from_system: { cls: 'bg-violet-100 text-violet-700', label: 'System' },
 };
 
-export default function AdminAgentTemplatesPage({ user: _user }: { user: User }) {
-  const navigate = useNavigate();
+const ROLE_CLS: Record<string, string> = {
+  orchestrator: 'bg-purple-100 text-purple-800',
+  specialist: 'bg-blue-100 text-blue-800',
+  worker: 'bg-slate-100 text-slate-700',
+};
+
+interface SlotNode {
+  id: string;
+  blueprintSlug: string;
+  blueprintName: string | null;
+  blueprintRole: string | null;
+  blueprintTitle: string | null;
+  systemAgentId: string | null;
+  children?: SlotNode[];
+}
+
+function SlotTreeRow({ slot, depth }: { slot: SlotNode; depth: number }) {
+  const [expanded, setExpanded] = useState(true);
+  const children = slot.children ?? [];
+  const hasChildren = children.length > 0;
+
+  return (
+    <>
+      <tr className="hover:bg-slate-50 transition-colors">
+        <td className="px-4 py-2">
+          <div className="flex items-center gap-1.5" style={{ paddingLeft: `${depth * 20}px` }}>
+            {hasChildren ? (
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="w-4 h-4 flex items-center justify-center bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-700 text-[11px] transition-transform"
+                style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              >
+                &#9654;
+              </button>
+            ) : <span className="w-4" />}
+            <span className="font-medium text-slate-800 text-[13px]">
+              {slot.blueprintName || slot.blueprintSlug}
+            </span>
+            {slot.systemAgentId && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">System</span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-2">
+          {slot.blueprintRole && (
+            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium capitalize ${ROLE_CLS[slot.blueprintRole] ?? 'bg-slate-100 text-slate-600'}`}>
+              {slot.blueprintRole}
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-2 text-[12px] text-slate-500">
+          {slot.blueprintTitle || '—'}
+        </td>
+      </tr>
+      {expanded && children.map((child) => (
+        <SlotTreeRow key={child.id} slot={child} depth={depth + 1} />
+      ))}
+    </>
+  );
+}
+
+export default function AdminAgentTemplatesPage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -50,16 +119,11 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
   const [createDesc, setCreateDesc] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // Import flow
-  const [showImport, setShowImport] = useState(false);
-  const [importName, setImportName] = useState('');
-  const [importManifest, setImportManifest] = useState<Record<string, unknown> | null>(null);
-  const [importFileName, setImportFileName] = useState('');
-  const [importPreview, setImportPreview] = useState<ImportSummary | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState('');
-  const [agentCount, setAgentCount] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Browse shared library
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [companyTemplates, setCompanyTemplates] = useState<CompanyTemplate[]>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
+  const [previewDetail, setPreviewDetail] = useState<CompanyTemplateDetail | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -113,62 +177,29 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
     }
   };
 
-  // Import flow handlers
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-
-    setImportFileName(file.name);
-    setImportError('');
-    setImportPreview(null);
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const manifest = JSON.parse(reader.result as string);
-        setImportManifest(manifest);
-        // Pre-fill name from manifest
-        const company = manifest.company as Record<string, unknown> | undefined;
-        const companyName = company?.name as string | undefined;
-        setImportName(companyName || file.name.replace(/\.\w+$/, ''));
-        // Count agents
-        const agents = (company?.agents ?? manifest.agents ?? []) as unknown[];
-        setAgentCount(agents.length);
-      } catch {
-        setImportError('Invalid JSON file. Please upload a valid Paperclip manifest.');
-        setImportManifest(null);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const handleImportConfirm = async () => {
-    if (!importManifest || !importName.trim()) return;
-    setImporting(true);
-    setImportError('');
+  // Browse shared library
+  const openLibrary = async () => {
+    setShowLibrary(true);
+    setLoadingLibrary(true);
+    setPreviewDetail(null);
     try {
-      const { data } = await api.post('/api/hierarchy-templates/import', {
-        name: importName,
-        manifest: importManifest,
-      });
-      setImportPreview(data);
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setImportError(e.response?.data?.error ?? 'Import failed');
+      const { data } = await api.get('/api/company-templates');
+      setCompanyTemplates(data);
+    } catch {
+      setError('Failed to load shared library');
+      setShowLibrary(false);
     } finally {
-      setImporting(false);
+      setLoadingLibrary(false);
     }
   };
 
-  const handleImportDone = () => {
-    setShowImport(false);
-    setImportManifest(null);
-    setImportPreview(null);
-    setImportName('');
-    setImportFileName('');
-    setImportError('');
-    load();
+  const handlePreviewTemplate = async (id: string) => {
+    try {
+      const { data } = await api.get(`/api/company-templates/${id}`);
+      setPreviewDetail(data);
+    } catch {
+      setError('Failed to load template details');
+    }
   };
 
   if (loading) {
@@ -178,16 +209,18 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Agent Templates</h1>
-          <p className="text-sm text-slate-500 mt-1.5">Reusable agent organisation blueprints for subaccounts</p>
-        </div>
+        {!embedded && (
+          <div>
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Team Templates</h1>
+            <p className="text-sm text-slate-500 mt-1.5">Reusable agent organisation blueprints for subaccounts</p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button
-            onClick={() => setShowImport(true)}
+            onClick={openLibrary}
             className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
           >
-            Import from Paperclip
+            Browse Shared Library
           </button>
           <button
             onClick={() => setShowCreate(true)}
@@ -201,7 +234,7 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
       {error && (
         <div className="mb-4 px-4 py-2.5 rounded-lg text-[14px] bg-red-50 text-red-700 border border-red-200 flex justify-between items-center">
           <span>{error}</span>
-          <button onClick={() => setError('')} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">×</button>
+          <button onClick={() => setError('')} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">x</button>
         </div>
       )}
 
@@ -220,13 +253,13 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
           <div className="py-16 px-12 flex flex-col items-center text-center">
             <div className="text-4xl mb-4">📋</div>
             <div className="text-[16px] font-semibold text-slate-800 mb-2">No templates yet</div>
-            <div className="text-sm text-slate-500 mb-6">Create a template manually or import from a Paperclip manifest.</div>
+            <div className="text-sm text-slate-500 mb-6">Create a template manually or browse the shared company template library.</div>
             <div className="flex gap-2">
               <button
-                onClick={() => setShowImport(true)}
+                onClick={openLibrary}
                 className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
               >
-                Import from Paperclip
+                Browse Shared Library
               </button>
               <button
                 onClick={() => setShowCreate(true)}
@@ -338,135 +371,78 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
         </Modal>
       )}
 
-      {/* Paperclip import modal */}
-      {showImport && (
-        <Modal title="Import from Paperclip" onClose={handleImportDone} maxWidth={640}>
-          {!importPreview ? (
+      {/* Browse Shared Library modal */}
+      {showLibrary && (
+        <Modal title={previewDetail ? `Preview: ${previewDetail.name}` : 'Shared Company Template Library'} onClose={() => { setShowLibrary(false); setPreviewDetail(null); }} maxWidth={700}>
+          {loadingLibrary ? (
+            <div className="py-8 text-center text-slate-500 text-[14px]">Loading...</div>
+          ) : previewDetail ? (
             <>
-              {/* Upload step */}
-              <div className="mb-5">
-                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Paperclip manifest file</label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
-                  >
-                    Choose file
-                  </button>
-                  <span className="text-[13px] text-slate-500">
-                    {importFileName || 'No file selected'}
-                  </span>
-                </div>
-                {agentCount > 100 && (
-                  <div className="mt-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-[13px] text-amber-700">
-                    This manifest contains {agentCount} agents. Large imports may take longer to process.
-                  </div>
-                )}
-              </div>
-              {importManifest && (
-                <div className="mb-5">
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Template name</label>
-                  <input
-                    value={importName}
-                    onChange={(e) => setImportName(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px]"
-                    placeholder="Template name"
-                  />
+              {previewDetail.description && (
+                <p className="text-[13px] text-slate-500 mt-0 mb-4">{previewDetail.description}</p>
+              )}
+              <div className="text-[13px] text-slate-600 mb-3">{previewDetail.agentCount} agents in this template</div>
+              {(previewDetail.tree as SlotNode[]).length > 0 && (
+                <div className="border border-slate-200 rounded-lg overflow-hidden mb-4">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agent</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Role</th>
+                        <th className="px-4 py-2 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Title</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {(previewDetail.tree as SlotNode[]).map((slot) => (
+                        <SlotTreeRow key={slot.id} slot={slot} depth={0} />
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-              {importError && (
-                <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-[13px] text-red-700">{importError}</div>
-              )}
-              <div className="flex gap-3">
-                <button
-                  onClick={handleImportConfirm}
-                  disabled={importing || !importManifest || !importName.trim()}
-                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${importing || !importManifest || !importName.trim() ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
-                >
-                  {importing ? 'Importing...' : 'Import'}
-                </button>
-                <button onClick={handleImportDone} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
-                  Cancel
-                </button>
-              </div>
+              <button
+                onClick={() => setPreviewDetail(null)}
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+              >
+                Back to Library
+              </button>
             </>
           ) : (
             <>
-              {/* Preview/result step */}
-              <div className="mb-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-[16px]">✅</span>
-                  <span className="font-semibold text-slate-800 text-[15px]">
-                    Template "{importPreview.template.name}" created
-                  </span>
+              <p className="text-[13px] text-slate-500 m-0 mb-4">
+                Browse company templates available from the platform. These can be loaded into subaccounts when managing their agents.
+              </p>
+              {companyTemplates.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 text-[14px]">
+                  No company templates available yet. Ask a system admin to import templates.
                 </div>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="bg-slate-50 rounded-lg px-3 py-2.5">
-                    <div className="text-[12px] text-slate-500">Total agents</div>
-                    <div className="text-[18px] font-bold text-slate-800">{importPreview.summary.total}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg px-3 py-2.5">
-                    <div className="text-[12px] text-slate-500">Matched (system)</div>
-                    <div className="text-[18px] font-bold text-slate-800">{importPreview.summary.matchedSystemAgent}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg px-3 py-2.5">
-                    <div className="text-[12px] text-slate-500">Matched (org)</div>
-                    <div className="text-[18px] font-bold text-slate-800">{importPreview.summary.matchedOrgAgent}</div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg px-3 py-2.5">
-                    <div className="text-[12px] text-slate-500">New blueprints</div>
-                    <div className="text-[18px] font-bold text-slate-800">{importPreview.summary.blueprint}</div>
-                  </div>
+              ) : (
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+                  {companyTemplates.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-slate-800 text-[14px]">{t.name}</div>
+                        {t.description && (
+                          <div className="text-[12px] text-slate-500 mt-0.5 truncate max-w-[400px]">{t.description}</div>
+                        )}
+                        <div className="text-[12px] text-slate-400 mt-0.5">{t.agentCount} agents</div>
+                      </div>
+                      <button
+                        onClick={() => handlePreviewTemplate(t.id)}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors ml-3"
+                      >
+                        Preview
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                {importPreview.summary.blueprintsRequiringPrompt > 0 && (
-                  <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-[13px] text-amber-700 mb-3">
-                    {importPreview.summary.blueprintsRequiringPrompt} agent(s) have no prompt — they will be created in <strong>draft</strong> status when applied. Prompts must be added before activation.
-                  </div>
-                )}
-                {importPreview.summary.slugsRenamed.length > 0 && (
-                  <div className="mb-3">
-                    <div className="text-[12px] font-semibold text-slate-600 mb-1">Renamed slugs:</div>
-                    {importPreview.summary.slugsRenamed.map((s, i) => (
-                      <div key={i} className="text-[12px] text-slate-500">
-                        <code className="bg-slate-100 px-1 rounded">{s.original}</code> → <code className="bg-slate-100 px-1 rounded">{s.final}</code>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {importPreview.summary.updateConflicts.length > 0 && (
-                  <div className="mb-3">
-                    <div className="text-[12px] font-semibold text-slate-600 mb-1">Update conflicts (non-blocking):</div>
-                    {importPreview.summary.updateConflicts.map((c, i) => (
-                      <div key={i} className="text-[12px] text-slate-500">
-                        {c.agentName}: {c.field} — {c.reason}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {importPreview.summary.unresolvedParents.length > 0 && (
-                  <div className="px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-[13px] text-orange-700 mb-3">
-                    Unresolved parent references: {importPreview.summary.unresolvedParents.join(', ')}. These agents will be root nodes.
-                  </div>
-                )}
-                {importPreview.summary.depthWarning && (
-                  <div className="px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-[13px] text-orange-700 mb-3">
-                    Maximum hierarchy depth: {importPreview.summary.depthWarning} levels (advisory warning at 7+)
-                  </div>
-                )}
-              </div>
-              <div className="flex gap-3">
+              )}
+              <div className="mt-4 flex justify-end">
                 <button
-                  onClick={handleImportDone}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+                  onClick={() => setShowLibrary(false)}
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
                 >
-                  Done
+                  Close
                 </button>
               </div>
             </>

@@ -32,6 +32,11 @@ export const subaccountAgents = pgTable(
     scheduleEnabled: boolean('schedule_enabled').notNull().default(false),
     scheduleTimezone: text('schedule_timezone').notNull().default('UTC'),
 
+    // ── Heartbeat (inherited from org agent, overridable per subaccount) ─
+    heartbeatEnabled: boolean('heartbeat_enabled').notNull().default(false),
+    heartbeatIntervalHours: integer('heartbeat_interval_hours'),
+    heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
+
     // ── Execution limits ────────────────────────────────────────────────
     tokenBudgetPerRun: integer('token_budget_per_run').notNull().default(30000),
     maxToolCallsPerRun: integer('max_tool_calls_per_run').notNull().default(20),

@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState, lazy, Suspense } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import HeartbeatEditor from '../components/HeartbeatEditor';
+
+const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
 
 // Live run counts per agent (polled from subaccount live-status isn't per-agent,
 // so we use a simple org-level stat to show the total running count in the header)
@@ -12,10 +15,14 @@ interface Agent {
   id: string;
   name: string;
   description: string | null;
+  icon: string | null;
   status: string;
   modelId: string;
   systemAgentId: string | null;
   isSystemManaged: boolean;
+  heartbeatEnabled: boolean;
+  heartbeatIntervalHours: number | null;
+  heartbeatOffsetHours: number;
   dataSources?: { id: string }[];
   dataSourceCount?: number;
   parentAgentId: string | null;
@@ -28,7 +35,7 @@ interface TreeNode extends Agent {
   children: TreeNode[];
 }
 
-type PageTab = 'list' | 'hierarchy';
+type PageTab = 'list' | 'team-templates' | 'heartbeat';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -45,6 +52,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 const ROLE_CLS: Record<string, string> = {
+  ceo: 'bg-amber-100 text-amber-800',
   orchestrator: 'bg-purple-100 text-purple-800',
   specialist: 'bg-blue-100 text-blue-800',
   worker: 'bg-slate-100 text-slate-700',
@@ -102,11 +110,14 @@ function OrgHierarchyRow({ node, depth, onNavigate }: { node: TreeNode; depth: n
   );
 }
 
-export default function AdminAgentsPage({ user: _user }: { user: User }) {
+export default function AdminAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : tabParam === 'heartbeat' ? 'heartbeat' : 'list';
+  const switchTab = (tab: PageTab) => setSearchParams(tab === 'list' ? {} : { tab });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [pageTab, setPageTab] = useState<PageTab>('list');
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
@@ -213,54 +224,46 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
         </button>
       </div>
 
-      {/* Page tabs */}
+
+      {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {(['list', 'hierarchy'] as const).map((tab) => (
+        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
-            onClick={() => setPageTab(tab)}
+            onClick={() => switchTab(tab as PageTab)}
             className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer ${
               pageTab === tab
                 ? 'border-indigo-600 text-indigo-600 font-semibold'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
-            {tab === 'list' ? 'Agents' : 'Hierarchy'}
+            {label}
           </button>
         ))}
       </div>
 
-      {/* Hierarchy Tab */}
-      {pageTab === 'hierarchy' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          {treeData.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 text-[14px]">
-              No hierarchy configured yet. Edit agents to set parent relationships.
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agent</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Role</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Title</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {treeData.map((node) => (
-                  <OrgHierarchyRow
-                    key={node.id}
-                    node={node}
-                    depth={0}
-                    onNavigate={(id) => navigate(`/admin/agents/${id}`)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+      {/* Team Templates Tab */}
+      {pageTab === 'team-templates' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading templates...</div>}>
+          <AdminAgentTemplatesPage user={user} embedded />
+        </Suspense>
+      )}
+
+      {/* Heartbeat Tab */}
+      {pageTab === 'heartbeat' && (
+        <HeartbeatEditor
+          levelLabel="agent"
+          agents={agents.map(a => ({
+            id: a.id, name: a.name, icon: a.icon,
+            heartbeatEnabled: a.heartbeatEnabled,
+            heartbeatIntervalHours: a.heartbeatIntervalHours,
+            heartbeatOffsetHours: a.heartbeatOffsetHours,
+          }))}
+          onUpdate={async (agentId, config) => {
+            await api.patch(`/api/agents/${agentId}`, config);
+            load();
+          }}
+        />
       )}
 
       {/* List Tab */}

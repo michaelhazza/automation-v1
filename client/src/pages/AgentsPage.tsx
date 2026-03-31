@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import TeamHeartbeatView from '../components/TeamHeartbeatView';
 
 interface Agent {
   id: string;
@@ -34,62 +35,6 @@ function getSkillSummary(skillSlugs?: string[]): string {
   const named = skillSlugs.map((s) => labels[s] || s.replace(/_/g, ' ')).slice(0, 3);
   const extra = skillSlugs.length > 3 ? ` +${skillSlugs.length - 3} more` : '';
   return named.join(', ') + extra;
-}
-
-function TeamHeartbeatView({ agents }: { agents: Agent[] }) {
-  const scheduled = agents.filter((a) => a.heartbeatEnabled && a.heartbeatIntervalHours);
-  if (scheduled.length === 0) return null;
-  const HOUR_LABELS = [0, 4, 8, 12, 16, 20, 24];
-
-  return (
-    <div className="mt-12">
-      <div className="mb-4">
-        <h2 className="text-[18px] font-extrabold text-slate-900 tracking-tight m-0 flex items-center gap-2">
-          <span>💓</span> Heartbeat Schedule
-        </h2>
-        <p className="text-[13px] text-slate-500 mt-1">When each agent wakes up and acts — across a 24h window</p>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-xl px-6 py-5">
-        <div className="flex items-center mb-3 pl-[180px]">
-          {HOUR_LABELS.map((h) => (
-            <div key={h} className="flex-1 text-[11px] text-slate-400 font-medium">{h}h</div>
-          ))}
-        </div>
-        <div className="flex flex-col gap-3.5">
-          {scheduled.map((agent) => {
-            const interval = agent.heartbeatIntervalHours!;
-            const offset = agent.heartbeatOffsetHours ?? 0;
-            const runHours: number[] = [];
-            for (let h = offset; h < 24; h += interval) runHours.push(h);
-            const icon = agent.icon || getDefaultIcon(agent.id);
-            return (
-              <div key={agent.id} className="flex items-center">
-                <div className="shrink-0 flex items-center gap-2 pr-4 w-[180px]">
-                  <span className="text-base">{icon}</span>
-                  <div className="min-w-0">
-                    <div className="text-[13px] font-semibold text-slate-900 truncate">{agent.name}</div>
-                    <div className="text-[11px] text-slate-400">every {interval}h</div>
-                  </div>
-                </div>
-                <div className="flex-1 relative h-7">
-                  <svg width="100%" height="28" className="block">
-                    <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#e2e8f0" strokeWidth="1.5" />
-                    {HOUR_LABELS.map((h) => (
-                      <line key={h} x1={`${(h / 24) * 100}%`} y1="30%" x2={`${(h / 24) * 100}%`} y2="70%" stroke="#e2e8f0" strokeWidth="1" />
-                    ))}
-                    {runHours.map((h) => (
-                      <circle key={h} cx={`${(h / 24) * 100}%`} cy="50%" r="5" fill="#6366f1" />
-                    ))}
-                  </svg>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function AgentsPage({ user: _user }: { user: User }) {

@@ -76,19 +76,19 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Subaccounts</h1>
-          <p className="text-sm text-slate-500 mt-2">Manage client subaccounts and their portal access</p>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">Companies</h1>
+          <p className="text-sm text-slate-500 mt-2">Manage companies and their portal access</p>
         </div>
         <button
           onClick={() => { setShowForm(true); setError(''); }}
           className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
         >
-          + New subaccount
+          + New company
         </button>
       </div>
 
       {showForm && (
-        <Modal title="New subaccount" onClose={() => setShowForm(false)} maxWidth={480}>
+        <Modal title="New company" onClose={() => setShowForm(false)} maxWidth={480}>
           {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
           <div className="grid gap-4 mb-6">
             <div>
@@ -140,8 +140,8 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
 
       {deleteId && (
         <ConfirmDialog
-          title="Delete subaccount"
-          message="Are you sure you want to delete this subaccount? Members will lose access."
+          title="Delete company"
+          message="Are you sure you want to delete this company? Members will lose access."
           confirmLabel="Delete"
           onConfirm={handleDeleteConfirm}
           onCancel={() => setDeleteId(null)}
@@ -150,7 +150,7 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {subaccounts.length === 0 ? (
-          <div className="py-12 text-center text-sm text-slate-500">No subaccounts yet.</div>
+          <div className="py-12 text-center text-sm text-slate-500">No companies yet.</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
