@@ -18,6 +18,15 @@ export const subaccountAgents = pgTable(
       .references(() => agents.id),
     isActive: boolean('is_active').notNull().default(true),
 
+    // ── Hierarchy ──────────────────────────────────────────────────────
+    parentSubaccountAgentId: uuid('parent_subaccount_agent_id'),
+    agentRole: text('agent_role'),
+    agentTitle: text('agent_title'),
+
+    // ── Applied template tracking ──────────────────────────────────────
+    appliedTemplateId: uuid('applied_template_id'),
+    appliedTemplateVersion: integer('applied_template_version'),
+
     // ── Scheduling ──────────────────────────────────────────────────────
     scheduleCron: text('schedule_cron'), // e.g. "0 */2 * * *"
     scheduleEnabled: boolean('schedule_enabled').notNull().default(false),

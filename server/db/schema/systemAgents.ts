@@ -14,6 +14,11 @@ export const systemAgents = pgTable('system_agents', {
   description: text('description'),
   icon: text('icon'),
 
+  // ── Hierarchy ──────────────────────────────────────────────────────────
+  parentSystemAgentId: uuid('parent_system_agent_id'),
+  agentRole: text('agent_role'),
+  agentTitle: text('agent_title'),
+
   // System-level master prompt (our IP — never exposed to org admins)
   masterPrompt: text('master_prompt').notNull().default(''),
 

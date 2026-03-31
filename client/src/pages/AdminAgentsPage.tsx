@@ -18,8 +18,17 @@ interface Agent {
   isSystemManaged: boolean;
   dataSources?: { id: string }[];
   dataSourceCount?: number;
+  parentAgentId: string | null;
+  agentRole: string | null;
+  agentTitle: string | null;
   createdAt: string;
 }
+
+interface TreeNode extends Agent {
+  children: TreeNode[];
+}
+
+type PageTab = 'list' | 'hierarchy';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -35,9 +44,69 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+const ROLE_CLS: Record<string, string> = {
+  orchestrator: 'bg-purple-100 text-purple-800',
+  specialist: 'bg-blue-100 text-blue-800',
+  worker: 'bg-slate-100 text-slate-700',
+};
+
+function RoleBadge({ role }: { role: string | null }) {
+  if (!role) return null;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${ROLE_CLS[role] ?? 'bg-slate-100 text-slate-600'}`}>
+      {role}
+    </span>
+  );
+}
+
+function OrgHierarchyRow({ node, depth, onNavigate }: { node: TreeNode; depth: number; onNavigate: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = node.children.length > 0;
+
+  return (
+    <>
+      <tr className="hover:bg-slate-50 transition-colors">
+        <td className="px-4 py-2.5">
+          <div className="flex items-center gap-1.5" style={{ paddingLeft: `${depth * 24}px` }}>
+            {hasChildren ? (
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="w-5 h-5 flex items-center justify-center bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-700 text-[12px] transition-transform"
+                style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              >
+                &#9654;
+              </button>
+            ) : <span className="w-5" />}
+            <span className="font-semibold text-slate-800 text-[14px]">{node.name}</span>
+            {node.isSystemManaged && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700">System</span>
+            )}
+          </div>
+        </td>
+        <td className="px-4 py-2.5"><RoleBadge role={node.agentRole} /></td>
+        <td className="px-4 py-2.5 text-[13px] text-slate-600">{node.agentTitle || '—'}</td>
+        <td className="px-4 py-2.5"><StatusBadge status={node.status} /></td>
+        <td className="px-4 py-2.5">
+          <button
+            onClick={() => onNavigate(node.id)}
+            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
+          >
+            Edit
+          </button>
+        </td>
+      </tr>
+      {expanded && hasChildren && node.children.map((child) => (
+        <OrgHierarchyRow key={child.id} node={child} depth={depth + 1} onNavigate={onNavigate} />
+      ))}
+    </>
+  );
+}
+
 export default function AdminAgentsPage({ user: _user }: { user: User }) {
   const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [treeData, setTreeData] = useState<TreeNode[]>([]);
+  const [pageTab, setPageTab] = useState<PageTab>('list');
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
@@ -47,8 +116,12 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
   const load = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/api/agents');
-      setAgents(data);
+      const [agentsRes, treeRes] = await Promise.all([
+        api.get('/api/agents'),
+        api.get('/api/agents/tree'),
+      ]);
+      setAgents(agentsRes.data);
+      setTreeData(treeRes.data);
     } finally {
       setLoading(false);
     }
@@ -140,6 +213,58 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
         </button>
       </div>
 
+      {/* Page tabs */}
+      <div className="border-b border-slate-200 mb-6 flex gap-1">
+        {(['list', 'hierarchy'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setPageTab(tab)}
+            className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer ${
+              pageTab === tab
+                ? 'border-indigo-600 text-indigo-600 font-semibold'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {tab === 'list' ? 'Agents' : 'Hierarchy'}
+          </button>
+        ))}
+      </div>
+
+      {/* Hierarchy Tab */}
+      {pageTab === 'hierarchy' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {treeData.length === 0 ? (
+            <div className="py-12 text-center text-slate-500 text-[14px]">
+              No hierarchy configured yet. Edit agents to set parent relationships.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agent</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Role</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Title</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {treeData.map((node) => (
+                  <OrgHierarchyRow
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    onNavigate={(id) => navigate(`/admin/agents/${id}`)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* List Tab */}
+      {pageTab === 'list' && <>
       {/* Status filter tabs */}
       {agents.length > 0 && (
         <div className="flex gap-1 mb-4">
@@ -269,6 +394,7 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
           </table>
         )}
       </div>
+      </>}
     </div>
   );
 }

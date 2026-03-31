@@ -46,3 +46,5 @@ export * from './orgBudgets';
 export * from './llmRequests';
 export * from './costAggregates';
 export * from './budgetReservations';
+export * from './hierarchyTemplates';
+export * from './hierarchyTemplateSlots';

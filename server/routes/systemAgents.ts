@@ -68,6 +68,18 @@ router.get('/api/system/agents', authenticate, requireSystemAdmin, asyncHandler(
   res.json(agents);
 }));
 
+// Tree view — returns agents as nested tree
+router.get('/api/system/agents/tree', authenticate, requireSystemAdmin, asyncHandler(async (_req, res) => {
+  const tree = await systemAgentService.getTree();
+  res.json(tree);
+}));
+
+// Reconcile hierarchy — fills null parentAgentId on org agents where parent now exists
+router.post('/api/system/agents/reconcile-hierarchy', authenticate, requireSystemAdmin, asyncHandler(async (_req, res) => {
+  const result = await systemAgentService.reconcileHierarchy();
+  res.json(result);
+}));
+
 // Export must come before /:id to avoid being matched as an id
 router.get('/api/system/agents/export', authenticate, requireSystemAdmin, asyncHandler(async (_req, res) => {
   const agents = await systemAgentService.listAgents();

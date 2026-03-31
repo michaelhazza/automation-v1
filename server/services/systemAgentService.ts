@@ -1,6 +1,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { systemAgents, agents } from '../db/schema/index.js';
+import { validateHierarchy, buildTree } from './hierarchyService.js';
 
 // ---------------------------------------------------------------------------
 // System Agent Service — manages platform-level agent definitions
@@ -121,6 +122,18 @@ export const systemAgentService = {
     if (data.defaultMaxToolCalls !== undefined) update.defaultMaxToolCalls = data.defaultMaxToolCalls;
     if (data.executionMode !== undefined) update.executionMode = data.executionMode;
     if (data.status !== undefined) update.status = data.status;
+    if (data.agentRole !== undefined) update.agentRole = data.agentRole;
+    if (data.agentTitle !== undefined) update.agentTitle = data.agentTitle;
+
+    // Handle parentSystemAgentId with hierarchy validation
+    if ('parentSystemAgentId' in data) {
+      const parentId = data.parentSystemAgentId as string | null;
+      if (parentId) {
+        const validation = await validateHierarchy('system_agents', id, parentId);
+        if (!validation.valid) throw { statusCode: 400, message: validation.error };
+      }
+      update.parentSystemAgentId = parentId ?? null;
+    }
 
     const [updated] = await db.update(systemAgents).set(update).where(eq(systemAgents.id, id)).returning();
     return updated;
@@ -231,6 +244,20 @@ export const systemAgentService = {
 
     const slug = systemAgent.slug + '-' + Date.now().toString(36);
 
+    // Auto-inherit hierarchy: if system agent has a parent, find the corresponding org agent
+    let parentAgentId: string | null = null;
+    if (systemAgent.parentSystemAgentId) {
+      const [parentOrgAgent] = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(
+          eq(agents.organisationId, organisationId),
+          eq(agents.systemAgentId, systemAgent.parentSystemAgentId),
+          isNull(agents.deletedAt)
+        ));
+      parentAgentId = parentOrgAgent?.id ?? null;
+    }
+
     const [agent] = await db
       .insert(agents)
       .values({
@@ -241,7 +268,6 @@ export const systemAgentService = {
         slug,
         description: systemAgent.description,
         icon: systemAgent.icon,
-        // masterPrompt left empty for system-managed — the system prompt comes from systemAgents at runtime
         masterPrompt: '',
         additionalPrompt: '',
         modelProvider: systemAgent.modelProvider,
@@ -249,6 +275,9 @@ export const systemAgentService = {
         temperature: systemAgent.temperature,
         maxTokens: systemAgent.maxTokens,
         defaultSkillSlugs: systemAgent.defaultOrgSkillSlugs ?? [],
+        parentAgentId,
+        agentRole: systemAgent.agentRole,
+        agentTitle: systemAgent.agentTitle,
         status: 'draft',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -256,6 +285,83 @@ export const systemAgentService = {
       .returning();
 
     return agent;
+  },
+
+  /**
+   * Return all system agents as a nested tree structure.
+   */
+  async getTree() {
+    const allAgents = await db
+      .select()
+      .from(systemAgents)
+      .where(isNull(systemAgents.deletedAt))
+      .orderBy(systemAgents.name);
+
+    return buildTree(
+      allAgents.map(a => ({ ...a, sortOrder: 0 })),
+      (a) => a.parentSystemAgentId
+    );
+  },
+
+  /**
+   * Reconcile hierarchy: fill null parentAgentId on org agents provisioned
+   * from system agents where the parent org agent now exists.
+   * Only fills missing values — never overwrites existing parentAgentId.
+   */
+  async reconcileHierarchy() {
+    // Find all system agents that have a parent
+    const systemWithParent = await db
+      .select({
+        id: systemAgents.id,
+        parentSystemAgentId: systemAgents.parentSystemAgentId,
+      })
+      .from(systemAgents)
+      .where(and(isNull(systemAgents.deletedAt)));
+
+    const parentMap = new Map<string, string>();
+    for (const sa of systemWithParent) {
+      if (sa.parentSystemAgentId) parentMap.set(sa.id, sa.parentSystemAgentId);
+    }
+
+    if (parentMap.size === 0) return { updated: 0 };
+
+    // Find all org agents provisioned from system agents that have no parentAgentId
+    const orgAgents = await db
+      .select({
+        id: agents.id,
+        systemAgentId: agents.systemAgentId,
+        parentAgentId: agents.parentAgentId,
+        organisationId: agents.organisationId,
+      })
+      .from(agents)
+      .where(isNull(agents.deletedAt));
+
+    // Group org agents by (organisationId, systemAgentId) for lookup
+    const orgBySystemAndOrg = new Map<string, string>();
+    for (const oa of orgAgents) {
+      if (oa.systemAgentId) {
+        orgBySystemAndOrg.set(`${oa.organisationId}:${oa.systemAgentId}`, oa.id);
+      }
+    }
+
+    let updated = 0;
+    for (const oa of orgAgents) {
+      // Only fill if: has systemAgentId, has no parentAgentId, system agent has a parent
+      if (!oa.systemAgentId || oa.parentAgentId) continue;
+      const parentSystemId = parentMap.get(oa.systemAgentId);
+      if (!parentSystemId) continue;
+
+      // Find the org agent in the same org that was provisioned from the parent system agent
+      const parentOrgAgentId = orgBySystemAndOrg.get(`${oa.organisationId}:${parentSystemId}`);
+      if (!parentOrgAgentId) continue;
+
+      await db.update(agents)
+        .set({ parentAgentId: parentOrgAgentId, updatedAt: new Date() })
+        .where(eq(agents.id, oa.id));
+      updated++;
+    }
+
+    return { updated };
   },
 
   /**

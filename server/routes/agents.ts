@@ -4,8 +4,16 @@ import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateMultipart } from '../middleware/validate.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
+
+// ── Agent Hierarchy Tree ──────────────────────────────────────────────────
+
+router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
+  const tree = await agentService.getTree(req.orgId!);
+  res.json(tree);
+}));
 
 // ── Agent CRUD ─────────────────────────────────────────────────────────────
 

@@ -16,6 +16,11 @@ interface AvailableSkill {
   methodology: string | null;
 }
 
+interface OrgAgentOption {
+  id: string;
+  name: string;
+}
+
 interface AgentForm {
   name: string;
   description: string;
@@ -33,6 +38,9 @@ interface AgentForm {
   heartbeatEnabled: boolean;
   heartbeatIntervalHours: number | null;
   heartbeatOffsetHours: number;
+  parentAgentId: string;
+  agentRole: string;
+  agentTitle: string;
 }
 
 interface Agent extends AgentForm {
@@ -162,6 +170,9 @@ const EMPTY_AGENT_FORM: AgentForm = {
   heartbeatEnabled: false,
   heartbeatIntervalHours: null,
   heartbeatOffsetHours: 0,
+  parentAgentId: '',
+  agentRole: '',
+  agentTitle: '',
 };
 
 // ─── Helper components ───────────────────────────────────────────────────────
@@ -303,6 +314,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
   // Skills state
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
+  const [allOrgAgents, setAllOrgAgents] = useState<OrgAgentOption[]>([]);
 
   // ── Load ──
 
@@ -327,6 +339,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         heartbeatEnabled: data.heartbeatEnabled ?? false,
         heartbeatIntervalHours: data.heartbeatIntervalHours ?? null,
         heartbeatOffsetHours: data.heartbeatOffsetHours ?? 0,
+        parentAgentId: data.parentAgentId ?? '',
+        agentRole: data.agentRole ?? '',
+        agentTitle: data.agentTitle ?? '',
       });
       setDataSources(data.dataSources ?? []);
     } finally {
@@ -340,6 +355,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     }
     // Load available skills for the skills picker
     api.get('/api/skills').then(({ data }) => setAvailableSkills(data)).catch(() => {});
+    // Load all org agents for the parent dropdown
+    api.get('/api/agents').then(({ data }) => setAllOrgAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })))).catch(() => {});
   }, [id, isNew]);
 
   // ── Save / Create ──
@@ -353,9 +370,17 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     }
     setSaving(true);
     try {
+      // Transform hierarchy fields: empty string → null for API
+      const payload = {
+        ...form,
+        parentAgentId: form.parentAgentId || null,
+        agentRole: form.agentRole || null,
+        agentTitle: form.agentTitle || null,
+      };
+
       if (isNew) {
         // 1. Create the agent
-        const { data } = await api.post('/api/agents', form);
+        const { data } = await api.post('/api/agents', payload);
         const agentId: string = data.id;
 
         // 2. Attach any pending data sources
@@ -394,7 +419,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
         navigate(`/admin/agents/${agentId}`);
       } else {
-        await api.patch(`/api/agents/${id}`, form);
+        await api.patch(`/api/agents/${id}`, payload);
         setSaveSuccess('Agent saved successfully.');
         if (id) loadAgent(id);
       }
@@ -1005,6 +1030,46 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </Field>
         </SectionCard>
       )}
+
+      {/* ── Hierarchy ── */}
+      <SectionCard title="Hierarchy" subtitle="Position this agent in your organisation's agent hierarchy. Phase 1 is structural/visual only.">
+        <div className="grid grid-cols-3 gap-4">
+          <Field label="Reports to">
+            <select
+              value={form.parentAgentId}
+              onChange={(e) => setForm({ ...form, parentAgentId: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">None (root agent)</option>
+              {allOrgAgents
+                .filter((a) => a.id !== id)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+            </select>
+          </Field>
+          <Field label="Role">
+            <select
+              value={form.agentRole}
+              onChange={(e) => setForm({ ...form, agentRole: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">None</option>
+              <option value="orchestrator">Orchestrator</option>
+              <option value="specialist">Specialist</option>
+              <option value="worker">Worker</option>
+            </select>
+          </Field>
+          <Field label="Title">
+            <input
+              value={form.agentTitle}
+              onChange={(e) => setForm({ ...form, agentTitle: e.target.value })}
+              className={inputCls}
+              placeholder="e.g. Head of Research"
+            />
+          </Field>
+        </div>
+      </SectionCard>
 
       {/* ── Section 3: Model Configuration ── */}
       <SectionCard title="Model Configuration">
