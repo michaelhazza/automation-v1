@@ -28,9 +28,9 @@ export const systemHierarchyTemplates = pgTable(
     // Incremented on every update
     version: integer('version').notNull().default(1),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     publishedIdx: index('system_hierarchy_templates_published_idx').on(table.isPublished),

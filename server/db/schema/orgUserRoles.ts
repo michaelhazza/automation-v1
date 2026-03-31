@@ -16,8 +16,8 @@ export const orgUserRoles = pgTable(
     permissionSetId: uuid('permission_set_id')
       .notNull()
       .references(() => permissionSets.id),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgUserUniqueIdx: uniqueIndex('org_user_roles_org_user_unique_idx').on(

@@ -74,6 +74,7 @@ export const llmRequests = pgTable(
     providerModelIdx:     index('llm_requests_provider_model_idx').on(table.provider, table.model, table.billingMonth),
     billingDayIdx:        index('llm_requests_billing_day_idx').on(table.billingDay),
     createdAtIdx:         index('llm_requests_created_at_idx').on(table.createdAt),
+    executionIdIdx:       index('llm_requests_execution_id_idx').on(table.executionId),
   }),
 );
 

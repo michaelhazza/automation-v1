@@ -50,10 +50,10 @@ export const workspaceMemories = pgTable(
 
     // Version tracking
     version: integer('version').notNull().default(0),
-    summaryGeneratedAt: timestamp('summary_generated_at'),
+    summaryGeneratedAt: timestamp('summary_generated_at', { withTimezone: true }),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('workspace_memories_org_idx').on(table.organisationId),
@@ -102,9 +102,12 @@ export const workspaceMemoryEntries = pgTable(
     // Semantic embedding for vector search (populated asynchronously)
     embedding: vector('embedding'),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
+    // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB
+    // and is managed by migration 0029. Drizzle does not support the HNSW index syntax
+    // natively — do NOT let drizzle-kit generate a migration that drops it.
     subaccountIdx: index('workspace_memory_entries_subaccount_idx').on(
       table.subaccountId,
       table.includedInSummary

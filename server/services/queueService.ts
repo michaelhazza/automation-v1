@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
-import { executions, workflowEngines, users } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
+import { eq, lt } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
 import { processResolutionService } from './processResolutionService.js';
@@ -112,7 +112,12 @@ async function processExecution(executionId: string): Promise<void> {
     });
   }
 
-  const processSnapshot = execution.processSnapshot as Record<string, unknown> | null;
+  // H-5: process snapshot lives in execution_payloads
+  const [payloadRow] = await db
+    .select({ processSnapshot: executionPayloads.processSnapshot })
+    .from(executionPayloads)
+    .where(eq(executionPayloads.executionId, executionId));
+  const processSnapshot = payloadRow?.processSnapshot as Record<string, unknown> | null ?? null;
   if (!processSnapshot) {
     await db
       .update(executions)
@@ -187,13 +192,21 @@ async function processExecution(executionId: string): Promise<void> {
     .update(executions)
     .set({
       returnWebhookUrl,
-      outboundPayload: auditPayload as unknown as Record<string, unknown>,
       engineId: engine.id,
       resolvedConnections: resolvedConnections as unknown as Record<string, unknown> ?? null,
       resolvedConfig: resolvedConfig as unknown as Record<string, unknown> ?? null,
       updatedAt: new Date(),
     })
     .where(eq(executions.id, executionId));
+
+  // H-5: persist outbound audit payload into execution_payloads
+  await db
+    .insert(executionPayloads)
+    .values({ executionId, outboundPayload: auditPayload as unknown as Record<string, unknown> })
+    .onConflictDoUpdate({
+      target: executionPayloads.executionId,
+      set: { outboundPayload: auditPayload as unknown as Record<string, unknown> },
+    });
 
   const start = Date.now();
   let retryCount = 0;
@@ -353,5 +366,32 @@ export const queueService = {
 
     const backend = await getQueueBackend();
     await backend.enqueue(executionId);
+  },
+
+  /**
+   * M-17: Delete expired execution_files rows.
+   * Call this on a schedule (e.g. once per hour via pg-boss or a cron).
+   */
+  async cleanupExpiredExecutionFiles(): Promise<number> {
+    const result = await db
+      .delete(executionFiles)
+      .where(lt(executionFiles.expiresAt, new Date()));
+    return (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+  },
+
+  /**
+   * M-18: Release stale budget_reservations left in 'active' status.
+   * Reservations expire after 5 minutes if the billing flow crashes.
+   * Mark them as 'released' so they no longer inflate projected spend.
+   */
+  async cleanupExpiredBudgetReservations(): Promise<number> {
+    const { sql } = await import('drizzle-orm');
+    const result = await db
+      .update(budgetReservations)
+      .set({ status: 'released' })
+      .where(
+        sql`${budgetReservations.status} = 'active' AND ${budgetReservations.expiresAt} < NOW()`
+      );
+    return (result as unknown as { rowCount?: number })?.rowCount ?? 0;
   },
 };

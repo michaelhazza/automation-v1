@@ -54,9 +54,9 @@ export const systemAgents = pgTable('system_agents', {
   version: integer('version').notNull().default(1),
   status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
 
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
-  deletedAt: timestamp('deleted_at'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 }, (table) => ({
   slugIdx: uniqueIndex('system_agents_slug_idx').on(table.slug),
   statusIdx: index('system_agents_status_idx').on(table.status),

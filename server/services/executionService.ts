@@ -1,6 +1,6 @@
 import { eq, and, isNull, gte, lte, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, executionFiles, processes } from '../db/schema/index.js';
+import { executions, executionFiles, executionPayloads, processes } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Execution } from '../db/schema/executions.js';
@@ -29,10 +29,9 @@ function mapExecution(e: Execution, viewFullAudit: boolean) {
       ? {
           errorDetail: e.errorDetail,
           returnWebhookUrl: e.returnWebhookUrl,
-          outboundPayload: e.outboundPayload,
           callbackReceivedAt: e.callbackReceivedAt,
-          callbackPayload: e.callbackPayload,
           queuedAt: e.queuedAt,
+          // outboundPayload and callbackPayload moved to execution_payloads (H-5)
         }
       : {}),
   };
@@ -130,7 +129,6 @@ export class ExecutionService {
         status: 'pending',
         inputData: data.inputData ?? null,
         engineType: '', // will be resolved by queue worker
-        processSnapshot: process as unknown as Record<string, unknown>,
         isTestExecution: false,
         notifyOnComplete: data.notifyOnComplete ?? false,
         triggerType: data.triggerType ?? 'manual',
@@ -141,6 +139,11 @@ export class ExecutionService {
         updatedAt: new Date(),
       })
       .returning();
+
+    // H-5: store process snapshot in execution_payloads (keeps executions lean)
+    await db.insert(executionPayloads)
+      .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
+      .onConflictDoNothing();
 
     try {
       await queueService.enqueueExecution(execution.id);

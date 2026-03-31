@@ -16,8 +16,8 @@ export const subaccountUserAssignments = pgTable(
     permissionSetId: uuid('permission_set_id')
       .notNull()
       .references(() => permissionSets.id),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     subaccountUserUniqueIdx: uniqueIndex('subaccount_user_assignments_subaccount_user_unique_idx').on(

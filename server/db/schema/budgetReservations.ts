@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, index, unique } from 'drizzle-orm/pg-core';
 
 // ---------------------------------------------------------------------------
 // budget_reservations — soft reservation system for concurrency safety
@@ -25,9 +25,10 @@ export const budgetReservations = pgTable(
     expiresAt:            timestamp('expires_at', { withTimezone: true }).notNull(),
   },
   (table) => ({
+    // H-1: true UNIQUE — prevents duplicate inserts on concurrent requests
+    idempotencyUnique: unique('budget_reservations_idempotency_key_unique').on(table.idempotencyKey),
     entityStatusIdx:   index('budget_reservations_entity_status_idx').on(table.entityType, table.entityId, table.status),
     expiresIdx:        index('budget_reservations_expires_idx').on(table.expiresAt),
-    idempotencyIdx:    index('budget_reservations_idempotency_idx').on(table.idempotencyKey),
   }),
 );
 

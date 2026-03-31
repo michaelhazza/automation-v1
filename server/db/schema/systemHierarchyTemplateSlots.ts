@@ -41,7 +41,7 @@ export const systemHierarchyTemplateSlots = pgTable(
     // Display order among siblings
     sortOrder: integer('sort_order').notNull().default(0),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     templateIdx: index('system_hierarchy_template_slots_template_idx').on(table.templateId),

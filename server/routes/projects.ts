@@ -146,7 +146,7 @@ router.get(
       .where(and(
         eq(agentRuns.subaccountId, subaccountId),
         eq(agentRuns.status, 'running'),
-        eq(agentRuns.isSubAgent, 0),
+        eq(agentRuns.isSubAgent, false),
       ));
 
     res.json({ runningAgents: Number(result?.count ?? 0) });

@@ -19,12 +19,12 @@ export const workflowEngines = pgTable(
       .references(() => subaccounts.id),
     // Per-engine HMAC secret for signing outbound requests and verifying callbacks
     hmacSecret: text('hmac_secret').notNull(),
-    lastTestedAt: timestamp('last_tested_at'),
+    lastTestedAt: timestamp('last_tested_at', { withTimezone: true }),
     lastTestStatus: text('last_test_status'),
     metadata: jsonb('metadata'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgStatusIdx: index('workflow_engines_org_status_idx').on(table.organisationId, table.status),

@@ -19,7 +19,7 @@ import { emitConversationUpdate } from '../websocket/emitters.js';
 // ---------------------------------------------------------------------------
 
 export const conversationService = {
-  async listConversations(agentId: string, userId: string, organisationId: string) {
+  async listConversations(agentId: string, userId: string, organisationId: string, subaccountId?: string | null) {
     // Verify agent
     const [agent] = await db
       .select()
@@ -27,13 +27,17 @@ export const conversationService = {
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
     if (!agent) throw { statusCode: 404, message: 'Agent not found' };
 
+    const filters = [
+      eq(agentConversations.agentId, agentId),
+      eq(agentConversations.userId, userId),
+    ];
+    // M-8: filter by subaccountId when provided (new conversations always have it set)
+    if (subaccountId) filters.push(eq(agentConversations.subaccountId, subaccountId));
+
     const rows = await db
       .select()
       .from(agentConversations)
-      .where(and(
-        eq(agentConversations.agentId, agentId),
-        eq(agentConversations.userId, userId),
-      ))
+      .where(and(...filters))
       .orderBy(desc(agentConversations.updatedAt));
 
     return rows;
@@ -66,7 +70,7 @@ export const conversationService = {
     return { ...conv, messages };
   },
 
-  async createConversation(agentId: string, userId: string, organisationId: string) {
+  async createConversation(agentId: string, userId: string, organisationId: string, subaccountId?: string | null) {
     const [agent] = await db
       .select()
       .from(agents)
@@ -80,6 +84,8 @@ export const conversationService = {
         agentId,
         organisationId,
         userId,
+        // M-8: set subaccountId for tenant isolation on all new conversations
+        subaccountId: subaccountId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })

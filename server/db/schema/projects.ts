@@ -19,9 +19,9 @@ export const projects = pgTable(
     status: text('status').notNull().default('active').$type<'active' | 'completed' | 'archived'>(),
     color: text('color').notNull().default('#6366f1'),
     createdBy: uuid('created_by').references(() => users.id),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     subaccountIdx: index('projects_subaccount_idx').on(table.subaccountId),

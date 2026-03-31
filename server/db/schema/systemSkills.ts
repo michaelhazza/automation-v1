@@ -22,8 +22,8 @@ export const systemSkills = pgTable('system_skills', {
 
   isActive: boolean('is_active').notNull().default(true),
 
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   slugIdx: uniqueIndex('system_skills_slug_idx').on(table.slug),
   activeIdx: index('system_skills_active_idx').on(table.isActive),

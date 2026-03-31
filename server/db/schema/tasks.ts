@@ -31,7 +31,7 @@ export const tasks = pgTable(
     projectId: uuid('project_id')
       .references(() => projects.id),
     position: integer('position').notNull().default(0),
-    dueDate: timestamp('due_date'),
+    dueDate: timestamp('due_date', { withTimezone: true }),
 
     // ── Handoff tracking ──────────────────────────────────────────────────
     handoffSourceRunId: uuid('handoff_source_run_id'),
@@ -43,12 +43,13 @@ export const tasks = pgTable(
     reviewRequired: boolean('review_required').notNull().default(false),
 
     // ── Sub-agent tracking ────────────────────────────────────────────────
-    isSubTask: integer('is_sub_task').notNull().default(0), // 0=false, 1=true
+    // M-10: proper boolean (was integer 0/1)
+    isSubTask: boolean('is_sub_task').notNull().default(false),
     parentTaskId: uuid('parent_task_id'),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgIdx: index('tasks_org_idx').on(table.organisationId),
@@ -57,6 +58,8 @@ export const tasks = pgTable(
     assignedAgentIdx: index('tasks_assigned_agent_idx').on(table.assignedAgentId),
     statusIdx: index('tasks_status_idx').on(table.status),
     projectIdx: index('tasks_project_idx').on(table.projectId),
+    // M-4: index for sub-task queries
+    parentTaskIdx: index('tasks_parent_task_id_idx').on(table.parentTaskId),
   })
 );
 

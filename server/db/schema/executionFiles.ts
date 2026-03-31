@@ -13,8 +13,8 @@ export const executionFiles = pgTable(
     storagePath: text('storage_path').notNull(),
     mimeType: text('mime_type'),
     fileSizeBytes: bigint('file_size_bytes', { mode: 'number' }),
-    expiresAt: timestamp('expires_at').notNull(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     executionFileTypeIdx: index('execution_files_exec_type_idx').on(table.executionId, table.fileType),

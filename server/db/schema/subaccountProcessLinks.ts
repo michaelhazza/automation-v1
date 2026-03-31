@@ -20,8 +20,8 @@ export const subaccountProcessLinks = pgTable(
     configOverrides: jsonb('config_overrides'),
     // Override input schema for this subaccount (rare, for advanced customisation)
     customInputSchema: text('custom_input_schema'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     subaccountProcessUniqueIdx: uniqueIndex('subaccount_process_links_subaccount_process_unique_idx').on(

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -35,11 +35,9 @@ export const agentRuns = pgTable(
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
     taskId: uuid('task_id'), // if working on a specific board task
-    systemPromptSnapshot: text('system_prompt_snapshot'),
+    // systemPromptSnapshot and toolCallsLog moved to agent_run_snapshots (H-5 blob extraction)
     skillsUsed: jsonb('skills_used'), // array of skill slugs available for this run
 
-    // Tool call log — ordered array of { tool, input, output, durationMs }
-    toolCallsLog: jsonb('tool_calls_log'),
     totalToolCalls: integer('total_tool_calls').notNull().default(0),
 
     // Token tracking
@@ -70,17 +68,17 @@ export const agentRuns = pgTable(
     handoffDepth: integer('handoff_depth').notNull().default(0),
     parentRunId: uuid('parent_run_id'),
 
-    // Sub-agent tracking
-    isSubAgent: integer('is_sub_agent').notNull().default(0), // 0=false, 1=true (pg boolean via int for compat)
+    // Sub-agent tracking — M-10: proper boolean (was integer 0/1)
+    isSubAgent: boolean('is_sub_agent').notNull().default(false),
     parentSpawnRunId: uuid('parent_spawn_run_id'),
 
     // Timing
-    startedAt: timestamp('started_at'),
-    completedAt: timestamp('completed_at'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
     durationMs: integer('duration_ms'),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('agent_runs_org_idx').on(table.organisationId),
@@ -91,6 +89,10 @@ export const agentRuns = pgTable(
     subaccountStatusIdx: index('agent_runs_subaccount_status_idx').on(table.subaccountId, table.status),
     createdAtIdx: index('agent_runs_created_at_idx').on(table.createdAt),
     subaccountAgentIdx: index('agent_runs_subaccount_agent_idx').on(table.subaccountAgentId),
+    // M-4/M-16: missing indexes on FK columns
+    taskIdIdx: index('agent_runs_task_id_idx').on(table.taskId),
+    parentRunIdIdx: index('agent_runs_parent_run_id_idx').on(table.parentRunId),
+    parentSpawnRunIdIdx: index('agent_runs_parent_spawn_run_id_idx').on(table.parentSpawnRunId),
   })
 );
 

@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 
 export const permissionSets = pgTable(
@@ -11,13 +12,20 @@ export const permissionSets = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     isDefault: boolean('is_default').notNull().default(false),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgIdx: index('permission_sets_org_idx').on(table.organisationId),
-    orgNameIdx: index('permission_sets_org_name_idx').on(table.organisationId, table.name),
+    // M-15: unique name per org, soft-delete-aware
+    orgNameUniq: uniqueIndex('permission_sets_org_name_unique_idx')
+      .on(table.organisationId, table.name)
+      .where(sql`${table.deletedAt} IS NULL`),
+    // At most one default permission set per org
+    orgDefaultUniq: uniqueIndex('permission_sets_org_default_unique_idx')
+      .on(table.organisationId)
+      .where(sql`${table.isDefault} = true AND ${table.deletedAt} IS NULL`),
   })
 );
 

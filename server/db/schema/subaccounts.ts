@@ -13,9 +13,9 @@ export const subaccounts = pgTable(
     slug: text('slug').notNull(),
     status: text('status').notNull().default('active').$type<'active' | 'suspended' | 'inactive'>(),
     settings: jsonb('settings'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgIdx: index('subaccounts_org_idx').on(table.organisationId),

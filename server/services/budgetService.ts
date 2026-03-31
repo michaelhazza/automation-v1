@@ -322,6 +322,9 @@ export async function checkAndReserve(
       status: 'active',
       expiresAt,
     })
+    // H-1: idempotency_key is UNIQUE — concurrent requests with the same key
+    // produce only one reservation; the duplicate is silently ignored.
+    .onConflictDoNothing({ target: budgetReservations.idempotencyKey })
     .returning();
 
   return reservation.id;

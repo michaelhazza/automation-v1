@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { jsonb } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { subaccountAgents } from './subaccountAgents';
@@ -42,7 +43,8 @@ export const agentTriggers = pgTable(
   },
   (table) => ({
     subaccountIdx: index('agent_triggers_subaccount_idx').on(table.subaccountId),
-    eventTypeIdx: index('agent_triggers_event_type_idx').on(table.subaccountId, table.eventType),
+    // M-20: partial index — active triggers only (excludes soft-deleted)
+    eventTypeIdx: index('agent_triggers_event_type_idx').on(table.subaccountId, table.eventType).where(sql`${table.deletedAt} IS NULL`),
   })
 );
 

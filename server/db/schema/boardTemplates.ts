@@ -16,8 +16,8 @@ export const boardTemplates = pgTable(
     description: text('description'),
     columns: jsonb('columns').notNull().$type<BoardColumn[]>(),
     isDefault: boolean('is_default').notNull().default(false),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   }
 );
 

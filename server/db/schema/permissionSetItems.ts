@@ -12,7 +12,7 @@ export const permissionSetItems = pgTable(
     permissionKey: text('permission_key')
       .notNull()
       .references(() => permissions.key),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     setKeyUniqueIdx: uniqueIndex('permission_set_items_set_key_unique_idx').on(

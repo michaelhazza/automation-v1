@@ -27,8 +27,8 @@ export const skills = pgTable(
     // quality criteria, and common mistakes. Injected after instructions for richer guidance.
     methodology: text('methodology'),
     isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('skills_org_idx').on(table.organisationId),

@@ -6,7 +6,7 @@ export const permissions = pgTable(
     key: text('key').primaryKey(),
     description: text('description').notNull(),
     groupName: text('group_name').notNull(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   }
 );
 

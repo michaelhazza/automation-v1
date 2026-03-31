@@ -2,6 +2,7 @@ import { eq, and, isNull, asc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agents, agentDataSources, users } from '../db/schema/index.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
+import { connectionTokenService } from './connectionTokenService.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { approxTokens, resolveTemperature, resolveMaxTokens } from './llmService.js';
@@ -110,7 +111,8 @@ async function fetchSourceContent(source: typeof agentDataSources.$inferSelect):
   if (source.sourceType === 'http_url') {
     const headers: Record<string, string> = { Accept: 'text/plain, application/json, text/csv, */*' };
     if (source.sourceHeaders) {
-      Object.assign(headers, source.sourceHeaders);
+      const decrypted = connectionTokenService.decryptToken(source.sourceHeaders);
+      Object.assign(headers, JSON.parse(decrypted));
     }
     const response = await fetch(source.sourcePath, { headers });
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -119,7 +121,10 @@ async function fetchSourceContent(source: typeof agentDataSources.$inferSelect):
 
   if (source.sourceType === 'google_docs') {
     const docId = extractGoogleDocId(source.sourcePath);
-    const apiKey = source.sourceHeaders?.['x-google-api-key'];
+    const parsedHeaders: Record<string, string> = source.sourceHeaders
+      ? JSON.parse(connectionTokenService.decryptToken(source.sourceHeaders))
+      : {};
+    const apiKey = parsedHeaders['x-google-api-key'];
     if (apiKey) {
       const url = `https://docs.googleapis.com/v1/documents/${docId}?key=${encodeURIComponent(apiKey)}`;
       const response = await fetch(url);
@@ -529,7 +534,7 @@ export const agentService = {
       maxTokens?: number;
       responseMode?: string;
       outputSize?: string;
-      allowModelOverride?: number;
+      allowModelOverride?: boolean;
       defaultSkillSlugs?: string[];
       icon?: string;
     }
@@ -550,7 +555,7 @@ export const agentService = {
         maxTokens: data.maxTokens ?? 4096,
         responseMode: (data.responseMode as 'balanced' | 'precise' | 'expressive' | 'highly_creative') ?? 'balanced',
         outputSize: (data.outputSize as 'standard' | 'extended' | 'maximum') ?? 'standard',
-        allowModelOverride: data.allowModelOverride ?? 1,
+        allowModelOverride: data.allowModelOverride ?? true,
         defaultSkillSlugs: data.defaultSkillSlugs ?? null,
         status: 'draft',
         createdAt: new Date(),
@@ -575,7 +580,7 @@ export const agentService = {
       maxTokens: number;
       responseMode: string;
       outputSize: string;
-      allowModelOverride: number;
+      allowModelOverride: boolean;
       defaultSkillSlugs: string[];
       icon: string;
       heartbeatEnabled: boolean;
@@ -744,7 +749,7 @@ export const agentService = {
         description: data.description,
         sourceType: data.sourceType,
         sourcePath: data.sourcePath,
-        sourceHeaders: data.sourceHeaders,
+        sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
         priority: data.priority ?? 0,
@@ -770,7 +775,7 @@ export const agentService = {
       name: string;
       description: string | null;
       sourcePath: string;
-      sourceHeaders: Record<string, string> | null;
+      sourceHeaders?: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode: 'lazy' | 'proactive';
       priority: number;
@@ -794,7 +799,7 @@ export const agentService = {
     if (data.name !== undefined) update.name = data.name;
     if (data.description !== undefined) update.description = data.description;
     if (data.sourcePath !== undefined) update.sourcePath = data.sourcePath;
-    if (data.sourceHeaders !== undefined) update.sourceHeaders = data.sourceHeaders;
+    if (data.sourceHeaders !== undefined) update.sourceHeaders = data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : null;
     if (data.contentType !== undefined) update.contentType = data.contentType;
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
