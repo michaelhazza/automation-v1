@@ -191,6 +191,13 @@ export default function Layout({ user, children }: LayoutProps) {
 
   const [showCreateAgent, setShowCreateAgent] = useState(false);
 
+  // New Issue modal
+  const [showNewIssue, setShowNewIssue] = useState(false);
+  const [newIssueTitle, setNewIssueTitle] = useState('');
+  const [newIssueDesc, setNewIssueDesc] = useState('');
+  const [newIssuePriority, setNewIssuePriority] = useState<'low' | 'normal' | 'high' | 'urgent'>('normal');
+  const [newIssueLoading, setNewIssueLoading] = useState(false);
+
   // Dynamic nav lists
   interface NavProject { id: string; name: string; color: string; status: string; }
   interface NavAgent { id: string; agentId: string; agent: { name: string; icon: string | null; status: string }; agentRole: string | null; isActive: boolean; }
@@ -477,7 +484,13 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* ── Top controls — always visible when client selected */}
           {hasOrgContext && activeClientId && (
             <>
-              <NavItem to={`/admin/subaccounts/${activeClientId}/review-queue?new=1`} icon={<Icons.bolt />} label="New Issue" />
+              <button
+                onClick={() => setShowNewIssue(true)}
+                className="flex items-center gap-[9px] px-3 py-[7px] mx-1.5 my-px rounded-[7px] text-[13px] font-medium border-0 cursor-pointer transition-[color,background] duration-100 text-slate-400 hover:text-slate-200 hover:bg-white/[0.04] bg-transparent w-[calc(100%-12px)] text-left [font-family:inherit]"
+              >
+                <span><Icons.bolt /></span>
+                <span className="flex-1">New Issue</span>
+              </button>
               <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined} />
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/review-queue`} icon={<Icons.inbox />} label="Inbox" badge={reviewCount} />
@@ -737,6 +750,62 @@ export default function Layout({ user, children }: LayoutProps) {
                 <button onClick={() => setShowCreateAgent(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Close</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── New Issue modal ───────────────────────────────────────────── */}
+      {showNewIssue && activeClientId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Issue</h2>
+              <button onClick={() => setShowNewIssue(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newIssueTitle.trim() || newIssueLoading) return;
+              setNewIssueLoading(true);
+              try {
+                // Find top-level agent (no parent) to auto-assign
+                const agentsRes = await api.get(`/api/subaccounts/${activeClientId}/agents`).catch(() => ({ data: [] }));
+                const topAgent = (agentsRes.data as any[]).find((a: any) => a.isActive && !a.parentSubaccountAgentId);
+                await api.post(`/api/subaccounts/${activeClientId}/tasks`, {
+                  title: newIssueTitle.trim(),
+                  description: newIssueDesc.trim() || undefined,
+                  status: 'inbox',
+                  priority: newIssuePriority,
+                  assignedAgentId: topAgent?.agentId ?? undefined,
+                });
+                setShowNewIssue(false);
+                setNewIssueTitle('');
+                setNewIssueDesc('');
+                setNewIssuePriority('normal');
+              } catch { /* ignore */ }
+              finally { setNewIssueLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Title</label>
+                <input autoFocus type="text" value={newIssueTitle} onChange={(e) => setNewIssueTitle(e.target.value)} placeholder="What needs to be done?" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+                <textarea value={newIssueDesc} onChange={(e) => setNewIssueDesc(e.target.value)} placeholder="Add more context..." rows={3} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Priority</label>
+                <select value={newIssuePriority} onChange={(e) => setNewIssuePriority(e.target.value as typeof newIssuePriority)} className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="low">Low</option>
+                  <option value="normal">Normal</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => setShowNewIssue(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newIssueTitle.trim() || newIssueLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{newIssueLoading ? 'Creating...' : 'Create Issue'}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
