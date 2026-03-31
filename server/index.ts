@@ -55,6 +55,7 @@ import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
 import llmUsageRouter from './routes/llmUsage.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
+import systemTemplatesRouter from './routes/systemTemplates.js';
 
 const app = express();
 
@@ -112,6 +113,7 @@ app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
 app.use(llmUsageRouter);
 app.use(hierarchyTemplatesRouter);
+app.use(systemTemplatesRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
@@ -27,23 +27,32 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-interface Template {
+interface CompanyTemplate {
   id: string;
   name: string;
+  description: string | null;
+  agentCount: number;
   version: number;
-  slotCount: number;
-  isDefaultForSubaccount: boolean;
 }
 
-interface ApplySummary {
-  appliedTemplateVersion: number;
+interface SystemAgentOption {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  agentRole: string | null;
+  agentTitle: string | null;
+  isPublished: boolean;
+}
+
+interface LoadResult {
+  templateName?: string;
   summary: {
     agentsLinked: number;
     agentsCreated: number;
     agentsReused: number;
-    agentsDraft: number;
-    hierarchyUpdated: number;
-    agentsRemovedFromHierarchy: number;
+    agentsDraft?: number;
+    hierarchyUpdated?: number;
   };
 }
 
@@ -131,38 +140,31 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Template apply
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [showApply, setShowApply] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [applyMode, setApplyMode] = useState<'merge' | 'replace'>('merge');
-  const [applying, setApplying] = useState(false);
-  const [applyPreview, setApplyPreview] = useState<ApplySummary | null>(null);
-  const [applyResult, setApplyResult] = useState<ApplySummary | null>(null);
+  // Load System Agents modal
+  const [showLoadAgents, setShowLoadAgents] = useState(false);
+  const [systemAgents, setSystemAgents] = useState<SystemAgentOption[]>([]);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [loadAgentsResult, setLoadAgentsResult] = useState<LoadResult | null>(null);
 
-  // Direct import
-  const [showImport, setShowImport] = useState(false);
-  const [importName, setImportName] = useState('');
-  const [importManifest, setImportManifest] = useState<Record<string, unknown> | null>(null);
-  const [importFileName, setImportFileName] = useState('');
-  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
-  const [importError, setImportError] = useState('');
-  const [importResult, setImportResult] = useState<Record<string, unknown> | null>(null);
-  const [importProcessing, setImportProcessing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Load Company Template modal
+  const [showLoadTemplate, setShowLoadTemplate] = useState(false);
+  const [companyTemplates, setCompanyTemplates] = useState<CompanyTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [parentAgentId, setParentAgentId] = useState('');
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
+  const [loadTemplateResult, setLoadTemplateResult] = useState<LoadResult | null>(null);
 
   const load = async () => {
     if (!subaccountId) return;
     setLoading(true);
     try {
-      const [linksRes, treeRes, templatesRes] = await Promise.all([
+      const [linksRes, treeRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}/agents`),
         api.get(`/api/subaccounts/${subaccountId}/agents/tree`),
-        api.get('/api/hierarchy-templates'),
       ]);
       setAgentLinks(linksRes.data);
       setTreeData(treeRes.data);
-      setTemplates(templatesRes.data);
     } finally {
       setLoading(false);
     }
@@ -170,105 +172,103 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
 
   useEffect(() => { load(); }, [subaccountId]);
 
-  // Template apply flow
-  const handlePreview = async () => {
-    if (!selectedTemplateId || !subaccountId) return;
-    setApplying(true);
-    setApplyPreview(null);
+  // ── Load System Agents ──────────────────────────────────────────────────
+
+  const openLoadAgents = async () => {
+    setShowLoadAgents(true);
+    setSelectedAgentIds(new Set());
+    setLoadAgentsResult(null);
     try {
-      const { data } = await api.post(`/api/hierarchy-templates/${selectedTemplateId}/apply`, {
-        subaccountId,
-        mode: applyMode,
-        preview: true,
-      });
-      setApplyPreview(data);
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Preview failed');
-    } finally {
-      setApplying(false);
+      const { data } = await api.get('/api/system-agents');
+      setSystemAgents(data);
+    } catch {
+      setError('Failed to load system agents');
+      setShowLoadAgents(false);
     }
   };
 
-  const handleApplyConfirm = async () => {
-    if (!selectedTemplateId || !subaccountId) return;
-    setApplying(true);
+  const toggleAgentSelection = (id: string) => {
+    setSelectedAgentIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllAgents = () => {
+    if (selectedAgentIds.size === systemAgents.length) {
+      setSelectedAgentIds(new Set());
+    } else {
+      setSelectedAgentIds(new Set(systemAgents.map(a => a.id)));
+    }
+  };
+
+  const handleLoadAgents = async () => {
+    if (!subaccountId || selectedAgentIds.size === 0) return;
+    setLoadingAgents(true);
     try {
-      const { data } = await api.post(`/api/hierarchy-templates/${selectedTemplateId}/apply`, {
+      const { data } = await api.post('/api/system-agents/load', {
+        systemAgentIds: Array.from(selectedAgentIds),
         subaccountId,
-        mode: applyMode,
-        preview: false,
       });
-      setApplyResult(data);
-      setSuccess(`Template applied: ${data.summary.agentsLinked} linked, ${data.summary.agentsCreated} created, ${data.summary.agentsReused} reused.`);
+      setLoadAgentsResult(data);
+      setSuccess(`Loaded ${data.agentsLinked} system agent(s) into subaccount.`);
       load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Apply failed');
+      setError(e.response?.data?.error ?? 'Failed to load agents');
     } finally {
-      setApplying(false);
+      setLoadingAgents(false);
     }
   };
 
-  const resetApplyModal = () => {
-    setShowApply(false);
-    setApplyPreview(null);
-    setApplyResult(null);
+  const resetLoadAgents = () => {
+    setShowLoadAgents(false);
+    setLoadAgentsResult(null);
+    setSelectedAgentIds(new Set());
+  };
+
+  // ── Load Company Template ───────────────────────────────────────────────
+
+  const openLoadTemplate = async () => {
+    setShowLoadTemplate(true);
     setSelectedTemplateId('');
-  };
-
-  // Direct import flow
-  const handleImportFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-    setImportFileName(file.name);
-    setImportError('');
-    setImportResult(null);
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const manifest = JSON.parse(reader.result as string);
-        setImportManifest(manifest);
-        const company = manifest.company as Record<string, unknown> | undefined;
-        setImportName((company?.name as string) || file.name.replace(/\.\w+$/, ''));
-      } catch {
-        setImportError('Invalid JSON file');
-        setImportManifest(null);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  const handleDirectImport = async () => {
-    if (!importManifest || !importName.trim() || !subaccountId) return;
-    setImportProcessing(true);
-    setImportError('');
+    setParentAgentId('');
+    setLoadTemplateResult(null);
     try {
-      const { data } = await api.post(`/api/subaccounts/${subaccountId}/agents/import`, {
-        name: importName,
-        manifest: importManifest,
-        saveAsTemplate,
-      });
-      setImportResult(data);
-      load();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setImportError(e.response?.data?.error ?? 'Import failed');
-    } finally {
-      setImportProcessing(false);
+      const { data } = await api.get('/api/company-templates');
+      setCompanyTemplates(data);
+    } catch {
+      setError('Failed to load company templates');
+      setShowLoadTemplate(false);
     }
   };
 
-  const resetImportModal = () => {
-    setShowImport(false);
-    setImportManifest(null);
-    setImportResult(null);
-    setImportName('');
-    setImportFileName('');
-    setImportError('');
-    setSaveAsTemplate(false);
+  const handleLoadTemplate = async () => {
+    if (!subaccountId || !selectedTemplateId) return;
+    setLoadingTemplate(true);
+    try {
+      const { data } = await api.post(`/api/company-templates/${selectedTemplateId}/load`, {
+        subaccountId,
+        parentSubaccountAgentId: parentAgentId || null,
+      });
+      setLoadTemplateResult(data);
+      setSuccess(`Company template "${data.templateName}" loaded: ${data.summary.agentsLinked} linked, ${data.summary.agentsCreated} created.`);
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to load template');
+    } finally {
+      setLoadingTemplate(false);
+    }
+  };
+
+  const resetLoadTemplate = () => {
+    setShowLoadTemplate(false);
+    setLoadTemplateResult(null);
+    setSelectedTemplateId('');
+    setParentAgentId('');
   };
 
   if (loading) {
@@ -287,16 +287,16 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowImport(true)}
+            onClick={openLoadAgents}
             className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
           >
-            Import from Paperclip
+            Load System Agents
           </button>
           <button
-            onClick={() => setShowApply(true)}
+            onClick={openLoadTemplate}
             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
           >
-            Load Template
+            Load Company Template
           </button>
         </div>
       </div>
@@ -304,13 +304,13 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
       {error && (
         <div className="mb-4 px-4 py-2.5 rounded-lg text-[14px] bg-red-50 text-red-700 border border-red-200 flex justify-between items-center">
           <span>{error}</span>
-          <button onClick={() => setError('')} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">×</button>
+          <button onClick={() => setError('')} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">x</button>
         </div>
       )}
       {success && (
         <div className="mb-4 px-4 py-2.5 rounded-lg text-[14px] bg-green-50 text-green-700 border border-green-200 flex justify-between items-center">
           <span>{success}</span>
-          <button onClick={() => setSuccess('')} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">×</button>
+          <button onClick={() => setSuccess('')} className="bg-transparent border-0 cursor-pointer text-inherit text-[16px] px-1">x</button>
         </div>
       )}
 
@@ -336,7 +336,7 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           {treeData.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-[14px]">
-              No hierarchy configured. Apply a template or set parent relationships manually.
+              No hierarchy configured. Load agents or a company template to get started.
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -400,96 +400,64 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
         </div>
       )}
 
-      {/* Load Template Modal */}
-      {showApply && (
-        <Modal title="Load Template" onClose={resetApplyModal} maxWidth={560}>
-          {!applyResult ? (
+      {/* ── Load System Agents Modal ─────────────────────────────────────── */}
+      {showLoadAgents && (
+        <Modal title="Load System Agents" onClose={resetLoadAgents} maxWidth={600}>
+          {!loadAgentsResult ? (
             <>
-              <div className="mb-4">
-                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Template</label>
-                <select
-                  value={selectedTemplateId}
-                  onChange={(e) => { setSelectedTemplateId(e.target.value); setApplyPreview(null); }}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px]"
-                >
-                  <option value="">Select a template...</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} (v{t.version}, {t.slotCount} agents){t.isDefaultForSubaccount ? ' — Default' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="mb-4">
-                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Apply mode</label>
-                <div className="flex gap-3">
-                  <label className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer">
-                    <input
-                      type="radio" name="mode" value="merge"
-                      checked={applyMode === 'merge'}
-                      onChange={() => { setApplyMode('merge'); setApplyPreview(null); }}
-                      className="accent-indigo-600"
-                    />
-                    <div>
-                      <span className="font-medium">Merge</span>
-                      <span className="text-slate-500 ml-1">— keep existing agents</span>
-                    </div>
-                  </label>
-                  <label className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer">
-                    <input
-                      type="radio" name="mode" value="replace"
-                      checked={applyMode === 'replace'}
-                      onChange={() => { setApplyMode('replace'); setApplyPreview(null); }}
-                      className="accent-indigo-600"
-                    />
-                    <div>
-                      <span className="font-medium">Replace</span>
-                      <span className="text-slate-500 ml-1">— clear existing hierarchy</span>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {applyPreview && (
-                <div className="mb-4 p-3 bg-slate-50 rounded-lg">
-                  <div className="text-[13px] font-semibold text-slate-700 mb-2">Preview</div>
-                  <div className="grid grid-cols-3 gap-2 text-[13px]">
-                    <div><span className="text-slate-500">Linked:</span> {applyPreview.summary.agentsLinked}</div>
-                    <div><span className="text-slate-500">Created:</span> {applyPreview.summary.agentsCreated}</div>
-                    <div><span className="text-slate-500">Reused:</span> {applyPreview.summary.agentsReused}</div>
-                    <div><span className="text-slate-500">Draft:</span> {applyPreview.summary.agentsDraft}</div>
-                    <div><span className="text-slate-500">Hierarchy:</span> {applyPreview.summary.hierarchyUpdated}</div>
-                    {applyPreview.summary.agentsRemovedFromHierarchy > 0 && (
-                      <div><span className="text-slate-500">Cleared:</span> {applyPreview.summary.agentsRemovedFromHierarchy}</div>
-                    )}
+              <p className="text-[13px] text-slate-500 m-0 mb-4">
+                Select which platform agents to load into this subaccount. Already-linked agents will be skipped.
+              </p>
+              {systemAgents.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 text-[14px]">No published system agents available.</div>
+              ) : (
+                <>
+                  <div className="mb-3">
+                    <label className="flex items-center gap-2 text-[13px] text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedAgentIds.size === systemAgents.length}
+                        onChange={selectAllAgents}
+                        className="accent-indigo-600"
+                      />
+                      Select all ({systemAgents.length})
+                    </label>
                   </div>
-                  {applyPreview.summary.agentsDraft > 0 && (
-                    <div className="mt-2 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded text-[12px] text-amber-700">
-                      {applyPreview.summary.agentsDraft} agent(s) will be created in draft status — prompts required before activation.
-                    </div>
-                  )}
-                </div>
+                  <div className="max-h-[320px] overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                    {systemAgents.map((agent) => (
+                      <label
+                        key={agent.id}
+                        className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAgentIds.has(agent.id)}
+                          onChange={() => toggleAgentSelection(agent.id)}
+                          className="accent-indigo-600 mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-slate-800 text-[13px]">{agent.name}</div>
+                          {agent.description && (
+                            <div className="text-[12px] text-slate-500 mt-0.5 truncate">{agent.description}</div>
+                          )}
+                        </div>
+                        {agent.agentRole && (
+                          <RoleBadge role={agent.agentRole} />
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </>
               )}
-
-              <div className="flex gap-3">
-                {!applyPreview ? (
-                  <button
-                    onClick={handlePreview}
-                    disabled={applying || !selectedTemplateId}
-                    className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${applying || !selectedTemplateId ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
-                  >
-                    {applying ? 'Loading...' : 'Preview'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleApplyConfirm}
-                    disabled={applying}
-                    className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${applying ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
-                  >
-                    {applying ? 'Applying...' : 'Apply Template'}
-                  </button>
-                )}
-                <button onClick={resetApplyModal} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={handleLoadAgents}
+                  disabled={loadingAgents || selectedAgentIds.size === 0}
+                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${loadingAgents || selectedAgentIds.size === 0 ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+                >
+                  {loadingAgents ? 'Loading...' : `Load ${selectedAgentIds.size} Agent${selectedAgentIds.size !== 1 ? 's' : ''}`}
+                </button>
+                <button onClick={resetLoadAgents} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
                   Cancel
                 </button>
               </div>
@@ -499,22 +467,15 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
               <div className="mb-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-[16px]">✅</span>
-                  <span className="font-semibold text-slate-800 text-[15px]">Template applied successfully</span>
+                  <span className="font-semibold text-slate-800 text-[15px]">System agents loaded</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[13px]">
-                  <div><span className="text-slate-500">Linked:</span> {applyResult.summary.agentsLinked}</div>
-                  <div><span className="text-slate-500">Created:</span> {applyResult.summary.agentsCreated}</div>
-                  <div><span className="text-slate-500">Reused:</span> {applyResult.summary.agentsReused}</div>
-                  <div><span className="text-slate-500">Draft:</span> {applyResult.summary.agentsDraft}</div>
+                  <div><span className="text-slate-500">Linked:</span> {loadAgentsResult.summary.agentsLinked}</div>
+                  <div><span className="text-slate-500">Created:</span> {loadAgentsResult.summary.agentsCreated}</div>
+                  <div><span className="text-slate-500">Reused:</span> {loadAgentsResult.summary.agentsReused}</div>
                 </div>
-                {applyResult.summary.agentsDraft > 0 && (
-                  <div className="mt-2 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded text-[12px] text-amber-700">
-                    {applyResult.summary.agentsDraft} agent(s) created in draft status.{' '}
-                    <Link to="/admin/agents" className="text-amber-800 underline">Set up prompts</Link>
-                  </div>
-                )}
               </div>
-              <button onClick={resetApplyModal} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+              <button onClick={resetLoadAgents} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
                 Done
               </button>
             </>
@@ -522,57 +483,70 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
         </Modal>
       )}
 
-      {/* Direct Import Modal */}
-      {showImport && (
-        <Modal title="Import from Paperclip" onClose={resetImportModal} maxWidth={560}>
-          {!importResult ? (
+      {/* ── Load Company Template Modal ──────────────────────────────────── */}
+      {showLoadTemplate && (
+        <Modal title="Load Company Template" onClose={resetLoadTemplate} maxWidth={600}>
+          {!loadTemplateResult ? (
             <>
+              <p className="text-[13px] text-slate-500 m-0 mb-4">
+                Browse the shared template library and load a company into this subaccount.
+                Optionally choose a manager agent to nest the company under.
+              </p>
+
               <div className="mb-4">
-                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Paperclip manifest</label>
-                <input ref={fileInputRef} type="file" accept=".json,.zip" onChange={handleImportFileSelect} className="hidden" />
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
-                  >
-                    Choose file
-                  </button>
-                  <span className="text-[13px] text-slate-500">{importFileName || 'No file selected'}</span>
-                </div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Company template</label>
+                <select
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px]"
+                >
+                  <option value="">Select a template...</option>
+                  {companyTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.agentCount} agents)
+                    </option>
+                  ))}
+                </select>
+                {selectedTemplateId && (() => {
+                  const selected = companyTemplates.find(t => t.id === selectedTemplateId);
+                  return selected?.description ? (
+                    <div className="text-[12px] text-slate-500 mt-1.5">{selected.description}</div>
+                  ) : null;
+                })()}
               </div>
-              {importManifest && (
-                <>
-                  <div className="mb-4">
-                    <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
-                    <input
-                      value={importName}
-                      onChange={(e) => setImportName(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px]"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 mb-4 text-[13px] text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={saveAsTemplate}
-                      onChange={(e) => setSaveAsTemplate(e.target.checked)}
-                      className="accent-indigo-600"
-                    />
-                    Save as org template for reuse
+
+              {agentLinks.length > 0 && (
+                <div className="mb-4">
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">
+                    Load under manager <span className="text-slate-400 font-normal">(optional)</span>
                   </label>
-                </>
+                  <select
+                    value={parentAgentId}
+                    onChange={(e) => setParentAgentId(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px]"
+                  >
+                    <option value="">No parent — top level</option>
+                    {agentLinks.map((link) => (
+                      <option key={link.id} value={link.id}>
+                        {link.agent.name}{link.agentRole ? ` (${link.agentRole})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="text-[12px] text-slate-400 mt-1">
+                    The company's top-level agents will report to this manager.
+                  </div>
+                </div>
               )}
-              {importError && (
-                <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-[13px] text-red-700">{importError}</div>
-              )}
+
               <div className="flex gap-3">
                 <button
-                  onClick={handleDirectImport}
-                  disabled={importProcessing || !importManifest || !importName.trim()}
-                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${importProcessing || !importManifest || !importName.trim() ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+                  onClick={handleLoadTemplate}
+                  disabled={loadingTemplate || !selectedTemplateId}
+                  className={`px-5 py-2 text-white border-0 rounded-lg text-[14px] font-medium transition-colors ${loadingTemplate || !selectedTemplateId ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
                 >
-                  {importProcessing ? 'Importing...' : 'Import & Apply'}
+                  {loadingTemplate ? 'Loading...' : 'Load Template'}
                 </button>
-                <button onClick={resetImportModal} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+                <button onClick={resetLoadTemplate} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
                   Cancel
                 </button>
               </div>
@@ -582,14 +556,26 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
               <div className="mb-4">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-[16px]">✅</span>
-                  <span className="font-semibold text-slate-800 text-[15px]">Import complete</span>
+                  <span className="font-semibold text-slate-800 text-[15px]">
+                    Company template "{loadTemplateResult.templateName}" loaded
+                  </span>
                 </div>
-                <div className="text-[13px] text-slate-600">
-                  Agents imported and hierarchy applied to this subaccount.
-                  {saveAsTemplate && ' Template saved for reuse.'}
+                <div className="grid grid-cols-3 gap-2 text-[13px]">
+                  <div><span className="text-slate-500">Linked:</span> {loadTemplateResult.summary.agentsLinked}</div>
+                  <div><span className="text-slate-500">Created:</span> {loadTemplateResult.summary.agentsCreated}</div>
+                  <div><span className="text-slate-500">Reused:</span> {loadTemplateResult.summary.agentsReused}</div>
+                  {loadTemplateResult.summary.agentsDraft !== undefined && loadTemplateResult.summary.agentsDraft > 0 && (
+                    <div><span className="text-slate-500">Draft:</span> {loadTemplateResult.summary.agentsDraft}</div>
+                  )}
                 </div>
+                {loadTemplateResult.summary.agentsDraft !== undefined && loadTemplateResult.summary.agentsDraft > 0 && (
+                  <div className="mt-2 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded text-[12px] text-amber-700">
+                    {loadTemplateResult.summary.agentsDraft} agent(s) created in draft status.{' '}
+                    <Link to="/admin/agents" className="text-amber-800 underline">Set up prompts</Link>
+                  </div>
+                )}
               </div>
-              <button onClick={resetImportModal} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
+              <button onClick={resetLoadTemplate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors">
                 Done
               </button>
             </>

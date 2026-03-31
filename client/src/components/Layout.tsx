@@ -476,6 +476,8 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && !activeClientId && hasAnyOrgPerm && (
             <>
               {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" icon={<Icons.clients />} label="Clients" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agent-templates" icon={<Icons.automations />} label="Templates" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view')) && <NavItem to="/admin/settings" icon={<Icons.settings />} label="Settings" />}
               {isSystemAdmin && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Org Settings" />}
