@@ -57,6 +57,10 @@ const envSchema = z.object({
   // AES-256-GCM key for encrypting OAuth tokens in integration_connections.
   // Must be 64 hex chars (32 bytes). Generate via: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   TOKEN_ENCRYPTION_KEY: z.string().length(64).optional(),
+  // Previous encryption key — set this when rotating to a new TOKEN_ENCRYPTION_KEY
+  // so that values encrypted under the old key can still be decrypted. Remove once
+  // all legacy-format values have been re-encrypted.
+  TOKEN_ENCRYPTION_KEY_V0: z.string().length(64).optional(),
 });
 
 export const env = envSchema.parse(process.env);

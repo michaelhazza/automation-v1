@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
-import { eq, lt } from 'drizzle-orm';
+import { eq, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
 import { processResolutionService } from './processResolutionService.js';
@@ -51,6 +51,26 @@ let pgBossQueue: {
   start(): Promise<void>;
 } | null = null;
 const EXECUTION_QUEUE_NAME = 'execution-run';
+
+// ---------------------------------------------------------------------------
+// Advisory lock helpers — prevent duplicate maintenance runs across
+// horizontally-scaled instances when using the in-memory queue backend.
+// pg-boss handles deduplication natively, so locks are only needed for
+// the setInterval fallback path.
+// ---------------------------------------------------------------------------
+const LOCK_ID_CLEANUP_FILES        = 7001;
+const LOCK_ID_CLEANUP_RESERVATIONS = 7002;
+
+async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
+  const result = await db.execute(sql`SELECT pg_try_advisory_lock(${lockId}) AS acquired`);
+  const acquired = (result.rows?.[0] as { acquired?: boolean } | undefined)?.acquired;
+  if (!acquired) return; // another instance is running this job
+  try {
+    await fn();
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(${lockId})`);
+  }
+}
 
 async function getQueueBackend() {
   if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
@@ -376,7 +396,7 @@ export const queueService = {
       .delete(executionFiles)
       .where(lt(executionFiles.expiresAt, new Date()));
     const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
-    if (count > 0) console.log(`[maintenance] Deleted ${count} expired execution_files rows`);
+    if (count > 0) console.log(JSON.stringify({ event: 'maintenance:cleanup_execution_files', rows_deleted: count }));
     return count;
   },
 
@@ -386,7 +406,6 @@ export const queueService = {
    * Mark them as 'released' so they no longer inflate projected spend.
    */
   async cleanupExpiredBudgetReservations(): Promise<number> {
-    const { sql } = await import('drizzle-orm');
     const result = await db
       .update(budgetReservations)
       .set({ status: 'released' })
@@ -394,20 +413,21 @@ export const queueService = {
         sql`${budgetReservations.status} = 'active' AND ${budgetReservations.expiresAt} < NOW()`
       );
     const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
-    if (count > 0) console.log(`[maintenance] Released ${count} expired budget_reservations`);
+    if (count > 0) console.log(JSON.stringify({ event: 'maintenance:release_budget_reservations', rows_released: count }));
     return count;
   },
 
   /**
    * Start periodic maintenance jobs.
    * Uses pg-boss scheduled workers when available, otherwise falls back to
-   * in-process setInterval. Call once at application startup.
+   * in-process setInterval guarded by pg advisory locks to prevent duplicate
+   * runs across horizontally-scaled instances. Call once at application startup.
    */
   async startMaintenanceJobs(): Promise<void> {
     const backend = await getQueueBackend();
 
     if (backend.kind === 'pg-boss' && pgBossQueue) {
-      // Register maintenance workers; pg-boss deduplicates across instances
+      // pg-boss deduplicates across instances natively — no advisory lock needed
       const boss = pgBossQueue as unknown as {
         schedule(name: string, cron: string, data: object, opts?: object): Promise<void>;
         work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
@@ -420,22 +440,26 @@ export const queueService = {
       });
       await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
-      console.log('[maintenance] Scheduled pg-boss maintenance jobs');
+      console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
-      // In-memory / simple queue: use setInterval
+      // In-memory queue: setInterval + advisory locks prevent duplicate runs
       setInterval(async () => {
-        await queueService.cleanupExpiredExecutionFiles().catch((err: unknown) => {
-          console.error('[maintenance] cleanupExpiredExecutionFiles failed', err);
+        await withAdvisoryLock(LOCK_ID_CLEANUP_FILES, () =>
+          queueService.cleanupExpiredExecutionFiles().then(() => undefined)
+        ).catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:cleanup_execution_files_error', error: String(err) }));
         });
       }, 60 * 60 * 1000); // every hour
 
       setInterval(async () => {
-        await queueService.cleanupExpiredBudgetReservations().catch((err: unknown) => {
-          console.error('[maintenance] cleanupExpiredBudgetReservations failed', err);
+        await withAdvisoryLock(LOCK_ID_CLEANUP_RESERVATIONS, () =>
+          queueService.cleanupExpiredBudgetReservations().then(() => undefined)
+        ).catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', error: String(err) }));
         });
       }, 5 * 60 * 1000); // every 5 minutes
 
-      console.log('[maintenance] Started in-process maintenance intervals');
+      console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
     }
   },
 };

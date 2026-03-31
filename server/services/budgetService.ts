@@ -334,10 +334,11 @@ export async function checkAndReserve(
     .returning();
 
   if (reservation.createdAt < insertedAt) {
-    console.warn('[budget] Idempotency conflict: returning existing reservation', {
+    console.warn(JSON.stringify({
+      event: 'budget:idempotency_conflict',
       idempotencyKey,
       reservationId: reservation.id,
-    });
+    }));
   }
 
   return reservation.id;
