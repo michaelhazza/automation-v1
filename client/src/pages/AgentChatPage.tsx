@@ -288,9 +288,9 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     <div className="flex flex-col bg-slate-50 overflow-hidden h-[calc(100vh-64px)]">
       {/* Header */}
       <div className="flex items-center gap-3.5 px-5 py-3 bg-white border-b border-slate-200 shrink-0 z-10">
-        <Link to="/agents" className="inline-flex items-center gap-1 text-indigo-600 no-underline text-[13px] font-semibold px-2.5 py-1.5 rounded-lg bg-violet-50 border border-indigo-200 shrink-0 transition-colors hover:bg-violet-100">
+        <Link to="/" className="inline-flex items-center gap-1 text-indigo-600 no-underline text-[13px] font-semibold px-2.5 py-1.5 rounded-lg bg-violet-50 border border-indigo-200 shrink-0 transition-colors hover:bg-violet-100">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-          Agents
+          Back
         </Link>
         <div className="w-px h-5.5 bg-slate-200 shrink-0" />
         <div className="font-bold text-[16px] text-slate-900 tracking-tight min-w-0 truncate">{agent.name}</div>

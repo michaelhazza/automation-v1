@@ -50,7 +50,7 @@ const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
-const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
 
 function PageLoader() {
@@ -160,7 +160,7 @@ export default function App() {
             <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
-            <Route path="/admin/subaccounts/:subaccountId/agents" element={<SubaccountAgentsPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
@@ -198,10 +198,11 @@ export default function App() {
           <Route path="/client-settings/:subaccountId" element={<AdminSubaccountDetailPage user={user!} mode="client" />} />
 
           {/* Projects */}
-          <Route path="/projects" element={<ProjectsPage user={user!} />} />
+          <Route path="/projects" element={<Navigate to="/" replace />} />
+          <Route path="/projects/:id" element={<ProjectDetailPage user={user!} />} />
 
           {/* AI Agents */}
-          <Route path="/agents" element={<AgentsPage user={user!} />} />
+          <Route path="/agents" element={<Navigate to="/" replace />} />
           <Route path="/agents/:id" element={<AgentChatPage user={user!} />} />
 
           {/* Client portal routes */}

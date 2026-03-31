@@ -137,14 +137,14 @@ function NavItem({
 }
 
 // ── NavSectionAction (+ button) ────────────────────────────────────────────
-function NavSectionAction({ to }: { to: string }) {
+function NavSectionAction({ onClick }: { onClick: () => void }) {
   return (
-    <Link
-      to={to}
-      className="w-[16px] h-[16px] flex items-center justify-center rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.08] no-underline transition-colors text-[13px] leading-none"
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="w-[16px] h-[16px] flex items-center justify-center rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.08] border-0 bg-transparent cursor-pointer transition-colors text-[13px] leading-none p-0"
     >
       +
-    </Link>
+    </button>
   );
 }
 
@@ -182,6 +182,14 @@ export default function Layout({ user, children }: LayoutProps) {
   // Badges
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
+
+  // Inline create modals
+  const [showCreateProject, setShowCreateProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectColor, setNewProjectColor] = useState('#6366f1');
+  const [createProjectLoading, setCreateProjectLoading] = useState(false);
+
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
 
   // Dynamic nav lists
   interface NavProject { id: string; name: string; color: string; status: string; }
@@ -501,7 +509,7 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* ── Projects section — dynamic list */}
           {hasOrgContext && activeClientId && (
             <>
-              <NavSection label="Projects" action={<NavSectionAction to="/projects?new=1" />} />
+              <NavSection label="Projects" action={<NavSectionAction onClick={() => setShowCreateProject(true)} />} />
               {navProjects.length === 0 && (
                 <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No projects yet</div>
               )}
@@ -519,7 +527,7 @@ export default function Layout({ user, children }: LayoutProps) {
           {/* ── Agents section — dynamic list */}
           {hasOrgContext && activeClientId && hasOrgPerm('org.agents.view') && (
             <>
-              <NavSection label="Agents" action={<NavSectionAction to={`/admin/subaccounts/${activeClientId}/agents?load=1`} />} />
+              <NavSection label="Agents" action={<NavSectionAction onClick={() => setShowCreateAgent(true)} />} />
               {navAgents.length === 0 && (
                 <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No agents yet</div>
               )}
@@ -655,6 +663,80 @@ export default function Layout({ user, children }: LayoutProps) {
           {children}
         </div>
       </main>
+
+      {/* ── Create Project modal ──────────────────────────────────────── */}
+      {showCreateProject && activeClientId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Project</h2>
+              <button onClick={() => setShowCreateProject(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newProjectName.trim() || createProjectLoading) return;
+              setCreateProjectLoading(true);
+              try {
+                const { data } = await api.post(`/api/subaccounts/${activeClientId}/projects`, { name: newProjectName.trim(), color: newProjectColor });
+                setShowCreateProject(false);
+                setNewProjectName('');
+                setNewProjectColor('#6366f1');
+                // Refresh projects list and navigate
+                api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data: p }) =>
+                  setNavProjects((p as NavProject[]).filter(pr => pr.status === 'active').slice(0, 12))
+                );
+                navigate(`/projects/${data.id}`);
+              } catch { /* ignore */ }
+              finally { setCreateProjectLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+                <input autoFocus type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="Project name" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Colour</label>
+                <div className="flex gap-2">
+                  {['#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#22c55e','#0ea5e9','#eab308'].map(c => (
+                    <button key={c} type="button" onClick={() => setNewProjectColor(c)} className={`w-7 h-7 rounded-full border-2 cursor-pointer transition-all ${newProjectColor === c ? 'border-slate-900 scale-110' : 'border-transparent'}`} style={{ background: c }} />
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => setShowCreateProject(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Agent dialog ──────────────────────────────────────────── */}
+      {showCreateAgent && activeClientId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">Add Agent</h2>
+              <button onClick={() => setShowCreateAgent(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-6">
+              <p className="text-[13px] text-slate-500 mb-4 mt-0">Agents are managed at the organisation level. Use Team Templates to load agent teams into this company.</p>
+              <div className="flex flex-col gap-2">
+                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
+                  <div className="text-[14px] font-semibold text-slate-800">Manage Org Agents</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5">Create, edit, and configure agents at the organisation level</div>
+                </button>
+                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents?tab=team-templates'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
+                  <div className="text-[14px] font-semibold text-slate-800">Load Team Template</div>
+                  <div className="text-[12px] text-slate-500 mt-0.5">Browse and apply a team template to this company</div>
+                </button>
+              </div>
+              <div className="flex justify-end mt-4">
+                <button onClick={() => setShowCreateAgent(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
