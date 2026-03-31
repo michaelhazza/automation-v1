@@ -96,3 +96,61 @@ export const DEFAULT_RETRY_POLICY = {
   backoffMinutes: 5,
   pauseAfterConsecutiveFailures: 3,
 } as const;
+
+// ── Phase 1A: Memory quality scoring ───────────────────────────────────────
+
+/** Minimum content length (chars) for a memory entry to be scored; shorter = score 0 */
+export const MIN_MEMORY_CONTENT_LENGTH = 40;
+
+// ── Phase 1B: Entity extraction ─────────────────────────────────────────────
+
+/** Max entities injected into agent prompt */
+export const MAX_PROMPT_ENTITIES = 10;
+
+/** Max entities extracted per run */
+export const MAX_ENTITIES_PER_EXTRACTION = 10;
+
+/** Minimum LLM confidence to store an entity (0.0–1.0) */
+export const MIN_ENTITY_CONFIDENCE = 0.7;
+
+/** Max attribute keys stored per entity */
+export const MAX_ENTITY_ATTRIBUTES = 10;
+
+// ── Phase 1C: Provider fallback ─────────────────────────────────────────────
+
+/** Max retries per provider before moving to the next */
+export const PROVIDER_MAX_RETRIES = 2;
+
+/** Backoff delays (ms) between retries */
+export const PROVIDER_BACKOFF_MS = [1000, 3000] as const;
+
+/** Ordered fallback chain of provider names */
+export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini'] as const;
+
+/** Timeout (ms) for a single provider call before it's treated as a failure */
+export const PROVIDER_CALL_TIMEOUT_MS = 30000;
+
+/** How long (ms) a provider stays in cooldown after exhausting retries */
+export const PROVIDER_COOLDOWN_MS = 60000;
+
+// ── Phase 2A: Vector memory search ──────────────────────────────────────────
+
+/** Max memory entries returned by vector search */
+export const VECTOR_SEARCH_LIMIT = 5;
+
+/** Minimum cosine similarity for a result to be included */
+export const VECTOR_SIMILARITY_THRESHOLD = 0.75;
+
+/** Only search entries created within this many days */
+export const VECTOR_SEARCH_RECENCY_DAYS = 90;
+
+/** Max chars of the compiled summary included alongside semantic results */
+export const ABBREVIATED_SUMMARY_LENGTH = 500;
+
+/** Minimum task context length (chars) required to run vector search */
+export const MIN_QUERY_CONTEXT_LENGTH = 20;
+
+// ── Phase 2B: Event-based triggers ──────────────────────────────────────────
+
+/** Max triggered agent runs per minute per workspace before suppression */
+export const MAX_TRIGGERED_RUNS_PER_MINUTE = 10;

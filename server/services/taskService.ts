@@ -8,6 +8,7 @@ import {
   agents,
 } from '../db/schema/index.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { triggerService } from './triggerService.js';
 
 const POSITION_GAP = 1000;
 
@@ -170,6 +171,15 @@ export const taskService = {
       taskId: item.id, title: data.title, status,
     });
 
+    // Fire task_created triggers (non-blocking)
+    triggerService.checkAndFire(subaccountId, organisationId, 'task_created', {
+      taskId: item.id,
+      title: data.title,
+      status,
+      priority: item.priority,
+      agentId: data.createdByAgentId ?? null,
+    }).catch(() => {});
+
     return item;
   },
 
@@ -288,6 +298,14 @@ export const taskService = {
         metadata: { from: existing.status, to: data.status },
         createdAt: new Date(),
       });
+
+      // Fire task_moved triggers (non-blocking)
+      triggerService.checkAndFire(existing.subaccountId, existing.organisationId, 'task_moved', {
+        taskId: id,
+        from: existing.status,
+        to: data.status,
+        column: data.status,
+      }).catch(() => {});
     }
 
     return updated;
