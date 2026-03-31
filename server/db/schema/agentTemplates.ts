@@ -21,7 +21,7 @@ export const agentTemplates = pgTable('agent_templates', {
   // High-level LLM presets
   responseMode: text('response_mode').notNull().default('balanced').$type<'balanced' | 'precise' | 'expressive' | 'highly_creative'>(),
   outputSize: text('output_size').notNull().default('standard').$type<'standard' | 'extended' | 'maximum'>(),
-  allowModelOverride: integer('allow_model_override').notNull().default(1),
+  allowModelOverride: boolean('allow_model_override').notNull().default(true),
 
   // Scheduling defaults
   defaultScheduleCron: text('default_schedule_cron'), // e.g. "0 */2 * * *"
@@ -39,8 +39,8 @@ export const agentTemplates = pgTable('agent_templates', {
   isPublished: boolean('is_published').notNull().default(false),
   version: integer('version').notNull().default(1),
 
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   slugIdx: uniqueIndex('agent_templates_slug_idx').on(table.slug),
   categoryIdx: index('agent_templates_category_idx').on(table.category),

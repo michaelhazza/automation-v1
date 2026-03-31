@@ -47,18 +47,18 @@ export const scheduledTasks = pgTable(
     tokenBudgetPerRun: integer('token_budget_per_run').notNull().default(30000),
 
     // Scheduling state
-    nextRunAt: timestamp('next_run_at'),
-    lastRunAt: timestamp('last_run_at'),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
     totalRuns: integer('total_runs').notNull().default(0),
     totalFailures: integer('total_failures').notNull().default(0),
     consecutiveFailures: integer('consecutive_failures').notNull().default(0),
 
     // End conditions
-    endsAt: timestamp('ends_at'),
+    endsAt: timestamp('ends_at', { withTimezone: true }),
     endsAfterRuns: integer('ends_after_runs'),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('scheduled_tasks_org_idx').on(table.organisationId),
@@ -94,10 +94,10 @@ export const scheduledTaskRuns = pgTable(
       .$type<'pending' | 'running' | 'completed' | 'failed' | 'retrying' | 'skipped'>(),
     attempt: integer('attempt').notNull().default(1),
     errorMessage: text('error_message'),
-    scheduledFor: timestamp('scheduled_for').notNull(),
-    startedAt: timestamp('started_at'),
-    completedAt: timestamp('completed_at'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }).notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     scheduledTaskIdx: index('scheduled_task_runs_st_idx').on(table.scheduledTaskId),

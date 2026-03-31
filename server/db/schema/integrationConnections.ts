@@ -28,10 +28,10 @@ export const integrationConnections = pgTable(
     // Explicit OAuth2 token fields (encrypted at rest)
     accessToken: text('access_token'),
     refreshToken: text('refresh_token'),
-    tokenExpiresAt: timestamp('token_expires_at'),
-    lastVerifiedAt: timestamp('last_verified_at'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+    lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     subaccountProviderLabelUnique: unique('integration_connections_subaccount_provider_label').on(

@@ -25,18 +25,16 @@ export const executions = pgTable(
     errorMessage: text('error_message'),
     errorDetail: jsonb('error_detail'),
     engineType: text('engine_type').notNull(),
-    processSnapshot: jsonb('process_snapshot'),
+    // processSnapshot, outboundPayload, callbackPayload moved to execution_payloads (H-5 blob extraction)
     isTestExecution: boolean('is_test_execution').notNull().default(false),
     retryCount: integer('retry_count').notNull().default(0),
     // Webhook / queue tracking fields
     returnWebhookUrl: text('return_webhook_url'),      // the URL we told the engine to POST results back to
-    outboundPayload: jsonb('outbound_payload'),         // full payload we sent to the engine (for audit)
-    callbackReceivedAt: timestamp('callback_received_at'), // when the engine called us back
-    callbackPayload: jsonb('callback_payload'),         // raw payload the engine sent back
+    callbackReceivedAt: timestamp('callback_received_at', { withTimezone: true }), // when the engine called us back
     notifyOnComplete: boolean('notify_on_complete').notNull().default(false), // user opted in to email on completion
-    queuedAt: timestamp('queued_at'),                  // when the job was placed on the queue
-    startedAt: timestamp('started_at'),
-    completedAt: timestamp('completed_at'),
+    queuedAt: timestamp('queued_at', { withTimezone: true }),                  // when the job was placed on the queue
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
     durationMs: integer('duration_ms'),
     // Three-level framework additions
     resolvedConnections: jsonb('resolved_connections'), // Snapshot of connection mapping used (no tokens)
@@ -45,8 +43,8 @@ export const executions = pgTable(
       .references(() => workflowEngines.id),           // Which engine actually ran this
     triggerType: text('trigger_type').notNull().default('manual').$type<'manual' | 'agent' | 'scheduled' | 'webhook'>(),
     triggerSourceId: uuid('trigger_source_id'),         // ID of agent run, scheduled task run, etc.
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgStatusIdx: index('executions_org_status_idx').on(table.organisationId, table.status),

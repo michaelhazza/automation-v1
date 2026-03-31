@@ -22,8 +22,8 @@ export const workspaceLimits = pgTable(
     maxRequestsPerMinute: integer('max_requests_per_minute'),
     maxRequestsPerHour: integer('max_requests_per_hour'),
     maxLlmCallsPerRun: integer('max_llm_calls_per_run'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     subaccountUnique: unique('workspace_limits_subaccount_unique').on(table.subaccountId),

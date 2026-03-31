@@ -17,40 +17,74 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 // Refresh tokens 5 minutes before they expire
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+// Current key version written into every new encrypted value.
+// To rotate: set TOKEN_ENCRYPTION_KEY to a new 64-char hex value, move the old
+// value to TOKEN_ENCRYPTION_KEY_V0, then bump this constant to 'k2'. Once all
+// legacy ciphertexts have been re-encrypted you can remove TOKEN_ENCRYPTION_KEY_V0.
+const CURRENT_KEY_VERSION = 'k1';
 
-function getEncryptionKey(): Buffer {
-  if (!env.TOKEN_ENCRYPTION_KEY) {
-    throw { statusCode: 500, message: 'TOKEN_ENCRYPTION_KEY is not configured' };
+// ---------------------------------------------------------------------------
+// Key registry — maps version identifiers to raw key buffers.
+// Populated once at module load from environment variables.
+// ---------------------------------------------------------------------------
+const KEY_REGISTRY: Record<string, Buffer> = {};
+if (env.TOKEN_ENCRYPTION_KEY) {
+  KEY_REGISTRY[CURRENT_KEY_VERSION] = Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'hex');
+}
+if (env.TOKEN_ENCRYPTION_KEY_V0) {
+  KEY_REGISTRY['k0'] = Buffer.from(env.TOKEN_ENCRYPTION_KEY_V0, 'hex');
+}
+
+function getKeyForVersion(version: string): Buffer {
+  const key = KEY_REGISTRY[version];
+  if (!key) {
+    throw { statusCode: 500, message: `Unknown encryption key version: ${version}` };
   }
-  return Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'hex');
+  return key;
 }
 
 export const connectionTokenService = {
   /**
    * Encrypt a plaintext token for storage.
-   * Returns a string in format: iv:authTag:ciphertext (all hex-encoded).
+   * Returns a versioned string: k1:iv:authTag:ciphertext (all hex-encoded).
+   * The key version prefix enables future rotation without re-encrypting all
+   * existing values at once — simply add a new key and bump the version.
    */
   encryptToken(plaintext: string): string {
-    const key = getEncryptionKey();
+    const key = getKeyForVersion(CURRENT_KEY_VERSION);
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
     const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const authTag = cipher.getAuthTag();
-    return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+    return `${CURRENT_KEY_VERSION}:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
   },
 
   /**
    * Decrypt a stored token string.
+   * Handles both legacy format (iv:authTag:ciphertext) and versioned format
+   * (k1:iv:authTag:ciphertext) for backward compatibility.
    */
   decryptToken(ciphertext: string): string {
-    const key = getEncryptionKey();
     const parts = ciphertext.split(':');
-    if (parts.length !== 3) {
+
+    let version: string;
+    let ivHex: string, authTagHex: string, encryptedHex: string;
+    if (parts.length === 4 && parts[0].startsWith('k')) {
+      // Versioned format: k1:iv:authTag:ciphertext
+      [version, ivHex, authTagHex, encryptedHex] = parts;
+    } else if (parts.length === 3) {
+      // Legacy format: iv:authTag:ciphertext — assume current key version
+      version = CURRENT_KEY_VERSION;
+      [ivHex, authTagHex, encryptedHex] = parts;
+      console.warn(JSON.stringify({ event: 'encryption:legacy_format_decrypt', hint: 'Value predates key versioning — re-encrypt to upgrade' }));
+    } else {
       throw { statusCode: 500, message: 'Invalid encrypted token format' };
     }
-    const iv = Buffer.from(parts[0], 'hex');
-    const authTag = Buffer.from(parts[1], 'hex');
-    const encrypted = Buffer.from(parts[2], 'hex');
+
+    const key = getKeyForVersion(version);
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const encrypted = Buffer.from(encryptedHex, 'hex');
     if (iv.length !== IV_LENGTH) {
       throw { statusCode: 500, message: 'Invalid encrypted token: wrong IV length' };
     }
@@ -59,7 +93,12 @@ export const connectionTokenService = {
     }
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
-    return decipher.update(encrypted) + decipher.final('utf8');
+    try {
+      return decipher.update(encrypted) + decipher.final('utf8');
+    } catch {
+      console.error(JSON.stringify({ event: 'encryption:auth_tag_failure', keyVersion: version, hint: 'Key mismatch or data corruption' }));
+      throw { statusCode: 500, message: 'Token decryption failed: integrity check failed' };
+    }
   },
 
   /**

@@ -22,8 +22,8 @@ export const processedResources = pgTable(
     externalId: text('external_id').notNull(),
     agentId: uuid('agent_id')
       .references(() => agents.id),
-    firstSeenAt: timestamp('first_seen_at').defaultNow().notNull(),
-    processedAt: timestamp('processed_at').defaultNow().notNull(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     deduplicationUnique: unique('processed_resources_dedup').on(

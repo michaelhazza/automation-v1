@@ -870,7 +870,7 @@ async function executeSpawnSubAgents(
           status: 'in_progress',
           assignedAgentId: st.assigned_agent_id,
           createdByAgentId: context.agentId,
-          isSubTask: 1,
+          isSubTask: true,
           parentTaskId: context.runId, // Link to parent's task context
         }
       );

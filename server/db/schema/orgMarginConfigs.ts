@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, numeric, integer, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, numeric, integer, timestamp, unique } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 
 export const orgMarginConfigs = pgTable('org_margin_configs', {
@@ -9,6 +9,9 @@ export const orgMarginConfigs = pgTable('org_margin_configs', {
   notes:            text('notes'),
   effectiveFrom:    timestamp('effective_from', { withTimezone: true }).defaultNow().notNull(),
   createdAt:        timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  // M-6: exactly one config per org per effective date prevents non-deterministic billing
+  orgEffectiveUniq: unique('org_margin_configs_org_effective_unique').on(table.organisationId, table.effectiveFrom),
+}));
 
 export type OrgMarginConfig = typeof orgMarginConfigs.$inferSelect;

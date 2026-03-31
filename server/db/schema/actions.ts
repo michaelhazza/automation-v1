@@ -49,18 +49,19 @@ export const actions = pgTable(
     // Approval
     approvedBy: uuid('approved_by')
       .references(() => users.id),
-    approvedAt: timestamp('approved_at'),
-    executedAt: timestamp('executed_at'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    executedAt: timestamp('executed_at', { withTimezone: true }),
     retryCount: integer('retry_count').notNull().default(0),
     maxRetries: integer('max_retries').notNull().default(3),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('actions_org_idx').on(table.organisationId),
     subaccountStatusIdx: index('actions_subaccount_status_idx').on(table.subaccountId, table.status),
     agentRunIdx: index('actions_agent_run_idx').on(table.agentRunId),
+    agentIdx: index('actions_agent_id_idx').on(table.agentId),
     parentActionIdx: index('actions_parent_action_idx').on(table.parentActionId),
     idempotencyIdx: unique('actions_idempotency_idx').on(table.subaccountId, table.idempotencyKey),
   })

@@ -18,8 +18,8 @@ export const boardConfigs = pgTable(
     sourceTemplateId: uuid('source_template_id')
       .references(() => boardTemplates.id),
     sourceConfigId: uuid('source_config_id'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('board_configs_org_idx').on(table.organisationId),

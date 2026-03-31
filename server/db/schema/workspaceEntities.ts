@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, real, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
@@ -36,11 +37,12 @@ export const workspaceEntities = pgTable(
   (table) => ({
     subaccountIdx: index('workspace_entities_subaccount_idx').on(table.subaccountId),
     orgIdx: index('workspace_entities_org_idx').on(table.organisationId),
+    // M-21: partial unique — excludes soft-deleted rows so names can be reused
     uniqueEntity: uniqueIndex('workspace_entities_unique').on(
       table.subaccountId,
       table.name,
       table.entityType
-    ),
+    ).where(sql`${table.deletedAt} IS NULL`),
   })
 );
 

@@ -32,7 +32,7 @@ export const agentMessages = pgTable(
       fileSizeBytes: number;
       storagePath: string;
     }>>(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     convIdx: index('agent_messages_conv_idx').on(table.conversationId),

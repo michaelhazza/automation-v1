@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workflowEngines } from '../db/schema/index.js';
+import { connectionTokenService } from './connectionTokenService.js';
 
 export class EngineService {
   async listEngines(organisationId: string, params: { status?: string }) {
@@ -36,7 +37,7 @@ export class EngineService {
         name: data.name,
         engineType: data.engineType as 'n8n',
         baseUrl: data.baseUrl,
-        apiKey: data.apiKey,
+        apiKey: data.apiKey ? connectionTokenService.encryptToken(data.apiKey) : undefined,
         scope: 'organisation',
         hmacSecret,
         status: 'inactive',
@@ -91,7 +92,7 @@ export class EngineService {
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) update.name = data.name;
     if (data.baseUrl !== undefined) update.baseUrl = data.baseUrl;
-    if (data.apiKey !== undefined) update.apiKey = data.apiKey;
+    if (data.apiKey !== undefined) update.apiKey = data.apiKey ? connectionTokenService.encryptToken(data.apiKey) : null;
     if (data.status !== undefined) update.status = data.status;
 
     const [updated] = await db
@@ -138,7 +139,7 @@ export class EngineService {
       const response = await fetch(engine.baseUrl, {
         method: 'GET',
         signal: AbortSignal.timeout(10000),
-        headers: engine.apiKey ? { 'X-N8N-API-KEY': engine.apiKey } : {},
+        headers: engine.apiKey ? { 'X-N8N-API-KEY': connectionTokenService.decryptToken(engine.apiKey) } : {},
       });
       const responseTimeMs = Date.now() - start;
       const success = response.ok || response.status < 500;

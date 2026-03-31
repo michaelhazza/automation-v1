@@ -9,9 +9,9 @@ export const organisations = pgTable(
     plan: text('plan').notNull().$type<'starter' | 'pro' | 'agency'>(),
     status: text('status').notNull().default('active').$type<'active' | 'suspended'>(),
     settings: jsonb('settings'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     nameUniqueIdx: uniqueIndex('organisations_name_unique_idx')

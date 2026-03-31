@@ -47,7 +47,7 @@ export const agentTemplateService = {
     maxTokens?: number;
     responseMode?: string;
     outputSize?: string;
-    allowModelOverride?: number;
+    allowModelOverride?: boolean;
     defaultScheduleCron?: string;
     defaultTokenBudget?: number;
     defaultMaxToolCalls?: number;
@@ -71,7 +71,7 @@ export const agentTemplateService = {
         maxTokens: data.maxTokens ?? 4096,
         responseMode: (data.responseMode as 'balanced' | 'precise' | 'expressive' | 'highly_creative') ?? 'balanced',
         outputSize: (data.outputSize as 'standard' | 'extended' | 'maximum') ?? 'standard',
-        allowModelOverride: data.allowModelOverride ?? 1,
+        allowModelOverride: data.allowModelOverride ?? true,
         defaultScheduleCron: data.defaultScheduleCron ?? null,
         defaultTokenBudget: data.defaultTokenBudget ?? 30000,
         defaultMaxToolCalls: data.defaultMaxToolCalls ?? 20,
@@ -97,7 +97,7 @@ export const agentTemplateService = {
     maxTokens: number;
     responseMode: string;
     outputSize: string;
-    allowModelOverride: number;
+    allowModelOverride: boolean;
     defaultScheduleCron: string;
     defaultTokenBudget: number;
     defaultMaxToolCalls: number;

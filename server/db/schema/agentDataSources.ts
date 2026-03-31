@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
 
@@ -15,8 +15,8 @@ export const agentDataSources = pgTable(
     sourceType: text('source_type').notNull().$type<'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload'>(),
     // For r2/s3: the object key/path. For http_url/google_docs/dropbox: the full URL
     sourcePath: text('source_path').notNull(),
-    // Optional HTTP headers (e.g. auth) for http_url sources; also used for google_docs API key
-    sourceHeaders: jsonb('source_headers').$type<Record<string, string>>(),
+    // Optional HTTP headers — stored as AES-256-GCM encrypted JSON string (H-3)
+    sourceHeaders: text('source_headers'),
     // How to parse the fetched content
     contentType: text('content_type').notNull().default('auto').$type<'json' | 'csv' | 'markdown' | 'text' | 'auto'>(),
     // Priority order (lower number = included first in context)
@@ -27,17 +27,17 @@ export const agentDataSources = pgTable(
     cacheMinutes: integer('cache_minutes').notNull().default(60),
     // Sync mode: lazy = re-fetch on demand when cache expires; proactive = background polling
     syncMode: text('sync_mode').notNull().default('lazy').$type<'lazy' | 'proactive'>(),
-    lastFetchedAt: timestamp('last_fetched_at'),
+    lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
     lastFetchStatus: text('last_fetch_status').$type<'ok' | 'error' | 'pending'>(),
     lastFetchError: text('last_fetch_error'),
     // Timestamp of last admin alert email (used for 1-hour cooldown to avoid alert spam)
-    lastAlertSentAt: timestamp('last_alert_sent_at'),
+    lastAlertSentAt: timestamp('last_alert_sent_at', { withTimezone: true }),
     // Subaccount-level data source: when set, this source is loaded only for this agent+subaccount combo.
     // When NULL, this is an org-level data source (original behaviour).
     subaccountAgentId: uuid('subaccount_agent_id')
       .references(() => subaccountAgents.id, { onDelete: 'cascade' }),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     agentIdx: index('agent_data_sources_agent_idx').on(table.agentId),

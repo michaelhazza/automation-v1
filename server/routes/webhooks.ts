@@ -17,7 +17,7 @@
 import { Router } from 'express';
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, users, workflowEngines } from '../db/schema/index.js';
+import { executions, executionPayloads, users, workflowEngines } from '../db/schema/index.js';
 import { webhookService } from '../services/webhookService.js';
 import { emailService } from '../services/emailService.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
@@ -91,7 +91,6 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
         ? String(callbackPayload.error ?? callbackPayload.message ?? 'External engine reported an error')
         : null,
       callbackReceivedAt: now,
-      callbackPayload: callbackPayload as unknown as Record<string, unknown>,
       completedAt: now,
       durationMs: execution.startedAt
         ? now.getTime() - execution.startedAt.getTime()
@@ -99,6 +98,15 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
       updatedAt: now,
     })
     .where(eq(executions.id, executionId));
+
+  // H-5: store raw callback payload in execution_payloads (keeps executions lean)
+  await db
+    .insert(executionPayloads)
+    .values({ executionId, callbackPayload: callbackPayload as unknown as Record<string, unknown> })
+    .onConflictDoUpdate({
+      target: executionPayloads.executionId,
+      set: { callbackPayload: callbackPayload as unknown as Record<string, unknown> },
+    });
 
   // ------------------------------------------------------------------
   // 5. Emit real-time WebSocket updates

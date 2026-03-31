@@ -27,8 +27,8 @@ export const processConnectionMappings = pgTable(
     connectionId: uuid('connection_id')
       .notNull()
       .references(() => integrationConnections.id),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     subaccountProcessKeyUnique: unique('pcm_subaccount_process_key_unique').on(

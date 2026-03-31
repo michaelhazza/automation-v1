@@ -12,7 +12,7 @@ export const taskDeliverables = pgTable(
     title: text('title').notNull(),
     path: text('path'),
     description: text('description'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     taskIdx: index('task_deliverables_task_idx').on(table.taskId),

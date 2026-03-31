@@ -42,7 +42,7 @@ export const agents = pgTable(
     responseMode: text('response_mode').notNull().default('balanced').$type<'balanced' | 'precise' | 'expressive' | 'highly_creative'>(),
     outputSize: text('output_size').notNull().default('standard').$type<'standard' | 'extended' | 'maximum'>(),
     // Whether per-subaccount model overrides are allowed
-    allowModelOverride: integer('allow_model_override').notNull().default(1),
+    allowModelOverride: boolean('allow_model_override').notNull().default(true),
     // Default skills assigned to this agent (copied to subaccountAgents on link)
     defaultSkillSlugs: jsonb('default_skill_slugs').$type<string[]>(),
     // Lifecycle
@@ -52,9 +52,9 @@ export const agents = pgTable(
     heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
     // Lifecycle
     status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgIdx: index('agents_org_idx').on(table.organisationId),

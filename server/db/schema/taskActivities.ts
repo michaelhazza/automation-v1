@@ -19,7 +19,7 @@ export const taskActivities = pgTable(
     metadata: jsonb('metadata'),
     // Optional reference to the agent run that created this activity
     agentRunId: uuid('agent_run_id'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     taskIdx: index('task_activities_task_idx').on(table.taskId),

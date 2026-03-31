@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, boolean, timestamp, jsonb, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, jsonb, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { workflowEngines } from './workflowEngines';
 import { processCategories } from './processCategories';
@@ -46,9 +47,9 @@ export const processes = pgTable(
     // Subaccount category for native subaccount processes (only set when subaccountId is set)
     subaccountCategoryId: uuid('subaccount_category_id')
       .references(() => subaccountCategories.id),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgStatusIdx: index('processes_org_status_idx').on(table.organisationId, table.status),
@@ -61,6 +62,10 @@ export const processes = pgTable(
     scopeStatusIdx: index('processes_scope_status_idx').on(table.scope, table.status),
     parentProcessIdx: index('processes_parent_process_idx').on(table.parentProcessId),
     systemProcessIdx: index('processes_system_process_idx').on(table.systemProcessId),
+    // M-5: prevent routing collisions — unique webhook path per engine (partial, excludes deleted)
+    engineWebhookUniq: uniqueIndex('processes_engine_webhook_unique_idx')
+      .on(table.workflowEngineId, table.webhookPath)
+      .where(sql`${table.workflowEngineId} IS NOT NULL AND ${table.deletedAt} IS NULL`),
   })
 );
 

@@ -1,5 +1,5 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm'; // used for partial index WHERE clauses
 import { organisations } from './organisations';
 
 // ---------------------------------------------------------------------------
@@ -29,13 +29,16 @@ export const hierarchyTemplates = pgTable(
     // Raw Paperclip manifest stored for reference
     paperclipManifest: jsonb('paperclip_manifest'),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
-    deletedAt: timestamp('deleted_at'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     orgIdx: index('hierarchy_templates_org_idx').on(table.organisationId),
-    orgNameIdx: index('hierarchy_templates_org_name_idx').on(table.organisationId, table.name),
+    // Unique name per org, soft-delete-aware
+    orgNameUniq: uniqueIndex('hierarchy_templates_org_name_unique_idx')
+      .on(table.organisationId, table.name)
+      .where(sql`${table.deletedAt} IS NULL`),
   })
 );
 

@@ -58,11 +58,11 @@ export const subaccountAgents = pgTable(
     maxLlmCallsPerRun: integer('max_llm_calls_per_run'),
 
     // ── Run tracking ────────────────────────────────────────────────────
-    lastRunAt: timestamp('last_run_at'),
-    nextRunAt: timestamp('next_run_at'),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
 
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     orgIdx: index('subaccount_agents_org_idx').on(table.organisationId),

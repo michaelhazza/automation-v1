@@ -25,7 +25,7 @@ export const actionEvents = pgTable(
     actorId: uuid('actor_id')
       .references(() => users.id),
     metadataJson: jsonb('metadata_json'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     actionIdx: index('action_events_action_idx').on(table.actionId),

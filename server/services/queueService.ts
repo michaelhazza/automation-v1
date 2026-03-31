@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
-import { executions, workflowEngines, users } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
+import { eq, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
 import { processResolutionService } from './processResolutionService.js';
@@ -51,6 +51,37 @@ let pgBossQueue: {
   start(): Promise<void>;
 } | null = null;
 const EXECUTION_QUEUE_NAME = 'execution-run';
+
+// ---------------------------------------------------------------------------
+// Advisory lock helpers — prevent duplicate maintenance runs across
+// horizontally-scaled instances when using the in-memory queue backend.
+// pg-boss handles deduplication natively, so locks are only needed for
+// the setInterval fallback path.
+// ---------------------------------------------------------------------------
+const LOCK_ID_CLEANUP_FILES        = 7001;
+const LOCK_ID_CLEANUP_RESERVATIONS = 7002;
+
+function serializeError(err: unknown): { message: string; name: string; stack?: string } {
+  if (err instanceof Error) {
+    return {
+      message: err.message,
+      name: err.name,
+      ...(env.NODE_ENV !== 'production' && { stack: err.stack }),
+    };
+  }
+  return { message: String(err), name: 'UnknownError' };
+}
+
+async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
+  const result = await db.execute(sql`SELECT pg_try_advisory_lock(${lockId}) AS acquired`);
+  const acquired = (result.rows?.[0] as { acquired?: boolean } | undefined)?.acquired;
+  if (!acquired) return; // another instance is running this job
+  try {
+    await fn();
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(${lockId})`);
+  }
+}
 
 async function getQueueBackend() {
   if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
@@ -112,7 +143,12 @@ async function processExecution(executionId: string): Promise<void> {
     });
   }
 
-  const processSnapshot = execution.processSnapshot as Record<string, unknown> | null;
+  // H-5: process snapshot lives in execution_payloads
+  const [payloadRow] = await db
+    .select({ processSnapshot: executionPayloads.processSnapshot })
+    .from(executionPayloads)
+    .where(eq(executionPayloads.executionId, executionId));
+  const processSnapshot = payloadRow?.processSnapshot as Record<string, unknown> | null ?? null;
   if (!processSnapshot) {
     await db
       .update(executions)
@@ -187,13 +223,21 @@ async function processExecution(executionId: string): Promise<void> {
     .update(executions)
     .set({
       returnWebhookUrl,
-      outboundPayload: auditPayload as unknown as Record<string, unknown>,
       engineId: engine.id,
       resolvedConnections: resolvedConnections as unknown as Record<string, unknown> ?? null,
       resolvedConfig: resolvedConfig as unknown as Record<string, unknown> ?? null,
       updatedAt: new Date(),
     })
     .where(eq(executions.id, executionId));
+
+  // H-5: persist outbound audit payload into execution_payloads
+  await db
+    .insert(executionPayloads)
+    .values({ executionId, outboundPayload: auditPayload as unknown as Record<string, unknown> })
+    .onConflictDoUpdate({
+      target: executionPayloads.executionId,
+      set: { outboundPayload: auditPayload as unknown as Record<string, unknown> },
+    });
 
   const start = Date.now();
   let retryCount = 0;
@@ -353,5 +397,80 @@ export const queueService = {
 
     const backend = await getQueueBackend();
     await backend.enqueue(executionId);
+  },
+
+  /**
+   * M-17: Delete expired execution_files rows.
+   */
+  async cleanupExpiredExecutionFiles(): Promise<number> {
+    const result = await db
+      .delete(executionFiles)
+      .where(lt(executionFiles.expiresAt, new Date()));
+    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (count > 0) console.log(JSON.stringify({ event: 'maintenance:cleanup_execution_files', rows_deleted: count }));
+    return count;
+  },
+
+  /**
+   * M-18: Release stale budget_reservations left in 'active' status.
+   * Reservations expire after 5 minutes if the billing flow crashes.
+   * Mark them as 'released' so they no longer inflate projected spend.
+   */
+  async cleanupExpiredBudgetReservations(): Promise<number> {
+    const result = await db
+      .update(budgetReservations)
+      .set({ status: 'released' })
+      .where(
+        sql`${budgetReservations.status} = 'active' AND ${budgetReservations.expiresAt} < NOW()`
+      );
+    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (count > 0) console.log(JSON.stringify({ event: 'maintenance:release_budget_reservations', rows_released: count }));
+    return count;
+  },
+
+  /**
+   * Start periodic maintenance jobs.
+   * Uses pg-boss scheduled workers when available, otherwise falls back to
+   * in-process setInterval guarded by pg advisory locks to prevent duplicate
+   * runs across horizontally-scaled instances. Call once at application startup.
+   */
+  async startMaintenanceJobs(): Promise<void> {
+    const backend = await getQueueBackend();
+
+    if (backend.kind === 'pg-boss' && pgBossQueue) {
+      // pg-boss deduplicates across instances natively — no advisory lock needed
+      const boss = pgBossQueue as unknown as {
+        schedule(name: string, cron: string, data: object, opts?: object): Promise<void>;
+        work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
+      };
+      await boss.work('maintenance:cleanup-execution-files', async () => {
+        await queueService.cleanupExpiredExecutionFiles();
+      });
+      await boss.work('maintenance:cleanup-budget-reservations', async () => {
+        await queueService.cleanupExpiredBudgetReservations();
+      });
+      await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
+      await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
+      console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
+    } else {
+      // In-memory queue: setInterval + advisory locks prevent duplicate runs
+      setInterval(async () => {
+        await withAdvisoryLock(LOCK_ID_CLEANUP_FILES, () =>
+          queueService.cleanupExpiredExecutionFiles().then(() => undefined)
+        ).catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:cleanup_execution_files_error', ...serializeError(err) }));
+        });
+      }, 60 * 60 * 1000); // every hour
+
+      setInterval(async () => {
+        await withAdvisoryLock(LOCK_ID_CLEANUP_RESERVATIONS, () =>
+          queueService.cleanupExpiredBudgetReservations().then(() => undefined)
+        ).catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', ...serializeError(err) }));
+        });
+      }, 5 * 60 * 1000); // every 5 minutes
+
+      console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
+    }
   },
 };

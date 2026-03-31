@@ -33,8 +33,8 @@ export const reviewItems = pgTable(
 
     reviewedBy: uuid('reviewed_by')
       .references(() => users.id),
-    reviewedAt: timestamp('reviewed_at'),
-    createdAt: timestamp('created_at').defaultNow().notNull(),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     actionUnique: unique('review_items_action_unique').on(table.actionId),

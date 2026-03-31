@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { db } from '../db/index.js';
-import { executions, organisations, processes, users } from '../db/schema/index.js';
+import { executions, executionPayloads, organisations, processes, users } from '../db/schema/index.js';
 import { eq, and, gte, lte, desc, SQL } from 'drizzle-orm';
 import { parsePositiveInt } from '../middleware/validate.js';
 
@@ -45,9 +45,9 @@ router.get('/api/system/executions', authenticate, requireSystemAdmin, async (re
         errorMessage: executions.errorMessage,
         errorDetail: executions.errorDetail,
         returnWebhookUrl: executions.returnWebhookUrl,
-        outboundPayload: executions.outboundPayload,
+        outboundPayload: executionPayloads.outboundPayload,
         callbackReceivedAt: executions.callbackReceivedAt,
-        callbackPayload: executions.callbackPayload,
+        callbackPayload: executionPayloads.callbackPayload,
         queuedAt: executions.queuedAt,
         startedAt: executions.startedAt,
         completedAt: executions.completedAt,
@@ -65,6 +65,7 @@ router.get('/api/system/executions', authenticate, requireSystemAdmin, async (re
         userLastName: users.lastName,
       })
       .from(executions)
+      .leftJoin(executionPayloads, eq(executions.id, executionPayloads.executionId))
       .leftJoin(organisations, eq(executions.organisationId, organisations.id))
       .leftJoin(processes, eq(executions.processId, processes.id))
       .leftJoin(users, eq(executions.triggeredByUserId, users.id))
@@ -98,9 +99,9 @@ router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async
         errorMessage: executions.errorMessage,
         errorDetail: executions.errorDetail,
         returnWebhookUrl: executions.returnWebhookUrl,
-        outboundPayload: executions.outboundPayload,
+        outboundPayload: executionPayloads.outboundPayload,
         callbackReceivedAt: executions.callbackReceivedAt,
-        callbackPayload: executions.callbackPayload,
+        callbackPayload: executionPayloads.callbackPayload,
         queuedAt: executions.queuedAt,
         startedAt: executions.startedAt,
         completedAt: executions.completedAt,
@@ -111,6 +112,7 @@ router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async
         processId: executions.processId,
         triggeredByUserId: executions.triggeredByUserId,
         subaccountId: executions.subaccountId,
+        processSnapshot: executionPayloads.processSnapshot,
         organisationName: organisations.name,
         processName: processes.name,
         userEmail: users.email,
@@ -118,6 +120,7 @@ router.get('/api/system/executions/:id', authenticate, requireSystemAdmin, async
         userLastName: users.lastName,
       })
       .from(executions)
+      .leftJoin(executionPayloads, eq(executions.id, executionPayloads.executionId))
       .leftJoin(organisations, eq(executions.organisationId, organisations.id))
       .leftJoin(processes, eq(executions.processId, processes.id))
       .leftJoin(users, eq(executions.triggeredByUserId, users.id))

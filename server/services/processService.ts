@@ -1,6 +1,6 @@
 import { eq, and, isNull, ilike } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { processes, workflowEngines, executions } from '../db/schema/index.js';
+import { processes, workflowEngines, executions, executionPayloads } from '../db/schema/index.js';
 import { webhookService } from './webhookService.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 
@@ -220,7 +220,6 @@ export class ProcessService {
         status: 'running',
         inputData: inputData ?? null,
         engineType: engine.engineType,
-        processSnapshot: process as unknown as Record<string, unknown>,
         isTestExecution: true,
         retryCount: 0,
         startedAt: new Date(),
@@ -229,6 +228,11 @@ export class ProcessService {
         updatedAt: new Date(),
       })
       .returning();
+
+    // H-5: store process snapshot in execution_payloads
+    await db.insert(executionPayloads)
+      .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
+      .onConflictDoNothing();
 
     const returnWebhookUrl = webhookService.buildReturnUrl(execution.id);
     const outboundPayload = await webhookService.buildOutboundPayload(
@@ -241,10 +245,17 @@ export class ProcessService {
       .update(executions)
       .set({
         returnWebhookUrl,
-        outboundPayload: outboundPayload as unknown as Record<string, unknown>,
         updatedAt: new Date(),
       })
       .where(eq(executions.id, execution.id));
+
+    // H-5: store outbound payload in execution_payloads
+    await db.insert(executionPayloads)
+      .values({ executionId: execution.id, outboundPayload: outboundPayload as unknown as Record<string, unknown> })
+      .onConflictDoUpdate({
+        target: executionPayloads.executionId,
+        set: { outboundPayload: outboundPayload as unknown as Record<string, unknown> },
+      });
 
     const authHeaders = buildEngineAuthHeaders(engine.engineType, engine.apiKey ?? undefined);
 

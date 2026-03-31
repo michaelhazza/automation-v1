@@ -4,6 +4,7 @@ import {
   agents,
   subaccountAgents,
   agentRuns,
+  agentRunSnapshots,
   tasks,
   taskActivities,
   taskDeliverables,
@@ -155,7 +156,7 @@ export const agentExecutionService = {
         taskId: request.taskId ?? null,
         handoffDepth: request.handoffDepth ?? 0,
         parentRunId: request.parentRunId ?? null,
-        isSubAgent: request.isSubAgent ? 1 : 0,
+        isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
         startedAt: new Date(),
         createdAt: new Date(),
@@ -392,7 +393,6 @@ export const agentExecutionService = {
       const systemPromptTokens = approxTokens(fullSystemPrompt);
 
       await db.update(agentRuns).set({
-        systemPromptSnapshot: fullSystemPrompt,
         memoryStateAtStart: memory ?? null,
         skillsUsed: [
           ...(systemAgentRecord ? ((systemAgentRecord.defaultSystemSkillSlugs ?? []) as string[]).map(s => `system:${s}`) : []),
@@ -400,6 +400,11 @@ export const agentExecutionService = {
         ],
         systemPromptTokens,
       }).where(eq(agentRuns.id, run.id));
+
+      // H-5: store large snapshot in agent_run_snapshots (keep agent_runs lean)
+      await db.insert(agentRunSnapshots)
+        .values({ runId: run.id, systemPromptSnapshot: fullSystemPrompt })
+        .onConflictDoNothing();
 
       // ── 8. Execute the agentic loop with middleware pipeline ────────────
       const pipeline = createDefaultPipeline();
@@ -433,7 +438,6 @@ export const agentExecutionService = {
 
       await db.update(agentRuns).set({
         status: finalStatus,
-        toolCallsLog: loopResult.toolCallsLog,
         totalToolCalls: loopResult.totalToolCalls,
         inputTokens: loopResult.inputTokens,
         outputTokens: loopResult.outputTokens,
@@ -446,6 +450,14 @@ export const agentExecutionService = {
         durationMs,
         updatedAt: new Date(),
       }).where(eq(agentRuns.id, run.id));
+
+      // H-5: upsert toolCallsLog into the snapshot table
+      await db.insert(agentRunSnapshots)
+        .values({ runId: run.id, toolCallsLog: loopResult.toolCallsLog })
+        .onConflictDoUpdate({
+          target: agentRunSnapshots.runId,
+          set: { toolCallsLog: loopResult.toolCallsLog },
+        });
 
       await db.update(subaccountAgents).set({
         lastRunAt: new Date(),
