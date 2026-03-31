@@ -17,6 +17,9 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 // Refresh tokens 5 minutes before they expire
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+// Current key version — stored as a prefix so future key rotation can be
+// handled by incrementing this value and adding the new key to an env map.
+const CURRENT_KEY_VERSION = 'k1';
 
 function getEncryptionKey(): Buffer {
   if (!env.TOKEN_ENCRYPTION_KEY) {
@@ -28,7 +31,9 @@ function getEncryptionKey(): Buffer {
 export const connectionTokenService = {
   /**
    * Encrypt a plaintext token for storage.
-   * Returns a string in format: iv:authTag:ciphertext (all hex-encoded).
+   * Returns a versioned string: k1:iv:authTag:ciphertext (all hex-encoded).
+   * The key version prefix enables future rotation without re-encrypting all
+   * existing values at once — simply add a new key and bump the version.
    */
   encryptToken(plaintext: string): string {
     const key = getEncryptionKey();
@@ -36,21 +41,32 @@ export const connectionTokenService = {
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
     const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
     const authTag = cipher.getAuthTag();
-    return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+    return `${CURRENT_KEY_VERSION}:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
   },
 
   /**
    * Decrypt a stored token string.
+   * Handles both legacy format (iv:authTag:ciphertext) and versioned format
+   * (k1:iv:authTag:ciphertext) for backward compatibility.
    */
   decryptToken(ciphertext: string): string {
     const key = getEncryptionKey();
     const parts = ciphertext.split(':');
-    if (parts.length !== 3) {
+
+    let ivHex: string, authTagHex: string, encryptedHex: string;
+    if (parts.length === 4 && parts[0].startsWith('k')) {
+      // Versioned format: k1:iv:authTag:ciphertext
+      [, ivHex, authTagHex, encryptedHex] = parts;
+    } else if (parts.length === 3) {
+      // Legacy format: iv:authTag:ciphertext (no version prefix)
+      [ivHex, authTagHex, encryptedHex] = parts;
+    } else {
       throw { statusCode: 500, message: 'Invalid encrypted token format' };
     }
-    const iv = Buffer.from(parts[0], 'hex');
-    const authTag = Buffer.from(parts[1], 'hex');
-    const encrypted = Buffer.from(parts[2], 'hex');
+
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const encrypted = Buffer.from(encryptedHex, 'hex');
     if (iv.length !== IV_LENGTH) {
       throw { statusCode: 500, message: 'Invalid encrypted token: wrong IV length' };
     }

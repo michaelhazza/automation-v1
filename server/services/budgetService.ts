@@ -312,6 +312,7 @@ export async function checkAndReserve(
   // ── All checks passed — create reservation ───────────────────────────────
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
+  const insertedAt = new Date();
   const [reservation] = await db
     .insert(budgetReservations)
     .values({
@@ -322,10 +323,22 @@ export async function checkAndReserve(
       status: 'active',
       expiresAt,
     })
-    // H-1: idempotency_key is UNIQUE — concurrent requests with the same key
-    // produce only one reservation; the duplicate is silently ignored.
-    .onConflictDoNothing({ target: budgetReservations.idempotencyKey })
+    // H-1: idempotency_key is UNIQUE. On conflict we perform a no-op UPDATE so
+    // that RETURNING always yields the winning row (new or pre-existing).
+    // This guarantees true exactly-once semantics: the caller always gets a
+    // valid reservation ID regardless of concurrent duplicate submissions.
+    .onConflictDoUpdate({
+      target: budgetReservations.idempotencyKey,
+      set: { idempotencyKey: sql`EXCLUDED.idempotency_key` },
+    })
     .returning();
+
+  if (reservation.createdAt < insertedAt) {
+    console.warn('[budget] Idempotency conflict: returning existing reservation', {
+      idempotencyKey,
+      reservationId: reservation.id,
+    });
+  }
 
   return reservation.id;
 }

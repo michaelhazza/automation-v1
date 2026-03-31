@@ -370,13 +370,14 @@ export const queueService = {
 
   /**
    * M-17: Delete expired execution_files rows.
-   * Call this on a schedule (e.g. once per hour via pg-boss or a cron).
    */
   async cleanupExpiredExecutionFiles(): Promise<number> {
     const result = await db
       .delete(executionFiles)
       .where(lt(executionFiles.expiresAt, new Date()));
-    return (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (count > 0) console.log(`[maintenance] Deleted ${count} expired execution_files rows`);
+    return count;
   },
 
   /**
@@ -392,6 +393,49 @@ export const queueService = {
       .where(
         sql`${budgetReservations.status} = 'active' AND ${budgetReservations.expiresAt} < NOW()`
       );
-    return (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    const count = (result as unknown as { rowCount?: number })?.rowCount ?? 0;
+    if (count > 0) console.log(`[maintenance] Released ${count} expired budget_reservations`);
+    return count;
+  },
+
+  /**
+   * Start periodic maintenance jobs.
+   * Uses pg-boss scheduled workers when available, otherwise falls back to
+   * in-process setInterval. Call once at application startup.
+   */
+  async startMaintenanceJobs(): Promise<void> {
+    const backend = await getQueueBackend();
+
+    if (backend.kind === 'pg-boss' && pgBossQueue) {
+      // Register maintenance workers; pg-boss deduplicates across instances
+      const boss = pgBossQueue as unknown as {
+        schedule(name: string, cron: string, data: object, opts?: object): Promise<void>;
+        work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
+      };
+      await boss.work('maintenance:cleanup-execution-files', async () => {
+        await queueService.cleanupExpiredExecutionFiles();
+      });
+      await boss.work('maintenance:cleanup-budget-reservations', async () => {
+        await queueService.cleanupExpiredBudgetReservations();
+      });
+      await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
+      await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
+      console.log('[maintenance] Scheduled pg-boss maintenance jobs');
+    } else {
+      // In-memory / simple queue: use setInterval
+      setInterval(async () => {
+        await queueService.cleanupExpiredExecutionFiles().catch((err: unknown) => {
+          console.error('[maintenance] cleanupExpiredExecutionFiles failed', err);
+        });
+      }, 60 * 60 * 1000); // every hour
+
+      setInterval(async () => {
+        await queueService.cleanupExpiredBudgetReservations().catch((err: unknown) => {
+          console.error('[maintenance] cleanupExpiredBudgetReservations failed', err);
+        });
+      }, 5 * 60 * 1000); // every 5 minutes
+
+      console.log('[maintenance] Started in-process maintenance intervals');
+    }
   },
 };

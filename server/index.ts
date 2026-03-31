@@ -14,6 +14,7 @@ import { skillService } from './services/skillService.js';
 import { systemSkillService } from './services/systemSkillService.js';
 import { agentScheduleService } from './services/agentScheduleService.js';
 import { routerJobService } from './services/routerJobService.js';
+import { queueService } from './services/queueService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,6 +154,7 @@ async function start() {
   // System skills are file-based (server/skills/*.md) — no seeding needed.
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
+  await queueService.startMaintenanceJobs();
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {
