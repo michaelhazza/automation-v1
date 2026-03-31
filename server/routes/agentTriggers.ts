@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { triggerService } from '../services/triggerService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { db } from '../db/index.js';
+import { subaccounts, subaccountAgents } from '../db/schema/index.js';
+import { and, eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -44,6 +47,33 @@ router.post(
 
       if (!eventType || !VALID_EVENT_TYPES.includes(eventType as EventType)) {
         res.status(400).json({ error: `eventType must be one of: ${VALID_EVENT_TYPES.join(', ')}` });
+        return;
+      }
+
+      // Validate subaccountId belongs to this org
+      const [sub] = await db
+        .select({ id: subaccounts.id })
+        .from(subaccounts)
+        .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, req.orgId!)))
+        .limit(1);
+      if (!sub) {
+        res.status(404).json({ error: 'Subaccount not found' });
+        return;
+      }
+
+      // Validate subaccountAgentId belongs to this subaccount
+      const [saLink] = await db
+        .select({ id: subaccountAgents.id })
+        .from(subaccountAgents)
+        .where(
+          and(
+            eq(subaccountAgents.id, subaccountAgentId),
+            eq(subaccountAgents.subaccountId, subaccountId)
+          )
+        )
+        .limit(1);
+      if (!saLink) {
+        res.status(404).json({ error: 'Subaccount agent not found in this subaccount' });
         return;
       }
 

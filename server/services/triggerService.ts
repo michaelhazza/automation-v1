@@ -96,6 +96,12 @@ export const triggerService = {
     let fired = 0;
 
     for (const trigger of triggers) {
+      // In-loop rate cap: re-check so a single batch cannot overshoot
+      if (recentCount + fired >= MAX_TRIGGERED_RUNS_PER_MINUTE) {
+        console.warn(`[TriggerService] Rate cap hit mid-batch (${recentCount + fired}/${MAX_TRIGGERED_RUNS_PER_MINUTE}) for subaccount ${subaccountId} — stopping`);
+        break;
+      }
+
       // Cooldown check
       if (trigger.lastTriggeredAt) {
         const cooldownMs = trigger.cooldownSeconds * 1000;

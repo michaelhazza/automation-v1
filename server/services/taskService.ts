@@ -178,7 +178,13 @@ export const taskService = {
       status,
       priority: item.priority,
       agentId: data.createdByAgentId ?? null,
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+      console.error('[TaskService] task_created trigger failed', {
+        subaccountId,
+        eventType: 'task_created',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     return item;
   },
@@ -305,7 +311,13 @@ export const taskService = {
         from: existing.status,
         to: data.status,
         column: data.status,
-      }).catch(() => {});
+      }).catch((err: unknown) => {
+        console.error('[TaskService] task_moved trigger failed', {
+          subaccountId: existing.subaccountId,
+          eventType: 'task_moved',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
 
     return updated;

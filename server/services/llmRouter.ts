@@ -287,7 +287,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     // Map the original model to the equivalent model for this provider
     const mappedModel = provider === ctx.provider
       ? ctx.model
-      : (FALLBACK_MODEL_MAP[provider]?.[ctx.model] ?? ctx.model);
+      : FALLBACK_MODEL_MAP[provider]?.[ctx.model];
+
+    // Skip this fallback provider if there is no explicit model mapping for it
+    if (mappedModel === undefined) {
+      console.warn(`[llmRouter] No model mapping for ${provider}/${ctx.model} — skipping`);
+      continue;
+    }
 
     let providerAdapter;
     try {

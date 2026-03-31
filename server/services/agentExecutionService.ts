@@ -498,7 +498,13 @@ export const agentExecutionService = {
           subaccountAgentId: request.subaccountAgentId,
           status: finalStatus,
         }
-      ).catch(() => {});
+      ).catch((err: unknown) => {
+        console.error('[AgentExecution] agent_completed trigger failed', {
+          subaccountId: request.subaccountId,
+          eventType: 'agent_completed',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
 
       return {
         runId: run.id,
