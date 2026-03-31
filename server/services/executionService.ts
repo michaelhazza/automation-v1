@@ -2,6 +2,7 @@ import { eq, and, isNull, gte, lte, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { executions, executionFiles, processes } from '../db/schema/index.js';
 import { queueService } from './queueService.js';
+import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Execution } from '../db/schema/executions.js';
 
 function mapExecution(e: Execution, viewFullAudit: boolean) {
@@ -145,6 +146,13 @@ export class ExecutionService {
       await queueService.enqueueExecution(execution.id);
     } catch {
       // Queue failure should not fail the API response
+    }
+
+    // Emit new execution to subaccount listeners (dashboard, history pages)
+    if (data.subaccountId) {
+      emitSubaccountUpdate(data.subaccountId, 'execution:new', {
+        executionId: execution.id, status: execution.status, processId: execution.processId,
+      });
     }
 
     return { id: execution.id, status: execution.status, processId: execution.processId };

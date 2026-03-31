@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
 import HeartbeatEditor from '../components/HeartbeatEditor';
+import { useSocket } from '../hooks/useSocket';
 
 const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
 
@@ -140,15 +141,16 @@ export default function AdminAgentsPage({ user }: { user: User }) {
 
   useEffect(() => { load(); }, []);
 
-  // Poll for live running agent count (org-wide, status=running)
+  // Fetch initial live running agent count, then update via WebSocket
   useEffect(() => {
-    const fetchLive = () => api.get('/api/agent-activity', { params: { status: 'running', limit: 100 } })
+    api.get('/api/agent-activity', { params: { status: 'running', limit: 100 } })
       .then(({ data }) => setLiveRunCount(Array.isArray(data) ? data.length : 0))
       .catch(() => {});
-    fetchLive();
-    const t = setInterval(fetchLive, 15_000);
-    return () => clearInterval(t);
   }, []);
+
+  // WebSocket: live agent count updates
+  useSocket('live:agent_started', () => setLiveRunCount(c => c + 1));
+  useSocket('live:agent_completed', () => setLiveRunCount(c => Math.max(0, c - 1)));
 
   const handleActivate = async (id: string) => {
     setActionError((prev) => ({ ...prev, [id]: '' }));

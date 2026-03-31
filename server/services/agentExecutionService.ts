@@ -41,6 +41,47 @@ import {
   MAX_CROSS_AGENT_TASKS,
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
+import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+
+// ---------------------------------------------------------------------------
+// Agent trace throttle — batches iteration/tool_call events to max 2/sec
+// ---------------------------------------------------------------------------
+
+const TRACE_THROTTLE_MS = 500;
+
+class TraceThrottle {
+  private pending: Record<string, unknown> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private lastEmit = 0;
+
+  constructor(private runId: string) {}
+
+  emit(event: string, data: Record<string, unknown>): void {
+    this.pending = { event, data };
+    const now = Date.now();
+    const elapsed = now - this.lastEmit;
+
+    if (elapsed >= TRACE_THROTTLE_MS) {
+      this.flush();
+    } else if (!this.timer) {
+      this.timer = setTimeout(() => this.flush(), TRACE_THROTTLE_MS - elapsed);
+    }
+  }
+
+  flush(): void {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (!this.pending) return;
+    const { event, data } = this.pending as { event: string; data: Record<string, unknown> };
+    this.pending = null;
+    this.lastEmit = Date.now();
+    emitAgentRunUpdate(this.runId, event, data);
+  }
+
+  destroy(): void {
+    this.flush(); // emit any pending event before cleanup
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,6 +161,15 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       })
       .returning();
+
+    // Emit run started event
+    emitAgentRunUpdate(run.id, 'agent:run:started', {
+      agentId: request.agentId, subaccountId: request.subaccountId,
+      runType: request.runType, status: 'running',
+    });
+    emitSubaccountUpdate(request.subaccountId, 'live:agent_started', {
+      runId: run.id, agentId: request.agentId,
+    });
 
     try {
       // ── 2. Load agent config ────────────────────────────────────────────
@@ -389,6 +439,16 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       }).where(eq(subaccountAgents.id, request.subaccountAgentId));
 
+      // Emit run completed event
+      emitAgentRunUpdate(run.id, 'agent:run:completed', {
+        status: finalStatus, summary: loopResult.summary,
+        totalToolCalls: loopResult.totalToolCalls, totalTokens: loopResult.totalTokens,
+        tasksCreated: loopResult.tasksCreated, durationMs,
+      });
+      emitSubaccountUpdate(request.subaccountId, 'live:agent_completed', {
+        runId: run.id, agentId: request.agentId, status: finalStatus,
+      });
+
       // ── 10. Extract insights for workspace memory ─────────────────────
       // Awaited (not fire-and-forget) so failures are visible in run logs
       if (loopResult.summary) {
@@ -428,6 +488,14 @@ export const agentExecutionService = {
         durationMs,
         updatedAt: new Date(),
       }).where(eq(agentRuns.id, run.id));
+
+      // Emit run failed event
+      emitAgentRunUpdate(run.id, 'agent:run:failed', {
+        status: 'failed', errorMessage, durationMs,
+      });
+      emitSubaccountUpdate(request.subaccountId, 'live:agent_completed', {
+        runId: run.id, agentId: request.agentId, status: 'failed',
+      });
 
       return {
         runId: run.id,
@@ -492,6 +560,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let deliverablesCreated = 0;
   let finalStatus: string | undefined;
 
+  // Throttle trace events to prevent event floods (max 2/sec)
+  const traceThrottle = new TraceThrottle(runId);
+
   const mwCtx: MiddlewareContext = {
     runId,
     request,
@@ -536,6 +607,11 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         break outerLoop;
       }
     }
+
+    // Emit iteration event for live trace (throttled to max 2/sec)
+    traceThrottle.emit('agent:run:iteration', {
+      iteration, tokensUsed: totalTokensUsed, toolCallsCount: totalToolCalls,
+    });
 
     // ── Call LLM ──────────────────────────────────────────────────────
     const response = await routeCall({
@@ -667,7 +743,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         }
       }
 
-      toolCallsLog.push({
+      const logEntry = {
         tool: toolCall.name,
         input: toolCall.input,
         output: resultContent.length > MAX_TOOL_OUTPUT_LOG_LENGTH
@@ -676,6 +752,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         durationMs: toolDurationMs,
         iteration,
         retried,
+      };
+      toolCallsLog.push(logEntry);
+
+      // Emit tool call event for live trace (throttled to max 2/sec)
+      traceThrottle.emit('agent:run:tool_call', {
+        tool: toolCall.name, durationMs: toolDurationMs, iteration,
+        totalToolCalls, tokensUsed: totalTokensUsed,
       });
 
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
@@ -690,6 +773,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       })),
     });
   }
+
+  // Flush any pending throttled trace events before returning
+  traceThrottle.destroy();
 
   return {
     summary: lastTextContent || null,

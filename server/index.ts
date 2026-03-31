@@ -1,10 +1,12 @@
 import 'dotenv/config';
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { env } from './lib/env.js';
+import { initWebSocket } from './websocket/index.js';
 import { seedPermissions, backfillOrgUserRoles } from './services/permissionSeedService.js';
 import { agentService } from './services/agentService.js';
 import { boardService } from './services/boardService.js';
@@ -58,6 +60,7 @@ import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 
 const app = express();
+const httpServer = createServer(app);
 
 // Security middleware
 app.use(helmet({
@@ -148,8 +151,9 @@ async function start() {
   // System skills are file-based (server/skills/*.md) — no seeding needed.
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
+  initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[SERVER] Automation OS running on port ${PORT} (${env.NODE_ENV})`);
   });
 }
