@@ -28,7 +28,7 @@ interface TreeNode extends Agent {
   children: TreeNode[];
 }
 
-type PageTab = 'list' | 'hierarchy';
+type PageTab = 'list';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -214,55 +214,6 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
         </button>
       </div>
 
-      {/* Page tabs */}
-      <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {(['list', 'hierarchy'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setPageTab(tab)}
-            className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer ${
-              pageTab === tab
-                ? 'border-indigo-600 text-indigo-600 font-semibold'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {tab === 'list' ? 'Agents' : 'Hierarchy'}
-          </button>
-        ))}
-      </div>
-
-      {/* Hierarchy Tab */}
-      {pageTab === 'hierarchy' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          {treeData.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 text-[14px]">
-              No hierarchy configured yet. Edit agents to set parent relationships.
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agent</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Role</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Title</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
-                  <th className="px-4 py-3 text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {treeData.map((node) => (
-                  <OrgHierarchyRow
-                    key={node.id}
-                    node={node}
-                    depth={0}
-                    onNavigate={(id) => navigate(`/admin/agents/${id}`)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
 
       {/* List Tab */}
       {pageTab === 'list' && <>
