@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState, lazy, Suspense } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+
+const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
 
 // Live run counts per agent (polled from subaccount live-status isn't per-agent,
 // so we use a simple org-level stat to show the total running count in the header)
@@ -28,7 +30,7 @@ interface TreeNode extends Agent {
   children: TreeNode[];
 }
 
-type PageTab = 'list';
+type PageTab = 'list' | 'team-templates';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -103,11 +105,14 @@ function OrgHierarchyRow({ node, depth, onNavigate }: { node: TreeNode; depth: n
   );
 }
 
-export default function AdminAgentsPage({ user: _user }: { user: User }) {
+export default function AdminAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : 'list';
+  const switchTab = (tab: PageTab) => setSearchParams(tab === 'list' ? {} : { tab });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [pageTab, setPageTab] = useState<PageTab>('list');
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
@@ -214,6 +219,30 @@ export default function AdminAgentsPage({ user: _user }: { user: User }) {
         </button>
       </div>
 
+
+      {/* Tabs */}
+      <div className="border-b border-slate-200 mb-6 flex gap-1">
+        {([['list', 'Agents'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
+          <button
+            key={tab}
+            onClick={() => switchTab(tab as PageTab)}
+            className={`px-4 py-2 text-[14px] font-medium border-b-2 transition-colors bg-transparent border-t-0 border-l-0 border-r-0 cursor-pointer ${
+              pageTab === tab
+                ? 'border-indigo-600 text-indigo-600 font-semibold'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Team Templates Tab */}
+      {pageTab === 'team-templates' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading templates...</div>}>
+          <AdminAgentTemplatesPage user={user} embedded />
+        </Suspense>
+      )}
 
       {/* List Tab */}
       {pageTab === 'list' && <>

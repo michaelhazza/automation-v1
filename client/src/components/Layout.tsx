@@ -443,6 +443,9 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.agents.view') && (
                 <NavItem to="/agents" icon={<Icons.agents />} label="Agents" badge={liveAgentCount} />
               )}
+              {hasOrgPerm('org.processes.view') && (
+                <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
+              )}
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
               )}
@@ -464,7 +467,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Organisation" />
               {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Clients" />}
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agent-templates" icon={<Icons.automations />} label="Team Templates" />}
+              {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
@@ -476,6 +479,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Platform" />
               <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
+              <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />

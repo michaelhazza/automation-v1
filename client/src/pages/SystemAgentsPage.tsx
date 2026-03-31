@@ -303,7 +303,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['hierarchy', 'Hierarchy'], ['company-templates', 'Company Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['hierarchy', 'Team Templates'], ['company-templates', 'Company Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as ActiveTab)}

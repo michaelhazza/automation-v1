@@ -107,7 +107,7 @@ function SlotTreeRow({ slot, depth }: { slot: SlotNode; depth: number }) {
   );
 }
 
-export default function AdminAgentTemplatesPage({ user: _user }: { user: User }) {
+export default function AdminAgentTemplatesPage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -209,10 +209,12 @@ export default function AdminAgentTemplatesPage({ user: _user }: { user: User })
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Agent Templates</h1>
-          <p className="text-sm text-slate-500 mt-1.5">Reusable agent organisation blueprints for subaccounts</p>
-        </div>
+        {!embedded && (
+          <div>
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Team Templates</h1>
+            <p className="text-sm text-slate-500 mt-1.5">Reusable agent organisation blueprints for subaccounts</p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button
             onClick={openLibrary}
