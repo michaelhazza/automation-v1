@@ -549,9 +549,6 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.agents.view') && (
                 <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
               )}
-              {hasOrgPerm('org.subaccounts.edit') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
-              )}
               {hasOrgPerm('org.agents.view') && (
                 <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
               )}
@@ -559,6 +556,9 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
               <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+              {hasOrgPerm('org.subaccounts.edit') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
+              )}
             </>
           )}
 

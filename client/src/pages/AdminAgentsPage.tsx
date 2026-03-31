@@ -227,7 +227,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['team-templates', 'Team Templates'], ['heartbeat', 'Heartbeat']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as PageTab)}
