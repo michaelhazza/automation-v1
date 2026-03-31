@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import TeamHeartbeatView from '../components/TeamHeartbeatView';
 import SystemCompanyTemplatesPage from './SystemCompanyTemplatesPage';
 
 interface SystemAgent {
@@ -45,7 +46,7 @@ function PublishedBadge({ published }: { published: boolean }) {
   );
 }
 
-type ActiveTab = 'list' | 'hierarchy' | 'company-templates';
+type ActiveTab = 'list' | 'hierarchy' | 'company-templates' | 'heartbeat';
 
 const ROLE_CLS: Record<string, string> = {
   ceo: 'bg-amber-100 text-amber-800',
@@ -119,7 +120,7 @@ function HierarchyTreeRow({
   );
 }
 
-const VALID_TABS = new Set<string>(['list', 'hierarchy', 'company-templates']);
+const VALID_TABS = new Set<string>(['list', 'hierarchy', 'company-templates', 'heartbeat']);
 
 export default function SystemAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
@@ -303,7 +304,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['hierarchy', 'Team Templates'], ['company-templates', 'Company Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['hierarchy', 'Team Templates'], ['company-templates', 'Company Templates'], ['heartbeat', 'Heartbeat']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as ActiveTab)}
@@ -362,6 +363,32 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Company Templates Tab */}
       {activeTab === 'company-templates' && <SystemCompanyTemplatesPage user={user} />}
+
+      {/* Heartbeat Tab */}
+      {activeTab === 'heartbeat' && (
+        <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <h2 className="text-[16px] font-extrabold text-slate-900 tracking-tight m-0 flex items-center gap-2 mb-1">
+            <span>💓</span> Default Schedules
+          </h2>
+          <p className="text-[13px] text-slate-500 mb-5">Default cron schedules assigned to system agents. Heartbeat intervals are configured at the organisation level when agents are installed.</p>
+          <div className="flex flex-col gap-2">
+            {agents.filter(a => (a as any).defaultScheduleCron).length === 0 ? (
+              <div className="text-[13px] text-slate-400 py-4 text-center">No system agents have default schedules configured.</div>
+            ) : (
+              agents.filter(a => (a as any).defaultScheduleCron).map(agent => (
+                <div key={agent.id} className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-lg">
+                  <span className="text-[15px]">🤖</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-slate-900">{agent.name}</div>
+                    <div className="text-[11px] text-slate-500">{agent.agentRole ?? 'No role'}</div>
+                  </div>
+                  <code className="text-[12px] bg-white border border-slate-200 px-2 py-1 rounded text-slate-600">{(agent as any).defaultScheduleCron}</code>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* List Tab */}
       {activeTab === 'list' && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User, getActiveClientId, getActiveClientName } from '../lib/auth';
+import TeamHeartbeatView, { type HeartbeatAgent } from '../components/TeamHeartbeatView';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
   const activeClientName = getActiveClientName();
 
   const [agents, setAgents] = useState<Omit<AgentNode, 'children'>[]>([]);
+  const [heartbeatAgents, setHeartbeatAgents] = useState<HeartbeatAgent[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Pan & zoom
@@ -148,9 +150,19 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
   useEffect(() => {
     if (!activeClientId) return;
     setLoading(true);
-    api.get(`/api/subaccounts/${activeClientId}/agents`)
-      .then(({ data }) => setAgents(data))
-      .catch(() => setAgents([]))
+    Promise.all([
+      api.get(`/api/subaccounts/${activeClientId}/agents`),
+      api.get('/api/agents').catch(() => ({ data: [] })),
+    ]).then(([saRes, orgRes]) => {
+      setAgents(saRes.data);
+      // Map org agents to heartbeat format
+      setHeartbeatAgents((orgRes.data as any[]).map((a: any) => ({
+        id: a.id, name: a.name, icon: a.icon,
+        heartbeatEnabled: a.heartbeatEnabled,
+        heartbeatIntervalHours: a.heartbeatIntervalHours,
+        heartbeatOffsetHours: a.heartbeatOffsetHours,
+      })));
+    }).catch(() => { setAgents([]); setHeartbeatAgents([]); })
       .finally(() => setLoading(false));
   }, [activeClientId]);
 
@@ -250,7 +262,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
   }
 
   return (
-    <div className="animate-[fadeIn_0.2s_ease-out_both] flex flex-col h-[calc(100vh-120px)]">
+    <div className="animate-[fadeIn_0.2s_ease-out_both] flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 shrink-0">
         <div>
@@ -273,8 +285,8 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        className={`flex-1 relative overflow-hidden bg-white border border-slate-200 rounded-xl ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-        style={{ userSelect: 'none' }}
+        className={`relative overflow-hidden bg-white border border-slate-200 rounded-xl ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        style={{ userSelect: 'none', height: 'min(500px, calc(100vh - 300px))' }}
       >
         <div
           style={{
@@ -346,6 +358,9 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
           })}
         </div>
       </div>
+
+      {/* Heartbeat Schedule */}
+      <TeamHeartbeatView agents={heartbeatAgents} />
     </div>
   );
 }

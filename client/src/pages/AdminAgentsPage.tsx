@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import TeamHeartbeatView from '../components/TeamHeartbeatView';
 
 const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
 
@@ -14,10 +15,14 @@ interface Agent {
   id: string;
   name: string;
   description: string | null;
+  icon: string | null;
   status: string;
   modelId: string;
   systemAgentId: string | null;
   isSystemManaged: boolean;
+  heartbeatEnabled: boolean;
+  heartbeatIntervalHours: number | null;
+  heartbeatOffsetHours: number;
   dataSources?: { id: string }[];
   dataSourceCount?: number;
   parentAgentId: string | null;
@@ -30,7 +35,7 @@ interface TreeNode extends Agent {
   children: TreeNode[];
 }
 
-type PageTab = 'list' | 'team-templates';
+type PageTab = 'list' | 'team-templates' | 'heartbeat';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -109,7 +114,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : 'list';
+  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : tabParam === 'heartbeat' ? 'heartbeat' : 'list';
   const switchTab = (tab: PageTab) => setSearchParams(tab === 'list' ? {} : { tab });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -222,7 +227,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['team-templates', 'Team Templates'], ['heartbeat', 'Heartbeat']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as PageTab)}
@@ -242,6 +247,16 @@ export default function AdminAgentsPage({ user }: { user: User }) {
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading templates...</div>}>
           <AdminAgentTemplatesPage user={user} embedded />
         </Suspense>
+      )}
+
+      {/* Heartbeat Tab */}
+      {pageTab === 'heartbeat' && (
+        <TeamHeartbeatView agents={agents.map(a => ({
+          id: a.id, name: a.name, icon: a.icon,
+          heartbeatEnabled: a.heartbeatEnabled,
+          heartbeatIntervalHours: a.heartbeatIntervalHours,
+          heartbeatOffsetHours: a.heartbeatOffsetHours,
+        }))} compact />
       )}
 
       {/* List Tab */}
