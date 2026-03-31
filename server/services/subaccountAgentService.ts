@@ -11,13 +11,14 @@ export const subaccountAgentService = {
         agentName: agents.name,
         agentSlug: agents.slug,
         agentDescription: agents.description,
+        agentIcon: agents.icon,
         agentStatus: agents.status,
       })
       .from(subaccountAgents)
       .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
       .where(and(eq(subaccountAgents.organisationId, organisationId), eq(subaccountAgents.subaccountId, subaccountId)));
 
-    return rows.map(({ link, agentName, agentSlug, agentDescription, agentStatus }) => ({
+    return rows.map(({ link, agentName, agentSlug, agentDescription, agentIcon, agentStatus }) => ({
       id: link.id,
       agentId: link.agentId,
       subaccountId: link.subaccountId,
@@ -46,6 +47,7 @@ export const subaccountAgentService = {
         name: agentName,
         slug: agentSlug,
         description: agentDescription,
+        icon: agentIcon,
         status: agentStatus,
       },
     }));

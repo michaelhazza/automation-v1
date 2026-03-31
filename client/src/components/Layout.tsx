@@ -106,10 +106,11 @@ function buildBreadcrumbs(pathname: string, clientName: string | null) {
 
 // ── NavItem ────────────────────────────────────────────────────────────────
 function NavItem({
-  to, icon, label, badge, exact = false,
-}: { to: string; icon: React.ReactNode; label: string; badge?: number; exact?: boolean }) {
+  to, icon, label, badge, badgeLabel, exact = false,
+}: { to: string; icon: React.ReactNode; label: string; badge?: number; badgeLabel?: string; exact?: boolean }) {
   const { pathname } = useLocation();
-  const active = exact ? pathname === to : pathname === to || pathname.startsWith(to + '/');
+  const baseTo = to.split('?')[0]; // ignore query params for matching
+  const active = exact ? pathname === baseTo : pathname === baseTo || pathname.startsWith(baseTo + '/');
   return (
     <Link
       to={to}
@@ -120,20 +121,38 @@ function NavItem({
       }`}
     >
       <span className={active ? 'text-indigo-300' : ''}>{icon}</span>
-      <span className="flex-1">{label}</span>
-      {!!badge && badge > 0 && (
+      <span className="flex-1 truncate">{label}</span>
+      {badgeLabel ? (
+        <span className="flex items-center gap-1 text-[11px] font-semibold text-blue-400">
+          <span className="w-[6px] h-[6px] rounded-full bg-blue-400 animate-pulse" />
+          {badgeLabel}
+        </span>
+      ) : !!badge && badge > 0 ? (
         <span className="min-w-[18px] h-[18px] rounded-[9px] px-[5px] bg-indigo-500 text-white text-[10px] font-bold flex items-center justify-center">
           {badge > 99 ? '99+' : badge}
         </span>
-      )}
+      ) : null}
     </Link>
   );
 }
 
-function NavSection({ label }: { label: string }) {
+// ── NavSectionAction (+ button) ────────────────────────────────────────────
+function NavSectionAction({ to }: { to: string }) {
   return (
-    <div className="px-[18px] pt-[14px] pb-1 text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em]">
-      {label}
+    <Link
+      to={to}
+      className="w-[16px] h-[16px] flex items-center justify-center rounded text-slate-500 hover:text-slate-300 hover:bg-white/[0.08] no-underline transition-colors text-[13px] leading-none"
+    >
+      +
+    </Link>
+  );
+}
+
+function NavSection({ label, action }: { label: string; action?: React.ReactNode }) {
+  return (
+    <div className="px-[18px] pt-[14px] pb-1 text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] flex items-center justify-between">
+      <span>{label}</span>
+      {action}
     </div>
   );
 }
@@ -163,6 +182,12 @@ export default function Layout({ user, children }: LayoutProps) {
   // Badges
   const [reviewCount, setReviewCount] = useState(0);
   const [liveAgentCount, setLiveAgentCount] = useState(0);
+
+  // Dynamic nav lists
+  interface NavProject { id: string; name: string; color: string; status: string; }
+  interface NavAgent { id: string; agentId: string; agent: { name: string; icon: string | null; status: string }; agentRole: string | null; isActive: boolean; }
+  const [navProjects, setNavProjects] = useState<NavProject[]>([]);
+  const [navAgents, setNavAgents] = useState<NavAgent[]>([]);
 
   // Budget alert
   interface BudgetAlert { pct: number; spent: number; limit: number; }
@@ -225,6 +250,17 @@ export default function Layout({ user, children }: LayoutProps) {
     fetch();
     const t = setInterval(fetch, 15_000);
     return () => clearInterval(t);
+  }, [activeClientId]);
+
+  // Dynamic nav: projects + agents for active client
+  useEffect(() => {
+    if (!activeClientId) { setNavProjects([]); setNavAgents([]); return; }
+    api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data }) =>
+      setNavProjects((data as NavProject[]).filter(p => p.status === 'active').slice(0, 12))
+    ).catch(() => setNavProjects([]));
+    api.get(`/api/subaccounts/${activeClientId}/agents`).then(({ data }) =>
+      setNavAgents((data as NavAgent[]).filter(a => a.isActive))
+    ).catch(() => setNavAgents([]));
   }, [activeClientId]);
 
   // Budget alert — check monthly spend vs limit for active client
@@ -428,36 +464,87 @@ export default function Layout({ user, children }: LayoutProps) {
         </div>
 
         {/* Navigation */}
-        <div className="flex-1 py-1">
+        <div className="flex-1 py-1 overflow-y-auto overflow-x-hidden">
 
-          <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
-
-          {/* ── Client section — when subaccount is selected */}
+          {/* ── Top controls — always visible when client selected */}
           {hasOrgContext && activeClientId && (
             <>
-              <NavSection label="Client" />
+              <NavItem to={`/admin/subaccounts/${activeClientId}/review-queue?new=1`} icon={<Icons.bolt />} label="New Issue" />
+              <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined} />
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/review-queue`} icon={<Icons.inbox />} label="Inbox" badge={reviewCount} />
               )}
-              <NavItem to="/projects" icon={<Icons.projects />} label="Projects" />
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to="/agents" icon={<Icons.agents />} label="Agents" badge={liveAgentCount} />
+            </>
+          )}
+
+          {/* ── Fallback dashboard when no client selected */}
+          {!(hasOrgContext && activeClientId) && (
+            <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" />
+          )}
+
+          {/* ── Work section */}
+          {hasOrgContext && activeClientId && (
+            <>
+              <NavSection label="Work" />
+              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
               )}
               {hasOrgPerm('org.processes.view') && (
                 <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
               )}
-              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/workspace`} icon={<Icons.tasks />} label="Tasks" />
-              )}
               {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
+              )}
+            </>
+          )}
+
+          {/* ── Projects section — dynamic list */}
+          {hasOrgContext && activeClientId && (
+            <>
+              <NavSection label="Projects" action={<NavSectionAction to="/projects?new=1" />} />
+              {navProjects.length === 0 && (
+                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No projects yet</div>
+              )}
+              {navProjects.map((p) => (
+                <NavItem
+                  key={p.id}
+                  to={`/projects/${p.id}`}
+                  icon={<span className="w-[10px] h-[10px] rounded-full shrink-0" style={{ background: p.color }} />}
+                  label={p.name}
+                />
+              ))}
+            </>
+          )}
+
+          {/* ── Agents section — dynamic list */}
+          {hasOrgContext && activeClientId && hasOrgPerm('org.agents.view') && (
+            <>
+              <NavSection label="Agents" action={<NavSectionAction to={`/admin/subaccounts/${activeClientId}/agents?load=1`} />} />
+              {navAgents.length === 0 && (
+                <div className="px-[18px] py-1 text-[11px] text-slate-600 italic">No agents yet</div>
+              )}
+              {navAgents.map((a) => (
+                <NavItem
+                  key={a.id}
+                  to={`/agents/${a.agentId}`}
+                  icon={a.agent.icon ? <span className="text-[13px] shrink-0 leading-none">{a.agent.icon}</span> : <Icons.agents />}
+                  label={a.agent.name}
+                />
+              ))}
+            </>
+          )}
+
+          {/* ── Company section */}
+          {hasOrgContext && activeClientId && (
+            <>
+              <NavSection label="Company" />
+              {hasOrgPerm('org.subaccounts.edit') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage Client" />
               )}
               {hasOrgPerm('org.subaccounts.view') && (
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
-              {hasOrgPerm('org.subaccounts.edit') && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage Client" />
-              )}
+              <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
             </>
           )}
 
