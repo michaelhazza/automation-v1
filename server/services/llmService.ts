@@ -172,29 +172,31 @@ export async function executeTriggerredProcess(
 
   const { queueService } = await import('./queueService.js');
 
-  const [execution] = await db
-    .insert(executions)
-    .values({
-      organisationId,
-      processId,
-      triggeredByUserId: userId,
-      subaccountId: options?.subaccountId ?? null,
-      status: 'pending',
-      inputData: inputData as Record<string, unknown>,
-      engineType: 'agent_triggered',
-      isTestExecution: false,
-      triggerType: options?.triggerType ?? 'agent',
-      triggerSourceId: options?.triggerSourceId ?? null,
-      resolvedConfig: options?.configOverrides ?? null,
-      retryCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .returning();
-
-  await db.insert(executionPayloads)
-    .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
-    .onConflictDoNothing();
+  const [execution] = await db.transaction(async (tx) => {
+    const [exec] = await tx
+      .insert(executions)
+      .values({
+        organisationId,
+        processId,
+        triggeredByUserId: userId,
+        subaccountId: options?.subaccountId ?? null,
+        status: 'pending',
+        inputData: inputData as Record<string, unknown>,
+        engineType: 'agent_triggered',
+        isTestExecution: false,
+        triggerType: options?.triggerType ?? 'agent',
+        triggerSourceId: options?.triggerSourceId ?? null,
+        resolvedConfig: options?.configOverrides ?? null,
+        retryCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    await tx.insert(executionPayloads)
+      .values({ executionId: exec.id, processSnapshot: process as unknown as Record<string, unknown> })
+      .onConflictDoNothing();
+    return [exec];
+  });
 
   await queueService.enqueueExecution(execution.id);
 

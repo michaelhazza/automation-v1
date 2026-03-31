@@ -117,8 +117,6 @@ export class ProcessService {
       .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
-    if (!process.workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
-    if (!process.workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) update.name = data.name;
@@ -145,7 +143,6 @@ export class ProcessService {
       .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId), isNull(processes.deletedAt)));
 
     if (!process) throw { statusCode: 404, message: 'Process not found' };
-    if (!process.workflowEngineId) throw { statusCode: 400, message: 'Process has no workflow engine configured' };
 
     const now = new Date();
     await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(eq(processes.id, id));

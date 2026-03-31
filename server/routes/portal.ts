@@ -290,27 +290,29 @@ router.post(
         return;
       }
 
-      const [execution] = await db
-        .insert(executions)
-        .values({
-          organisationId: process.organisationId ?? req.orgId!,
-          processId,
-          triggeredByUserId: req.user!.id,
-          subaccountId: req.params.subaccountId,
-          status: 'pending',
-          inputData: inputData ?? null,
-          engineType: engine.engineType,
-          isTestExecution: false,
-          notifyOnComplete: notifyOnComplete ?? false,
-          retryCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning();
-
-      await db.insert(executionPayloads)
-        .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
-        .onConflictDoNothing();
+      const [execution] = await db.transaction(async (tx) => {
+        const [exec] = await tx
+          .insert(executions)
+          .values({
+            organisationId: process.organisationId ?? req.orgId!,
+            processId,
+            triggeredByUserId: req.user!.id,
+            subaccountId: req.params.subaccountId,
+            status: 'pending',
+            inputData: inputData ?? null,
+            engineType: engine.engineType,
+            isTestExecution: false,
+            notifyOnComplete: notifyOnComplete ?? false,
+            retryCount: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+        await tx.insert(executionPayloads)
+          .values({ executionId: exec.id, processSnapshot: process as unknown as Record<string, unknown> })
+          .onConflictDoNothing();
+        return [exec];
+      });
 
       try {
         await queueService.enqueueExecution(execution.id);
