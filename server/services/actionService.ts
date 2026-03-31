@@ -158,7 +158,7 @@ export const actionService = {
       skipped: 'skipped_duplicate',
     };
 
-    const eventType = eventMap[newStatus] ?? newStatus;
+    const eventType = (eventMap[newStatus] ?? newStatus) as typeof actionEvents.eventType._.data;
     await this.emitEvent(actionId, organisationId, eventType, actorId, metadata);
   },
 
@@ -253,7 +253,7 @@ export const actionService = {
     ];
 
     if (statusFilter) {
-      conditions.push(eq(actions.status, statusFilter));
+      conditions.push(eq(actions.status, statusFilter as typeof actions.status._.data));
     }
 
     return db
@@ -281,7 +281,7 @@ export const actionService = {
   async emitEvent(
     actionId: string,
     organisationId: string,
-    eventType: string,
+    eventType: typeof actionEvents.eventType._.data,
     actorId?: string,
     metadata?: Record<string, unknown>
   ): Promise<void> {

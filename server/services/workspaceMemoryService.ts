@@ -392,7 +392,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       LIMIT ${VECTOR_SEARCH_LIMIT}
     `);
 
-    return (rows.rows as Array<{ id: string; content: string; similarity: number }>)
+    return (Array.from(rows) as Array<{ id: string; content: string; similarity: number }>)
       .filter(r => r.similarity >= VECTOR_SIMILARITY_THRESHOLD);
   },
 

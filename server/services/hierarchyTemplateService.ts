@@ -368,7 +368,7 @@ export const hierarchyTemplateService = {
           eq(subaccountAgents.subaccountId, subaccountId),
           eq(subaccountAgents.organisationId, organisationId)
         ));
-      const withParent = existing.filter(r => r.parentSubaccountAgentId !== null);
+      const withParent = existing.filter((r: { parentSubaccountAgentId: string | null }) => r.parentSubaccountAgentId !== null);
       if (withParent.length > 0) {
         await tx.update(subaccountAgents)
           .set({ parentSubaccountAgentId: null, updatedAt: new Date() })
@@ -517,6 +517,7 @@ export const hierarchyTemplateService = {
       }
 
       // Store mapping for hierarchy resolution
+      if (!subAgentLink) continue;
       slotToSubaccountAgentId.set(slot.id, subAgentLink.id);
     }
 

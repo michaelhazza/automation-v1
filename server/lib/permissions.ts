@@ -41,6 +41,9 @@ export const ORG_PERMISSIONS = {
   SUBACCOUNTS_DELETE: 'org.subaccounts.delete',
   // Permission sets
   PERMISSION_SETS_MANAGE: 'org.permission_sets.manage',
+  // Settings / billing / usage
+  SETTINGS_VIEW: 'org.settings.view',
+  SETTINGS_EDIT: 'org.settings.edit',
   // AI Agents
   AGENTS_VIEW: 'org.agents.view',
   AGENTS_CREATE: 'org.agents.create',
@@ -129,6 +132,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.SUBACCOUNTS_DELETE, description: 'Delete subaccounts',              groupName: 'org.subaccounts' },
   // org.permission_sets
   { key: ORG_PERMISSIONS.PERMISSION_SETS_MANAGE, description: 'Manage permission sets',      groupName: 'org.permission_sets' },
+  // org.settings
+  { key: ORG_PERMISSIONS.SETTINGS_VIEW, description: 'View organisation settings and usage', groupName: 'org.settings' },
+  { key: ORG_PERMISSIONS.SETTINGS_EDIT, description: 'Edit organisation settings and budgets', groupName: 'org.settings' },
   // org.agents
   { key: ORG_PERMISSIONS.AGENTS_VIEW,   description: 'View AI agents',             groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_CREATE, description: 'Create AI agents',           groupName: 'org.agents' },

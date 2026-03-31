@@ -74,7 +74,7 @@ function serializeError(err: unknown): { message: string; name: string; stack?: 
 
 async function withAdvisoryLock(lockId: number, fn: () => Promise<void>): Promise<void> {
   const result = await db.execute(sql`SELECT pg_try_advisory_lock(${lockId}) AS acquired`);
-  const acquired = (result.rows?.[0] as { acquired?: boolean } | undefined)?.acquired;
+  const acquired = (Array.from(result)[0] as { acquired?: boolean } | undefined)?.acquired;
   if (!acquired) return; // another instance is running this job
   try {
     await fn();

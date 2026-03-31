@@ -11,6 +11,7 @@ export interface ExecutionResult {
   result?: unknown;
   error?: string;
   errorCode?: string;
+  durationMs?: number;
 }
 
 export interface ExecutionAdapter {

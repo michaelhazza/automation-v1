@@ -65,7 +65,7 @@ router.post(
   async (req, res) => {
     try {
       const { edits } = req.body;
-      const result = await reviewService.approveItem(req.params.id, req.orgId!, req.userId!, edits);
+      const result = await reviewService.approveItem(req.params.id, req.orgId!, req.user!.id, edits);
       // Emit review count change to subaccount listeners
       const subaccountId = req.params.subaccountId ?? (result as Record<string, unknown>)?.subaccountId;
       if (subaccountId) emitSubaccountUpdate(String(subaccountId), 'review:item_updated', { action: 'approved' });
@@ -85,7 +85,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.REVIEW_APPROVE),
   async (req, res) => {
     try {
-      const result = await reviewService.rejectItem(req.params.id, req.orgId!, req.userId!);
+      const result = await reviewService.rejectItem(req.params.id, req.orgId!, req.user!.id);
       const subaccountId = req.params.subaccountId ?? (result as Record<string, unknown>)?.subaccountId;
       if (subaccountId) emitSubaccountUpdate(String(subaccountId), 'review:item_updated', { action: 'rejected' });
       res.json(result);
@@ -109,7 +109,7 @@ router.post(
         res.status(400).json({ error: 'ids (array) is required' });
         return;
       }
-      const result = await reviewService.bulkApprove(ids, req.orgId!, req.userId!);
+      const result = await reviewService.bulkApprove(ids, req.orgId!, req.user!.id);
       res.json(result);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
@@ -131,7 +131,7 @@ router.post(
         res.status(400).json({ error: 'ids (array) is required' });
         return;
       }
-      const result = await reviewService.bulkReject(ids, req.orgId!, req.userId!);
+      const result = await reviewService.bulkReject(ids, req.orgId!, req.user!.id);
       res.json(result);
     } catch (err: unknown) {
       const e = err as { statusCode?: number; message?: string };
