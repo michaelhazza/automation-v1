@@ -546,6 +546,9 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && activeClientId && (
             <>
               <NavSection label="Company" />
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
+              )}
               {hasOrgPerm('org.subaccounts.edit') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
               )}

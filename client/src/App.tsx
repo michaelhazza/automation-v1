@@ -51,6 +51,7 @@ const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
+const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
 
 function PageLoader() {
@@ -200,6 +201,9 @@ export default function App() {
           {/* Projects */}
           <Route path="/projects" element={<Navigate to="/" replace />} />
           <Route path="/projects/:id" element={<ProjectDetailPage user={user!} />} />
+
+          {/* Org Chart */}
+          <Route path="/org-chart" element={<OrgChartPage user={user!} />} />
 
           {/* AI Agents */}
           <Route path="/agents" element={<Navigate to="/" replace />} />
