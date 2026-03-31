@@ -1,10 +1,12 @@
-# Phase 1 & Phase 2 Design Specification (v2)
+# Phase 1 & Phase 2 Design Specification (v3 — Final)
 
 **Date:** 31 March 2026
-**Status:** Implementation-ready (approved with improvements)
+**Status:** Ready to build
 **Scope:** Memory quality + entities + provider fallback (P1) → Vector search + event triggers (P2)
 
 **v2 changes:** Min content gate, entity normalization + confidence filter, provider timeout guard, vector recency cap + similarity threshold, trigger rate cap + dry run mode.
+
+**v3 changes:** Entity attribute cap (max 10 keys), provider cooldown map (skip recently-failed providers), empty query context guard, rate cap soft warning at 70%, lightweight observability logs.
 
 ---
 
@@ -141,6 +143,12 @@ if ((entity.confidence ?? 0) < MIN_ENTITY_CONFIDENCE) continue;
 
 **Upsert on normalized name** — increment `mention_count`, merge `attributes`, preserve `displayName`.
 
+**Attribute bloat guard** — cap at 10 keys per entity to prevent unbounded growth:
+```typescript
+const merged = { ...existing.attributes, ...newAttributes };
+const capped = Object.fromEntries(Object.entries(merged).slice(0, MAX_ENTITY_ATTRIBUTES));
+```
+
 **Prompt injection** — top 10 entities by mention_count wrapped in `<workspace-entities>`.
 
 ### Files Modified
@@ -150,7 +158,7 @@ if ((entity.confidence ?? 0) < MIN_ENTITY_CONFIDENCE) continue;
 | `server/db/schema/workspaceEntities.ts` | **New** |
 | `server/services/workspaceMemoryService.ts` | `extractEntities()` + `getEntitiesForPrompt()` |
 | `server/services/agentExecutionService.ts` | Call extraction, inject into prompt |
-| `server/config/limits.ts` | `MAX_PROMPT_ENTITIES=10`, `MIN_ENTITY_CONFIDENCE=0.7` |
+| `server/config/limits.ts` | `MAX_PROMPT_ENTITIES=10`, `MIN_ENTITY_CONFIDENCE=0.7`, `MAX_ENTITY_ATTRIBUTES=10` |
 
 ---
 
@@ -176,11 +184,32 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
 }
 ```
 
+**Provider cooldown map** — skip recently-failed providers to avoid repeated slow failures:
+```typescript
+const providerCooldowns: Map<string, number> = new Map(); // provider → timestamp
+const PROVIDER_COOLDOWN_MS = 60000; // 60s
+
+function isProviderCoolingDown(provider: string): boolean {
+  const cooldownUntil = providerCooldowns.get(provider);
+  if (!cooldownUntil) return false;
+  if (Date.now() > cooldownUntil) {
+    providerCooldowns.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+// Called after exhausting retries for a provider:
+providerCooldowns.set(provider, Date.now() + PROVIDER_COOLDOWN_MS);
+```
+
 **Retry-fallback loop** replaces step 8 in `routeCall()`:
 - Chain: Anthropic → OpenAI → Gemini
+- Skip providers in cooldown (recently failed)
 - 2 retries per provider with backoff [1s, 3s]
 - Each call wrapped in `withTimeout(call, 30000)`
 - Non-retryable errors (auth, bad request) propagate immediately
+- After exhausting retries, provider enters 60s cooldown
 - Audit record logs actual provider/model used + fallback metadata
 
 **Model mapping:**
@@ -194,7 +223,7 @@ google:  { 'claude-sonnet-4-6': 'gemini-2.0-flash',    'claude-haiku-4-5': 'gemi
 | File | Change |
 |---|---|
 | `server/services/llmRouter.ts` | `withTimeout()`, retry loop, fallback chain, model mapping |
-| `server/config/limits.ts` | `PROVIDER_CALL_TIMEOUT_MS=30000`, `PROVIDER_MAX_RETRIES=2` |
+| `server/config/limits.ts` | `PROVIDER_CALL_TIMEOUT_MS=30000`, `PROVIDER_MAX_RETRIES=2`, `PROVIDER_COOLDOWN_MS=60000` |
 
 ---
 
@@ -222,6 +251,13 @@ CREATE INDEX idx_memory_entries_recent
 **New file: `server/lib/embeddings.ts`** — wraps OpenAI `text-embedding-3-small` (1536 dims, ~$0.02/1M tokens).
 
 **Embed at insert time** — batch call in `extractRunInsights()`. Non-fatal on failure.
+
+**Empty query context guard** — skip vector search for weak/empty context:
+```typescript
+if (!taskContext || taskContext.length < 20) {
+  return []; // forces fallback to compiled summary
+}
+```
 
 **Semantic retrieval:**
 ```sql
@@ -252,7 +288,7 @@ If empty after filtering → graceful fallback to compiled summary.
 | `server/db/schema/workspaceMemories.ts` | Add `embedding` column |
 | `server/services/workspaceMemoryService.ts` | Embed at insert, `getRelevantMemories()`, update prompt builder |
 | `server/services/agentExecutionService.ts` | Pass task context |
-| `server/config/limits.ts` | `VECTOR_SIMILARITY_THRESHOLD=0.75`, `VECTOR_SEARCH_RECENCY_DAYS=90` |
+| `server/config/limits.ts` | `VECTOR_SIMILARITY_THRESHOLD=0.75`, `VECTOR_SEARCH_RECENCY_DAYS=90`, `MIN_QUERY_CONTEXT_LENGTH=20` |
 | `.env.example` | `OPENAI_API_KEY` |
 
 ---
@@ -290,12 +326,14 @@ CREATE TABLE agent_triggers (
 
 `checkAndFire(subaccountId, orgId, eventType, eventData)`:
 1. **Global rate cap** — count triggered runs in last minute, reject if >= `MAX_TRIGGERED_RUNS_PER_MINUTE`
+   - **Soft warning at 70%**: log `console.warn` when count >= 7 (early signal before suppression)
 2. Find active triggers matching event type
 3. **Cooldown check** — skip if fired within cooldown window
 4. **Filter match** — all filter keys must match event data
 5. **Self-trigger guard** — skip if triggering agent = target agent
 6. Enqueue via pg-boss
 7. Update trigger stats
+8. **Log execution count**: `console.info('[TriggerService] Fired N triggers for event_type in subaccount')`
 
 `dryRun(subaccountId, orgId, eventType, eventData)`:
 - Returns array of `{ triggerId, agentId, wouldFire, reason }` without executing
@@ -340,6 +378,25 @@ CREATE TABLE agent_triggers (
 
 ---
 
+## Cross-Cutting: Lightweight Observability Logs
+
+Three `console.info` lines added to existing services — no infrastructure, immediate visibility:
+
+```typescript
+// In workspaceMemoryService.extractRunInsights(), after insertion:
+console.info(`[WorkspaceMemory] Extracted ${values.length} entries (${values.filter(v => v.qualityScore >= threshold).length} above threshold) for subaccount ${subaccountId}`);
+
+// In workspaceMemoryService.extractEntities(), after processing:
+console.info(`[WorkspaceMemory] Extracted ${stored} entities (${skipped} below confidence) for subaccount ${subaccountId}`);
+
+// In triggerService.checkAndFire(), after firing:
+console.info(`[TriggerService] Fired ${fired} of ${triggers.length} triggers for ${eventType} in subaccount ${subaccountId}`);
+```
+
+These provide immediate debugging signal without OpenTelemetry.
+
+---
+
 ## Summary
 
 ### Phase 1 (~2 weeks)
@@ -347,15 +404,15 @@ CREATE TABLE agent_triggers (
 | Item | Effort | v2 Improvements |
 |---|---|---|
 | Memory quality scoring | 2-3 days | Min content gate (40 chars) |
-| Entity extraction | 3-4 days | Name normalization, confidence filter (0.7) |
-| Provider fallback | 2-3 days | Timeout guard (30s per call) |
+| Entity extraction | 3-4 days | Name normalization, confidence filter (0.7), attribute cap (10 keys) |
+| Provider fallback | 2-3 days | Timeout guard (30s), provider cooldown map (60s) |
 
 ### Phase 2 (~2 weeks)
 
 | Item | Effort | v2 Improvements |
 |---|---|---|
-| Vector memory search | 3-4 days | 90-day recency cap, similarity threshold (0.75) |
-| Event triggers | 4-5 days | Global rate cap (10/min), dry run mode |
+| Vector memory search | 3-4 days | 90-day recency cap, similarity threshold (0.75), empty context guard |
+| Event triggers | 4-5 days | Global rate cap (10/min), soft warning at 70%, dry run mode |
 
 ### All Config Constants
 
@@ -367,18 +424,21 @@ MIN_MEMORY_CONTENT_LENGTH = 40;
 MAX_PROMPT_ENTITIES = 10;
 MAX_ENTITIES_PER_EXTRACTION = 10;
 MIN_ENTITY_CONFIDENCE = 0.7;
+MAX_ENTITY_ATTRIBUTES = 10;
 
 // Phase 1C
 PROVIDER_MAX_RETRIES = 2;
 PROVIDER_BACKOFF_MS = [1000, 3000];
 PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'google'];
 PROVIDER_CALL_TIMEOUT_MS = 30000;
+PROVIDER_COOLDOWN_MS = 60000;
 
 // Phase 2A
 VECTOR_SEARCH_LIMIT = 5;
 VECTOR_SIMILARITY_THRESHOLD = 0.75;
 VECTOR_SEARCH_RECENCY_DAYS = 90;
 ABBREVIATED_SUMMARY_LENGTH = 500;
+MIN_QUERY_CONTEXT_LENGTH = 20;
 
 // Phase 2B
 MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
