@@ -76,11 +76,10 @@ export async function validateHierarchy(
 export function buildTree<T extends { id: string; sortOrder?: number | null; createdAt?: Date | null }>(
   items: T[],
   getParentId: (item: T) => string | null
-): (T & { children: T[] })[] {
-  type TreeNode = T & { children: TreeNode[] };
+): Array<TreeNode<T>> {
 
-  const nodeMap = new Map<string, TreeNode>();
-  const roots: TreeNode[] = [];
+  const nodeMap = new Map<string, TreeNode<T>>();
+  const roots: TreeNode<T>[] = [];
 
   // Create all nodes
   for (const item of items) {
@@ -100,7 +99,7 @@ export function buildTree<T extends { id: string; sortOrder?: number | null; cre
   }
 
   // Sort children: sortOrder ASC, then createdAt ASC
-  const sortNodes = (nodes: TreeNode[]) => {
+  const sortNodes = (nodes: TreeNode<T>[]) => {
     nodes.sort((a, b) => {
       const aSort = a.sortOrder ?? Infinity;
       const bSort = b.sortOrder ?? Infinity;
@@ -117,6 +116,8 @@ export function buildTree<T extends { id: string; sortOrder?: number | null; cre
   sortNodes(roots);
   return roots;
 }
+
+type TreeNode<T> = T & { children: TreeNode<T>[] };
 
 /**
  * Calculate the maximum depth of a tree.

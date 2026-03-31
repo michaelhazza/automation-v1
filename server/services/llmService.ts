@@ -1,6 +1,6 @@
 import { env } from '../lib/env.js';
 import { db } from '../db/index.js';
-import { processes, executions } from '../db/schema/index.js';
+import { processes, executions, executionPayloads } from '../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -182,7 +182,6 @@ export async function executeTriggerredProcess(
       status: 'pending',
       inputData: inputData as Record<string, unknown>,
       engineType: 'agent_triggered',
-      processSnapshot: process as unknown as Record<string, unknown>,
       isTestExecution: false,
       triggerType: options?.triggerType ?? 'agent',
       triggerSourceId: options?.triggerSourceId ?? null,
@@ -192,6 +191,10 @@ export async function executeTriggerredProcess(
       updatedAt: new Date(),
     })
     .returning();
+
+  await db.insert(executionPayloads)
+    .values({ executionId: execution.id, processSnapshot: process as unknown as Record<string, unknown> })
+    .onConflictDoNothing();
 
   await queueService.enqueueExecution(execution.id);
 

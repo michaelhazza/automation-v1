@@ -141,7 +141,7 @@ export default function TasksPage({ user: _user }: { user: User }) {
       {/* Grid / Empty */}
       {filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center text-center">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" className="bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>

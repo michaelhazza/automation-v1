@@ -194,7 +194,7 @@ export default function ExecutionHistoryPage({ user }: { user: User }) {
         </div>
       ) : executions.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 flex flex-col items-center text-center">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4" className="bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4 bg-[linear-gradient(135deg,#f5f3ff,#ede9fe)]">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
             </svg>
