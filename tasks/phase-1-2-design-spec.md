@@ -1,23 +1,10 @@
-# Phase 1 & Phase 2 Design Specification
+# Phase 1 & Phase 2 Design Specification (v2)
 
 **Date:** 31 March 2026
-**Status:** Implementation-ready spec
+**Status:** Implementation-ready (approved with improvements)
 **Scope:** Memory quality + entities + provider fallback (P1) → Vector search + event triggers (P2)
 
----
-
-## Scope
-
-**Phase 1 (Immediate):**
-- Memory quality scoring on entries
-- Basic entity extraction
-- Provider fallback + retry layer in llmRouter
-
-**Phase 2 (Next):**
-- Vector memory search via pgvector
-- Event-based triggers (task_created, task_moved, agent_completed)
-
-Everything else is deferred.
+**v2 changes:** Min content gate, entity normalization + confidence filter, provider timeout guard, vector recency cap + similarity threshold, trigger rate cap + dry run mode.
 
 ---
 
@@ -25,7 +12,7 @@ Everything else is deferred.
 
 ### What Changes
 
-Every memory entry extracted from a run gets scored 0.0–1.0 before insertion. Entries below the workspace threshold are stored but never promoted to summaries.
+Every memory entry gets scored 0.0–1.0 before insertion. A hard minimum content gate (40 chars) rejects trivially short entries before scoring. Entries below the workspace threshold are stored but never promoted to summaries.
 
 ### Database Changes
 
@@ -51,11 +38,12 @@ ALTER TABLE workspace_memories ADD COLUMN quality_threshold REAL NOT NULL DEFAUL
 
 **File:** `server/services/workspaceMemoryService.ts`
 
-Add scoring function (heuristic — no LLM call):
-
 ```typescript
 function scoreMemoryEntry(entry: { content: string; entryType: string }): number {
   const content = entry.content;
+
+  // Hard floor: trivially short content is always zero
+  if (content.length < MIN_MEMORY_CONTENT_LENGTH) return 0;
 
   const completeness = Math.min(content.length / 200, 1.0);
 
@@ -80,21 +68,22 @@ function scoreMemoryEntry(entry: { content: string; entryType: string }): number
 }
 ```
 
-**Modify `extractRunInsights()`** — add `qualityScore` to each entry value.
+**Modify `extractRunInsights()`** — add `qualityScore` to each entry.
 
-**Modify `regenerateSummary()`** — filter entries by quality threshold:
+**Modify `regenerateSummary()`** — filter by quality threshold:
 ```sql
 AND quality_score >= workspace_memories.quality_threshold
 ```
 
-Low-quality entries remain in DB (queryable for debugging) but never enter summaries.
+Low-quality entries remain in DB for debugging but never enter summaries.
 
 ### Files Modified
 
 | File | Change |
 |---|---|
 | `server/db/schema/workspaceMemories.ts` | Add columns |
-| `server/services/workspaceMemoryService.ts` | Add scoring, modify extraction + regeneration |
+| `server/services/workspaceMemoryService.ts` | Add scoring with min-length gate, modify extraction + regeneration |
+| `server/config/limits.ts` | `MIN_MEMORY_CONTENT_LENGTH = 40` |
 | `server/routes/workspaceMemory.ts` | Expose threshold in GET/PATCH |
 | Drizzle migration | ALTER TABLE |
 
@@ -104,7 +93,7 @@ Low-quality entries remain in DB (queryable for debugging) but never enter summa
 
 ### What Changes
 
-After each agent run, extract named entities (people, companies, products) alongside memory insights. Store with mention counts. Inject top entities into agent prompts.
+After each run, extract named entities with **name normalization** (prevents "John Smith" vs "john smith" fragmentation) and **confidence filtering** (rejects hallucinated entities below 0.7).
 
 ### Database Changes
 
@@ -115,9 +104,11 @@ CREATE TABLE workspace_entities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organisation_id UUID NOT NULL REFERENCES organisations(id),
   subaccount_id UUID NOT NULL REFERENCES subaccounts(id),
-  name TEXT NOT NULL,
-  entity_type TEXT NOT NULL, -- person | company | product | project | location | other
+  name TEXT NOT NULL,                    -- normalized (lowercase, trimmed)
+  display_name TEXT NOT NULL,            -- original casing
+  entity_type TEXT NOT NULL,             -- person | company | product | project | location | other
   attributes JSONB DEFAULT '{}',
+  confidence REAL,                       -- LLM confidence at extraction (0.0-1.0)
   mention_count INTEGER NOT NULL DEFAULT 1,
   first_seen_at TIMESTAMPTZ DEFAULT NOW(),
   last_seen_at TIMESTAMPTZ DEFAULT NOW(),
@@ -130,35 +121,36 @@ CREATE TABLE workspace_entities (
 
 ### Implementation
 
-**File:** `server/services/workspaceMemoryService.ts`
-
-Add `extractEntities()` — LLM call extracts JSON array of entities, upsert on conflict (increment mention_count, merge attributes).
-
-Add `getEntitiesForPrompt()` — returns top 10 entities by mention_count wrapped in `<workspace-entities>` boundary markers.
-
-**File:** `server/services/agentExecutionService.ts`
-
-Call `extractEntities()` after `extractRunInsights()` in finalization (step 10).
-Inject entities into system prompt after memory injection.
-
-### Config
-
+**Name normalization:**
 ```typescript
-export const MAX_PROMPT_ENTITIES = 10;
-export const MAX_ENTITIES_PER_EXTRACTION = 10;
-export const VALID_ENTITY_TYPES = ['person', 'company', 'product', 'project', 'location', 'other'] as const;
+function normalizeEntityName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
 ```
+
+**LLM prompt** (strict, with confidence):
+```
+Only include entities you are highly confident are real and explicitly mentioned.
+Do not infer or guess. Confidence: 1.0 = explicitly named, 0.7 = clearly referenced.
+```
+
+**Confidence filter:**
+```typescript
+if ((entity.confidence ?? 0) < MIN_ENTITY_CONFIDENCE) continue;
+```
+
+**Upsert on normalized name** — increment `mention_count`, merge `attributes`, preserve `displayName`.
+
+**Prompt injection** — top 10 entities by mention_count wrapped in `<workspace-entities>`.
 
 ### Files Modified
 
 | File | Change |
 |---|---|
 | `server/db/schema/workspaceEntities.ts` | **New** |
-| `server/db/schema/index.ts` | Export |
-| `server/services/workspaceMemoryService.ts` | Add entity functions |
+| `server/services/workspaceMemoryService.ts` | `extractEntities()` + `getEntitiesForPrompt()` |
 | `server/services/agentExecutionService.ts` | Call extraction, inject into prompt |
-| `server/config/limits.ts` | Entity constants |
-| `server/routes/workspaceMemory.ts` | Entity CRUD endpoints |
+| `server/config/limits.ts` | `MAX_PROMPT_ENTITIES=10`, `MIN_ENTITY_CONFIDENCE=0.7` |
 
 ---
 
@@ -166,64 +158,43 @@ export const VALID_ENTITY_TYPES = ['person', 'company', 'product', 'project', 'l
 
 ### What Changes
 
-When a provider call fails (rate limit, outage, timeout), retry with backoff, then fall back to the next provider. Currently a failure kills the run.
-
-### Design
-
-No database changes. Pure logic in `llmRouter.ts`.
-
-**Fallback chain:** Anthropic → OpenAI → Gemini
-**Retry policy:** 2 retries with backoff [1s, 3s] per provider before fallover.
+When a provider fails or **hangs**, retry with backoff, then fall back. A **30s timeout guard** wraps every call.
 
 ### Implementation
 
 **File:** `server/services/llmRouter.ts`
 
-Replace step 8 (provider call) with a retry-with-fallback loop:
-
+**Timeout guard:**
 ```typescript
-const providerChain = [ctx.provider, ...FALLBACK_CHAIN.filter(p => p !== ctx.provider)];
-
-for (const provider of providerChain) {
-  const model = provider === ctx.provider ? ctx.model : getFallbackModel(ctx.model, provider);
-  if (!model) continue;
-
-  for (let retry = 0; retry <= MAX_RETRIES; retry++) {
-    if (retry > 0) await sleep(BACKOFF_MS[retry - 1]);
-    try {
-      providerResponse = await adapter.call({ model, ... });
-      break outer;
-    } catch (err) {
-      if (!isRetryableError(err)) throw err;
-    }
-  }
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Provider call timed out after ${ms}ms (${label})`)), ms)
+    ),
+  ]);
 }
 ```
+
+**Retry-fallback loop** replaces step 8 in `routeCall()`:
+- Chain: Anthropic → OpenAI → Gemini
+- 2 retries per provider with backoff [1s, 3s]
+- Each call wrapped in `withTimeout(call, 30000)`
+- Non-retryable errors (auth, bad request) propagate immediately
+- Audit record logs actual provider/model used + fallback metadata
 
 **Model mapping:**
 ```typescript
-{
-  openai: { 'claude-sonnet-4-6': 'gpt-4o', 'claude-haiku-4-5': 'gpt-4o-mini' },
-  google: { 'claude-sonnet-4-6': 'gemini-2.0-flash', 'claude-haiku-4-5': 'gemini-2.0-flash-lite' },
-}
-```
-
-Audit record logs actual provider/model used + fallback metadata.
-
-### Config
-
-```typescript
-export const PROVIDER_MAX_RETRIES = 2;
-export const PROVIDER_BACKOFF_MS = [1000, 3000];
-export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'google'];
+openai:  { 'claude-sonnet-4-6': 'gpt-4o',             'claude-haiku-4-5': 'gpt-4o-mini' }
+google:  { 'claude-sonnet-4-6': 'gemini-2.0-flash',    'claude-haiku-4-5': 'gemini-2.0-flash-lite' }
 ```
 
 ### Files Modified
 
 | File | Change |
 |---|---|
-| `server/services/llmRouter.ts` | Retry loop, fallback chain, model mapping |
-| `server/config/limits.ts` | Fallback constants |
+| `server/services/llmRouter.ts` | `withTimeout()`, retry loop, fallback chain, model mapping |
+| `server/config/limits.ts` | `PROVIDER_CALL_TIMEOUT_MS=30000`, `PROVIDER_MAX_RETRIES=2` |
 
 ---
 
@@ -231,12 +202,7 @@ export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'google'];
 
 ### What Changes
 
-Replace "dump all memory" with semantic search. Find top-K most relevant memories for the current task. Keeps prompts lean as workspaces grow.
-
-### Prerequisites
-
-- Phase 1A (quality scoring)
-- `OPENAI_API_KEY` for embeddings
+Semantic search replaces "dump all memory". Results filtered by **similarity threshold** (0.75) and capped by **90-day recency window** to prevent unbounded scans.
 
 ### Database Changes
 
@@ -244,36 +210,50 @@ Replace "dump all memory" with semantic search. Find top-K most relevant memorie
 CREATE EXTENSION IF NOT EXISTS vector;
 ALTER TABLE workspace_memory_entries ADD COLUMN embedding vector(1536);
 CREATE INDEX idx_memory_entries_embedding
-  ON workspace_memory_entries USING hnsw (embedding vector_cosine_ops);
+  ON workspace_memory_entries USING hnsw (embedding vector_cosine_ops)
+  WITH (m = 16, ef_construction = 64);
+CREATE INDEX idx_memory_entries_recent
+  ON workspace_memory_entries (subaccount_id, created_at DESC)
+  WHERE embedding IS NOT NULL;
 ```
 
 ### Implementation
 
-**New file:** `server/lib/embeddings.ts` — wraps OpenAI `text-embedding-3-small`
+**New file: `server/lib/embeddings.ts`** — wraps OpenAI `text-embedding-3-small` (1536 dims, ~$0.02/1M tokens).
 
-**Modify `extractRunInsights()`** — generate embeddings at insert time (batch call).
+**Embed at insert time** — batch call in `extractRunInsights()`. Non-fatal on failure.
 
-**Add `getRelevantMemories()`** — pgvector cosine similarity search filtered by quality threshold.
+**Semantic retrieval:**
+```sql
+WHERE subaccount_id = $1
+  AND embedding IS NOT NULL
+  AND quality_score >= threshold
+  AND created_at > NOW() - INTERVAL '90 days'
+ORDER BY embedding <=> query_vector
+LIMIT 5
+```
 
-**Update `getMemoryForPrompt()`** — accepts optional `taskContext`. When provided:
-1. Semantic search for top 5 relevant entries
-2. Include abbreviated compiled summary as general context
-3. Fallback to full summary if no embeddings or no task context
+**Post-query filter:**
+```typescript
+const filtered = results.filter(r => r.similarity >= VECTOR_SIMILARITY_THRESHOLD);
+```
+If empty after filtering → graceful fallback to compiled summary.
 
-### Cost
-
-text-embedding-3-small: ~$0.02 per 1M tokens. ~$0.0001 per agent run. Negligible.
+**Updated `getMemoryForPrompt(taskContext?)`:**
+1. If task context → semantic search for top-K relevant entries + abbreviated summary
+2. If no results above threshold → fallback to full compiled summary
+3. If no task context → original behavior (full summary)
 
 ### Files
 
 | File | Change |
 |---|---|
 | `server/lib/embeddings.ts` | **New** |
-| `server/db/schema/workspaceMemories.ts` | Add embedding column |
-| `server/services/workspaceMemoryService.ts` | Embed at insert, semantic retrieval, updated prompt builder |
-| `server/services/agentExecutionService.ts` | Pass task context to memory prompt |
-| `server/config/limits.ts` | Vector search constants |
-| `.env.example` | OPENAI_API_KEY |
+| `server/db/schema/workspaceMemories.ts` | Add `embedding` column |
+| `server/services/workspaceMemoryService.ts` | Embed at insert, `getRelevantMemories()`, update prompt builder |
+| `server/services/agentExecutionService.ts` | Pass task context |
+| `server/config/limits.ts` | `VECTOR_SIMILARITY_THRESHOLD=0.75`, `VECTOR_SEARCH_RECENCY_DAYS=90` |
+| `.env.example` | `OPENAI_API_KEY` |
 
 ---
 
@@ -281,7 +261,7 @@ text-embedding-3-small: ~$0.02 per 1M tokens. ~$0.0001 per agent run. Negligible
 
 ### What Changes
 
-Agents fire on events: task_created, task_moved, agent_completed. With cooldowns and filters.
+Agents fire on events with **global rate cap** (10 triggered runs/minute/workspace) and **dry run mode** for testing without execution.
 
 ### Database Changes
 
@@ -292,8 +272,8 @@ CREATE TABLE agent_triggers (
   organisation_id UUID NOT NULL,
   subaccount_id UUID NOT NULL,
   subaccount_agent_id UUID NOT NULL,
-  event_type TEXT NOT NULL, -- task_created | task_moved | agent_completed
-  event_filter JSONB DEFAULT '{}',
+  event_type TEXT NOT NULL,          -- task_created | task_moved | agent_completed
+  event_filter JSONB DEFAULT '{}',   -- { "column": "In Progress" }
   cooldown_seconds INTEGER NOT NULL DEFAULT 60,
   is_active BOOLEAN DEFAULT true,
   last_triggered_at TIMESTAMPTZ,
@@ -306,46 +286,56 @@ CREATE TABLE agent_triggers (
 
 ### Implementation
 
-**New file:** `server/services/triggerService.ts`
+**New file: `server/services/triggerService.ts`**
 
 `checkAndFire(subaccountId, orgId, eventType, eventData)`:
-1. Find matching active triggers
-2. Check cooldown window
-3. Match event filter (all filter keys must match event data)
-4. Self-trigger guard (skip if triggering agent = target agent)
-5. Enqueue via pg-boss
-6. Update trigger stats
+1. **Global rate cap** — count triggered runs in last minute, reject if >= `MAX_TRIGGERED_RUNS_PER_MINUTE`
+2. Find active triggers matching event type
+3. **Cooldown check** — skip if fired within cooldown window
+4. **Filter match** — all filter keys must match event data
+5. **Self-trigger guard** — skip if triggering agent = target agent
+6. Enqueue via pg-boss
+7. Update trigger stats
 
-**Hook points (non-blocking .catch()):**
+`dryRun(subaccountId, orgId, eventType, eventData)`:
+- Returns array of `{ triggerId, agentId, wouldFire, reason }` without executing
+- Reasons: `cooldown_active`, `filter_mismatch`, `self_trigger`
+
+**Hook points** (non-blocking `.catch()`):
 - `taskService.ts` → task creation → `checkAndFire('task_created', ...)`
 - `taskService.ts` → task move → `checkAndFire('task_moved', ...)`
 - `agentExecutionService.ts` → run completed → `checkAndFire('agent_completed', ...)`
 
-**Job sender** wired via `setTriggerJobSender()` in `agentScheduleService.initialize()`.
+### Safety: 4-Layer Loop Prevention
 
-### Loop Prevention
-
-1. Self-trigger guard in checkAndFire
-2. Cooldown (60s default)
-3. Existing MAX_HANDOFF_DEPTH (5)
-4. Existing token budget limits per run
+1. **Self-trigger guard** — agent can't trigger itself
+2. **Cooldown** — 60s default per trigger
+3. **Global rate cap** — 10 triggered runs/min/workspace
+4. **Existing depth limit** — `MAX_HANDOFF_DEPTH = 5`
 
 ### API Routes
 
-**New file:** `server/routes/agentTriggers.ts` — CRUD (list, create, patch, delete)
-Permissions: `view_agents` for read, `manage_agents` for write.
+**New file: `server/routes/agentTriggers.ts`**
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/subaccounts/:id/triggers` | `view_agents` | List triggers |
+| POST | `/api/subaccounts/:id/triggers` | `manage_agents` | Create trigger |
+| PATCH | `/api/subaccounts/:id/triggers/:id` | `manage_agents` | Update trigger |
+| DELETE | `/api/subaccounts/:id/triggers/:id` | `manage_agents` | Soft delete |
+| POST | `/api/subaccounts/:id/triggers/dry-run` | `manage_agents` | Test trigger matching |
 
 ### Files
 
 | File | Change |
 |---|---|
 | `server/db/schema/agentTriggers.ts` | **New** |
-| `server/db/schema/index.ts` | Export |
-| `server/services/triggerService.ts` | **New** |
-| `server/routes/agentTriggers.ts` | **New** |
+| `server/services/triggerService.ts` | **New** — matching, firing, dry run, CRUD |
+| `server/routes/agentTriggers.ts` | **New** — API routes |
 | `server/services/taskService.ts` | Emit events |
-| `server/services/agentExecutionService.ts` | Emit agent_completed |
+| `server/services/agentExecutionService.ts` | Emit `agent_completed` |
 | `server/services/agentScheduleService.ts` | Wire job sender |
+| `server/config/limits.ts` | `MAX_TRIGGERED_RUNS_PER_MINUTE = 10` |
 | `server/index.ts` | Mount routes |
 
 ---
@@ -354,18 +344,45 @@ Permissions: `view_agents` for read, `manage_agents` for write.
 
 ### Phase 1 (~2 weeks)
 
-| Item | Effort |
-|---|---|
-| Memory quality scoring | 2-3 days |
-| Entity extraction | 3-4 days |
-| Provider fallback | 2-3 days |
+| Item | Effort | v2 Improvements |
+|---|---|---|
+| Memory quality scoring | 2-3 days | Min content gate (40 chars) |
+| Entity extraction | 3-4 days | Name normalization, confidence filter (0.7) |
+| Provider fallback | 2-3 days | Timeout guard (30s per call) |
 
 ### Phase 2 (~2 weeks)
 
-| Item | Effort |
-|---|---|
-| Vector memory search | 3-4 days |
-| Event triggers | 4-5 days |
+| Item | Effort | v2 Improvements |
+|---|---|---|
+| Vector memory search | 3-4 days | 90-day recency cap, similarity threshold (0.75) |
+| Event triggers | 4-5 days | Global rate cap (10/min), dry run mode |
+
+### All Config Constants
+
+```typescript
+// Phase 1A
+MIN_MEMORY_CONTENT_LENGTH = 40;
+
+// Phase 1B
+MAX_PROMPT_ENTITIES = 10;
+MAX_ENTITIES_PER_EXTRACTION = 10;
+MIN_ENTITY_CONFIDENCE = 0.7;
+
+// Phase 1C
+PROVIDER_MAX_RETRIES = 2;
+PROVIDER_BACKOFF_MS = [1000, 3000];
+PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'google'];
+PROVIDER_CALL_TIMEOUT_MS = 30000;
+
+// Phase 2A
+VECTOR_SEARCH_LIMIT = 5;
+VECTOR_SIMILARITY_THRESHOLD = 0.75;
+VECTOR_SEARCH_RECENCY_DAYS = 90;
+ABBREVIATED_SUMMARY_LENGTH = 500;
+
+// Phase 2B
+MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
+```
 
 ### New Dependencies
 
@@ -373,4 +390,4 @@ Permissions: `view_agents` for read, `manage_agents` for write.
 
 ### Replit Compatible
 
-All confirmed. pgvector on Neon. OpenAI embeddings via HTTP. Triggers via pg-boss.
+All confirmed. pgvector on Neon. Embeddings via HTTP. Triggers via pg-boss. No filesystem.
