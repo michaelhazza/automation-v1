@@ -641,6 +641,12 @@ export const agentService = {
       .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'Agent not found' };
 
+    // Draft agents require a masterPrompt before activation
+    // System-managed agents inherit their prompt at runtime, so they are exempt
+    if (!existing.isSystemManaged && !existing.masterPrompt?.trim()) {
+      throw { statusCode: 400, message: 'Cannot activate agent: masterPrompt is required. Add a prompt before activating.' };
+    }
+
     const [updated] = await db
       .update(agents)
       .set({ status: 'active', updatedAt: new Date() })

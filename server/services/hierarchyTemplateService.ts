@@ -7,7 +7,7 @@ import {
   agents,
   subaccountAgents,
 } from '../db/schema/index.js';
-import { buildTree, getMaxDepth, validateHierarchy } from './hierarchyService.js';
+import { buildTree, getMaxDepth } from './hierarchyService.js';
 
 // ---------------------------------------------------------------------------
 // Hierarchy Template Service
@@ -153,11 +153,20 @@ export const hierarchyTemplateService = {
     manifest: Record<string, unknown>;
   }) {
     const manifest = data.manifest;
+    if (!manifest || typeof manifest !== 'object') {
+      throw { statusCode: 400, message: 'Invalid manifest: must be a JSON object' };
+    }
+
     const company = manifest.company as Record<string, unknown> | undefined;
     const paperclipAgents = (company?.agents ?? manifest.agents ?? []) as Array<Record<string, unknown>>;
 
     if (!Array.isArray(paperclipAgents) || paperclipAgents.length === 0) {
-      throw { statusCode: 400, message: 'Manifest contains no agents' };
+      throw { statusCode: 400, message: 'Manifest contains no agents. Expected agents array in manifest.company.agents or manifest.agents.' };
+    }
+
+    // Log warning for very large imports
+    if (paperclipAgents.length > 200) {
+      console.warn(`[IMPORT] Large Paperclip import: ${paperclipAgents.length} agents for org ${organisationId}`);
     }
 
     // Load existing system agents and org agents for matching
@@ -329,6 +338,231 @@ export const hierarchyTemplateService = {
 
   // ── Apply Template to Subaccount ──────────────────────────────────────────
 
+  /**
+   * Core apply logic extracted so preview and real apply share identical code.
+   * Receives the Drizzle transaction (or db) to operate on.
+   */
+  async _applyCore(
+    tx: any,
+    templateId: string,
+    organisationId: string,
+    subaccountId: string,
+    mode: 'merge' | 'replace',
+    template: { version: number; slots: any[] }
+  ) {
+    // ── Concurrency: advisory lock per subaccount to prevent concurrent applies
+    // Hash subaccountId to a bigint for pg_advisory_xact_lock
+    let lockHash = 0;
+    for (let i = 0; i < subaccountId.length; i++) {
+      lockHash = ((lockHash << 5) - lockHash + subaccountId.charCodeAt(i)) | 0;
+    }
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockHash})`);
+
+    // Replace mode: clear hierarchy ONLY (not links, not agents)
+    let agentsRemovedFromHierarchy = 0;
+    if (mode === 'replace') {
+      const existing = await tx
+        .select({ id: subaccountAgents.id, parentSubaccountAgentId: subaccountAgents.parentSubaccountAgentId })
+        .from(subaccountAgents)
+        .where(and(
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.organisationId, organisationId)
+        ));
+      const withParent = existing.filter(r => r.parentSubaccountAgentId !== null);
+      if (withParent.length > 0) {
+        await tx.update(subaccountAgents)
+          .set({ parentSubaccountAgentId: null, updatedAt: new Date() })
+          .where(and(
+            eq(subaccountAgents.subaccountId, subaccountId),
+            eq(subaccountAgents.organisationId, organisationId)
+          ));
+        agentsRemovedFromHierarchy = withParent.length;
+      }
+    }
+
+    let agentsLinked = 0;
+    let agentsCreated = 0;
+    let agentsReused = 0;
+    let agentsDraft = 0;
+    let hierarchyUpdated = 0;
+
+    // Map slot id → subaccount agent id for hierarchy resolution
+    const slotToSubaccountAgentId = new Map<string, string>();
+
+    // Process each slot
+    for (const slot of template.slots) {
+      let orgAgentId: string | null = null;
+
+      if (slot.systemAgentId) {
+        // System agent ref: check if org agent exists, create if not
+        const [existingOrgAgent] = await tx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(and(
+            eq(agents.organisationId, organisationId),
+            eq(agents.systemAgentId, slot.systemAgentId),
+            isNull(agents.deletedAt)
+          ));
+
+        if (existingOrgAgent) {
+          orgAgentId = existingOrgAgent.id;
+          agentsReused++;
+        } else {
+          // Provision system agent to org
+          const [sysAgent] = await tx.select().from(systemAgents)
+            .where(eq(systemAgents.id, slot.systemAgentId));
+          if (sysAgent) {
+            const slug = sysAgent.slug + '-' + Date.now().toString(36);
+            const [newAgent] = await tx.insert(agents).values({
+              organisationId,
+              systemAgentId: sysAgent.id,
+              isSystemManaged: true,
+              name: sysAgent.name,
+              slug,
+              description: sysAgent.description,
+              icon: sysAgent.icon,
+              masterPrompt: '',
+              additionalPrompt: '',
+              modelProvider: sysAgent.modelProvider,
+              modelId: sysAgent.modelId,
+              temperature: sysAgent.temperature,
+              maxTokens: sysAgent.maxTokens,
+              agentRole: slot.blueprintRole,
+              agentTitle: slot.blueprintTitle,
+              status: 'draft',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            }).returning();
+            orgAgentId = newAgent.id;
+            agentsCreated++;
+            agentsDraft++;
+          }
+        }
+      } else if (slot.agentId) {
+        // Org agent ref: use directly
+        orgAgentId = slot.agentId;
+        agentsReused++;
+      } else if (slot.blueprintSlug) {
+        // Blueprint: match existing org agent by blueprintSlug (the sole matching key)
+        const [existingBySlug] = await tx
+          .select({ id: agents.id })
+          .from(agents)
+          .where(and(
+            eq(agents.organisationId, organisationId),
+            eq(agents.slug, slot.blueprintSlug),
+            isNull(agents.deletedAt)
+          ));
+
+        if (existingBySlug) {
+          orgAgentId = existingBySlug.id;
+          agentsReused++;
+        } else {
+          const hasMasterPrompt = !!slot.blueprintMasterPrompt;
+          const [newAgent] = await tx.insert(agents).values({
+            organisationId,
+            name: slot.blueprintName || slot.blueprintSlug,
+            slug: slot.blueprintSlug,
+            description: slot.blueprintDescription,
+            icon: slot.blueprintIcon,
+            masterPrompt: slot.blueprintMasterPrompt ?? '',
+            additionalPrompt: '',
+            modelProvider: slot.blueprintModelProvider ?? 'anthropic',
+            modelId: slot.blueprintModelId ?? 'claude-sonnet-4-6',
+            agentRole: slot.blueprintRole,
+            agentTitle: slot.blueprintTitle,
+            status: hasMasterPrompt ? 'active' : 'draft',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }).returning();
+          orgAgentId = newAgent.id;
+          agentsCreated++;
+          if (!hasMasterPrompt) agentsDraft++;
+        }
+      }
+
+      if (!orgAgentId) continue;
+
+      // Link to subaccount (or get existing link)
+      let subAgentLink: { id: string } | undefined;
+      const [existingLink] = await tx
+        .select({ id: subaccountAgents.id })
+        .from(subaccountAgents)
+        .where(and(
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.agentId, orgAgentId)
+        ));
+
+      if (existingLink) {
+        subAgentLink = existingLink;
+      } else {
+        // Get default skills from the org agent
+        const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
+          .from(agents).where(eq(agents.id, orgAgentId));
+
+        const [newLink] = await tx.insert(subaccountAgents).values({
+          organisationId,
+          subaccountId,
+          agentId: orgAgentId,
+          isActive: true,
+          agentRole: slot.blueprintRole,
+          agentTitle: slot.blueprintTitle,
+          appliedTemplateId: templateId,
+          appliedTemplateVersion: template.version,
+          skillSlugs: orgAgent?.defaultSkillSlugs ?? null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }).returning();
+        subAgentLink = newLink;
+        agentsLinked++;
+      }
+
+      // Store mapping for hierarchy resolution
+      slotToSubaccountAgentId.set(slot.id, subAgentLink.id);
+    }
+
+    // Resolve hierarchy on subaccount agents
+    // Validate depth of template tree before applying (reject if >10 levels)
+    const templateTree = buildTree(
+      template.slots.map(s => ({ ...s, sortOrder: s.sortOrder })),
+      (s) => s.parentSlotId
+    );
+    const maxDepth = getMaxDepth(templateTree);
+    if (maxDepth > 10) {
+      throw { statusCode: 400, message: `Template hierarchy depth (${maxDepth}) exceeds maximum of 10 levels` };
+    }
+
+    for (const slot of template.slots) {
+      if (!slot.parentSlotId) continue;
+      const subAgentId = slotToSubaccountAgentId.get(slot.id);
+      const parentSubAgentId = slotToSubaccountAgentId.get(slot.parentSlotId);
+      if (subAgentId && parentSubAgentId && subAgentId !== parentSubAgentId) {
+        await tx.update(subaccountAgents)
+          .set({
+            parentSubaccountAgentId: parentSubAgentId,
+            agentRole: slot.blueprintRole,
+            agentTitle: slot.blueprintTitle,
+            appliedTemplateId: templateId,
+            appliedTemplateVersion: template.version,
+            updatedAt: new Date(),
+          })
+          .where(eq(subaccountAgents.id, subAgentId));
+        hierarchyUpdated++;
+      }
+    }
+
+    return {
+      appliedTemplateVersion: template.version,
+      summary: {
+        agentsLinked,
+        agentsCreated,
+        agentsReused,
+        agentsDraft,
+        hierarchyUpdated,
+        agentsRemovedFromHierarchy,
+      },
+    };
+  },
+
   async apply(
     templateId: string,
     organisationId: string,
@@ -345,201 +579,19 @@ export const hierarchyTemplateService = {
 
     const { subaccountId, mode = 'merge', preview = false } = data;
 
-    // Use a transaction for both preview and apply
+    // Both preview and real apply run inside a transaction on the same code path.
+    // Preview rolls back; real apply commits.
     const result = await db.transaction(async (tx) => {
-      // Replace mode: clear hierarchy on existing subaccount agents
-      let agentsRemovedFromHierarchy = 0;
-      if (mode === 'replace') {
-        const cleared = await tx.update(subaccountAgents)
-          .set({ parentSubaccountAgentId: null, updatedAt: new Date() })
-          .where(and(
-            eq(subaccountAgents.subaccountId, subaccountId),
-            eq(subaccountAgents.organisationId, organisationId)
-          ))
-          .returning();
-        agentsRemovedFromHierarchy = cleared.filter(r => r.parentSubaccountAgentId !== null).length;
-      }
-
-      let agentsLinked = 0;
-      let agentsCreated = 0;
-      let agentsReused = 0;
-      let agentsDraft = 0;
-      let hierarchyUpdated = 0;
-
-      // Map slot id → subaccount agent id for hierarchy resolution
-      const slotToSubaccountAgentId = new Map<string, string>();
-
-      // Process each slot
-      for (const slot of template.slots) {
-        let orgAgentId: string | null = null;
-
-        if (slot.systemAgentId) {
-          // System agent ref: check if org agent exists, create if not
-          const [existingOrgAgent] = await tx
-            .select({ id: agents.id })
-            .from(agents)
-            .where(and(
-              eq(agents.organisationId, organisationId),
-              eq(agents.systemAgentId, slot.systemAgentId),
-              isNull(agents.deletedAt)
-            ));
-
-          if (existingOrgAgent) {
-            orgAgentId = existingOrgAgent.id;
-            agentsReused++;
-          } else {
-            // Provision system agent to org
-            const [sysAgent] = await tx.select().from(systemAgents)
-              .where(eq(systemAgents.id, slot.systemAgentId));
-            if (sysAgent) {
-              const slug = sysAgent.slug + '-' + Date.now().toString(36);
-              const [newAgent] = await tx.insert(agents).values({
-                organisationId,
-                systemAgentId: sysAgent.id,
-                isSystemManaged: true,
-                name: sysAgent.name,
-                slug,
-                description: sysAgent.description,
-                icon: sysAgent.icon,
-                masterPrompt: '',
-                additionalPrompt: '',
-                modelProvider: sysAgent.modelProvider,
-                modelId: sysAgent.modelId,
-                temperature: sysAgent.temperature,
-                maxTokens: sysAgent.maxTokens,
-                agentRole: slot.blueprintRole,
-                agentTitle: slot.blueprintTitle,
-                status: 'draft',
-                createdAt: new Date(),
-                updatedAt: new Date(),
-              }).returning();
-              orgAgentId = newAgent.id;
-              agentsCreated++;
-              agentsDraft++;
-            }
-          }
-        } else if (slot.agentId) {
-          // Org agent ref: use directly
-          orgAgentId = slot.agentId;
-          agentsReused++;
-        } else if (slot.blueprintSlug) {
-          // Blueprint: match existing org agent by slug or create new
-          const [existingBySlug] = await tx
-            .select({ id: agents.id })
-            .from(agents)
-            .where(and(
-              eq(agents.organisationId, organisationId),
-              eq(agents.slug, slot.blueprintSlug),
-              isNull(agents.deletedAt)
-            ));
-
-          if (existingBySlug) {
-            orgAgentId = existingBySlug.id;
-            agentsReused++;
-          } else {
-            const hasMasterPrompt = !!slot.blueprintMasterPrompt;
-            const [newAgent] = await tx.insert(agents).values({
-              organisationId,
-              name: slot.blueprintName || slot.blueprintSlug,
-              slug: slot.blueprintSlug,
-              description: slot.blueprintDescription,
-              icon: slot.blueprintIcon,
-              masterPrompt: slot.blueprintMasterPrompt ?? '',
-              additionalPrompt: '',
-              modelProvider: slot.blueprintModelProvider ?? 'anthropic',
-              modelId: slot.blueprintModelId ?? 'claude-sonnet-4-6',
-              agentRole: slot.blueprintRole,
-              agentTitle: slot.blueprintTitle,
-              status: hasMasterPrompt ? 'active' : 'draft',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            }).returning();
-            orgAgentId = newAgent.id;
-            agentsCreated++;
-            if (!hasMasterPrompt) agentsDraft++;
-          }
-        }
-
-        if (!orgAgentId) continue;
-
-        // Link to subaccount (or get existing link)
-        let subAgentLink: { id: string } | undefined;
-        const [existingLink] = await tx
-          .select({ id: subaccountAgents.id })
-          .from(subaccountAgents)
-          .where(and(
-            eq(subaccountAgents.subaccountId, subaccountId),
-            eq(subaccountAgents.agentId, orgAgentId)
-          ));
-
-        if (existingLink) {
-          subAgentLink = existingLink;
-        } else {
-          // Get default skills from the org agent
-          const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
-            .from(agents).where(eq(agents.id, orgAgentId));
-
-          const [newLink] = await tx.insert(subaccountAgents).values({
-            organisationId,
-            subaccountId,
-            agentId: orgAgentId,
-            isActive: true,
-            agentRole: slot.blueprintRole,
-            agentTitle: slot.blueprintTitle,
-            appliedTemplateId: templateId,
-            appliedTemplateVersion: template.version,
-            skillSlugs: orgAgent?.defaultSkillSlugs ?? null,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          }).returning();
-          subAgentLink = newLink;
-          agentsLinked++;
-        }
-
-        // Store mapping for hierarchy resolution
-        slotToSubaccountAgentId.set(slot.id, subAgentLink.id);
-      }
-
-      // Resolve hierarchy on subaccount agents
-      for (const slot of template.slots) {
-        if (!slot.parentSlotId) continue;
-        const subAgentId = slotToSubaccountAgentId.get(slot.id);
-        const parentSubAgentId = slotToSubaccountAgentId.get(slot.parentSlotId);
-        if (subAgentId && parentSubAgentId) {
-          await tx.update(subaccountAgents)
-            .set({
-              parentSubaccountAgentId: parentSubAgentId,
-              agentRole: slot.blueprintRole,
-              agentTitle: slot.blueprintTitle,
-              appliedTemplateId: templateId,
-              appliedTemplateVersion: template.version,
-              updatedAt: new Date(),
-            })
-            .where(eq(subaccountAgents.id, subAgentId));
-          hierarchyUpdated++;
-        }
-      }
-
-      const summary = {
-        appliedTemplateVersion: template.version,
-        summary: {
-          agentsLinked,
-          agentsCreated,
-          agentsReused,
-          agentsDraft,
-          hierarchyUpdated,
-          agentsRemovedFromHierarchy,
-        },
-      };
+      const summary = await this._applyCore(tx, templateId, organisationId, subaccountId, mode, template);
 
       if (preview) {
-        // Throw a special object to trigger rollback while preserving the result
+        // Throw to trigger rollback while preserving the computed result
         throw { __preview: true, result: summary };
       }
 
       return summary;
     }).catch((err: unknown) => {
-      // Catch preview rollback
+      // Catch preview rollback — return the result without committing
       if (err && typeof err === 'object' && '__preview' in (err as Record<string, unknown>)) {
         return (err as { result: { appliedTemplateVersion: number; summary: Record<string, number> } }).result;
       }
