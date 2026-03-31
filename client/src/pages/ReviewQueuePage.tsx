@@ -92,11 +92,11 @@ function NewIssueModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // Pick CEO agent, fall back to orchestrator, fall back to top-level (no parent)
+  // Pick the top-level agent (no parent) — this is whichever agent sits at the
+  // root of the subaccount hierarchy (e.g. CEO, Orchestrator, etc.)
   const defaultAgent =
-    agents.find((a) => a.agentRole === 'ceo') ??
-    agents.find((a) => a.agentRole === 'orchestrator') ??
     agents.find((a) => !a.parentSubaccountAgentId) ??
+    agents[0] ??
     null;
 
   const handleSubmit = async (e: React.FormEvent) => {
