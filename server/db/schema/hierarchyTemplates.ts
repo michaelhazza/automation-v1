@@ -29,6 +29,11 @@ export const hierarchyTemplates = pgTable(
     // Raw Paperclip manifest stored for reference
     paperclipManifest: jsonb('paperclip_manifest'),
 
+    // SHA-256 hash of the manifest JSON for idempotency / duplicate detection
+    manifestHash: text('manifest_hash'),
+    // Version of the parser that produced this import (for reproducibility)
+    parserVersion: text('parser_version'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

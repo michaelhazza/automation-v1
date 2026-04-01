@@ -1,4 +1,5 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import {
   systemHierarchyTemplates,
@@ -8,6 +9,12 @@ import {
   subaccountAgents,
 } from '../db/schema/index.js';
 import { buildTree, getMaxDepth } from './hierarchyService.js';
+
+const PARSER_VERSION = '1.0.0';
+
+function computeManifestHash(manifest: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+}
 
 // ---------------------------------------------------------------------------
 // System Template Service — platform-level company template library
@@ -114,6 +121,25 @@ export const systemTemplateService = {
       console.warn(`[SYSTEM-IMPORT] Large Paperclip import: ${paperclipAgents.length} agents`);
     }
 
+    // Compute manifest hash for idempotency
+    const manifestHash = computeManifestHash(manifest);
+
+    // Check for duplicate import
+    const [existingByHash] = await db
+      .select({ id: systemHierarchyTemplates.id, name: systemHierarchyTemplates.name })
+      .from(systemHierarchyTemplates)
+      .where(and(
+        eq(systemHierarchyTemplates.manifestHash, manifestHash),
+        isNull(systemHierarchyTemplates.deletedAt)
+      ));
+
+    if (existingByHash) {
+      throw {
+        statusCode: 409,
+        message: `This manifest has already been imported as "${existingByHash.name}" (${existingByHash.id}). Delete the existing template first or modify the manifest before re-importing.`,
+      };
+    }
+
     // Load existing system agents for matching
     const sysAgents = await db.select().from(systemAgents).where(isNull(systemAgents.deletedAt));
 
@@ -124,6 +150,8 @@ export const systemTemplateService = {
         name: data.name,
         sourceType: 'paperclip_import',
         paperclipManifest: manifest,
+        manifestHash,
+        parserVersion: PARSER_VERSION,
         agentCount: paperclipAgents.length,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -474,6 +502,8 @@ export const systemTemplateService = {
             agentRole: slot.blueprintRole,
             agentTitle: slot.blueprintTitle,
             skillSlugs: orgAgent?.defaultSkillSlugs ?? null,
+            appliedTemplateId: template.id,
+            appliedTemplateVersion: template.version,
             createdAt: new Date(),
             updatedAt: new Date(),
           }).returning();

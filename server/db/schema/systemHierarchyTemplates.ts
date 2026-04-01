@@ -19,6 +19,11 @@ export const systemHierarchyTemplates = pgTable(
     // Raw Paperclip manifest stored for reference
     paperclipManifest: jsonb('paperclip_manifest'),
 
+    // SHA-256 hash of the manifest JSON for idempotency / duplicate detection
+    manifestHash: text('manifest_hash'),
+    // Version of the parser that produced this import (for reproducibility)
+    parserVersion: text('parser_version'),
+
     // Quick reference count of agents in the template
     agentCount: integer('agent_count').notNull().default(0),
 

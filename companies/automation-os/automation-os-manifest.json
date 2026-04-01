@@ -1,4 +1,5 @@
 {
+  "parserVersion": "1.0.0",
   "company": {
     "name": "Automation OS",
     "description": "The platform's own agent team — the team that builds the platform. Four MVP agents forming a product development team with orchestrated dev/QA loops, BA-driven requirements, and human-in-the-loop review gates.",

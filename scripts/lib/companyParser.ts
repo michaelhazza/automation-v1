@@ -217,8 +217,11 @@ export async function parseCompanyFolder(companyDir: string): Promise<ParsedComp
 // (feeds into existing importPaperclip methods on template services)
 // ---------------------------------------------------------------------------
 
+export const COMPANY_PARSER_VERSION = '1.0.0';
+
 export function toPaperclipManifest(parsed: ParsedCompany): Record<string, unknown> {
   return {
+    parserVersion: COMPANY_PARSER_VERSION,
     company: {
       name: parsed.manifest.name,
       description: parsed.manifest.description,
