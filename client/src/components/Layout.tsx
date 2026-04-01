@@ -227,6 +227,23 @@ export default function Layout({ user, children }: LayoutProps) {
   const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has(key);
   const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has(key);
 
+  // Auto-set org context for non-system-admin users who belong to an org
+  useEffect(() => {
+    if (!isSystemAdmin && user.organisationId && !activeOrgId) {
+      api.get('/api/organisations/mine').then(({ data }) => {
+        const name = data?.name ?? 'My Organisation';
+        setActiveOrg(user.organisationId, name);
+        setActiveOrgIdState(user.organisationId);
+        setActiveOrgNameState(name);
+      }).catch(() => {
+        // Fallback: set org ID without name so pages at least work
+        setActiveOrg(user.organisationId, 'My Organisation');
+        setActiveOrgIdState(user.organisationId);
+        setActiveOrgNameState('My Organisation');
+      });
+    }
+  }, [isSystemAdmin, user.organisationId, activeOrgId]);
+
   // Fetch orgs list (system admin)
   useEffect(() => {
     if (isSystemAdmin) {

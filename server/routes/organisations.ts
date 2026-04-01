@@ -25,6 +25,14 @@ router.post('/api/organisations', authenticate, requireSystemAdmin, asyncHandler
   res.status(201).json(result);
 }));
 
+// Current user's org — no system admin required
+router.get('/api/organisations/mine', authenticate, asyncHandler(async (req, res) => {
+  const orgId = (req as any).user?.organisationId;
+  if (!orgId) { res.status(404).json({ error: 'No organisation found' }); return; }
+  const result = await organisationService.getOrganisation(orgId);
+  res.json(result);
+}));
+
 router.get('/api/organisations/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const result = await organisationService.getOrganisation(req.params.id);
   res.json(result);
