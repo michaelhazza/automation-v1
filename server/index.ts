@@ -62,6 +62,8 @@ import llmUsageRouter from './routes/llmUsage.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
+import mcpRouter from './routes/mcp.js';
+import agentInboxRouter from './routes/agentInbox.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -123,6 +125,8 @@ app.use(llmUsageRouter);
 app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
 app.use(oauthIntegrationsRouter);
+app.use(mcpRouter);
+app.use(agentInboxRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

@@ -449,8 +449,13 @@ export const queueService = {
       await boss.work('maintenance:cleanup-budget-reservations', async () => {
         await queueService.cleanupExpiredBudgetReservations();
       });
+      await boss.work('maintenance:memory-decay', async () => {
+        const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
+        await runMemoryDecay();
+      });
       await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
+      await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs
@@ -469,6 +474,13 @@ export const queueService = {
           console.error(JSON.stringify({ event: 'maintenance:cleanup_reservations_error', ...serializeError(err) }));
         });
       }, 5 * 60 * 1000); // every 5 minutes
+
+      setInterval(async () => {
+        const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
+        runMemoryDecay().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:memory_decay_error', ...serializeError(err) }));
+        });
+      }, 24 * 60 * 60 * 1000); // daily
 
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'interval' }));
     }

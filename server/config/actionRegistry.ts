@@ -10,6 +10,14 @@ export interface RetryPolicy {
   doNotRetryOn: string[];
 }
 
+/** MCP ToolAnnotations — maps to the MCP specification's ToolAnnotations type */
+export interface McpAnnotations {
+  readOnlyHint: boolean;    // true = does not modify external state
+  destructiveHint: boolean; // true = may be irreversible
+  idempotentHint: boolean;  // true = same args = same effect
+  openWorldHint: boolean;   // true = reaches external systems
+}
+
 export interface ActionDefinition {
   actionType: string;
   actionCategory: 'api' | 'worker' | 'browser' | 'devops';
@@ -18,6 +26,7 @@ export interface ActionDefinition {
   createsBoardTask: boolean;
   payloadFields: string[];
   retryPolicy: RetryPolicy;
+  mcp?: { annotations: McpAnnotations };
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -34,6 +43,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout', 'network_error', 'rate_limit'],
       doNotRetryOn: ['validation_error', 'auth_error', 'recipient_not_found'],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -48,6 +58,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout', 'network_error'],
       doNotRetryOn: ['auth_error'],
     },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
   },
   create_task: {
     actionType: 'create_task',
@@ -62,6 +73,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['db_error'],
       doNotRetryOn: [],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   },
   move_task: {
     actionType: 'move_task',
@@ -76,6 +88,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['db_error'],
       doNotRetryOn: [],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   },
   reassign_task: {
     actionType: 'reassign_task',
@@ -90,6 +103,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['db_error'],
       doNotRetryOn: [],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   },
   add_deliverable: {
     actionType: 'add_deliverable',
@@ -104,6 +118,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['db_error'],
       doNotRetryOn: [],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   },
   update_record: {
     actionType: 'update_record',
@@ -118,6 +133,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout', 'network_error'],
       doNotRetryOn: ['validation_error', 'not_found'],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
   },
   fetch_url: {
     actionType: 'fetch_url',
@@ -132,6 +148,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout', 'network_error'],
       doNotRetryOn: ['validation_error'],
     },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
   },
   request_approval: {
     actionType: 'request_approval',
@@ -146,6 +163,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: [],
       doNotRetryOn: [],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   },
 
   // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
@@ -163,6 +181,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout'],
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   },
 
   search_codebase: {
@@ -178,6 +197,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout'],
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   },
 
   run_tests: {
@@ -193,6 +213,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: [],
       doNotRetryOn: ['permission_failure', 'execution_failure'],
     },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   },
 
   analyze_endpoint: {
@@ -208,6 +229,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['timeout', 'network_error'],
       doNotRetryOn: ['validation_failure'],
     },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
   },
 
   report_bug: {
@@ -223,6 +245,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['db_error'],
       doNotRetryOn: [],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   },
 
   // ── Dev/QA devops actions ──────────────────────────────────────────────────
@@ -238,9 +261,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       maxRetries: 0,
       strategy: 'none',
       retryOn: [],
-      // base_commit_mismatch and patch_size_exceeded require agent to re-propose
       doNotRetryOn: ['base_commit_mismatch', 'patch_size_exceeded', 'permission_failure'],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
   },
 
   run_command: {
@@ -256,6 +279,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['execution_failure', 'timeout'],
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
   },
 
   create_pr: {
@@ -271,6 +295,25 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: ['execution_failure', 'timeout', 'network_error'],
       doNotRetryOn: ['validation_failure', 'environment_failure'],
     },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+  },
+
+  // ── Workflow orchestration (Phase 2) ────────────────────────────────────────
+
+  assign_task: {
+    actionType: 'assign_task',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['worker_agent_slug', 'task_description', 'context'],
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['execution_failure'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
   },
 };
 

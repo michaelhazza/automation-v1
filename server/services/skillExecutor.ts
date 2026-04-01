@@ -6,6 +6,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { env } from '../lib/env.js';
 import { getActiveTrace } from '../instrumentation.js';
+import { TripWire } from '../lib/tripwire.js';
+import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
@@ -56,6 +58,91 @@ interface SkillExecutionParams {
   context: SkillExecutionContext;
 }
 
+// ---------------------------------------------------------------------------
+// Per-tool processor hooks registry
+// Maps action type slug → ProcessorHooks (input/output transform pipeline)
+// ---------------------------------------------------------------------------
+
+const processorRegistry: Map<string, ProcessorHooks> = new Map();
+
+/** Register processor hooks for a tool slug. Called at module load time. */
+export function registerProcessor(toolSlug: string, hooks: ProcessorHooks): void {
+  processorRegistry.set(toolSlug, hooks);
+}
+
+/** Internal: run registered processor phases around a tool executor. */
+async function runWithProcessors(
+  toolSlug: string,
+  input: Record<string, unknown>,
+  context: SkillExecutionContext,
+  executor: (processedInput: Record<string, unknown>) => Promise<unknown>,
+  actionId?: string,
+): Promise<unknown> {
+  const hooks = processorRegistry.get(toolSlug);
+  const processorCtx: ProcessorContext = {
+    toolSlug,
+    input,
+    subaccountId: context.subaccountId,
+    organisationId: context.organisationId,
+    agentRunId: context.runId,
+    actionId,
+  };
+
+  let processedInput = input;
+
+  // Phase 1: processInput (before gate)
+  if (hooks?.processInput) {
+    try {
+      processedInput = (await hooks.processInput({ ...processorCtx, input: processedInput })) as Record<string, unknown>;
+    } catch (err) {
+      if (err instanceof TripWire) {
+        if (!err.options.retry) throw err;  // fatal — propagate to caller
+        return { success: false, error: err.reason, retryable: true };
+      }
+      throw err;
+    }
+  }
+
+  // Phase 2: processInputStep (after gate, before execute)
+  if (hooks?.processInputStep) {
+    try {
+      processedInput = (await hooks.processInputStep({ ...processorCtx, input: processedInput })) as Record<string, unknown>;
+    } catch (err) {
+      if (err instanceof TripWire) {
+        if (!err.options.retry) throw err;
+        return { success: false, error: err.reason, retryable: true };
+      }
+      throw err;
+    }
+  }
+
+  // Execute
+  let result: unknown;
+  try {
+    result = await executor(processedInput);
+  } catch (err) {
+    if (err instanceof TripWire) {
+      return { success: false, error: err.reason, retryable: err.options.retry };
+    }
+    throw err;
+  }
+
+  // Phase 3: processOutputStep (after execute)
+  if (hooks?.processOutputStep) {
+    try {
+      result = await hooks.processOutputStep({ ...processorCtx, input: processedInput, actionId }, result);
+    } catch (err) {
+      if (err instanceof TripWire) {
+        if (!err.options.retry) throw err;
+        return { success: false, error: err.reason, retryable: true };
+      }
+      throw err;
+    }
+  }
+
+  return result;
+}
+
 // Handoff job queue name
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 
@@ -71,6 +158,16 @@ export const skillExecutor = {
     const { skillName, input, context } = params;
 
     switch (skillName) {
+      // ── Meta tools — BM25 tool discovery (no action record) ─────────────
+      case 'search_tools': {
+        const { executeSearchTools } = await import('../tools/meta/searchTools.js');
+        return executeSearchTools(input, context);
+      }
+      case 'load_tool': {
+        const { executeLoadTool } = await import('../tools/meta/searchTools.js');
+        return executeLoadTool(input, context);
+      }
+
       // ── Direct skills (no action record) ──────────────────────────────
       case 'web_search':
         return executeWebSearch(input, context);
@@ -124,6 +221,14 @@ export const skillExecutor = {
         return proposeDevopsAction('run_command', input, context);
       case 'create_pr':
         return proposeDevopsAction('create_pr', input, context);
+
+      // ── Phase 2: Workflow orchestration ──────────────────────────────────
+      case 'assign_task': {
+        const { executeAssignTask } = await import('../tools/internal/assignTask.js');
+        return executeWithActionAudit('assign_task', input, context, () =>
+          executeAssignTask(input, context),
+        );
+      }
 
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
@@ -190,24 +295,35 @@ async function executeWithActionAudit(
       return reviewResult;
     }
 
-    // Auto-approved — execute inline
+    // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
       span?.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
-    const result = await executor();
+    const result = await runWithProcessors(
+      actionType,
+      input,
+      context,
+      (_processedInput) => executor(),
+      proposed.actionId,
+    );
     const resultObj = result as Record<string, unknown>;
-    if (resultObj.success) {
+    if (resultObj?.success) {
       await actionService.markCompleted(proposed.actionId, context.organisationId, result);
     } else {
-      await actionService.markFailed(proposed.actionId, context.organisationId, resultObj.error ?? 'Unknown error');
+      await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj?.error ?? 'Unknown error'));
     }
 
     span?.end({ output: result });
     return result;
   } catch (err) {
+    if (err instanceof TripWire && !err.options.retry) {
+      // Fatal TripWire — surface as denied result so the loop halts gracefully
+      span?.end({ output: { success: false, error: err.reason } });
+      return { success: false, error: `Action halted: ${err.reason}`, code: err.options.code };
+    }
     // If action tracking fails, execute directly to preserve existing behaviour
     console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
     span?.end({ output: { error: String(err) } });

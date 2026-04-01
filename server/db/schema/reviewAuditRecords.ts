@@ -4,6 +4,7 @@ import { subaccounts } from './subaccounts';
 import { actions } from './actions';
 import { agentRuns } from './agentRuns';
 import { users } from './users';
+import { workflowRuns } from './workflowRuns';
 
 // ---------------------------------------------------------------------------
 // Review Audit Records — append-only HumanFeedbackResult log (CrewAI pattern)
@@ -31,6 +32,10 @@ export const reviewAuditRecords = pgTable(
     collapsedOutcome: text('collapsed_outcome').$type<'approved' | 'rejected' | 'needs_revision'>(),
     /** Populated only when decision = 'edited' */
     editedArgs: jsonb('edited_args'),
+
+    /** Workflow context — populated when this review item came from a workflow step. */
+    workflowRunId: uuid('workflow_run_id').references(() => workflowRuns.id),
+    workflowStepId: text('workflow_step_id'),
 
     proposedAt: timestamp('proposed_at', { withTimezone: true }).notNull(),
     decidedAt: timestamp('decided_at', { withTimezone: true }).defaultNow().notNull(),

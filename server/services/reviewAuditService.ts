@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { reviewAuditRecords, actions } from '../db/schema/index.js';
+import { collapseOutcome } from './outcomeLearningService.js';
 
 // ---------------------------------------------------------------------------
 // Review Audit Service — records every human decision on a gated action.
@@ -54,6 +55,19 @@ export const reviewAuditService = {
     collapseOutcomeAsync(row.id, input.decision, input.rawFeedback).catch((err) => {
       console.error('[ReviewAudit] Outcome collapse failed for record', row.id, err);
     });
+
+    // If the human edited the args, write a lesson to workspace memory
+    if (input.decision === 'edited' && input.editedArgs && input.agentRunId) {
+      collapseOutcome({
+        toolSlug: input.toolSlug,
+        originalArgs: input.agentOutput,
+        editedArgs: input.editedArgs,
+        agentRunId: input.agentRunId,
+        agentId: input.agentOutput['agentId'] as string ?? 'unknown',
+        organisationId: input.organisationId,
+        subaccountId: input.subaccountId,
+      }).catch(() => {/* fire-and-forget */});
+    }
   },
 };
 

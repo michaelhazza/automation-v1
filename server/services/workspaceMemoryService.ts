@@ -1,4 +1,4 @@
-import { eq, and, desc, inArray, sql, isNull } from 'drizzle-orm';
+import { eq, and, desc, inArray, sql, isNull, lt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   workspaceMemories,
@@ -164,7 +164,8 @@ export const workspaceMemoryService = {
     agentId: string,
     organisationId: string,
     subaccountId: string,
-    runSummary: string
+    runSummary: string,
+    taskSlug?: string,
   ): Promise<void> {
     if (!runSummary || runSummary.trim().length < 20) return;
 
@@ -207,8 +208,23 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
       const memory = await this.getOrCreateMemory(organisationId, subaccountId);
       const threshold = memory.qualityThreshold;
 
-      const baseValues = entries
-        .filter(e => e.content && (VALID_ENTRY_TYPES as readonly string[]).includes(e.entryType))
+      // ── Mem0 dedup loop ───────────────────────────────────────────────────
+      // Compare new entries against recent existing entries and classify as
+      // ADD, UPDATE, or DELETE before persisting. Runs async after return.
+      const validEntries = entries.filter(
+        e => e.content && (VALID_ENTRY_TYPES as readonly string[]).includes(e.entryType)
+      );
+
+      const dedupedEntries = await deduplicateEntries(
+        validEntries,
+        subaccountId,
+        taskSlug ?? null,
+        organisationId,
+        runId,
+      );
+
+      const baseValues = dedupedEntries
+        .filter(e => e.op === 'ADD')
         .map(e => ({
           organisationId,
           subaccountId,
@@ -217,8 +233,22 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
           content: e.content,
           entryType: e.entryType as EntryType,
           qualityScore: scoreMemoryEntry(e),
+          taskSlug: taskSlug ?? null,
           createdAt: new Date(),
         }));
+
+      // Apply UPDATE and DELETE ops
+      for (const op of dedupedEntries.filter(e => e.op === 'UPDATE' || e.op === 'DELETE')) {
+        if (!op.existingId) continue;
+        if (op.op === 'DELETE') {
+          await db.delete(workspaceMemoryEntries)
+            .where(eq(workspaceMemoryEntries.id, op.existingId));
+        } else if (op.op === 'UPDATE' && op.updatedContent) {
+          await db.update(workspaceMemoryEntries)
+            .set({ content: op.updatedContent, qualityScore: scoreMemoryEntry({ content: op.updatedContent, entryType: op.entryType }) })
+            .where(eq(workspaceMemoryEntries.id, op.existingId));
+        }
+      }
 
       const values = baseValues;
 
@@ -370,30 +400,54 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
   async getRelevantMemories(
     subaccountId: string,
     qualityThreshold: number,
-    queryEmbedding: number[]
+    queryEmbedding: number[],
+    taskSlug?: string,
   ): Promise<Array<{ content: string; similarity: number }>> {
-    const recencyCutoff = new Date();
-    recencyCutoff.setDate(recencyCutoff.getDate() - VECTOR_SEARCH_RECENCY_DAYS);
-
     const vectorLiteral = formatVectorLiteral(queryEmbedding);
+    const now = new Date();
+    const RECENCY_HALF_LIFE_DAYS = 30;
+
+    // Combined scoring: cosine (60%) + quality (25%) + recency decay (15%)
+    // task_slug filter: show task-specific entries + global entries (task_slug IS NULL)
+    const taskFilter = taskSlug
+      ? sql`AND (task_slug = ${taskSlug} OR task_slug IS NULL)`
+      : sql``;
 
     const rows = await db.execute<{
       id: string;
       content: string;
-      similarity: number;
+      combined_score: number;
     }>(sql`
-      SELECT id, content, 1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
+      SELECT id, content,
+        (
+          (1 - (embedding <=> ${vectorLiteral}::vector)) * 0.60
+          + COALESCE(quality_score, 0.5) * 0.25
+          + (1.0 / (1.0 + EXTRACT(EPOCH FROM (${now.toISOString()}::timestamptz - created_at)) / 86400.0 / ${RECENCY_HALF_LIFE_DAYS})) * 0.15
+        ) AS combined_score
       FROM workspace_memory_entries
       WHERE subaccount_id = ${subaccountId}
         AND embedding IS NOT NULL
         AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
-        AND created_at > ${recencyCutoff.toISOString()}::timestamptz
-      ORDER BY embedding <=> ${vectorLiteral}::vector
+      ${taskFilter}
+      ORDER BY combined_score DESC
       LIMIT ${VECTOR_SEARCH_LIMIT}
     `);
 
-    return (rows.rows as Array<{ id: string; content: string; similarity: number }>)
-      .filter(r => r.similarity >= VECTOR_SIMILARITY_THRESHOLD);
+    const results = (rows.rows as Array<{ id: string; content: string; combined_score: number }>)
+      .filter(r => r.combined_score >= VECTOR_SIMILARITY_THRESHOLD);
+
+    // Bump access counters async — do not await
+    if (results.length > 0) {
+      db.update(workspaceMemoryEntries)
+        .set({
+          accessCount: sql`access_count + 1`,
+          lastAccessedAt: now,
+        })
+        .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
+        .catch(() => {});
+    }
+
+    return results.map(r => ({ content: r.content, similarity: r.combined_score }));
   },
 
   // ─── Prompt Builder (with boundary markers for injection protection) ───────
@@ -660,4 +714,122 @@ async function buildBoardSnapshot(organisationId: string, subaccountId: string):
       return `**${status}** (${total}):\n${list}${total > 5 ? `\n  ... and ${total - 5} more` : ''}`;
     })
     .join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Mem0 dedup loop — compare new entries against existing before persisting
+// ---------------------------------------------------------------------------
+
+interface DedupeEntry {
+  content: string;
+  entryType: string;
+  op: 'ADD' | 'UPDATE' | 'DELETE';
+  existingId?: string;
+  updatedContent?: string;
+}
+
+const DEDUP_SYSTEM = `You are a memory deduplication assistant.
+Given new facts and existing facts, classify each new fact as ADD, UPDATE, or DELETE.
+- ADD: new information not in existing facts
+- UPDATE: amends an existing fact (provide existing_id and updated_fact)
+- DELETE: makes an existing fact wrong or obsolete (provide existing_id)
+
+Output ONLY valid JSON: { "ops": [{ "type": "ADD"|"UPDATE"|"DELETE", "fact": "...", "existing_id"?: "uuid", "updated_fact"?: "..." }] }
+If all are new: { "ops": [{ "type": "ADD", "fact": "..." }, ...] }`;
+
+async function deduplicateEntries(
+  newEntries: Array<{ content: string; entryType: string }>,
+  subaccountId: string,
+  taskSlug: string | null,
+  organisationId: string,
+  runId: string,
+): Promise<DedupeEntry[]> {
+  if (newEntries.length === 0) return [];
+
+  // Load recent candidate entries for comparison (top 20 by recency)
+  const taskFilter = taskSlug
+    ? and(
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        sql`(task_slug = ${taskSlug} OR task_slug IS NULL)`,
+      )
+    : eq(workspaceMemoryEntries.subaccountId, subaccountId);
+
+  const candidates = await db
+    .select({ id: workspaceMemoryEntries.id, content: workspaceMemoryEntries.content })
+    .from(workspaceMemoryEntries)
+    .where(taskFilter)
+    .orderBy(desc(workspaceMemoryEntries.createdAt))
+    .limit(20);
+
+  // If no existing entries, all are ADD — skip LLM call
+  if (candidates.length === 0) {
+    return newEntries.map(e => ({ ...e, op: 'ADD' as const }));
+  }
+
+  try {
+    const response = await routeCall({
+      system: DEDUP_SYSTEM,
+      messages: [{
+        role: 'user',
+        content: JSON.stringify({
+          new_facts: newEntries.map(e => ({ content: e.content, type: e.entryType })),
+          existing_facts: candidates.map(c => ({ id: c.id, fact: c.content })),
+        }),
+      }],
+      maxTokens: 1024,
+      temperature: 0.1,
+      context: {
+        organisationId,
+        subaccountId,
+        runId,
+        sourceType: 'agent_run',
+        taskType: 'memory_compile',
+        provider: 'anthropic',
+        model: EXTRACTION_MODEL,
+      },
+    });
+
+    const parsed = JSON.parse(response.content) as {
+      ops: Array<{ type: 'ADD' | 'UPDATE' | 'DELETE'; fact?: string; existing_id?: string; updated_fact?: string }>;
+    };
+
+    const result: DedupeEntry[] = [];
+    for (let i = 0; i < parsed.ops.length; i++) {
+      const op = parsed.ops[i];
+      const source = newEntries[i] ?? newEntries[newEntries.length - 1];
+      result.push({
+        content: op.fact ?? source.content,
+        entryType: source.entryType,
+        op: op.type,
+        existingId: op.existing_id,
+        updatedContent: op.updated_fact,
+      });
+    }
+    return result;
+  } catch {
+    // Dedup failed — fall through to ADD all (safe degradation)
+    return newEntries.map(e => ({ ...e, op: 'ADD' as const }));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Memory decay pruning (called by daily job)
+// ---------------------------------------------------------------------------
+
+export async function pruneStaleMemoryEntries(): Promise<number> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90); // 90-day window
+
+  const pruned = await db
+    .delete(workspaceMemoryEntries)
+    .where(
+      and(
+        lt(workspaceMemoryEntries.createdAt, cutoff),
+        sql`(quality_score IS NOT NULL AND quality_score < 0.3)`,
+        sql`access_count < 3`,
+      )
+    )
+    .returning({ id: workspaceMemoryEntries.id });
+
+  return pruned.length;
 }
