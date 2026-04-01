@@ -17,8 +17,19 @@ interface Connection {
   createdAt: string;
 }
 
-const providerOptions = ['gmail', 'github', 'hubspot', 'slack', 'ghl', 'custom'];
-const authOptions = ['oauth2', 'api_key', 'service_account'];
+const providerOptions: { value: string; label: string }[] = [
+  { value: 'gmail', label: 'Gmail' },
+  { value: 'github', label: 'GitHub' },
+  { value: 'hubspot', label: 'HubSpot' },
+  { value: 'slack', label: 'Slack' },
+  { value: 'ghl', label: 'GoHighLevel' },
+  { value: 'custom', label: 'Custom' },
+];
+const authOptions: { value: string; label: string }[] = [
+  { value: 'oauth2', label: 'OAuth 2.0' },
+  { value: 'api_key', label: 'API Key' },
+  { value: 'service_account', label: 'Service Account' },
+];
 
 const inputCls = 'block w-full mt-1 px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
@@ -27,6 +38,9 @@ const STATUS_STYLES: Record<string, string> = {
   revoked: 'text-red-600',
   error: 'text-amber-600',
 };
+
+const providerLabel = (v: string) => providerOptions.find((p) => p.value === v)?.label ?? v;
+const authLabel = (v: string) => authOptions.find((a) => a.value === v)?.label ?? v;
 
 export default function ConnectionsPage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
   const params = useParams<{ subaccountId: string }>();
@@ -100,7 +114,7 @@ export default function ConnectionsPage({ user: _user, embedded = false }: { use
           <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <div className="font-bold text-[16px] text-slate-800 capitalize">{c.providerType}</div>
+                <div className="font-bold text-[16px] text-slate-800">{providerLabel(c.providerType)}</div>
                 {c.label && <div className="text-[13px] text-slate-500 mt-0.5">{c.label}</div>}
                 {c.displayName && <div className="text-[13px] text-slate-500">{c.displayName}</div>}
               </div>
@@ -109,7 +123,7 @@ export default function ConnectionsPage({ user: _user, embedded = false }: { use
               </span>
             </div>
             <div className="text-[13px] text-slate-500 mb-3">
-              Auth: {c.authType} | Token: {c.hasAccessToken ? 'Yes' : 'No'}
+              {authLabel(c.authType)} | Token: {c.hasAccessToken ? 'Yes' : 'No'}
               {c.tokenExpiresAt && <> | Expires: {new Date(c.tokenExpiresAt).toLocaleDateString()}</>}
             </div>
             {c.connectionStatus === 'active' && (
@@ -125,52 +139,61 @@ export default function ConnectionsPage({ user: _user, embedded = false }: { use
       </div>
 
       {showCreate && (
-        <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
-          <div className="bg-white rounded-xl p-8 w-[460px] shadow-xl">
-            <h2 className="text-[20px] font-bold text-slate-800 mb-5">Add Connection</h2>
-            <div className="flex flex-col gap-3">
-              <label>
-                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Provider</span>
-                <select value={form.providerType} onChange={(e) => setForm({ ...form, providerType: e.target.value })} className={inputCls}>
-                  {providerOptions.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Auth Type</span>
-                <select value={form.authType} onChange={(e) => setForm({ ...form, authType: e.target.value })} className={inputCls}>
-                  {authOptions.map((a) => <option key={a} value={a}>{a}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Label (optional)</span>
-                <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Support Gmail" className={inputCls} />
-              </label>
-              <label>
-                <span className="block text-[14px] font-semibold text-slate-700 mb-1">Display Name (optional)</span>
-                <input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} className={inputCls} />
-              </label>
-              {form.authType === 'oauth2' && (
-                <>
-                  <label>
-                    <span className="block text-[14px] font-semibold text-slate-700 mb-1">Access Token</span>
-                    <input value={form.accessToken} onChange={(e) => setForm({ ...form, accessToken: e.target.value })} type="password" className={inputCls} />
-                  </label>
-                  <label>
-                    <span className="block text-[14px] font-semibold text-slate-700 mb-1">Refresh Token</span>
-                    <input value={form.refreshToken} onChange={(e) => setForm({ ...form, refreshToken: e.target.value })} type="password" className={inputCls} />
-                  </label>
-                </>
-              )}
-              {form.authType === 'api_key' && (
-                <label>
-                  <span className="block text-[14px] font-semibold text-slate-700 mb-1">API Key</span>
-                  <input value={form.secretsRef} onChange={(e) => setForm({ ...form, secretsRef: e.target.value })} type="password" className={inputCls} />
-                </label>
-              )}
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">Add Connection</h2>
+              <button onClick={() => setShowCreate(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
-            <div className="flex gap-3 justify-end mt-6">
-              <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[13px] font-medium transition-colors">Cancel</button>
-              <button onClick={handleCreate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[13px] font-semibold transition-colors">Add Connection</button>
+            <div className="px-6 py-5">
+              <div className="grid gap-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Provider *</label>
+                    <select value={form.providerType} onChange={(e) => setForm({ ...form, providerType: e.target.value })} className={inputCls}>
+                      {providerOptions.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Auth Type *</label>
+                    <select value={form.authType} onChange={(e) => setForm({ ...form, authType: e.target.value })} className={inputCls}>
+                      {authOptions.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Label</label>
+                    <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="e.g. Support Gmail" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Display Name</label>
+                    <input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} placeholder="e.g. Main Account" className={inputCls} />
+                  </div>
+                </div>
+                {form.authType === 'oauth2' && (
+                  <>
+                    <div>
+                      <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Access Token</label>
+                      <input value={form.accessToken} onChange={(e) => setForm({ ...form, accessToken: e.target.value })} type="password" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Refresh Token</label>
+                      <input value={form.refreshToken} onChange={(e) => setForm({ ...form, refreshToken: e.target.value })} type="password" className={inputCls} />
+                    </div>
+                  </>
+                )}
+                {form.authType === 'api_key' && (
+                  <div>
+                    <label className="block text-[13px] font-medium text-slate-700 mb-1.5">API Key</label>
+                    <input value={form.secretsRef} onChange={(e) => setForm({ ...form, secretsRef: e.target.value })} type="password" className={inputCls} />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end px-6 py-4 border-t border-slate-200">
+              <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+              <button onClick={handleCreate} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors">Add Connection</button>
             </div>
           </div>
         </div>
