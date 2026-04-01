@@ -36,6 +36,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newColor, setNewColor] = useState('#6366f1');
+  const [newRepoUrl, setNewRepoUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<'all' | 'active' | 'completed' | 'archived'>('all');
 
@@ -51,9 +52,9 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
     if (!newName.trim() || !clientId) return;
     setSaving(true);
     try {
-      const { data } = await api.post(`/api/subaccounts/${clientId}/projects`, { name: newName.trim(), description: newDesc.trim() || null, color: newColor });
+      const { data } = await api.post(`/api/subaccounts/${clientId}/projects`, { name: newName.trim(), description: newDesc.trim() || null, color: newColor, repoUrl: newRepoUrl.trim() || undefined });
       setProjects((p) => [data, ...p]);
-      setShowNew(false); setNewName(''); setNewDesc(''); setNewColor('#6366f1');
+      setShowNew(false); setNewName(''); setNewDesc(''); setNewColor('#6366f1'); setNewRepoUrl('');
     } catch {
       // TODO: show error toast
     } finally { setSaving(false); }
@@ -115,11 +116,12 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
                 ))}
               </div>
             </div>
+            <input className={inputCls} placeholder="GitHub repo URL (optional)" value={newRepoUrl} onChange={(e) => setNewRepoUrl(e.target.value)} />
             <div className="flex gap-2">
               <button onClick={handleCreate} disabled={!newName.trim() || saving} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[13px] font-semibold rounded-lg transition-colors">
                 {saving ? 'Creating…' : 'Create Project'}
               </button>
-              <button onClick={() => { setShowNew(false); setNewName(''); setNewDesc(''); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
+              <button onClick={() => { setShowNew(false); setNewName(''); setNewDesc(''); setNewRepoUrl(''); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
                 Cancel
               </button>
             </div>

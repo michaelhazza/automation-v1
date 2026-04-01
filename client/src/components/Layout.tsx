@@ -190,6 +190,7 @@ export default function Layout({ user, children }: LayoutProps) {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectColor, setNewProjectColor] = useState('#6366f1');
   const [createProjectLoading, setCreateProjectLoading] = useState(false);
+  const [newProjectRepoUrl, setNewProjectRepoUrl] = useState('');
 
   const [showCreateAgent, setShowCreateAgent] = useState(false);
 
@@ -745,10 +746,11 @@ export default function Layout({ user, children }: LayoutProps) {
               if (!newProjectName.trim() || createProjectLoading) return;
               setCreateProjectLoading(true);
               try {
-                const { data } = await api.post(`/api/subaccounts/${activeClientId}/projects`, { name: newProjectName.trim(), color: newProjectColor });
+                const { data } = await api.post(`/api/subaccounts/${activeClientId}/projects`, { name: newProjectName.trim(), color: newProjectColor, repoUrl: newProjectRepoUrl.trim() || undefined });
                 setShowCreateProject(false);
                 setNewProjectName('');
                 setNewProjectColor('#6366f1');
+                setNewProjectRepoUrl('');
                 // Refresh projects list and navigate
                 api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data: p }) =>
                   setNavProjects((p as NavProject[]).filter(pr => pr.status === 'active').slice(0, 12))
@@ -768,6 +770,10 @@ export default function Layout({ user, children }: LayoutProps) {
                     <button key={c} type="button" onClick={() => setNewProjectColor(c)} className={`w-7 h-7 rounded-full border-2 cursor-pointer transition-all ${newProjectColor === c ? 'border-slate-900 scale-110' : 'border-transparent'}`} style={{ background: c }} />
                   ))}
                 </div>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">GitHub repo <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input type="url" value={newProjectRepoUrl} onChange={(e) => setNewProjectRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div className="flex gap-2 justify-end pt-1">
                 <button type="button" onClick={() => setShowCreateProject(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
