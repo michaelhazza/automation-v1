@@ -1,5 +1,5 @@
-import './instrumentation.js';
 import 'dotenv/config';
+import './instrumentation.js';
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
