@@ -38,7 +38,7 @@ export const reviewService = {
         actionId: action.id,
         agentRunId: action.agentRunId,
         reviewStatus: 'pending',
-        reviewPayloadJson: reviewPayload as Record<string, unknown>,
+        reviewPayloadJson: reviewPayload as unknown as Record<string, unknown>,
         createdAt: new Date(),
       })
       .returning();

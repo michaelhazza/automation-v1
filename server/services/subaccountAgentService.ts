@@ -240,7 +240,7 @@ export const subaccountAgentService = {
         description: data.description ?? null,
         sourceType: data.sourceType,
         sourcePath: data.sourcePath,
-        sourceHeaders: data.sourceHeaders ?? null,
+        sourceHeaders: data.sourceHeaders ? JSON.stringify(data.sourceHeaders) : null,
         contentType: data.contentType ?? 'auto',
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,

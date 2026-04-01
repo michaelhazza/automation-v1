@@ -72,7 +72,7 @@ export const executionLayerService = {
           .where(
             and(
               eq(integrationConnections.subaccountId, action.subaccountId),
-              eq(integrationConnections.providerType, provider),
+              eq(integrationConnections.providerType, provider as typeof integrationConnections.providerType._.data),
               eq(integrationConnections.connectionStatus, 'active')
             )
           );

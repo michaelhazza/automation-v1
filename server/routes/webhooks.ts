@@ -133,7 +133,11 @@ router.post('/api/webhooks/callback/:executionId', async (req, res) => {
     try {
       const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
       if (user) {
-        const processName = (execution.processSnapshot as Record<string, unknown> | null)?.name as string | undefined ?? 'Process';
+        const [payloadRow] = await db
+          .select({ processSnapshot: executionPayloads.processSnapshot })
+          .from(executionPayloads)
+          .where(eq(executionPayloads.executionId, executionId));
+        const processName = (payloadRow?.processSnapshot as Record<string, unknown> | null)?.name as string | undefined ?? 'Process';
         await emailService.sendExecutionCompletionEmail(
           user.email,
           processName,

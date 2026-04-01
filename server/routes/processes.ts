@@ -47,7 +47,7 @@ router.get('/api/processes/:id', authenticate, async (req, res) => {
   try {
     const result = await processService.getProcess(req.params.id, req.orgId!, req.user!.role);
     // For system-managed processes, hide the execution internals from org admins
-    if (result.isSystemManaged && req.user!.role !== 'system_admin') {
+    if ((result as { isSystemManaged?: boolean }).isSystemManaged && req.user!.role !== 'system_admin') {
       const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, workflowEngineId, ...safe } = result as Record<string, unknown>;
       res.json(safe);
       return;

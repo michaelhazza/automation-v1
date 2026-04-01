@@ -14,7 +14,7 @@ const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
  * Returns null if the API key is not configured or the call fails.
  */
 export async function generateEmbedding(text: string): Promise<number[] | null> {
-  const apiKey = (env as Record<string, string | undefined>).OPENAI_API_KEY;
+  const apiKey = env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
   try {

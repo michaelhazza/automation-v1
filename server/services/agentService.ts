@@ -583,6 +583,9 @@ export const agentService = {
       allowModelOverride: boolean;
       defaultSkillSlugs: string[];
       icon: string;
+      agentRole: string | null;
+      agentTitle: string | null;
+      parentAgentId: string | null;
       heartbeatEnabled: boolean;
       heartbeatIntervalHours: number | null;
       heartbeatOffsetHours: number;
@@ -632,7 +635,7 @@ export const agentService = {
 
     const [updated] = await db
       .update(agents)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update)
       .where(eq(agents.id, id))
       .returning();
 

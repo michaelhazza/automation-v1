@@ -97,6 +97,9 @@ export const systemAgentService = {
     defaultMaxToolCalls: number;
     executionMode: string;
     status: string;
+    agentRole: string | null;
+    agentTitle: string | null;
+    parentSystemAgentId: string | null;
   }>) {
     const [existing] = await db.select().from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));
