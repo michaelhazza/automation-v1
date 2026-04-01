@@ -877,15 +877,15 @@ export default function Layout({ user, children }: LayoutProps) {
 
                   {/* Icon picker popover */}
                   {showIconPicker && (
-                    <div className="absolute top-full left-0 mt-2 z-20 bg-white border border-slate-200 rounded-xl shadow-xl p-3 w-[280px] animate-[fadeIn_0.1s_ease-out_both]">
+                    <div className="absolute top-full left-0 mt-2 z-20 bg-white border border-slate-200 rounded-xl shadow-xl p-3 w-[340px] animate-[fadeIn_0.1s_ease-out_both]">
                       <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Choose an icon</div>
-                      <div className="grid grid-cols-10 gap-0.5">
+                      <div className="grid grid-cols-7 gap-1">
                         {AGENT_ICONS.map((icon) => (
                           <button
                             key={icon}
                             type="button"
                             onClick={() => { setNewAgentIcon(icon); setShowIconPicker(false); }}
-                            className={`w-7 h-7 rounded-md text-base flex items-center justify-center cursor-pointer border-0 transition-all ${
+                            className={`w-10 h-10 rounded-lg text-2xl flex items-center justify-center cursor-pointer border-0 transition-all ${
                               newAgentIcon === icon
                                 ? 'bg-indigo-100 ring-2 ring-indigo-500 scale-110'
                                 : 'bg-transparent hover:bg-slate-100'
