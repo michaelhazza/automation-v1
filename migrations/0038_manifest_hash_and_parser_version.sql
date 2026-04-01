@@ -9,11 +9,13 @@ ALTER TABLE hierarchy_templates
   ADD COLUMN manifest_hash text,
   ADD COLUMN parser_version text;
 
--- Index on manifest_hash for fast duplicate lookups (only non-null values)
-CREATE INDEX system_hierarchy_templates_manifest_hash_idx
+-- Unique constraint on manifest_hash to prevent race-condition duplicates.
+-- Application-level check (409) handles the happy path; this catches concurrent inserts.
+-- Scoped to non-deleted, non-null hashes so soft-deleted templates don't block re-import.
+CREATE UNIQUE INDEX system_hierarchy_templates_manifest_hash_uniq
   ON system_hierarchy_templates (manifest_hash)
   WHERE manifest_hash IS NOT NULL AND deleted_at IS NULL;
 
-CREATE INDEX hierarchy_templates_manifest_hash_idx
-  ON hierarchy_templates (manifest_hash)
+CREATE UNIQUE INDEX hierarchy_templates_manifest_hash_org_uniq
+  ON hierarchy_templates (organisation_id, manifest_hash)
   WHERE manifest_hash IS NOT NULL AND deleted_at IS NULL;

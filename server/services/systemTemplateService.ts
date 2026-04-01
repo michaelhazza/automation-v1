@@ -143,20 +143,29 @@ export const systemTemplateService = {
     // Load existing system agents for matching
     const sysAgents = await db.select().from(systemAgents).where(isNull(systemAgents.deletedAt));
 
-    // Create template
-    const [template] = await db
-      .insert(systemHierarchyTemplates)
-      .values({
-        name: data.name,
-        sourceType: 'paperclip_import',
-        paperclipManifest: manifest,
-        manifestHash,
-        parserVersion: PARSER_VERSION,
-        agentCount: paperclipAgents.length,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    // Create template (DB unique constraint on manifest_hash catches race conditions)
+    let template;
+    try {
+      [template] = await db
+        .insert(systemHierarchyTemplates)
+        .values({
+          name: data.name,
+          sourceType: 'paperclip_import',
+          paperclipManifest: manifest,
+          manifestHash,
+          parserVersion: PARSER_VERSION,
+          agentCount: paperclipAgents.length,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string };
+      if (pgErr.code === '23505') {
+        throw { statusCode: 409, message: 'This manifest has already been imported (concurrent duplicate detected).' };
+      }
+      throw err;
+    }
 
     // Track used slugs for collision detection within this template
     const templateSlugs = new Set<string>();

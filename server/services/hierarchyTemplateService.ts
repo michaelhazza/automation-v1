@@ -201,20 +201,29 @@ export const hierarchyTemplateService = {
     const orgAgents = await db.select().from(agents)
       .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
 
-    // Create template
-    const [template] = await db
-      .insert(hierarchyTemplates)
-      .values({
-        organisationId,
-        name: data.name,
-        sourceType: 'paperclip_import',
-        paperclipManifest: manifest,
-        manifestHash,
-        parserVersion: PARSER_VERSION,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    // Create template (DB unique constraint on manifest_hash catches race conditions)
+    let template;
+    try {
+      [template] = await db
+        .insert(hierarchyTemplates)
+        .values({
+          organisationId,
+          name: data.name,
+          sourceType: 'paperclip_import',
+          paperclipManifest: manifest,
+          manifestHash,
+          parserVersion: PARSER_VERSION,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string };
+      if (pgErr.code === '23505') {
+        throw { statusCode: 409, message: 'This manifest has already been imported (concurrent duplicate detected).' };
+      }
+      throw err;
+    }
 
     // Track used slugs for collision detection
     const usedSlugs = new Set(orgAgents.map(a => a.slug));
