@@ -36,7 +36,7 @@ export default function SystemSettingsPage({ user }: { user: User }) {
       .then(({ data }) => {
         setMaxUploadSizeMb(parseInt(data.max_upload_size_mb, 10) || 200);
       })
-      .catch(() => setError('Failed to load settings'))
+      .catch((err) => { console.error('[SystemSettings] Failed to load settings:', err); setError('Failed to load settings'); })
       .finally(() => setLoading(false));
   }, []);
 

@@ -61,8 +61,8 @@ export default function DashboardPage({ user }: { user: User }) {
     Promise.all([
       api.get('/api/agents'),
       api.get('/api/executions', { params: { limit: 8 } }),
-      api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch(() => ({ data: null })),
-      api.get('/api/agent-activity/daily', { params: { sinceDays: 14 } }).catch(() => ({ data: [] })),
+      api.get('/api/agent-activity/stats', { params: { sinceDays: 7 } }).catch((err) => { console.error('[Dashboard] Failed to fetch activity stats:', err); return { data: null }; }),
+      api.get('/api/agent-activity/daily', { params: { sinceDays: 14 } }).catch((err) => { console.error('[Dashboard] Failed to fetch daily activity:', err); return { data: [] }; }),
     ]).then(([a, e, s, d]) => {
       setAgents(a.data);
       const execs: Execution[] = e.data;
@@ -78,7 +78,7 @@ export default function DashboardPage({ user }: { user: User }) {
         fresh.forEach(id => seenIds.current.add(id));
         setTimeout(() => setNewIds(new Set()), 980);
       }
-    }).catch(() => {}).finally(() => setLoading(false));
+    }).catch((err) => console.error('[Dashboard] Failed to load dashboard data:', err)).finally(() => setLoading(false));
   }, []);
 
   const hour = new Date().getHours();

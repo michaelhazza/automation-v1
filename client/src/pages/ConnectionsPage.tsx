@@ -39,7 +39,7 @@ export default function ConnectionsPage({ user: _user }: { user: User }) {
   const load = () => {
     api.get(`/api/subaccounts/${subaccountId}/connections`)
       .then(({ data }) => setConnections(data))
-      .catch(() => setError('Failed to load connections'))
+      .catch((err) => { console.error('[Connections] Failed to load connections:', err); setError('Failed to load connections'); })
       .finally(() => setLoading(false));
   };
 

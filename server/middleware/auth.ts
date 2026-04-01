@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
+import { auditService } from '../services/auditService.js';
 
 export interface JwtPayload {
   id: string;
@@ -43,6 +44,22 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
     if (payload.role === 'system_admin') {
       const headerOrgId = req.headers['x-organisation-id'] as string | undefined;
       req.orgId = headerOrgId || payload.organisationId;
+
+      if (headerOrgId && headerOrgId !== payload.organisationId) {
+        auditService.log({
+          organisationId: headerOrgId,
+          actorId: payload.id,
+          actorType: 'user',
+          action: 'cross_org_access',
+          metadata: {
+            targetOrganisationId: headerOrgId,
+            originalOrganisationId: payload.organisationId,
+            method: req.method,
+            path: req.path,
+          },
+          ipAddress: req.ip,
+        });
+      }
     } else {
       req.orgId = payload.organisationId;
     }

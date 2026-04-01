@@ -4,6 +4,7 @@ import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/sc
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { hitlService } from './hitlService.js';
+import { auditService } from './auditService.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 
@@ -112,6 +113,16 @@ export const reviewService = {
     // Transition action to approved
     await actionService.transitionState(item.actionId, organisationId, 'approved', userId);
 
+    auditService.log({
+      organisationId,
+      actorId: userId,
+      actorType: 'user',
+      action: 'agent_approved',
+      entityType: 'review_item',
+      entityId: reviewItemId,
+      metadata: { actionId: item.actionId, edited: !!edits },
+    });
+
     // Dispatch execution outside the approval transaction
     let execResult;
     try {
@@ -185,6 +196,16 @@ export const reviewService = {
     });
 
     await actionService.transitionState(item.actionId, organisationId, 'rejected', userId);
+
+    auditService.log({
+      organisationId,
+      actorId: userId,
+      actorType: 'user',
+      action: 'agent_rejected',
+      entityType: 'review_item',
+      entityId: reviewItemId,
+      metadata: { actionId: item.actionId, comment: rejectionComment },
+    });
 
     // Write durable resume event
     const action = await actionService.getAction(item.actionId, organisationId);

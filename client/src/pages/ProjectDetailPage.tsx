@@ -40,13 +40,14 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
     setLoading(true);
     Promise.all([
       api.get(`/api/subaccounts/${activeClientId}/projects/${id}`),
-      api.get(`/api/subaccounts/${activeClientId}/tasks`, { params: { projectId: id } }).catch(() => ({ data: [] })),
+      api.get(`/api/subaccounts/${activeClientId}/tasks`, { params: { projectId: id } }).catch((err) => { console.error('[ProjectDetail] Failed to fetch tasks:', err); return { data: [] }; }),
     ]).then(([pRes, tRes]) => {
       setProject(pRes.data);
       setTasks(tRes.data);
       setEditName(pRes.data.name);
       setEditDescription(pRes.data.description ?? '');
-    }).catch(() => {
+    }).catch((err) => {
+      console.error('[ProjectDetail] Failed to load project:', err);
       navigate('/');
     }).finally(() => setLoading(false));
   }, [id, activeClientId]);

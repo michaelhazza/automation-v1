@@ -152,7 +152,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
     setLoading(true);
     Promise.all([
       api.get(`/api/subaccounts/${activeClientId}/agents`),
-      api.get('/api/agents').catch(() => ({ data: [] })),
+      api.get('/api/agents').catch((err) => { console.error('[OrgChart] Failed to fetch org agents:', err); return { data: [] }; }),
     ]).then(([saRes, _orgRes]) => {
       const saData = saRes.data as any[];
       setAgents(saData);
@@ -166,7 +166,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
         heartbeatIntervalHours: a.heartbeatIntervalHours ?? null,
         heartbeatOffsetHours: a.heartbeatOffsetHours ?? 0,
       })));
-    }).catch(() => { setAgents([]); setHeartbeatAgents([]); })
+    }).catch((err) => { console.error('[OrgChart] Failed to load org chart data:', err); setAgents([]); setHeartbeatAgents([]); })
       .finally(() => setLoading(false));
   }, [activeClientId]);
 

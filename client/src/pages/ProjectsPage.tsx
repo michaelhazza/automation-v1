@@ -43,7 +43,7 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
     if (!clientId) { setLoading(false); return; }
     api.get(`/api/subaccounts/${clientId}/projects`)
       .then(({ data }) => setProjects(data))
-      .catch(() => {})
+      .catch((err) => console.error('[ProjectsPage] Failed to load projects:', err))
       .finally(() => setLoading(false));
   }, [clientId]);
 

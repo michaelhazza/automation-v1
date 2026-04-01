@@ -355,9 +355,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       loadAgent(id);
     }
     // Load available skills for the skills picker
-    api.get('/api/skills').then(({ data }) => setAvailableSkills(data)).catch(() => {});
+    api.get('/api/skills').then(({ data }) => setAvailableSkills(data)).catch((err) => console.error('[AdminAgentEdit] Failed to fetch skills:', err));
     // Load all org agents for the parent dropdown
-    api.get('/api/agents').then(({ data }) => setAllOrgAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })))).catch(() => {});
+    api.get('/api/agents').then(({ data }) => setAllOrgAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })))).catch((err) => console.error('[AdminAgentEdit] Failed to fetch agents:', err));
   }, [id, isNew]);
 
   // ── Save / Create ──
@@ -1703,7 +1703,7 @@ function AgentUsageTab({ agentId }: { agentId: string }) {
     // and find this agent's row
     api.get('/api/agent-activity/stats', { params: { sinceDays: 30 } })
       .then(() => {})
-      .catch(() => {});
+      .catch((err) => console.error('[AdminAgentEdit] Failed to fetch agent activity stats:', err));
 
     // Use the cost aggregates scoped to this agent via the invoice-style query
     // We'll query the org usage/agents list and look for matching agentId pattern

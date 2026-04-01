@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { auditService } from '../services/auditService.js';
 
 const router = Router();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -41,7 +42,27 @@ router.post('/api/auth/login', asyncHandler(async (req, res) => {
     res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
     return;
   }
-  const result = await authService.login(email, password, organisationSlug);
+  let result;
+  try {
+    result = await authService.login(email, password, organisationSlug);
+  } catch (err) {
+    auditService.log({
+      actorType: 'user',
+      action: 'login_failed',
+      metadata: { email: String(email).toLowerCase(), reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
+      ipAddress: req.ip,
+    });
+    throw err;
+  }
+  auditService.log({
+    organisationId: result.user.organisationId,
+    actorId: result.user.id,
+    actorType: 'user',
+    action: 'login',
+    entityType: 'user',
+    entityId: result.user.id,
+    ipAddress: req.ip,
+  });
   res.json(result);
 }));
 
@@ -67,6 +88,12 @@ router.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
     return;
   }
   const result = await authService.forgotPassword(email);
+  auditService.log({
+    actorType: 'user',
+    action: 'password_reset_request',
+    metadata: { email: String(email).toLowerCase() },
+    ipAddress: req.ip,
+  });
   res.json(result);
 }));
 
@@ -82,6 +109,12 @@ router.post('/api/auth/reset-password', asyncHandler(async (req, res) => {
     return;
   }
   const result = await authService.resetPassword(token, password);
+  auditService.log({
+    actorType: 'user',
+    action: 'password_reset',
+    metadata: { tokenPrefix: String(token).slice(0, 8) },
+    ipAddress: req.ip,
+  });
   res.json(result);
 }));
 

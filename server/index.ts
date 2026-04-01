@@ -16,6 +16,8 @@ import { systemSkillService } from './services/systemSkillService.js';
 import { agentScheduleService } from './services/agentScheduleService.js';
 import { routerJobService } from './services/routerJobService.js';
 import { queueService } from './services/queueService.js';
+import { client as dbClient } from './db/index.js';
+import { getIO } from './websocket/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,13 +71,34 @@ const app = express();
 const httpServer = createServer(app);
 
 // Security middleware
+const isProduction = env.NODE_ENV === 'production';
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
   crossOriginOpenerPolicy: false,
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: isProduction
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'blob:'],
+          connectSrc: ["'self'", 'ws:', 'wss:'],
+        },
+      }
+    : false,
 }));
+
+const corsOrigin = (() => {
+  if (!isProduction) return '*';
+  if (env.CORS_ORIGINS === '*') {
+    console.warn('[SERVER] CORS_ORIGINS is wildcard in production. Set explicit origins via CORS_ORIGINS env var.');
+  }
+  return env.CORS_ORIGINS === '*' ? false as const : env.CORS_ORIGINS.split(',').map(o => o.trim());
+})();
+
 app.use(cors({
-  origin: env.CORS_ORIGINS === '*' ? '*' : env.CORS_ORIGINS.split(',').map(o => o.trim()),
+  origin: corsOrigin,
   credentials: true,
 }));
 
@@ -148,8 +171,24 @@ app.use('/api', (req, res) => {
 // Global error handler
 app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('[SERVER ERROR]', err);
-  const e = err as { status?: number; statusCode?: number; message?: string };
-  res.status(e.status ?? e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+
+  let statusCode = 500;
+  let message = 'Internal server error';
+
+  if (err instanceof Error) {
+    message = err.message;
+    const withStatus = err as Error & { status?: number; statusCode?: number };
+    statusCode = withStatus.status ?? withStatus.statusCode ?? 500;
+  } else if (typeof err === 'object' && err !== null) {
+    const e = err as { status?: number; statusCode?: number; message?: string };
+    statusCode = e.status ?? e.statusCode ?? 500;
+    message = e.message ?? message;
+  }
+
+  const isProduction = env.NODE_ENV === 'production';
+  res.status(statusCode).json({
+    error: isProduction ? 'Internal server error' : message,
+  });
 });
 
 async function start() {
@@ -173,5 +212,67 @@ start().catch((err) => {
   console.error('[SERVER] Startup failed', err);
   process.exit(1);
 });
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+// ---------------------------------------------------------------------------
+const SHUTDOWN_TIMEOUT_MS = 15_000;
+let shuttingDown = false;
+
+async function gracefulShutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[SHUTDOWN] Received ${signal} — starting graceful shutdown`);
+
+  const forceExit = setTimeout(() => {
+    console.error('[SHUTDOWN] Timed out after 15 s — forcing exit');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  // Allow the process to exit naturally if everything closes in time
+  forceExit.unref();
+
+  try {
+    // 1. Stop accepting new connections & wait for in-flight requests
+    await new Promise<void>((resolve, reject) => {
+      httpServer.close((err) => (err ? reject(err) : resolve()));
+      console.log('[SHUTDOWN] HTTP server closing (waiting for in-flight requests)');
+    });
+    console.log('[SHUTDOWN] HTTP server closed');
+
+    // 2. Close Socket.IO server
+    const io = getIO();
+    if (io) {
+      await new Promise<void>((resolve) => {
+        io.close(() => resolve());
+      });
+      console.log('[SHUTDOWN] Socket.IO server closed');
+    }
+
+    // 3. Stop agent schedule service (pg-boss instance)
+    try {
+      await agentScheduleService.shutdown();
+      console.log('[SHUTDOWN] Agent schedule service stopped');
+    } catch (err) {
+      console.error('[SHUTDOWN] Error stopping agent schedule service', err);
+    }
+
+    // 4. Close database connection pool
+    try {
+      await dbClient.end();
+      console.log('[SHUTDOWN] Database connection pool closed');
+    } catch (err) {
+      console.error('[SHUTDOWN] Error closing database pool', err);
+    }
+
+    console.log('[SHUTDOWN] Clean shutdown complete');
+    process.exit(0);
+  } catch (err) {
+    console.error('[SHUTDOWN] Error during shutdown', err);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export default app;

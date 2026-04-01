@@ -41,7 +41,7 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
       const [skillsRes, agentsRes] = await Promise.all([
         api.get('/api/skills/all'),
         activeClientId
-          ? api.get(`/api/subaccounts/${activeClientId}/agents`).catch(() => ({ data: [] }))
+          ? api.get(`/api/subaccounts/${activeClientId}/agents`).catch((err) => { console.error('[AdminSkills] Failed to fetch agents:', err); return { data: [] }; })
           : Promise.resolve({ data: [] }),
       ]);
       setSkills(skillsRes.data);

@@ -32,7 +32,7 @@ export default function SystemProcessesPage({ user }: { user: User }) {
   const load = () => {
     api.get('/api/system/processes')
       .then(({ data }) => setProcesses(data))
-      .catch(() => setError('Failed to load system processes'))
+      .catch((err) => { console.error('[SystemProcesses] Failed to load processes:', err); setError('Failed to load system processes'); })
       .finally(() => setLoading(false));
   };
 

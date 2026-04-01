@@ -101,7 +101,7 @@ function GeneralTab({ orgId, orgName: _orgName }: { orgId: string; orgName: stri
         setEditPlan(data.plan);
         setEditStatus(data.status);
       })
-      .catch(() => {})
+      .catch((err) => console.error('[OrgSettings] Failed to load organisation:', err))
       .finally(() => setLoading(false));
   }, [orgId]);
 

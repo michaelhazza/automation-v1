@@ -221,14 +221,14 @@ export default function Layout({ user, children }: LayoutProps) {
   // Fetch orgs list (system admin)
   useEffect(() => {
     if (isSystemAdmin) {
-      api.get('/api/organisations').then(({ data }) => setOrgs(data)).catch(() => {});
+      api.get('/api/organisations').then(({ data }) => setOrgs(data)).catch((err) => console.error('[Layout] Failed to fetch organisations:', err));
     }
   }, [isSystemAdmin]);
 
   // Fetch subaccounts
   useEffect(() => {
     if (hasOrgContext) {
-      api.get('/api/subaccounts').then(({ data }) => setSubaccounts(data)).catch(() => setSubaccounts([]));
+      api.get('/api/subaccounts').then(({ data }) => setSubaccounts(data)).catch((err) => { console.error('[Layout] Failed to fetch subaccounts:', err); setSubaccounts([]); });
     } else {
       setSubaccounts([]);
       if (activeClientId) { removeActiveClient(); setActiveClientIdState(null); setActiveClientNameState(null); }
@@ -239,7 +239,7 @@ export default function Layout({ user, children }: LayoutProps) {
   useEffect(() => {
     if (isSystemAdmin) { setOrgPerms(new Set(['__system_admin__'])); return; }
     if (hasOrgContext) {
-      api.get('/api/my-permissions').then(({ data }) => setOrgPerms(new Set(data.permissions))).catch(() => setOrgPerms(new Set()));
+      api.get('/api/my-permissions').then(({ data }) => setOrgPerms(new Set(data.permissions))).catch((err) => { console.error('[Layout] Failed to fetch org permissions:', err); setOrgPerms(new Set()); });
     } else { setOrgPerms(new Set()); }
   }, [hasOrgContext, activeOrgId, isSystemAdmin]);
 
@@ -247,27 +247,27 @@ export default function Layout({ user, children }: LayoutProps) {
   useEffect(() => {
     if (isSystemAdmin) { setClientPerms(new Set(['__system_admin__'])); return; }
     if (activeClientId) {
-      api.get(`/api/subaccounts/${activeClientId}/my-permissions`).then(({ data }) => setClientPerms(new Set(data.permissions))).catch(() => setClientPerms(new Set()));
+      api.get(`/api/subaccounts/${activeClientId}/my-permissions`).then(({ data }) => setClientPerms(new Set(data.permissions))).catch((err) => { console.error('[Layout] Failed to fetch client permissions:', err); setClientPerms(new Set()); });
     } else { setClientPerms(new Set()); }
   }, [activeClientId, isSystemAdmin]);
 
   // Review queue badge — initial load + WebSocket updates
   useEffect(() => {
     if (!activeClientId) { setReviewCount(0); return; }
-    api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
+    api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to fetch review queue count:', err));
   }, [activeClientId]);
 
   // Live agent badge — initial load + WebSocket updates
   useEffect(() => {
     if (!activeClientId) { setLiveAgentCount(0); return; }
-    api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch(() => {});
+    api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch((err) => console.error('[Layout] Failed to fetch live status:', err));
   }, [activeClientId]);
 
   // Resync function — re-fetch all badge counts from REST (used on reconnect)
   const resyncBadges = useCallback(() => {
     if (!activeClientId) return;
-    api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
-    api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch(() => {});
+    api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to resync review count:', err));
+    api.get(`/api/subaccounts/${activeClientId}/live-status`).then(({ data }) => setLiveAgentCount(data.runningAgents ?? 0)).catch((err) => console.error('[Layout] Failed to resync live status:', err));
     api.get(`/api/subaccounts/${activeClientId}/usage/summary`)
       .then(({ data }) => {
         const spent = data.monthly?.totalCostCents ?? 0;
@@ -276,7 +276,7 @@ export default function Layout({ user, children }: LayoutProps) {
         const pct = spent / limit;
         if (pct >= 0.75) setBudgetAlert({ pct, spent, limit });
         else setBudgetAlert(null);
-      }).catch(() => {});
+      }).catch((err) => console.error('[Layout] Failed to resync usage summary:', err));
   }, [activeClientId]);
 
   // WebSocket: subscribe to subaccount room for live updates
@@ -286,7 +286,7 @@ export default function Layout({ user, children }: LayoutProps) {
     'live:agent_completed': () => setLiveAgentCount(c => Math.max(0, c - 1)),
     'review:item_updated': () => {
       // Re-fetch count on any review change
-      if (activeClientId) api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch(() => {});
+      if (activeClientId) api.get(`/api/subaccounts/${activeClientId}/review-queue/count`).then(({ data }) => setReviewCount(data.count ?? 0)).catch((err) => console.error('[Layout] Failed to refresh review count:', err));
     },
     'review:item_created': () => setReviewCount(c => c + 1),
     'budget:update': (data: unknown) => {
@@ -301,10 +301,10 @@ export default function Layout({ user, children }: LayoutProps) {
     if (!activeClientId) { setNavProjects([]); setNavAgents([]); return; }
     api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data }) =>
       setNavProjects((data as NavProject[]).filter(p => p.status === 'active').slice(0, 12))
-    ).catch(() => setNavProjects([]));
+    ).catch((err) => { console.error('[Layout] Failed to fetch nav projects:', err); setNavProjects([]); });
     api.get(`/api/subaccounts/${activeClientId}/agents`).then(({ data }) =>
       setNavAgents((data as NavAgent[]).filter(a => a.isActive))
-    ).catch(() => setNavAgents([]));
+    ).catch((err) => { console.error('[Layout] Failed to fetch nav agents:', err); setNavAgents([]); });
   }, [activeClientId]);
 
   // Budget alert — initial load (updates come via WebSocket 'budget:update')
@@ -318,7 +318,7 @@ export default function Layout({ user, children }: LayoutProps) {
         const pct = spent / limit;
         if (pct >= 0.75) setBudgetAlert({ pct, spent, limit });
         else setBudgetAlert(null);
-      }).catch(() => {});
+      }).catch((err) => console.error('[Layout] Failed to fetch budget alert:', err));
   }, [activeClientId]);
 
   // Initialise WebSocket connection
@@ -802,7 +802,7 @@ export default function Layout({ user, children }: LayoutProps) {
               setNewIssueLoading(true);
               try {
                 // Find top-level agent (no parent) to auto-assign
-                const agentsRes = await api.get(`/api/subaccounts/${activeClientId}/agents`).catch(() => ({ data: [] }));
+                const agentsRes = await api.get(`/api/subaccounts/${activeClientId}/agents`).catch((err) => { console.error('[Layout] Failed to fetch agents for new issue:', err); return { data: [] }; });
                 const topAgent = (agentsRes.data as any[]).find((a: any) => a.isActive && !a.parentSubaccountAgentId);
                 await api.post(`/api/subaccounts/${activeClientId}/tasks`, {
                   title: newIssueTitle.trim(),
