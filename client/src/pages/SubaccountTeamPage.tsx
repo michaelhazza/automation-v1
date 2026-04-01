@@ -207,21 +207,11 @@ export default function SubaccountTeamPage({ user: _user }: { user: User }) {
         <Modal title="Add Team Member" onClose={() => setShowAdd(false)} maxWidth={480}>
           {addError && <div className="text-[13px] text-red-600 mb-3">{addError}</div>}
           <div className="grid gap-4 mb-6">
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Email *</label>
-              <input
-                autoFocus
-                type="email"
-                value={addForm.email}
-                onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
-                placeholder="name@company.com"
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name *</label>
                 <input
+                  autoFocus
                   value={addForm.firstName}
                   onChange={(e) => setAddForm({ ...addForm, firstName: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -235,6 +225,16 @@ export default function SubaccountTeamPage({ user: _user }: { user: User }) {
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Email *</label>
+              <input
+                type="email"
+                value={addForm.email}
+                onChange={(e) => setAddForm({ ...addForm, email: e.target.value })}
+                placeholder="name@company.com"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
             <div>
               <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Role</label>
