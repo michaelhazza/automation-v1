@@ -103,6 +103,8 @@ export interface AgentRunRequest {
   parentRunId?: string;
   isSubAgent?: boolean;
   parentSpawnRunId?: string;
+  /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
+  idempotencyKey?: string;
 }
 
 export interface AgentRunResult {
@@ -142,6 +144,29 @@ export const agentExecutionService = {
   async executeRun(request: AgentRunRequest): Promise<AgentRunResult> {
     const startTime = Date.now();
 
+    // ── 0. Idempotency check — return existing run if key already used ───
+    if (request.idempotencyKey) {
+      const [existing] = await db
+        .select()
+        .from(agentRuns)
+        .where(eq(agentRuns.idempotencyKey, request.idempotencyKey))
+        .limit(1);
+
+      if (existing) {
+        return {
+          runId: existing.id,
+          status: existing.status as AgentRunResult['status'],
+          summary: existing.summary,
+          totalToolCalls: existing.totalToolCalls,
+          totalTokens: existing.totalTokens,
+          durationMs: existing.durationMs ?? (Date.now() - startTime),
+          tasksCreated: existing.tasksCreated,
+          tasksUpdated: existing.tasksUpdated,
+          deliverablesCreated: existing.deliverablesCreated,
+        };
+      }
+    }
+
     // ── 1. Create the run record ──────────────────────────────────────────
     const [run] = await db
       .insert(agentRuns)
@@ -150,6 +175,7 @@ export const agentExecutionService = {
         subaccountId: request.subaccountId,
         agentId: request.agentId,
         subaccountAgentId: request.subaccountAgentId,
+        idempotencyKey: request.idempotencyKey ?? null,
         runType: request.runType,
         executionMode: request.executionMode ?? 'api',
         status: 'running',
