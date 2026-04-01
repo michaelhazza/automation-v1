@@ -788,3 +788,438 @@ interface ReviewQueueItemProps {
 | `server/services/skillExecutor.ts` | Add `buildDenialMessage()`, pass `collapsedOutcome` to agent loop |
 | `client/src/pages/ReviewQueuePage.tsx` | Render `interruptConfig` buttons, free-text field, args editor |
 | `server/migrations/XXXX_review_audit.sql` | Raw SQL migration |
+
+---
+
+## Section 5 — OAuth Integration Layer
+
+**Source repos:** Activepieces (primary), Composio (evaluated, rejected as strategic dependency)
+**Gap closed:** `integration_connections` table exists with correct columns but zero OAuth flow implementation — no auth URL generation, no callback handler, no token exchange, no auto-refresh. Agents with `send_email`, `update_record`, etc. cannot use connected external services.
+
+**Strategic decision:** Build our own OAuth layer using Activepieces patterns. Composio was evaluated and fails two kill criteria: it owns the token vault (tokens never live in our DB) and all tool arguments transit their infrastructure. It may be used as a throwaway bridge behind a hard adapter boundary only, with an explicit replacement plan.
+
+### Architecture overview
+
+```
+User clicks "Connect Gmail"
+  → GET  /api/integrations/oauth2/auth-url?provider=gmail&subaccountId=...
+  → returns { url, state }  (state = signed JWT binding provider+subaccountId)
+
+Browser redirects to Google → user consents → Google redirects to:
+  → GET  /api/integrations/oauth2/callback?code=...&state=...
+  → server validates state JWT, exchanges code for tokens
+  → encrypts tokens (AES-256-GCM), stores in integration_connections
+  → redirects browser to success page
+
+Agent calls tool with auth_context
+  → integrationConnectionService.getConnection(subaccountId, provider)
+  → auto-refreshes if expires within 15 minutes (distributed lock)
+  → returns decrypted connection to tool handler
+```
+
+### Encryption (AES-256-GCM, upgraded from Activepieces' CBC)
+
+Activepieces uses AES-256-CBC. We use AES-256-GCM (already established in our codebase per migration 0034) — adds authentication tag, prevents ciphertext tampering.
+
+```typescript
+// server/lib/integrationEncryption.ts
+// Wraps the existing encryptText/decryptText helpers already in the codebase
+
+export function encryptToken(plaintext: string, orgKey: string): string {
+  // AES-256-GCM: random 12-byte IV, 16-byte auth tag
+  // Returns: base64(iv + authTag + ciphertext)
+  // Uses orgKey from organisation_secrets table (same key as HMAC resume URLs)
+}
+
+export function decryptToken(encrypted: string, orgKey: string): string {
+  // Reverse of above
+}
+```
+
+### DB changes to `integration_connections`
+
+Add `claimed_at` (Unix seconds) + `expires_in` (seconds) following the Activepieces pattern. This is more reliable than storing `expires_at` directly because token responses give us `expires_in` — computing `expires_at` requires trusting the server clock at exchange time, which can drift.
+
+```sql
+ALTER TABLE integration_connections
+  ADD COLUMN claimed_at   BIGINT,        -- Unix seconds when token was acquired
+  ADD COLUMN expires_in   INTEGER,       -- seconds until expiry (from provider response)
+  ADD COLUMN token_url    TEXT,          -- stored so refresh doesn't need provider config
+  ADD COLUMN client_id    TEXT,          -- stored encrypted for refresh calls
+  ADD COLUMN client_secret TEXT,         -- stored encrypted for refresh calls
+  ADD COLUMN status       TEXT NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'expired', 'error', 'disconnected'));
+```
+
+### OAuth provider configs
+
+Each provider's OAuth endpoints are defined once, referenced by slug:
+
+```typescript
+// server/config/oauthProviders.ts
+
+export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
+  gmail: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly'],
+    extra: { access_type: 'offline', prompt: 'consent' },  // forces refresh_token issuance
+  },
+  github: {
+    authUrl: 'https://github.com/login/oauth/authorize',
+    tokenUrl: 'https://github.com/login/oauth/access_token',
+    scopes: ['repo', 'read:org'],
+  },
+  hubspot: {
+    authUrl: 'https://app.hubspot.com/oauth/authorize',
+    tokenUrl: 'https://api.hubapi.com/oauth/v1/token',
+    scopes: ['contacts', 'content', 'deals'],
+  },
+  slack: {
+    authUrl: 'https://slack.com/oauth/v2/authorize',
+    tokenUrl: 'https://slack.com/api/oauth.v2.access',
+    scopes: ['chat:write', 'channels:read', 'users:read'],
+  },
+  ghl: {
+    authUrl: 'https://marketplace.leadconnectorhq.com/oauth/chooselocation',
+    tokenUrl: 'https://services.leadconnectorhq.com/oauth/token',
+    scopes: ['contacts.readonly', 'contacts.write', 'opportunities.readonly'],
+  },
+};
+
+interface OAuthProviderConfig {
+  authUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  extra?: Record<string, string>;  // appended to auth URL params
+  pkce?: boolean;
+}
+```
+
+### Auth URL generation endpoint
+
+```typescript
+// server/routes/integrations.ts
+
+// GET /api/integrations/oauth2/auth-url
+app.get('/oauth2/auth-url', requireAuth, async (req, res) => {
+  const { provider, subaccountId } = req.query;
+
+  const config = OAUTH_PROVIDERS[provider];
+  if (!config) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+
+  // State JWT: signs provider + subaccountId + nonce, verified in callback
+  // Prevents CSRF — callback will only accept state we issued
+  const state = jwt.sign(
+    { provider, subaccountId, nonce: crypto.randomUUID() },
+    process.env.JWT_SECRET!,
+    { expiresIn: '10m' }
+  );
+
+  const url = new URL(config.authUrl);
+  url.searchParams.set('client_id', process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`]!);
+  url.searchParams.set('redirect_uri', `${process.env.APP_URL}/api/integrations/oauth2/callback`);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', config.scopes.join(' '));
+  url.searchParams.set('state', state);
+  for (const [k, v] of Object.entries(config.extra ?? {})) url.searchParams.set(k, v);
+
+  return res.json({ url: url.toString(), state });
+});
+```
+
+### Callback handler (token exchange + encrypted storage)
+
+```typescript
+// GET /api/integrations/oauth2/callback
+app.get('/oauth2/callback', async (req, res) => {
+  const { code, state } = req.query;
+
+  // Verify state JWT
+  const payload = jwt.verify(state, process.env.JWT_SECRET!) as { provider: string; subaccountId: string };
+  const config = OAUTH_PROVIDERS[payload.provider];
+
+  // Exchange code for tokens
+  const tokenResponse = await axios.post(config.tokenUrl, new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: `${process.env.APP_URL}/api/integrations/oauth2/callback`,
+    client_id: process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_ID`]!,
+    client_secret: process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_SECRET`]!,
+  }), { headers: { Accept: 'application/json' } });
+
+  const { access_token, refresh_token, expires_in, token_type, scope } = tokenResponse.data;
+  const claimedAt = Math.floor(Date.now() / 1000);
+
+  // Get org key for encryption
+  const orgKey = await organisationSecretService.getKey(/* orgId from subaccount */);
+
+  // Upsert into integration_connections
+  await db.insert(integrationConnections).values({
+    subaccountId: payload.subaccountId,
+    provider: payload.provider,
+    accessToken: encryptToken(access_token, orgKey),
+    refreshToken: refresh_token ? encryptToken(refresh_token, orgKey) : null,
+    claimedAt,
+    expiresIn: expires_in ?? 3600,
+    tokenUrl: config.tokenUrl,
+    clientId: encryptToken(process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_ID`]!, orgKey),
+    clientSecret: encryptToken(process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_SECRET`]!, orgKey),
+    scopes: (scope ?? config.scopes.join(' ')).split(' '),
+    status: 'active',
+  }).onConflictDoUpdate({
+    target: [integrationConnections.subaccountId, integrationConnections.provider],
+    set: { accessToken: sql`excluded.access_token`, /* ... all token fields */ },
+  });
+
+  return res.redirect(`${process.env.APP_URL}/settings/integrations?connected=${payload.provider}`);
+});
+```
+
+### Auto-refresh on access (Activepieces pattern)
+
+```typescript
+// server/services/integrationConnectionService.ts
+
+export async function getDecryptedConnection(
+  subaccountId: string,
+  provider: string
+): Promise<DecryptedConnection> {
+  const conn = await db.query.integrationConnections.findFirst({
+    where: and(
+      eq(integrationConnections.subaccountId, subaccountId),
+      eq(integrationConnections.provider, provider),
+      eq(integrationConnections.status, 'active')
+    ),
+  });
+  if (!conn) throw new Error(`No active ${provider} connection for subaccount ${subaccountId}`);
+
+  const orgKey = await organisationSecretService.getKey(conn.organisationId);
+
+  // Check expiry: refresh 15 minutes early (Activepieces pattern)
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const REFRESH_BUFFER = 15 * 60;
+  const needsRefresh = conn.claimedAt !== null &&
+    conn.expiresIn !== null &&
+    (nowSeconds + REFRESH_BUFFER >= conn.claimedAt + conn.expiresIn);
+
+  if (needsRefresh && conn.refreshToken) {
+    return refreshWithLock(conn, orgKey);
+  }
+
+  return {
+    provider: conn.provider,
+    access_token: decryptToken(conn.accessToken, orgKey),
+    scopes: conn.scopes,
+  };
+}
+
+async function refreshWithLock(conn: IntegrationConnection, orgKey: string): Promise<DecryptedConnection> {
+  // pg-boss advisory lock keyed by subaccountId + provider
+  // Prevents parallel refreshes from double-spending the refresh token
+  const lockKey = `oauth_refresh:${conn.subaccountId}:${conn.provider}`;
+
+  return withAdvisoryLock(lockKey, async () => {
+    // Re-fetch after acquiring lock — another worker may have already refreshed
+    const fresh = await db.query.integrationConnections.findFirst({ where: /* same */ });
+    const freshNow = Math.floor(Date.now() / 1000);
+    const REFRESH_BUFFER = 15 * 60;
+    if (fresh!.claimedAt! + fresh!.expiresIn! > freshNow + REFRESH_BUFFER) {
+      // Already refreshed by the other worker
+      return decryptConnection(fresh!, orgKey);
+    }
+
+    const clientId = decryptToken(conn.clientId!, orgKey);
+    const clientSecret = decryptToken(conn.clientSecret!, orgKey);
+    const refreshToken = decryptToken(conn.refreshToken!, orgKey);
+
+    const response = await axios.post(conn.tokenUrl!, new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }), { headers: { Accept: 'application/json' }, timeout: 20000 });
+
+    const data = response.data;
+
+    // mergeNonNull: preserve existing refresh_token if provider doesn't return a new one
+    // (common with GitHub, HubSpot)
+    const newRefreshToken = data.refresh_token
+      ? encryptToken(data.refresh_token, orgKey)
+      : conn.refreshToken;
+
+    await db.update(integrationConnections)
+      .set({
+        accessToken: encryptToken(data.access_token, orgKey),
+        refreshToken: newRefreshToken,
+        claimedAt: Math.floor(Date.now() / 1000),
+        expiresIn: data.expires_in ?? 3600,
+        status: 'active',
+      })
+      .where(eq(integrationConnections.id, conn.id));
+
+    return { provider: conn.provider, access_token: data.access_token, scopes: conn.scopes };
+  });
+}
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/config/oauthProviders.ts` | New file — provider config registry |
+| `server/routes/integrations.ts` | New file — auth URL, callback, list/delete connection routes |
+| `server/services/integrationConnectionService.ts` | New file — `getDecryptedConnection`, refresh-with-lock |
+| `server/lib/integrationEncryption.ts` | New file — AES-256-GCM encrypt/decrypt wrappers |
+| `server/services/organisationSecretService.ts` | New file — per-org key lookup with cache |
+| `server/db/schema/integrationConnections.ts` | Add `claimedAt`, `expiresIn`, `tokenUrl`, `clientId`, `clientSecret`, `status` |
+| `server/migrations/XXXX_integration_oauth.sql` | Raw SQL migration |
+| `.env.example` | Add `OAUTH_{PROVIDER}_CLIENT_ID/SECRET` vars for all 5 providers |
+
+---
+
+## Section 6 — Observability (Langfuse Phase 1)
+
+**Source repos:** Langfuse
+**Gap closed:** `llm_requests` table is the billing ledger but provides no visual trace of what happened inside an agent run. Debugging agent failures requires reading raw DB rows. Per-tenant cost is not surfaced in the UI. There is no grouped view of a complete run.
+
+**Infrastructure note:** Langfuse self-hosting requires ClickHouse (mandatory in v3+) in addition to PostgreSQL. This adds operational overhead. Two options:
+- **Option A (recommended for now):** Use Langfuse Cloud (free tier: 50k observations/month) and point `LANGFUSE_BASE_URL` at their hosted instance. Zero infrastructure cost to start.
+- **Option B:** Self-host with ClickHouse when observability volume justifies it or data residency requires it.
+
+**Phase 1 scope — strictly these three things:**
+1. Run-level trace per `agentRun` (session grouped by `agentRunId`)
+2. Tool-level span per `skillExecutor` dispatch
+3. LLM generation span per `llmRouter` call with token counts and USD cost
+
+**Not in Phase 1:** prompt versioning, A/B testing, annotation queues, full analytics UI.
+
+### Install
+
+```bash
+npm install @langfuse/tracing @langfuse/otel @opentelemetry/sdk-node
+```
+
+### New file: `server/instrumentation.ts`
+
+Must be the **first import** in the server entry point.
+
+```typescript
+// server/instrumentation.ts
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { LangfuseSpanProcessor } from '@langfuse/otel';
+
+export const langfuseProcessor = new LangfuseSpanProcessor();
+
+const sdk = new NodeSDK({ spanProcessors: [langfuseProcessor] });
+sdk.start();
+
+// Call on graceful shutdown so spans flush before process exits
+export async function shutdownTracing() {
+  await langfuseProcessor.forceFlush();
+  await sdk.shutdown();
+}
+```
+
+```typescript
+// server/index.ts — first line, before any other import
+import './instrumentation';
+```
+
+### `agentExecutionService.ts` — wrap the agent loop
+
+```typescript
+import { startActiveObservation, propagateAttributes } from '@langfuse/tracing';
+
+export async function executeRun(agentRunId: string, subaccountId: string, organisationId: string, task: string) {
+  return startActiveObservation('agent-run', async (rootSpan) => {
+    await propagateAttributes({
+      userId: subaccountId,        // per-tenant attribution — drives cost dashboards
+      sessionId: agentRunId,       // groups all spans for this run into one session replay
+      metadata: { organisationId, subaccountId, agentRunId },
+      traceName: 'agent-run',
+    }, async () => {
+      rootSpan.update({ input: { task } });
+      // ... existing agent loop logic unchanged ...
+      rootSpan.update({ output: { result } });
+    });
+  });
+}
+```
+
+### `skillExecutor.ts` — tool span
+
+```typescript
+import { startObservation } from '@langfuse/tracing';
+
+// Inside executeWithGate, wrap the dispatch call:
+const toolSpan = startObservation(toolName, { input }, { asType: 'tool' });
+try {
+  const result = await dispatch(toolName, input, context, actionId);
+  toolSpan.update({ output: result });
+  return result;
+} finally {
+  toolSpan.end();
+}
+```
+
+### `llmRouter.ts` — generation span
+
+```typescript
+import { startObservation } from '@langfuse/tracing';
+
+// OTel context propagation auto-parents this under the active agent-run trace
+const generation = startObservation('llm-call', {
+  model,
+  input: messages,
+  modelParameters: { temperature, maxTokens },
+}, { asType: 'generation' });
+
+// ... existing LLM call ...
+
+generation.update({
+  output: response.content,
+  usageDetails: {
+    input: response.usage.promptTokens,
+    output: response.usage.completionTokens,
+  },
+  costDetails: {
+    input: promptCost,
+    output: completionCost,
+  },
+});
+generation.end();
+
+// Existing llm_requests ledger write is UNCHANGED — dual-write, not replacement
+await db.insert(llmRequests).values({ /* ... existing ... */ });
+```
+
+### Environment variables
+
+```env
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com   # or self-hosted URL
+```
+
+### What this gives you
+
+| Capability | How |
+|---|---|
+| Per-run session replay | All spans share `sessionId = agentRunId` |
+| Tool call sequence | Each `skillExecutor` dispatch = one span |
+| LLM cost per run | `costDetails` on each generation span |
+| Per-tenant cost filter | `userId = subaccountId` on every trace |
+| Billing ledger unchanged | `llm_requests` table still the source of truth |
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/instrumentation.ts` | New file — OTel + Langfuse processor init |
+| `server/index.ts` | Add `import './instrumentation'` as first line |
+| `server/services/agentExecutionService.ts` | Wrap agent loop in `startActiveObservation` + `propagateAttributes` |
+| `server/services/skillExecutor.ts` | Add tool span around `dispatch()` |
+| `server/services/llmRouter.ts` | Add generation span, dual-write alongside existing ledger |
+| `.env.example` | Add `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` |
+| `package.json` | Add `@langfuse/tracing`, `@langfuse/otel`, `@opentelemetry/sdk-node` |
