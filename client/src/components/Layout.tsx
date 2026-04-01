@@ -609,7 +609,7 @@ export default function Layout({ user, children }: LayoutProps) {
           )}
 
           {/* ── Agents section — dynamic list */}
-          {hasOrgContext && activeClientId && hasOrgPerm('org.agents.view') && (
+          {hasOrgContext && activeClientId && (
             <>
               <NavSection label="Agents" action={<NavSectionAction onClick={() => setShowCreateAgent(true)} />} />
               {navAgents.length === 0 && (
