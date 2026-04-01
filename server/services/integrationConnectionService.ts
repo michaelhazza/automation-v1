@@ -31,10 +31,14 @@ export const integrationConnectionService = {
    * Get a decrypted, valid connection for a subaccount + provider.
    * Auto-refreshes if the token expires within the next 15 minutes.
    * Throws if no active connection exists.
+   *
+   * organisationId is required and enforced at the DB query level to prevent
+   * cross-tenant token leakage if a stale subaccountId is passed by mistake.
    */
   async getDecryptedConnection(
     subaccountId: string,
     provider: string,
+    organisationId: string,
   ): Promise<DecryptedConnection> {
     const [conn] = await db
       .select()
@@ -42,6 +46,7 @@ export const integrationConnectionService = {
       .where(
         and(
           eq(integrationConnections.subaccountId, subaccountId),
+          eq(integrationConnections.organisationId, organisationId),
           eq(integrationConnections.providerType, provider as IntegrationConnection['providerType']),
           eq(integrationConnections.connectionStatus, 'active'),
         ),
