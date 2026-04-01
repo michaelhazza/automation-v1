@@ -33,7 +33,7 @@
     "jsonwebtoken": "^9.0.2",
     "langfuse": "^3.38.6",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.9.9",
+    "nodemailer": "^8.0.4",
     "pg-boss": "^9.0.3",
     "postgres": "^3.4.4",
     "react": "^18.2.0",
@@ -60,14 +60,14 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@types/uuid": "^9.0.7",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.27",
     "concurrently": "^8.2.2",
-    "drizzle-kit": "^0.31.9",
+    "drizzle-kit": "^0.31.10",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "vite": "^5.0.12"
+    "vite": "^5.4.21"
   }
 }
