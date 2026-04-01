@@ -19,22 +19,34 @@ export const skillService = {
     return db
       .select()
       .from(skills)
-      .where(and(conditions, eq(skills.isActive, true)))
+      .where(and(conditions, eq(skills.isActive, true), isNull(skills.deletedAt)))
       .orderBy(skills.skillType, skills.name);
   },
 
-  async getSkill(id: string) {
-    const [skill] = await db.select().from(skills).where(eq(skills.id, id));
+  async getSkill(id: string, organisationId?: string) {
+    // Skill must be active AND either a system skill or belonging to the caller's org
+    const orgCondition = organisationId
+      ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
+      : isNull(skills.organisationId);
+
+    const [skill] = await db
+      .select()
+      .from(skills)
+      .where(and(eq(skills.id, id), orgCondition, eq(skills.isActive, true), isNull(skills.deletedAt)));
     if (!skill) throw { statusCode: 404, message: 'Skill not found' };
     return skill;
   },
 
   async getSkillBySlug(slug: string, organisationId?: string) {
     // Prefer org-specific skill, fall back to built-in
+    const orgCondition = organisationId
+      ? or(isNull(skills.organisationId), eq(skills.organisationId, organisationId))
+      : isNull(skills.organisationId);
+
     const rows = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.slug, slug), eq(skills.isActive, true)));
+      .where(and(eq(skills.slug, slug), eq(skills.isActive, true), orgCondition, isNull(skills.deletedAt)));
 
     if (organisationId) {
       const orgSkill = rows.find(s => s.organisationId === organisationId);
@@ -122,7 +134,7 @@ export const skillService = {
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot modify built-in skills' };
@@ -143,12 +155,13 @@ export const skillService = {
     const [existing] = await db
       .select()
       .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot delete built-in skills' };
 
-    await db.delete(skills).where(eq(skills.id, id));
+    const now = new Date();
+    await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(eq(skills.id, id));
     return { message: 'Skill deleted' };
   },
 

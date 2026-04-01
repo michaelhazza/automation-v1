@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
@@ -7,81 +8,51 @@ const router = Router();
 
 // ─── List all skills (built-in + custom) for the skills library page ──
 
-router.get('/api/skills/all', authenticate, async (req, res) => {
-  try {
-    const skills = await skillService.listSkills(req.orgId!);
-    res.json(skills);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.get('/api/skills/all', authenticate, asyncHandler(async (req, res) => {
+  const skills = await skillService.listSkills(req.orgId!);
+  res.json(skills);
+}));
 
 // ─── List skills (org-specific custom skills only; built-in skills are now system-level) ──
 
-router.get('/api/skills', authenticate, async (req, res) => {
-  try {
-    const skills = await skillService.listSkills(req.orgId!);
-    // Filter out built-in skills from org listing — they are now managed as system skills
-    const orgSkills = skills.filter((s: { skillType: string }) => s.skillType !== 'built_in');
-    res.json(orgSkills);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.get('/api/skills', authenticate, asyncHandler(async (req, res) => {
+  const skills = await skillService.listSkills(req.orgId!);
+  // Filter out built-in skills from org listing — they are now managed as system skills
+  const orgSkills = skills.filter((s: { skillType: string }) => s.skillType !== 'built_in');
+  res.json(orgSkills);
+}));
 
 // ─── Get single skill ────────────────────────────────────────────────────────
 
-router.get('/api/skills/:id', authenticate, async (req, res) => {
-  try {
-    const skill = await skillService.getSkill(req.params.id);
-    res.json(skill);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.get('/api/skills/:id', authenticate, asyncHandler(async (req, res) => {
+  const skill = await skillService.getSkill(req.params.id, req.orgId!);
+  res.json(skill);
+}));
 
 // ─── Create custom skill (org-level) ─────────────────────────────────────────
 
-router.post('/api/skills', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), async (req, res) => {
-  try {
-    const { name, slug, description, definition, instructions, methodology } = req.body;
-    if (!name || !slug || !definition) {
-      res.status(400).json({ error: 'name, slug, and definition are required' });
-      return;
-    }
-    const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions, methodology });
-    res.status(201).json(skill);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/skills', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res) => {
+  const { name, slug, description, definition, instructions, methodology } = req.body;
+  if (!name || !slug || !definition) {
+    res.status(400).json({ error: 'name, slug, and definition are required' });
+    return;
   }
-});
+  const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions, methodology });
+  res.status(201).json(skill);
+}));
 
 // ─── Update custom skill ─────────────────────────────────────────────────────
 
-router.patch('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), async (req, res) => {
-  try {
-    const skill = await skillService.updateSkill(req.params.id, req.orgId!, req.body);
-    res.json(skill);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.patch('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+  const skill = await skillService.updateSkill(req.params.id, req.orgId!, req.body);
+  res.json(skill);
+}));
 
 // ─── Delete custom skill ─────────────────────────────────────────────────────
 
-router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_DELETE), async (req, res) => {
-  try {
-    await skillService.deleteSkill(req.params.id, req.orgId!);
-    res.json({ message: 'Skill deleted' });
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.delete('/api/skills/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_DELETE), asyncHandler(async (req, res) => {
+  await skillService.deleteSkill(req.params.id, req.orgId!);
+  res.json({ message: 'Skill deleted' });
+}));
 
 export default router;

@@ -28,7 +28,9 @@ const CURRENT_KEY_VERSION = 'k1';
 // Populated once at module load from environment variables.
 // ---------------------------------------------------------------------------
 const KEY_REGISTRY: Record<string, Buffer> = {};
-if (env.TOKEN_ENCRYPTION_KEY) {
+if (!env.TOKEN_ENCRYPTION_KEY) {
+  console.warn('[connectionTokenService] TOKEN_ENCRYPTION_KEY is not set — encryption/decryption will fail at runtime');
+} else {
   KEY_REGISTRY[CURRENT_KEY_VERSION] = Buffer.from(env.TOKEN_ENCRYPTION_KEY, 'hex');
 }
 if (env.TOKEN_ENCRYPTION_KEY_V0) {

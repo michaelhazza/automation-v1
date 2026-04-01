@@ -37,7 +37,7 @@ const execFileAsync = promisify(execFile);
 // Skill Executor — executes tool calls for autonomous agent runs
 // ---------------------------------------------------------------------------
 
-interface SkillExecutionContext {
+export interface SkillExecutionContext {
   runId: string;
   organisationId: string;
   subaccountId: string;
@@ -555,7 +555,7 @@ async function executeReadWorkspace(
 
     if (includeActivities) {
       const enriched = await Promise.all(sliced.map(async (item) => {
-        const activities = await taskService.listActivities(item.id);
+        const activities = await taskService.listActivities(item.id, context.organisationId);
         return {
           id: item.id,
           title: item.title,

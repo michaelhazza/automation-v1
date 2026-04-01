@@ -10,105 +10,68 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
-router.get('/api/processes', authenticate, async (req, res) => {
-  try {
-    const result = await processService.listProcesses(req.user!.id, req.orgId!, req.user!.role, {
-      categoryId: req.query.categoryId as string | undefined,
-      status: req.query.status as string | undefined,
-      search: req.query.search as string | undefined,
-      limit: parsePositiveInt(req.query.limit),
-      offset: parsePositiveInt(req.query.offset),
-    });
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.get('/api/processes', authenticate, asyncHandler(async (req, res) => {
+  const result = await processService.listProcesses(req.user!.id, req.orgId!, req.user!.role, {
+    categoryId: req.query.categoryId as string | undefined,
+    status: req.query.status as string | undefined,
+    search: req.query.search as string | undefined,
+    limit: parsePositiveInt(req.query.limit),
+    offset: parsePositiveInt(req.query.offset),
+  });
+  res.json(result);
+}));
 
-router.post('/api/processes', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_CREATE), async (req, res) => {
-  try {
-    const { name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId } = req.body;
-    if (!name || !workflowEngineId || !webhookPath) {
-      res.status(400).json({ error: 'Validation failed', details: 'name, workflowEngineId, and webhookPath are required' });
-      return;
-    }
-    const result = await processService.createProcess(req.orgId!, {
-      name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId,
-    });
-    res.status(201).json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/processes', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_CREATE), asyncHandler(async (req, res) => {
+  const { name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId } = req.body;
+  if (!name || !workflowEngineId || !webhookPath) {
+    res.status(400).json({ error: 'Validation failed', details: 'name, workflowEngineId, and webhookPath are required' });
+    return;
   }
-});
+  const result = await processService.createProcess(req.orgId!, {
+    name, description, workflowEngineId, orgCategoryId, webhookPath, inputSchema, outputSchema, subaccountId,
+  });
+  res.status(201).json(result);
+}));
 
-router.get('/api/processes/:id', authenticate, async (req, res) => {
-  try {
-    const result = await processService.getProcess(req.params.id, req.orgId!, req.user!.role);
-    // For system-managed processes, hide the execution internals from org admins
-    if ((result as { isSystemManaged?: boolean }).isSystemManaged && req.user!.role !== 'system_admin') {
-      const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, workflowEngineId, ...safe } = result as Record<string, unknown>;
-      res.json(safe);
-      return;
-    }
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.get('/api/processes/:id', authenticate, asyncHandler(async (req, res) => {
+  const result = await processService.getProcess(req.params.id, req.orgId!, req.user!.role);
+  // For system-managed processes, hide the execution internals from org admins
+  if ((result as { isSystemManaged?: boolean }).isSystemManaged && req.user!.role !== 'system_admin') {
+    const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, workflowEngineId, ...safe } = result as Record<string, unknown>;
+    res.json(safe);
+    return;
   }
-});
+  res.json(result);
+}));
 
-router.patch('/api/processes/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_EDIT), async (req, res) => {
-  try {
-    const result = await processService.updateProcess(req.params.id, req.orgId!, req.body);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.patch('/api/processes/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_EDIT), asyncHandler(async (req, res) => {
+  const result = await processService.updateProcess(req.params.id, req.orgId!, req.body);
+  res.json(result);
+}));
 
-router.delete('/api/processes/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_DELETE), async (req, res) => {
-  try {
-    const result = await processService.deleteProcess(req.params.id, req.orgId!);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.delete('/api/processes/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_DELETE), asyncHandler(async (req, res) => {
+  const result = await processService.deleteProcess(req.params.id, req.orgId!);
+  res.json(result);
+}));
 
-router.post('/api/processes/:id/test', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_TEST), validateMultipart, async (req, res) => {
-  try {
-    const inputData = req.body.inputData ? JSON.parse(req.body.inputData) : undefined;
-    const result = await processService.testProcess(req.params.id, req.orgId!, req.user!.id, inputData);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/processes/:id/test', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_TEST), validateMultipart, asyncHandler(async (req, res) => {
+  let inputData: unknown;
+  if (req.body.inputData) {
+    try { inputData = JSON.parse(req.body.inputData); } catch { res.status(400).json({ error: 'Invalid JSON in inputData' }); return; }
   }
-});
+  const result = await processService.testProcess(req.params.id, req.orgId!, req.user!.id, inputData);
+  res.json(result);
+}));
 
-router.post('/api/processes/:id/activate', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_ACTIVATE), async (req, res) => {
-  try {
-    const result = await processService.activateProcess(req.params.id, req.orgId!);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.post('/api/processes/:id/activate', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_ACTIVATE), asyncHandler(async (req, res) => {
+  const result = await processService.activateProcess(req.params.id, req.orgId!);
+  res.json(result);
+}));
 
-router.post('/api/processes/:id/deactivate', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_ACTIVATE), async (req, res) => {
-  try {
-    const result = await processService.deactivateProcess(req.params.id, req.orgId!);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.post('/api/processes/:id/deactivate', authenticate, requireOrgPermission(ORG_PERMISSIONS.PROCESSES_ACTIVATE), asyncHandler(async (req, res) => {
+  const result = await processService.deactivateProcess(req.params.id, req.orgId!);
+  res.json(result);
+}));
 
 // ---------------------------------------------------------------------------
 // System process visibility and linking

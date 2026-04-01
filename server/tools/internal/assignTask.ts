@@ -42,7 +42,7 @@ export async function executeAssignTask(
   input: Record<string, unknown>,
   context: AssignTaskExecutionContext,
 ): Promise<unknown> {
-  const { worker_agent_slug, task_description, context: taskContext } = input as AssignTaskInput;
+  const { worker_agent_slug, task_description, context: taskContext } = input as unknown as AssignTaskInput;
 
   if (!worker_agent_slug || !task_description) {
     return { success: false, error: 'worker_agent_slug and task_description are required' };

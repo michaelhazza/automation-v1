@@ -36,6 +36,7 @@ export const processConnectionMappings = pgTable(
     ),
     subaccountProcessIdx: index('pcm_subaccount_process_idx').on(table.subaccountId, table.processId),
     connectionIdx: index('pcm_connection_idx').on(table.connectionId),
+    orgIdx: index('pcm_org_idx').on(table.organisationId),
   })
 );
 

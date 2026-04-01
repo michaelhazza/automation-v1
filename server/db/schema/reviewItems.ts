@@ -40,6 +40,7 @@ export const reviewItems = pgTable(
     actionUnique: unique('review_items_action_unique').on(table.actionId),
     subaccountStatusIdx: index('review_items_subaccount_status_idx').on(table.subaccountId, table.reviewStatus),
     agentRunIdx: index('review_items_agent_run_idx').on(table.agentRunId),
+    orgIdx: index('review_items_org_idx').on(table.organisationId),
   })
 );
 

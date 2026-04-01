@@ -116,7 +116,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
-    const activities = await taskService.listActivities(req.params.itemId);
+    const activities = await taskService.listActivities(req.params.itemId, req.orgId!);
     res.json(activities);
   })
 );

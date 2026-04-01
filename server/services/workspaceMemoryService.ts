@@ -433,7 +433,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       LIMIT ${VECTOR_SEARCH_LIMIT}
     `);
 
-    const results = (rows.rows as Array<{ id: string; content: string; combined_score: number }>)
+    const results = (rows as unknown as Array<{ id: string; content: string; combined_score: number }>)
       .filter(r => r.combined_score >= VECTOR_SIMILARITY_THRESHOLD);
 
     // Bump access counters async — do not await
