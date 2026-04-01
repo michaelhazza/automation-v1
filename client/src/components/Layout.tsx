@@ -640,7 +640,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
               <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
-              <NavItem to={`/admin/subaccounts/${activeClientId}/connections`} icon={<Icons.connections />} label="Connections" />
+              <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
               {hasOrgPerm('org.subaccounts.edit') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
               )}

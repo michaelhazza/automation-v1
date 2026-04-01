@@ -8,20 +8,17 @@ import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEd
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
+const ConnectionsPage = lazy(() => import('./ConnectionsPage'));
 
 interface Subaccount { id: string; name: string; slug: string; status: string; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-interface Member { assignmentId: string; userId: string; email: string; firstName: string; lastName: string; status: string; permissionSetId: string; permissionSetName: string; }
-interface PermissionSet { id: string; name: string; }
-interface OrgMember { userId: string; email: string; firstName: string; lastName: string; }
-
-type ActiveTab = 'settings' | 'workflows' | 'board' | 'categories' | 'members' | 'memory' | 'usage';
+type ActiveTab = 'connections' | 'workflows' | 'categories' | 'board' | 'memory' | 'usage' | 'admin';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
-  settings: 'Settings', workflows: 'Workflows', board: 'Board Config', categories: 'Categories',
-  members: 'Members', memory: 'Memory', usage: 'Usage & Costs',
+  connections: 'Connections', workflows: 'Workflows', categories: 'Categories',
+  board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -34,14 +31,11 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [categories, setCategories] = useState<Category[]>([]);
   const [linkedProcesses, setLinkedProcesses] = useState<ProcessLink[]>([]);
   const [orgProcesses, setOrgProcesses] = useState<OrgProcess[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [permissionSets, setPermissionSets] = useState<PermissionSet[]>([]);
-  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
   const [loading, setLoading] = useState(true);
 
   const visibleTabs: ActiveTab[] = mode === 'client'
-    ? ['board', 'categories', 'members']
-    : ['settings', 'workflows', 'board', 'categories', 'members', 'memory', 'usage'];
+    ? ['connections', 'board', 'categories']
+    : ['connections', 'workflows', 'categories', 'board', 'memory', 'usage', 'admin'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
@@ -54,10 +48,6 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
   const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
-  const [showMemberForm, setShowMemberForm] = useState(false);
-  const [memberForm, setMemberForm] = useState({ userId: '', permissionSetId: '' });
-  const [removeMemberId, setRemoveMemberId] = useState<string | null>(null);
-
   const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active' });
   const [settingsSaved, setSettingsSaved] = useState('');
 
@@ -69,17 +59,15 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const load = async () => {
     if (!subaccountId) return;
     try {
-      const [saRes, catRes, processRes, memberRes, boardRes] = await Promise.all([
+      const [saRes, catRes, processRes, boardRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
         api.get(`/api/subaccounts/${subaccountId}/processes`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
-        api.get(`/api/subaccounts/${subaccountId}/members`),
         api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);
       setLinkedProcesses(processRes.data.linkedProcesses ?? []);
-      setMembers(memberRes.data);
       setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
     } catch (err: unknown) {
@@ -91,14 +79,10 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   };
 
   const loadOrgData = async () => {
-    const [psRes, processesRes, membersRes] = await Promise.all([
-      api.get('/api/permission-sets').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch permission sets:', err); return { data: [] }; }),
+    const [processesRes] = await Promise.all([
       api.get('/api/processes').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: [] }; }),
-      api.get('/api/org/members').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch org members:', err); return { data: [] }; }),
     ]);
-    setPermissionSets(psRes.data);
     setOrgProcesses((processesRes.data as OrgProcess[]).filter(t => t.status === 'active'));
-    setOrgMembers(membersRes.data);
   };
 
   useEffect(() => { load(); loadOrgData(); }, [subaccountId]);
@@ -145,28 +129,6 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
     if (!deleteCatId) return;
     await api.delete(`/api/subaccounts/${subaccountId}/categories/${deleteCatId}`);
     setDeleteCatId(null); load();
-  };
-
-  const handleAddMember = async () => {
-    setError('');
-    try {
-      await api.post(`/api/subaccounts/${subaccountId}/members`, memberForm);
-      setShowMemberForm(false); setMemberForm({ userId: '', permissionSetId: '' }); load();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to add member');
-    }
-  };
-
-  const handleRemoveMember = async () => {
-    if (!removeMemberId) return;
-    await api.delete(`/api/subaccounts/${subaccountId}/members/${removeMemberId}`);
-    setRemoveMemberId(null); load();
-  };
-
-  const handleUpdateMemberRole = async (userId: string, permissionSetId: string) => {
-    await api.patch(`/api/subaccounts/${subaccountId}/members/${userId}`, { permissionSetId });
-    load();
   };
 
   const handleSaveSettings = async () => {
@@ -236,7 +198,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         {mode === 'client' ? `${sa.name} Settings` : sa.name}
       </h1>
       {mode === 'admin' && <div className="font-mono text-[13px] text-slate-400 mb-6">{sa.slug}</div>}
-      {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage board config, categories, and members</div>}
+      {mode === 'client' && <div className="text-[13px] text-slate-500 mb-6">Manage connections, board config, and categories</div>}
 
       {/* Tabs */}
       {visibleTabs.length > 1 && (
@@ -435,87 +397,15 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         </>
       )}
 
-      {/* Members */}
-      {activeTab === 'members' && (
-        <>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-[18px] font-semibold text-slate-800 m-0">Members</h2>
-            <button onClick={() => setShowMemberForm(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors">
-              + Add member
-            </button>
-          </div>
-
-          {showMemberForm && (
-            <Modal title="Add member" onClose={() => setShowMemberForm(false)} maxWidth={400}>
-              <div className="grid gap-3.5 mb-5">
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">User *</label>
-                  <select value={memberForm.userId} onChange={(e) => setMemberForm({ ...memberForm, userId: e.target.value })} className={inputCls}>
-                    <option value="">Select user...</option>
-                    {orgMembers.map((m) => <option key={m.userId} value={m.userId}>{m.firstName} {m.lastName} ({m.email})</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Permission set *</label>
-                  <select value={memberForm.permissionSetId} onChange={(e) => setMemberForm({ ...memberForm, permissionSetId: e.target.value })} className={inputCls}>
-                    <option value="">Select permission set...</option>
-                    {permissionSets.map((ps) => <option key={ps.id} value={ps.id}>{ps.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <button onClick={handleAddMember} className={btnPrimary}>Add</button>
-                <button onClick={() => setShowMemberForm(false)} className={btnSecondary}>Cancel</button>
-              </div>
-            </Modal>
-          )}
-
-          {removeMemberId && (
-            <ConfirmDialog title="Remove member" message="Remove this member's access to the subaccount?" confirmLabel="Remove" onConfirm={handleRemoveMember} onCancel={() => setRemoveMemberId(null)} />
-          )}
-
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            {members.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-500">No members yet.</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">User</th>
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Permission set</th>
-                    <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {members.map((m) => (
-                    <tr key={m.assignmentId} className="hover:bg-slate-50">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-800">{m.firstName} {m.lastName}</div>
-                        <div className="text-xs text-slate-500">{m.email}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={m.permissionSetId}
-                          onChange={(e) => handleUpdateMemberRole(m.userId, e.target.value)}
-                          className="px-2.5 py-1.5 border border-slate-200 rounded-md text-[13px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                        >
-                          {permissionSets.map((ps) => <option key={ps.id} value={ps.id}>{ps.name}</option>)}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => setRemoveMemberId(m.userId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">Remove</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
+      {/* Connections */}
+      {activeTab === 'connections' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading connections...</div>}>
+          <ConnectionsPage user={_user as any} embedded />
+        </Suspense>
       )}
 
-      {/* Settings */}
-      {activeTab === 'settings' && (
+      {/* Admin */}
+      {activeTab === 'admin' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
           <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Company settings</h2>
           {settingsSaved && (

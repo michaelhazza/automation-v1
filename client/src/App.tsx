@@ -49,6 +49,7 @@ const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPa
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
 const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
+const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
@@ -192,6 +193,9 @@ export default function App() {
           {/* Subaccount connections */}
           <Route path="/admin/subaccounts/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
           <Route path="/portal/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
+
+          {/* Subaccount team */}
+          <Route path="/admin/subaccounts/:subaccountId/team" element={<SubaccountTeamPage user={user!} />} />
 
           {/* Review queue (portal access) */}
           <Route path="/portal/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />

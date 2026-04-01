@@ -28,8 +28,9 @@ const STATUS_STYLES: Record<string, string> = {
   error: 'text-amber-600',
 };
 
-export default function ConnectionsPage({ user: _user }: { user: User }) {
-  const { subaccountId } = useParams<{ subaccountId: string }>();
+export default function ConnectionsPage({ user: _user, embedded = false }: { user: User; embedded?: boolean }) {
+  const params = useParams<{ subaccountId: string }>();
+  const subaccountId = params.subaccountId;
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -78,10 +79,13 @@ export default function ConnectionsPage({ user: _user }: { user: User }) {
   return (
     <>
       <div className="mb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">Connections</h1>
-          <p className="text-[14px] text-slate-500 mt-2 m-0">Manage external service connections for this subaccount</p>
-        </div>
+        {!embedded && (
+          <div>
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Connections</h1>
+            <p className="text-[14px] text-slate-500 mt-2 m-0">Manage external service connections for this subaccount</p>
+          </div>
+        )}
+        {embedded && <h2 className="text-[18px] font-semibold text-slate-800 m-0">Connections</h2>}
         <button onClick={() => setShowCreate(true)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
           + Add Connection
         </button>

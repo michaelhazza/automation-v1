@@ -102,6 +102,70 @@ export class UserService {
     };
   }
 
+  /**
+   * Create a team member with a generated temporary password.
+   * Returns the plaintext password so the org admin can share it.
+   */
+  async createTeamMember(
+    organisationId: string,
+    createdByUserId: string,
+    data: { email: string; firstName: string; lastName: string; role?: string }
+  ) {
+    const role = data.role ?? 'user';
+    if (role === 'system_admin') {
+      throw { statusCode: 403, message: 'Cannot create system admin via this endpoint' };
+    }
+
+    const existing = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.organisationId, organisationId), eq(users.email, data.email.toLowerCase()), isNull(users.deletedAt)));
+
+    if (existing.length > 0) {
+      throw { statusCode: 409, message: 'User with this email already exists in this organisation' };
+    }
+
+    // Generate a readable temporary password
+    const tempPassword = this.generateReadablePassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+    const [user] = await db
+      .insert(users)
+      .values({
+        organisationId,
+        email: data.email.toLowerCase(),
+        passwordHash,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        role: role as 'org_admin' | 'manager' | 'user' | 'client_user',
+        status: 'active',
+        invitedByUserId: createdByUserId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    await assignOrgUserRole(organisationId, user.id, role);
+
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      status: user.status,
+      temporaryPassword: tempPassword,
+    };
+  }
+
+  private generateReadablePassword(): string {
+    const words = ['alpha', 'bravo', 'coral', 'delta', 'ember', 'frost', 'grain', 'haven', 'ivory', 'jade', 'karma', 'lunar', 'maple', 'noble', 'orbit', 'prism', 'quest', 'ridge', 'solar', 'terra'];
+    const w1 = words[crypto.randomInt(words.length)];
+    const w2 = words[crypto.randomInt(words.length)];
+    const num = crypto.randomInt(100, 999);
+    return `${w1}-${w2}-${num}`;
+  }
+
   async getCurrentUserProfile(userId: string) {
     const [user] = await db
       .select()
