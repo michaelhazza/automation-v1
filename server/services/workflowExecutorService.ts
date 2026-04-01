@@ -24,6 +24,7 @@
 // ---------------------------------------------------------------------------
 
 import { eq, and } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { workflowRuns, workflowStepOutputs } from '../db/schema/workflowRuns.js';
 import { skillExecutor } from './skillExecutor.js';
@@ -31,6 +32,9 @@ import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
 import { ACTION_REGISTRY } from '../config/actionRegistry.js';
 import type { WorkflowDefinition, WorkflowCheckpoint, WorkflowRunStatus, WorkflowStep } from '../types/workflow.js';
+
+// HITL approval window — approvals arriving after this are rejected as stale
+const HITL_TIMEOUT_HOURS = 24;
 
 // ---------------------------------------------------------------------------
 // Context passed to every workflow step execution
@@ -102,14 +106,39 @@ export async function resumeWorkflow(
     return;
   }
 
+  // ── Resume validation ────────────────────────────────────────────────────
+  const checkpoint = run.checkpoint as WorkflowCheckpoint | null;
+
+  if (checkpoint?.timeoutAt && new Date() > new Date(checkpoint.timeoutAt)) {
+    const msg = `Resume rejected: approval window expired at ${checkpoint.timeoutAt}`;
+    console.warn(`[WorkflowResume] ${workflowRunId}: ${msg}`);
+    await markRunFailed(workflowRunId, msg);
+    return;
+  }
+
+  // Pre-load the approved action once (used for both validation and result extraction)
+  const approvedAction = approvedActionId
+    ? await actionService.getAction(approvedActionId, context.organisationId)
+    : null;
+
+  if (approvedAction && checkpoint?.inputHash) {
+    const currentHash = hashPayload(approvedAction.payloadJson as Record<string, unknown>);
+    if (currentHash !== checkpoint.inputHash) {
+      const msg = 'Resume rejected: action payload was modified after checkpoint was written';
+      console.warn(`[WorkflowResume] ${workflowRunId}: ${msg}`);
+      await markRunFailed(workflowRunId, msg);
+      return;
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────────
+
   const definition = run.workflowDefinition as WorkflowDefinition;
   const accumulatedOutputs: Record<string, unknown> = (run.stepOutputs as Record<string, unknown>) ?? {};
   let stepIndex = run.currentStepIndex;
 
   // If an approved action is provided, record its result as the paused step's output
   // then advance to the next step before continuing execution.
-  if (approvedActionId) {
-    const approvedAction = await actionService.getAction(approvedActionId, context.organisationId);
+  if (approvedAction) {
     const stepOutput = approvedAction.resultJson ?? { approved: true };
     const pausedStep = definition.steps[stepIndex];
 
@@ -152,11 +181,26 @@ async function executeFromCheckpoint(
 
   while (stepIndex < steps.length) {
     const step = steps[stepIndex];
+
+    // ── Idempotency guard: skip steps already recorded in step_outputs ─────
+    // This makes resume provably safe under duplicate-job or partial-failure scenarios.
+    const existingOutput = await db.query.workflowStepOutputs.findFirst({
+      where: and(
+        eq(workflowStepOutputs.workflowRunId, workflowRunId),
+        eq(workflowStepOutputs.stepIndex, stepIndex),
+      ),
+    });
+    if (existingOutput && existingOutput.status !== 'failed') {
+      accumulatedOutputs[step.stepId] = existingOutput.output ?? {};
+      stepIndex += 1;
+      continue;
+    }
+
     const gateLevel = getStepGateLevel(step);
 
     // ── Review-gated step: propose, checkpoint, pause. Do NOT block. ──────
     if (gateLevel === 'review') {
-      await proposeWorkflowHitlStep(run.id, step, stepIndex, accumulatedOutputs, context);
+      await proposeWorkflowHitlStep(workflowRunId, step, stepIndex, accumulatedOutputs, context);
       return; // caller (resume worker) continues after human approves
     }
 
@@ -251,8 +295,17 @@ async function proposeWorkflowHitlStep(
     });
   }
 
-  // Checkpoint the workflow at the current (HITL) step and pause
-  await writeCheckpoint(workflowRunId, stepIndex, accumulatedOutputs, 'paused');
+  // Checkpoint with resume validation fields
+  const timeoutAt = new Date(Date.now() + HITL_TIMEOUT_HOURS * 60 * 60 * 1000).toISOString();
+  const inputHash = hashPayload(mergedPayload);
+  const def = ACTION_REGISTRY[step.actionType as keyof typeof ACTION_REGISTRY];
+  const toolVersion = String((def as { version?: unknown } | undefined)?.version ?? '1');
+
+  await writeCheckpoint(workflowRunId, stepIndex, accumulatedOutputs, 'paused', undefined, {
+    timeoutAt,
+    inputHash,
+    toolVersion,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -271,10 +324,12 @@ async function writeCheckpoint(
   stepOutputs: Record<string, unknown>,
   status: WorkflowRunStatus,
   errorMessage?: string,
+  extraCheckpointFields?: Pick<WorkflowCheckpoint, 'timeoutAt' | 'inputHash' | 'toolVersion'>,
 ): Promise<void> {
   const checkpoint: WorkflowCheckpoint = {
     lastCompletedStepIndex: nextStepIndex - 1,
     checkpointedAt: new Date().toISOString(),
+    ...extraCheckpointFields,
   };
 
   await db
@@ -287,6 +342,20 @@ async function writeCheckpoint(
       errorMessage: errorMessage ?? null,
       updatedAt: new Date(),
     })
+    .where(eq(workflowRuns.id, workflowRunId));
+}
+
+/** SHA-256 of a deterministically-serialised payload object. */
+function hashPayload(payload: Record<string, unknown>): string {
+  const sorted = JSON.stringify(payload, Object.keys(payload).sort());
+  return createHash('sha256').update(sorted).digest('hex');
+}
+
+/** Mark a workflow run as failed with a message. */
+async function markRunFailed(workflowRunId: string, message: string): Promise<void> {
+  await db
+    .update(workflowRuns)
+    .set({ status: 'failed', errorMessage: message, updatedAt: new Date() })
     .where(eq(workflowRuns.id, workflowRunId));
 }
 
