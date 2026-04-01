@@ -26,7 +26,7 @@ export default function SystemEnginesPage({ user }: { user: User }) {
   const load = () => {
     api.get('/api/system/engines')
       .then(({ data }) => setEngines(data))
-      .catch(() => setError('Failed to load system engines'))
+      .catch((err) => { console.error('[SystemEngines] Failed to load engines:', err); setError('Failed to load system engines'); })
       .finally(() => setLoading(false));
   };
 

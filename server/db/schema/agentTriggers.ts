@@ -43,6 +43,7 @@ export const agentTriggers = pgTable(
   },
   (table) => ({
     subaccountIdx: index('agent_triggers_subaccount_idx').on(table.subaccountId),
+    orgIdx: index('agent_triggers_org_idx').on(table.organisationId),
     // M-20: partial index — active triggers only (excludes soft-deleted)
     eventTypeIdx: index('agent_triggers_event_type_idx').on(table.subaccountId, table.eventType).where(sql`${table.deletedAt} IS NULL`),
   })

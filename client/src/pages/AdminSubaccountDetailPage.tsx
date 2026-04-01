@@ -72,9 +72,9 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       const [saRes, catRes, processRes, memberRes, boardRes] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
-        api.get(`/api/subaccounts/${subaccountId}/processes`).catch(() => ({ data: { linkedProcesses: [] } })),
+        api.get(`/api/subaccounts/${subaccountId}/processes`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
         api.get(`/api/subaccounts/${subaccountId}/members`),
-        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch(() => ({ data: null })),
+        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);
@@ -92,9 +92,9 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const loadOrgData = async () => {
     const [psRes, processesRes, membersRes] = await Promise.all([
-      api.get('/api/permission-sets').catch(() => ({ data: [] })),
-      api.get('/api/processes').catch(() => ({ data: [] })),
-      api.get('/api/org/members').catch(() => ({ data: [] })),
+      api.get('/api/permission-sets').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch permission sets:', err); return { data: [] }; }),
+      api.get('/api/processes').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: [] }; }),
+      api.get('/api/org/members').catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch org members:', err); return { data: [] }; }),
     ]);
     setPermissionSets(psRes.data);
     setOrgProcesses((processesRes.data as OrgProcess[]).filter(t => t.status === 'active'));

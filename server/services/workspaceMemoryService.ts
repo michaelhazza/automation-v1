@@ -269,7 +269,7 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
               // Non-fatal — vector search degrades gracefully
             }
           })
-        ).catch(() => {});
+        ).catch((err) => console.error('[WorkspaceMemory] Failed to generate embeddings:', err));
       }
 
       console.info(`[WorkspaceMemory] Extracted ${values.length} entries (${values.filter(v => (v.qualityScore ?? 0) >= threshold).length} above threshold) for subaccount ${subaccountId}`);
@@ -433,7 +433,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       LIMIT ${VECTOR_SEARCH_LIMIT}
     `);
 
-    const results = (rows.rows as Array<{ id: string; content: string; combined_score: number }>)
+    const results = (rows as unknown as Array<{ id: string; content: string; combined_score: number }>)
       .filter(r => r.combined_score >= VECTOR_SIMILARITY_THRESHOLD);
 
     // Bump access counters async — do not await
@@ -444,7 +444,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
           lastAccessedAt: now,
         })
         .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
-        .catch(() => {});
+        .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
     }
 
     return results.map(r => ({ content: r.content, similarity: r.combined_score }));

@@ -223,7 +223,7 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
     setLoadingMessages(true); setMessages([]);
     api.get(`/api/agents/${agentId}/conversations/${activeConvId}`)
       .then((res) => { const data = res.data; setMessages(Array.isArray(data) ? data : (data.messages ?? [])); })
-      .catch(() => setMessages([]))
+      .catch((err) => { console.error('[AgentChat] Failed to load conversation messages:', err); setMessages([]); })
       .finally(() => setLoadingMessages(false));
   }, [agentId, activeConvId]);
 

@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
+import { auditService } from '../services/auditService.js';
 
 const router = Router();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -29,99 +31,101 @@ function validatePasswordStrength(password: string): string | null {
   return null;
 }
 
-router.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password, organisationSlug } = req.body;
-    if (!email || !password) {
-      res.status(400).json({ error: 'Validation failed', details: 'email and password are required' });
-      return;
-    }
-    const rateKey = `${req.ip}:${String(email).toLowerCase()}`;
-    if (!enforceLoginRateLimit(rateKey)) {
-      res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
-      return;
-    }
-    const result = await authService.login(email, password, organisationSlug);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/auth/login', asyncHandler(async (req, res) => {
+  const { email, password, organisationSlug } = req.body;
+  if (!email || !password) {
+    res.status(400).json({ error: 'Validation failed', details: 'email and password are required' });
+    return;
   }
-});
+  const rateKey = `${req.ip}:${String(email).toLowerCase()}`;
+  if (!enforceLoginRateLimit(rateKey)) {
+    res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+    return;
+  }
+  let result;
+  try {
+    result = await authService.login(email, password, organisationSlug);
+  } catch (err) {
+    auditService.log({
+      actorType: 'user',
+      action: 'login_failed',
+      metadata: { email: String(email).toLowerCase(), reason: err && typeof err === 'object' && 'message' in err ? (err as any).message : 'unknown' },
+      ipAddress: req.ip,
+    });
+    throw err;
+  }
+  auditService.log({
+    organisationId: result.user.organisationId,
+    actorId: result.user.id,
+    actorType: 'user',
+    action: 'login',
+    entityType: 'user',
+    entityId: result.user.id,
+    ipAddress: req.ip,
+  });
+  res.json(result);
+}));
 
-router.post('/api/auth/invite/accept', async (req, res) => {
-  try {
-    const { token, password, firstName, lastName } = req.body;
-    if (!token || !password || !firstName || !lastName) {
-      res.status(400).json({ error: 'Validation failed', details: 'token, password, firstName, lastName are required' });
-      return;
-    }
-    const passwordError = validatePasswordStrength(password);
-    if (passwordError) {
-      res.status(400).json({ error: 'Validation failed', details: passwordError });
-      return;
-    }
-    const result = await authService.acceptInvite(token, password, firstName, lastName);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/auth/invite/accept', asyncHandler(async (req, res) => {
+  const { token, password, firstName, lastName } = req.body;
+  if (!token || !password || !firstName || !lastName) {
+    res.status(400).json({ error: 'Validation failed', details: 'token, password, firstName, lastName are required' });
+    return;
   }
-});
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) {
+    res.status(400).json({ error: 'Validation failed', details: passwordError });
+    return;
+  }
+  const result = await authService.acceptInvite(token, password, firstName, lastName);
+  res.json(result);
+}));
 
-router.post('/api/auth/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) {
-      res.status(400).json({ error: 'Validation failed', details: 'email is required' });
-      return;
-    }
-    const result = await authService.forgotPassword(email);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    res.status(400).json({ error: 'Validation failed', details: 'email is required' });
+    return;
   }
-});
+  const result = await authService.forgotPassword(email);
+  auditService.log({
+    actorType: 'user',
+    action: 'password_reset_request',
+    metadata: { email: String(email).toLowerCase() },
+    ipAddress: req.ip,
+  });
+  res.json(result);
+}));
 
-router.post('/api/auth/reset-password', async (req, res) => {
-  try {
-    const { token, password } = req.body;
-    if (!token || !password) {
-      res.status(400).json({ error: 'Validation failed', details: 'token and password are required' });
-      return;
-    }
-    const passwordError = validatePasswordStrength(password);
-    if (passwordError) {
-      res.status(400).json({ error: 'Validation failed', details: passwordError });
-      return;
-    }
-    const result = await authService.resetPassword(token, password);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
+router.post('/api/auth/reset-password', asyncHandler(async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) {
+    res.status(400).json({ error: 'Validation failed', details: 'token and password are required' });
+    return;
   }
-});
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) {
+    res.status(400).json({ error: 'Validation failed', details: passwordError });
+    return;
+  }
+  const result = await authService.resetPassword(token, password);
+  auditService.log({
+    actorType: 'user',
+    action: 'password_reset',
+    metadata: { tokenPrefix: String(token).slice(0, 8) },
+    ipAddress: req.ip,
+  });
+  res.json(result);
+}));
 
-router.get('/api/auth/me', authenticate, async (req, res) => {
-  try {
-    const result = await authService.getCurrentUser(req.user!.id);
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.get('/api/auth/me', authenticate, asyncHandler(async (req, res) => {
+  const result = await authService.getCurrentUser(req.user!.id);
+  res.json(result);
+}));
 
-router.post('/api/auth/logout', authenticate, async (req, res) => {
-  try {
-    const result = await authService.logout();
-    res.json(result);
-  } catch (err: unknown) {
-    const e = err as { statusCode?: number; message?: string };
-    res.status(e.statusCode ?? 500).json({ error: e.message ?? 'Internal server error' });
-  }
-});
+router.post('/api/auth/logout', authenticate, asyncHandler(async (req, res) => {
+  const result = await authService.logout();
+  res.json(result);
+}));
 
 export default router;

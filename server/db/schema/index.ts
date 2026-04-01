@@ -59,3 +59,4 @@ export * from './hierarchyTemplateSlots';
 export * from './systemHierarchyTemplates';
 export * from './systemHierarchyTemplateSlots';
 export * from './workflowRuns';
+export * from './auditEvents';

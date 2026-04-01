@@ -49,8 +49,8 @@ export default function CommandPalette({ isOpen, onClose, activeClientId, onSele
     setQuery('');
     setSelected(0);
     setTimeout(() => inputRef.current?.focus(), 30);
-    api.get('/api/subaccounts').then(({ data }) => setClients(data)).catch(() => {});
-    api.get('/api/agents').then(({ data }) => setAgents(data)).catch(() => {});
+    api.get('/api/subaccounts').then(({ data }) => setClients(data)).catch((err) => console.error('[CommandPalette] Failed to fetch clients:', err));
+    api.get('/api/agents').then(({ data }) => setAgents(data)).catch((err) => console.error('[CommandPalette] Failed to fetch agents:', err));
   }, [isOpen]);
 
   // Close on Escape

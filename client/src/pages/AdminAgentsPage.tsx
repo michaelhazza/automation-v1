@@ -145,7 +145,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
   useEffect(() => {
     api.get('/api/agent-activity', { params: { status: 'running', limit: 100 } })
       .then(({ data }) => setLiveRunCount(Array.isArray(data) ? data.length : 0))
-      .catch(() => {});
+      .catch((err) => console.error('[AdminAgents] Failed to fetch live agent count:', err));
   }, []);
 
   // WebSocket: live agent count updates

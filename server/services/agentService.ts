@@ -220,7 +220,7 @@ async function maybeSendDataSourceAlert(
   const agentEditUrl = `${env.APP_BASE_URL}/admin/agents/${agent.id}`;
 
   for (const email of emails) {
-    await emailService.sendDataSourceSyncAlert(email, agent.name, source.name, errorMsg, agentEditUrl).catch(() => {});
+    await emailService.sendDataSourceSyncAlert(email, agent.name, source.name, errorMsg, agentEditUrl).catch((err) => console.error('[AgentService] Failed to send sync alert email:', err));
   }
 
   // Record alert time to enforce cooldown
@@ -228,7 +228,7 @@ async function maybeSendDataSourceAlert(
     .update(agentDataSources)
     .set({ lastAlertSentAt: now, updatedAt: now })
     .where(eq(agentDataSources.id, source.id))
-    .catch(() => {});
+    .catch((err) => console.error('[AgentService] Failed to update alert timestamp:', err));
 }
 
 async function maybeSendDataSourceRecovery(
@@ -247,7 +247,7 @@ async function maybeSendDataSourceRecovery(
   const agentEditUrl = `${env.APP_BASE_URL}/admin/agents/${agent.id}`;
 
   for (const email of emails) {
-    await emailService.sendDataSourceSyncRecovery(email, agent.name, source.name, agentEditUrl).catch(() => {});
+    await emailService.sendDataSourceSyncRecovery(email, agent.name, source.name, agentEditUrl).catch((err) => console.error('[AgentService] Failed to send recovery email:', err));
   }
 }
 
@@ -281,7 +281,7 @@ async function runProactiveSync(sourceId: string): Promise<void> {
       .update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId))
-      .catch(() => {});
+      .catch((err) => console.error('[AgentService] Failed to update data source status (ok):', err));
 
     // Recovery email if this was previously in error
     await maybeSendDataSourceRecovery(source, wasError);
@@ -292,7 +292,7 @@ async function runProactiveSync(sourceId: string): Promise<void> {
       .update(agentDataSources)
       .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
       .where(eq(agentDataSources.id, sourceId))
-      .catch(() => {});
+      .catch((err2) => console.error('[AgentService] Failed to update data source status (error):', err2));
 
     // Re-warm hot cache with last good content so lazy fetches still serve stale data
     const fallback = lastGoodContentCache.get(sourceId);
@@ -302,7 +302,7 @@ async function runProactiveSync(sourceId: string): Promise<void> {
 
     // Alert admins (rate-limited by ALERT_COOLDOWN_MS)
     // Re-fetch source to get current lastAlertSentAt before deciding
-    const [fresh] = await db.select().from(agentDataSources).where(eq(agentDataSources.id, sourceId)).catch(() => [undefined]);
+    const [fresh] = await db.select().from(agentDataSources).where(eq(agentDataSources.id, sourceId)).catch((err2) => { console.error('[AgentService] Failed to re-fetch data source for alert:', err2); return [undefined]; });
     if (fresh) await maybeSendDataSourceAlert(fresh, errMsg);
   }
 }
@@ -353,7 +353,7 @@ export async function fetchAgentDataSources(
         db.update(agentDataSources)
           .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
           .where(eq(agentDataSources.id, source.id))
-          .catch(() => {});
+          .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
       } catch (err) {
         fetchOk = false;
         const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
@@ -361,7 +361,7 @@ export async function fetchAgentDataSources(
         db.update(agentDataSources)
           .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
           .where(eq(agentDataSources.id, source.id))
-          .catch(() => {});
+          .catch((err2) => console.error('[AgentService] Failed to update data source fetch status (error):', err2));
 
         // Use last good content as silent fallback (end users see no disruption)
         const fallback = lastGoodContentCache.get(source.id);
@@ -375,7 +375,7 @@ export async function fetchAgentDataSources(
         if (source.syncMode === 'lazy') {
           db.select().from(agentDataSources).where(eq(agentDataSources.id, source.id))
             .then(([fresh]) => { if (fresh) return maybeSendDataSourceAlert(fresh, errMsg); })
-            .catch(() => {});
+            .catch((err2) => console.error('[AgentService] Failed to fetch data source for lazy alert:', err2));
         }
       }
     }

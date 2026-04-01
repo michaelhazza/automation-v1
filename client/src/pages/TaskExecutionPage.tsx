@@ -92,7 +92,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
   useEffect(() => {
     Promise.all([
       api.get(`/api/processes/${id}`),
-      api.get('/api/settings/upload').catch(() => ({ data: { maxUploadSizeMb: 200 } })),
+      api.get('/api/settings/upload').catch((err) => { console.error('[TaskExecution] Failed to fetch upload settings:', err); return { data: { maxUploadSizeMb: 200 } }; }),
     ]).then(([processRes, settingsRes]) => {
       setProcess(processRes.data);
       setMaxUploadSizeMb(settingsRes.data.maxUploadSizeMb ?? 200);
@@ -107,9 +107,9 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
     api.get(`/api/executions/${executionId}`).then(({ data }) => {
       setExecution(data);
       if (data.status === 'completed') {
-        api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch(() => {});
+        api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch((err) => console.error('[TaskExecution] Failed to fetch execution files:', err));
       }
-    }).catch(() => {});
+    }).catch((err) => console.error('[TaskExecution] Failed to resync execution:', err));
   }, [executionId]);
 
   useSocketRoom('execution', executionId, {
@@ -117,7 +117,7 @@ export default function TaskExecutionPage({ user: _user }: { user: User }) {
       const d = data as { status: string; outputData?: unknown; errorMessage?: string | null; durationMs?: number | null };
       setExecution(prev => prev ? { ...prev, status: d.status, outputData: d.outputData ?? prev.outputData, errorMessage: d.errorMessage ?? prev.errorMessage, durationMs: d.durationMs ?? prev.durationMs } : prev);
       if (['completed', 'failed', 'timeout', 'cancelled'].includes(d.status) && d.status === 'completed' && executionId) {
-        api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch(() => {});
+        api.get(`/api/executions/${executionId}/files`).then(({ data: files }) => setExecFiles(files)).catch((err) => console.error('[TaskExecution] Failed to fetch execution files:', err));
       }
     },
   }, resyncExecution);

@@ -88,7 +88,7 @@ export const taskService = {
 
     const [activitiesRows, deliverablesRows] = await Promise.all([
       db.select().from(taskActivities).where(eq(taskActivities.taskId, id)).orderBy(desc(taskActivities.createdAt)),
-      db.select().from(taskDeliverables).where(eq(taskDeliverables.taskId, id)).orderBy(desc(taskDeliverables.createdAt)),
+      db.select().from(taskDeliverables).where(and(eq(taskDeliverables.taskId, id), isNull(taskDeliverables.deletedAt))).orderBy(desc(taskDeliverables.createdAt)),
     ]);
 
     const ids = (item.assignedAgentIds as string[] | null) ?? (item.assignedAgentId ? [item.assignedAgentId] : []);
@@ -337,7 +337,15 @@ export const taskService = {
 
   // ─── Activities ─────────────────────────────────────────────────────────────
 
-  async listActivities(taskId: string) {
+  async listActivities(taskId: string, organisationId: string) {
+    // Validate that the task belongs to this org before returning activities
+    const [task] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
+
+    if (!task) throw { statusCode: 404, message: 'Task not found' };
+
     return db
       .select()
       .from(taskActivities)
@@ -377,7 +385,7 @@ export const taskService = {
     return db
       .select()
       .from(taskDeliverables)
-      .where(eq(taskDeliverables.taskId, taskId))
+      .where(and(eq(taskDeliverables.taskId, taskId), isNull(taskDeliverables.deletedAt)))
       .orderBy(desc(taskDeliverables.createdAt));
   },
 
@@ -401,9 +409,9 @@ export const taskService = {
   },
 
   async deleteDeliverable(id: string) {
-    const [existing] = await db.select().from(taskDeliverables).where(eq(taskDeliverables.id, id));
+    const [existing] = await db.select().from(taskDeliverables).where(and(eq(taskDeliverables.id, id), isNull(taskDeliverables.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'Deliverable not found' };
-    await db.delete(taskDeliverables).where(eq(taskDeliverables.id, id));
+    await db.update(taskDeliverables).set({ deletedAt: new Date() }).where(eq(taskDeliverables.id, id));
   },
 
   // ─── Helpers ────────────────────────────────────────────────────────────────

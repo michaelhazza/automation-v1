@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { tasks } from './tasks';
 
 export const taskDeliverables = pgTable(
@@ -13,9 +14,10 @@ export const taskDeliverables = pgTable(
     path: text('path'),
     description: text('description'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    taskIdx: index('task_deliverables_task_idx').on(table.taskId),
+    taskIdx: index('task_deliverables_task_idx').on(table.taskId).where(sql`${table.deletedAt} IS NULL`),
   })
 );
 

@@ -32,6 +32,7 @@ export const processedResources = pgTable(
     subaccountTypeIdx: index('processed_resources_subaccount_type_idx').on(
       table.subaccountId, table.integrationType, table.resourceType
     ),
+    orgIdx: index('processed_resources_org_idx').on(table.organisationId),
   })
 );
 

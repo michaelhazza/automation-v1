@@ -155,33 +155,17 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // ── 3. Generate idempotency key ─────────────────────────────────────────
   const idempotencyKey = generateIdempotencyKey(ctx, params.messages);
 
-  // ── 4. Pre-call: check for existing record (exactly-once execution) ─────
-  const existing = await db
-    .select()
-    .from(llmRequests)
-    .where(eq(llmRequests.idempotencyKey, idempotencyKey))
-    .limit(1);
-
-  if (existing.length > 0 && existing[0].status === 'success') {
-    // Return a reconstructed response — Anthropic is NOT called again
-    return {
-      content:           '',   // callers should handle cached responses gracefully
-      stopReason:        'cached',
-      tokensIn:          existing[0].tokensIn,
-      tokensOut:         existing[0].tokensOut,
-      providerRequestId: existing[0].providerRequestId ?? '',
-    };
-  }
-
+  // ── 4–7. Idempotency check + budget reservation (atomic transaction) ────
+  // Wrap the idempotency lookup and budget reservation in a single transaction
+  // so two concurrent requests with the same key cannot both pass through.
   const { billingMonth, billingDay } = getBillingPeriods();
 
-  // ── 5. Resolve pricing and estimate cost ────────────────────────────────
+  // ── 5. Resolve pricing and estimate cost (outside tx — read-only, no race) ──
   const [pricing, margin] = await Promise.all([
     pricingService.getPricing(ctx.provider, ctx.model),
     pricingService.getMargin(ctx.organisationId),
   ]);
 
-  // Default max tokens for estimation if not provided
   const maxTokensForEstimate = params.maxTokens ?? 4096;
   const estimatedCostCents = await pricingService.estimateCost(
     ctx.provider, ctx.model, maxTokensForEstimate, ctx.organisationId,
@@ -192,10 +176,39 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     .update(JSON.stringify(params.messages))
     .digest('hex');
 
-  // ── 7. Budget check + reservation ──────────────────────────────────────
+  // ── 4+7. Atomic idempotency check + budget reservation ─────────────────
   let reservationId: string | null = null;
   let budgetBlockedStatus: string | null = null;
   let budgetErrorMessage: string | null = null;
+
+  const idempotencyResult = await db.transaction(async (tx) => {
+    // Check for existing record inside the transaction
+    const existing = await tx
+      .select()
+      .from(llmRequests)
+      .where(eq(llmRequests.idempotencyKey, idempotencyKey))
+      .for('update')
+      .limit(1);
+
+    if (existing.length > 0 && existing[0].status === 'success') {
+      return {
+        cached: true as const,
+        response: {
+          content:           '',
+          stopReason:        'cached' as const,
+          tokensIn:          existing[0].tokensIn,
+          tokensOut:         existing[0].tokensOut,
+          providerRequestId: existing[0].providerRequestId ?? '',
+        },
+      };
+    }
+
+    return { cached: false as const };
+  });
+
+  if (idempotencyResult.cached) {
+    return idempotencyResult.response;
+  }
 
   try {
     reservationId = await budgetService.checkAndReserve(

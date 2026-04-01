@@ -1,4 +1,5 @@
 import { db } from '../db/index.js';
+import type { DB } from '../db/index.js';
 import {
   workspaceLimits,
   orgBudgets,
@@ -8,6 +9,9 @@ import {
 } from '../db/schema/index.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { env } from '../lib/env.js';
+
+// Transaction-aware db handle: either the root db or a transaction context
+type TxOrDb = DB | Parameters<Parameters<DB['transaction']>[0]>[0];
 
 // ---------------------------------------------------------------------------
 // Budget enforcement hierarchy (checked in order, most granular first):
@@ -56,8 +60,9 @@ export class RateLimitError extends Error {
 async function getActiveReservationTotal(
   entityType: string,
   entityId: string,
+  conn: TxOrDb = db,
 ): Promise<number> {
-  const result = await db
+  const result = await conn
     .select({
       total: sql<number>`COALESCE(SUM(COALESCE(${budgetReservations.actualCostCents}, ${budgetReservations.estimatedCostCents})), 0)`,
     })
@@ -81,8 +86,9 @@ async function getCurrentSpend(
   entityId: string,
   periodType: string,
   periodKey: string,
+  conn: TxOrDb = db,
 ): Promise<number> {
-  const [row] = await db
+  const [row] = await conn
     .select({ totalCostCents: costAggregates.totalCostCents })
     .from(costAggregates)
     .where(
@@ -100,8 +106,8 @@ async function getCurrentSpend(
 // Get run LLM call count
 // ---------------------------------------------------------------------------
 
-async function getRunCallCount(runId: string): Promise<number> {
-  const [row] = await db
+async function getRunCallCount(runId: string, conn: TxOrDb = db): Promise<number> {
+  const [row] = await conn
     .select({ requestCount: costAggregates.requestCount })
     .from(costAggregates)
     .where(
@@ -122,6 +128,7 @@ async function getRunCallCount(runId: string): Promise<number> {
 async function checkRateLimits(
   ctx: BudgetContext,
   limits: Awaited<ReturnType<typeof getWorkspaceLimits>>,
+  conn: TxOrDb = db,
 ): Promise<void> {
   if (!ctx.subaccountId) return;
 
@@ -130,7 +137,7 @@ async function checkRateLimits(
   const hourKey   = now.toISOString().slice(0, 13); // 'YYYY-MM-DDTHH'
 
   if (limits?.maxRequestsPerMinute) {
-    const [row] = await db
+    const [row] = await conn
       .select({ requestCount: costAggregates.requestCount })
       .from(costAggregates)
       .where(
@@ -147,7 +154,7 @@ async function checkRateLimits(
   }
 
   if (limits?.maxRequestsPerHour) {
-    const [row] = await db
+    const [row] = await conn
       .select({ requestCount: costAggregates.requestCount })
       .from(costAggregates)
       .where(
@@ -168,9 +175,9 @@ async function checkRateLimits(
 // Load workspace limits for a subaccount
 // ---------------------------------------------------------------------------
 
-async function getWorkspaceLimits(subaccountId: string | undefined) {
+async function getWorkspaceLimits(subaccountId: string | undefined, conn: TxOrDb = db) {
   if (!subaccountId) return null;
-  const [row] = await db
+  const [row] = await conn
     .select()
     .from(workspaceLimits)
     .where(eq(workspaceLimits.subaccountId, subaccountId));
@@ -181,9 +188,9 @@ async function getWorkspaceLimits(subaccountId: string | undefined) {
 // Load subaccount agent limits
 // ---------------------------------------------------------------------------
 
-async function getSubaccountAgentLimits(subaccountAgentId: string | undefined) {
+async function getSubaccountAgentLimits(subaccountAgentId: string | undefined, conn: TxOrDb = db) {
   if (!subaccountAgentId) return null;
-  const [row] = await db
+  const [row] = await conn
     .select()
     .from(subaccountAgents)
     .where(eq(subaccountAgents.id, subaccountAgentId));
@@ -194,12 +201,39 @@ async function getSubaccountAgentLimits(subaccountAgentId: string | undefined) {
 // Load org budget
 // ---------------------------------------------------------------------------
 
-async function getOrgBudget(organisationId: string) {
-  const [row] = await db
+async function getOrgBudget(organisationId: string, conn: TxOrDb = db) {
+  const [row] = await conn
     .select()
     .from(orgBudgets)
     .where(eq(orgBudgets.organisationId, organisationId));
   return row ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Acquire org-level budget lock via SELECT ... FOR UPDATE
+// This serializes all budget checks for the same organisation within the tx.
+// If no org_budgets row exists, we use a PostgreSQL advisory lock instead.
+// ---------------------------------------------------------------------------
+
+async function acquireOrgBudgetLock(
+  tx: TxOrDb,
+  organisationId: string,
+): Promise<void> {
+  // Try to lock the org_budgets row. This serializes concurrent budget checks.
+  const locked = await tx
+    .select({ id: orgBudgets.id })
+    .from(orgBudgets)
+    .where(eq(orgBudgets.organisationId, organisationId))
+    .for('update');
+
+  // If no org_budgets row exists, fall back to an advisory lock keyed on the
+  // organisation UUID. This ensures serialization even for orgs without an
+  // explicit budget row.
+  if (locked.length === 0) {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${organisationId}))`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,137 +245,147 @@ export async function checkAndReserve(
   estimatedCostCents:   number,
   idempotencyKey:       string,
 ): Promise<string> {
-  const [wsLimits, orgBudget] = await Promise.all([
-    getWorkspaceLimits(ctx.subaccountId),
-    getOrgBudget(ctx.organisationId),
-  ]);
+  // Wrap the entire check-and-reserve flow in a serializable transaction.
+  // acquireOrgBudgetLock() uses SELECT ... FOR UPDATE on the org_budgets row
+  // (or pg_advisory_xact_lock for orgs without one) to serialize concurrent
+  // budget checks for the same organisation, eliminating the race condition
+  // where two requests both pass budget checks before either reserves.
+  return await db.transaction(async (tx) => {
+    // ── 0. Acquire org-level lock to serialize concurrent budget checks ────
+    await acquireOrgBudgetLock(tx, ctx.organisationId);
 
-  const subaccountAgentLimits = await getSubaccountAgentLimits(ctx.subaccountAgentId);
-
-  // ── Rate limits first (cheap, no spend calculation needed) ──────────────
-  await checkRateLimits(ctx, wsLimits);
-
-  // ── Per-run checks ───────────────────────────────────────────────────────
-  if (ctx.runId) {
-    const [runCallCount, runReservations] = await Promise.all([
-      getRunCallCount(ctx.runId),
-      getActiveReservationTotal('run', ctx.runId),
+    const [wsLimits, orgBudget] = await Promise.all([
+      getWorkspaceLimits(ctx.subaccountId, tx),
+      getOrgBudget(ctx.organisationId, tx),
     ]);
 
-    // Agent-level call cap
-    if (subaccountAgentLimits?.maxLlmCallsPerRun) {
-      if (runCallCount >= subaccountAgentLimits.maxLlmCallsPerRun) {
-        throw new BudgetExceededError('agent_llm_calls_per_run', subaccountAgentLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
+    const subaccountAgentLimits = await getSubaccountAgentLimits(ctx.subaccountAgentId, tx);
+
+    // ── Rate limits first (cheap, no spend calculation needed) ──────────────
+    await checkRateLimits(ctx, wsLimits, tx);
+
+    // ── Per-run checks ───────────────────────────────────────────────────────
+    if (ctx.runId) {
+      const [runCallCount, runReservations] = await Promise.all([
+        getRunCallCount(ctx.runId, tx),
+        getActiveReservationTotal('run', ctx.runId, tx),
+      ]);
+
+      // Agent-level call cap
+      if (subaccountAgentLimits?.maxLlmCallsPerRun) {
+        if (runCallCount >= subaccountAgentLimits.maxLlmCallsPerRun) {
+          throw new BudgetExceededError('agent_llm_calls_per_run', subaccountAgentLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
+        }
+      }
+
+      // Workspace-level call cap
+      if (wsLimits?.maxLlmCallsPerRun) {
+        if (runCallCount >= wsLimits.maxLlmCallsPerRun) {
+          throw new BudgetExceededError('llm_calls_per_run', wsLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
+        }
+      }
+
+      // Agent cost cap per run
+      if (subaccountAgentLimits?.maxCostPerRunCents) {
+        const runSpend = await getCurrentSpend('run', ctx.runId, 'run', ctx.runId, tx);
+        const projected = runSpend + runReservations + estimatedCostCents;
+        if (projected > subaccountAgentLimits.maxCostPerRunCents) {
+          throw new BudgetExceededError('agent_cost_per_run', subaccountAgentLimits.maxCostPerRunCents, projected, ctx.runId);
+        }
+      }
+
+      // Workspace run cost cap
+      if (wsLimits?.maxCostPerRunCents) {
+        const runSpend = await getCurrentSpend('run', ctx.runId, 'run', ctx.runId, tx);
+        const projected = runSpend + runReservations + estimatedCostCents;
+        if (projected > wsLimits.maxCostPerRunCents) {
+          throw new BudgetExceededError('run_cost', wsLimits.maxCostPerRunCents, projected, ctx.runId);
+        }
       }
     }
 
-    // Workspace-level call cap
-    if (wsLimits?.maxLlmCallsPerRun) {
-      if (runCallCount >= wsLimits.maxLlmCallsPerRun) {
-        throw new BudgetExceededError('llm_calls_per_run', wsLimits.maxLlmCallsPerRun, runCallCount + 1, ctx.runId);
+    // ── Subaccount daily + monthly caps ─────────────────────────────────────
+    if (ctx.subaccountId) {
+      const [dailySpend, monthlySpend, subaccountReservations] = await Promise.all([
+        getCurrentSpend('subaccount', ctx.subaccountId, 'daily', ctx.billingDay, tx),
+        getCurrentSpend('subaccount', ctx.subaccountId, 'monthly', ctx.billingMonth, tx),
+        getActiveReservationTotal('subaccount', ctx.subaccountId, tx),
+      ]);
+
+      if (wsLimits?.dailyCostLimitCents) {
+        const projected = dailySpend + subaccountReservations + estimatedCostCents;
+        if (projected > wsLimits.dailyCostLimitCents) {
+          throw new BudgetExceededError('daily_subaccount', wsLimits.dailyCostLimitCents, projected, ctx.subaccountId);
+        }
+      }
+
+      if (wsLimits?.monthlyCostLimitCents) {
+        const projected = monthlySpend + subaccountReservations + estimatedCostCents;
+        if (projected > wsLimits.monthlyCostLimitCents) {
+          throw new BudgetExceededError('monthly_subaccount', wsLimits.monthlyCostLimitCents, projected, ctx.subaccountId);
+        }
       }
     }
 
-    // Agent cost cap per run
-    if (subaccountAgentLimits?.maxCostPerRunCents) {
-      const runSpend = await getCurrentSpend('run', ctx.runId, 'run', ctx.runId);
-      const projected = runSpend + runReservations + estimatedCostCents;
-      if (projected > subaccountAgentLimits.maxCostPerRunCents) {
-        throw new BudgetExceededError('agent_cost_per_run', subaccountAgentLimits.maxCostPerRunCents, projected, ctx.runId);
+    // ── Org monthly cap ──────────────────────────────────────────────────────
+    if (orgBudget?.monthlyCostLimitCents) {
+      const [orgMonthlySpend, orgReservations] = await Promise.all([
+        getCurrentSpend('organisation', ctx.organisationId, 'monthly', ctx.billingMonth, tx),
+        getActiveReservationTotal('organisation', ctx.organisationId, tx),
+      ]);
+      const projected = orgMonthlySpend + orgReservations + estimatedCostCents;
+      if (projected > orgBudget.monthlyCostLimitCents) {
+        throw new BudgetExceededError('monthly_org', orgBudget.monthlyCostLimitCents, projected, ctx.organisationId);
       }
     }
 
-    // Workspace run cost cap
-    if (wsLimits?.maxCostPerRunCents) {
-      const runSpend = await getCurrentSpend('run', ctx.runId, 'run', ctx.runId);
-      const projected = runSpend + runReservations + estimatedCostCents;
-      if (projected > wsLimits.maxCostPerRunCents) {
-        throw new BudgetExceededError('run_cost', wsLimits.maxCostPerRunCents, projected, ctx.runId);
-      }
-    }
-  }
-
-  // ── Subaccount daily + monthly caps ─────────────────────────────────────
-  if (ctx.subaccountId) {
-    const [dailySpend, monthlySpend, subaccountReservations] = await Promise.all([
-      getCurrentSpend('subaccount', ctx.subaccountId, 'daily', ctx.billingDay),
-      getCurrentSpend('subaccount', ctx.subaccountId, 'monthly', ctx.billingMonth),
-      getActiveReservationTotal('subaccount', ctx.subaccountId),
-    ]);
-
-    if (wsLimits?.dailyCostLimitCents) {
-      const projected = dailySpend + subaccountReservations + estimatedCostCents;
-      if (projected > wsLimits.dailyCostLimitCents) {
-        throw new BudgetExceededError('daily_subaccount', wsLimits.dailyCostLimitCents, projected, ctx.subaccountId);
+    // ── Global platform safety cap ───────────────────────────────────────────
+    const globalCap = env.PLATFORM_MONTHLY_COST_LIMIT_CENTS;
+    if (globalCap) {
+      const [platformSpend, platformReservations] = await Promise.all([
+        getCurrentSpend('platform', 'global', 'monthly', ctx.billingMonth, tx),
+        getActiveReservationTotal('platform', 'global', tx),
+      ]);
+      const projected = platformSpend + platformReservations + estimatedCostCents;
+      if (projected > globalCap) {
+        throw new BudgetExceededError('global_platform', globalCap, projected, 'global');
       }
     }
 
-    if (wsLimits?.monthlyCostLimitCents) {
-      const projected = monthlySpend + subaccountReservations + estimatedCostCents;
-      if (projected > wsLimits.monthlyCostLimitCents) {
-        throw new BudgetExceededError('monthly_subaccount', wsLimits.monthlyCostLimitCents, projected, ctx.subaccountId);
-      }
+    // ── All checks passed — create reservation (inside the same tx) ────────
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    const insertedAt = new Date();
+    const [reservation] = await tx
+      .insert(budgetReservations)
+      .values({
+        idempotencyKey,
+        entityType: ctx.subaccountId ? 'subaccount' : 'organisation',
+        entityId:   ctx.subaccountId ?? ctx.organisationId,
+        estimatedCostCents,
+        status: 'active',
+        expiresAt,
+      })
+      // H-1: idempotency_key is UNIQUE. On conflict we perform a no-op UPDATE so
+      // that RETURNING always yields the winning row (new or pre-existing).
+      // This guarantees true exactly-once semantics: the caller always gets a
+      // valid reservation ID regardless of concurrent duplicate submissions.
+      .onConflictDoUpdate({
+        target: budgetReservations.idempotencyKey,
+        set: { idempotencyKey: sql`EXCLUDED.idempotency_key` },
+      })
+      .returning();
+
+    if (reservation.createdAt < insertedAt) {
+      console.warn(JSON.stringify({
+        event: 'budget:idempotency_conflict',
+        idempotencyKey,
+        reservationId: reservation.id,
+      }));
     }
-  }
 
-  // ── Org monthly cap ──────────────────────────────────────────────────────
-  if (orgBudget?.monthlyCostLimitCents) {
-    const [orgMonthlySpend, orgReservations] = await Promise.all([
-      getCurrentSpend('organisation', ctx.organisationId, 'monthly', ctx.billingMonth),
-      getActiveReservationTotal('organisation', ctx.organisationId),
-    ]);
-    const projected = orgMonthlySpend + orgReservations + estimatedCostCents;
-    if (projected > orgBudget.monthlyCostLimitCents) {
-      throw new BudgetExceededError('monthly_org', orgBudget.monthlyCostLimitCents, projected, ctx.organisationId);
-    }
-  }
-
-  // ── Global platform safety cap ───────────────────────────────────────────
-  const globalCap = env.PLATFORM_MONTHLY_COST_LIMIT_CENTS;
-  if (globalCap) {
-    const [platformSpend, platformReservations] = await Promise.all([
-      getCurrentSpend('platform', 'global', 'monthly', ctx.billingMonth),
-      getActiveReservationTotal('platform', 'global'),
-    ]);
-    const projected = platformSpend + platformReservations + estimatedCostCents;
-    if (projected > globalCap) {
-      throw new BudgetExceededError('global_platform', globalCap, projected, 'global');
-    }
-  }
-
-  // ── All checks passed — create reservation ───────────────────────────────
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
-
-  const insertedAt = new Date();
-  const [reservation] = await db
-    .insert(budgetReservations)
-    .values({
-      idempotencyKey,
-      entityType: ctx.subaccountId ? 'subaccount' : 'organisation',
-      entityId:   ctx.subaccountId ?? ctx.organisationId,
-      estimatedCostCents,
-      status: 'active',
-      expiresAt,
-    })
-    // H-1: idempotency_key is UNIQUE. On conflict we perform a no-op UPDATE so
-    // that RETURNING always yields the winning row (new or pre-existing).
-    // This guarantees true exactly-once semantics: the caller always gets a
-    // valid reservation ID regardless of concurrent duplicate submissions.
-    .onConflictDoUpdate({
-      target: budgetReservations.idempotencyKey,
-      set: { idempotencyKey: sql`EXCLUDED.idempotency_key` },
-    })
-    .returning();
-
-  if (reservation.createdAt < insertedAt) {
-    console.warn(JSON.stringify({
-      event: 'budget:idempotency_conflict',
-      idempotencyKey,
-      reservationId: reservation.id,
-    }));
-  }
-
-  return reservation.id;
+    return reservation.id;
+  });
 }
 
 // ---------------------------------------------------------------------------

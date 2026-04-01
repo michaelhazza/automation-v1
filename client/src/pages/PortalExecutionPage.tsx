@@ -66,7 +66,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
     if (!subaccountId) return;
     Promise.all([
       api.get(`/api/portal/${subaccountId}/processes`),
-      api.get('/api/settings/upload').catch(() => ({ data: { maxUploadSizeMb: 200 } })),
+      api.get('/api/settings/upload').catch((err) => { console.error('[PortalExecution] Failed to fetch upload settings:', err); return { data: { maxUploadSizeMb: 200 } }; }),
     ]).then(([portalRes, settingsRes]) => {
       const found = (portalRes.data.processes as Process[]).find((t: Process) => t.id === processId);
       setProcess(found ?? null);
@@ -81,7 +81,7 @@ export default function PortalExecutionPage({ user }: { user: User }) {
     if (!executionId || !subaccountId) return;
     api.get(`/api/portal/${subaccountId}/executions/${executionId}`).then(({ data }) => {
       setExecution(data);
-    }).catch(() => {});
+    }).catch((err) => console.error('[PortalExecution] Failed to resync execution:', err));
   }, [executionId, subaccountId]);
 
   useSocketRoom('execution', executionId, {

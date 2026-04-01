@@ -26,7 +26,7 @@ interface BM25Result { ref: string; score: number }
 
 async function getBM25(slugs: string[], descriptions: Record<string, string>): Promise<{ search: (query: string, limit: number) => BM25Result[] }> {
   if (bm25Instance && indexedSlugs.join(',') === slugs.join(',')) {
-    return bm25Instance as { search: (query: string, limit: number) => BM25Result[] };
+    return bm25Instance as unknown as { search: (query: string, limit: number) => BM25Result[] };
   }
 
   // Dynamic import to avoid ESM/CJS issues
@@ -49,7 +49,7 @@ async function getBM25(slugs: string[], descriptions: Record<string, string>): P
 
   bm25Instance = engine;
   indexedSlugs = slugs;
-  return engine as { search: (query: string, limit: number) => BM25Result[] };
+  return engine as unknown as { search: (query: string, limit: number) => BM25Result[] };
 }
 
 /** All registered action slugs with their descriptions (sourced from actionRegistry) */

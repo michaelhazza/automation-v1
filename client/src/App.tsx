@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import api from './lib/api';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const AcceptInvitePage = lazy(() => import('./pages/AcceptInvitePage'));
@@ -71,9 +72,11 @@ function ProtectedLayout({ user, loading }: { user: User | null; loading: boolea
   if (!user) return <Navigate to="/login" replace />;
   return (
     <Layout user={user}>
-      <Suspense fallback={<PageLoader />}>
-        <Outlet />
-      </Suspense>
+      <ErrorBoundary>
+        <Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </Suspense>
+      </ErrorBoundary>
     </Layout>
   );
 }
@@ -104,7 +107,8 @@ export default function App() {
         setUser(data);
         setUserRole(data.role);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[App] Auth check failed:', err);
         setUser(null);
         removeUserRole();
         removeActiveOrg();

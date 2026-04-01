@@ -99,9 +99,18 @@ Respond with only the lesson — no preamble, no quotes.`;
 
   try {
     const response = await routeCall({
-      model: EXTRACTION_MODEL,
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: EXTRACTION_MAX_TOKENS,
+      maxTokens: EXTRACTION_MAX_TOKENS,
+      context: {
+        organisationId: 'system',
+        subaccountId: 'system',
+        runId: 'outcome-learning',
+        sourceType: 'system',
+        agentName: 'outcome-learning',
+        taskType: 'memory_compile',
+        provider: 'anthropic',
+        model: EXTRACTION_MODEL,
+      },
     });
 
     const text =

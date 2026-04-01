@@ -37,7 +37,7 @@ const execFileAsync = promisify(execFile);
 // Skill Executor — executes tool calls for autonomous agent runs
 // ---------------------------------------------------------------------------
 
-interface SkillExecutionContext {
+export interface SkillExecutionContext {
   runId: string;
   organisationId: string;
   subaccountId: string;
@@ -495,7 +495,7 @@ async function executeWebSearch(input: Record<string, unknown>, context: SkillEx
     };
 
     // Per-subaccount Tavily usage logging for billing
-    logSearchUsage(context.subaccountId, context.organisationId, context.runId).catch(() => undefined);
+    logSearchUsage(context.subaccountId, context.organisationId, context.runId).catch((err) => console.error('[SkillExecutor] Failed to log search usage:', err));
 
     return {
       success: true,
@@ -555,7 +555,7 @@ async function executeReadWorkspace(
 
     if (includeActivities) {
       const enriched = await Promise.all(sliced.map(async (item) => {
-        const activities = await taskService.listActivities(item.id);
+        const activities = await taskService.listActivities(item.id, context.organisationId);
         return {
           id: item.id,
           title: item.title,

@@ -195,7 +195,7 @@ export default function UsagePage({ user: _user, embedded = false }: { user: Use
     ]).then(([s, d]) => {
       setSummary(s.data);
       setDaily(d.data);
-    }).catch(() => {}).finally(() => setLoading(false));
+    }).catch((err) => console.error('[UsagePage] Failed to load usage data:', err)).finally(() => setLoading(false));
   }, [subaccountId, month]);
 
   // Load tab data on tab change

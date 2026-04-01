@@ -72,7 +72,7 @@ export default function HeartbeatEditor({ agents, onUpdate, levelLabel = 'agent'
     if (!row) return;
     const rowRect = row.getBoundingClientRect();
     const relX = e.clientX - rowRect.left;
-    const pct = Math.max(0, Math.min(1, relX / rowRect.clientWidth));
+    const pct = Math.max(0, Math.min(1, relX / rowRect.width));
     const hour = Math.round(pct * 24);
     const newOffset = Math.max(0, Math.min(23, hour)) % (agent.heartbeatIntervalHours ?? 8);
 

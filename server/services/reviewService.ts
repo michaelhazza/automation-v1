@@ -4,6 +4,7 @@ import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/sc
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { hitlService } from './hitlService.js';
+import { auditService } from './auditService.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 
@@ -78,35 +79,49 @@ export const reviewService = {
       throw Object.assign(new Error(`Review item already resolved: ${item.reviewStatus}`), { statusCode: 409 });
     }
 
-    // Apply edits to action payload if provided
+    // Apply edits and transition in a single transaction to avoid partial state
+    await db.transaction(async (tx) => {
+      if (edits) {
+        const action = await actionService.getAction(item.actionId, organisationId);
+        const currentPayload = action.payloadJson as Record<string, unknown>;
+        const mergedPayload = { ...currentPayload, ...edits };
+
+        await tx.update(actions).set({
+          payloadJson: mergedPayload,
+          updatedAt: new Date(),
+        }).where(eq(actions.id, item.actionId));
+
+        await tx.update(reviewItems).set({
+          humanEditJson: edits,
+          reviewStatus: 'approved',
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+        }).where(eq(reviewItems.id, reviewItemId));
+      } else {
+        await tx.update(reviewItems).set({
+          reviewStatus: 'approved',
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+        }).where(eq(reviewItems.id, reviewItemId));
+      }
+    });
+
     if (edits) {
-      const action = await actionService.getAction(item.actionId, organisationId);
-      const currentPayload = action.payloadJson as Record<string, unknown>;
-      const mergedPayload = { ...currentPayload, ...edits };
-
-      await db.update(actions).set({
-        payloadJson: mergedPayload,
-        updatedAt: new Date(),
-      }).where(eq(actions.id, item.actionId));
-
-      await db.update(reviewItems).set({
-        humanEditJson: edits,
-        reviewStatus: 'approved',
-        reviewedBy: userId,
-        reviewedAt: new Date(),
-      }).where(eq(reviewItems.id, reviewItemId));
-
       await actionService.emitEvent(item.actionId, organisationId, 'edited_and_approved', userId);
-    } else {
-      await db.update(reviewItems).set({
-        reviewStatus: 'approved',
-        reviewedBy: userId,
-        reviewedAt: new Date(),
-      }).where(eq(reviewItems.id, reviewItemId));
     }
 
     // Transition action to approved
     await actionService.transitionState(item.actionId, organisationId, 'approved', userId);
+
+    auditService.log({
+      organisationId,
+      actorId: userId,
+      actorType: 'user',
+      action: 'agent_approved',
+      entityType: 'review_item',
+      entityId: reviewItemId,
+      metadata: { actionId: item.actionId, edited: !!edits },
+    });
 
     // Dispatch execution outside the approval transaction
     let execResult;
@@ -165,19 +180,32 @@ export const reviewService = {
 
     const rejectionComment = comment?.trim() || 'No reason provided';
 
-    await db.update(reviewItems).set({
-      reviewStatus: 'rejected',
-      reviewedBy: userId,
-      reviewedAt: new Date(),
-    }).where(eq(reviewItems.id, reviewItemId));
+    // Update review item and action comment in a single transaction
+    await db.transaction(async (tx) => {
+      await tx.update(reviewItems).set({
+        reviewStatus: 'rejected',
+        reviewedBy: userId,
+        reviewedAt: new Date(),
+      }).where(eq(reviewItems.id, reviewItemId));
 
-    // Store comment on the action for the agent to receive
-    await db.update(actions).set({
-      rejectionComment,
-      updatedAt: new Date(),
-    }).where(eq(actions.id, item.actionId));
+      // Store comment on the action for the agent to receive
+      await tx.update(actions).set({
+        rejectionComment,
+        updatedAt: new Date(),
+      }).where(eq(actions.id, item.actionId));
+    });
 
     await actionService.transitionState(item.actionId, organisationId, 'rejected', userId);
+
+    auditService.log({
+      organisationId,
+      actorId: userId,
+      actorType: 'user',
+      action: 'agent_rejected',
+      entityType: 'review_item',
+      entityId: reviewItemId,
+      metadata: { actionId: item.actionId, comment: rejectionComment },
+    });
 
     // Write durable resume event
     const action = await actionService.getAction(item.actionId, organisationId);

@@ -66,7 +66,7 @@ export const reviewAuditService = {
         agentId: input.agentOutput['agentId'] as string ?? 'unknown',
         organisationId: input.organisationId,
         subaccountId: input.subaccountId,
-      }).catch(() => {/* fire-and-forget */});
+      }).catch((err) => console.error('[ReviewAudit] Fire-and-forget audit failed:', err));
     }
   },
 };

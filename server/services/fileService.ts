@@ -62,27 +62,28 @@ export class FileService {
   }
 
   async downloadFile(fileId: string, userId: string, organisationId: string, role: string) {
-    const [fileRecord] = await db
-      .select()
+    // Single query: fetch file and validate org ownership via execution join
+    const [result] = await db
+      .select({
+        file: executionFiles,
+        execution: executions,
+      })
       .from(executionFiles)
+      .innerJoin(executions, and(
+        eq(executionFiles.executionId, executions.id),
+        eq(executions.organisationId, organisationId)
+      ))
       .where(eq(executionFiles.id, fileId));
 
-    if (!fileRecord) {
+    if (!result) {
       throw { statusCode: 404, message: 'File not found or not accessible' };
     }
+
+    const fileRecord = result.file;
+    const execution = result.execution;
 
     if (new Date() > fileRecord.expiresAt) {
       throw { statusCode: 410, message: 'File has expired and is no longer available' };
-    }
-
-    // Verify user has access to the execution
-    const [execution] = await db
-      .select()
-      .from(executions)
-      .where(and(eq(executions.id, fileRecord.executionId), eq(executions.organisationId, organisationId)));
-
-    if (!execution) {
-      throw { statusCode: 404, message: 'File not found or not accessible' };
     }
 
     if (role === 'user' && execution.triggeredByUserId !== userId) {
