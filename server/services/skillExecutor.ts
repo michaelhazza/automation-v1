@@ -5,6 +5,7 @@ import { glob } from 'glob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { env } from '../lib/env.js';
+import { getActiveTrace } from '../instrumentation.js';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
@@ -148,6 +149,7 @@ async function executeWithActionAudit(
   executor: () => Promise<unknown>
 ): Promise<unknown> {
   const idempotencyKey = `${actionType}:${context.runId}:${Date.now()}`;
+  const span = getActiveTrace()?.span({ name: actionType, input });
 
   try {
     const proposed = await actionService.proposeAction({
@@ -163,12 +165,16 @@ async function executeWithActionAudit(
 
     // Duplicate detected — return existing status
     if (!proposed.isNew) {
-      return { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
+      const dupeResult = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
+      span?.end({ output: dupeResult });
+      return dupeResult;
     }
 
     // Policy engine escalated to block — return denial immediately
     if (proposed.status === 'blocked') {
-      return buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
+      const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
+      span?.end({ output: denial });
+      return denial;
     }
 
     // Policy engine escalated to review — block and await human decision
@@ -179,12 +185,15 @@ async function executeWithActionAudit(
         reasoning: input.metadata ? String((input.metadata as Record<string, unknown>).reasoning ?? '') : undefined,
         proposedPayload: input,
       });
-      return awaitReviewDecision(proposed.actionId, actionType, context);
+      const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
+      span?.end({ output: reviewResult });
+      return reviewResult;
     }
 
     // Auto-approved — execute inline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
+      span?.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
@@ -196,10 +205,12 @@ async function executeWithActionAudit(
       await actionService.markFailed(proposed.actionId, context.organisationId, resultObj.error ?? 'Unknown error');
     }
 
+    span?.end({ output: result });
     return result;
   } catch (err) {
     // If action tracking fails, execute directly to preserve existing behaviour
     console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
+    span?.end({ output: { error: String(err) } });
     return executor();
   }
 }
@@ -223,6 +234,8 @@ async function proposeReviewGatedAction(
     return { success: false, error: `Unknown action type: ${actionType}` };
   }
 
+  const span = getActiveTrace()?.span({ name: actionType, input, metadata: { gated: true } });
+
   const keyParts = [actionType, context.subaccountId];
   if (input.thread_id) keyParts.push(String(input.thread_id));
   if (input.record_id) keyParts.push(String(input.record_id));
@@ -244,24 +257,25 @@ async function proposeReviewGatedAction(
 
     // Duplicate — return its current status
     if (!proposed.isNew) {
-      return {
-        success: true,
-        action_id: proposed.actionId,
-        status: proposed.status,
-        message: 'Action already exists (duplicate detected)',
-      };
+      const result = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Action already exists (duplicate detected)' };
+      span?.end({ output: result });
+      return result;
     }
 
     // Policy engine blocked it — return denial immediately, no review queue entry
     if (proposed.status === 'blocked') {
-      return buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
+      const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
+      span?.end({ output: denial });
+      return denial;
     }
 
     // Policy engine auto-approved it — should not happen for review-gated skills,
     // but handle it gracefully by dispatching immediately
     if (proposed.status === 'approved') {
       await executionLayerService.executeAction(proposed.actionId, context.organisationId);
-      return { success: true, action_id: proposed.actionId, status: 'completed', message: 'Action auto-approved and executed.' };
+      const result = { success: true, action_id: proposed.actionId, status: 'completed', message: 'Action auto-approved and executed.' };
+      span?.end({ output: result });
+      return result;
     }
 
     // pending_approval — create review item, then block until decision
@@ -272,9 +286,12 @@ async function proposeReviewGatedAction(
       proposedPayload: input,
     });
 
-    return awaitReviewDecision(proposed.actionId, actionType, context);
+    const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
+    span?.end({ output: reviewResult });
+    return reviewResult;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    span?.end({ output: { success: false, error: errMsg } });
     return { success: false, error: `Failed to propose ${actionType}: ${errMsg}` };
   }
 }

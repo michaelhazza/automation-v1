@@ -44,6 +44,7 @@ export * from './processedResources';
 export * from './policyRules';
 export * from './actionResumeEvents';
 export * from './organisationSecrets';
+export * from './reviewAuditRecords';
 export * from './workspaceLimits';
 export * from './processConnectionMappings';
 export * from './projects';

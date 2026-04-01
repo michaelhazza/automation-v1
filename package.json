@@ -30,6 +30,7 @@
     "glob": "^13.0.6",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "langfuse": "^3.38.6",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.9",
     "pg-boss": "^9.0.3",

@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { llmRequests, TASK_TYPES, SOURCE_TYPES } from '../db/schema/index.js';
+import { getActiveTrace } from '../instrumentation.js';
 import type { TaskType, SourceType } from '../db/schema/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -517,12 +518,31 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       where: sql`${llmRequests.status} != 'success'`,
     });
 
-  // ── 13. Commit reservation with actual cost (releases delta) ─────────────
+  // ── 13. Emit Langfuse generation span (dual-write — does not replace ledger) ──
+  getActiveTrace()?.generation({
+    name:            'llm-call',
+    model:           actualModel,
+    input:           params.messages,
+    modelParameters: params.maxTokens ? { maxTokens: params.maxTokens } : undefined,
+    output:          providerResponse.content,
+    usage: {
+      input:  providerResponse.tokensIn,
+      output: providerResponse.tokensOut,
+    },
+    metadata: {
+      provider:  actualProvider,
+      runId:     ctx.runId,
+      agentName: ctx.agentName,
+      taskType:  ctx.taskType,
+    },
+  });
+
+  // ── 14. Commit reservation with actual cost (releases delta) ─────────────
   if (reservationId) {
     await budgetService.commitReservation(reservationId, costResult.costWithMarginCents);
   }
 
-  // ── 14. Enqueue aggregate update (async — do not await) ──────────────────
+  // ── 15. Enqueue aggregate update (async — do not await) ──────────────────
   enqueueAggregateUpdate(idempotencyKey).catch((err) => {
     console.error('[llmRouter] Failed to enqueue aggregate update', err);
   });

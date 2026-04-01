@@ -1,3 +1,4 @@
+import './instrumentation.js';
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
@@ -60,6 +61,7 @@ import projectsRouter from './routes/projects.js';
 import llmUsageRouter from './routes/llmUsage.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
+import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -120,6 +122,7 @@ app.use(projectsRouter);
 app.use(llmUsageRouter);
 app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
+app.use(oauthIntegrationsRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {

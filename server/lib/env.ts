@@ -61,6 +61,21 @@ const envSchema = z.object({
   // so that values encrypted under the old key can still be decrypted. Remove once
   // all legacy-format values have been re-encrypted.
   TOKEN_ENCRYPTION_KEY_V0: z.string().length(64).optional(),
+  // Langfuse observability — optional, no-ops if not set
+  LANGFUSE_PUBLIC_KEY: z.string().optional(),
+  LANGFUSE_SECRET_KEY: z.string().optional(),
+  LANGFUSE_BASE_URL: z.string().url().optional().default('https://cloud.langfuse.com'),
+  // OAuth provider credentials — OAUTH_{PROVIDER}_CLIENT_ID / _CLIENT_SECRET
+  OAUTH_GMAIL_CLIENT_ID: z.string().optional(),
+  OAUTH_GMAIL_CLIENT_SECRET: z.string().optional(),
+  OAUTH_GITHUB_CLIENT_ID: z.string().optional(),
+  OAUTH_GITHUB_CLIENT_SECRET: z.string().optional(),
+  OAUTH_HUBSPOT_CLIENT_ID: z.string().optional(),
+  OAUTH_HUBSPOT_CLIENT_SECRET: z.string().optional(),
+  OAUTH_SLACK_CLIENT_ID: z.string().optional(),
+  OAUTH_SLACK_CLIENT_SECRET: z.string().optional(),
+  OAUTH_GHL_CLIENT_ID: z.string().optional(),
+  OAUTH_GHL_CLIENT_SECRET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
