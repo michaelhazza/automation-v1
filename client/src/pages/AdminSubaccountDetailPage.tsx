@@ -418,33 +418,38 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       )}
 
       {/* Admin */}
-      {activeTab === 'admin' && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
-          <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Company settings</h2>
-          {settingsSaved && (
-            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{settingsSaved}</div>
-          )}
-          <div className="grid gap-4 mb-5">
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
-              <input value={settingsForm.name} onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })} className={inputCls} />
+      {activeTab === 'admin' && subaccountId && (
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-[480px]">
+            <h2 className="text-[18px] font-semibold text-slate-800 mb-5">Company settings</h2>
+            {settingsSaved && (
+              <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{settingsSaved}</div>
+            )}
+            <div className="grid gap-4 mb-5">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name</label>
+                <input value={settingsForm.name} onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Slug</label>
+                <input value={settingsForm.slug} onChange={(e) => setSettingsForm({ ...settingsForm, slug: e.target.value })} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Status</label>
+                <select value={settingsForm.status} onChange={(e) => setSettingsForm({ ...settingsForm, status: e.target.value })} className={inputCls}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Slug</label>
-              <input value={settingsForm.slug} onChange={(e) => setSettingsForm({ ...settingsForm, slug: e.target.value })} className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Status</label>
-              <select value={settingsForm.status} onChange={(e) => setSettingsForm({ ...settingsForm, status: e.target.value })} className={inputCls}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
-              </select>
-            </div>
+            <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
+              Save changes
+            </button>
           </div>
-          <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
-            Save changes
-          </button>
+
+          {/* Dev Execution Context */}
+          <DevContextConfig subaccountId={subaccountId} />
         </div>
       )}
 
@@ -470,6 +475,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 interface OrgAgent { id: string; name: string; slug: string; icon: string | null; status: string; description: string | null; }
 interface LinkedAgent { id: string; agentId: string; isActive: boolean; agent: { name: string; icon: string | null; status: string; description: string | null; }; agentRole: string | null; }
 interface Template { id: string; name: string; description: string | null; sourceType: string; slotCount: number; version: number; }
+interface AgentRunRecord { id: string; status: string; runType: string; executionMode: string; summary: string | null; totalToolCalls: number; totalTokens: number; durationMs: number | null; errorMessage: string | null; createdAt: string; }
 
 function AgentsTab({ subaccountId }: { subaccountId: string }) {
   const [linked, setLinked] = useState<LinkedAgent[]>([]);
@@ -483,16 +489,25 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
+  // Run state
+  const [runningAgentId, setRunningAgentId] = useState<string | null>(null);
+  const [runHistory, setRunHistory] = useState<Record<string, AgentRunRecord[]>>({});
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [showRunResult, setShowRunResult] = useState<AgentRunRecord | null>(null);
+  const [claudeCodeAvailable, setClaudeCodeAvailable] = useState<boolean | null>(null);
+
   const load = async () => {
     try {
-      const [linkedRes, agentsRes, templatesRes] = await Promise.all([
+      const [linkedRes, agentsRes, templatesRes, ccStatus] = await Promise.all([
         api.get(`/api/subaccounts/${subaccountId}/agents`),
         api.get('/api/agents').catch(() => ({ data: [] })),
         api.get('/api/hierarchy-templates').catch(() => ({ data: [] })),
+        api.get(`/api/subaccounts/${subaccountId}/claude-code-status`).catch(() => ({ data: { available: false } })),
       ]);
       setLinked(linkedRes.data);
       setOrgAgents(agentsRes.data);
       setTemplates(templatesRes.data);
+      setClaudeCodeAvailable(ccStatus.data.available);
     } catch { setError('Failed to load agents'); }
     finally { setLoading(false); }
   };
@@ -544,12 +559,62 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
     } finally { setApplyingTemplate(null); }
   };
 
+  const handleRunAgent = async (agentId: string, mode: 'api' | 'claude-code') => {
+    setRunningAgentId(agentId);
+    setError(''); setMsg('');
+    try {
+      const { data } = await api.post(`/api/subaccounts/${subaccountId}/agents/${agentId}/run`, {
+        executionMode: mode,
+      });
+      setMsg(`Agent run ${data.status}: ${data.summary?.slice(0, 200) ?? 'No summary'} (${data.totalTokens} tokens, ${Math.round((data.durationMs ?? 0) / 1000)}s)`);
+      // Refresh history for this agent
+      loadRunHistory(agentId);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to run agent');
+    } finally { setRunningAgentId(null); }
+  };
+
+  const loadRunHistory = async (agentId: string) => {
+    try {
+      const { data } = await api.get(`/api/subaccounts/${subaccountId}/agents/${agentId}/runs?limit=10`);
+      setRunHistory(prev => ({ ...prev, [agentId]: data }));
+    } catch { /* ignore */ }
+  };
+
+  const toggleExpand = (agentId: string) => {
+    if (expandedAgent === agentId) {
+      setExpandedAgent(null);
+    } else {
+      setExpandedAgent(agentId);
+      if (!runHistory[agentId]) loadRunHistory(agentId);
+    }
+  };
+
+  const STATUS_BADGE: Record<string, string> = {
+    completed: 'bg-green-100 text-green-700',
+    failed: 'bg-red-100 text-red-700',
+    running: 'bg-blue-100 text-blue-700',
+    timeout: 'bg-amber-100 text-amber-700',
+    budget_exceeded: 'bg-orange-100 text-orange-700',
+    loop_detected: 'bg-purple-100 text-purple-700',
+    pending: 'bg-slate-100 text-slate-600',
+    cancelled: 'bg-slate-100 text-slate-500',
+  };
+
   if (loading) return <div className="py-8 text-sm text-slate-500">Loading agents...</div>;
 
   return (
     <>
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-[18px] font-semibold text-slate-800 m-0">Linked Agents</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-[18px] font-semibold text-slate-800 m-0">Linked Agents</h2>
+          {claudeCodeAvailable !== null && (
+            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${claudeCodeAvailable ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+              Claude Code {claudeCodeAvailable ? 'Available' : 'Not Found'}
+            </span>
+          )}
+        </div>
         <div className="flex gap-2">
           <button onClick={() => setShowTemplates(true)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors">
             Load Team Template
@@ -567,44 +632,130 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
         {linked.length === 0 ? (
           <div className="py-12 text-center text-sm text-slate-500">No agents linked yet. Link an org agent or load a team template to get started.</div>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Agent</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Role</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
-                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {linked.map((l) => (
-                <tr key={l.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {l.agent.icon && <span className="text-base">{l.agent.icon}</span>}
-                      <div>
-                        <div className="font-medium text-slate-800">{l.agent.name}</div>
-                        {l.agent.description && <div className="text-[12px] text-slate-400 mt-0.5">{l.agent.description}</div>}
-                      </div>
+          <div className="divide-y divide-slate-100">
+            {linked.map((l) => (
+              <div key={l.id}>
+                <div className="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {l.agent.icon && <span className="text-lg shrink-0">{l.agent.icon}</span>}
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-800 text-[14px]">{l.agent.name}</div>
+                      {l.agent.description && <div className="text-[12px] text-slate-400 mt-0.5 truncate">{l.agent.description}</div>}
                     </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 text-[13px]">{l.agentRole ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[12px] font-semibold capitalize ${l.isActive ? 'text-green-600' : 'text-slate-400'}`}>
+                    {l.agentRole && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full shrink-0">{l.agentRole}</span>}
+                    <span className={`text-[11px] font-semibold capitalize px-2 py-0.5 rounded-full shrink-0 ${l.isActive ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
                       {l.isActive ? 'Active' : 'Inactive'}
                     </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button onClick={() => handleUnlink(l.agentId)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors">
+                  </div>
+                  <div className="flex items-center gap-2 ml-4 shrink-0">
+                    <button
+                      onClick={() => handleRunAgent(l.agentId, 'api')}
+                      disabled={runningAgentId === l.agentId}
+                      className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 disabled:opacity-50 rounded-md text-[12px] font-medium transition-colors"
+                      title="Run via Anthropic API"
+                    >
+                      {runningAgentId === l.agentId ? 'Running...' : 'Run (API)'}
+                    </button>
+                    {claudeCodeAvailable && (
+                      <button
+                        onClick={() => handleRunAgent(l.agentId, 'claude-code')}
+                        disabled={runningAgentId === l.agentId}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-50 rounded-md text-[12px] font-medium transition-colors"
+                        title="Run via Claude Code CLI (uses Max plan)"
+                      >
+                        {runningAgentId === l.agentId ? 'Running...' : 'Run (Claude Code)'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => toggleExpand(l.agentId)}
+                      className="px-2 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-md text-[12px] transition-colors"
+                    >
+                      {expandedAgent === l.agentId ? 'Hide' : 'History'}
+                    </button>
+                    <button onClick={() => handleUnlink(l.agentId)} className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-[12px] font-medium transition-colors">
                       Unlink
                     </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+
+                {/* Expandable run history */}
+                {expandedAgent === l.agentId && (
+                  <div className="bg-slate-50 border-t border-slate-100 px-4 py-3">
+                    <div className="text-[12px] font-semibold text-slate-600 mb-2">Recent Runs</div>
+                    {!runHistory[l.agentId] ? (
+                      <div className="text-[12px] text-slate-400">Loading...</div>
+                    ) : runHistory[l.agentId].length === 0 ? (
+                      <div className="text-[12px] text-slate-400">No runs yet</div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {runHistory[l.agentId].map((r) => (
+                          <div
+                            key={r.id}
+                            onClick={() => setShowRunResult(r)}
+                            className="flex items-center gap-3 p-2 bg-white border border-slate-200 rounded-lg cursor-pointer hover:border-indigo-200 transition-colors"
+                          >
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[r.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                              {r.status}
+                            </span>
+                            <span className="text-[11px] text-slate-500">{r.executionMode === 'claude-code' ? 'Claude Code' : 'API'}</span>
+                            <span className="text-[12px] text-slate-700 truncate flex-1">{r.summary?.slice(0, 100) ?? r.errorMessage?.slice(0, 100) ?? 'No summary'}</span>
+                            <span className="text-[11px] text-slate-400 shrink-0">
+                              {r.totalTokens > 0 && `${r.totalTokens} tok`}
+                              {r.durationMs && ` · ${Math.round(r.durationMs / 1000)}s`}
+                            </span>
+                            <span className="text-[11px] text-slate-400 shrink-0">{new Date(r.createdAt).toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
+
+      {/* Run result detail modal */}
+      {showRunResult && (
+        <Modal title={`Run: ${showRunResult.status}`} onClose={() => setShowRunResult(null)} maxWidth={640}>
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <div className="text-[20px] font-bold text-slate-800">{showRunResult.totalTokens.toLocaleString()}</div>
+              <div className="text-[11px] text-slate-500">Tokens</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <div className="text-[20px] font-bold text-slate-800">{showRunResult.totalToolCalls}</div>
+              <div className="text-[11px] text-slate-500">Tool Calls</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <div className="text-[20px] font-bold text-slate-800">{showRunResult.durationMs ? `${Math.round(showRunResult.durationMs / 1000)}s` : '—'}</div>
+              <div className="text-[11px] text-slate-500">Duration</div>
+            </div>
+          </div>
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[showRunResult.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                {showRunResult.status}
+              </span>
+              <span className="text-[11px] text-slate-500">{showRunResult.executionMode === 'claude-code' ? 'Claude Code' : 'API'} · {showRunResult.runType}</span>
+              <span className="text-[11px] text-slate-400">{new Date(showRunResult.createdAt).toLocaleString()}</span>
+            </div>
+          </div>
+          {showRunResult.summary && (
+            <div className="mb-3">
+              <div className="text-[12px] font-semibold text-slate-600 mb-1">Summary</div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[13px] text-slate-700 whitespace-pre-wrap max-h-[300px] overflow-auto">{showRunResult.summary}</div>
+            </div>
+          )}
+          {showRunResult.errorMessage && (
+            <div>
+              <div className="text-[12px] font-semibold text-red-600 mb-1">Error</div>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-[13px] text-red-700 whitespace-pre-wrap">{showRunResult.errorMessage}</div>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {/* Link Agent modal */}
       {showLinkForm && (
@@ -660,5 +811,162 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
         </Modal>
       )}
     </>
+  );
+}
+
+// ─── Dev Execution Context Config ─────────────────────────────────────────────
+
+function DevContextConfig({ subaccountId }: { subaccountId: string }) {
+  const [dec, setDec] = useState({
+    projectRoot: '',
+    testCommand: '',
+    buildCommand: '',
+    lintCommand: '',
+    runtime: 'node@20',
+    packageManager: 'npm',
+    gitConfig: { defaultBranch: 'main', branchPrefix: 'agent/', remote: 'origin', repoOwner: '', repoName: '' },
+    costLimits: { maxTestRunsPerTask: 5, maxCommandsPerRun: 10, maxPatchAttemptsPerTask: 10 },
+    resourceLimits: { commandTimeoutMs: 60000, maxOutputBytes: 1048576 },
+    safeMode: true,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get(`/api/subaccounts/${subaccountId}/dev-context`)
+      .then(({ data }) => {
+        if (data.devContext) {
+          setDec(prev => ({
+            ...prev,
+            ...data.devContext,
+            gitConfig: { ...prev.gitConfig, ...(data.devContext.gitConfig ?? {}) },
+            costLimits: { ...prev.costLimits, ...(data.devContext.costLimits ?? {}) },
+            resourceLimits: { ...prev.resourceLimits, ...(data.devContext.resourceLimits ?? {}) },
+          }));
+        }
+      })
+      .catch(() => { /* no DEC yet — that's fine */ })
+      .finally(() => setLoading(false));
+  }, [subaccountId]);
+
+  const handleSave = async () => {
+    setSaving(true); setMsg(''); setError('');
+    try {
+      await api.put(`/api/subaccounts/${subaccountId}/dev-context`, { devContext: dec });
+      setMsg('Dev Execution Context saved');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to save');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="py-4 text-sm text-slate-500">Loading dev context...</div>;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6">
+      <h2 className="text-[18px] font-semibold text-slate-800 mb-1">Dev Execution Context</h2>
+      <p className="text-[13px] text-slate-500 mt-0 mb-5">Configure how agents interact with this project's codebase, run tests, and execute commands.</p>
+
+      {msg && <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-green-700">{msg}</div>}
+      {error && <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 mb-4 text-[13px] text-red-600">{error}</div>}
+
+      <div className="space-y-5">
+        {/* Project basics */}
+        <div>
+          <h3 className="text-[14px] font-semibold text-slate-700 mb-3">Project</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Project Root *</label>
+              <input value={dec.projectRoot} onChange={(e) => setDec({ ...dec, projectRoot: e.target.value })} placeholder="/home/user/my-project" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Runtime</label>
+              <input value={dec.runtime} onChange={(e) => setDec({ ...dec, runtime: e.target.value })} placeholder="node@20" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Package Manager</label>
+              <select value={dec.packageManager} onChange={(e) => setDec({ ...dec, packageManager: e.target.value })} className={inputCls}>
+                <option value="npm">npm</option>
+                <option value="yarn">yarn</option>
+                <option value="pnpm">pnpm</option>
+                <option value="bun">bun</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Commands */}
+        <div>
+          <h3 className="text-[14px] font-semibold text-slate-700 mb-3">Commands</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Test Command *</label>
+              <input value={dec.testCommand} onChange={(e) => setDec({ ...dec, testCommand: e.target.value })} placeholder="npm test" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Build Command</label>
+              <input value={dec.buildCommand} onChange={(e) => setDec({ ...dec, buildCommand: e.target.value })} placeholder="npm run build" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Lint Command</label>
+              <input value={dec.lintCommand} onChange={(e) => setDec({ ...dec, lintCommand: e.target.value })} placeholder="npm run lint" className={inputCls} />
+            </div>
+          </div>
+        </div>
+
+        {/* Git config */}
+        <div>
+          <h3 className="text-[14px] font-semibold text-slate-700 mb-3">Git</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Default Branch</label>
+              <input value={dec.gitConfig.defaultBranch} onChange={(e) => setDec({ ...dec, gitConfig: { ...dec.gitConfig, defaultBranch: e.target.value } })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Repo Owner</label>
+              <input value={dec.gitConfig.repoOwner} onChange={(e) => setDec({ ...dec, gitConfig: { ...dec.gitConfig, repoOwner: e.target.value } })} placeholder="github-username" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Repo Name</label>
+              <input value={dec.gitConfig.repoName} onChange={(e) => setDec({ ...dec, gitConfig: { ...dec.gitConfig, repoName: e.target.value } })} placeholder="my-repo" className={inputCls} />
+            </div>
+          </div>
+        </div>
+
+        {/* Limits */}
+        <div>
+          <h3 className="text-[14px] font-semibold text-slate-700 mb-3">Limits</h3>
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Max Test Runs / Task</label>
+              <input type="number" value={dec.costLimits.maxTestRunsPerTask} onChange={(e) => setDec({ ...dec, costLimits: { ...dec.costLimits, maxTestRunsPerTask: Number(e.target.value) } })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Max Commands / Run</label>
+              <input type="number" value={dec.costLimits.maxCommandsPerRun} onChange={(e) => setDec({ ...dec, costLimits: { ...dec.costLimits, maxCommandsPerRun: Number(e.target.value) } })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Command Timeout (ms)</label>
+              <input type="number" value={dec.resourceLimits.commandTimeoutMs} onChange={(e) => setDec({ ...dec, resourceLimits: { ...dec.resourceLimits, commandTimeoutMs: Number(e.target.value) } })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Safe Mode</label>
+              <select value={dec.safeMode ? 'true' : 'false'} onChange={(e) => setDec({ ...dec, safeMode: e.target.value === 'true' })} className={inputCls}>
+                <option value="true">Enabled (read-only)</option>
+                <option value="false">Disabled (can write)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <button onClick={handleSave} disabled={saving || !dec.projectRoot || !dec.testCommand} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+          {saving ? 'Saving...' : 'Save Dev Context'}
+        </button>
+      </div>
+    </div>
   );
 }

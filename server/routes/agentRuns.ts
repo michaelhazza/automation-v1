@@ -21,7 +21,11 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
-    const { taskId, idempotencyKey } = req.body;
+    const { taskId, idempotencyKey, executionMode } = req.body as {
+      taskId?: string;
+      idempotencyKey?: string;
+      executionMode?: 'api' | 'claude-code';
+    };
 
     // Find the subaccount agent link
     const [saLink] = await db
@@ -50,10 +54,10 @@ router.post(
       subaccountAgentId: saLink.id,
       organisationId: req.orgId!,
       runType: 'manual',
-      executionMode: 'api',
+      executionMode: executionMode ?? 'api',
       taskId,
       idempotencyKey: effectiveIdempotencyKey,
-      triggerContext: { triggeredBy: req.user!.id, source: 'manual' },
+      triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
     });
 
     res.json(result);

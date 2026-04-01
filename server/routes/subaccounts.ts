@@ -177,6 +177,63 @@ router.delete(
   })
 );
 
+// ─── Dev Execution Context (DEC) ──────────────────────────────────────────────
+
+/**
+ * GET /api/subaccounts/:subaccountId/dev-context
+ * Return the Dev Execution Context configuration for this subaccount.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/dev-context',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const settings = (sa.settings ?? {}) as Record<string, unknown>;
+    res.json({ devContext: settings.devContext ?? null });
+  })
+);
+
+/**
+ * PUT /api/subaccounts/:subaccountId/dev-context
+ * Save the Dev Execution Context configuration.
+ */
+router.put(
+  '/api/subaccounts/:subaccountId/dev-context',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const { devContext } = req.body as { devContext: Record<string, unknown> };
+    const currentSettings = (sa.settings ?? {}) as Record<string, unknown>;
+    const newSettings = { ...currentSettings, devContext };
+
+    await db.update(subaccounts).set({
+      settings: newSettings,
+      updatedAt: new Date(),
+    }).where(eq(subaccounts.id, sa.id));
+
+    res.json({ devContext });
+  })
+);
+
+// ─── Claude Code availability ─────────────────────────────────────────────────
+
+import { claudeCodeRunner } from '../services/claudeCodeRunner.js';
+
+/**
+ * GET /api/subaccounts/:subaccountId/claude-code-status
+ * Check if Claude Code CLI is available on this machine.
+ */
+router.get(
+  '/api/subaccounts/:subaccountId/claude-code-status',
+  authenticate,
+  asyncHandler(async (_req, res) => {
+    const status = await claudeCodeRunner.isAvailable();
+    res.json(status);
+  })
+);
+
 // ─── Subaccount categories ────────────────────────────────────────────────────
 
 /**
