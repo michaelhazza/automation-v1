@@ -1,6 +1,6 @@
 # AI Agent Research — Development Spec
 
-**Version:** 1.0 (First 10% — HITL Wiring + Suspend/Resume)
+**Version:** 1.1 (Complete)
 **Date:** 2026-03-31
 **Branch:** claude/research-ai-agent-repos-2iK2b
 **Sources:** 10 repo deep-dives (HumanLayer, Windmill, Mastra, Activepieces, Composio, Langfuse, LangGraph, n8n, CrewAI, Mem0)
@@ -405,4 +405,386 @@ export const organisationSecrets = pgTable('organisation_secrets', {
 
 ---
 
-*Sections 3–10 to follow after review of this first 10%.*
+---
+
+## Section 3 — Policy Engine
+
+**Source repos:** LangGraph (three-tier model), CrewAI (`@human_feedback` emit/routing), n8n (per-tool config)
+**Gap closed:** Gate levels are currently hardcoded per action type in `actionRegistry.ts`. There is no runtime rules engine — nothing can make "auto-approve under $500 for manager role" decisions. Every review-gated action requires manual approval regardless of context.
+
+### What needs to exist
+
+A `PolicyEngine` that evaluates an ordered list of `PolicyRule` rows (first-match, ascending priority) and returns a `PolicyDecision`. The engine lives between `skillExecutor.ts` receiving a tool call and `executeWithGate` deciding which path to take.
+
+### DB table: `policy_rules`
+
+```sql
+CREATE TABLE policy_rules (
+    id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    organisation_id     TEXT        NOT NULL,
+    subaccount_id       TEXT,                   -- NULL = applies to all subaccounts in org
+    priority            INTEGER     NOT NULL,   -- lower = evaluated first
+    tool_slug           TEXT        NOT NULL,   -- exact slug or '*' wildcard
+    decision            TEXT        NOT NULL    CHECK (decision IN ('auto', 'review', 'block')),
+
+    -- Conditions (all nullable — NULL = match any)
+    cond_user_role      TEXT,                   -- 'org_admin' | 'manager' | 'user' | 'client_user'
+    cond_amount_gt      NUMERIC,                -- match if action amount > this value
+    cond_amount_lte     NUMERIC,                -- match if action amount <= this value
+    cond_environment    TEXT,                   -- 'production' | 'staging'
+
+    -- Reviewer UX config
+    allow_ignore        BOOLEAN     NOT NULL DEFAULT false,
+    allow_respond       BOOLEAN     NOT NULL DEFAULT true,
+    allow_edit          BOOLEAN     NOT NULL DEFAULT false,
+    allow_accept        BOOLEAN     NOT NULL DEFAULT true,
+    allowed_decisions   TEXT[],                 -- ['approve','reject'] or ['approve','edit','reject']
+    description_template TEXT,                  -- markdown, supports {{tool_slug}}, {{args}}
+
+    -- Timeout
+    timeout_seconds     INTEGER     NOT NULL DEFAULT 86400,  -- 24 hours default
+    timeout_policy      TEXT        NOT NULL DEFAULT 'auto_reject'
+                                    CHECK (timeout_policy IN ('auto_reject', 'auto_approve', 'escalate')),
+
+    -- Audit
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by          TEXT,
+
+    CONSTRAINT evaluation_mode CHECK (true)  -- first_match is the only mode; enforced by code
+);
+
+CREATE INDEX idx_policy_rules_org ON policy_rules (organisation_id, priority ASC);
+CREATE INDEX idx_policy_rules_subaccount ON policy_rules (organisation_id, subaccount_id, priority ASC)
+    WHERE subaccount_id IS NOT NULL;
+
+-- The fallback rule for every org (inserted on org creation)
+-- priority=9999, tool_slug='*', decision='review'
+```
+
+### Drizzle schema
+
+```typescript
+// server/db/schema/policyRules.ts
+export const policyRules = pgTable('policy_rules', {
+  id:                 text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+  organisationId:     text('organisation_id').notNull(),
+  subaccountId:       text('subaccount_id'),
+  priority:           integer('priority').notNull(),
+  toolSlug:           text('tool_slug').notNull(),
+  decision:           text('decision').notNull(),
+
+  condUserRole:       text('cond_user_role'),
+  condAmountGt:       numeric('cond_amount_gt'),
+  condAmountLte:      numeric('cond_amount_lte'),
+  condEnvironment:    text('cond_environment'),
+
+  allowIgnore:        boolean('allow_ignore').notNull().default(false),
+  allowRespond:       boolean('allow_respond').notNull().default(true),
+  allowEdit:          boolean('allow_edit').notNull().default(false),
+  allowAccept:        boolean('allow_accept').notNull().default(true),
+  allowedDecisions:   text('allowed_decisions').array(),
+  descriptionTemplate: text('description_template'),
+
+  timeoutSeconds:     integer('timeout_seconds').notNull().default(86400),
+  timeoutPolicy:      text('timeout_policy').notNull().default('auto_reject'),
+
+  createdAt:          timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:          timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdBy:          text('created_by'),
+});
+```
+
+### Policy engine service
+
+```typescript
+// server/services/policyEngineService.ts
+
+export async function evaluatePolicy(
+  toolSlug: string,
+  context: PolicyContext
+): Promise<PolicyDecision> {
+  // Load rules for this org, ordered by priority ASC
+  // Rules are cached in-process with a 60s TTL — policy changes take effect within 1 minute
+  const rules = await getRulesForOrg(context.organisationId);
+
+  for (const rule of rules) {
+    if (matchesRule(rule, toolSlug, context)) {
+      return buildDecision(rule, toolSlug, context);
+    }
+  }
+
+  // Should never reach here if fallback rule exists for every org
+  // but safe default just in case
+  return { decision: 'review', matchedRule: SYSTEM_FALLBACK };
+}
+
+function matchesRule(rule: PolicyRule, toolSlug: string, ctx: PolicyContext): boolean {
+  // Tool slug: exact match or wildcard
+  if (rule.toolSlug !== '*' && rule.toolSlug !== toolSlug) return false;
+
+  // Subaccount: if rule scoped to subaccount, must match
+  if (rule.subaccountId && rule.subaccountId !== ctx.subaccountId) return false;
+
+  // User role
+  if (rule.condUserRole && rule.condUserRole !== ctx.userRole) return false;
+
+  // Amount conditions (for financial tools like send_payment, update_record with value)
+  if (rule.condAmountGt !== null && ctx.amountUsd !== undefined) {
+    if (ctx.amountUsd <= rule.condAmountGt) return false;
+  }
+  if (rule.condAmountLte !== null && ctx.amountUsd !== undefined) {
+    if (ctx.amountUsd > rule.condAmountLte) return false;
+  }
+
+  // Environment
+  if (rule.condEnvironment && rule.condEnvironment !== ctx.environment) return false;
+
+  return true;
+}
+```
+
+### Wire into `executeWithGate`
+
+Replace the current `actionRegistry.getGateLevel(toolName)` call with the policy engine:
+
+```typescript
+// In skillExecutor.ts executeWithGate — replace static gate lookup
+const policyDecision = await policyEngineService.evaluatePolicy(toolName, {
+  organisationId: context.organisationId,
+  subaccountId: context.subaccountId,
+  userRole: context.userRole,
+  amountUsd: extractAmount(input),   // optional — only for tools with financial values
+  environment: process.env.NODE_ENV === 'production' ? 'production' : 'staging',
+});
+
+const gateLevel = policyDecision.decision;
+// ... rest of executeWithGate unchanged, but pass policyDecision to createCheckpoint
+```
+
+### Bootstrap: seed fallback rule on org creation
+
+```typescript
+// In organisationService.ts, after creating org:
+await db.insert(policyRules).values({
+  organisationId: newOrg.id,
+  priority: 9999,
+  toolSlug: '*',
+  decision: 'review',
+  timeoutSeconds: 86400,
+  timeoutPolicy: 'auto_reject',
+  createdBy: 'system',
+});
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/db/schema/policyRules.ts` | New file — Drizzle schema |
+| `server/db/schema/index.ts` | Export `policyRules` |
+| `server/services/policyEngineService.ts` | New file — evaluation logic + 60s cache |
+| `server/services/skillExecutor.ts` | Replace `actionRegistry.getGateLevel()` with `policyEngineService.evaluatePolicy()` |
+| `server/services/organisationService.ts` | Seed fallback rule on org creation |
+| `server/routes/policyRules.ts` | New CRUD routes (org admin only) |
+| `server/migrations/XXXX_policy_rules.sql` | Raw SQL migration |
+
+---
+
+## Section 4 — Review Gate UX
+
+**Source repos:** n8n (denial-as-tool-output, interrupt_config), CrewAI (`HumanFeedbackResult` audit schema, outcome-collapse classifier), LangGraph (Agent Inbox data model)
+**Gap closed:** The review queue UI (`ReviewQueuePage.tsx`) exists but: (1) reviewer options are binary approve/reject with no context about what options are available, (2) denial has no required comment field enforced at the API level, (3) there is no audit record of what the human decided and why, (4) the agent receives no structured feedback message on denial — it just times out or errors.
+
+### 1. Enforce comment on rejection (API level)
+
+```typescript
+// server/routes/reviews.ts (or existing approval route)
+
+app.post('/actions/:actionId/decide', async (req, res) => {
+  const { decision, comment, editedArgs } = req.body;
+
+  // Rejection requires a comment — no silent rejections (HumanLayer pattern)
+  if (decision === 'rejected' && (!comment || comment.trim().length === 0)) {
+    return res.status(400).json({
+      error: 'A comment is required when rejecting an action.',
+      code: 'COMMENT_REQUIRED',
+    });
+  }
+
+  // Double-approve guard
+  const action = await actionService.getById(req.params.actionId);
+  if (action.status !== 'pending_approval') {
+    return res.status(409).json({
+      error: `Action is already in state: ${action.status}`,
+      code: 'ALREADY_DECIDED',
+    });
+  }
+
+  // Validate resume integrity before marking approved
+  if (decision === 'approved') {
+    await actionService.validateResumeIntegrity(req.params.actionId, {
+      approvedBy: req.user.id,
+      editedArgs,   // if reviewer edited the args (allow_edit = true on rule)
+    });
+  }
+
+  // Write audit record
+  await reviewAuditService.record({
+    actionId: req.params.actionId,
+    decidedBy: req.user.id,
+    decision,
+    comment,
+    editedArgs,
+    subaccountId: action.subaccountId,
+    organisationId: action.organisationId,
+  });
+
+  // Resolve the pending promise in reviewService
+  reviewService.resolveDecision(req.params.actionId, { status: decision, comment, editedArgs });
+
+  return res.json({ ok: true });
+});
+```
+
+### 2. `review_audit_records` table — HumanFeedbackResult schema
+
+Modelled after CrewAI's `HumanFeedbackResult`. Append-only — never updated after insert.
+
+```sql
+CREATE TABLE review_audit_records (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_id       UUID        NOT NULL REFERENCES actions(id),
+    organisation_id TEXT        NOT NULL,
+    subaccount_id   TEXT        NOT NULL,
+    agent_run_id    TEXT,
+    tool_slug       TEXT        NOT NULL,
+
+    -- What the agent proposed (snapshot at time of review)
+    agent_output    JSONB       NOT NULL,   -- the args the agent passed to the tool
+
+    -- What the human decided
+    decided_by      TEXT        NOT NULL,
+    decision        TEXT        NOT NULL    CHECK (decision IN ('approved', 'rejected', 'edited', 'timed_out')),
+    raw_feedback    TEXT,                   -- verbatim comment from reviewer
+    collapsed_outcome TEXT,                 -- LLM-collapsed: 'approved'|'rejected'|'needs_revision'
+    edited_args     JSONB,                  -- populated only when decision = 'edited'
+
+    -- Timing
+    proposed_at     TIMESTAMPTZ NOT NULL,
+    decided_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    wait_duration_ms INTEGER,               -- decided_at - proposed_at in ms
+
+    CONSTRAINT feedback_required CHECK (
+      decision != 'rejected' OR (raw_feedback IS NOT NULL AND length(raw_feedback) > 0)
+    )
+);
+
+CREATE INDEX idx_review_audit_org ON review_audit_records (organisation_id, decided_at DESC);
+CREATE INDEX idx_review_audit_subaccount ON review_audit_records (subaccount_id, decided_at DESC);
+CREATE INDEX idx_review_audit_action ON review_audit_records (action_id);
+```
+
+### 3. Outcome-collapse classifier (CrewAI `emit` pattern)
+
+When a reviewer types free-text feedback (e.g. "looks good but change the subject line"), the system uses a small LLM call to collapse it to a typed outcome. This makes routing deterministic.
+
+```typescript
+// server/services/reviewAuditService.ts
+
+const OUTCOME_OPTIONS = ['approved', 'rejected', 'needs_revision'] as const;
+type CollapsedOutcome = typeof OUTCOME_OPTIONS[number];
+
+async function collapseToOutcome(
+  rawFeedback: string,
+  decision: string,
+): Promise<CollapsedOutcome> {
+  // Short-circuit: empty feedback or binary decision
+  if (!rawFeedback || rawFeedback.trim().length === 0) {
+    return decision === 'approved' ? 'approved' : 'rejected';
+  }
+
+  const response = await llmRouter.routeCall({
+    model: 'claude-haiku-4-5-20251001',  // cheapest model, simple classification
+    messages: [{
+      role: 'user',
+      content: `Classify this reviewer feedback into exactly one of: approved, rejected, needs_revision.
+
+Feedback: "${rawFeedback}"
+Initial decision: ${decision}
+
+Rules:
+- "approved" = reviewer is satisfied, proceed
+- "rejected" = reviewer wants to stop this action entirely
+- "needs_revision" = reviewer wants changes before proceeding
+
+Return only the single word.`,
+    }],
+    maxTokens: 10,
+  });
+
+  const output = response.content[0].text.trim().toLowerCase() as CollapsedOutcome;
+  return OUTCOME_OPTIONS.includes(output) ? output : (decision === 'approved' ? 'approved' : 'rejected');
+}
+```
+
+### 4. Denial message injected as tool output (n8n pattern)
+
+The agent loop should receive a structured denial message as the tool's return value — not an exception, not a timeout. The loop stays alive and the model can reason about what to do next.
+
+```typescript
+// server/services/skillExecutor.ts
+
+function buildDenialMessage(toolSlug: string, collapsedOutcome: CollapsedOutcome, comment?: string): string {
+  if (collapsedOutcome === 'needs_revision' && comment) {
+    return `Your request to use ${toolSlug} was reviewed. The reviewer requests changes before proceeding: "${comment}". Please revise your approach and try again if appropriate.`;
+  }
+  if (comment) {
+    return `Your request to use ${toolSlug} was declined. Reviewer feedback: "${comment}". The tool remains available if a different approach would be appropriate.`;
+  }
+  return `Your request to use ${toolSlug} was declined by a reviewer. Stop and wait for further instructions from the user.`;
+}
+```
+
+### 5. Review queue UI — `interrupt_config` rendering
+
+The `ReviewQueuePage.tsx` should surface the reviewer options from the matched `PolicyRule.interrupt_config`. This tells the UI which buttons to render.
+
+```typescript
+// Frontend: ReviewQueueItem component
+
+interface ReviewQueueItemProps {
+  action: {
+    id: string;
+    toolSlug: string;
+    actionRequest: { action: string; args: Record<string, unknown> };
+    interruptConfig: {
+      allow_accept: boolean;
+      allow_respond: boolean;   // show free-text field
+      allow_edit: boolean;      // show args editor
+      allow_ignore: boolean;
+    };
+    descriptionTemplate?: string;  // rendered markdown shown to reviewer
+    proposedAt: string;
+    timeoutAt: string;
+  };
+}
+
+// Rendered buttons based on interruptConfig:
+// allow_accept  → "Approve" button
+// allow_respond → "Decline with feedback" (shows text input)
+// allow_edit    → "Edit & Approve" (shows args editor, submits edited args)
+// allow_ignore  → "Dismiss" (no resume, action times out naturally)
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/db/schema/reviewAuditRecords.ts` | New file — audit table |
+| `server/db/schema/index.ts` | Export `reviewAuditRecords` |
+| `server/services/reviewAuditService.ts` | New file — `record()`, `collapseToOutcome()` |
+| `server/routes/reviews.ts` | Add comment enforcement, double-approve guard, audit write, `resolveDecision` call |
+| `server/services/skillExecutor.ts` | Add `buildDenialMessage()`, pass `collapsedOutcome` to agent loop |
+| `client/src/pages/ReviewQueuePage.tsx` | Render `interruptConfig` buttons, free-text field, args editor |
+| `server/migrations/XXXX_review_audit.sql` | Raw SQL migration |
