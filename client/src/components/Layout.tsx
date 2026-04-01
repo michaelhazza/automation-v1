@@ -55,6 +55,7 @@ const Icons = {
   team:        () => <Ico><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Ico>,
   orgs:        () => <Ico><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Ico>,
   skills:      () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></Ico>,
+  connections: () => <Ico><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><circle cx="18" cy="6" r="4"/><path d="M18 4v4"/><path d="M16 6h4"/></Ico>,
   diagnostic:  () => <Ico><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></Ico>,
   boardTpl:    () => <Ico><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Ico>,
   logout:      () => <Ico><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Ico>,
@@ -622,6 +623,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
               <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+              <NavItem to={`/admin/subaccounts/${activeClientId}/connections`} icon={<Icons.connections />} label="Connections" />
               {hasOrgPerm('org.subaccounts.edit') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
               )}
