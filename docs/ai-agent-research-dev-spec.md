@@ -1740,3 +1740,439 @@ These deltas can be applied in `processOutputStep` on the `retrieve_memory` tool
 | `server/jobs/index.ts` | Register `memoryDecayJob` |
 | `server/schema/agentMemory.ts` | Extend Drizzle schema with new columns |
 
+---
+
+## Section 9 — MCP Scaffolding (Mastra patterns)
+
+**Source:** Mastra codebase — `McpMetadata`, `ToolAnnotations`, MCP server registration
+**Contracts touched:** Contract 2 (Tool interface — `mcp` field already defined)
+
+### Problem
+
+The `Tool` interface in Contract 2 already includes an `mcp` field with `annotations` and `server_name`. This section defines how to populate that field on existing tools, and how to expose the tool registry as an MCP server so that external MCP clients (Claude Desktop, Cursor, other agents) can discover and call our tools without going through the REST API.
+
+### 9.1 — Annotating existing tools
+
+The `mcp.annotations` block maps directly to the MCP specification's `ToolAnnotations`. Add it to every tool definition now — zero runtime cost, enables MCP registration later.
+
+```typescript
+// Example: annotating the send_email tool
+export const sendEmailTool: Tool = {
+  slug: 'send_email',
+  version: '1.0.0',
+  description: 'Send an email via the connected Gmail account.',
+  input_schema: { /* ... */ },
+  gate_level: 'review',
+  idempotency_key_fn: stableHash,
+  execution_handler: sendEmailHandler,
+
+  // MCP annotations — set these now
+  mcp: {
+    annotations: {
+      readOnlyHint: false,      // modifies external state
+      destructiveHint: false,   // reversible (email can be recalled in some cases)
+      idempotentHint: false,    // same args = second email sent
+      openWorldHint: true,      // reaches external system (Gmail API)
+    },
+  },
+};
+```
+
+Standard annotation rules by tool category:
+
+| Category | readOnly | destructive | idempotent | openWorld |
+|---|---|---|---|---|
+| Read/search (list emails, search CRM) | true | false | true | true |
+| Write with external side effect (send email, create issue) | false | false | false | true |
+| Destructive write (delete record, archive contact) | false | true | false | true |
+| Pure internal compute (memory read, summarise) | true | false | true | false |
+
+---
+
+### 9.2 — MCP server registration interface
+
+```typescript
+// server/mcp/mcpServer.ts
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+
+/**
+ * Exposes the tool registry as an MCP server.
+ * Each tool's execution_handler is wrapped in the standard HITL gate.
+ * Auth is enforced via an API key that maps to a subaccountId.
+ */
+export async function startMcpServer(subaccountId: string) {
+  const server = new McpServer({
+    name: 'automation-os',
+    version: '1.0.0',
+  });
+
+  const tools = await toolRegistry.getForSubaccount(subaccountId);
+
+  for (const tool of tools) {
+    server.tool(
+      tool.slug,
+      tool.description,
+      tool.input_schema.properties as Record<string, unknown>,
+      async (input: unknown) => {
+        // All MCP calls go through the normal HITL dispatch
+        const result = await skillExecutorService.execute(tool.slug, input, {
+          subaccountId,
+          organisationId: await orgService.getOrgForSubaccount(subaccountId),
+          agentRunId: `mcp-${Date.now()}`,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result.data ?? result.error),
+            },
+          ],
+          isError: result.status === 'failed',
+        };
+      },
+    );
+  }
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+```
+
+---
+
+### 9.3 — `search_tools` and `load_tool` as MCP resources
+
+In addition to exposing tools directly, register a `list_tools` MCP resource that returns the BM25-searchable tool catalogue. External clients can fetch this to understand what capabilities are available before calling any tool.
+
+```typescript
+// server/mcp/mcpServer.ts (continued)
+
+server.resource(
+  'tool-catalogue',
+  'automation-os://tools',
+  async () => {
+    const tools = await toolRegistry.getForSubaccount(subaccountId);
+    return {
+      contents: [
+        {
+          uri: 'automation-os://tools',
+          mimeType: 'application/json',
+          text: JSON.stringify(
+            tools.map((t) => ({
+              slug: t.slug,
+              description: t.description,
+              gate_level: t.gate_level,
+              annotations: t.mcp?.annotations ?? {},
+            })),
+          ),
+        },
+      ],
+    };
+  },
+);
+```
+
+---
+
+### 9.4 — HTTP transport for remote MCP access
+
+The stdio transport above is for local clients (Claude Desktop, Cursor). For remote access (agent-to-agent, webhooks), use Streamable HTTP transport:
+
+```typescript
+// server/routes/mcp.ts
+
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
+router.all('/mcp', authenticate, async (req, res) => {
+  const subaccountId = req.auth.subaccountId;
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => uuidv4() });
+  const mcpInstance = await buildMcpServer(subaccountId); // same server, different transport
+  await mcpInstance.connect(transport);
+  await transport.handleRequest(req, res);
+});
+```
+
+This is a Phase 1C addition. Prioritise the annotation backfill (9.1) now — it costs nothing and enables everything else.
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/types/tool.ts` | `mcp` field already in Contract 2 — no change needed |
+| All tool definition files | Add `mcp.annotations` block to each tool |
+| `server/mcp/mcpServer.ts` | New file — MCP server + tool registration + resource endpoint |
+| `server/routes/mcp.ts` | New file — HTTP transport route |
+| `server/index.ts` | Mount `/mcp` route |
+| `package.json` | Add `@modelcontextprotocol/sdk` |
+
+---
+
+## Section 10 — Phase 2 Orchestrator (CrewAI + Mastra reference)
+
+**Source:** CrewAI (Flows + Crews), Mastra (WorkflowRunState, Agent Inbox), LangGraph (checkpoint replay)
+**Contracts touched:** Contract 1 (HITL flow), Contract 3 (PolicyEngine), Contract 4 (AgentRunFixture)
+
+### Problem
+
+All current agent runs are single-agent, single-thread. There is no mechanism to compose multiple specialised agents into a workflow where one agent's output feeds the next. There is also no UI for humans to review multi-step workflow state, only individual action approvals.
+
+Phase 2 introduces two primitives: **Flows** (deterministic pipelines) and **Crews** (autonomous multi-agent groups). These are built on the contracts already defined — they are not a rewrite.
+
+---
+
+### 10.1 — Flow: deterministic pipeline
+
+A Flow is a sequence of steps, each of which is an agent run. The output of step N is the input of step N+1. Branching is explicit (if/else conditions on step outputs). Flows have their own checkpoint state so any step can be resumed after a HITL pause.
+
+```typescript
+// server/types/workflow.ts
+
+export interface WorkflowStep {
+  step_id: string;
+  agent_slug: string;
+  input_template: Record<string, unknown>; // {{previous.output.field}} interpolation
+  gate?: 'auto' | 'review';               // gate on entering this step
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  steps: WorkflowStep[];
+  version: string;
+}
+
+export interface WorkflowRunState {
+  id: string;                              // FK → workflow_runs.id
+  workflow_id: string;
+  subaccount_id: string;
+  organisation_id: string;
+  current_step_index: number;
+  status: 'running' | 'paused' | 'completed' | 'failed';
+  step_outputs: Record<string, unknown>;   // keyed by step_id
+  checkpoint: {                            // Drizzle JSONB — deterministic replay from any step
+    step_id: string;
+    input_snapshot: unknown;
+    agent_run_id: string;
+    created_at: Date;
+  } | null;
+  created_at: Date;
+  updated_at: Date;
+}
+```
+
+---
+
+### 10.2 — Crew: autonomous multi-agent group
+
+A Crew is a set of agents that collaborate on a task. Unlike a Flow, step order is determined by a Manager agent at runtime, not hardcoded. The Manager decomposes the goal into subtasks and assigns them to Worker agents.
+
+The Manager agent has access to a special `assign_task` tool:
+
+```typescript
+export const assignTaskTool: Tool = {
+  slug: 'assign_task',
+  version: '1.0.0',
+  description: 'Assign a subtask to a worker agent and wait for its result.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      worker_agent_slug: { type: 'string' },
+      task_description: { type: 'string' },
+      context: { type: 'object' },
+    },
+    required: ['worker_agent_slug', 'task_description'],
+  },
+  gate_level: 'auto',
+  idempotency_key_fn: stableHash,
+  execution_handler: async (ctx) => {
+    const { worker_agent_slug, task_description, context } = ctx.input as any;
+    const workerRun = await agentRunService.startChildRun({
+      agentSlug: worker_agent_slug,
+      parentRunId: ctx.agentRunId,
+      subaccountId: ctx.subaccountId,
+      organisationId: ctx.organisationId,
+      initialMessage: task_description,
+      memoryContext: context,
+    });
+    const result = await agentRunService.awaitCompletion(workerRun.id);
+    return { status: 'success', data: result.output };
+  },
+  mcp: { annotations: { readOnlyHint: false, openWorldHint: true } },
+};
+```
+
+---
+
+### 10.3 — Agent Inbox UI
+
+The Agent Inbox is the human interface for all pending multi-step approvals. It shows:
+
+- All `pending_approval` actions across all active workflow runs, grouped by workflow
+- The current workflow step, its inputs, and the proposed action
+- Approve / Reject / Edit controls (rendered from `interrupt_config`)
+
+This extends the existing `ReviewQueuePage` — it is not a new page. The difference is that items now link to a workflow run context panel showing the full step history.
+
+```typescript
+// server/routes/agentInbox.ts
+
+router.get('/agent-inbox', authenticate, async (req, res) => {
+  const { subaccountId, orgId } = req.auth;
+
+  const pendingActions = await db.query.actions.findMany({
+    where: and(
+      eq(actions.subaccountId, subaccountId),
+      eq(actions.status, 'pending_approval'),
+    ),
+    with: {
+      checkpoint: true,
+      workflowRun: {
+        with: { stepOutputs: true },
+      },
+    },
+    orderBy: asc(actions.createdAt),
+  });
+
+  return res.json({ items: pendingActions });
+});
+```
+
+---
+
+### 10.4 — HumanFeedbackResult audit schema
+
+Every human decision on a workflow step is stored as an immutable audit record. This extends Contract 3's `ActionCheckpoint.human_response` with workflow-level context.
+
+```typescript
+// Extends human_response on ActionCheckpoint — no schema change needed
+// The workflow_run_id and step_id are looked up via action → workflow_run join
+
+interface HumanFeedbackAuditRow {
+  id: string;
+  action_id: string;                         // FK → actions.id
+  workflow_run_id?: string;                  // null for standalone agent runs
+  step_id?: string;                          // which workflow step triggered this
+  decision: 'approve' | 'reject' | 'edit';
+  comment?: string;
+  edited_args?: Record<string, unknown>;     // present if decision = 'edit'
+  decided_by: string;                        // user ID
+  decided_at: Date;
+  subaccount_id: string;
+  organisation_id: string;
+}
+```
+
+This table is already effectively captured by the `review_audit_records` table defined in Section 4. Add `workflow_run_id` and `step_id` columns to that table during Phase 2 migrations.
+
+---
+
+### 10.5 — Outcome-collapse classifier (Phase 2 edge case)
+
+When a human edits the args of an action before approval, the LLM that originally proposed the action needs to learn from the correction. The outcome-collapse classifier is a small LLM call that compares the original proposal to the edited version and synthesises a lesson for the agent's working memory.
+
+```typescript
+// server/services/outcomeLearningService.ts
+
+const COLLAPSE_SYSTEM = `Compare an agent's original action proposal to the human-edited version.
+Output a concise lesson (1-2 sentences) for the agent that explains why the human changed it.
+Output JSON: { "lesson": "..." }`;
+
+export async function collapseOutcome(
+  originalArgs: Record<string, unknown>,
+  editedArgs: Record<string, unknown>,
+  toolSlug: string,
+  subaccountId: string,
+  agentRunId: string,
+): Promise<void> {
+  if (JSON.stringify(originalArgs) === JSON.stringify(editedArgs)) return;
+
+  const response = await llmRouter.complete({
+    system: COLLAPSE_SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({ tool: toolSlug, original: originalArgs, edited: editedArgs }),
+      },
+    ],
+    max_tokens: 256,
+  });
+
+  const { lesson } = JSON.parse(response.content);
+  await writeMemory(subaccountId, agentRunId, [lesson], { taskSlug: toolSlug });
+}
+```
+
+Call `collapseOutcome` in the approval handler when `human_response.type === 'edit'`.
+
+---
+
+### Phase 2 build sequence
+
+This section is a planning reference, not immediate implementation. The correct build order within Phase 2:
+
+1. `WorkflowDefinition` + `WorkflowRunState` DB tables + Drizzle schema
+2. `WorkflowExecutorService` — step sequencing, checkpoint writes
+3. `assign_task` tool — child run spawning
+4. Agent Inbox UI extensions on `ReviewQueuePage`
+5. `HumanFeedbackAuditRow` column additions on `review_audit_records`
+6. `outcomeLearningService` + `collapseOutcome` integration
+7. Manager agent (Crew mode) — builds on all of the above
+
+Do not ship Manager/Crew before Flows are stable. Flows can be tested deterministically (Contract 4 fixtures); Crew mode cannot.
+
+### Files to touch (Phase 2)
+
+| File | Change |
+|---|---|
+| `server/types/workflow.ts` | New file — `WorkflowDefinition`, `WorkflowRunState` |
+| `server/services/workflowExecutorService.ts` | New file — step sequencing, checkpoint writes |
+| `server/tools/internal/assignTask.ts` | New file — `assign_task` tool |
+| `server/routes/agentInbox.ts` | New file — inbox query endpoint |
+| `client/pages/ReviewQueuePage.tsx` | Extend with workflow run context panel |
+| `server/schema/workflowRuns.ts` | New Drizzle schema |
+| `db/migrations/YYYYMMDD_workflow_runs.sql` | New tables: `workflow_runs`, `workflow_step_outputs` |
+| `db/migrations/YYYYMMDD_feedback_audit_ext.sql` | Add `workflow_run_id`, `step_id` to `review_audit_records` |
+| `server/services/outcomeLearningService.ts` | New file — outcome-collapse classifier |
+
+---
+
+## Implementation Sequence
+
+The sections above define what to build. This is the order to build it.
+
+### Phase 1A — Foundation (ship together)
+
+Must all land in one PR or the system is partially broken between deploys.
+
+1. **Section 2** — Suspend/Resume DB migrations (actions table columns, `action_resume_events`, `organisation_secrets`)
+2. **Section 3** — Policy Engine (`policy_rules` table, `policyEngineService`, fallback seed)
+3. **Section 1** — HITL Wiring (`executeWithGate`, `awaitDecision`/`resolveDecision`, `buildDenialMessage`)
+
+### Phase 1B — Visibility and Compliance
+
+Each can land independently after Phase 1A.
+
+4. **Section 4** — Review Gate UX (`review_audit_records`, comment enforcement, `interrupt_config` rendering)
+5. **Section 5** — OAuth Integration Layer (provider configs, auth flow, `integrationConnectionService`)
+6. **Section 6** — Observability (`instrumentation.ts`, agent/tool/LLM spans, dual-write)
+
+### Phase 1C — Quality and Resilience
+
+Each can land independently after 1A and 1B.
+
+7. **Section 7** — Processor Guardrails (pipeline hooks, `TripWire`, budget processor)
+8. **Section 8** — Memory Improvements (dedup loop, combined scoring, task scoping, pruning)
+9. **Section 9** — MCP Scaffolding (annotation backfill first, then server + HTTP transport)
+
+### Phase 2 — Orchestration
+
+10. **Section 10** — Phase 2 Orchestrator (Flows → Crews → Manager agent → Agent Inbox)
+
+---
+
+*End of specification. Version 1.1 — complete.*
+
+
