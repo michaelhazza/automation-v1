@@ -1,0 +1,2178 @@
+# AI Agent Research — Development Spec
+
+**Version:** 1.1 (Complete)
+**Date:** 2026-03-31
+**Branch:** claude/research-ai-agent-repos-2iK2b
+**Sources:** 10 repo deep-dives (HumanLayer, Windmill, Mastra, Activepieces, Composio, Langfuse, LangGraph, n8n, CrewAI, Mem0)
+**Contracts:** See `docs/execution-contracts.md` — all types referenced here are defined there.
+
+---
+
+## Document Structure
+
+This spec is written in implementation order. Each section maps to a discrete body of work that can be reviewed, planned into a sprint, and shipped independently.
+
+| Section | Tier | Status in this doc |
+|---|---|---|
+| 1. HITL Wiring | Tier 1 — Immediate | ✅ Written |
+| 2. Suspend/Resume DB Schema | Tier 1 — Immediate | ✅ Written |
+| 3. Policy Engine | Tier 1 — Immediate | 🔜 Next |
+| 4. Review Gate UX | Tier 1 — Immediate | 🔜 Next |
+| 5. OAuth Integrations | Tier 2 | 🔜 Next |
+| 6. Observability | Tier 2 | 🔜 Next |
+| 7. Processor Guardrails | Tier 2 | 🔜 Next |
+| 8. Memory Improvements | Tier 3 | 🔜 Later |
+| 9. MCP Scaffolding | Tier 4 | 🔜 Later |
+| 10. Phase 2: Orchestrator | Tier 5 | 🔜 Phase 2 |
+
+---
+
+## Section 1 — HITL Wiring
+
+**Source repos:** HumanLayer, LangGraph, n8n
+**Gap closed:** `skillExecutor.ts` currently has direct execution paths that bypass the action gate for some skills. The gate (auto/review/block) is defined in `actionRegistry.ts` but not consistently enforced before dispatch.
+
+### The core insight from HumanLayer
+
+HumanLayer's architecture evolved away from per-tool decorators to a session-boundary intercept — every tool call hits the gate before execution, enforced structurally rather than per-case. Their key lesson: **the gate must be a middleware wrapper above the dispatch, not a check inside each case**.
+
+From n8n: the LLM never sees the approval step. A gated tool call that requires review simply returns a pending observation; on approval, a second request executes the real tool. Denial injects a message as the tool result — the agent loop stays alive and the model handles it.
+
+### Current state
+
+```
+agentExecutionService.ts
+  └── skillExecutor.execute(toolName, input)
+        └── switch(toolName):
+              case 'send_email': sendEmail(params)        ← direct, bypasses gate
+              case 'create_task': proposeReviewGated(...)  ← gated ✓
+              case 'web_search': webSearch(params)         ← direct, bypasses gate
+```
+
+The inconsistency is the bug. Some cases call `executeWithActionAudit()` or `proposeReviewGatedAction()`, others call the skill function directly.
+
+### Target state
+
+```
+agentExecutionService.ts
+  └── skillExecutor.execute(toolName, input, context)
+        └── gateMiddleware(toolName, input, context)      ← single enforcement point
+              ├── auto   → createAuditRecord() → dispatch()
+              ├── review → createCheckpoint() → awaitApproval() → dispatch()
+              └── block  → return refusal (never dispatches)
+```
+
+### Implementation
+
+**File: `server/services/skillExecutor.ts`**
+
+Replace the current switch statement dispatch with a gated wrapper. The switch still exists for routing, but no case executes directly — all flow through `executeWithGate`.
+
+```typescript
+// NEW: top-level execute function — replaces current switch entry point
+export async function execute(
+  toolName: string,
+  input: unknown,
+  context: SkillExecutorContext
+): Promise<ToolResult> {
+  // 1. Look up gate level from registry
+  const gateLevel = actionRegistry.getGateLevel(toolName);
+
+  // 2. Enforce gate — this is the single interception point
+  return executeWithGate(toolName, input, context, gateLevel);
+}
+
+async function executeWithGate(
+  toolName: string,
+  input: unknown,
+  context: SkillExecutorContext,
+  gateLevel: 'auto' | 'review' | 'block'
+): Promise<ToolResult> {
+  const idempotencyKey = stableHash(`${context.agentRunId}:${toolName}:${JSON.stringify(input)}`);
+
+  // BLOCK — never executes, return immediately
+  if (gateLevel === 'block') {
+    return {
+      success: false,
+      output: `This action (${toolName}) is not permitted in this workspace.`,
+      blocked: true,
+    };
+  }
+
+  // AUTO — create audit record, execute, close record
+  if (gateLevel === 'auto') {
+    const action = await actionService.createAndExecute({
+      toolName,
+      input,
+      subaccountId: context.subaccountId,
+      organisationId: context.organisationId,
+      agentRunId: context.agentRunId,
+      idempotencyKey,
+    });
+    return dispatch(toolName, input, context, action.id);
+  }
+
+  // REVIEW — create checkpoint, suspend, await approval, then execute
+  const action = await actionService.proposeForReview({
+    toolName,
+    input,
+    subaccountId: context.subaccountId,
+    organisationId: context.organisationId,
+    agentRunId: context.agentRunId,
+    idempotencyKey,
+    toolVersion: getToolVersion(toolName),
+    inputHash: stableHash(JSON.stringify(input)),
+  });
+
+  // Suspend until approved or rejected — no polling, event-driven
+  const decision = await reviewService.awaitDecision(action.id, {
+    timeoutMs: action.timeoutMs,
+    signal: context.abortSignal,
+  });
+
+  if (decision.status === 'rejected') {
+    // Inject denial as tool output (n8n pattern) — agent loop stays alive
+    return {
+      success: false,
+      output: buildDenialMessage(toolName, decision.comment),
+      rejected: true,
+    };
+  }
+
+  if (decision.status === 'timed_out') {
+    return {
+      success: false,
+      output: `Approval for ${toolName} timed out. The action was not executed.`,
+      timedOut: true,
+    };
+  }
+
+  // Approved — validate checkpoint integrity before executing
+  await actionService.validateResumeIntegrity(action.id, {
+    inputHash: stableHash(JSON.stringify(input)),
+    toolVersion: getToolVersion(toolName),
+  });
+
+  // Execute with approved context
+  return dispatch(toolName, input, context, action.id);
+}
+```
+
+**`reviewService.awaitDecision` — event-driven, no polling**
+
+```typescript
+// server/services/reviewService.ts
+
+// In-memory map: actionId → { resolve, reject } pending promise
+const pendingDecisions = new Map<string, {
+  resolve: (decision: ReviewDecision) => void;
+  reject: (err: Error) => void;
+}>();
+
+export async function awaitDecision(
+  actionId: string,
+  opts: { timeoutMs: number; signal?: AbortSignal }
+): Promise<ReviewDecision> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingDecisions.delete(actionId);
+      resolve({ status: 'timed_out' });
+    }, opts.timeoutMs);
+
+    opts.signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      pendingDecisions.delete(actionId);
+      reject(new Error('Agent run aborted while awaiting approval'));
+    });
+
+    pendingDecisions.set(actionId, {
+      resolve: (decision) => { clearTimeout(timer); resolve(decision); },
+      reject: (err) => { clearTimeout(timer); reject(err); },
+    });
+  });
+}
+
+// Called by the approval API route when a reviewer approves/rejects
+export function resolveDecision(actionId: string, decision: ReviewDecision): void {
+  const pending = pendingDecisions.get(actionId);
+  if (!pending) {
+    // Guard: double-approve — action already resolved
+    throw new AlreadyDecidedError(actionId);
+  }
+  pendingDecisions.delete(actionId);
+  pending.resolve(decision);
+}
+```
+
+**Denial message format (n8n pattern)**
+
+```typescript
+function buildDenialMessage(toolName: string, comment?: string): string {
+  if (comment) {
+    return `Your request to use ${toolName} was reviewed and declined. Feedback: "${comment}". The tool remains available if you'd like to try a different approach.`;
+  }
+  return `Your request to use ${toolName} was declined by a reviewer. STOP and wait for further instructions. The tool remains available if needed.`;
+}
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/services/skillExecutor.ts` | Add `executeWithGate` wrapper; all cases route through it |
+| `server/services/reviewService.ts` | Add `awaitDecision` / `resolveDecision` with `pendingDecisions` map |
+| `server/services/actionService.ts` | Add `validateResumeIntegrity`, `createAndExecute`, `proposeForReview` |
+| `server/routes/reviews.ts` (or existing approval route) | Call `reviewService.resolveDecision(actionId, decision)` on approval/rejection |
+| `server/config/actionRegistry.ts` | Ensure `getGateLevel(toolName)` exists and covers all 20+ skills |
+
+### Edge cases to handle
+
+| Case | Handling |
+|---|---|
+| Double-approve | `AlreadyDecidedError` thrown by `resolveDecision` — caught at route level, return 409 |
+| Agent run aborted mid-wait | `AbortSignal` rejects the promise cleanly |
+| `actionId` not found in map (server restart) | `resolveDecision` throws — approval route should check action status in DB first |
+| Approval arrives after timeout fired | `pendingDecisions.delete` already ran — `resolveDecision` throws `AlreadyDecidedError` |
+| Same skill called twice in one run | Separate `action` records, separate `actionId` keys — no collision |
+
+---
+
+## Section 2 — Suspend/Resume DB Schema
+
+**Source repos:** Windmill (primary), LangGraph (checkpoint types)
+**Gap closed:** Paused approval states currently have no zero-resource mechanism. A pg-boss job holds state during wait. This section adds the PostgreSQL-native suspend/resume schema so paused actions consume no worker resources.
+
+### The Windmill pattern (adapted)
+
+Windmill uses `suspend_count` (integer, decrements to 0 = ready) + `suspend_until` (timestamp) on the job row. Suspended jobs keep `running = true` so they're invisible to the normal job pull query. A separate pull query targets `suspend_until IS NOT NULL AND (suspend_count <= 0 OR suspend_until <= now())`.
+
+We adapt this for our `actions` table and add:
+1. An `action_resume_events` table (the approval record)
+2. An `organisation_secrets` table (per-org encryption keys for HMAC resume URLs)
+
+### Migration: extend `actions` table
+
+```sql
+-- Migration: add suspend/resume columns to actions
+ALTER TABLE actions
+  ADD COLUMN suspend_count    INTEGER     DEFAULT 0,
+  ADD COLUMN suspend_until    TIMESTAMPTZ,
+  ADD COLUMN wac_checkpoint   JSONB;      -- serialized approval state for resume
+
+-- Index for the suspended pull query
+CREATE INDEX idx_actions_suspended
+  ON actions (organisation_id, suspend_until)
+  WHERE suspend_until IS NOT NULL;
+```
+
+### New table: `action_resume_events`
+
+Stores the approval/rejection event. Decoupled from the action row for audit trail integrity (the action row's state changes; this table is append-only).
+
+```sql
+CREATE TABLE action_resume_events (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_id       UUID        NOT NULL REFERENCES actions(id) ON DELETE CASCADE,
+    resume_id       INTEGER     NOT NULL,   -- random nonce, part of HMAC URL
+    organisation_id TEXT        NOT NULL,
+    subaccount_id   TEXT        NOT NULL,
+    decided_by      TEXT,                   -- user ID of approver/rejector
+    decision        TEXT        NOT NULL,   -- 'approved' | 'rejected' | 'timed_out'
+    comment         TEXT,                   -- required when decision = 'rejected'
+    payload         JSONB       NOT NULL DEFAULT 'null'::jsonb,  -- reviewer-provided form data
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT payload_size CHECK (length(payload::text) < 10240),
+    CONSTRAINT comment_required CHECK (
+      decision != 'rejected' OR (comment IS NOT NULL AND length(comment) > 0)
+    )
+);
+
+CREATE INDEX idx_action_resume_events_action_id ON action_resume_events (action_id);
+```
+
+### New table: `organisation_secrets`
+
+Per-org encryption key used for both credential encryption (AES-256-GCM) and HMAC signing of resume URLs. Same pattern as Windmill's `workspace_key` table.
+
+```sql
+CREATE TABLE organisation_secrets (
+    organisation_id TEXT        PRIMARY KEY,
+    key             TEXT        NOT NULL,   -- AES-256 key, hex-encoded, 32 bytes
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    rotated_at      TIMESTAMPTZ
+);
+```
+
+> **Security note:** The same key is used for both credential encryption and HMAC resume URL signing (matching Windmill's pattern). Key rotation must re-encrypt all `integration_connections` for that org and invalidate all outstanding resume URLs.
+
+### HMAC-signed resume URLs
+
+Resume URLs must be unforgeable and single-use. Pattern from Windmill:
+
+```typescript
+// server/lib/resumeUrl.ts
+
+import { createHmac } from 'crypto';
+
+export function generateResumeUrl(params: {
+  orgKey: string;     // from organisation_secrets.key
+  actionId: string;
+  resumeId: number;   // random u32 nonce
+  approver?: string;  // optional: locks URL to specific approver
+  baseUrl: string;
+}): { url: string; secret: string } {
+  const mac = createHmac('sha256', params.orgKey);
+  mac.update(params.actionId);
+  mac.update(Buffer.alloc(4).fill(0).writeUInt32BE(params.resumeId, 0) && Buffer.alloc(4)); // big-endian u32
+
+  // Simpler approach that works in Node.js:
+  const nonceBuf = Buffer.allocUnsafe(4);
+  nonceBuf.writeUInt32BE(params.resumeId, 0);
+  const mac2 = createHmac('sha256', params.orgKey);
+  mac2.update(params.actionId);
+  mac2.update(nonceBuf);
+  if (params.approver) mac2.update(params.approver);
+  const secret = mac2.digest('hex');
+
+  const url = `${params.baseUrl}/api/actions/${params.actionId}/resume/${params.resumeId}/${secret}`;
+  return { url, secret };
+}
+
+export function verifyResumeUrl(params: {
+  orgKey: string;
+  actionId: string;
+  resumeId: number;
+  secret: string;
+  approver?: string;
+}): boolean {
+  const { url } = generateResumeUrl({ ...params, baseUrl: '' });
+  const expectedSecret = url.split('/').pop()!;
+  // Constant-time comparison to prevent timing attacks
+  return crypto.timingSafeEqual(
+    Buffer.from(params.secret, 'hex'),
+    Buffer.from(expectedSecret, 'hex')
+  );
+}
+```
+
+### Drizzle schema additions
+
+```typescript
+// server/db/schema/actions.ts — additions
+
+export const actions = pgTable('actions', {
+  // ... existing columns ...
+  suspendCount:   integer('suspend_count').default(0),
+  suspendUntil:   timestamp('suspend_until', { withTimezone: true }),
+  wacCheckpoint:  jsonb('wac_checkpoint'),
+});
+
+// server/db/schema/actionResumeEvents.ts — new table
+
+export const actionResumeEvents = pgTable('action_resume_events', {
+  id:             uuid('id').primaryKey().defaultRandom(),
+  actionId:       uuid('action_id').notNull().references(() => actions.id, { onDelete: 'cascade' }),
+  resumeId:       integer('resume_id').notNull(),
+  organisationId: text('organisation_id').notNull(),
+  subaccountId:   text('subaccount_id').notNull(),
+  decidedBy:      text('decided_by'),
+  decision:       text('decision').notNull(),  // 'approved' | 'rejected' | 'timed_out'
+  comment:        text('comment'),
+  payload:        jsonb('payload').default(sql`'null'::jsonb`),
+  createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// server/db/schema/organisationSecrets.ts — new table
+
+export const organisationSecrets = pgTable('organisation_secrets', {
+  organisationId: text('organisation_id').primaryKey(),
+  key:            text('key').notNull(),
+  createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  rotatedAt:      timestamp('rotated_at', { withTimezone: true }),
+});
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/db/schema/actions.ts` | Add `suspendCount`, `suspendUntil`, `wacCheckpoint` columns |
+| `server/db/schema/actionResumeEvents.ts` | New file — `actionResumeEvents` table |
+| `server/db/schema/organisationSecrets.ts` | New file — `organisationSecrets` table |
+| `server/db/schema/index.ts` | Export both new schemas |
+| `server/lib/resumeUrl.ts` | New file — HMAC URL generation and verification |
+| `server/migrations/XXXX_hitl_suspend_resume.sql` | Raw SQL migration |
+
+---
+
+---
+
+## Section 3 — Policy Engine
+
+**Source repos:** LangGraph (three-tier model), CrewAI (`@human_feedback` emit/routing), n8n (per-tool config)
+**Gap closed:** Gate levels are currently hardcoded per action type in `actionRegistry.ts`. There is no runtime rules engine — nothing can make "auto-approve under $500 for manager role" decisions. Every review-gated action requires manual approval regardless of context.
+
+### What needs to exist
+
+A `PolicyEngine` that evaluates an ordered list of `PolicyRule` rows (first-match, ascending priority) and returns a `PolicyDecision`. The engine lives between `skillExecutor.ts` receiving a tool call and `executeWithGate` deciding which path to take.
+
+### DB table: `policy_rules`
+
+```sql
+CREATE TABLE policy_rules (
+    id                  TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    organisation_id     TEXT        NOT NULL,
+    subaccount_id       TEXT,                   -- NULL = applies to all subaccounts in org
+    priority            INTEGER     NOT NULL,   -- lower = evaluated first
+    tool_slug           TEXT        NOT NULL,   -- exact slug or '*' wildcard
+    decision            TEXT        NOT NULL    CHECK (decision IN ('auto', 'review', 'block')),
+
+    -- Conditions (all nullable — NULL = match any)
+    cond_user_role      TEXT,                   -- 'org_admin' | 'manager' | 'user' | 'client_user'
+    cond_amount_gt      NUMERIC,                -- match if action amount > this value
+    cond_amount_lte     NUMERIC,                -- match if action amount <= this value
+    cond_environment    TEXT,                   -- 'production' | 'staging'
+
+    -- Reviewer UX config
+    allow_ignore        BOOLEAN     NOT NULL DEFAULT false,
+    allow_respond       BOOLEAN     NOT NULL DEFAULT true,
+    allow_edit          BOOLEAN     NOT NULL DEFAULT false,
+    allow_accept        BOOLEAN     NOT NULL DEFAULT true,
+    allowed_decisions   TEXT[],                 -- ['approve','reject'] or ['approve','edit','reject']
+    description_template TEXT,                  -- markdown, supports {{tool_slug}}, {{args}}
+
+    -- Timeout
+    timeout_seconds     INTEGER     NOT NULL DEFAULT 86400,  -- 24 hours default
+    timeout_policy      TEXT        NOT NULL DEFAULT 'auto_reject'
+                                    CHECK (timeout_policy IN ('auto_reject', 'auto_approve', 'escalate')),
+
+    -- Audit
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by          TEXT,
+
+    CONSTRAINT evaluation_mode CHECK (true)  -- first_match is the only mode; enforced by code
+);
+
+CREATE INDEX idx_policy_rules_org ON policy_rules (organisation_id, priority ASC);
+CREATE INDEX idx_policy_rules_subaccount ON policy_rules (organisation_id, subaccount_id, priority ASC)
+    WHERE subaccount_id IS NOT NULL;
+
+-- The fallback rule for every org (inserted on org creation)
+-- priority=9999, tool_slug='*', decision='review'
+```
+
+### Drizzle schema
+
+```typescript
+// server/db/schema/policyRules.ts
+export const policyRules = pgTable('policy_rules', {
+  id:                 text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+  organisationId:     text('organisation_id').notNull(),
+  subaccountId:       text('subaccount_id'),
+  priority:           integer('priority').notNull(),
+  toolSlug:           text('tool_slug').notNull(),
+  decision:           text('decision').notNull(),
+
+  condUserRole:       text('cond_user_role'),
+  condAmountGt:       numeric('cond_amount_gt'),
+  condAmountLte:      numeric('cond_amount_lte'),
+  condEnvironment:    text('cond_environment'),
+
+  allowIgnore:        boolean('allow_ignore').notNull().default(false),
+  allowRespond:       boolean('allow_respond').notNull().default(true),
+  allowEdit:          boolean('allow_edit').notNull().default(false),
+  allowAccept:        boolean('allow_accept').notNull().default(true),
+  allowedDecisions:   text('allowed_decisions').array(),
+  descriptionTemplate: text('description_template'),
+
+  timeoutSeconds:     integer('timeout_seconds').notNull().default(86400),
+  timeoutPolicy:      text('timeout_policy').notNull().default('auto_reject'),
+
+  createdAt:          timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt:          timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  createdBy:          text('created_by'),
+});
+```
+
+### Policy engine service
+
+```typescript
+// server/services/policyEngineService.ts
+
+export async function evaluatePolicy(
+  toolSlug: string,
+  context: PolicyContext
+): Promise<PolicyDecision> {
+  // Load rules for this org, ordered by priority ASC
+  // Rules are cached in-process with a 60s TTL — policy changes take effect within 1 minute
+  const rules = await getRulesForOrg(context.organisationId);
+
+  for (const rule of rules) {
+    if (matchesRule(rule, toolSlug, context)) {
+      return buildDecision(rule, toolSlug, context);
+    }
+  }
+
+  // Should never reach here if fallback rule exists for every org
+  // but safe default just in case
+  return { decision: 'review', matchedRule: SYSTEM_FALLBACK };
+}
+
+function matchesRule(rule: PolicyRule, toolSlug: string, ctx: PolicyContext): boolean {
+  // Tool slug: exact match or wildcard
+  if (rule.toolSlug !== '*' && rule.toolSlug !== toolSlug) return false;
+
+  // Subaccount: if rule scoped to subaccount, must match
+  if (rule.subaccountId && rule.subaccountId !== ctx.subaccountId) return false;
+
+  // User role
+  if (rule.condUserRole && rule.condUserRole !== ctx.userRole) return false;
+
+  // Amount conditions (for financial tools like send_payment, update_record with value)
+  if (rule.condAmountGt !== null && ctx.amountUsd !== undefined) {
+    if (ctx.amountUsd <= rule.condAmountGt) return false;
+  }
+  if (rule.condAmountLte !== null && ctx.amountUsd !== undefined) {
+    if (ctx.amountUsd > rule.condAmountLte) return false;
+  }
+
+  // Environment
+  if (rule.condEnvironment && rule.condEnvironment !== ctx.environment) return false;
+
+  return true;
+}
+```
+
+### Wire into `executeWithGate`
+
+Replace the current `actionRegistry.getGateLevel(toolName)` call with the policy engine:
+
+```typescript
+// In skillExecutor.ts executeWithGate — replace static gate lookup
+const policyDecision = await policyEngineService.evaluatePolicy(toolName, {
+  organisationId: context.organisationId,
+  subaccountId: context.subaccountId,
+  userRole: context.userRole,
+  amountUsd: extractAmount(input),   // optional — only for tools with financial values
+  environment: process.env.NODE_ENV === 'production' ? 'production' : 'staging',
+});
+
+const gateLevel = policyDecision.decision;
+// ... rest of executeWithGate unchanged, but pass policyDecision to createCheckpoint
+```
+
+### Bootstrap: seed fallback rule on org creation
+
+```typescript
+// In organisationService.ts, after creating org:
+await db.insert(policyRules).values({
+  organisationId: newOrg.id,
+  priority: 9999,
+  toolSlug: '*',
+  decision: 'review',
+  timeoutSeconds: 86400,
+  timeoutPolicy: 'auto_reject',
+  createdBy: 'system',
+});
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/db/schema/policyRules.ts` | New file — Drizzle schema |
+| `server/db/schema/index.ts` | Export `policyRules` |
+| `server/services/policyEngineService.ts` | New file — evaluation logic + 60s cache |
+| `server/services/skillExecutor.ts` | Replace `actionRegistry.getGateLevel()` with `policyEngineService.evaluatePolicy()` |
+| `server/services/organisationService.ts` | Seed fallback rule on org creation |
+| `server/routes/policyRules.ts` | New CRUD routes (org admin only) |
+| `server/migrations/XXXX_policy_rules.sql` | Raw SQL migration |
+
+---
+
+## Section 4 — Review Gate UX
+
+**Source repos:** n8n (denial-as-tool-output, interrupt_config), CrewAI (`HumanFeedbackResult` audit schema, outcome-collapse classifier), LangGraph (Agent Inbox data model)
+**Gap closed:** The review queue UI (`ReviewQueuePage.tsx`) exists but: (1) reviewer options are binary approve/reject with no context about what options are available, (2) denial has no required comment field enforced at the API level, (3) there is no audit record of what the human decided and why, (4) the agent receives no structured feedback message on denial — it just times out or errors.
+
+### 1. Enforce comment on rejection (API level)
+
+```typescript
+// server/routes/reviews.ts (or existing approval route)
+
+app.post('/actions/:actionId/decide', async (req, res) => {
+  const { decision, comment, editedArgs } = req.body;
+
+  // Rejection requires a comment — no silent rejections (HumanLayer pattern)
+  if (decision === 'rejected' && (!comment || comment.trim().length === 0)) {
+    return res.status(400).json({
+      error: 'A comment is required when rejecting an action.',
+      code: 'COMMENT_REQUIRED',
+    });
+  }
+
+  // Double-approve guard
+  const action = await actionService.getById(req.params.actionId);
+  if (action.status !== 'pending_approval') {
+    return res.status(409).json({
+      error: `Action is already in state: ${action.status}`,
+      code: 'ALREADY_DECIDED',
+    });
+  }
+
+  // Validate resume integrity before marking approved
+  if (decision === 'approved') {
+    await actionService.validateResumeIntegrity(req.params.actionId, {
+      approvedBy: req.user.id,
+      editedArgs,   // if reviewer edited the args (allow_edit = true on rule)
+    });
+  }
+
+  // Write audit record
+  await reviewAuditService.record({
+    actionId: req.params.actionId,
+    decidedBy: req.user.id,
+    decision,
+    comment,
+    editedArgs,
+    subaccountId: action.subaccountId,
+    organisationId: action.organisationId,
+  });
+
+  // Resolve the pending promise in reviewService
+  reviewService.resolveDecision(req.params.actionId, { status: decision, comment, editedArgs });
+
+  return res.json({ ok: true });
+});
+```
+
+### 2. `review_audit_records` table — HumanFeedbackResult schema
+
+Modelled after CrewAI's `HumanFeedbackResult`. Append-only — never updated after insert.
+
+```sql
+CREATE TABLE review_audit_records (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_id       UUID        NOT NULL REFERENCES actions(id),
+    organisation_id TEXT        NOT NULL,
+    subaccount_id   TEXT        NOT NULL,
+    agent_run_id    TEXT,
+    tool_slug       TEXT        NOT NULL,
+
+    -- What the agent proposed (snapshot at time of review)
+    agent_output    JSONB       NOT NULL,   -- the args the agent passed to the tool
+
+    -- What the human decided
+    decided_by      TEXT        NOT NULL,
+    decision        TEXT        NOT NULL    CHECK (decision IN ('approved', 'rejected', 'edited', 'timed_out')),
+    raw_feedback    TEXT,                   -- verbatim comment from reviewer
+    collapsed_outcome TEXT,                 -- LLM-collapsed: 'approved'|'rejected'|'needs_revision'
+    edited_args     JSONB,                  -- populated only when decision = 'edited'
+
+    -- Timing
+    proposed_at     TIMESTAMPTZ NOT NULL,
+    decided_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    wait_duration_ms INTEGER,               -- decided_at - proposed_at in ms
+
+    CONSTRAINT feedback_required CHECK (
+      decision != 'rejected' OR (raw_feedback IS NOT NULL AND length(raw_feedback) > 0)
+    )
+);
+
+CREATE INDEX idx_review_audit_org ON review_audit_records (organisation_id, decided_at DESC);
+CREATE INDEX idx_review_audit_subaccount ON review_audit_records (subaccount_id, decided_at DESC);
+CREATE INDEX idx_review_audit_action ON review_audit_records (action_id);
+```
+
+### 3. Outcome-collapse classifier (CrewAI `emit` pattern)
+
+When a reviewer types free-text feedback (e.g. "looks good but change the subject line"), the system uses a small LLM call to collapse it to a typed outcome. This makes routing deterministic.
+
+```typescript
+// server/services/reviewAuditService.ts
+
+const OUTCOME_OPTIONS = ['approved', 'rejected', 'needs_revision'] as const;
+type CollapsedOutcome = typeof OUTCOME_OPTIONS[number];
+
+async function collapseToOutcome(
+  rawFeedback: string,
+  decision: string,
+): Promise<CollapsedOutcome> {
+  // Short-circuit: empty feedback or binary decision
+  if (!rawFeedback || rawFeedback.trim().length === 0) {
+    return decision === 'approved' ? 'approved' : 'rejected';
+  }
+
+  const response = await llmRouter.routeCall({
+    model: 'claude-haiku-4-5-20251001',  // cheapest model, simple classification
+    messages: [{
+      role: 'user',
+      content: `Classify this reviewer feedback into exactly one of: approved, rejected, needs_revision.
+
+Feedback: "${rawFeedback}"
+Initial decision: ${decision}
+
+Rules:
+- "approved" = reviewer is satisfied, proceed
+- "rejected" = reviewer wants to stop this action entirely
+- "needs_revision" = reviewer wants changes before proceeding
+
+Return only the single word.`,
+    }],
+    maxTokens: 10,
+  });
+
+  const output = response.content[0].text.trim().toLowerCase() as CollapsedOutcome;
+  return OUTCOME_OPTIONS.includes(output) ? output : (decision === 'approved' ? 'approved' : 'rejected');
+}
+```
+
+### 4. Denial message injected as tool output (n8n pattern)
+
+The agent loop should receive a structured denial message as the tool's return value — not an exception, not a timeout. The loop stays alive and the model can reason about what to do next.
+
+```typescript
+// server/services/skillExecutor.ts
+
+function buildDenialMessage(toolSlug: string, collapsedOutcome: CollapsedOutcome, comment?: string): string {
+  if (collapsedOutcome === 'needs_revision' && comment) {
+    return `Your request to use ${toolSlug} was reviewed. The reviewer requests changes before proceeding: "${comment}". Please revise your approach and try again if appropriate.`;
+  }
+  if (comment) {
+    return `Your request to use ${toolSlug} was declined. Reviewer feedback: "${comment}". The tool remains available if a different approach would be appropriate.`;
+  }
+  return `Your request to use ${toolSlug} was declined by a reviewer. Stop and wait for further instructions from the user.`;
+}
+```
+
+### 5. Review queue UI — `interrupt_config` rendering
+
+The `ReviewQueuePage.tsx` should surface the reviewer options from the matched `PolicyRule.interrupt_config`. This tells the UI which buttons to render.
+
+```typescript
+// Frontend: ReviewQueueItem component
+
+interface ReviewQueueItemProps {
+  action: {
+    id: string;
+    toolSlug: string;
+    actionRequest: { action: string; args: Record<string, unknown> };
+    interruptConfig: {
+      allow_accept: boolean;
+      allow_respond: boolean;   // show free-text field
+      allow_edit: boolean;      // show args editor
+      allow_ignore: boolean;
+    };
+    descriptionTemplate?: string;  // rendered markdown shown to reviewer
+    proposedAt: string;
+    timeoutAt: string;
+  };
+}
+
+// Rendered buttons based on interruptConfig:
+// allow_accept  → "Approve" button
+// allow_respond → "Decline with feedback" (shows text input)
+// allow_edit    → "Edit & Approve" (shows args editor, submits edited args)
+// allow_ignore  → "Dismiss" (no resume, action times out naturally)
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/db/schema/reviewAuditRecords.ts` | New file — audit table |
+| `server/db/schema/index.ts` | Export `reviewAuditRecords` |
+| `server/services/reviewAuditService.ts` | New file — `record()`, `collapseToOutcome()` |
+| `server/routes/reviews.ts` | Add comment enforcement, double-approve guard, audit write, `resolveDecision` call |
+| `server/services/skillExecutor.ts` | Add `buildDenialMessage()`, pass `collapsedOutcome` to agent loop |
+| `client/src/pages/ReviewQueuePage.tsx` | Render `interruptConfig` buttons, free-text field, args editor |
+| `server/migrations/XXXX_review_audit.sql` | Raw SQL migration |
+
+---
+
+## Section 5 — OAuth Integration Layer
+
+**Source repos:** Activepieces (primary), Composio (evaluated, rejected as strategic dependency)
+**Gap closed:** `integration_connections` table exists with correct columns but zero OAuth flow implementation — no auth URL generation, no callback handler, no token exchange, no auto-refresh. Agents with `send_email`, `update_record`, etc. cannot use connected external services.
+
+**Strategic decision:** Build our own OAuth layer using Activepieces patterns. Composio was evaluated and fails two kill criteria: it owns the token vault (tokens never live in our DB) and all tool arguments transit their infrastructure. It may be used as a throwaway bridge behind a hard adapter boundary only, with an explicit replacement plan.
+
+### Architecture overview
+
+```
+User clicks "Connect Gmail"
+  → GET  /api/integrations/oauth2/auth-url?provider=gmail&subaccountId=...
+  → returns { url, state }  (state = signed JWT binding provider+subaccountId)
+
+Browser redirects to Google → user consents → Google redirects to:
+  → GET  /api/integrations/oauth2/callback?code=...&state=...
+  → server validates state JWT, exchanges code for tokens
+  → encrypts tokens (AES-256-GCM), stores in integration_connections
+  → redirects browser to success page
+
+Agent calls tool with auth_context
+  → integrationConnectionService.getConnection(subaccountId, provider)
+  → auto-refreshes if expires within 15 minutes (distributed lock)
+  → returns decrypted connection to tool handler
+```
+
+### Encryption (AES-256-GCM, upgraded from Activepieces' CBC)
+
+Activepieces uses AES-256-CBC. We use AES-256-GCM (already established in our codebase per migration 0034) — adds authentication tag, prevents ciphertext tampering.
+
+```typescript
+// server/lib/integrationEncryption.ts
+// Wraps the existing encryptText/decryptText helpers already in the codebase
+
+export function encryptToken(plaintext: string, orgKey: string): string {
+  // AES-256-GCM: random 12-byte IV, 16-byte auth tag
+  // Returns: base64(iv + authTag + ciphertext)
+  // Uses orgKey from organisation_secrets table (same key as HMAC resume URLs)
+}
+
+export function decryptToken(encrypted: string, orgKey: string): string {
+  // Reverse of above
+}
+```
+
+### DB changes to `integration_connections`
+
+Add `claimed_at` (Unix seconds) + `expires_in` (seconds) following the Activepieces pattern. This is more reliable than storing `expires_at` directly because token responses give us `expires_in` — computing `expires_at` requires trusting the server clock at exchange time, which can drift.
+
+```sql
+ALTER TABLE integration_connections
+  ADD COLUMN claimed_at   BIGINT,        -- Unix seconds when token was acquired
+  ADD COLUMN expires_in   INTEGER,       -- seconds until expiry (from provider response)
+  ADD COLUMN token_url    TEXT,          -- stored so refresh doesn't need provider config
+  ADD COLUMN client_id    TEXT,          -- stored encrypted for refresh calls
+  ADD COLUMN client_secret TEXT,         -- stored encrypted for refresh calls
+  ADD COLUMN status       TEXT NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'expired', 'error', 'disconnected'));
+```
+
+### OAuth provider configs
+
+Each provider's OAuth endpoints are defined once, referenced by slug:
+
+```typescript
+// server/config/oauthProviders.ts
+
+export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
+  gmail: {
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly'],
+    extra: { access_type: 'offline', prompt: 'consent' },  // forces refresh_token issuance
+  },
+  github: {
+    authUrl: 'https://github.com/login/oauth/authorize',
+    tokenUrl: 'https://github.com/login/oauth/access_token',
+    scopes: ['repo', 'read:org'],
+  },
+  hubspot: {
+    authUrl: 'https://app.hubspot.com/oauth/authorize',
+    tokenUrl: 'https://api.hubapi.com/oauth/v1/token',
+    scopes: ['contacts', 'content', 'deals'],
+  },
+  slack: {
+    authUrl: 'https://slack.com/oauth/v2/authorize',
+    tokenUrl: 'https://slack.com/api/oauth.v2.access',
+    scopes: ['chat:write', 'channels:read', 'users:read'],
+  },
+  ghl: {
+    authUrl: 'https://marketplace.leadconnectorhq.com/oauth/chooselocation',
+    tokenUrl: 'https://services.leadconnectorhq.com/oauth/token',
+    scopes: ['contacts.readonly', 'contacts.write', 'opportunities.readonly'],
+  },
+};
+
+interface OAuthProviderConfig {
+  authUrl: string;
+  tokenUrl: string;
+  scopes: string[];
+  extra?: Record<string, string>;  // appended to auth URL params
+  pkce?: boolean;
+}
+```
+
+### Auth URL generation endpoint
+
+```typescript
+// server/routes/integrations.ts
+
+// GET /api/integrations/oauth2/auth-url
+app.get('/oauth2/auth-url', requireAuth, async (req, res) => {
+  const { provider, subaccountId } = req.query;
+
+  const config = OAUTH_PROVIDERS[provider];
+  if (!config) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+
+  // State JWT: signs provider + subaccountId + nonce, verified in callback
+  // Prevents CSRF — callback will only accept state we issued
+  const state = jwt.sign(
+    { provider, subaccountId, nonce: crypto.randomUUID() },
+    process.env.JWT_SECRET!,
+    { expiresIn: '10m' }
+  );
+
+  const url = new URL(config.authUrl);
+  url.searchParams.set('client_id', process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`]!);
+  url.searchParams.set('redirect_uri', `${process.env.APP_URL}/api/integrations/oauth2/callback`);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', config.scopes.join(' '));
+  url.searchParams.set('state', state);
+  for (const [k, v] of Object.entries(config.extra ?? {})) url.searchParams.set(k, v);
+
+  return res.json({ url: url.toString(), state });
+});
+```
+
+### Callback handler (token exchange + encrypted storage)
+
+```typescript
+// GET /api/integrations/oauth2/callback
+app.get('/oauth2/callback', async (req, res) => {
+  const { code, state } = req.query;
+
+  // Verify state JWT
+  const payload = jwt.verify(state, process.env.JWT_SECRET!) as { provider: string; subaccountId: string };
+  const config = OAUTH_PROVIDERS[payload.provider];
+
+  // Exchange code for tokens
+  const tokenResponse = await axios.post(config.tokenUrl, new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: `${process.env.APP_URL}/api/integrations/oauth2/callback`,
+    client_id: process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_ID`]!,
+    client_secret: process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_SECRET`]!,
+  }), { headers: { Accept: 'application/json' } });
+
+  const { access_token, refresh_token, expires_in, token_type, scope } = tokenResponse.data;
+  const claimedAt = Math.floor(Date.now() / 1000);
+
+  // Get org key for encryption
+  const orgKey = await organisationSecretService.getKey(/* orgId from subaccount */);
+
+  // Upsert into integration_connections
+  await db.insert(integrationConnections).values({
+    subaccountId: payload.subaccountId,
+    provider: payload.provider,
+    accessToken: encryptToken(access_token, orgKey),
+    refreshToken: refresh_token ? encryptToken(refresh_token, orgKey) : null,
+    claimedAt,
+    expiresIn: expires_in ?? 3600,
+    tokenUrl: config.tokenUrl,
+    clientId: encryptToken(process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_ID`]!, orgKey),
+    clientSecret: encryptToken(process.env[`OAUTH_${payload.provider.toUpperCase()}_CLIENT_SECRET`]!, orgKey),
+    scopes: (scope ?? config.scopes.join(' ')).split(' '),
+    status: 'active',
+  }).onConflictDoUpdate({
+    target: [integrationConnections.subaccountId, integrationConnections.provider],
+    set: { accessToken: sql`excluded.access_token`, /* ... all token fields */ },
+  });
+
+  return res.redirect(`${process.env.APP_URL}/settings/integrations?connected=${payload.provider}`);
+});
+```
+
+### Auto-refresh on access (Activepieces pattern)
+
+```typescript
+// server/services/integrationConnectionService.ts
+
+export async function getDecryptedConnection(
+  subaccountId: string,
+  provider: string
+): Promise<DecryptedConnection> {
+  const conn = await db.query.integrationConnections.findFirst({
+    where: and(
+      eq(integrationConnections.subaccountId, subaccountId),
+      eq(integrationConnections.provider, provider),
+      eq(integrationConnections.status, 'active')
+    ),
+  });
+  if (!conn) throw new Error(`No active ${provider} connection for subaccount ${subaccountId}`);
+
+  const orgKey = await organisationSecretService.getKey(conn.organisationId);
+
+  // Check expiry: refresh 15 minutes early (Activepieces pattern)
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const REFRESH_BUFFER = 15 * 60;
+  const needsRefresh = conn.claimedAt !== null &&
+    conn.expiresIn !== null &&
+    (nowSeconds + REFRESH_BUFFER >= conn.claimedAt + conn.expiresIn);
+
+  if (needsRefresh && conn.refreshToken) {
+    return refreshWithLock(conn, orgKey);
+  }
+
+  return {
+    provider: conn.provider,
+    access_token: decryptToken(conn.accessToken, orgKey),
+    scopes: conn.scopes,
+  };
+}
+
+async function refreshWithLock(conn: IntegrationConnection, orgKey: string): Promise<DecryptedConnection> {
+  // pg-boss advisory lock keyed by subaccountId + provider
+  // Prevents parallel refreshes from double-spending the refresh token
+  const lockKey = `oauth_refresh:${conn.subaccountId}:${conn.provider}`;
+
+  return withAdvisoryLock(lockKey, async () => {
+    // Re-fetch after acquiring lock — another worker may have already refreshed
+    const fresh = await db.query.integrationConnections.findFirst({ where: /* same */ });
+    const freshNow = Math.floor(Date.now() / 1000);
+    const REFRESH_BUFFER = 15 * 60;
+    if (fresh!.claimedAt! + fresh!.expiresIn! > freshNow + REFRESH_BUFFER) {
+      // Already refreshed by the other worker
+      return decryptConnection(fresh!, orgKey);
+    }
+
+    const clientId = decryptToken(conn.clientId!, orgKey);
+    const clientSecret = decryptToken(conn.clientSecret!, orgKey);
+    const refreshToken = decryptToken(conn.refreshToken!, orgKey);
+
+    const response = await axios.post(conn.tokenUrl!, new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }), { headers: { Accept: 'application/json' }, timeout: 20000 });
+
+    const data = response.data;
+
+    // mergeNonNull: preserve existing refresh_token if provider doesn't return a new one
+    // (common with GitHub, HubSpot)
+    const newRefreshToken = data.refresh_token
+      ? encryptToken(data.refresh_token, orgKey)
+      : conn.refreshToken;
+
+    await db.update(integrationConnections)
+      .set({
+        accessToken: encryptToken(data.access_token, orgKey),
+        refreshToken: newRefreshToken,
+        claimedAt: Math.floor(Date.now() / 1000),
+        expiresIn: data.expires_in ?? 3600,
+        status: 'active',
+      })
+      .where(eq(integrationConnections.id, conn.id));
+
+    return { provider: conn.provider, access_token: data.access_token, scopes: conn.scopes };
+  });
+}
+```
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/config/oauthProviders.ts` | New file — provider config registry |
+| `server/routes/integrations.ts` | New file — auth URL, callback, list/delete connection routes |
+| `server/services/integrationConnectionService.ts` | New file — `getDecryptedConnection`, refresh-with-lock |
+| `server/lib/integrationEncryption.ts` | New file — AES-256-GCM encrypt/decrypt wrappers |
+| `server/services/organisationSecretService.ts` | New file — per-org key lookup with cache |
+| `server/db/schema/integrationConnections.ts` | Add `claimedAt`, `expiresIn`, `tokenUrl`, `clientId`, `clientSecret`, `status` |
+| `server/migrations/XXXX_integration_oauth.sql` | Raw SQL migration |
+| `.env.example` | Add `OAUTH_{PROVIDER}_CLIENT_ID/SECRET` vars for all 5 providers |
+
+---
+
+## Section 6 — Observability (Langfuse Phase 1)
+
+**Source repos:** Langfuse
+**Gap closed:** `llm_requests` table is the billing ledger but provides no visual trace of what happened inside an agent run. Debugging agent failures requires reading raw DB rows. Per-tenant cost is not surfaced in the UI. There is no grouped view of a complete run.
+
+**Infrastructure note:** Langfuse self-hosting requires ClickHouse (mandatory in v3+) in addition to PostgreSQL. This adds operational overhead. Two options:
+- **Option A (recommended for now):** Use Langfuse Cloud (free tier: 50k observations/month) and point `LANGFUSE_BASE_URL` at their hosted instance. Zero infrastructure cost to start.
+- **Option B:** Self-host with ClickHouse when observability volume justifies it or data residency requires it.
+
+**Phase 1 scope — strictly these three things:**
+1. Run-level trace per `agentRun` (session grouped by `agentRunId`)
+2. Tool-level span per `skillExecutor` dispatch
+3. LLM generation span per `llmRouter` call with token counts and USD cost
+
+**Not in Phase 1:** prompt versioning, A/B testing, annotation queues, full analytics UI.
+
+### Install
+
+```bash
+npm install @langfuse/tracing @langfuse/otel @opentelemetry/sdk-node
+```
+
+### New file: `server/instrumentation.ts`
+
+Must be the **first import** in the server entry point.
+
+```typescript
+// server/instrumentation.ts
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { LangfuseSpanProcessor } from '@langfuse/otel';
+
+export const langfuseProcessor = new LangfuseSpanProcessor();
+
+const sdk = new NodeSDK({ spanProcessors: [langfuseProcessor] });
+sdk.start();
+
+// Call on graceful shutdown so spans flush before process exits
+export async function shutdownTracing() {
+  await langfuseProcessor.forceFlush();
+  await sdk.shutdown();
+}
+```
+
+```typescript
+// server/index.ts — first line, before any other import
+import './instrumentation';
+```
+
+### `agentExecutionService.ts` — wrap the agent loop
+
+```typescript
+import { startActiveObservation, propagateAttributes } from '@langfuse/tracing';
+
+export async function executeRun(agentRunId: string, subaccountId: string, organisationId: string, task: string) {
+  return startActiveObservation('agent-run', async (rootSpan) => {
+    await propagateAttributes({
+      userId: subaccountId,        // per-tenant attribution — drives cost dashboards
+      sessionId: agentRunId,       // groups all spans for this run into one session replay
+      metadata: { organisationId, subaccountId, agentRunId },
+      traceName: 'agent-run',
+    }, async () => {
+      rootSpan.update({ input: { task } });
+      // ... existing agent loop logic unchanged ...
+      rootSpan.update({ output: { result } });
+    });
+  });
+}
+```
+
+### `skillExecutor.ts` — tool span
+
+```typescript
+import { startObservation } from '@langfuse/tracing';
+
+// Inside executeWithGate, wrap the dispatch call:
+const toolSpan = startObservation(toolName, { input }, { asType: 'tool' });
+try {
+  const result = await dispatch(toolName, input, context, actionId);
+  toolSpan.update({ output: result });
+  return result;
+} finally {
+  toolSpan.end();
+}
+```
+
+### `llmRouter.ts` — generation span
+
+```typescript
+import { startObservation } from '@langfuse/tracing';
+
+// OTel context propagation auto-parents this under the active agent-run trace
+const generation = startObservation('llm-call', {
+  model,
+  input: messages,
+  modelParameters: { temperature, maxTokens },
+}, { asType: 'generation' });
+
+// ... existing LLM call ...
+
+generation.update({
+  output: response.content,
+  usageDetails: {
+    input: response.usage.promptTokens,
+    output: response.usage.completionTokens,
+  },
+  costDetails: {
+    input: promptCost,
+    output: completionCost,
+  },
+});
+generation.end();
+
+// Existing llm_requests ledger write is UNCHANGED — dual-write, not replacement
+await db.insert(llmRequests).values({ /* ... existing ... */ });
+```
+
+### Environment variables
+
+```env
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com   # or self-hosted URL
+```
+
+### What this gives you
+
+| Capability | How |
+|---|---|
+| Per-run session replay | All spans share `sessionId = agentRunId` |
+| Tool call sequence | Each `skillExecutor` dispatch = one span |
+| LLM cost per run | `costDetails` on each generation span |
+| Per-tenant cost filter | `userId = subaccountId` on every trace |
+| Billing ledger unchanged | `llm_requests` table still the source of truth |
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/instrumentation.ts` | New file — OTel + Langfuse processor init |
+| `server/index.ts` | Add `import './instrumentation'` as first line |
+| `server/services/agentExecutionService.ts` | Wrap agent loop in `startActiveObservation` + `propagateAttributes` |
+| `server/services/skillExecutor.ts` | Add tool span around `dispatch()` |
+| `server/services/llmRouter.ts` | Add generation span, dual-write alongside existing ledger |
+| `.env.example` | Add `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` |
+| `package.json` | Add `@langfuse/tracing`, `@langfuse/otel`, `@opentelemetry/sdk-node` |
+
+---
+
+## Section 7 — Processor Guardrails (Mastra patterns)
+
+**Source:** Mastra codebase — middleware pipeline, `TripWire`, BM25 lazy loading
+**Contracts touched:** Contract 1 (HITL flow), Contract 2 (Tool interface)
+
+### Problem
+
+The agent loop has no layered processing hooks. Once a tool call leaves `skillExecutor`, there's no standard intercept point to validate inputs, post-process outputs, enforce cost budgets, or stream partial results to the caller. Safety checks are scattered.
+
+Mastra solves this with a 5-phase middleware pipeline that fires around every tool dispatch. We adopt three of the five phases that are immediately valuable. Phases 4 (stream) and 5 (result-level) are deferred to Phase 2.
+
+---
+
+### 7.1 — ProcessorHook interface
+
+```typescript
+// server/types/processor.ts
+
+export interface ProcessorContext {
+  toolSlug: string;
+  input: unknown;
+  subaccountId: string;
+  agentRunId: string;
+  organisationId: string;
+  actionId?: string;
+}
+
+export interface ProcessorHooks {
+  /**
+   * Phase 1: Validate/transform the raw input before gate evaluation.
+   * Return modified input to continue, or throw to abort the entire call.
+   */
+  processInput?: (ctx: ProcessorContext) => Promise<unknown>;
+
+  /**
+   * Phase 2: Per-step input hook. Runs immediately before execution_handler
+   * is called (after gate approval). Can inject dynamic context.
+   */
+  processInputStep?: (ctx: ProcessorContext) => Promise<unknown>;
+
+  /**
+   * Phase 3: Post-execution output hook. Runs on every execution_handler result
+   * before the result is returned to the agent. Can sanitise, truncate, or augment.
+   */
+  processOutputStep?: (
+    ctx: ProcessorContext,
+    result: ExecutionResult,
+  ) => Promise<ExecutionResult>;
+}
+```
+
+---
+
+### 7.2 — TripWire abort signal
+
+TripWire is a typed abort mechanism for processors. It distinguishes *retryable* halts (soft abort — skip this step, try again) from *fatal* halts (kill the run entirely).
+
+```typescript
+// server/lib/tripwire.ts
+
+export class TripWire {
+  constructor(
+    public readonly reason: string,
+    public readonly options: { retry: boolean; code?: string } = { retry: false },
+  ) {}
+}
+
+/**
+ * Usage inside a ProcessorHook:
+ *
+ *   throw new TripWire('Budget exceeded', { retry: false });      // fatal — halt run
+ *   throw new TripWire('Rate limit hit, back off', { retry: true }); // soft — skip step
+ */
+```
+
+`skillExecutor.ts` catches `TripWire` separately from unknown errors:
+
+```typescript
+// server/services/skillExecutor.ts (updated dispatch wrapper)
+
+import { TripWire } from '../lib/tripwire';
+
+async function dispatchWithProcessors(
+  tool: Tool,
+  input: unknown,
+  ctx: ToolContext,
+): Promise<ExecutionResult> {
+  let processedInput = input;
+
+  // Phase 1 — processInput
+  if (tool.processors?.processInput) {
+    processedInput = await tool.processors.processInput({
+      toolSlug: tool.slug,
+      input,
+      subaccountId: ctx.subaccountId,
+      agentRunId: ctx.agentRunId,
+      organisationId: ctx.organisationId,
+    });
+  }
+
+  // Phase 2 — processInputStep (after gate, before execute)
+  if (tool.processors?.processInputStep) {
+    processedInput = await tool.processors.processInputStep({
+      toolSlug: tool.slug,
+      input: processedInput,
+      subaccountId: ctx.subaccountId,
+      agentRunId: ctx.agentRunId,
+      organisationId: ctx.organisationId,
+      actionId: ctx.actionId,
+    });
+  }
+
+  // Execute
+  let result: ExecutionResult;
+  try {
+    result = await tool.execution_handler({ ...ctx, input: processedInput });
+  } catch (err) {
+    if (err instanceof TripWire) {
+      if (!err.options.retry) {
+        // Fatal — surface as a failed result, halt agent
+        return {
+          status: 'failed',
+          error: { message: err.reason, retryable: false, code: err.options.code },
+        };
+      }
+      // Soft — treat as skippable, agent continues
+      return {
+        status: 'failed',
+        error: { message: err.reason, retryable: true, code: err.options.code },
+      };
+    }
+    throw err; // unknown errors bubble normally
+  }
+
+  // Phase 3 — processOutputStep
+  if (tool.processors?.processOutputStep) {
+    result = await tool.processors.processOutputStep(
+      {
+        toolSlug: tool.slug,
+        input: processedInput,
+        subaccountId: ctx.subaccountId,
+        agentRunId: ctx.agentRunId,
+        organisationId: ctx.organisationId,
+        actionId: ctx.actionId,
+      },
+      result,
+    );
+  }
+
+  return result;
+}
+```
+
+---
+
+### 7.3 — Budget guardrail processor (built-in example)
+
+This is the first processor to ship. It enforces a per-run cost budget using the `ExecutionResult.metadata.cost_usd` field.
+
+```typescript
+// server/processors/budgetGuardrail.ts
+
+import { TripWire } from '../lib/tripwire';
+import { agentRunService } from '../services/agentRunService';
+
+/**
+ * Attaches to any tool that emits cost_usd in its metadata.
+ * If accumulated run cost exceeds the workspace budget, throws a fatal TripWire.
+ */
+export const budgetGuardrailProcessor: Pick<ProcessorHooks, 'processOutputStep'> = {
+  async processOutputStep(ctx, result) {
+    const costThisCall = result.metadata?.cost_usd ?? 0;
+    if (costThisCall === 0) return result;
+
+    const runCost = await agentRunService.accumulateCost(ctx.agentRunId, costThisCall);
+    const budget = await agentRunService.getBudgetLimit(ctx.subaccountId);
+
+    if (runCost > budget) {
+      throw new TripWire(
+        `Run cost $${runCost.toFixed(4)} exceeded workspace budget $${budget.toFixed(2)}`,
+        { retry: false, code: 'BUDGET_EXCEEDED' },
+      );
+    }
+
+    return result;
+  },
+};
+```
+
+---
+
+### 7.4 — BM25 lazy tool loading
+
+The agent currently loads every registered skill into its system prompt on every run. This has two costs: (1) context window bloat, and (2) the LLM picks from a large flat list which creates retrieval noise.
+
+Mastra's pattern: expose two meta-tools to the agent. The agent uses `search_tools` to find relevant tools by description, then `load_tool` to activate one. The full tool list is indexed offline with BM25.
+
+```typescript
+// server/tools/meta/searchTools.ts
+
+import BM25 from 'bm25';  // npm: wink-bm25-text-search
+
+let index: BM25 | null = null;
+
+function ensureIndex(tools: Tool[]) {
+  if (index) return;
+  index = new BM25();
+  index.defineConfig({ fldWeights: { description: 1 } });
+  index.definePrepTasks([/* tokeniser, stemmer */]);
+  for (const t of tools) {
+    index.addDoc({ name: t.slug, description: t.description }, t.slug);
+  }
+  index.consolidate();
+}
+
+export const searchToolsMeta: Tool = {
+  slug: 'search_tools',
+  version: '1.0.0',
+  description: 'Find available tools by keyword. Returns up to 5 matching tool names and descriptions.',
+  input_schema: {
+    type: 'object',
+    properties: { query: { type: 'string' } },
+    required: ['query'],
+  },
+  gate_level: 'auto',
+  idempotency_key_fn: (input: any) => `search_tools:${input.query}`,
+  execution_handler: async (ctx) => {
+    const { query } = ctx.input as { query: string };
+    const allTools = await toolRegistry.getForSubaccount(ctx.subaccountId);
+    ensureIndex(allTools);
+    const results = index!.search(query, 5);
+    return {
+      status: 'success',
+      data: results.map((r: any) => ({
+        slug: r.ref,
+        description: allTools.find((t) => t.slug === r.ref)?.description,
+      })),
+    };
+  },
+};
+
+export const loadToolMeta: Tool = {
+  slug: 'load_tool',
+  version: '1.0.0',
+  description: 'Activate a tool by slug so it becomes callable in this run.',
+  input_schema: {
+    type: 'object',
+    properties: { tool_slug: { type: 'string' } },
+    required: ['tool_slug'],
+  },
+  gate_level: 'auto',
+  idempotency_key_fn: (input: any) => `load_tool:${input.tool_slug}`,
+  execution_handler: async (ctx) => {
+    const { tool_slug } = ctx.input as { tool_slug: string };
+    const tool = await toolRegistry.getOne(tool_slug, ctx.subaccountId);
+    if (!tool) return { status: 'failed', error: { message: `Tool not found: ${tool_slug}`, retryable: false } };
+    // Inject the tool definition into the active run's tool list
+    await agentRunService.activateTool(ctx.agentRunId, tool);
+    return { status: 'success', data: { slug: tool.slug, description: tool.description } };
+  },
+};
+```
+
+**Default behaviour change:** Agent runs start with only `search_tools` and `load_tool` active. Pre-loaded tools are limited to the 5 highest-priority skills for the agent's role. Everything else is discoverable via BM25 search.
+
+This is a Phase 1C feature — it requires agent loop changes. Do not ship it before the basic processor pipeline is working.
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/types/processor.ts` | New file — `ProcessorHooks`, `ProcessorContext` interfaces |
+| `server/lib/tripwire.ts` | New file — `TripWire` class |
+| `server/services/skillExecutor.ts` | Add `dispatchWithProcessors` wrapper, handle `TripWire` |
+| `server/types/tool.ts` | Add `processors?: ProcessorHooks` field to `Tool` interface |
+| `server/processors/budgetGuardrail.ts` | New file — first production processor |
+| `server/tools/meta/searchTools.ts` | New file — BM25 index + `search_tools` / `load_tool` meta tools |
+| `package.json` | Add `wink-bm25-text-search` |
+
+---
+
+## Section 8 — Memory Improvements (Mem0 patterns)
+
+**Source:** Mem0 codebase — LLM-driven deduplication, combined retrieval scoring, task scoping
+**Contracts touched:** Contract 1 (HITL flow), Contract 4 (agent test fixture — memory_state field)
+
+### Problem
+
+The current memory layer stores facts verbatim and retrieves by cosine similarity alone. This creates three failure modes: (1) duplicate facts accumulate over time, (2) old stale facts outrank recent ones if their embeddings are similar, (3) facts from one agent task bleed into unrelated tasks for the same subaccount.
+
+Mem0's approach resolves all three.
+
+---
+
+### 8.1 — LLM-driven deduplication on write
+
+Every memory write runs a deduplication loop before persisting. The LLM is asked to classify each new fact against existing facts: ADD (new information), UPDATE (amend existing), or DELETE (existing fact is now wrong/stale).
+
+```typescript
+// server/services/memoryService.ts (updated writeMemory)
+
+const DEDUP_SYSTEM = `You are a memory deduplication assistant.
+Given new facts and existing facts, classify each new fact as:
+- ADD: it is genuinely new information not in existing facts
+- UPDATE: it replaces or amends an existing fact (provide the existing fact's id)
+- DELETE: it makes an existing fact wrong or obsolete (provide the existing fact's id)
+
+Output JSON: { "ops": [{ "type": "ADD"|"UPDATE"|"DELETE", "fact": "...", "existing_id"?: "uuid", "updated_fact"?: "..." }] }
+`;
+
+export async function writeMemory(
+  subaccountId: string,
+  agentRunId: string,
+  newFacts: string[],
+): Promise<void> {
+  // Retrieve candidate facts that may overlap (top 20 by cosine similarity)
+  const candidates = await db.query.agentMemory.findMany({
+    where: and(
+      eq(agentMemory.subaccountId, subaccountId),
+      // Only compare against facts from same task type (scoped by task_slug)
+    ),
+    orderBy: desc(agentMemory.createdAt),
+    limit: 20,
+  });
+
+  const response = await llmRouter.complete({
+    system: DEDUP_SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({
+          new_facts: newFacts,
+          existing_facts: candidates.map((c) => ({ id: c.id, fact: c.content })),
+        }),
+      },
+    ],
+    max_tokens: 1024,
+  });
+
+  const { ops } = JSON.parse(response.content) as {
+    ops: Array<{
+      type: 'ADD' | 'UPDATE' | 'DELETE';
+      fact?: string;
+      existing_id?: string;
+      updated_fact?: string;
+    }>;
+  };
+
+  await db.transaction(async (tx) => {
+    for (const op of ops) {
+      if (op.type === 'ADD' && op.fact) {
+        const embedding = await embeddingService.embed(op.fact);
+        await tx.insert(agentMemory).values({
+          id: uuidv4(),
+          subaccountId,
+          agentRunId,
+          content: op.fact,
+          embedding,
+          createdAt: new Date(),
+        });
+      } else if (op.type === 'UPDATE' && op.existing_id && op.updated_fact) {
+        const embedding = await embeddingService.embed(op.updated_fact);
+        await tx
+          .update(agentMemory)
+          .set({ content: op.updated_fact, embedding, updatedAt: new Date() })
+          .where(eq(agentMemory.id, op.existing_id));
+      } else if (op.type === 'DELETE' && op.existing_id) {
+        await tx.delete(agentMemory).where(eq(agentMemory.id, op.existing_id));
+      }
+    }
+  });
+}
+```
+
+---
+
+### 8.2 — Combined retrieval scoring
+
+Replace pure cosine similarity retrieval with a combined score that weights recency and a pre-computed quality signal.
+
+```sql
+-- Migration: add quality_score and access_count columns
+ALTER TABLE agent_memory ADD COLUMN quality_score NUMERIC(4,3) DEFAULT 0.500;
+ALTER TABLE agent_memory ADD COLUMN access_count INTEGER DEFAULT 0;
+ALTER TABLE agent_memory ADD COLUMN last_accessed_at TIMESTAMPTZ;
+ALTER TABLE agent_memory ADD COLUMN task_slug TEXT;        -- scoping: null = global
+ALTER TABLE agent_memory ADD COLUMN agent_id TEXT;         -- scoping: null = subaccount-wide
+```
+
+```typescript
+// server/services/memoryService.ts (updated retrieveMemory)
+
+const RECENCY_HALF_LIFE_DAYS = 30;
+
+export async function retrieveMemory(
+  subaccountId: string,
+  query: string,
+  options: {
+    taskSlug?: string;
+    agentId?: string;
+    limit?: number;
+  } = {},
+): Promise<AgentMemoryRow[]> {
+  const queryEmbedding = await embeddingService.embed(query);
+  const limit = options.limit ?? 10;
+  const now = new Date();
+
+  // Raw SQL for combined scoring — zero schema change, just a computed expression
+  const rows = await db.execute<AgentMemoryRow>(sql`
+    SELECT *,
+      (
+        (1 - (embedding <=> ${queryEmbedding}::vector)) * 0.6   -- cosine similarity
+        + quality_score * 0.25                                    -- quality signal
+        + (
+            1.0 / (1.0 + EXTRACT(EPOCH FROM (${now} - created_at)) / 86400 / ${RECENCY_HALF_LIFE_DAYS})
+          ) * 0.15                                                 -- recency decay
+      ) AS combined_score
+    FROM agent_memory
+    WHERE subaccount_id = ${subaccountId}
+      ${options.taskSlug ? sql`AND (task_slug = ${options.taskSlug} OR task_slug IS NULL)` : sql``}
+      ${options.agentId ? sql`AND (agent_id = ${options.agentId} OR agent_id IS NULL)` : sql``}
+    ORDER BY combined_score DESC
+    LIMIT ${limit}
+  `);
+
+  // Bump access counters async — do not await
+  void db
+    .update(agentMemory)
+    .set({
+      accessCount: sql`access_count + 1`,
+      lastAccessedAt: now,
+    })
+    .where(
+      inArray(
+        agentMemory.id,
+        rows.map((r) => r.id),
+      ),
+    );
+
+  return rows;
+}
+```
+
+---
+
+### 8.3 — Task scoping
+
+Facts written by an agent run are tagged with `task_slug` and `agent_id`. This prevents a "send email" agent's working memory from contaminating a "lead research" agent's context window.
+
+```typescript
+// When writing facts, always pass task and agent identifiers
+await writeMemory(subaccountId, agentRunId, newFacts, {
+  taskSlug: 'lead_enrichment',
+  agentId: 'researcher_v2',
+});
+```
+
+The retrieval scoping filter (`task_slug = X OR task_slug IS NULL`) means globally-relevant facts (tagged null) always surface, while task-specific facts only appear in their own context.
+
+---
+
+### 8.4 — Decay and pruning job
+
+A scheduled job (daily) prunes memory rows that are old, low-quality, and rarely accessed.
+
+```typescript
+// server/jobs/memoryDecayJob.ts
+
+export async function runMemoryDecay() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90); // 90-day window
+
+  const pruned = await db
+    .delete(agentMemory)
+    .where(
+      and(
+        lt(agentMemory.createdAt, cutoff),
+        lt(agentMemory.qualityScore, 0.3),
+        lt(agentMemory.accessCount, 3),
+      ),
+    )
+    .returning({ id: agentMemory.id });
+
+  logger.info(`Memory decay job: pruned ${pruned.length} stale facts`);
+}
+```
+
+Schedule this in the existing jobs registry alongside the audit flush job.
+
+---
+
+### 8.5 — Quality score initialisation
+
+Quality score starts at `0.500` (neutral). It is bumped on positive signals and decayed on negative ones:
+
+| Event | Quality delta |
+|---|---|
+| Memory referenced in completed run | `+0.05` (max 1.0) |
+| Human edits or deletes the fact via UI | `-0.3` |
+| Dedup loop classifies as stale (DELETE op) | Set to `0.0` before delete |
+| Memory retrieved but run halted (budget/loop) | `-0.05` |
+
+These deltas can be applied in `processOutputStep` on the `retrieve_memory` tool.
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/services/memoryService.ts` | Add `writeMemory` dedup loop, replace retrieval scoring |
+| `db/migrations/YYYYMMDD_memory_scoring.sql` | Add `quality_score`, `access_count`, `last_accessed_at`, `task_slug`, `agent_id` columns |
+| `server/jobs/memoryDecayJob.ts` | New file — daily pruning job |
+| `server/jobs/index.ts` | Register `memoryDecayJob` |
+| `server/schema/agentMemory.ts` | Extend Drizzle schema with new columns |
+
+---
+
+## Section 9 — MCP Scaffolding (Mastra patterns)
+
+**Source:** Mastra codebase — `McpMetadata`, `ToolAnnotations`, MCP server registration
+**Contracts touched:** Contract 2 (Tool interface — `mcp` field already defined)
+
+### Problem
+
+The `Tool` interface in Contract 2 already includes an `mcp` field with `annotations` and `server_name`. This section defines how to populate that field on existing tools, and how to expose the tool registry as an MCP server so that external MCP clients (Claude Desktop, Cursor, other agents) can discover and call our tools without going through the REST API.
+
+### 9.1 — Annotating existing tools
+
+The `mcp.annotations` block maps directly to the MCP specification's `ToolAnnotations`. Add it to every tool definition now — zero runtime cost, enables MCP registration later.
+
+```typescript
+// Example: annotating the send_email tool
+export const sendEmailTool: Tool = {
+  slug: 'send_email',
+  version: '1.0.0',
+  description: 'Send an email via the connected Gmail account.',
+  input_schema: { /* ... */ },
+  gate_level: 'review',
+  idempotency_key_fn: stableHash,
+  execution_handler: sendEmailHandler,
+
+  // MCP annotations — set these now
+  mcp: {
+    annotations: {
+      readOnlyHint: false,      // modifies external state
+      destructiveHint: false,   // reversible (email can be recalled in some cases)
+      idempotentHint: false,    // same args = second email sent
+      openWorldHint: true,      // reaches external system (Gmail API)
+    },
+  },
+};
+```
+
+Standard annotation rules by tool category:
+
+| Category | readOnly | destructive | idempotent | openWorld |
+|---|---|---|---|---|
+| Read/search (list emails, search CRM) | true | false | true | true |
+| Write with external side effect (send email, create issue) | false | false | false | true |
+| Destructive write (delete record, archive contact) | false | true | false | true |
+| Pure internal compute (memory read, summarise) | true | false | true | false |
+
+---
+
+### 9.2 — MCP server registration interface
+
+```typescript
+// server/mcp/mcpServer.ts
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+
+/**
+ * Exposes the tool registry as an MCP server.
+ * Each tool's execution_handler is wrapped in the standard HITL gate.
+ * Auth is enforced via an API key that maps to a subaccountId.
+ */
+export async function startMcpServer(subaccountId: string) {
+  const server = new McpServer({
+    name: 'automation-os',
+    version: '1.0.0',
+  });
+
+  const tools = await toolRegistry.getForSubaccount(subaccountId);
+
+  for (const tool of tools) {
+    server.tool(
+      tool.slug,
+      tool.description,
+      tool.input_schema.properties as Record<string, unknown>,
+      async (input: unknown) => {
+        // All MCP calls go through the normal HITL dispatch
+        const result = await skillExecutorService.execute(tool.slug, input, {
+          subaccountId,
+          organisationId: await orgService.getOrgForSubaccount(subaccountId),
+          agentRunId: `mcp-${Date.now()}`,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result.data ?? result.error),
+            },
+          ],
+          isError: result.status === 'failed',
+        };
+      },
+    );
+  }
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+```
+
+---
+
+### 9.3 — `search_tools` and `load_tool` as MCP resources
+
+In addition to exposing tools directly, register a `list_tools` MCP resource that returns the BM25-searchable tool catalogue. External clients can fetch this to understand what capabilities are available before calling any tool.
+
+```typescript
+// server/mcp/mcpServer.ts (continued)
+
+server.resource(
+  'tool-catalogue',
+  'automation-os://tools',
+  async () => {
+    const tools = await toolRegistry.getForSubaccount(subaccountId);
+    return {
+      contents: [
+        {
+          uri: 'automation-os://tools',
+          mimeType: 'application/json',
+          text: JSON.stringify(
+            tools.map((t) => ({
+              slug: t.slug,
+              description: t.description,
+              gate_level: t.gate_level,
+              annotations: t.mcp?.annotations ?? {},
+            })),
+          ),
+        },
+      ],
+    };
+  },
+);
+```
+
+---
+
+### 9.4 — HTTP transport for remote MCP access
+
+The stdio transport above is for local clients (Claude Desktop, Cursor). For remote access (agent-to-agent, webhooks), use Streamable HTTP transport:
+
+```typescript
+// server/routes/mcp.ts
+
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+
+router.all('/mcp', authenticate, async (req, res) => {
+  const subaccountId = req.auth.subaccountId;
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => uuidv4() });
+  const mcpInstance = await buildMcpServer(subaccountId); // same server, different transport
+  await mcpInstance.connect(transport);
+  await transport.handleRequest(req, res);
+});
+```
+
+This is a Phase 1C addition. Prioritise the annotation backfill (9.1) now — it costs nothing and enables everything else.
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/types/tool.ts` | `mcp` field already in Contract 2 — no change needed |
+| All tool definition files | Add `mcp.annotations` block to each tool |
+| `server/mcp/mcpServer.ts` | New file — MCP server + tool registration + resource endpoint |
+| `server/routes/mcp.ts` | New file — HTTP transport route |
+| `server/index.ts` | Mount `/mcp` route |
+| `package.json` | Add `@modelcontextprotocol/sdk` |
+
+---
+
+## Section 10 — Phase 2 Orchestrator (CrewAI + Mastra reference)
+
+**Source:** CrewAI (Flows + Crews), Mastra (WorkflowRunState, Agent Inbox), LangGraph (checkpoint replay)
+**Contracts touched:** Contract 1 (HITL flow), Contract 3 (PolicyEngine), Contract 4 (AgentRunFixture)
+
+### Problem
+
+All current agent runs are single-agent, single-thread. There is no mechanism to compose multiple specialised agents into a workflow where one agent's output feeds the next. There is also no UI for humans to review multi-step workflow state, only individual action approvals.
+
+Phase 2 introduces two primitives: **Flows** (deterministic pipelines) and **Crews** (autonomous multi-agent groups). These are built on the contracts already defined — they are not a rewrite.
+
+---
+
+### 10.1 — Flow: deterministic pipeline
+
+A Flow is a sequence of steps, each of which is an agent run. The output of step N is the input of step N+1. Branching is explicit (if/else conditions on step outputs). Flows have their own checkpoint state so any step can be resumed after a HITL pause.
+
+```typescript
+// server/types/workflow.ts
+
+export interface WorkflowStep {
+  step_id: string;
+  agent_slug: string;
+  input_template: Record<string, unknown>; // {{previous.output.field}} interpolation
+  gate?: 'auto' | 'review';               // gate on entering this step
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  steps: WorkflowStep[];
+  version: string;
+}
+
+export interface WorkflowRunState {
+  id: string;                              // FK → workflow_runs.id
+  workflow_id: string;
+  subaccount_id: string;
+  organisation_id: string;
+  current_step_index: number;
+  status: 'running' | 'paused' | 'completed' | 'failed';
+  step_outputs: Record<string, unknown>;   // keyed by step_id
+  checkpoint: {                            // Drizzle JSONB — deterministic replay from any step
+    step_id: string;
+    input_snapshot: unknown;
+    agent_run_id: string;
+    created_at: Date;
+  } | null;
+  created_at: Date;
+  updated_at: Date;
+}
+```
+
+---
+
+### 10.2 — Crew: autonomous multi-agent group
+
+A Crew is a set of agents that collaborate on a task. Unlike a Flow, step order is determined by a Manager agent at runtime, not hardcoded. The Manager decomposes the goal into subtasks and assigns them to Worker agents.
+
+The Manager agent has access to a special `assign_task` tool:
+
+```typescript
+export const assignTaskTool: Tool = {
+  slug: 'assign_task',
+  version: '1.0.0',
+  description: 'Assign a subtask to a worker agent and wait for its result.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      worker_agent_slug: { type: 'string' },
+      task_description: { type: 'string' },
+      context: { type: 'object' },
+    },
+    required: ['worker_agent_slug', 'task_description'],
+  },
+  gate_level: 'auto',
+  idempotency_key_fn: stableHash,
+  execution_handler: async (ctx) => {
+    const { worker_agent_slug, task_description, context } = ctx.input as any;
+    const workerRun = await agentRunService.startChildRun({
+      agentSlug: worker_agent_slug,
+      parentRunId: ctx.agentRunId,
+      subaccountId: ctx.subaccountId,
+      organisationId: ctx.organisationId,
+      initialMessage: task_description,
+      memoryContext: context,
+    });
+    const result = await agentRunService.awaitCompletion(workerRun.id);
+    return { status: 'success', data: result.output };
+  },
+  mcp: { annotations: { readOnlyHint: false, openWorldHint: true } },
+};
+```
+
+---
+
+### 10.3 — Agent Inbox UI
+
+The Agent Inbox is the human interface for all pending multi-step approvals. It shows:
+
+- All `pending_approval` actions across all active workflow runs, grouped by workflow
+- The current workflow step, its inputs, and the proposed action
+- Approve / Reject / Edit controls (rendered from `interrupt_config`)
+
+This extends the existing `ReviewQueuePage` — it is not a new page. The difference is that items now link to a workflow run context panel showing the full step history.
+
+```typescript
+// server/routes/agentInbox.ts
+
+router.get('/agent-inbox', authenticate, async (req, res) => {
+  const { subaccountId, orgId } = req.auth;
+
+  const pendingActions = await db.query.actions.findMany({
+    where: and(
+      eq(actions.subaccountId, subaccountId),
+      eq(actions.status, 'pending_approval'),
+    ),
+    with: {
+      checkpoint: true,
+      workflowRun: {
+        with: { stepOutputs: true },
+      },
+    },
+    orderBy: asc(actions.createdAt),
+  });
+
+  return res.json({ items: pendingActions });
+});
+```
+
+---
+
+### 10.4 — HumanFeedbackResult audit schema
+
+Every human decision on a workflow step is stored as an immutable audit record. This extends Contract 3's `ActionCheckpoint.human_response` with workflow-level context.
+
+```typescript
+// Extends human_response on ActionCheckpoint — no schema change needed
+// The workflow_run_id and step_id are looked up via action → workflow_run join
+
+interface HumanFeedbackAuditRow {
+  id: string;
+  action_id: string;                         // FK → actions.id
+  workflow_run_id?: string;                  // null for standalone agent runs
+  step_id?: string;                          // which workflow step triggered this
+  decision: 'approve' | 'reject' | 'edit';
+  comment?: string;
+  edited_args?: Record<string, unknown>;     // present if decision = 'edit'
+  decided_by: string;                        // user ID
+  decided_at: Date;
+  subaccount_id: string;
+  organisation_id: string;
+}
+```
+
+This table is already effectively captured by the `review_audit_records` table defined in Section 4. Add `workflow_run_id` and `step_id` columns to that table during Phase 2 migrations.
+
+---
+
+### 10.5 — Outcome-collapse classifier (Phase 2 edge case)
+
+When a human edits the args of an action before approval, the LLM that originally proposed the action needs to learn from the correction. The outcome-collapse classifier is a small LLM call that compares the original proposal to the edited version and synthesises a lesson for the agent's working memory.
+
+```typescript
+// server/services/outcomeLearningService.ts
+
+const COLLAPSE_SYSTEM = `Compare an agent's original action proposal to the human-edited version.
+Output a concise lesson (1-2 sentences) for the agent that explains why the human changed it.
+Output JSON: { "lesson": "..." }`;
+
+export async function collapseOutcome(
+  originalArgs: Record<string, unknown>,
+  editedArgs: Record<string, unknown>,
+  toolSlug: string,
+  subaccountId: string,
+  agentRunId: string,
+): Promise<void> {
+  if (JSON.stringify(originalArgs) === JSON.stringify(editedArgs)) return;
+
+  const response = await llmRouter.complete({
+    system: COLLAPSE_SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({ tool: toolSlug, original: originalArgs, edited: editedArgs }),
+      },
+    ],
+    max_tokens: 256,
+  });
+
+  const { lesson } = JSON.parse(response.content);
+  await writeMemory(subaccountId, agentRunId, [lesson], { taskSlug: toolSlug });
+}
+```
+
+Call `collapseOutcome` in the approval handler when `human_response.type === 'edit'`.
+
+---
+
+### Phase 2 build sequence
+
+This section is a planning reference, not immediate implementation. The correct build order within Phase 2:
+
+1. `WorkflowDefinition` + `WorkflowRunState` DB tables + Drizzle schema
+2. `WorkflowExecutorService` — step sequencing, checkpoint writes
+3. `assign_task` tool — child run spawning
+4. Agent Inbox UI extensions on `ReviewQueuePage`
+5. `HumanFeedbackAuditRow` column additions on `review_audit_records`
+6. `outcomeLearningService` + `collapseOutcome` integration
+7. Manager agent (Crew mode) — builds on all of the above
+
+Do not ship Manager/Crew before Flows are stable. Flows can be tested deterministically (Contract 4 fixtures); Crew mode cannot.
+
+### Files to touch (Phase 2)
+
+| File | Change |
+|---|---|
+| `server/types/workflow.ts` | New file — `WorkflowDefinition`, `WorkflowRunState` |
+| `server/services/workflowExecutorService.ts` | New file — step sequencing, checkpoint writes |
+| `server/tools/internal/assignTask.ts` | New file — `assign_task` tool |
+| `server/routes/agentInbox.ts` | New file — inbox query endpoint |
+| `client/pages/ReviewQueuePage.tsx` | Extend with workflow run context panel |
+| `server/schema/workflowRuns.ts` | New Drizzle schema |
+| `db/migrations/YYYYMMDD_workflow_runs.sql` | New tables: `workflow_runs`, `workflow_step_outputs` |
+| `db/migrations/YYYYMMDD_feedback_audit_ext.sql` | Add `workflow_run_id`, `step_id` to `review_audit_records` |
+| `server/services/outcomeLearningService.ts` | New file — outcome-collapse classifier |
+
+---
+
+## Implementation Sequence
+
+The sections above define what to build. This is the order to build it.
+
+### Phase 1A — Foundation (ship together)
+
+Must all land in one PR or the system is partially broken between deploys.
+
+1. **Section 2** — Suspend/Resume DB migrations (actions table columns, `action_resume_events`, `organisation_secrets`)
+2. **Section 3** — Policy Engine (`policy_rules` table, `policyEngineService`, fallback seed)
+3. **Section 1** — HITL Wiring (`executeWithGate`, `awaitDecision`/`resolveDecision`, `buildDenialMessage`)
+
+### Phase 1B — Visibility and Compliance
+
+Each can land independently after Phase 1A.
+
+4. **Section 4** — Review Gate UX (`review_audit_records`, comment enforcement, `interrupt_config` rendering)
+5. **Section 5** — OAuth Integration Layer (provider configs, auth flow, `integrationConnectionService`)
+6. **Section 6** — Observability (`instrumentation.ts`, agent/tool/LLM spans, dual-write)
+
+### Phase 1C — Quality and Resilience
+
+Each can land independently after 1A and 1B.
+
+7. **Section 7** — Processor Guardrails (pipeline hooks, `TripWire`, budget processor)
+8. **Section 8** — Memory Improvements (dedup loop, combined scoring, task scoping, pruning)
+9. **Section 9** — MCP Scaffolding (annotation backfill first, then server + HTTP transport)
+
+### Phase 2 — Orchestration
+
+10. **Section 10** — Phase 2 Orchestrator (Flows → Crews → Manager agent → Agent Inbox)
+
+---
+
+*End of specification. Version 1.1 — complete.*
+
+

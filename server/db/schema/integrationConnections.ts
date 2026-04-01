@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, unique, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
@@ -30,6 +30,17 @@ export const integrationConnections = pgTable(
     refreshToken: text('refresh_token'),
     tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
     lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+
+    // OAuth-specific fields (Activepieces pattern — Phase 1B)
+    // Store claimed_at + expires_in rather than expires_at to avoid clock drift
+    claimedAt: bigint('claimed_at', { mode: 'number' }),   // Unix seconds
+    expiresIn: integer('expires_in'),                       // seconds until expiry
+    tokenUrl: text('token_url'),                            // stored for refresh calls
+    clientIdEnc: text('client_id_enc'),                     // AES-256-GCM encrypted
+    clientSecretEnc: text('client_secret_enc'),             // AES-256-GCM encrypted
+    oauthStatus: text('oauth_status').default('active')
+      .$type<'active' | 'expired' | 'error' | 'disconnected'>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

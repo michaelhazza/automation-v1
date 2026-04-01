@@ -54,6 +54,18 @@ export const actions = pgTable(
     retryCount: integer('retry_count').notNull().default(0),
     maxRetries: integer('max_retries').notNull().default(3),
 
+    // Suspend/resume — Windmill pattern (Phase 1A)
+    // suspend_count increments each time the action enters pending_approval.
+    // suspend_until marks when the approval window closes (timeout_at).
+    suspendCount: integer('suspend_count').notNull().default(0),
+    suspendUntil: timestamp('suspend_until', { withTimezone: true }),
+    // Checkpoint JSONB for deterministic replay (LangGraph pattern)
+    wacCheckpoint: jsonb('wac_checkpoint'),
+    // SHA-256(canonicalize(payload)) — verified before executing approved action
+    inputHash: text('input_hash'),
+    // Comment required on rejection (no silent rejections)
+    rejectionComment: text('rejection_comment'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

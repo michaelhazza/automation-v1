@@ -5,6 +5,9 @@ import { glob } from 'glob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { env } from '../lib/env.js';
+import { getActiveTrace } from '../instrumentation.js';
+import { TripWire } from '../lib/tripwire.js';
+import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
@@ -13,6 +16,7 @@ import { agentExecutionService } from './agentExecutionService.js';
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
+import { hitlService } from './hitlService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { devContextService, assertPathInRoot } from './devContextService.js';
 import {
@@ -23,6 +27,7 @@ import {
   MAX_SUB_AGENTS,
   MIN_SUB_AGENT_TOKEN_BUDGET,
   SUB_AGENT_TIMEOUT_BUFFER,
+  HITL_REVIEW_TIMEOUT_MS,
   type TaskPriority,
 } from '../config/limits.js';
 
@@ -53,6 +58,91 @@ interface SkillExecutionParams {
   context: SkillExecutionContext;
 }
 
+// ---------------------------------------------------------------------------
+// Per-tool processor hooks registry
+// Maps action type slug → ProcessorHooks (input/output transform pipeline)
+// ---------------------------------------------------------------------------
+
+const processorRegistry: Map<string, ProcessorHooks> = new Map();
+
+/** Register processor hooks for a tool slug. Called at module load time. */
+export function registerProcessor(toolSlug: string, hooks: ProcessorHooks): void {
+  processorRegistry.set(toolSlug, hooks);
+}
+
+/** Internal: run registered processor phases around a tool executor. */
+async function runWithProcessors(
+  toolSlug: string,
+  input: Record<string, unknown>,
+  context: SkillExecutionContext,
+  executor: (processedInput: Record<string, unknown>) => Promise<unknown>,
+  actionId?: string,
+): Promise<unknown> {
+  const hooks = processorRegistry.get(toolSlug);
+  const processorCtx: ProcessorContext = {
+    toolSlug,
+    input,
+    subaccountId: context.subaccountId,
+    organisationId: context.organisationId,
+    agentRunId: context.runId,
+    actionId,
+  };
+
+  let processedInput = input;
+
+  // Phase 1: processInput (before gate)
+  if (hooks?.processInput) {
+    try {
+      processedInput = (await hooks.processInput({ ...processorCtx, input: processedInput })) as Record<string, unknown>;
+    } catch (err) {
+      if (err instanceof TripWire) {
+        if (!err.options.retry) throw err;  // fatal — propagate to caller
+        return { success: false, error: err.reason, retryable: true };
+      }
+      throw err;
+    }
+  }
+
+  // Phase 2: processInputStep (after gate, before execute)
+  if (hooks?.processInputStep) {
+    try {
+      processedInput = (await hooks.processInputStep({ ...processorCtx, input: processedInput })) as Record<string, unknown>;
+    } catch (err) {
+      if (err instanceof TripWire) {
+        if (!err.options.retry) throw err;
+        return { success: false, error: err.reason, retryable: true };
+      }
+      throw err;
+    }
+  }
+
+  // Execute
+  let result: unknown;
+  try {
+    result = await executor(processedInput);
+  } catch (err) {
+    if (err instanceof TripWire) {
+      return { success: false, error: err.reason, retryable: err.options.retry };
+    }
+    throw err;
+  }
+
+  // Phase 3: processOutputStep (after execute)
+  if (hooks?.processOutputStep) {
+    try {
+      result = await hooks.processOutputStep({ ...processorCtx, input: processedInput, actionId }, result);
+    } catch (err) {
+      if (err instanceof TripWire) {
+        if (!err.options.retry) throw err;
+        return { success: false, error: err.reason, retryable: true };
+      }
+      throw err;
+    }
+  }
+
+  return result;
+}
+
 // Handoff job queue name
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 
@@ -68,6 +158,16 @@ export const skillExecutor = {
     const { skillName, input, context } = params;
 
     switch (skillName) {
+      // ── Meta tools — BM25 tool discovery (no action record) ─────────────
+      case 'search_tools': {
+        const { executeSearchTools } = await import('../tools/meta/searchTools.js');
+        return executeSearchTools(input, context);
+      }
+      case 'load_tool': {
+        const { executeLoadTool } = await import('../tools/meta/searchTools.js');
+        return executeLoadTool(input, context);
+      }
+
       // ── Direct skills (no action record) ──────────────────────────────
       case 'web_search':
         return executeWebSearch(input, context);
@@ -122,6 +222,14 @@ export const skillExecutor = {
       case 'create_pr':
         return proposeDevopsAction('create_pr', input, context);
 
+      // ── Phase 2: Workflow orchestration ──────────────────────────────────
+      case 'assign_task': {
+        const { executeAssignTask } = await import('../tools/internal/assignTask.js');
+        return executeWithActionAudit('assign_task', input, context, () =>
+          executeAssignTask(input, context),
+        );
+      }
+
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
     }
@@ -134,7 +242,10 @@ export const skillExecutor = {
 
 /**
  * Wraps an auto-gated internal skill: creates an action record for auditability,
- * then executes the original skill logic synchronously and records the result.
+ * executes synchronously, and records the result.
+ *
+ * If the policy engine has escalated this skill to review (returns pending_approval),
+ * we fall through to the review-gate path so the agent still gets a proper result.
  */
 async function executeWithActionAudit(
   actionType: string,
@@ -143,6 +254,7 @@ async function executeWithActionAudit(
   executor: () => Promise<unknown>
 ): Promise<unknown> {
   const idempotencyKey = `${actionType}:${context.runId}:${Date.now()}`;
+  const span = getActiveTrace()?.span({ name: actionType, input });
 
   try {
     const proposed = await actionService.proposeAction({
@@ -156,45 +268,77 @@ async function executeWithActionAudit(
       taskId: context.taskId,
     });
 
-    // If returned existing (not new), return its status
+    // Duplicate detected — return existing status
     if (!proposed.isNew) {
-      return { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
+      const dupeResult = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
+      span?.end({ output: dupeResult });
+      return dupeResult;
     }
 
-    // Auto-gated: should be approved immediately by proposeAction
-    if (proposed.status !== 'approved') {
-      return { success: false, action_id: proposed.actionId, status: proposed.status, message: `Action gated: ${proposed.status}` };
+    // Policy engine escalated to block — return denial immediately
+    if (proposed.status === 'blocked') {
+      const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
+      span?.end({ output: denial });
+      return denial;
     }
 
-    // Lock and execute
+    // Policy engine escalated to review — block and await human decision
+    if (proposed.status === 'pending_approval') {
+      const action = await actionService.getAction(proposed.actionId, context.organisationId);
+      await reviewService.createReviewItem(action, {
+        actionType,
+        reasoning: input.metadata ? String((input.metadata as Record<string, unknown>).reasoning ?? '') : undefined,
+        proposedPayload: input,
+      });
+      const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
+      span?.end({ output: reviewResult });
+      return reviewResult;
+    }
+
+    // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
+      span?.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
-    // Run the original skill logic
-    const result = await executor();
-
-    // Record completion
+    const result = await runWithProcessors(
+      actionType,
+      input,
+      context,
+      (_processedInput) => executor(),
+      proposed.actionId,
+    );
     const resultObj = result as Record<string, unknown>;
-    if (resultObj.success) {
+    if (resultObj?.success) {
       await actionService.markCompleted(proposed.actionId, context.organisationId, result);
     } else {
-      await actionService.markFailed(proposed.actionId, context.organisationId, resultObj.error ?? 'Unknown error');
+      await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj?.error ?? 'Unknown error'));
     }
 
+    span?.end({ output: result });
     return result;
   } catch (err) {
-    // If action tracking fails, still execute the original skill
-    // to avoid breaking existing behaviour during rollout
+    if (err instanceof TripWire && !err.options.retry) {
+      // Fatal TripWire — surface as denied result so the loop halts gracefully
+      span?.end({ output: { success: false, error: err.reason } });
+      return { success: false, error: `Action halted: ${err.reason}`, code: err.options.code };
+    }
+    // If action tracking fails, execute directly to preserve existing behaviour
     console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
+    span?.end({ output: { error: String(err) } });
     return executor();
   }
 }
 
 /**
- * Proposes a review-gated action. Does NOT execute — returns the action status
- * to the agent so it knows the action is queued for human review.
+ * Proposes a review-gated action and BLOCKS until a human decides.
+ *
+ * Returns:
+ *   - On approval: the execution result from the adapter (via hitlService)
+ *   - On rejection/timeout: a structured denial observation (not an exception)
+ *
+ * The agent receives this as a normal tool call result and continues its loop.
  */
 async function proposeReviewGatedAction(
   actionType: string,
@@ -206,7 +350,8 @@ async function proposeReviewGatedAction(
     return { success: false, error: `Unknown action type: ${actionType}` };
   }
 
-  // Build idempotency key from payload
+  const span = getActiveTrace()?.span({ name: actionType, input, metadata: { gated: true } });
+
   const keyParts = [actionType, context.subaccountId];
   if (input.thread_id) keyParts.push(String(input.thread_id));
   if (input.record_id) keyParts.push(String(input.record_id));
@@ -226,37 +371,85 @@ async function proposeReviewGatedAction(
       taskId: context.taskId,
     });
 
+    // Duplicate — return its current status
     if (!proposed.isNew) {
-      return {
-        success: true,
-        action_id: proposed.actionId,
-        status: proposed.status,
-        message: 'Action already exists (duplicate detected)',
-      };
+      const result = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Action already exists (duplicate detected)' };
+      span?.end({ output: result });
+      return result;
     }
 
-    // Create review item if pending approval
-    if (proposed.status === 'pending_approval') {
-      const action = await actionService.getAction(proposed.actionId, context.organisationId);
-      await reviewService.createReviewItem(action, {
-        actionType,
-        reasoning: input.metadata ? String((input.metadata as Record<string, unknown>).reasoning ?? '') : undefined,
-        proposedPayload: input,
-      });
+    // Policy engine blocked it — return denial immediately, no review queue entry
+    if (proposed.status === 'blocked') {
+      const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
+      span?.end({ output: denial });
+      return denial;
     }
 
-    return {
-      success: true,
-      action_id: proposed.actionId,
-      status: proposed.status,
-      message: proposed.status === 'pending_approval'
-        ? 'Action queued for human review. It will execute after approval.'
-        : `Action status: ${proposed.status}`,
-    };
+    // Policy engine auto-approved it — should not happen for review-gated skills,
+    // but handle it gracefully by dispatching immediately
+    if (proposed.status === 'approved') {
+      await executionLayerService.executeAction(proposed.actionId, context.organisationId);
+      const result = { success: true, action_id: proposed.actionId, status: 'completed', message: 'Action auto-approved and executed.' };
+      span?.end({ output: result });
+      return result;
+    }
+
+    // pending_approval — create review item, then block until decision
+    const action = await actionService.getAction(proposed.actionId, context.organisationId);
+    await reviewService.createReviewItem(action, {
+      actionType,
+      reasoning: input.metadata ? String((input.metadata as Record<string, unknown>).reasoning ?? '') : undefined,
+      proposedPayload: input,
+    });
+
+    const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
+    span?.end({ output: reviewResult });
+    return reviewResult;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    span?.end({ output: { success: false, error: errMsg } });
     return { success: false, error: `Failed to propose ${actionType}: ${errMsg}` };
   }
+}
+
+/**
+ * Shared await logic: blocks until hitlService resolves the decision,
+ * then returns the execution result or a denial observation.
+ */
+async function awaitReviewDecision(
+  actionId: string,
+  actionType: string,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const decision = await hitlService.awaitDecision(actionId, HITL_REVIEW_TIMEOUT_MS);
+
+  if (!decision.approved) {
+    return buildDenialMessage(actionType, decision.comment ?? 'No reason provided');
+  }
+
+  // Return the execution result that reviewService ran via executionLayerService
+  return {
+    success: true,
+    action_id: actionId,
+    status: 'completed',
+    result: decision.result,
+    edited: decision.editedArgs ? true : undefined,
+  };
+}
+
+/**
+ * Builds a structured denial observation that the agent receives as a tool result.
+ * The agent continues its loop — this is never thrown as an exception.
+ * Pattern from n8n: inject the denial as a tool output, not an error.
+ */
+function buildDenialMessage(actionType: string, comment: string): Record<string, unknown> {
+  return {
+    success: false,
+    status: 'denied',
+    action_type: actionType,
+    message: `Action '${actionType}' was not approved. Reason: ${comment}`,
+    instruction: 'Do not retry this action automatically. Inform the user or adjust your approach based on the feedback.',
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -33,6 +33,16 @@ interface RunGroup {
   items: ReviewItem[];
 }
 
+interface WorkflowContext {
+  workflowRunId: string;
+  workflowStepId: string | null;
+  workflowType: string | undefined;
+  label: string | null;
+  currentStepIndex: number;
+  totalSteps: number;
+  workflowStatus: string;
+}
+
 // ── Issue (task) types ────────────────────────────────────────────────────────
 
 interface Issue {
@@ -207,6 +217,8 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPayload, setEditPayload] = useState('');
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
+  // workflowContext keyed by actionId — populated from agent-inbox endpoint
+  const [workflowContextByActionId, setWorkflowContextByActionId] = useState<Map<string, WorkflowContext>>(new Map());
 
   // Issues state
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -222,11 +234,26 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     if (!subaccountId) return;
     setReviewLoading(true); setError('');
     try {
-      const res = await api.get(`/api/subaccounts/${subaccountId}/review-queue`);
-      const sorted = (res.data as ReviewItem[]).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-      setReviewItems(sorted); setSelectedIds(new Set()); setEditingId(null);
-    } catch {
-      setError('Failed to load review queue');
+      const [queueRes, inboxRes] = await Promise.allSettled([
+        api.get(`/api/subaccounts/${subaccountId}/review-queue`),
+        api.get(`/api/subaccounts/${subaccountId}/agent-inbox`),
+      ]);
+
+      if (queueRes.status === 'fulfilled') {
+        const sorted = (queueRes.value.data as ReviewItem[]).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        setReviewItems(sorted); setSelectedIds(new Set()); setEditingId(null);
+      } else {
+        setError('Failed to load review queue');
+      }
+
+      if (inboxRes.status === 'fulfilled') {
+        const inboxItems = inboxRes.value.data as Array<{ id: string; workflowContext: WorkflowContext | null }>;
+        const ctxMap = new Map<string, WorkflowContext>();
+        for (const item of inboxItems) {
+          if (item.workflowContext) ctxMap.set(item.id, item.workflowContext);
+        }
+        setWorkflowContextByActionId(ctxMap);
+      }
     } finally { setReviewLoading(false); }
   }, [subaccountId]);
 
@@ -359,11 +386,39 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
     );
   };
 
+  const renderWorkflowBanner = (wf: WorkflowContext) => {
+    const completedSteps = wf.currentStepIndex;
+    const pct = wf.totalSteps > 0 ? Math.round((completedSteps / wf.totalSteps) * 100) : 0;
+    const label = wf.label ?? wf.workflowType ?? 'Workflow';
+    const stepLabel = `Step ${completedSteps + 1} of ${wf.totalSteps}`;
+
+    return (
+      <div className="mb-3 px-3 py-2.5 bg-indigo-50 border border-indigo-100 rounded-lg">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-2">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+            <span className="text-[12px] font-semibold text-indigo-700">{label}</span>
+          </div>
+          <span className="text-[11px] text-indigo-500 font-medium">{stepLabel}</span>
+        </div>
+        <div className="w-full h-1.5 bg-indigo-100 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-indigo-500 rounded-full transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
+
   const renderItemCard = (item: ReviewItem) => {
     const isEditing = editingId === item.id;
     const isLoading = actionLoading.has(item.id);
     const badgeCls = ACTION_BADGE[item.reviewPayloadJson.actionType] ?? 'bg-slate-100 text-slate-600';
     const isReasoningExpanded = expandedReasoning.has(item.id);
+    const workflowCtx = workflowContextByActionId.get(item.actionId);
 
     return (
       <div key={item.id} className={`p-4 bg-white border border-slate-200 rounded-lg ${isLoading ? 'opacity-60 pointer-events-none' : ''}`}>
@@ -398,6 +453,8 @@ export default function ReviewQueuePage({ user: _user }: { user: { id: string; r
                 {item.reviewPayloadJson.reasoning}
               </div>
             )}
+
+            {workflowCtx && renderWorkflowBanner(workflowCtx)}
 
             {!isEditing && renderProposedPayload(item)}
 

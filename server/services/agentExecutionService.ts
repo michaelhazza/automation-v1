@@ -44,6 +44,7 @@ import {
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { langfuse, withTrace } from '../instrumentation.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -409,7 +410,18 @@ export const agentExecutionService = {
       // ── 8. Execute the agentic loop with middleware pipeline ────────────
       const pipeline = createDefaultPipeline();
 
-      const loopResult = await runAgenticLoop({
+      const trace = langfuse.trace({
+        name:      'agent-run',
+        userId:    request.subaccountId,
+        sessionId: run.id,
+        metadata: {
+          agentId:    request.agentId,
+          runType:    request.runType,
+          orgId:      request.organisationId,
+        },
+      });
+
+      const loopResult = await withTrace(trace, () => runAgenticLoop({
         runId: run.id,
         agent,
         routerCtx: {
@@ -430,7 +442,7 @@ export const agentExecutionService = {
         orgProcesses,
         saLink,
         pipeline,
-      });
+      }));
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
