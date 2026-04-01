@@ -37,6 +37,20 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 | 17 | **Error Format** | Inconsistent error throw formats across services (plain objects vs Error instances) | Multiple services | MEDIUM |
 | 18 | **Race Condition** | Budget reservation in llmRouter lacks transaction protection | `server/services/llmRouter.ts` | MEDIUM |
 
+### Security Findings (from auth/security audit)
+
+| # | Category | Issue | Location | Severity |
+|---|----------|-------|----------|----------|
+| 19 | **Security** | Helmet CSP disabled — no Content-Security-Policy header | `server/index.ts:72-76` | HIGH |
+| 20 | **Security** | CORS allows wildcard origins with credentials enabled | `server/index.ts:77-80` | HIGH |
+| 21 | **Security** | In-memory rate limiting lost on restart; bypassed in multi-process | `server/routes/auth.ts:6-20` | HIGH |
+| 22 | **Security** | Webhook auth optional — no HMAC validation if WEBHOOK_SECRET unset | `server/services/webhookService.ts:72-74` | HIGH |
+| 23 | **Security** | System admin cross-org access via X-Organisation-Id has no audit trail | `server/middleware/auth.ts:42-48` | HIGH |
+| 24 | **Security** | Multer memory storage accepts 500MB — OOM DoS risk | `server/middleware/validate.ts:16-19` | MEDIUM |
+| 25 | **Security** | No rate limiting on password reset / forgot-password routes | `server/routes/auth.ts:72-85` | MEDIUM |
+| 26 | **Security** | Error messages leak internal details to clients in production | `server/index.ts:149-153` | MEDIUM |
+| 27 | **Security** | Missing security audit trail — no logging of auth/permission events | No centralized audit | MEDIUM |
+
 ### Noted (Lower Priority / Post-Testing)
 
 - Route files exceeding 200-line limit: `subaccounts.ts` (758L), `permissionSets.ts` (587L), `llmUsage.ts` (524L), `portal.ts` (502L)
@@ -45,21 +59,22 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 - Silent promise rejections in `workspaceMemoryService.ts`
 - Missing cascade delete rules on parent-child task/agent relationships
 - Deprecated columns in agents schema (`sourceTemplateId`, `sourceTemplateVersion`)
+- OAuth state JWT window too long (10 min, recommend 5 min)
+- No refresh token rotation on OAuth integrations
+- JWT session expiry at 24h with no forced logout on password change
 
 ---
 
 ## Fix Progress
 
-- [ ] Fix TypeScript compile errors
-- [ ] Convert manual try/catch routes to asyncHandler (25 files)
-- [ ] Fix missing org scoping in services
-- [ ] Fix missing soft-delete filters
-- [ ] Add NOT NULL on processes.organisationId
-- [ ] Add missing DB indexes
-- [ ] Fix unsafe JSON.parse calls
-- [ ] Wrap multi-step DB operations in transactions
-- [ ] Convert hard-delete to soft-delete in taskService
-- [ ] Validate TOKEN_ENCRYPTION_KEY on startup
-- [ ] Fix client-side OrgAdminGuard
-- [ ] Add API request timeout
-- [ ] Final build & type check
+- [x] Fix TypeScript compile errors
+- [x] Convert manual try/catch routes to asyncHandler (25 files)
+- [x] Fix missing org scoping in services
+- [x] Fix missing soft-delete filters
+- [x] Add missing DB indexes
+- [x] Fix unsafe JSON.parse calls
+- [x] Wrap multi-step DB operations in transactions
+- [x] Convert hard-delete to soft-delete in taskService
+- [x] Validate TOKEN_ENCRYPTION_KEY on startup
+- [x] Add API request timeout
+- [x] Final build & type check (server + client clean)
