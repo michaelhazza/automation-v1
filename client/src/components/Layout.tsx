@@ -194,6 +194,13 @@ export default function Layout({ user, children }: LayoutProps) {
   const [newProjectRepoUrl, setNewProjectRepoUrl] = useState('');
 
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentDesc, setNewAgentDesc] = useState('');
+  const [newAgentPrompt, setNewAgentPrompt] = useState('');
+  const [newAgentIcon, setNewAgentIcon] = useState('');
+  const [newAgentRole, setNewAgentRole] = useState<'specialist' | 'worker' | 'orchestrator'>('specialist');
+  const [createAgentLoading, setCreateAgentLoading] = useState(false);
+  const [createAgentError, setCreateAgentError] = useState('');
 
   // New Client modal
   const [showCreateClient, setShowCreateClient] = useState(false);
@@ -803,30 +810,103 @@ export default function Layout({ user, children }: LayoutProps) {
         </div>
       )}
 
-      {/* ── Add Agent dialog ──────────────────────────────────────────── */}
+      {/* ── Create Agent modal ──────────────────────────────────────── */}
       {showCreateAgent && activeClientId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h2 className="text-[17px] font-bold text-slate-900 m-0">Add Agent</h2>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 sticky top-0 bg-white z-10">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">Create Agent</h2>
               <button onClick={() => setShowCreateAgent(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
-            <div className="p-6">
-              <p className="text-[13px] text-slate-500 mb-4 mt-0">Agents are managed at the organisation level. Use Team Templates to load agent teams into this company.</p>
-              <div className="flex flex-col gap-2">
-                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
-                  <div className="text-[14px] font-semibold text-slate-800">Manage Org Agents</div>
-                  <div className="text-[12px] text-slate-500 mt-0.5">Create, edit, and configure agents at the organisation level</div>
-                </button>
-                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents?tab=team-templates'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
-                  <div className="text-[14px] font-semibold text-slate-800">Load Team Template</div>
-                  <div className="text-[12px] text-slate-500 mt-0.5">Browse and apply a team template to this company</div>
-                </button>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading) return;
+              setCreateAgentLoading(true);
+              setCreateAgentError('');
+              try {
+                // 1. Create org-level agent
+                const { data: agent } = await api.post('/api/agents', {
+                  name: newAgentName.trim(),
+                  description: newAgentDesc.trim() || undefined,
+                  masterPrompt: newAgentPrompt.trim(),
+                  icon: newAgentIcon.trim() || undefined,
+                  agentRole: newAgentRole,
+                  status: 'active',
+                });
+                // 2. Link agent to current subaccount
+                await api.post(`/api/subaccounts/${activeClientId}/agents`, { agentId: agent.id });
+                // 3. Reset and close
+                setShowCreateAgent(false);
+                setNewAgentName(''); setNewAgentDesc(''); setNewAgentPrompt('');
+                setNewAgentIcon(''); setNewAgentRole('specialist'); setCreateAgentError('');
+                // Refresh agents list
+                api.get(`/api/subaccounts/${activeClientId}/agents`).then(({ data }) =>
+                  setNavAgents((data as NavAgent[]).filter(a => a.isActive))
+                );
+                navigate(`/agents/${agent.id}`);
+              } catch (err: unknown) {
+                const e = err as { response?: { data?: { error?: string } } };
+                setCreateAgentError(e.response?.data?.error ?? 'Failed to create agent');
+              } finally { setCreateAgentLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              {createAgentError && <div className="text-[13px] text-red-600">{createAgentError}</div>}
+              <div className="flex gap-3">
+                <div className="shrink-0">
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Icon</label>
+                  <input
+                    value={newAgentIcon}
+                    onChange={(e) => setNewAgentIcon(e.target.value)}
+                    placeholder="🤖"
+                    className="w-12 h-10 text-center text-lg border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name *</label>
+                  <input
+                    autoFocus
+                    value={newAgentName}
+                    onChange={(e) => setNewAgentName(e.target.value)}
+                    placeholder="e.g. QA Engineer"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
               </div>
-              <div className="flex justify-end mt-4">
-                <button onClick={() => setShowCreateAgent(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Close</button>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input
+                  value={newAgentDesc}
+                  onChange={(e) => setNewAgentDesc(e.target.value)}
+                  placeholder="What does this agent do?"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
               </div>
-            </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Role</label>
+                <select
+                  value={newAgentRole}
+                  onChange={(e) => setNewAgentRole(e.target.value as typeof newAgentRole)}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="orchestrator">Orchestrator</option>
+                  <option value="specialist">Specialist</option>
+                  <option value="worker">Worker</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">System prompt *</label>
+                <textarea
+                  value={newAgentPrompt}
+                  onChange={(e) => setNewAgentPrompt(e.target.value)}
+                  placeholder="You are a QA engineer. Your job is to..."
+                  rows={5}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => setShowCreateAgent(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createAgentLoading ? 'Creating...' : 'Create Agent'}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
