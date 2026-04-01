@@ -289,7 +289,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const [saveError, setSaveError] = useState('');
 
   // Tab
-  const [agentTab, setAgentTab] = useState<'config' | 'runs' | 'usage'>('config');
+  const [agentTab, setAgentTab] = useState<'config' | 'runs' | 'budget'>('config');
 
   // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
@@ -916,7 +916,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* Tab bar — only for existing agents */}
       {!isNew && (
         <div className="flex gap-0.5 border-b border-slate-200 mb-6">
-          {(['config', 'runs', 'usage'] as const).map(t => (
+          {(['config', 'runs', 'budget'] as const).map(t => (
             <button
               key={t}
               onClick={() => setAgentTab(t)}
@@ -926,7 +926,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                   : 'text-slate-500 border-transparent hover:text-slate-800'
               }`}
             >
-              {t === 'config' ? 'Configuration' : t === 'runs' ? 'Run History' : 'Usage & Costs'}
+              {t === 'config' ? 'Configuration' : t === 'runs' ? 'Runs' : 'Budget'}
             </button>
           ))}
         </div>
@@ -1506,8 +1506,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Runs tab ────────────────────────────────────────────────────── */}
       {!isNew && agentTab === 'runs' && id && <AgentRunsTab agentId={id} />}
 
-      {/* ── Usage tab ───────────────────────────────────────────────────── */}
-      {!isNew && agentTab === 'usage' && id && <AgentUsageTab agentId={id} />}
+      {/* ── Budget tab ──────────────────────────────────────────────────── */}
+      {!isNew && agentTab === 'budget' && id && <AgentBudgetTab agentId={id} />}
 
     </>
   );
@@ -1517,8 +1517,11 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
 interface RunRow {
   id: string; agentName: string; subaccountName: string; runType: string;
-  status: string; totalTokens: number; totalToolCalls: number;
-  durationMs: number | null; createdAt: string; subaccountId: string;
+  status: string; totalTokens: number; inputTokens: number; outputTokens: number;
+  totalToolCalls: number; durationMs: number | null; createdAt: string;
+  subaccountId: string; startedAt: string | null; completedAt: string | null;
+  tasksCreated: number; tasksUpdated: number; summary: string | null;
+  tokenBudget: number;
 }
 
 const RUN_STATUS_STYLES: Record<string, string> = {
@@ -1541,11 +1544,35 @@ function RunStatusBadge({ status }: { status: string }) {
   );
 }
 
+function fmtTokens(n: number | null | undefined) {
+  if (n == null) return '—';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function fmtDuration(ms: number | null | undefined) {
+  if (ms == null) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s % 60);
+  return `${m}m ${rem}s`;
+}
+
+function fmtTime(iso: string | null | undefined) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 function AgentRunsTab({ agentId }: { agentId: string }) {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [daily, setDaily] = useState<{ date: string; completed: number; failed: number; timeout: number; other: number; total: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [runCosts, setRunCosts] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1561,6 +1588,14 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
   }, [agentId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Fetch cost for expanded run
+  useEffect(() => {
+    if (!expandedId || runCosts[expandedId] !== undefined) return;
+    api.get(`/api/runs/${expandedId}/cost`)
+      .then(r => setRunCosts(prev => ({ ...prev, [expandedId]: r.data.totalCostCents ?? 0 })))
+      .catch(() => setRunCosts(prev => ({ ...prev, [expandedId]: 0 })));
+  }, [expandedId, runCosts]);
 
   const filtered = statusFilter === 'all' ? runs : runs.filter(r => r.status === statusFilter);
   const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
@@ -1596,78 +1631,146 @@ function AgentRunsTab({ agentId }: { agentId: string }) {
         ))}
       </div>
 
-      {/* Runs table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50/50">
-              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Run</th>
-              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Client</th>
-              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
-              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tokens</th>
-              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Duration</th>
-              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">When</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {loading ? (
-              [...Array(5)].map((_, i) => (
-                <tr key={i}>
-                  {[...Array(6)].map((_, j) => (
-                    <td key={j} className="px-4 py-3">
-                      <div className={`h-4 ${shimmer}`} style={{ width: j === 0 ? '80px' : j === 1 ? '100px' : '70px' }} />
-                    </td>
-                  ))}
-                </tr>
-              ))
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-sm">No runs yet</td></tr>
-            ) : (
-              filtered.map(run => (
-                <tr key={run.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3">
-                    <Link
-                      to={`/admin/subaccounts/${run.subaccountId}/runs/${run.id}`}
-                      className="font-mono text-[12px] text-indigo-600 hover:text-indigo-700 no-underline"
-                    >
-                      {run.id.substring(0, 8)}
-                    </Link>
-                    <div className="text-[11px] text-slate-400 capitalize">{run.runType}</div>
-                  </td>
-                  <td className="px-4 py-3 text-[13px] text-slate-600">{run.subaccountName}</td>
-                  <td className="px-4 py-3"><RunStatusBadge status={run.status} /></td>
-                  <td className="px-4 py-3 text-right text-[13px] text-slate-500">{run.totalTokens.toLocaleString()}</td>
-                  <td className="px-4 py-3 text-right text-[13px] text-slate-500">
-                    {run.durationMs != null ? `${(run.durationMs / 1000).toFixed(1)}s` : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-right text-[12px] text-slate-400">
+      {/* Runs list */}
+      <div className="space-y-2">
+        {loading ? (
+          [...Array(5)].map((_, i) => <div key={i} className={`h-16 ${shimmer}`} />)
+        ) : filtered.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-xl px-4 py-10 text-center text-slate-400 text-sm">No runs yet</div>
+        ) : (
+          filtered.map(run => {
+            const isExpanded = expandedId === run.id;
+            const costCents = runCosts[run.id];
+            return (
+              <div key={run.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                {/* Run summary row */}
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : run.id)}
+                  className="w-full flex items-center gap-4 px-4 py-3 bg-transparent border-0 cursor-pointer hover:bg-slate-50 transition-colors text-left [font-family:inherit]"
+                >
+                  <Link
+                    to={`/admin/subaccounts/${run.subaccountId}/runs/${run.id}`}
+                    onClick={e => e.stopPropagation()}
+                    className="font-mono text-[12px] text-indigo-600 hover:text-indigo-700 no-underline min-w-[70px]"
+                  >
+                    {run.id.substring(0, 8)}
+                  </Link>
+                  <span className="text-[11px] text-slate-400 capitalize min-w-[65px]">{run.runType}</span>
+                  <RunStatusBadge status={run.status} />
+                  <span className="text-[12px] text-slate-500 ml-auto">{fmtTokens(run.totalTokens)} tok</span>
+                  <span className="text-[12px] text-slate-500 min-w-[55px] text-right">{fmtDuration(run.durationMs)}</span>
+                  <span className="text-[11px] text-slate-400 min-w-[100px] text-right">
                     {new Date(run.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                  </span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                    className={`text-slate-300 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 px-4 py-4 bg-slate-50/50">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                      <div>
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Status</div>
+                        <RunStatusBadge status={run.status} />
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Duration</div>
+                        <div className="text-[13px] text-slate-700 font-medium">{fmtDuration(run.durationMs)}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {fmtTime(run.startedAt)} → {fmtTime(run.completedAt)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Cost</div>
+                        <div className="text-[13px] text-slate-700 font-medium">
+                          {costCents !== undefined ? `$${(costCents / 100).toFixed(4)}` : '...'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Tool Calls</div>
+                        <div className="text-[13px] text-slate-700 font-medium">{run.totalToolCalls}</div>
+                      </div>
+                    </div>
+
+                    {/* Token breakdown */}
+                    <div className="grid grid-cols-3 gap-4 mb-4">
+                      <div className="bg-white rounded-lg border border-slate-200 p-3">
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider">Input</div>
+                        <div className="text-[15px] font-semibold text-slate-800">{fmtTokens(run.inputTokens)}</div>
+                      </div>
+                      <div className="bg-white rounded-lg border border-slate-200 p-3">
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider">Output</div>
+                        <div className="text-[15px] font-semibold text-slate-800">{fmtTokens(run.outputTokens)}</div>
+                      </div>
+                      <div className="bg-white rounded-lg border border-slate-200 p-3">
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider">Budget</div>
+                        <div className="text-[15px] font-semibold text-slate-800">{fmtTokens(run.tokenBudget)}</div>
+                      </div>
+                    </div>
+
+                    {/* Issues touched */}
+                    {(run.tasksCreated > 0 || run.tasksUpdated > 0) && (
+                      <div className="mb-3">
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Issues Touched</div>
+                        <div className="text-[13px] text-slate-600">
+                          {run.tasksCreated > 0 && <span className="mr-3">{run.tasksCreated} created</span>}
+                          {run.tasksUpdated > 0 && <span>{run.tasksUpdated} updated</span>}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Summary */}
+                    {run.summary && (
+                      <div>
+                        <div className="text-[11px] text-slate-400 uppercase tracking-wider mb-1">Summary</div>
+                        <div className="text-[13px] text-slate-600 leading-relaxed">{run.summary}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Agent Usage Tab ─────────────────────────────────────────────────────────
+// ─── Agent Budget Tab ────────────────────────────────────────────────────────
 
-interface AgentMonthlyUsage {
-  entityId: string;
-  totalCostCents: number;
-  requestCount: number;
-  tokensIn?: number;
-  tokensOut?: number;
+interface AgentBudgetData {
+  period: string;
+  spend: {
+    totalCostCents: number;
+    requestCount: number;
+    totalTokensIn: number;
+    totalTokensOut: number;
+    errorCount: number;
+  };
+  config: {
+    maxCostPerRunCents: number | null;
+    maxLlmCallsPerRun: number | null;
+    tokenBudgetPerRun: number;
+  };
+  limits: {
+    monthlyCostLimitCents: number | null;
+    dailyCostLimitCents: number | null;
+    alertThresholdPct: number | null;
+  } | null;
 }
 
-function AgentUsageTab({ agentId }: { agentId: string }) {
+function AgentBudgetTab({ agentId }: { agentId: string }) {
+  const { subaccountId } = useParams();
   const thisMonth = new Date().toISOString().slice(0, 7);
   const [month, setMonth] = useState(thisMonth);
-  const [usage, setUsage] = useState<AgentMonthlyUsage | null>(null);
+  const [data, setData] = useState<AgentBudgetData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [budgetInput, setBudgetInput] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const prevMonth = (ym: string) => {
     const [y, m] = ym.split('-').map(Number);
@@ -1686,34 +1789,67 @@ function AgentUsageTab({ agentId }: { agentId: string }) {
     const [y, m] = ym.split('-');
     return new Date(Number(y), Number(m) - 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   };
-  const fmt = (c: number | null | undefined) => {
-    if (c == null) return '—';
+  const fmtCost = (c: number | null | undefined) => {
+    if (c == null || c === 0) return '$0.00';
     return `$${(c / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
-  const fmtTok = (n: number | null | undefined) => {
-    if (n == null) return '—';
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-    return String(n);
-  };
+
+  // Find first subaccount from runs (the budget endpoint needs subaccountId)
+  const [resolvedSubaccountId, setResolvedSubaccountId] = useState<string | null>(subaccountId || null);
 
   useEffect(() => {
-    setLoading(true);
-    // Agent aggregates are keyed as "orgId:agentId" — fetch via org usage agents endpoint
-    // and find this agent's row
-    api.get('/api/agent-activity/stats', { params: { sinceDays: 30 } })
-      .then(() => {})
-      .catch((err) => console.error('[AdminAgentEdit] Failed to fetch agent activity stats:', err));
+    if (resolvedSubaccountId) return;
+    api.get('/api/agent-activity', { params: { agentId, limit: 1 } })
+      .then(r => {
+        if (r.data.length > 0) setResolvedSubaccountId(r.data[0].subaccountId);
+      })
+      .catch(() => {});
+  }, [agentId, resolvedSubaccountId]);
 
-    // Use the cost aggregates scoped to this agent via the invoice-style query
-    // We'll query the org usage/agents list and look for matching agentId pattern
-    // Since agent cost aggregates use entityId = "orgId:agentId", we use the subaccount billing
-    // endpoint isn't ideal here — instead surface what we can via stats
-    setUsage(null);
-    setLoading(false);
-  }, [agentId, month]);
+  useEffect(() => {
+    if (!resolvedSubaccountId) { setLoading(false); return; }
+    setLoading(true);
+    api.get(`/api/subaccounts/${resolvedSubaccountId}/agents/${agentId}/budget`, { params: { month } })
+      .then(r => {
+        setData(r.data);
+        setBudgetInput(r.data.config.maxCostPerRunCents ? String(r.data.config.maxCostPerRunCents / 100) : '');
+      })
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [agentId, resolvedSubaccountId, month]);
+
+  const handleSaveBudget = async () => {
+    if (!resolvedSubaccountId) return;
+    setSaving(true);
+    try {
+      const cents = budgetInput ? Math.round(parseFloat(budgetInput) * 100) : null;
+      await api.put(`/api/subaccounts/${resolvedSubaccountId}/agents/${agentId}/budget`, {
+        maxCostPerRunCents: cents,
+      });
+      // Refresh
+      const r = await api.get(`/api/subaccounts/${resolvedSubaccountId}/agents/${agentId}/budget`, { params: { month } });
+      setData(r.data);
+    } catch { /* ignore */ }
+    finally { setSaving(false); }
+  };
 
   const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
+
+  if (!resolvedSubaccountId && !loading) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-slate-400 text-[13px]">
+        This agent is not linked to any client yet. Link it to a client to view budget data.
+      </div>
+    );
+  }
+
+  const spend = data?.spend;
+  const config = data?.config;
+  const limits = data?.limits;
+  const monthlyLimit = limits?.monthlyCostLimitCents;
+  const spentCents = spend?.totalCostCents ?? 0;
+  const budgetPct = monthlyLimit ? Math.min((spentCents / monthlyLimit) * 100, 100) : 0;
+  const isHealthy = !monthlyLimit || spentCents < monthlyLimit * (limits?.alertThresholdPct ?? 80) / 100;
 
   return (
     <div>
@@ -1730,21 +1866,96 @@ function AgentUsageTab({ agentId }: { agentId: string }) {
         </button>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl p-6">
-        <p className="text-[13px] text-slate-500 mb-4">
-          Agent-level cost data is aggregated across all clients. To see a breakdown by client, go to the client's
-          {' '}<strong>Usage & Costs</strong> page and filter by this agent.
-        </p>
-        {loading ? (
-          <div className="space-y-3">
-            {[...Array(3)].map((_, i) => <div key={i} className={`h-5 ${shimmer}`} />)}
+      {loading ? (
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => <div key={i} className={`h-24 ${shimmer}`} />)}
+        </div>
+      ) : (
+        <>
+          {/* Health status + observed spend */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[11px] text-slate-400 uppercase tracking-wider font-bold">Observed</div>
+                <div className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${isHealthy ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                  {isHealthy ? 'HEALTHY' : 'WARNING'}
+                </div>
+              </div>
+              <div className="text-[28px] font-bold text-slate-900">{fmtCost(spentCents)}</div>
+              <div className="text-[12px] text-slate-400 mt-1">
+                {spend?.requestCount ?? 0} requests / {spend?.errorCount ?? 0} errors
+              </div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-bold mb-3">Budget</div>
+              <div className="text-[28px] font-bold text-slate-900">
+                {monthlyLimit ? fmtCost(monthlyLimit) : 'Disabled'}
+              </div>
+              <div className="text-[12px] text-slate-400 mt-1">
+                {monthlyLimit ? `Soft alert at ${limits?.alertThresholdPct ?? 80}%` : 'No cap configured'}
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="text-[13px] text-slate-400 italic">
-            Detailed per-agent cost breakdown coming soon. Use the client Usage pages for now.
+
+          {/* Progress bar */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[12px] text-slate-500">Remaining</span>
+              <span className="text-[12px] text-slate-500">
+                {monthlyLimit ? fmtCost(Math.max(0, monthlyLimit - spentCents)) : 'Unlimited'}
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-2.5">
+              <div
+                className={`h-2.5 rounded-full transition-all ${budgetPct > 80 ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                style={{ width: monthlyLimit ? `${budgetPct}%` : '0%' }}
+              />
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Token breakdown */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="bg-white border border-slate-200 rounded-xl p-4">
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider">Input Tokens</div>
+              <div className="text-[18px] font-semibold text-slate-800 mt-1">{fmtTokens(spend?.totalTokensIn)}</div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-4">
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider">Output Tokens</div>
+              <div className="text-[18px] font-semibold text-slate-800 mt-1">{fmtTokens(spend?.totalTokensOut)}</div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-4">
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider">Per-Run Budget</div>
+              <div className="text-[18px] font-semibold text-slate-800 mt-1">{fmtTokens(config?.tokenBudgetPerRun)}</div>
+            </div>
+          </div>
+
+          {/* Set budget */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="text-[11px] text-slate-400 uppercase tracking-wider font-bold mb-3">Max Cost Per Run (USD)</div>
+            <div className="flex gap-3 items-center">
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={budgetInput}
+                onChange={e => setBudgetInput(e.target.value)}
+                placeholder="0.00"
+                className="w-48 px-3 py-2 rounded-lg border border-slate-200 text-[13px] text-slate-700 [font-family:inherit] focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+              />
+              <button
+                onClick={handleSaveBudget}
+                disabled={saving}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-[13px] font-semibold border-0 cursor-pointer hover:bg-indigo-700 transition-colors disabled:opacity-50 [font-family:inherit]"
+              >
+                {saving ? 'Saving...' : 'Set budget'}
+              </button>
+            </div>
+            <p className="text-[12px] text-slate-400 mt-2">
+              Leave empty to disable per-run cost cap. Monthly limits are configured at the workspace level.
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 }

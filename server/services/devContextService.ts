@@ -16,6 +16,8 @@ export interface DevContextGitConfig {
   repoOwner: string;
   repoName: string;
   reuseBranchPerTask: boolean;
+  /** Optional: specific GitHub connection to use (integration_connections.id) */
+  githubConnectionId?: string;
 }
 
 export interface DevContext {
@@ -92,6 +94,7 @@ function validateDevContext(raw: unknown): DevContext {
       repoOwner: git.repoOwner as string,
       repoName: git.repoName as string,
       reuseBranchPerTask: (git.reuseBranchPerTask as boolean) ?? true,
+      githubConnectionId: (git.githubConnectionId as string) ?? undefined,
     },
     resourceLimits: {
       commandTimeoutMs: ((ctx.resourceLimits as Record<string, unknown>)?.commandTimeoutMs as number) ?? 60000,
