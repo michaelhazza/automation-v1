@@ -1,8 +1,9 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { actions, reviewItems, actionEvents } from '../db/schema/index.js';
+import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
+import { hitlService } from './hitlService.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 
@@ -108,8 +109,9 @@ export const reviewService = {
     await actionService.transitionState(item.actionId, organisationId, 'approved', userId);
 
     // Dispatch execution outside the approval transaction
+    let execResult;
     try {
-      await executionLayerService.executeAction(item.actionId, organisationId);
+      execResult = await executionLayerService.executeAction(item.actionId, organisationId);
       // Mark review item as completed after successful execution
       await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
     } catch (err) {
@@ -117,13 +119,37 @@ export const reviewService = {
       console.error(`[ReviewService] Execution failed for action ${item.actionId}:`, err);
     }
 
+    // Write durable resume event
+    const action = await actionService.getAction(item.actionId, organisationId);
+    await db.insert(actionResumeEvents).values({
+      actionId: item.actionId,
+      organisationId,
+      subaccountId: action.subaccountId,
+      eventType: edits ? 'edited' : 'approved',
+      resolvedBy: userId,
+      payload: { result: execResult, edits: edits ?? null },
+      createdAt: new Date(),
+    });
+
+    // Unblock the agent's awaiting promise (if still in-process)
+    hitlService.resolveDecision(item.actionId, {
+      approved: true,
+      result: execResult,
+      editedArgs: edits,
+    });
+
     return { actionId: item.actionId };
   },
 
   /**
-   * Reject a review item.
+   * Reject a review item. A comment is required — no silent rejections.
    */
-  async rejectItem(reviewItemId: string, organisationId: string, userId: string) {
+  async rejectItem(
+    reviewItemId: string,
+    organisationId: string,
+    userId: string,
+    comment?: string,
+  ) {
     const [item] = await db
       .select()
       .from(reviewItems)
@@ -137,13 +163,39 @@ export const reviewService = {
       throw Object.assign(new Error(`Review item already resolved: ${item.reviewStatus}`), { statusCode: 409 });
     }
 
+    const rejectionComment = comment?.trim() || 'No reason provided';
+
     await db.update(reviewItems).set({
       reviewStatus: 'rejected',
       reviewedBy: userId,
       reviewedAt: new Date(),
     }).where(eq(reviewItems.id, reviewItemId));
 
+    // Store comment on the action for the agent to receive
+    await db.update(actions).set({
+      rejectionComment,
+      updatedAt: new Date(),
+    }).where(eq(actions.id, item.actionId));
+
     await actionService.transitionState(item.actionId, organisationId, 'rejected', userId);
+
+    // Write durable resume event
+    const action = await actionService.getAction(item.actionId, organisationId);
+    await db.insert(actionResumeEvents).values({
+      actionId: item.actionId,
+      organisationId,
+      subaccountId: action.subaccountId,
+      eventType: 'rejected',
+      resolvedBy: userId,
+      payload: { comment: rejectionComment },
+      createdAt: new Date(),
+    });
+
+    // Unblock the agent's awaiting promise with the denial
+    hitlService.resolveDecision(item.actionId, {
+      approved: false,
+      comment: rejectionComment,
+    });
 
     return { actionId: item.actionId };
   },

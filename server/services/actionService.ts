@@ -6,6 +6,7 @@ import {
   LEGAL_TRANSITIONS,
   type ActionStatus,
 } from '../config/actionRegistry.js';
+import { policyEngineService } from './policyEngineService.js';
 
 // ---------------------------------------------------------------------------
 // Action Service — create, validate, and transition actions
@@ -93,6 +94,20 @@ export const actionService = {
     }
 
     if (gateLevel === 'review') {
+      // Compute suspend_until from policy rule timeout or default 30 min
+      const definition = getActionDefinition(input.actionType);
+      const timeoutMs = (definition as { timeoutSeconds?: number } | undefined)
+        ?.timeoutSeconds
+        ? ((definition as unknown as { timeoutSeconds: number }).timeoutSeconds * 1000)
+        : 30 * 60 * 1000;
+      const suspendUntil = new Date(Date.now() + timeoutMs);
+
+      await db.update(actions).set({
+        suspendCount: sql`suspend_count + 1`,
+        suspendUntil,
+        updatedAt: new Date(),
+      }).where(eq(actions.id, action.id));
+
       await this.transitionState(action.id, input.organisationId, 'pending_approval');
       return { actionId: action.id, status: 'pending_approval', isNew: true };
     }
@@ -310,27 +325,32 @@ function higherGate(a: string, b: string): 'auto' | 'review' | 'block' {
  * Resolves the effective gate level from multiple sources.
  * Highest restriction wins: block > review > auto.
  *
- * Sources checked in order:
- * 1. Action type registry default (always present)
+ * Sources checked in order (Phase 1A):
+ * 1. Policy engine: first-match rule from policy_rules table (falls back to
+ *    registry default if no rules match)
  * 2. Explicit gate override from caller
  * 3. Task-level reviewRequired flag (escalates auto → review)
  * 4. Agent metadata needs_human_review flag (escalates auto → review)
- *
- * Phase 1C will add: workspace-level policy overrides
  */
 async function resolveGateLevel(
-  registryDefault: 'auto' | 'review' | 'block',
+  _registryDefault: 'auto' | 'review' | 'block',
   input: ProposeActionInput
 ): Promise<'auto' | 'review' | 'block'> {
-  // Start with registry default
-  let gate: 'auto' | 'review' | 'block' = registryDefault;
+  // 1. Policy engine — first-match, with registry default as fallback
+  const policyDecision = await policyEngineService.evaluatePolicy({
+    toolSlug: input.actionType,
+    subaccountId: input.subaccountId,
+    organisationId: input.organisationId,
+    input: input.payload,
+  });
+  let gate = policyDecision.decision;
 
-  // Explicit override from caller (e.g. skillExecutor knows this needs review)
+  // 2. Explicit override from caller
   if (input.gateOverride) {
     gate = higherGate(gate, input.gateOverride);
   }
 
-  // Task-level escalation: if the task has reviewRequired=true, escalate to review
+  // 3. Task-level escalation
   if (input.taskId) {
     const [task] = await db
       .select({ reviewRequired: tasks.reviewRequired })
@@ -342,7 +362,7 @@ async function resolveGateLevel(
     }
   }
 
-  // Agent metadata escalation: if agent flagged uncertainty, escalate to review
+  // 4. Agent metadata escalation
   if (input.metadata) {
     const meta = input.metadata as Record<string, unknown>;
     if (meta.needs_human_review === true || meta.needsHumanReview === true) {

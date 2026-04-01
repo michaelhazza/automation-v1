@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { organisations, users } from '../db/schema/index.js';
 import { emailService } from './emailService.js';
 import { assignOrgUserRole } from './permissionSeedService.js';
+import { policyEngineService } from './policyEngineService.js';
 import crypto from 'crypto';
 import { env } from '../lib/env.js';
 
@@ -70,6 +71,12 @@ export class OrganisationService {
 
     // Assign the org_admin permission set so the new admin passes org permission checks
     await assignOrgUserRole(org.id, adminUser.id, 'org_admin');
+
+    // Seed the wildcard fallback policy rule for this new org
+    await policyEngineService.seedFallbackRule(org.id).catch((err) => {
+      // Non-fatal — the policy engine falls back to registry defaults if missing
+      console.error('[OrganisationService] Failed to seed policy fallback rule:', err);
+    });
 
     try {
       await emailService.sendInvitationEmail(data.adminEmail, inviteToken, org.name);

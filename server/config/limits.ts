@@ -150,6 +150,15 @@ export const ABBREVIATED_SUMMARY_LENGTH = 500;
 /** Minimum task context length (chars) required to run vector search */
 export const MIN_QUERY_CONTEXT_LENGTH = 20;
 
+// ── Phase 1A: HITL review gate ───────────────────────────────────────────────
+
+/**
+ * How long (ms) the agent blocks waiting for a human to approve/reject a
+ * review-gated action before the decision times out as rejected.
+ * Default: 30 minutes. Override per-rule via policy_rules.timeout_seconds.
+ */
+export const HITL_REVIEW_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 // ── Phase 2B: Event-based triggers ──────────────────────────────────────────
 
 /** Max triggered agent runs per minute per workspace before suppression */
