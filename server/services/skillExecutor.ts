@@ -495,7 +495,7 @@ async function executeWebSearch(input: Record<string, unknown>, context: SkillEx
     };
 
     // Per-subaccount Tavily usage logging for billing
-    logSearchUsage(context.subaccountId, context.organisationId, context.runId).catch(() => undefined);
+    logSearchUsage(context.subaccountId, context.organisationId, context.runId).catch((err) => console.error('[SkillExecutor] Failed to log search usage:', err));
 
     return {
       success: true,
