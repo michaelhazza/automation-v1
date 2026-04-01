@@ -195,12 +195,26 @@ export const requireSubaccountPermission = (permissionKey: string) => {
     try {
       const subaccountPerms = await loadSubaccountPermissions(req.user.id, subaccountId);
 
-      if (!subaccountPerms.has(permissionKey)) {
-        res.status(403).json({ error: 'Forbidden' });
-        return;
+      if (subaccountPerms.has(permissionKey)) {
+        return next();
       }
 
-      next();
+      // Fallback: org admins and users with org-level permissions can access subaccounts
+      const organisationId = req.orgId ?? req.user.organisationId;
+      if (req.user.role === 'org_admin') {
+        return next();
+      }
+      if (organisationId) {
+        const orgPerms = req._orgPermissionCache ?? await loadOrgPermissions(req.user.id, organisationId);
+        req._orgPermissionCache = orgPerms;
+        // Map subaccount permission to org-level equivalent (e.g. subaccount.connections.view -> org.subaccounts.edit)
+        if (orgPerms.has('org.subaccounts.edit') || orgPerms.has('org.subaccounts.manage')) {
+          return next();
+        }
+      }
+
+      res.status(403).json({ error: 'Forbidden' });
+      return;
     } catch (err) {
       next(err);
     }
