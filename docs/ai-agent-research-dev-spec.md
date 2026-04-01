@@ -1223,3 +1223,520 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com   # or self-hosted URL
 | `server/services/llmRouter.ts` | Add generation span, dual-write alongside existing ledger |
 | `.env.example` | Add `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` |
 | `package.json` | Add `@langfuse/tracing`, `@langfuse/otel`, `@opentelemetry/sdk-node` |
+
+---
+
+## Section 7 — Processor Guardrails (Mastra patterns)
+
+**Source:** Mastra codebase — middleware pipeline, `TripWire`, BM25 lazy loading
+**Contracts touched:** Contract 1 (HITL flow), Contract 2 (Tool interface)
+
+### Problem
+
+The agent loop has no layered processing hooks. Once a tool call leaves `skillExecutor`, there's no standard intercept point to validate inputs, post-process outputs, enforce cost budgets, or stream partial results to the caller. Safety checks are scattered.
+
+Mastra solves this with a 5-phase middleware pipeline that fires around every tool dispatch. We adopt three of the five phases that are immediately valuable. Phases 4 (stream) and 5 (result-level) are deferred to Phase 2.
+
+---
+
+### 7.1 — ProcessorHook interface
+
+```typescript
+// server/types/processor.ts
+
+export interface ProcessorContext {
+  toolSlug: string;
+  input: unknown;
+  subaccountId: string;
+  agentRunId: string;
+  organisationId: string;
+  actionId?: string;
+}
+
+export interface ProcessorHooks {
+  /**
+   * Phase 1: Validate/transform the raw input before gate evaluation.
+   * Return modified input to continue, or throw to abort the entire call.
+   */
+  processInput?: (ctx: ProcessorContext) => Promise<unknown>;
+
+  /**
+   * Phase 2: Per-step input hook. Runs immediately before execution_handler
+   * is called (after gate approval). Can inject dynamic context.
+   */
+  processInputStep?: (ctx: ProcessorContext) => Promise<unknown>;
+
+  /**
+   * Phase 3: Post-execution output hook. Runs on every execution_handler result
+   * before the result is returned to the agent. Can sanitise, truncate, or augment.
+   */
+  processOutputStep?: (
+    ctx: ProcessorContext,
+    result: ExecutionResult,
+  ) => Promise<ExecutionResult>;
+}
+```
+
+---
+
+### 7.2 — TripWire abort signal
+
+TripWire is a typed abort mechanism for processors. It distinguishes *retryable* halts (soft abort — skip this step, try again) from *fatal* halts (kill the run entirely).
+
+```typescript
+// server/lib/tripwire.ts
+
+export class TripWire {
+  constructor(
+    public readonly reason: string,
+    public readonly options: { retry: boolean; code?: string } = { retry: false },
+  ) {}
+}
+
+/**
+ * Usage inside a ProcessorHook:
+ *
+ *   throw new TripWire('Budget exceeded', { retry: false });      // fatal — halt run
+ *   throw new TripWire('Rate limit hit, back off', { retry: true }); // soft — skip step
+ */
+```
+
+`skillExecutor.ts` catches `TripWire` separately from unknown errors:
+
+```typescript
+// server/services/skillExecutor.ts (updated dispatch wrapper)
+
+import { TripWire } from '../lib/tripwire';
+
+async function dispatchWithProcessors(
+  tool: Tool,
+  input: unknown,
+  ctx: ToolContext,
+): Promise<ExecutionResult> {
+  let processedInput = input;
+
+  // Phase 1 — processInput
+  if (tool.processors?.processInput) {
+    processedInput = await tool.processors.processInput({
+      toolSlug: tool.slug,
+      input,
+      subaccountId: ctx.subaccountId,
+      agentRunId: ctx.agentRunId,
+      organisationId: ctx.organisationId,
+    });
+  }
+
+  // Phase 2 — processInputStep (after gate, before execute)
+  if (tool.processors?.processInputStep) {
+    processedInput = await tool.processors.processInputStep({
+      toolSlug: tool.slug,
+      input: processedInput,
+      subaccountId: ctx.subaccountId,
+      agentRunId: ctx.agentRunId,
+      organisationId: ctx.organisationId,
+      actionId: ctx.actionId,
+    });
+  }
+
+  // Execute
+  let result: ExecutionResult;
+  try {
+    result = await tool.execution_handler({ ...ctx, input: processedInput });
+  } catch (err) {
+    if (err instanceof TripWire) {
+      if (!err.options.retry) {
+        // Fatal — surface as a failed result, halt agent
+        return {
+          status: 'failed',
+          error: { message: err.reason, retryable: false, code: err.options.code },
+        };
+      }
+      // Soft — treat as skippable, agent continues
+      return {
+        status: 'failed',
+        error: { message: err.reason, retryable: true, code: err.options.code },
+      };
+    }
+    throw err; // unknown errors bubble normally
+  }
+
+  // Phase 3 — processOutputStep
+  if (tool.processors?.processOutputStep) {
+    result = await tool.processors.processOutputStep(
+      {
+        toolSlug: tool.slug,
+        input: processedInput,
+        subaccountId: ctx.subaccountId,
+        agentRunId: ctx.agentRunId,
+        organisationId: ctx.organisationId,
+        actionId: ctx.actionId,
+      },
+      result,
+    );
+  }
+
+  return result;
+}
+```
+
+---
+
+### 7.3 — Budget guardrail processor (built-in example)
+
+This is the first processor to ship. It enforces a per-run cost budget using the `ExecutionResult.metadata.cost_usd` field.
+
+```typescript
+// server/processors/budgetGuardrail.ts
+
+import { TripWire } from '../lib/tripwire';
+import { agentRunService } from '../services/agentRunService';
+
+/**
+ * Attaches to any tool that emits cost_usd in its metadata.
+ * If accumulated run cost exceeds the workspace budget, throws a fatal TripWire.
+ */
+export const budgetGuardrailProcessor: Pick<ProcessorHooks, 'processOutputStep'> = {
+  async processOutputStep(ctx, result) {
+    const costThisCall = result.metadata?.cost_usd ?? 0;
+    if (costThisCall === 0) return result;
+
+    const runCost = await agentRunService.accumulateCost(ctx.agentRunId, costThisCall);
+    const budget = await agentRunService.getBudgetLimit(ctx.subaccountId);
+
+    if (runCost > budget) {
+      throw new TripWire(
+        `Run cost $${runCost.toFixed(4)} exceeded workspace budget $${budget.toFixed(2)}`,
+        { retry: false, code: 'BUDGET_EXCEEDED' },
+      );
+    }
+
+    return result;
+  },
+};
+```
+
+---
+
+### 7.4 — BM25 lazy tool loading
+
+The agent currently loads every registered skill into its system prompt on every run. This has two costs: (1) context window bloat, and (2) the LLM picks from a large flat list which creates retrieval noise.
+
+Mastra's pattern: expose two meta-tools to the agent. The agent uses `search_tools` to find relevant tools by description, then `load_tool` to activate one. The full tool list is indexed offline with BM25.
+
+```typescript
+// server/tools/meta/searchTools.ts
+
+import BM25 from 'bm25';  // npm: wink-bm25-text-search
+
+let index: BM25 | null = null;
+
+function ensureIndex(tools: Tool[]) {
+  if (index) return;
+  index = new BM25();
+  index.defineConfig({ fldWeights: { description: 1 } });
+  index.definePrepTasks([/* tokeniser, stemmer */]);
+  for (const t of tools) {
+    index.addDoc({ name: t.slug, description: t.description }, t.slug);
+  }
+  index.consolidate();
+}
+
+export const searchToolsMeta: Tool = {
+  slug: 'search_tools',
+  version: '1.0.0',
+  description: 'Find available tools by keyword. Returns up to 5 matching tool names and descriptions.',
+  input_schema: {
+    type: 'object',
+    properties: { query: { type: 'string' } },
+    required: ['query'],
+  },
+  gate_level: 'auto',
+  idempotency_key_fn: (input: any) => `search_tools:${input.query}`,
+  execution_handler: async (ctx) => {
+    const { query } = ctx.input as { query: string };
+    const allTools = await toolRegistry.getForSubaccount(ctx.subaccountId);
+    ensureIndex(allTools);
+    const results = index!.search(query, 5);
+    return {
+      status: 'success',
+      data: results.map((r: any) => ({
+        slug: r.ref,
+        description: allTools.find((t) => t.slug === r.ref)?.description,
+      })),
+    };
+  },
+};
+
+export const loadToolMeta: Tool = {
+  slug: 'load_tool',
+  version: '1.0.0',
+  description: 'Activate a tool by slug so it becomes callable in this run.',
+  input_schema: {
+    type: 'object',
+    properties: { tool_slug: { type: 'string' } },
+    required: ['tool_slug'],
+  },
+  gate_level: 'auto',
+  idempotency_key_fn: (input: any) => `load_tool:${input.tool_slug}`,
+  execution_handler: async (ctx) => {
+    const { tool_slug } = ctx.input as { tool_slug: string };
+    const tool = await toolRegistry.getOne(tool_slug, ctx.subaccountId);
+    if (!tool) return { status: 'failed', error: { message: `Tool not found: ${tool_slug}`, retryable: false } };
+    // Inject the tool definition into the active run's tool list
+    await agentRunService.activateTool(ctx.agentRunId, tool);
+    return { status: 'success', data: { slug: tool.slug, description: tool.description } };
+  },
+};
+```
+
+**Default behaviour change:** Agent runs start with only `search_tools` and `load_tool` active. Pre-loaded tools are limited to the 5 highest-priority skills for the agent's role. Everything else is discoverable via BM25 search.
+
+This is a Phase 1C feature — it requires agent loop changes. Do not ship it before the basic processor pipeline is working.
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/types/processor.ts` | New file — `ProcessorHooks`, `ProcessorContext` interfaces |
+| `server/lib/tripwire.ts` | New file — `TripWire` class |
+| `server/services/skillExecutor.ts` | Add `dispatchWithProcessors` wrapper, handle `TripWire` |
+| `server/types/tool.ts` | Add `processors?: ProcessorHooks` field to `Tool` interface |
+| `server/processors/budgetGuardrail.ts` | New file — first production processor |
+| `server/tools/meta/searchTools.ts` | New file — BM25 index + `search_tools` / `load_tool` meta tools |
+| `package.json` | Add `wink-bm25-text-search` |
+
+---
+
+## Section 8 — Memory Improvements (Mem0 patterns)
+
+**Source:** Mem0 codebase — LLM-driven deduplication, combined retrieval scoring, task scoping
+**Contracts touched:** Contract 1 (HITL flow), Contract 4 (agent test fixture — memory_state field)
+
+### Problem
+
+The current memory layer stores facts verbatim and retrieves by cosine similarity alone. This creates three failure modes: (1) duplicate facts accumulate over time, (2) old stale facts outrank recent ones if their embeddings are similar, (3) facts from one agent task bleed into unrelated tasks for the same subaccount.
+
+Mem0's approach resolves all three.
+
+---
+
+### 8.1 — LLM-driven deduplication on write
+
+Every memory write runs a deduplication loop before persisting. The LLM is asked to classify each new fact against existing facts: ADD (new information), UPDATE (amend existing), or DELETE (existing fact is now wrong/stale).
+
+```typescript
+// server/services/memoryService.ts (updated writeMemory)
+
+const DEDUP_SYSTEM = `You are a memory deduplication assistant.
+Given new facts and existing facts, classify each new fact as:
+- ADD: it is genuinely new information not in existing facts
+- UPDATE: it replaces or amends an existing fact (provide the existing fact's id)
+- DELETE: it makes an existing fact wrong or obsolete (provide the existing fact's id)
+
+Output JSON: { "ops": [{ "type": "ADD"|"UPDATE"|"DELETE", "fact": "...", "existing_id"?: "uuid", "updated_fact"?: "..." }] }
+`;
+
+export async function writeMemory(
+  subaccountId: string,
+  agentRunId: string,
+  newFacts: string[],
+): Promise<void> {
+  // Retrieve candidate facts that may overlap (top 20 by cosine similarity)
+  const candidates = await db.query.agentMemory.findMany({
+    where: and(
+      eq(agentMemory.subaccountId, subaccountId),
+      // Only compare against facts from same task type (scoped by task_slug)
+    ),
+    orderBy: desc(agentMemory.createdAt),
+    limit: 20,
+  });
+
+  const response = await llmRouter.complete({
+    system: DEDUP_SYSTEM,
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({
+          new_facts: newFacts,
+          existing_facts: candidates.map((c) => ({ id: c.id, fact: c.content })),
+        }),
+      },
+    ],
+    max_tokens: 1024,
+  });
+
+  const { ops } = JSON.parse(response.content) as {
+    ops: Array<{
+      type: 'ADD' | 'UPDATE' | 'DELETE';
+      fact?: string;
+      existing_id?: string;
+      updated_fact?: string;
+    }>;
+  };
+
+  await db.transaction(async (tx) => {
+    for (const op of ops) {
+      if (op.type === 'ADD' && op.fact) {
+        const embedding = await embeddingService.embed(op.fact);
+        await tx.insert(agentMemory).values({
+          id: uuidv4(),
+          subaccountId,
+          agentRunId,
+          content: op.fact,
+          embedding,
+          createdAt: new Date(),
+        });
+      } else if (op.type === 'UPDATE' && op.existing_id && op.updated_fact) {
+        const embedding = await embeddingService.embed(op.updated_fact);
+        await tx
+          .update(agentMemory)
+          .set({ content: op.updated_fact, embedding, updatedAt: new Date() })
+          .where(eq(agentMemory.id, op.existing_id));
+      } else if (op.type === 'DELETE' && op.existing_id) {
+        await tx.delete(agentMemory).where(eq(agentMemory.id, op.existing_id));
+      }
+    }
+  });
+}
+```
+
+---
+
+### 8.2 — Combined retrieval scoring
+
+Replace pure cosine similarity retrieval with a combined score that weights recency and a pre-computed quality signal.
+
+```sql
+-- Migration: add quality_score and access_count columns
+ALTER TABLE agent_memory ADD COLUMN quality_score NUMERIC(4,3) DEFAULT 0.500;
+ALTER TABLE agent_memory ADD COLUMN access_count INTEGER DEFAULT 0;
+ALTER TABLE agent_memory ADD COLUMN last_accessed_at TIMESTAMPTZ;
+ALTER TABLE agent_memory ADD COLUMN task_slug TEXT;        -- scoping: null = global
+ALTER TABLE agent_memory ADD COLUMN agent_id TEXT;         -- scoping: null = subaccount-wide
+```
+
+```typescript
+// server/services/memoryService.ts (updated retrieveMemory)
+
+const RECENCY_HALF_LIFE_DAYS = 30;
+
+export async function retrieveMemory(
+  subaccountId: string,
+  query: string,
+  options: {
+    taskSlug?: string;
+    agentId?: string;
+    limit?: number;
+  } = {},
+): Promise<AgentMemoryRow[]> {
+  const queryEmbedding = await embeddingService.embed(query);
+  const limit = options.limit ?? 10;
+  const now = new Date();
+
+  // Raw SQL for combined scoring — zero schema change, just a computed expression
+  const rows = await db.execute<AgentMemoryRow>(sql`
+    SELECT *,
+      (
+        (1 - (embedding <=> ${queryEmbedding}::vector)) * 0.6   -- cosine similarity
+        + quality_score * 0.25                                    -- quality signal
+        + (
+            1.0 / (1.0 + EXTRACT(EPOCH FROM (${now} - created_at)) / 86400 / ${RECENCY_HALF_LIFE_DAYS})
+          ) * 0.15                                                 -- recency decay
+      ) AS combined_score
+    FROM agent_memory
+    WHERE subaccount_id = ${subaccountId}
+      ${options.taskSlug ? sql`AND (task_slug = ${options.taskSlug} OR task_slug IS NULL)` : sql``}
+      ${options.agentId ? sql`AND (agent_id = ${options.agentId} OR agent_id IS NULL)` : sql``}
+    ORDER BY combined_score DESC
+    LIMIT ${limit}
+  `);
+
+  // Bump access counters async — do not await
+  void db
+    .update(agentMemory)
+    .set({
+      accessCount: sql`access_count + 1`,
+      lastAccessedAt: now,
+    })
+    .where(
+      inArray(
+        agentMemory.id,
+        rows.map((r) => r.id),
+      ),
+    );
+
+  return rows;
+}
+```
+
+---
+
+### 8.3 — Task scoping
+
+Facts written by an agent run are tagged with `task_slug` and `agent_id`. This prevents a "send email" agent's working memory from contaminating a "lead research" agent's context window.
+
+```typescript
+// When writing facts, always pass task and agent identifiers
+await writeMemory(subaccountId, agentRunId, newFacts, {
+  taskSlug: 'lead_enrichment',
+  agentId: 'researcher_v2',
+});
+```
+
+The retrieval scoping filter (`task_slug = X OR task_slug IS NULL`) means globally-relevant facts (tagged null) always surface, while task-specific facts only appear in their own context.
+
+---
+
+### 8.4 — Decay and pruning job
+
+A scheduled job (daily) prunes memory rows that are old, low-quality, and rarely accessed.
+
+```typescript
+// server/jobs/memoryDecayJob.ts
+
+export async function runMemoryDecay() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 90); // 90-day window
+
+  const pruned = await db
+    .delete(agentMemory)
+    .where(
+      and(
+        lt(agentMemory.createdAt, cutoff),
+        lt(agentMemory.qualityScore, 0.3),
+        lt(agentMemory.accessCount, 3),
+      ),
+    )
+    .returning({ id: agentMemory.id });
+
+  logger.info(`Memory decay job: pruned ${pruned.length} stale facts`);
+}
+```
+
+Schedule this in the existing jobs registry alongside the audit flush job.
+
+---
+
+### 8.5 — Quality score initialisation
+
+Quality score starts at `0.500` (neutral). It is bumped on positive signals and decayed on negative ones:
+
+| Event | Quality delta |
+|---|---|
+| Memory referenced in completed run | `+0.05` (max 1.0) |
+| Human edits or deletes the fact via UI | `-0.3` |
+| Dedup loop classifies as stale (DELETE op) | Set to `0.0` before delete |
+| Memory retrieved but run halted (budget/loop) | `-0.05` |
+
+These deltas can be applied in `processOutputStep` on the `retrieve_memory` tool.
+
+### Files to touch
+
+| File | Change |
+|---|---|
+| `server/services/memoryService.ts` | Add `writeMemory` dedup loop, replace retrieval scoring |
+| `db/migrations/YYYYMMDD_memory_scoring.sql` | Add `quality_score`, `access_count`, `last_accessed_at`, `task_slug`, `agent_id` columns |
+| `server/jobs/memoryDecayJob.ts` | New file — daily pruning job |
+| `server/jobs/index.ts` | Register `memoryDecayJob` |
+| `server/schema/agentMemory.ts` | Extend Drizzle schema with new columns |
+
