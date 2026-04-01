@@ -1,6 +1,7 @@
 /**
  * Local development seed script.
- * Creates the system organisation and system admin user.
+ * Creates the system organisation, system admin user, and seeds system agents
+ * from the company folder format.
  *
  * Usage:
  *   npx tsx scripts/seed-local.ts
@@ -9,7 +10,6 @@
  */
 
 import 'dotenv/config';
-import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
@@ -18,6 +18,7 @@ import bcrypt from 'bcryptjs';
 import { organisations } from '../server/db/schema/organisations.js';
 import { users } from '../server/db/schema/users.js';
 import { systemAgents } from '../server/db/schema/index.js';
+import { parseCompanyFolder, toSystemAgentRows } from './lib/companyParser.js';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -83,84 +84,47 @@ async function seedAdmin(organisationId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Minimal RFC 4180 CSV parser (duplicated from import-system-agents.ts to
-// keep seed-local.ts self-contained — no shared util imports at seed time)
+// Seed system agents from company folder format
+// Reads companies/automation-os/ (or fallback to CSV for backwards compat)
 // ---------------------------------------------------------------------------
 
-function parseCsv(raw: string): Record<string, string>[] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = '';
-  let inQuotes = false;
-  let i = 0;
-
-  while (i < raw.length) {
-    const ch = raw[i];
-    const next = raw[i + 1];
-    if (inQuotes) {
-      if (ch === '"' && next === '"') { field += '"'; i += 2; }
-      else if (ch === '"') { inQuotes = false; i++; }
-      else { field += ch; i++; }
-    } else {
-      if (ch === '"') { inQuotes = true; i++; }
-      else if (ch === ',') { row.push(field); field = ''; i++; }
-      else if (ch === '\r' && next === '\n') { row.push(field); field = ''; rows.push(row); row = []; i += 2; }
-      else if (ch === '\n') { row.push(field); field = ''; rows.push(row); row = []; i++; }
-      else { field += ch; i++; }
-    }
-  }
-  if (field || row.length > 0) { row.push(field); if (row.some(f => f !== '')) rows.push(row); }
-  if (rows.length < 2) return [];
-  const headers = rows[0];
-  return rows.slice(1).map(cols => {
-    const obj: Record<string, string> = {};
-    headers.forEach((h, idx) => { obj[h.trim()] = (cols[idx] ?? '').trim(); });
-    return obj;
-  });
-}
-
 async function seedSystemAgents() {
-  console.log('\n  Seeding system agents...');
-  const csvPath = resolve('scripts/data/system-agents.csv');
-  let raw: string;
+  console.log('\n  Seeding system agents from company folder...');
+
+  const companyDir = resolve('companies/automation-os');
+  let parsed;
   try {
-    raw = await readFile(csvPath, 'utf8');
-  } catch {
-    console.log('  [skip] scripts/data/system-agents.csv not found');
+    parsed = await parseCompanyFolder(companyDir);
+  } catch (err) {
+    console.log(`  [skip] Company folder not found or invalid: ${(err as Error).message}`);
     return;
   }
 
-  const rows = parseCsv(raw);
+  console.log(`  Company: ${parsed.manifest.name} (v${parsed.manifest.version})`);
+  console.log(`  Agents:  ${parsed.agents.length}`);
+
+  const rows = toSystemAgentRows(parsed);
+
   for (const row of rows) {
-    const slug = row.slug?.trim();
-    if (!slug) continue;
     const values = {
-      slug,
-      name: row.name,
-      description: row.description || null,
-      icon: row.icon || null,
-      masterPrompt: row.masterPrompt,
-      modelProvider: row.modelProvider || 'anthropic',
-      modelId: row.modelId || 'claude-sonnet-4-6',
-      temperature: parseFloat(row.temperature) || 0.7,
-      maxTokens: parseInt(row.maxTokens, 10) || 4096,
-      defaultSystemSkillSlugs: (() => { try { return JSON.parse(row.defaultSystemSkillSlugs); } catch { return []; } })(),
-      defaultOrgSkillSlugs: (() => { try { return JSON.parse(row.defaultOrgSkillSlugs); } catch { return []; } })(),
-      defaultTokenBudget: parseInt(row.defaultTokenBudget, 10) || 30000,
-      defaultMaxToolCalls: parseInt(row.defaultMaxToolCalls, 10) || 20,
-      executionMode: (row.executionMode as 'api' | 'headless') || 'api',
-      isPublished: row.isPublished?.toLowerCase() === 'true',
-      status: (row.status as 'draft' | 'active' | 'inactive') || 'draft',
-      defaultScheduleCron: row.defaultScheduleCron || null,
+      ...row,
       updatedAt: new Date(),
     };
-    const [existing] = await db.select({ id: systemAgents.id }).from(systemAgents).where(eq(systemAgents.slug, slug));
+
+    const [existing] = await db
+      .select({ id: systemAgents.id })
+      .from(systemAgents)
+      .where(eq(systemAgents.slug, row.slug));
+
     if (existing) {
-      await db.update(systemAgents).set(values).where(eq(systemAgents.slug, slug));
-      console.log(`  [updated] system agent: ${slug}`);
+      await db.update(systemAgents).set(values).where(eq(systemAgents.slug, row.slug));
+      console.log(`  [updated] system agent: ${row.slug}`);
     } else {
-      const [created] = await db.insert(systemAgents).values({ ...values, createdAt: new Date() }).returning({ id: systemAgents.id });
-      console.log(`  [created] system agent: ${slug} (${created.id})`);
+      const [created] = await db
+        .insert(systemAgents)
+        .values({ ...values, createdAt: new Date() })
+        .returning({ id: systemAgents.id });
+      console.log(`  [created] system agent: ${row.slug} (${created.id})`);
     }
   }
 }

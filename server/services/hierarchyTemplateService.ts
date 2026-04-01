@@ -1,4 +1,5 @@
 import { eq, and, isNull, sql } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import {
   hierarchyTemplates,
@@ -8,6 +9,12 @@ import {
   subaccountAgents,
 } from '../db/schema/index.js';
 import { buildTree, getMaxDepth } from './hierarchyService.js';
+
+const PARSER_VERSION = '1.0.0';
+
+function computeManifestHash(manifest: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+}
 
 // ---------------------------------------------------------------------------
 // Hierarchy Template Service
@@ -169,23 +176,54 @@ export const hierarchyTemplateService = {
       console.warn(`[IMPORT] Large Paperclip import: ${paperclipAgents.length} agents for org ${organisationId}`);
     }
 
+    // Compute manifest hash for idempotency
+    const manifestHash = computeManifestHash(manifest);
+
+    // Check for duplicate import within this org
+    const [existingByHash] = await db
+      .select({ id: hierarchyTemplates.id, name: hierarchyTemplates.name })
+      .from(hierarchyTemplates)
+      .where(and(
+        eq(hierarchyTemplates.organisationId, organisationId),
+        eq(hierarchyTemplates.manifestHash, manifestHash),
+        isNull(hierarchyTemplates.deletedAt)
+      ));
+
+    if (existingByHash) {
+      throw {
+        statusCode: 409,
+        message: `This manifest has already been imported as "${existingByHash.name}" (${existingByHash.id}). Delete the existing template first or modify the manifest before re-importing.`,
+      };
+    }
+
     // Load existing system agents and org agents for matching
     const sysAgents = await db.select().from(systemAgents).where(isNull(systemAgents.deletedAt));
     const orgAgents = await db.select().from(agents)
       .where(and(eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
 
-    // Create template
-    const [template] = await db
-      .insert(hierarchyTemplates)
-      .values({
-        organisationId,
-        name: data.name,
-        sourceType: 'paperclip_import',
-        paperclipManifest: manifest,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    // Create template (DB unique constraint on manifest_hash catches race conditions)
+    let template;
+    try {
+      [template] = await db
+        .insert(hierarchyTemplates)
+        .values({
+          organisationId,
+          name: data.name,
+          sourceType: 'paperclip_import',
+          paperclipManifest: manifest,
+          manifestHash,
+          parserVersion: PARSER_VERSION,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string };
+      if (pgErr.code === '23505') {
+        throw { statusCode: 409, message: 'This manifest has already been imported (concurrent duplicate detected).' };
+      }
+      throw err;
+    }
 
     // Track used slugs for collision detection
     const usedSlugs = new Set(orgAgents.map(a => a.slug));
