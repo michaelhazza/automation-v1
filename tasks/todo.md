@@ -78,3 +78,11 @@ Full audit of routes, services, DB schema, client-side code, auth/security, and 
 - [x] Validate TOKEN_ENCRYPTION_KEY on startup
 - [x] Add API request timeout
 - [x] Final build & type check (server + client clean)
+
+### Migration Required
+
+The following schema changes need a DB migration before testing:
+- `skills` table: new `deleted_at` column (for soft-delete support)
+- `task_deliverables` table: new `deleted_at` column (for soft-delete support)
+
+Generate with: `npm run db:generate` then `npm run migrate`
