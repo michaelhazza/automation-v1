@@ -4,6 +4,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { reviewService } from '../services/reviewService.js';
 import { reviewAuditService } from '../services/reviewAuditService.js';
 import { actionService } from '../services/actionService.js';
+import { queueService } from '../services/queueService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 
@@ -87,6 +88,20 @@ router.post(
       editedArgs: edits,
       proposedAt: action.createdAt,
     }).catch((err) => console.error('[ReviewItems] Audit record failed:', err));
+
+    // If this action was created by a workflow step, enqueue a resume job
+    const meta = action.metadataJson as Record<string, unknown> | null;
+    const workflowRunId = meta?.workflowRunId as string | undefined;
+    if (workflowRunId) {
+      queueService.enqueueWorkflowResume({
+        workflowRunId,
+        approvedActionId: action.id,
+        organisationId: req.orgId!,
+        subaccountId: action.subaccountId,
+        agentId: action.agentId,
+        agentRunId: action.agentRunId ?? undefined,
+      }).catch((err) => console.error('[ReviewItems] Workflow resume enqueue failed:', err));
+    }
 
     const subaccountId = action.subaccountId;
     if (subaccountId) emitSubaccountUpdate(subaccountId, 'review:item_updated', { action: 'approved' });

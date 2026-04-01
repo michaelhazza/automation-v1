@@ -51,6 +51,7 @@ let pgBossQueue: {
   start(): Promise<void>;
 } | null = null;
 const EXECUTION_QUEUE_NAME = 'execution-run';
+const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
 
 // ---------------------------------------------------------------------------
 // Advisory lock helpers — prevent duplicate maintenance runs across
@@ -114,6 +115,9 @@ async function getQueueBackend() {
   return {
     enqueue: async (executionId: string) => {
       await pgBossQueue!.send(EXECUTION_QUEUE_NAME, { executionId });
+    },
+    send: async (queue: string, data: object) => {
+      return pgBossQueue!.send(queue, data);
     },
     kind: 'pg-boss' as const,
   };
@@ -429,6 +433,41 @@ export const queueService = {
   },
 
   /**
+   * Enqueue a workflow resume job. Called from the approval handler when an
+   * action that was created by a workflow step (identified by workflowRunId
+   * in the action's metadataJson) is approved.
+   *
+   * Falls back to direct synchronous resume if pg-boss is not available.
+   */
+  async enqueueWorkflowResume(params: {
+    workflowRunId: string;
+    approvedActionId?: string;
+    organisationId: string;
+    subaccountId: string;
+    agentId: string;
+    agentRunId?: string;
+  }): Promise<void> {
+    if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+      const backend = await getQueueBackend();
+      if (backend.kind === 'pg-boss' && pgBossQueue) {
+        await pgBossQueue.send(WORKFLOW_RESUME_QUEUE, params);
+        return;
+      }
+    }
+
+    // Synchronous fallback — resume inline (no restart resilience, but functional)
+    const { resumeWorkflow } = await import('./workflowExecutorService.js');
+    resumeWorkflow(params.workflowRunId, {
+      organisationId: params.organisationId,
+      subaccountId: params.subaccountId,
+      agentId: params.agentId,
+      agentRunId: params.agentRunId,
+    }, params.approvedActionId).catch((err) => {
+      console.error('[WorkflowResume] Inline resume failed', err);
+    });
+  },
+
+  /**
    * Start periodic maintenance jobs.
    * Uses pg-boss scheduled workers when available, otherwise falls back to
    * in-process setInterval guarded by pg advisory locks to prevent duplicate
@@ -453,6 +492,23 @@ export const queueService = {
         const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
         await runMemoryDecay();
       });
+
+      // Workflow resume worker — DB-backed, survives process restarts
+      await pgBossQueue!.work(WORKFLOW_RESUME_QUEUE, async (job) => {
+        const { workflowRunId, approvedActionId, organisationId, subaccountId, agentId, agentRunId } =
+          job.data as {
+            workflowRunId: string;
+            approvedActionId?: string;
+            organisationId: string;
+            subaccountId: string;
+            agentId: string;
+            agentRunId?: string;
+          };
+
+        const { resumeWorkflow } = await import('./workflowExecutorService.js');
+        await resumeWorkflow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId);
+      });
+
       await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
