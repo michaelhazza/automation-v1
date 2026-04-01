@@ -138,8 +138,8 @@ export const requireOrgPermission = (permissionKey: string) => {
       return;
     }
 
-    // system_admin bypasses all permission checks
-    if (req.user.role === 'system_admin') {
+    // system_admin and org_admin bypass all org-level permission checks
+    if (req.user.role === 'system_admin' || req.user.role === 'org_admin') {
       return next();
     }
 

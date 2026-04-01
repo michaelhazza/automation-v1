@@ -488,6 +488,12 @@ router.get(
       return;
     }
 
+    // org_admin gets full org-level access — same as system_admin but scoped to their org
+    if (req.user!.role === 'org_admin') {
+      res.json({ permissions: ['__org_admin__'] });
+      return;
+    }
+
     const rows = await db
       .select({ permissionKey: permissionSetItems.permissionKey })
       .from(orgUserRoles)

@@ -232,8 +232,8 @@ export default function Layout({ user, children }: LayoutProps) {
 
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
   const hasAnyOrgPerm = orgPerms.size > 0;
-  const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has(key);
-  const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has(key);
+  const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has('__org_admin__') || orgPerms.has(key);
+  const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has('__org_admin__') || orgPerms.has('__org_admin__') || clientPerms.has(key);
 
   // Auto-set org context for non-system-admin users who belong to an org
   useEffect(() => {
