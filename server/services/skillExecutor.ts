@@ -14,7 +14,7 @@ import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { actionService } from './actionService.js';
-import { executionLayerService } from './executionLayerService.js';
+import { executionLayerService, registerAdapter } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
 import { hitlService } from './hitlService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
@@ -32,6 +32,21 @@ import {
 } from '../config/limits.js';
 
 const execFileAsync = promisify(execFile);
+
+// ---------------------------------------------------------------------------
+// Register worker adapter for execution layer (handles review-gated worker actions)
+// ---------------------------------------------------------------------------
+import { createWorkerAdapter } from './adapters/workerAdapter.js';
+
+registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) => {
+  const context = ctx as unknown as SkillExecutionContext;
+  switch (actionType) {
+    case 'create_page': return executeCreatePage(payload, context);
+    case 'update_page': return executeUpdatePage(payload, context);
+    case 'publish_page': return executePublishPage(payload, context);
+    default: return { success: false, error: `No worker handler for: ${actionType}` };
+  }
+}));
 
 // ---------------------------------------------------------------------------
 // Skill Executor — executes tool calls for autonomous agent runs
@@ -227,6 +242,14 @@ export const skillExecutor = {
         return proposeDevopsAction('run_command', input, context);
       case 'create_pr':
         return proposeDevopsAction('create_pr', input, context);
+
+      // ── Page infrastructure skills ──────────────────────────────────────
+      case 'create_page':
+        return proposeReviewGatedAction('create_page', input, context);
+      case 'update_page':
+        return executeWithActionAudit('update_page', input, context, () => executeUpdatePage(input, context));
+      case 'publish_page':
+        return proposeReviewGatedAction('publish_page', input, context);
 
       // ── Methodology skills — LLM-guided reasoning; executor returns a
       //    structured scaffold the agent fills using the injected instructions ─
@@ -2000,6 +2023,85 @@ async function executeRunPlaywrightTest(
     }
     return { success: false, error: `Playwright test execution failed: ${errMsg}` };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Page infrastructure skills
+// ---------------------------------------------------------------------------
+
+async function executeCreatePage(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const projectId = String(input.projectId ?? '');
+  const slug = String(input.slug ?? '');
+  const pageType = String(input.pageType ?? 'website') as 'website' | 'landing';
+  if (!projectId || !slug) return { success: false, error: 'projectId and slug are required' };
+
+  const { pageProjectService } = await import('./pageProjectService.js');
+  const { pageService } = await import('./pageService.js');
+
+  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  if (!project) return { success: false, error: 'Page project not found' };
+
+  const page = await pageService.create(
+    {
+      projectId,
+      slug,
+      pageType,
+      title: input.title ? String(input.title) : undefined,
+      html: input.html ? String(input.html) : '',
+      meta: (input.meta as Record<string, unknown>) ?? undefined,
+      formConfig: (input.formConfig as Record<string, unknown>) ?? undefined,
+      createdByAgentId: context.agentId,
+    },
+    project.slug
+  );
+
+  return { success: true, pageId: page.id, previewUrl: page.previewUrl, status: 'draft' };
+}
+
+async function executeUpdatePage(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const pageId = String(input.pageId ?? '');
+  const projectId = String(input.projectId ?? '');
+  if (!pageId || !projectId) return { success: false, error: 'pageId and projectId are required' };
+
+  const { pageProjectService } = await import('./pageProjectService.js');
+  const { pageService } = await import('./pageService.js');
+
+  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  if (!project) return { success: false, error: 'Page project not found' };
+
+  const result = await pageService.update(
+    pageId,
+    projectId,
+    {
+      html: input.html ? String(input.html) : undefined,
+      meta: input.meta as Record<string, unknown> | undefined,
+      formConfig: input.formConfig as Record<string, unknown> | undefined,
+      changeNote: input.changeNote ? String(input.changeNote) : undefined,
+    },
+    project.slug
+  );
+
+  return { success: true, pageId: result.id, previewUrl: result.previewUrl };
+}
+
+async function executePublishPage(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const pageId = String(input.pageId ?? '');
+  const projectId = String(input.projectId ?? '');
+  if (!pageId || !projectId) return { success: false, error: 'pageId and projectId are required' };
+
+  const { pageService } = await import('./pageService.js');
+  const page = await pageService.publish(pageId, projectId);
+
+  return { success: true, pageId: page.id, status: page.status, publishedAt: page.publishedAt };
 }
 
 // ---------------------------------------------------------------------------
