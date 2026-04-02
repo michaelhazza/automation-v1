@@ -346,3 +346,190 @@ Phase 2 is complete when:
 - Webhook ingestion is operational for at minimum the five key event types
 - A developer working on Phase 3 can write skills that call the integration layer interface without touching GHL-specific code
 - Rate limiting is functional and surfaces warnings when approaching GHL limits
+
+---
+
+## Phase 3: Cross-Subaccount Intelligence + Portfolio Health Agent
+
+### What this phase delivers
+
+Two tightly coupled components:
+
+1. **Generic cross-subaccount capabilities** — subaccount tags, org-level memory, and skills that let org-level agents read across subaccounts. These are platform primitives usable by any org-level agent for any purpose.
+
+2. **The Portfolio Health Agent and its intelligence skills** — a new system agent that consumes normalised data from Phase 2, computes health scores, detects anomalies, flags churn risk, generates portfolio reports, and escalates interventions through the HITL gate. This agent is the first consumer of both the org-level execution (Phase 1) and the integration layer (Phase 2).
+
+### Part A: Generic cross-subaccount capabilities
+
+#### Subaccount tags
+
+User-defined key-value tags on subaccounts. This is the grouping primitive for cohort analysis. Organisations define whatever dimensions matter to them — the platform provides the tagging infrastructure, not the categories.
+
+```
+subaccount_tags table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── subaccount_id (FK)
+├── key          (e.g. "vertical", "region", "plan", "tier")
+├── value        (e.g. "dental", "northeast", "premium", "enterprise")
+└── created_at
+
+Unique: (subaccount_id, key)
+```
+
+A GHL agency tags by vertical and region. A dev shop tags by tech stack and contract type. A property manager tags by building type and location. Same table, same API, same skills — different data.
+
+UI: tag management on the subaccount settings page. Key-value editor. Bulk tagging across multiple subaccounts.
+
+#### Org-level memory
+
+A new memory layer scoped to the organisation, not any single subaccount. This is where cross-subaccount insights and patterns are stored.
+
+```
+org_memory_entries table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── source_subaccount_ids  (jsonb array — which subaccounts contributed)
+├── agent_run_id (FK)
+├── content                ("Dental subaccounts convert 2x better with same-day follow-up")
+├── entry_type             (observation, decision, preference, issue, pattern)
+├── scope_tags             (jsonb — e.g. {"vertical": "dental"} — which segment this applies to)
+├── quality_score          (0.0–1.0, same scoring as subaccount memory entries)
+├── embedding              (vector(1536), same embedding infrastructure)
+├── evidence_count         (how many subaccounts support this insight)
+├── access_count
+├── created_at
+└── last_accessed_at
+```
+
+Design decisions:
+- **Separate table, not nullable `subaccountId` on existing memory tables.** Org insights are a different concept than subaccount memory. Mixing them muddies permissions and queries.
+- **`scope_tags`** links insights to subaccount tag dimensions. "This pattern applies to subaccounts tagged `vertical=dental`." Generic, not hardcoded.
+- **`evidence_count`** tracks how many subaccounts support this insight. Agents can weight by evidence strength.
+- **`source_subaccount_ids`** for traceability without leaking subaccount data into the insight content.
+
+The service mirrors `workspaceMemoryService` — CRUD, semantic search via embeddings, quality scoring, dedup. The dedup loop compares new org insights against existing ones using the same Mem0 pattern.
+
+#### Cross-subaccount skills
+
+Three new skills available to org-level agents:
+
+**`query_subaccount_cohort`**
+- Reads board health + memory summaries across multiple subaccounts, filtered by tags
+- Input: tag filters (e.g. `{"vertical": "dental"}`) or explicit subaccount IDs, optional metric focus
+- Output: aggregated/anonymised data per matching subaccount — board health metrics, memory summary excerpts, entity counts, last activity dates
+- Does NOT return raw subaccount data to prevent cross-subaccount data leakage — returns summaries and metrics
+- Gate level: `auto` (read-only, no side effects)
+
+**`read_org_insights`**
+- Queries org-level memory entries
+- Input: optional tag scope filter, optional semantic query, optional entry type filter
+- Output: matching org memory entries with content, scope tags, evidence count
+- Gate level: `auto`
+
+**`write_org_insight`**
+- Stores a cross-subaccount pattern in org memory
+- Input: content, entry_type, scope_tags, source_subaccount_ids, evidence_count
+- Triggers the same quality scoring and embedding pipeline as subaccount memory entries
+- Gate level: `auto` (internal state, no external effect)
+
+### Part B: Portfolio Health Agent
+
+#### Agent definition
+
+A new system agent — the Portfolio Health Agent — that operates at the organisation level using the org-level execution enabled by Phase 1. It is responsible for monitoring the portfolio as a whole, coordinating health scoring runs, detecting anomalies, managing alert delivery, and escalating findings through the HITL gate.
+
+This agent is conditionally loaded. It is not present in every organisation. It is loaded when a configuration template that requires it is applied (Phase 4). This is by design — not every organisation manages a portfolio that needs health monitoring.
+
+#### Agent responsibilities
+
+**Scheduled portfolio scans.** The agent runs on a configurable schedule (default: every 4 hours, configurable per organisation). Each run triggers a health scoring pass across all active subaccounts, compares current scores to historical baselines, and flags any subaccounts that have crossed threshold conditions.
+
+**Anomaly detection coordination.** The agent does not compute anomalies directly — that is delegated to the intelligence skills. The agent is responsible for invoking those skills, receiving their outputs, and deciding what to do with them (log, alert, escalate, act).
+
+**Alert delivery.** When the intelligence skills produce an anomaly event or a health score crosses a threshold, the agent formats and delivers an alert to the configured destination (Slack, email, in-platform notification). Alert formatting and destination are configured per-organisation, not hardcoded.
+
+**HITL gate escalation.** Alerts that require human approval before action (for example, pausing a client campaign, triggering an outreach sequence, generating a client communication) are passed through the existing HITL gate system. The agent surfaces the recommended action, the evidence, and a structured approval request.
+
+**Portfolio report generation.** On a configurable schedule (default: weekly), the agent coordinates the generation of a portfolio-level intelligence briefing and delivers it to the operator.
+
+**Memory and baseline management.** The agent maintains a rolling baseline for each subaccount in org memory — what "normal" looks like for that subaccount's key metrics. Baselines are subaccount-specific and updated continuously. This is what makes anomaly detection meaningful: a 30% drop for a subaccount that normally generates 200 leads/month is different from the same drop for one that generates 10.
+
+#### What this agent does NOT do
+
+- Deep analytical reasoning on why a subaccount is struggling — that can be delegated to other agents
+- Directly modify external platform data — that goes through the HITL gate and the appropriate skill
+- Manage individual subaccount configurations — that is the operator's responsibility
+- It monitors. It detects. It alerts. It escalates. Execution is separate.
+
+### Part C: Intelligence skills
+
+The analytical capabilities that the Portfolio Health Agent invokes. These are skills in the existing Automation OS sense: invokable by any agent with the right permissions. Although designed for the Portfolio Health Agent, they are registered in the skill library and can be enabled for other agents.
+
+#### Skill: `compute_health_score`
+
+Accepts normalised metric values for a given subaccount (from the integration layer), weights them according to a configurable scoring model, and returns a composite health score between 0 and 100 with factor breakdown.
+
+**Inputs:** Account entity, recent metric snapshot (contact growth rate, opportunity pipeline velocity, conversation engagement rate, revenue trend, platform activity).
+**Outputs:** Composite score, factor breakdown, trend direction (improving/stable/declining), confidence level.
+
+**The generic/configured split:** The skill code implements the scoring algorithm generically — it accepts a weight map and a set of signals and computes a weighted score. The weight map (how much to value lead volume versus pipeline velocity versus conversation engagement) lives in the database as configuration, per-organisation. Same skill code, different configuration.
+
+#### Skill: `detect_anomaly`
+
+Compares a current metric snapshot for a subaccount against that subaccount's historical baseline and identifies statistically significant deviations.
+
+**Inputs:** Account identifier, metric name, current value, historical baseline (rolling window stored in org memory), sensitivity configuration.
+**Outputs:** Boolean anomaly flag, deviation magnitude, direction (above/below baseline), severity (low/medium/high/critical), natural language description.
+
+**The generic/configured split:** The detection algorithm is generic. The threshold and rolling window size are configured per-organisation. Same skill code, different configuration.
+
+#### Skill: `compute_churn_risk`
+
+Evaluates behavioural signals for a subaccount and produces a churn risk score.
+
+**Inputs:** Account entity, recent HealthSnapshot history, specific risk signals (declining health trajectory, consecutive missed milestones, platform login inactivity, pipeline stagnation duration).
+**Outputs:** Churn risk score (0-100), primary risk drivers, recommended intervention type (early warning / active intervention / urgent escalation), suggested next action.
+
+**Implementation note:** At MVP, this uses a heuristic scoring model — explicit rules with configured weights. The architecture should allow replacement with an ML model later without changing the skill's interface. Build the interface right, ship the heuristic, refine over time.
+
+**The generic/configured split:** Risk signal weights and threshold bands are configured per-organisation.
+
+#### Skill: `generate_portfolio_report`
+
+Accepts a portfolio-level dataset and generates a structured intelligence briefing in natural language.
+
+**Inputs:** Full portfolio snapshot (all Account entities with latest HealthSnapshot records), reporting period, operator preferences (verbosity, focus areas, format).
+**Outputs:** Formatted briefing covering: overall portfolio health, subaccounts requiring attention, negative trends, positive patterns, and recommended priority actions. Structured for delivery via email, Slack, or in-platform.
+
+**The generic/configured split:** Report structure, language tone, and delivery format are configured per-organisation.
+
+#### Skill: `trigger_account_intervention`
+
+The action skill — the bridge between detection and execution.
+
+**Inputs:** Account identifier, intervention type (check-in sequence, campaign pause, internal alert, account manager notification, client communication draft), supporting evidence, HITL gate reference.
+**Outputs:** Intervention record (what was proposed, what was approved, what was executed), audit trail entry.
+
+**Critical design note:** This skill does not execute directly. Every execution path goes through the HITL gate first. The skill submits the intervention proposal and returns a pending status. Only on human approval does execution proceed. This is consistent with the existing platform design and is non-negotiable.
+
+**The generic/configured split:** Available intervention types and their execution logic are configured per-organisation and per-connector. A GHL organisation can pause a GHL campaign. A future HubSpot organisation can archive a deal. Same skill, different connector execution.
+
+### Data isolation
+
+When an org agent reads across subaccounts, data isolation must be maintained:
+
+- `query_subaccount_cohort` returns aggregated summaries, not raw data. Subaccount A's specific records should not appear in the context used for reasoning about Subaccount B.
+- Org memory entries (`org_memory_entries`) should contain insights and patterns, not copies of subaccount data. The `source_subaccount_ids` field is for traceability, not for re-querying.
+- Health scores and anomaly events are per-subaccount records. The Portfolio Health Agent can see all of them for its organisation, but each is attributed to its source subaccount.
+
+### Gate condition for Phase 4
+
+Phase 3 is complete when:
+- Subaccount tags can be created, queried, and used to filter subaccounts
+- Org memory entries can be created, queried via semantic search, and deduped
+- All three cross-subaccount skills are operational
+- All five intelligence skills are operational and passing integration tests against real normalised data
+- The Portfolio Health Agent successfully runs a scheduled scan cycle, invokes skills, and produces HealthSnapshot records
+- At least one end-to-end flow is demonstrated: a real metric changes, the integration layer detects it, the agent invokes `detect_anomaly`, a HITL gate proposal is generated, approval produces an intervention record
+- Skill outputs conform to the formats Phase 4's configuration system will reference
