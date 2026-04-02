@@ -10,6 +10,7 @@ import {
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { triggerService } from './triggerService.js';
 import { subtaskWakeupService } from './subtaskWakeupService.js';
+import { logger } from '../lib/logger.js';
 
 const POSITION_GAP = 1000;
 
@@ -180,7 +181,7 @@ export const taskService = {
       priority: item.priority,
       agentId: data.createdByAgentId ?? null,
     }).catch((err: unknown) => {
-      console.error('[TaskService] task_created trigger failed', {
+      logger.error('task.trigger_failed', {
         subaccountId,
         eventType: 'task_created',
         error: err instanceof Error ? err.message : String(err),
@@ -277,7 +278,7 @@ export const taskService = {
       // Wake the orchestrator when a subtask reaches a terminal or blocked state (non-blocking)
       if (data.status === 'done' || data.status === 'blocked') {
         subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId, existing.organisationId, data.status).catch((err: unknown) => {
-          console.error('[TaskService] subtask wakeup failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
+          logger.error('task.subtask_wakeup_failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
         });
       }
     }
@@ -320,7 +321,7 @@ export const taskService = {
         to: data.status,
         column: data.status,
       }).catch((err: unknown) => {
-        console.error('[TaskService] task_moved trigger failed', {
+        logger.error('task.trigger_failed', {
           subaccountId: existing.subaccountId,
           eventType: 'task_moved',
           error: err instanceof Error ? err.message : String(err),
@@ -330,7 +331,7 @@ export const taskService = {
       // Wake the orchestrator when a subtask reaches a terminal or blocked state (non-blocking)
       if (data.status === 'done' || data.status === 'blocked') {
         subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId, existing.organisationId, data.status).catch((err: unknown) => {
-          console.error('[TaskService] subtask wakeup failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
+          logger.error('task.subtask_wakeup_failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
         });
       }
     }

@@ -16,6 +16,7 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { tasks, agents, subaccountAgents, agentRuns } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
+import { logger } from '../lib/logger.js';
 
 // The slug that identifies the orchestrator agent across workspaces.
 // If the orchestrator is installed under a different slug, no wakeup fires.
@@ -74,7 +75,7 @@ export const subtaskWakeupService = {
       .limit(1);
 
     if (!saLink) {
-      console.log(`[SubtaskWakeup] No active orchestrator in subaccount ${subaccountId} — skipping wakeup`);
+      logger.info('subtask_wakeup.no_orchestrator', { subaccountId });
       return;
     }
 
@@ -93,7 +94,7 @@ export const subtaskWakeupService = {
       .limit(1);
 
     if (runningRun) {
-      console.log(`[SubtaskWakeup] Orchestrator already running (run ${runningRun.id}) — skipping wakeup`);
+      logger.info('subtask_wakeup.orchestrator_already_running', { subaccountId, runId: runningRun.id });
       return;
     }
 
@@ -108,9 +109,14 @@ export const subtaskWakeupService = {
       parentTaskStatus: parentTask?.status ?? null,
     };
 
-    console.log(
-      `[SubtaskWakeup] Waking orchestrator for subtask "${completedTask.title}" (${newStatus}) → parent "${parentTask?.title ?? completedTask.parentTaskId}"`
-    );
+    logger.info('subtask_wakeup.triggering', {
+      subaccountId,
+      subtaskId: completedTask.id,
+      subtaskTitle: completedTask.title,
+      subtaskStatus: newStatus,
+      parentTaskId: completedTask.parentTaskId,
+      parentTaskTitle: parentTask?.title ?? null,
+    });
 
     // Fire and forget — do not block the calling task update
     agentExecutionService.executeRun({
@@ -123,7 +129,7 @@ export const subtaskWakeupService = {
       taskId: completedTask.parentTaskId,
       triggerContext,
     }).catch((err: unknown) => {
-      console.error('[SubtaskWakeup] Orchestrator wakeup run failed', {
+      logger.error('subtask_wakeup.run_failed', {
         subaccountId,
         completedTaskId: taskId,
         error: err instanceof Error ? err.message : String(err),

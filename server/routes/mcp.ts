@@ -20,6 +20,7 @@ import { buildMcpServer } from '../mcp/mcpServer.js';
 import { db } from '../db/index.js';
 import { subaccountAgents } from '../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -72,7 +73,7 @@ router.all('/mcp', authenticate, async (req: Request, res: Response) => {
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   } catch (err) {
-    console.error('[MCP] Transport error', err);
+    logger.error('mcp.transport_error', { error: err instanceof Error ? err.message : String(err) });
     if (!res.headersSent) {
       res.status(500).json({ error: 'MCP transport error' });
     }

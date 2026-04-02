@@ -19,6 +19,7 @@ import { db } from '../db/index.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { taskService } from '../services/taskService.js';
 import { env } from '../lib/env.js';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -30,7 +31,7 @@ function verifyGitHubSignature(body: Buffer, signature: string | undefined): boo
   const secret = env.GITHUB_APP_WEBHOOK_SECRET;
   if (!secret) {
     // If no secret configured, skip verification (dev only)
-    console.warn('[githubWebhook] GITHUB_APP_WEBHOOK_SECRET not set — skipping signature check');
+    logger.warn('github_webhook.no_secret_configured');
     return true;
   }
   if (!signature) return false;
@@ -94,7 +95,7 @@ router.post('/api/webhooks/github', (req, res, next) => {
 
   // 1. Verify signature
   if (!verifyGitHubSignature(rawBody, signature)) {
-    console.warn('[githubWebhook] Signature verification failed', { delivery });
+    logger.warn('github_webhook.signature_failed', { delivery });
     res.status(401).json({ error: 'Invalid signature' });
     return;
   }
@@ -119,7 +120,7 @@ router.post('/api/webhooks/github', (req, res, next) => {
     }
     // ping, installation, push etc. are silently ignored
   } catch (err) {
-    console.error('[githubWebhook] Event handler error', { event, delivery, err });
+    logger.error('github_webhook.handler_error', { event, delivery, error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -133,13 +134,13 @@ async function handleIssueEvent(payload: Record<string, any>) {
   const installation = payload.installation as { id: number } | undefined;
 
   if (!installation) {
-    console.warn('[githubWebhook] issues event missing installation');
+    logger.warn('github_webhook.missing_installation', { event: 'issues' });
     return;
   }
 
   const context = await resolveSubaccountFromInstallation(installation.id);
   if (!context) {
-    console.warn('[githubWebhook] No subaccount linked to installation', installation.id);
+    logger.warn('github_webhook.no_subaccount', { installationId: installation.id });
     return;
   }
 
@@ -163,12 +164,12 @@ async function handleIssueEvent(payload: Record<string, any>) {
       }
     );
 
-    console.log(`[githubWebhook] Created task for issue #${issue.number} in ${repo}`);
+    logger.info('github_webhook.task_created', { issueNumber: issue.number, repo });
   }
 
   if (action === 'closed') {
     // Future: auto-move the matching task to 'done'. Skip for now.
-    console.log(`[githubWebhook] Issue #${issue.number} closed in ${repo} — no action taken`);
+    logger.info('github_webhook.issue_closed', { issueNumber: issue.number, repo });
   }
 }
 
@@ -210,7 +211,7 @@ async function handleIssueCommentEvent(payload: Record<string, any>) {
     }
   );
 
-  console.log(`[githubWebhook] Created task from comment on issue #${issue.number} in ${repo}`);
+  logger.info('github_webhook.task_from_comment', { issueNumber: issue.number, repo });
 }
 
 // ---------------------------------------------------------------------------
