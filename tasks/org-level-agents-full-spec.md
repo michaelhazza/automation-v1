@@ -259,6 +259,49 @@ The integration layer handles all of that complexity once, centrally, so that sk
 
 The canonical schema is the set of normalised entity types that the integration layer produces and the rest of the system consumes. It is designed from GHL's real data model (the first implementation) but named and structured generically so that a second connector (HubSpot, Shopify, Stripe) can produce the same entity types from different raw data.
 
+#### Entity identity and uniqueness
+
+Every entity ingested from an external platform is identified by a composite key:
+
+- `external_id` — the ID in the source system (e.g. GHL contact ID)
+- `source_connector` — which connector type produced it (e.g. `ghl`)
+- `source_account_id` — which external account it belongs to (e.g. GHL location ID)
+
+This composite key is the global identity for deduplication and updates. No two records may share the same `(external_id, source_connector, source_account_id)` tuple.
+
+#### State vs event separation
+
+The schema separates **current state** (latest known record) from **event history** (what happened and when):
+
+- **State tables** (`contacts`, `opportunities`, `conversations`, `revenue`) hold the latest known state of each entity. Upserted on every sync.
+- **Event tables** (`contact_events`, `opportunity_events`, `conversation_events`, `revenue_events`) record discrete changes over time. Append-only. These power anomaly detection, trend analysis, and historical baselines.
+
+This split is critical: health scoring needs current state; anomaly detection needs event history; both need to be queryable independently.
+
+#### Upsert and ordering rules
+
+- **Last-write-wins with timestamp ordering.** Each entity carries `source_updated_at` (timestamp from the external platform) and `last_synced_at` (when we last wrote it). An incoming record only overwrites the stored state if its `source_updated_at` is newer than the stored value. This handles out-of-order webhook + polling arrivals.
+- **Soft delete handling.** Entities deleted in the source system are marked with `deleted_at` rather than removed. Required for GHL (which soft-deletes contacts) and expected for future connectors. All queries filter on `deleted_at IS NULL` by default.
+
+#### Event enrichment fields
+
+Every event table entry includes, in addition to entity-specific fields:
+
+- `event_group_id` (optional) — groups related events that are part of the same real-world change (e.g. a pipeline move that triggers stage change + revenue update). Assigned by the connector when it can detect causality, or by the ingestion layer when events arrive within a short window for the same entity.
+- `event_source_type` — one of `webhook`, `poll`, or `derived` (computed by the platform, e.g. a churn risk event). Distinguishes how the event entered the system.
+- `event_ingested_at` — when the platform received the event. Separate from `source_updated_at` (when it happened in the source) and `last_synced_at` (when state was written). This three-timestamp model enables: sequence reconstruction, ingestion latency monitoring, and debugging "what actually happened vs when we knew about it."
+
+#### Data freshness metadata
+
+Every state table includes:
+- `last_synced_at` — when this record was last written by the ingestion layer
+- `source_updated_at` — the last-modified timestamp from the external platform
+- `sync_source` — whether the last update came from `webhook` or `poll`
+
+This enables the reconciliation job (below) to detect stale data and the intelligence layer to assess data confidence.
+
+#### Entity types
+
 The schema defines at minimum:
 
 **Account** — represents one subaccount mapped to an external platform account. Fields: identifier, display name, status, creation date, source connector reference. This is the central entity everything else hangs off.
@@ -273,9 +316,9 @@ The schema defines at minimum:
 
 **CampaignActivity** — a marketing activity (email send, SMS, ad) with performance signals where available.
 
-**HealthSnapshot** — a point-in-time computed summary of an account's health. Written by the platform (Phase 3 intelligence skills), not ingested from the external source.
+**HealthSnapshot** — a point-in-time computed summary of an account's health. Written by the platform (Phase 3 intelligence skills), not ingested from the external source. Includes `algorithm_version` and `config_version` for regression debugging.
 
-**AnomalyEvent** — a detected deviation from baseline in any metric. Written by the intelligence skills (Phase 3). Not ingested.
+**AnomalyEvent** — a detected deviation from baseline in any metric. Written by the intelligence skills (Phase 3). Not ingested. Includes `algorithm_version` and `config_version`.
 
 The schema is v1. It will be refactored when the second connector is built. The goal now is to get the right boundaries — agents consume entity types, not API responses — not to get the perfect field set on every entity.
 
@@ -308,6 +351,42 @@ Extends the existing `ghlAdapter.ts` with data retrieval capabilities:
 **Webhook ingestion.** GHL fires webhooks for 59 documented event types. The existing `server/routes/githubWebhook.ts` pattern (unauthenticated endpoint with signature verification) is the model. The GHL connector receives webhook events, validates their signatures, and translates them into internal event types. Key events at minimum: contact created, opportunity stage changed, conversation started, conversation went inactive, appointment booked.
 
 **Scheduled polling.** Some metrics are not available via webhooks and require polling. The connector supports scheduled polling jobs managed through the existing pg-boss scheduler. Polling frequency is configurable per-organisation.
+
+### Ingestion consistency model
+
+Webhooks and polling serve different purposes and must be reconciled:
+
+- **Webhooks = near real-time events.** They deliver changes as they happen but can be missed (network failures, downtime, ordering issues).
+- **Polling = source of truth reconciliation.** Polling jobs periodically fetch the full current state from the source and reconcile against stored data.
+
+**Idempotency.** Every ingested event carries an idempotency key derived from `(source_connector, external_id, event_type, source_timestamp)`. Duplicate events are silently dropped. This prevents double-counting when a webhook and a poll cycle deliver the same change.
+
+**Event sequencing.** When multiple updates arrive for the same entity, `source_updated_at` determines which is authoritative (see upsert rules above). Events without a source timestamp use arrival order as fallback.
+
+**Reconciliation job.** A scheduled job (default: daily, configurable) compares stored entity state against the source for each connected account. It detects:
+- Entities present in source but missing locally (missed webhook + missed poll)
+- Entities with `last_synced_at` older than expected (stale data)
+- Entities deleted in source but not locally marked
+
+The reconciliation job produces a drift report per account. Drift is considered significant — and triggers an operator-visible warning — when any of: (a) 5%+ of entities for an account are missing locally, (b) 10%+ of entities have a `source_updated_at` newer than `last_synced_at` by more than 2 polling cycles, or (c) any entities are deleted in source but not locally marked. Thresholds are configurable per-organisation.
+
+**Reconciliation authority rules.** When reconciliation detects a mismatch between stored state and the source:
+
+- **Polling (source) always wins for state.** The polled data is the source of truth. If the stored state differs from what polling returns, the stored state is overwritten — provided the polled `source_updated_at` is newer or equal. This is a repair, not a conflict.
+- **Webhooks are advisory.** Webhook-delivered data is applied optimistically (faster updates), but reconciliation can overwrite it. Webhooks are never authoritative over a more recent poll result.
+- **Repair behaviour:** On mismatch, the reconciliation job overwrites the stored state with the polled version and logs a `reconciliation_repair` event including the before/after values. No manual intervention required for state repairs. Event history is never modified — only state tables are repaired.
+
+**Last seen cursor.** The ingestion layer tracks a `last_seen_cursor` per entity type per account — the most recent `source_updated_at` or page cursor successfully processed. Polling resumes from this cursor rather than re-fetching everything.
+
+### Initial backfill strategy
+
+When a connector is first connected to an organisation:
+
+1. **Staged ingestion.** The backfill job fetches historical data in batches, respecting rate limits. It does not attempt to pull everything at once.
+2. **Priority order.** Accounts are backfilled first (the subaccount list), then contacts, then opportunities, then conversations, then revenue. This ensures the Portfolio Health Agent has the entity hierarchy before detail data.
+3. **Backfill flag.** During backfill, ingested entities are tagged with `is_backfill: true` so the intelligence layer can distinguish historical data from live activity. Anomaly detection ignores backfill data when computing baselines.
+4. **Completion signal.** When backfill completes for an account, the system emits a `backfill_complete` event. The Portfolio Health Agent waits for this before running its first health scoring pass on that account.
+5. **Webhook queueing during backfill.** Webhooks that arrive while backfill is in progress for an account are queued (not dropped, not applied immediately). Once backfill completes, queued webhooks are replayed in order, subject to normal idempotency and timestamp rules. This prevents: duplicate events from overlapping data windows, incorrect baselines from mixing historical and live data, and false anomalies immediately post-connect.
 
 ### Connector configuration in the database
 
@@ -410,6 +489,13 @@ Design decisions:
 
 The service mirrors `workspaceMemoryService` — CRUD, semantic search via embeddings, quality scoring, dedup. The dedup loop compares new org insights against existing ones using the same Mem0 pattern.
 
+**Org ↔ subaccount memory interaction rules:**
+
+- **Promotion.** A subaccount-level insight is promoted to org memory when the same pattern is observed across 3+ subaccounts (configurable threshold). The promoting agent writes a new org memory entry with `evidence_count` reflecting how many subaccounts contributed, and `source_subaccount_ids` listing them. The original subaccount entries are not deleted.
+- **Decay.** Org memory entries have a `last_validated_at` timestamp. Entries not revalidated within a configurable window (default: 30 days) have their `quality_score` decayed by 20% per missed window. Entries that decay below 0.2 are flagged for review rather than auto-deleted — the agent can re-evaluate or the operator can dismiss.
+- **Conflict resolution.** When a new insight contradicts an existing org memory entry (detected via semantic similarity + opposing sentiment), the system applies: (1) higher `evidence_count` wins if the gap is significant (2x+), (2) more recent `last_validated_at` wins if evidence is comparable, (3) if neither is clear, both are kept and the agent is prompted to resolve on its next run.
+- **No downward propagation.** Org insights are never automatically written into subaccount memory. They inform org-level agent reasoning only. If an org insight needs to influence subaccount-level behaviour, it goes through an explicit agent action (which may be HITL-gated).
+
 #### Cross-subaccount skills
 
 Three new skills available to org-level agents:
@@ -419,6 +505,7 @@ Three new skills available to org-level agents:
 - Input: tag filters (e.g. `{"vertical": "dental"}`) or explicit subaccount IDs, optional metric focus
 - Output: aggregated/anonymised data per matching subaccount — board health metrics, memory summary excerpts, entity counts, last activity dates
 - Does NOT return raw subaccount data to prevent cross-subaccount data leakage — returns summaries and metrics
+- **Scope guards:** Maximum 50 subaccounts per query (configurable). Results are paginated. If the tag filter matches more than the limit, the skill returns the first page with a continuation token. This prevents a single agent call from triggering expensive scans across hundreds of subaccounts.
 - Gate level: `auto` (read-only, no side effects)
 
 **`read_org_insights`**
@@ -455,6 +542,64 @@ This agent is conditionally loaded. It is not present in every organisation. It 
 
 **Memory and baseline management.** The agent maintains a rolling baseline for each subaccount in org memory — what "normal" looks like for that subaccount's key metrics. Baselines are subaccount-specific and updated continuously. This is what makes anomaly detection meaningful: a 30% drop for a subaccount that normally generates 200 leads/month is different from the same drop for one that generates 10.
 
+**Baseline storage.** Baselines are stored in a dedicated structured table, not in org memory. Org memory is optimised for semantic reasoning; baselines are structured time-series data that needs efficient querying and updating.
+
+```
+account_metric_baselines table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── subaccount_id (FK)
+├── metric_type         (e.g. "contact_growth", "pipeline_velocity", "conversation_engagement")
+├── rolling_avg
+├── rolling_median
+├── variance
+├── window_size_days
+├── sample_count
+├── last_computed_at
+└── created_at
+```
+
+The Portfolio Health Agent writes a human-readable summary of baseline state into org memory for reasoning purposes (e.g. "Account X typically generates 150 leads/month with low variance"). The structured table is the source of truth for computation; org memory is the source for agent reasoning.
+
+**Baseline model definition:**
+- **Window size:** Configurable per metric type. Default: 30-day rolling window for volume metrics (contacts, conversations), 14-day for velocity metrics (pipeline movement, response times). Operators can override per-organisation.
+- **Seasonality handling:** Day-of-week weighting is applied by default (agencies see predictable weekday/weekend patterns). Monthly seasonality is tracked but only applied when 90+ days of data exist.
+- **Minimum data threshold:** A baseline is not considered valid until the subaccount has at least 14 days of data for that metric. Before that threshold, anomaly detection is suppressed for that metric and the agent reports "insufficient data" rather than false positives.
+- **Adaptive windows:** For subaccounts with high variance, the window auto-expands (up to 60 days) to stabilise the baseline. For low-variance subaccounts, it can contract (down to 7 days) to increase sensitivity. The variance threshold for adaptation is configurable.
+- **Recomputation trigger:** Baselines are recomputed on a scheduled batch (default: hourly). They are not recomputed on every event ingestion — that would be expensive and noisy for high-volume accounts. The hourly batch picks up all new events since the last computation.
+
+#### Agent state machine
+
+The Portfolio Health Agent operates as a state machine for observability and debugging:
+
+```
+idle → scanning → analysing → alerting → awaiting_hitl → executing → idle
+                                    ↓
+                                  idle (no alerts needed)
+```
+
+| State | Description | Transitions |
+|-------|------------|-------------|
+| `idle` | Waiting for next scheduled scan or manual trigger | → `scanning` on schedule/trigger |
+| `scanning` | Fetching current data from integration layer for all active subaccounts | → `analysing` when data collected |
+| `analysing` | Running health scoring, anomaly detection, churn risk skills | → `alerting` if findings exist, → `idle` if none |
+| `alerting` | Formatting and delivering alerts to configured destinations | → `awaiting_hitl` if interventions proposed, → `idle` if alerts only |
+| `awaiting_hitl` | Intervention proposals submitted to review queue, waiting for operator | → `executing` on approval, → `idle` on rejection/timeout |
+| `executing` | Approved interventions being carried out via skills | → `idle` on completion |
+
+State transitions are logged with timestamps for debugging. If the agent is stuck in any non-idle state for longer than a configurable timeout (default: 30 minutes), an operator alert is raised.
+
+**Retry semantics per state:**
+
+| State | On failure | Max retries | Fallback |
+|-------|-----------|-------------|----------|
+| `scanning` | Retry data fetch with exponential backoff | 3 | → `idle` + operator warning ("scan failed, data may be stale") |
+| `analysing` | Retry failed skill invocation | 2 | → `idle` + partial results logged (healthy skills still produce output) |
+| `alerting` | Retry delivery to each destination independently | 3 | → `idle` + failed deliveries queued for next cycle |
+| `executing` | Retry the approved intervention | 1 | → `idle` + operator alert ("approved intervention failed to execute") |
+
+Failed retries never silently swallow errors. Every exhausted retry produces an operator-visible event with the failure reason.
+
 #### What this agent does NOT do
 
 - Deep analytical reasoning on why a subaccount is struggling — that can be delegated to other agents
@@ -475,6 +620,8 @@ Accepts normalised metric values for a given subaccount (from the integration la
 
 **The generic/configured split:** The skill code implements the scoring algorithm generically — it accepts a weight map and a set of signals and computes a weighted score. The weight map (how much to value lead volume versus pipeline velocity versus conversation engagement) lives in the database as configuration, per-organisation. Same skill code, different configuration.
 
+**Output versioning:** Every HealthSnapshot includes `algorithm_version` (the skill code version) and `config_version` (a hash of the weight map used). This enables before/after comparison when scoring logic or weights change, and regression debugging.
+
 #### Skill: `detect_anomaly`
 
 Compares a current metric snapshot for a subaccount against that subaccount's historical baseline and identifies statistically significant deviations.
@@ -483,6 +630,8 @@ Compares a current metric snapshot for a subaccount against that subaccount's hi
 **Outputs:** Boolean anomaly flag, deviation magnitude, direction (above/below baseline), severity (low/medium/high/critical), natural language description.
 
 **The generic/configured split:** The detection algorithm is generic. The threshold and rolling window size are configured per-organisation. Same skill code, different configuration.
+
+**Output versioning:** Every AnomalyEvent includes `algorithm_version` and `config_version` for the same regression debugging reasons as health scoring.
 
 #### Skill: `compute_churn_risk`
 
@@ -494,6 +643,8 @@ Evaluates behavioural signals for a subaccount and produces a churn risk score.
 **Implementation note:** At MVP, this uses a heuristic scoring model — explicit rules with configured weights. The architecture should allow replacement with an ML model later without changing the skill's interface. Build the interface right, ship the heuristic, refine over time.
 
 **The generic/configured split:** Risk signal weights and threshold bands are configured per-organisation.
+
+**Output versioning:** Churn risk outputs include `algorithm_version` and `config_version`, same as the other intelligence skills.
 
 #### Skill: `generate_portfolio_report`
 
@@ -597,6 +748,17 @@ The first published configuration template:
 - Default scan frequency (every 4 hours) and report schedule (weekly, Monday 8am operator timezone)
 - Skill enablement: `compute_health_score`, `detect_anomaly`, `compute_churn_risk`, `generate_portfolio_report` enabled on Portfolio Health Agent; `trigger_account_intervention` enabled with explicit HITL approval on all paths
 
+### Template dependency validation
+
+Before a template is applied, a preflight check validates that all dependencies are satisfiable:
+
+- **Connector exists.** The specified connector type is registered in the adapter registry.
+- **Required skills exist.** Every skill referenced in the skill enablement map is registered in the skill library.
+- **Config schema valid.** Operational parameters conform to the expected schema (correct types, required fields present, values within allowed ranges).
+- **Dry-run mode.** The template load operation supports a `dryRun: true` flag that runs all preflight checks and returns a validation report without making any changes. This is surfaced in the UI as a "Preview" step before activation.
+
+If any preflight check fails, the template load is rejected with a structured error listing every failure. Partial application is never allowed.
+
 ### Loading a template into an organisation
 
 When a template is applied, the system must:
@@ -630,6 +792,16 @@ All customisation is through configuration — database values, not code changes
 When a template is updated at the system admin level, existing organisations that loaded an older version are not automatically updated. The admin can push an update notification to affected organisations, and operators can choose to apply the update with a preview of what changes. This prevents silent regressions in live organisations.
 
 The existing `appliedTemplateVersion` tracking on `subaccountAgents` provides the foundation. The extension applies the same pattern to org-level agent configs and operational parameters.
+
+### Config version linkage
+
+The `config_version` referenced in intelligence skill outputs (Phase 3) must be traceable back to its source. The config version is a SHA-256 hash computed from:
+
+- The `appliedTemplateVersion` (which template was loaded)
+- Any operator overrides applied after template load (weight maps, thresholds, sensitivity settings)
+- The active connector config version
+
+This hash is stored on the organisation's config record and recomputed whenever any input changes. Intelligence outputs reference this hash, creating a complete chain: template version → operator overrides → config hash → skill output. This enables: reproducing any past computation, auditing when and why outputs shifted, and debugging regressions after config changes.
 
 ---
 
@@ -682,6 +854,14 @@ One key capability: **an org-level agent should be able to create a task on a su
 This requires the task-creation skills to accept an optional `targetSubaccountId` parameter when called from an org-level context. The skill validates that the target subaccount belongs to the same organisation before creating the task.
 
 This capability should be HITL-gated when writing to a subaccount board from an org context.
+
+### Cross-boundary permission model
+
+HITL gating is the user-facing safety layer. Below it, there is a mandatory programmatic validation layer for all cross-boundary actions:
+
+- **Target validation.** Any skill invoked from an org-level context with a `targetSubaccountId` must validate that the target subaccount belongs to the same organisation. This is a hard check in the skill execution layer, not delegated to individual skill implementations.
+- **Allowed subaccounts list.** Org agent configs include an optional `allowedSubaccountIds` field. When populated, the org agent can only target those subaccounts. When null, all subaccounts in the org are valid targets. This allows operators to restrict org agent scope (e.g. "only monitor premium-tier clients").
+- **Audit enrichment.** Every cross-boundary action logged in the `actions` table includes `source_agent_id`, `source_context` (org vs subaccount), and `reasoning_summary` (a one-line explanation from the agent of why this action was taken). This is required for debugging and operator trust.
 
 ### Gate condition
 
