@@ -7,9 +7,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { eq, and } from 'drizzle-orm';
-import { db } from '../../db/index.js';
-import { pages } from '../../db/schema/index.js';
+import { pageService } from '../../services/pageService.js';
 import type { Page } from '../../db/schema/pages.js';
 import type { PageProject } from '../../db/schema/pageProjects.js';
 import { previewTokenService } from '../../lib/previewTokenService.js';
@@ -108,16 +106,7 @@ router.get('/preview/:pageSlug', async (req: Request, res: Response, next: NextF
     const { pageSlug } = req.params;
 
     // Look up page by slug + projectId + pageId (no status filter — serves drafts)
-    const [page] = await db
-      .select()
-      .from(pages)
-      .where(
-        and(
-          eq(pages.projectId, project.id),
-          eq(pages.slug, pageSlug),
-          eq(pages.id, payload.pageId),
-        ),
-      );
+    const page = await pageService.getForPreview(payload.pageId, project.id, pageSlug);
 
     if (!page) {
       res.status(404).send('Page not found');

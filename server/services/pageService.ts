@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { pages, pageVersions, pageProjects, type NewPage } from '../db/schema/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { sanitizePageHtml } from '../lib/htmlSanitizer.js';
 import { previewTokenService } from '../lib/previewTokenService.js';
 
@@ -11,6 +11,18 @@ function buildPreviewUrl(projectSlug: string, pageSlug: string, token: string): 
 }
 
 export const pageService = {
+  async getPublishedBySlug(projectId: string, slug: string) {
+    const [row] = await db.select().from(pages)
+      .where(and(eq(pages.projectId, projectId), eq(pages.slug, slug), eq(pages.status, 'published')));
+    return row ?? null;
+  },
+
+  async getForPreview(pageId: string, projectId: string, slug: string) {
+    const [row] = await db.select().from(pages)
+      .where(and(eq(pages.id, pageId), eq(pages.projectId, projectId), eq(pages.slug, slug)));
+    return row ?? null;
+  },
+
   async list(projectId: string) {
     return db
       .select()
@@ -111,7 +123,7 @@ export const pageService = {
     const [updated] = await db
       .update(pages)
       .set(updateValues)
-      .where(eq(pages.id, pageId))
+      .where(and(eq(pages.id, pageId), eq(pages.projectId, existing.projectId)))
       .returning();
 
     const token = previewTokenService.generate(pageId, projectId);
@@ -132,7 +144,7 @@ export const pageService = {
         publishedAt: now,
         updatedAt: now,
       })
-      .where(eq(pages.id, pageId))
+      .where(and(eq(pages.id, pageId), eq(pages.projectId, existing.projectId)))
       .returning();
 
     return updated;

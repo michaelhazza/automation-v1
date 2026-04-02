@@ -6,12 +6,10 @@ const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
 async function checkSlugUniqueness(
   slug: string,
-  subaccountId: string,
   excludeId?: string
 ): Promise<void> {
   const conditions = [
     eq(pageProjects.slug, slug),
-    eq(pageProjects.subaccountId, subaccountId),
     isNull(pageProjects.deletedAt),
   ];
 
@@ -21,7 +19,7 @@ async function checkSlugUniqueness(
     .where(and(...conditions));
 
   if (existing && existing.id !== excludeId) {
-    throw { statusCode: 409, message: 'A page project with this slug already exists in this subaccount' };
+    throw { statusCode: 409, message: 'A page project with this slug already exists' };
   }
 }
 
@@ -59,7 +57,7 @@ export const pageProjectService = {
       throw { statusCode: 400, message: 'Slug must contain only lowercase letters, numbers, and hyphens' };
     }
 
-    await checkSlugUniqueness(data.slug, data.subaccountId);
+    await checkSlugUniqueness(data.slug);
 
     const [created] = await db.insert(pageProjects).values(data).returning();
     return created;
@@ -79,7 +77,7 @@ export const pageProjectService = {
         throw { statusCode: 400, message: 'Slug must contain only lowercase letters, numbers, and hyphens' };
       }
       if (updates.slug !== existing.slug) {
-        await checkSlugUniqueness(updates.slug, subaccountId, id);
+        await checkSlugUniqueness(updates.slug, id);
       }
     }
 

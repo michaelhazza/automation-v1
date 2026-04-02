@@ -17,7 +17,7 @@ export const integrationConnections = pgTable(
     subaccountId: uuid('subaccount_id')
       .notNull()
       .references(() => subaccounts.id),
-    providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'custom'>(),
+    providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'custom'>(),
     authType: text('auth_type').notNull().$type<'oauth2' | 'api_key' | 'service_account' | 'github_app'>(),
     connectionStatus: text('connection_status').notNull().default('active').$type<'active' | 'revoked' | 'error'>(),
     // Label to distinguish multiple connections of the same provider (e.g. "Support Gmail", "Personal Gmail")

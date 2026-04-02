@@ -78,7 +78,7 @@ export async function enqueuePageIntegrationJob(payload: PageIntegrationJobPaylo
       retryLimit: 3,
       retryDelay: 5,
       retryBackoff: true,
-      expireInSeconds: 15,
+      expireInSeconds: 120,
     });
   } else {
     // Dev-mode fallback: process immediately

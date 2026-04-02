@@ -7,9 +7,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { eq, and } from 'drizzle-orm';
-import { db } from '../../db/index.js';
-import { pages } from '../../db/schema/index.js';
+import { pageService } from '../../services/pageService.js';
 import type { Page } from '../../db/schema/pages.js';
 import type { PageProject } from '../../db/schema/pageProjects.js';
 
@@ -170,16 +168,7 @@ router.get('*', async (req: Request, res: Response, next: NextFunction) => {
   const project = req.resolvedPageProject;
 
   try {
-    const [page] = await db
-      .select()
-      .from(pages)
-      .where(
-        and(
-          eq(pages.projectId, project.id),
-          eq(pages.slug, pageSlug),
-          eq(pages.status, 'published'),
-        ),
-      );
+    const page = await pageService.getPublishedBySlug(project.id, pageSlug);
 
     if (!page) {
       res.status(404).send('Page not found');

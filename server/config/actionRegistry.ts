@@ -556,7 +556,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   update_page: {
     actionType: 'update_page',
-    description: 'Update an existing page HTML, meta, or formConfig. Saves a version snapshot before updating. Returns a preview URL. Rate limited to 10 updates per page per hour.',
+    description: 'Update an existing page HTML, meta, or formConfig. Saves a version snapshot before updating. Returns a preview URL.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',

@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS page_projects (
 CREATE INDEX page_projects_subaccount_idx ON page_projects(subaccount_id);
 CREATE INDEX page_projects_org_idx ON page_projects(organisation_id);
 CREATE INDEX page_projects_slug_subaccount_idx ON page_projects(subaccount_id, slug);
+CREATE UNIQUE INDEX page_projects_slug_unique ON page_projects(slug) WHERE deleted_at IS NULL;
 
 -- 2. pages
 CREATE TABLE IF NOT EXISTS pages (

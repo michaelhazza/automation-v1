@@ -4,8 +4,7 @@
  */
 
 import { Router } from 'express';
-import { db } from '../../db/index.js';
-import { pageViews } from '../../db/schema/index.js';
+import { pageTrackingService } from '../../services/pageTrackingService.js';
 
 const router = Router();
 
@@ -18,13 +17,13 @@ router.post('/api/public/track', async (req, res) => {
 
     if (!pageId || typeof pageId !== 'string') return;
 
-    await db.insert(pageViews).values({
+    await pageTrackingService.recordView({
       pageId,
-      sessionId: typeof sessionId === 'string' ? sessionId : null,
-      referrer: typeof referrer === 'string' ? referrer : null,
-      utmSource: typeof utmSource === 'string' ? utmSource : null,
-      utmMedium: typeof utmMedium === 'string' ? utmMedium : null,
-      utmCampaign: typeof utmCampaign === 'string' ? utmCampaign : null,
+      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+      referrer: typeof referrer === 'string' ? referrer : undefined,
+      utmSource: typeof utmSource === 'string' ? utmSource : undefined,
+      utmMedium: typeof utmMedium === 'string' ? utmMedium : undefined,
+      utmCampaign: typeof utmCampaign === 'string' ? utmCampaign : undefined,
     });
   } catch (err) {
     // Fire-and-forget — log but never fail the client
