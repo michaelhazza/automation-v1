@@ -78,15 +78,16 @@ export interface ParsedCompany {
 // ---------------------------------------------------------------------------
 
 function parseFrontmatter(raw: string): { frontmatter: Record<string, unknown>; body: string } {
-  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const normalised = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!fmMatch) {
-    return { frontmatter: {}, body: raw };
+    return { frontmatter: {}, body: normalised };
   }
   try {
     const frontmatter = parseYaml(fmMatch[1]) as Record<string, unknown>;
     return { frontmatter, body: fmMatch[2].trim() };
   } catch {
-    return { frontmatter: {}, body: raw };
+    return { frontmatter: {}, body: normalised };
   }
 }
 
@@ -268,26 +269,79 @@ export interface SystemAgentSeedRow {
   isPublished: boolean;
   status: 'draft' | 'active' | 'inactive';
   defaultScheduleCron: string | null;
+  heartbeatEnabled: boolean;
+  heartbeatIntervalHours: number | null;
+  heartbeatOffsetHours: number;
+}
+
+/**
+ * Derive heartbeat config from a cron schedule string.
+ * e.g. "0 2 * * *"      → interval=24h, offset=2h
+ *      "0 6,20 * * *"   → interval=12h, offset=6h  (first fire hour)
+ *      "0 *\/6 * * *"   → interval=6h,  offset=0h
+ *      null / on-demand → disabled
+ */
+function heartbeatFromCron(schedule: string | null | undefined): {
+  heartbeatEnabled: boolean;
+  heartbeatIntervalHours: number | null;
+  heartbeatOffsetHours: number;
+} {
+  if (!schedule || schedule === 'on-demand') {
+    return { heartbeatEnabled: false, heartbeatIntervalHours: null, heartbeatOffsetHours: 0 };
+  }
+
+  const parts = schedule.trim().split(/\s+/);
+  if (parts.length < 5) {
+    return { heartbeatEnabled: true, heartbeatIntervalHours: 24, heartbeatOffsetHours: 0 };
+  }
+
+  const hourField = parts[1]; // cron hour field
+
+  // "*/N" — every N hours
+  const everyMatch = hourField.match(/^\*\/(\d+)$/);
+  if (everyMatch) {
+    return { heartbeatEnabled: true, heartbeatIntervalHours: parseInt(everyMatch[1]), heartbeatOffsetHours: 0 };
+  }
+
+  // "H1,H2,..." — specific hours (use first as offset, gap as interval)
+  if (hourField.includes(',')) {
+    const hours = hourField.split(',').map(Number).sort((a, b) => a - b);
+    const interval = hours.length >= 2 ? hours[1] - hours[0] : 24 / hours.length;
+    return { heartbeatEnabled: true, heartbeatIntervalHours: interval, heartbeatOffsetHours: hours[0] };
+  }
+
+  // Single hour — daily at that hour
+  const hour = parseInt(hourField);
+  if (!isNaN(hour)) {
+    return { heartbeatEnabled: true, heartbeatIntervalHours: 24, heartbeatOffsetHours: hour };
+  }
+
+  return { heartbeatEnabled: true, heartbeatIntervalHours: 24, heartbeatOffsetHours: 0 };
 }
 
 export function toSystemAgentRows(parsed: ParsedCompany): SystemAgentSeedRow[] {
-  return parsed.agents.map(a => ({
-    slug: a.slug,
-    name: a.name,
-    description: a.description ?? a.title ?? null,
-    icon: a.icon ?? null,
-    masterPrompt: a.systemPrompt,
-    modelProvider: 'anthropic',
-    modelId: a.model ?? 'claude-sonnet-4-6',
-    temperature: a.temperature ?? 0.7,
-    maxTokens: a.maxTokens ?? 4096,
-    defaultSystemSkillSlugs: a.skills,
-    defaultOrgSkillSlugs: [],
-    defaultTokenBudget: a.tokenBudget ?? 30000,
-    defaultMaxToolCalls: a.maxToolCalls ?? 20,
-    executionMode: 'api' as const,
-    isPublished: true,
-    status: 'active' as const,
-    defaultScheduleCron: a.schedule === 'on-demand' ? null : (a.schedule ?? null),
-  }));
+  return parsed.agents.map(a => {
+    const cron = a.schedule === 'on-demand' ? null : (a.schedule ?? null);
+    const heartbeat = heartbeatFromCron(cron);
+    return {
+      slug: a.slug,
+      name: a.name,
+      description: a.description ?? a.title ?? null,
+      icon: a.icon ?? null,
+      masterPrompt: a.systemPrompt,
+      modelProvider: 'anthropic',
+      modelId: a.model ?? 'claude-sonnet-4-6',
+      temperature: a.temperature ?? 0.7,
+      maxTokens: a.maxTokens ?? 4096,
+      defaultSystemSkillSlugs: a.skills,
+      defaultOrgSkillSlugs: [],
+      defaultTokenBudget: a.tokenBudget ?? 30000,
+      defaultMaxToolCalls: a.maxToolCalls ?? 20,
+      executionMode: 'api' as const,
+      isPublished: true,
+      status: 'active' as const,
+      defaultScheduleCron: cron,
+      ...heartbeat,
+    };
+  });
 }
