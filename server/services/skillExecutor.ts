@@ -189,6 +189,8 @@ export const skillExecutor = {
         return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
       case 'reassign_task':
         return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
+      case 'update_task':
+        return executeWithActionAudit('update_task', input, context, () => executeUpdateTask(input, context));
       case 'read_inbox':
         return executeWithActionAudit('read_inbox', input, context, () => executeReadInbox(input, context));
       case 'fetch_url':
@@ -213,6 +215,10 @@ export const skillExecutor = {
         return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
       case 'report_bug':
         return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
+      case 'capture_screenshot':
+        return executeWithActionAudit('capture_screenshot', input, context, () => executeCaptureScreenshot(input, context));
+      case 'run_playwright_test':
+        return executeWithActionAudit('run_playwright_test', input, context, () => executeRunPlaywrightTest(input, context));
 
       // ── Dev review-gated skills (safeMode-checked) ───────────────────────
       case 'write_patch':
@@ -221,6 +227,70 @@ export const skillExecutor = {
         return proposeDevopsAction('run_command', input, context);
       case 'create_pr':
         return proposeDevopsAction('create_pr', input, context);
+
+      // ── Methodology skills — LLM-guided reasoning; executor returns a
+      //    structured scaffold the agent fills using the injected instructions ─
+      case 'draft_architecture_plan':
+        return executeMethodologySkill('draft_architecture_plan', input, {
+          template: {
+            intent: '',
+            classification: '',
+            implementationChunks: [],
+            contracts: [],
+            failureModes: [],
+            openQuestions: [],
+            affectedFiles: [],
+            testStrategy: '',
+          },
+          guidance: 'Fill in each section of the architecture plan template above. Use the methodology instructions in your context. Return the completed plan as your tool result.',
+        });
+      case 'draft_tech_spec':
+        return executeMethodologySkill('draft_tech_spec', input, {
+          template: {
+            openApiChanges: '',
+            schemaChanges: '',
+            sequenceDiagram: '',
+            migrationPlan: '',
+            breakingChanges: [],
+            envVarChanges: [],
+          },
+          guidance: 'Fill in each section of the tech spec template. Omit sections not applicable to this change.',
+        });
+      case 'review_ux':
+        return executeMethodologySkill('review_ux', input, {
+          template: {
+            findings: [],
+            highPriority: [],
+            mediumPriority: [],
+            lowPriority: [],
+            recommendation: 'proceed | revise | escalate',
+          },
+          guidance: 'Evaluate each changed UI surface against the UX checklist in your context. Populate findings by priority.',
+        });
+      case 'review_code':
+        return executeMethodologySkill('review_code', input, {
+          template: {
+            blocking: [],
+            nonBlocking: [],
+            securityIssues: [],
+            planComplianceIssues: [],
+            acCoverageGaps: [],
+            recommendation: 'approve | revise | escalate',
+          },
+          guidance: 'Review each changed file against the checklist in your context. Only blocking issues prevent submission.',
+        });
+      case 'write_tests':
+        return executeMethodologySkill('write_tests', input, {
+          template: {
+            targetFile: '',
+            framework: '',
+            testCases: [],
+            coveredScenarios: [],
+            deferredScenarios: [],
+            estimatedCoverageDelta: '',
+          },
+          guidance: 'Follow the test authorship methodology in your context. For each scenario, write the test case and submit via write_patch.',
+        });
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -536,35 +606,43 @@ async function executeReadWorkspace(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const filters: { status?: string; assignedAgentId?: string } = {};
-
-  if (input.status) filters.status = String(input.status);
-  if (input.assigned_to_me) filters.assignedAgentId = context.agentId;
-
   const limit = Math.min(Number(input.limit ?? 20), 50);
   const includeActivities = Boolean(input.include_activities);
 
   try {
-    const items = await taskService.listTasks(
-      context.organisationId,
-      context.subaccountId,
-      filters
-    );
+    // Single-task lookup by ID
+    if (input.task_id) {
+      const task = await taskService.getTask(String(input.task_id), context.organisationId);
+      return { success: true, item: serializeTask(task), total: 1 };
+    }
 
+    // Subtask listing by parent
+    if (input.parent_task_id) {
+      const parentId = String(input.parent_task_id);
+      const allItems = await taskService.listTasks(context.organisationId, context.subaccountId, {});
+      const subtasks = allItems.filter(t => (t as { parentTaskId?: string | null }).parentTaskId === parentId);
+      return {
+        success: true,
+        items: subtasks.map(serializeTask),
+        total: subtasks.length,
+        allDone: subtasks.length > 0 && subtasks.every(t => t.status === 'done'),
+        anyBlocked: subtasks.some(t => t.status === 'blocked'),
+      };
+    }
+
+    // Standard filtered listing
+    const filters: { status?: string; assignedAgentId?: string } = {};
+    if (input.status) filters.status = String(input.status);
+    if (input.assigned_to_me) filters.assignedAgentId = context.agentId;
+
+    const items = await taskService.listTasks(context.organisationId, context.subaccountId, filters);
     const sliced = items.slice(0, limit);
 
     if (includeActivities) {
       const enriched = await Promise.all(sliced.map(async (item) => {
         const activities = await taskService.listActivities(item.id, context.organisationId);
         return {
-          id: item.id,
-          title: item.title,
-          description: item.description,
-          brief: item.brief,
-          status: item.status,
-          priority: item.priority,
-          assignedAgent: item.assignedAgent,
-          createdAt: item.createdAt,
+          ...serializeTask(item),
           activities: activities.slice(0, 5).map(a => ({
             type: a.activityType,
             message: a.message,
@@ -575,24 +653,26 @@ async function executeReadWorkspace(
       return { success: true, items: enriched, total: items.length };
     }
 
-    return {
-      success: true,
-      items: sliced.map(item => ({
-        id: item.id,
-        title: item.title,
-        description: item.description,
-        brief: item.brief,
-        status: item.status,
-        priority: item.priority,
-        assignedAgent: item.assignedAgent,
-        createdAt: item.createdAt,
-      })),
-      total: items.length,
-    };
+    return { success: true, items: sliced.map(serializeTask), total: items.length };
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to read board: ${errMsg}` };
   }
+}
+
+function serializeTask(item: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: item.id,
+    title: item.title,
+    description: item.description,
+    brief: item.brief,
+    status: item.status,
+    priority: item.priority,
+    isSubTask: (item as { isSubTask?: boolean }).isSubTask ?? false,
+    parentTaskId: (item as { parentTaskId?: string | null }).parentTaskId ?? null,
+    assignedAgent: item.assignedAgent,
+    createdAt: item.createdAt,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -923,6 +1003,63 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
   } catch (err) {
     console.error('[Handoff] Failed to enqueue handoff job:', err);
     return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Update Task — update content fields (title, description, brief, priority)
+// ---------------------------------------------------------------------------
+
+async function executeUpdateTask(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const taskId = String(input.task_id ?? '');
+  if (!taskId) return { success: false, error: 'task_id is required' };
+
+  const reasoning = String(input.reasoning ?? '').trim();
+  if (!reasoning) return { success: false, error: 'reasoning is required' };
+
+  const update: {
+    title?: string;
+    description?: string;
+    brief?: string;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+  } = {};
+
+  if (input.title !== undefined) update.title = String(input.title).slice(0, 255);
+  if (input.description !== undefined) update.description = String(input.description);
+  if (input.brief !== undefined) update.brief = String(input.brief);
+  if (input.priority !== undefined) {
+    const p = String(input.priority);
+    if (!['low', 'normal', 'high', 'urgent'].includes(p)) {
+      return { success: false, error: `Invalid priority: ${p}` };
+    }
+    update.priority = p as 'low' | 'normal' | 'high' | 'urgent';
+  }
+
+  if (!Object.keys(update).length) {
+    return { success: false, error: 'At least one field (title, description, brief, priority) must be provided' };
+  }
+
+  try {
+    const updated = await taskService.updateTask(taskId, context.organisationId, update);
+
+    await taskService.addActivity(taskId, {
+      activityType: 'note',
+      message: `Updated by agent: ${reasoning}`,
+      agentId: context.agentId,
+    });
+
+    return {
+      success: true,
+      task_id: updated.id,
+      updated_fields: Object.keys(update),
+      _updated_task: true,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to update task: ${errMsg}` };
   }
 }
 
@@ -1649,4 +1786,236 @@ async function executeReportBug(
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to report bug: ${errMsg}` };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Capture Screenshot — launch headless browser, navigate, capture
+// ---------------------------------------------------------------------------
+
+async function executeCaptureScreenshot(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  let devCtxResult;
+  try {
+    devCtxResult = await devContextService.getContext(context.subaccountId);
+  } catch (err) {
+    const msg = (err as { message?: string }).message ?? String(err);
+    return { success: false, error: `Cannot load dev execution context: ${msg}` };
+  }
+
+  const { context: devCtx } = devCtxResult;
+
+  if (!devCtx.playwright) {
+    return {
+      success: false,
+      error: 'Playwright is not configured for this subaccount. Add a "playwright" section to devContext settings with at minimum a baseUrl.',
+    };
+  }
+
+  const url = String(input.url ?? '');
+  if (!url) return { success: false, error: 'url is required' };
+
+  const reasoning = String(input.reasoning ?? '');
+  if (!reasoning) return { success: false, error: 'reasoning is required' };
+
+  const selector = input.selector ? String(input.selector) : null;
+  const viewport = input.viewport as { width?: number; height?: number } | undefined;
+
+  // Resolve screenshot output directory (must be inside projectRoot)
+  const screenshotDirRelative = devCtx.playwright.screenshotDir;
+  const screenshotDir = resolve(devCtx.projectRoot, screenshotDirRelative);
+  assertPathInRoot(screenshotDir, devCtx.projectRoot);
+
+  const timestamp = Date.now();
+  const filename = `screenshot_${timestamp}.png`;
+  const screenshotPath = join(screenshotDir, filename);
+
+  try {
+    const { mkdir } = await import('fs/promises');
+    await mkdir(screenshotDir, { recursive: true });
+
+    const playwright = await import('playwright');
+    const browserType = playwright[devCtx.playwright.browser] ?? playwright.chromium;
+
+    const browser = await browserType.launch({ headless: true });
+    try {
+      const page = await browser.newPage({
+        viewport: {
+          width: viewport?.width ?? 1280,
+          height: viewport?.height ?? 720,
+        },
+      });
+
+      page.setDefaultTimeout(devCtx.playwright.timeoutMs);
+
+      await page.goto(url, { waitUntil: 'networkidle', timeout: devCtx.playwright.timeoutMs });
+
+      let screenshotOptions: { path: string; fullPage?: boolean } = { path: screenshotPath };
+
+      if (selector) {
+        const element = await page.locator(selector).first();
+        const box = await element.boundingBox();
+        if (!box) return { success: false, error: `Selector "${selector}" found no visible element` };
+        await element.screenshot({ path: screenshotPath });
+      } else {
+        screenshotOptions = { path: screenshotPath, fullPage: !viewport };
+        await page.screenshot(screenshotOptions);
+      }
+
+      // Read back as base64 for inline delivery
+      const { readFile } = await import('fs/promises');
+      const imageBuffer = await readFile(screenshotPath);
+      const base64 = imageBuffer.toString('base64');
+
+      return {
+        success: true,
+        url,
+        selector: selector ?? null,
+        screenshot_path: screenshotPath.replace(devCtx.projectRoot, '').replace(/\\/g, '/'),
+        screenshot_base64: `data:image/png;base64,${base64}`,
+        size_bytes: imageBuffer.length,
+        reasoning,
+      };
+    } finally {
+      await browser.close();
+    }
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    // Diagnose common failure: browsers not installed
+    if (errMsg.includes('Executable doesn\'t exist') || errMsg.includes('browserType.launch')) {
+      return {
+        success: false,
+        error: `Playwright browser binaries not installed. Run: npx playwright install ${devCtx.playwright.browser}. Original error: ${errMsg}`,
+      };
+    }
+    return { success: false, error: `Screenshot failed: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Run Playwright Test — execute a specific Playwright test file via CLI
+// ---------------------------------------------------------------------------
+
+async function executeRunPlaywrightTest(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  let devCtxResult;
+  try {
+    devCtxResult = await devContextService.getContext(context.subaccountId);
+  } catch (err) {
+    const msg = (err as { message?: string }).message ?? String(err);
+    return { success: false, error: `Cannot load dev execution context: ${msg}` };
+  }
+
+  const { context: devCtx } = devCtxResult;
+
+  if (!devCtx.playwright) {
+    return {
+      success: false,
+      error: 'Playwright is not configured for this subaccount. Add a "playwright" section to devContext settings with at minimum a baseUrl.',
+    };
+  }
+
+  // Enforce the same maxTestRunsPerTask limit as run_tests
+  if (context.taskId) {
+    const taskRunRows = await db
+      .select({ id: agentRuns.id })
+      .from(agentRuns)
+      .where(eq(agentRuns.taskId, context.taskId));
+    const taskRunIds = taskRunRows.map(r => r.id);
+    const runCount = taskRunIds.length
+      ? await db
+          .select({ total: count() })
+          .from(actions)
+          .where(and(inArray(actions.agentRunId, taskRunIds), eq(actions.actionType, 'run_playwright_test')))
+          .then(rows => Number(rows[0]?.total ?? 0))
+      : 0;
+    if (runCount >= devCtx.costLimits.maxTestRunsPerTask) {
+      return {
+        success: false,
+        error: `Playwright test run limit reached (${runCount}/${devCtx.costLimits.maxTestRunsPerTask} per task).`,
+        errorCode: 'permission_failure',
+      };
+    }
+  }
+
+  const testFile = String(input.test_file ?? '');
+  if (!testFile) return { success: false, error: 'test_file is required' };
+
+  const baseUrl = String(input.base_url ?? devCtx.playwright.baseUrl);
+  const testName = input.test_name ? String(input.test_name) : null;
+
+  // Validate test file is inside projectRoot
+  const absoluteTestPath = resolve(devCtx.projectRoot, testFile);
+  assertPathInRoot(absoluteTestPath, devCtx.projectRoot);
+
+  // Build the Playwright CLI command
+  const args = ['playwright', 'test', testFile, '--reporter=line'];
+  if (testName) args.push('--grep', testName);
+  // Pass baseUrl via env so playwright.config.ts can pick it up
+  const env = { ...process.env, ...devCtx.env, PLAYWRIGHT_BASE_URL: baseUrl, BASE_URL: baseUrl };
+
+  const start = Date.now();
+
+  try {
+    const { stdout, stderr } = await execFileAsync('npx', args, {
+      cwd: devCtx.projectRoot,
+      timeout: devCtx.playwright.timeoutMs * 3, // E2E tests take longer
+      maxBuffer: devCtx.resourceLimits.maxOutputBytes,
+      env,
+    }).catch((err: { stdout?: string; stderr?: string; code?: number }) => {
+      return { stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    });
+
+    const durationMs = Date.now() - start;
+    const output = (stdout + (stderr ? `\nSTDERR:\n${stderr}` : '')).slice(0, devCtx.resourceLimits.maxOutputBytes);
+    const truncated = (stdout + stderr).length > devCtx.resourceLimits.maxOutputBytes;
+
+    const passed = /(\d+) passed/.exec(output)?.[1] ?? null;
+    const failed = /(\d+) failed/.exec(output)?.[1] ?? null;
+    const skipped = /(\d+) skipped/.exec(output)?.[1] ?? null;
+
+    return {
+      success: true,
+      test_file: testFile,
+      test_name: testName,
+      base_url: baseUrl,
+      output,
+      truncated,
+      duration_ms: durationMs,
+      passed: passed ? Number(passed) : null,
+      failed: failed ? Number(failed) : null,
+      skipped: skipped ? Number(skipped) : null,
+      all_passed: failed === null && passed !== null,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes('Executable doesn\'t exist') || errMsg.includes('browserType.launch')) {
+      return {
+        success: false,
+        error: `Playwright browser binaries not installed. Run: npx playwright install ${devCtx.playwright.browser}. Original error: ${errMsg}`,
+      };
+    }
+    return { success: false, error: `Playwright test execution failed: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Methodology skills — return a structured scaffold the LLM fills in.
+// The actual reasoning is performed by the agent using its injected instructions.
+// ---------------------------------------------------------------------------
+
+function executeMethodologySkill(
+  skillName: string,
+  _input: Record<string, unknown>,
+  scaffold: { template: Record<string, unknown>; guidance: string }
+): { success: true; skillName: string; template: Record<string, unknown>; guidance: string } {
+  return {
+    success: true,
+    skillName,
+    template: scaffold.template,
+    guidance: scaffold.guidance,
+  };
 }

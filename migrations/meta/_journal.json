@@ -12,15 +12,281 @@
     {
       "idx": 1,
       "version": "7",
-      "when": 1771919200000,
-      "tag": "0010_rename_tasks_and_workspace_items",
+      "when": 1771762268422,
+      "tag": "0001_system_settings",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "7",
+      "when": 1771779705263,
+      "tag": "0002_execution_webhook_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771797142104,
+      "tag": "0003_execution_notify_on_complete",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771814578945,
+      "tag": "0004_subaccounts_feature_new_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771832015786,
+      "tag": "0005_subaccounts_feature_modify_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1771849452627,
+      "tag": "0006_ai_agents",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1771866889468,
+      "tag": "0007_data_source_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1771884326309,
+      "tag": "0008_workspace_board",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1771901763150,
+      "tag": "0009_autonomous_agent_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1771919200000,
+      "tag": "0010_rename_tasks_and_workspace_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1771988480000,
+      "tag": "0011_skill_methodology",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1772057760000,
+      "tag": "0012_phase_one_autonomous_foundations",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1772127040000,
+      "tag": "0013_phase_two_scheduled_workforce",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1772196320000,
+      "tag": "0014_system_agents_and_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
       "when": 1772265600000,
       "tag": "0015_agent_model_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1772352000000,
+      "tag": "0016_hitl_action_system",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1772438400000,
+      "tag": "0017_task_review_required",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1772524800000,
+      "tag": "0018_three_level_process_framework",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1772611200000,
+      "tag": "0019_system_process_linking",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1772697600000,
+      "tag": "0020_replayability_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1772784000000,
+      "tag": "0021_task_multi_agent_assignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1772870400000,
+      "tag": "0022_add_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1772956800000,
+      "tag": "0023_agent_heartbeat",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1773043200000,
+      "tag": "0024_llm_router",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1773129600000,
+      "tag": "0025_agent_hierarchy_and_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1773216000000,
+      "tag": "0026_system_company_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1773302400000,
+      "tag": "0027_add_project_to_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1773388800000,
+      "tag": "0028_heartbeat_all_levels",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1773475200000,
+      "tag": "0029_phase_1_2_memory_entities_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1773561600000,
+      "tag": "0030_integrity_and_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1773648000000,
+      "tag": "0031_blob_extraction",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1773734400000,
+      "tag": "0032_updated_at_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1773820800000,
+      "tag": "0033_timezone_standardisation",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1773907200000,
+      "tag": "0034_tenant_isolation_and_secrets",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1773993600000,
+      "tag": "0035_phase1a_policy_engine_and_resume",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1774080000000,
+      "tag": "0036_phase1b_review_audit_and_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1774166400000,
+      "tag": "0037_phase1c_memory_and_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1774252800000,
+      "tag": "0038_manifest_hash_and_parser_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1774339200000,
+      "tag": "0039_github_app_and_project_repo",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1774425600000,
+      "tag": "0040_agent_run_idempotency_key",
       "breakpoints": true
     }
   ]

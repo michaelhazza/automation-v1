@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
-import HeartbeatEditor from '../components/HeartbeatEditor';
+import Modal from '../components/Modal';
 import { useSocket } from '../hooks/useSocket';
 
 const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
@@ -36,7 +36,7 @@ interface TreeNode extends Agent {
   children: TreeNode[];
 }
 
-type PageTab = 'list' | 'team-templates' | 'heartbeat';
+type PageTab = 'list' | 'team-templates';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -115,7 +115,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : tabParam === 'heartbeat' ? 'heartbeat' : 'list';
+  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : 'list';
   const switchTab = (tab: PageTab) => setSearchParams(tab === 'list' ? {} : { tab });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -124,6 +124,13 @@ export default function AdminAgentsPage({ user }: { user: User }) {
   const [actionError, setActionError] = useState<Record<string, string>>({});
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive' | 'draft'>('all');
   const [liveRunCount, setLiveRunCount] = useState(0);
+
+  // Install from System Library modal
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [systemLibrary, setSystemLibrary] = useState<Array<{ id: string; name: string; slug: string; description: string | null; icon: string | null; status: string }>>([]);
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [installError, setInstallError] = useState('');
+  const [installSuccess, setInstallSuccess] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -174,6 +181,33 @@ export default function AdminAgentsPage({ user }: { user: User }) {
     }
   };
 
+  const openInstallModal = async () => {
+    setShowInstallModal(true);
+    setInstallError('');
+    setInstallSuccess('');
+    try {
+      const { data } = await api.get('/api/system-agents');
+      setSystemLibrary(data);
+    } catch {
+      setInstallError('Failed to load system agent library');
+    }
+  };
+
+  const handleInstall = async (systemAgentId: string) => {
+    setInstallingId(systemAgentId);
+    setInstallError('');
+    try {
+      await api.post(`/api/system-agents/${systemAgentId}/install`);
+      setInstallSuccess('Agent installed to your organisation.');
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setInstallError(e.response?.data?.error ?? 'Failed to install agent');
+    } finally {
+      setInstallingId(null);
+    }
+  };
+
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
     try {
@@ -218,18 +252,73 @@ export default function AdminAgentsPage({ user }: { user: User }) {
           </div>
           <p className="text-sm text-slate-500 mt-1.5">Create and manage AI agent configurations</p>
         </div>
-        <button
-          onClick={() => navigate('/admin/agents/new')}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          + New Agent
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={openInstallModal}
+            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-sm font-medium cursor-pointer transition-colors"
+          >
+            ↓ Install from System Library
+          </button>
+          <button
+            onClick={() => navigate('/admin/agents/new')}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            + New Agent
+          </button>
+        </div>
       </div>
 
 
+      {/* Install from System Library Modal */}
+      {showInstallModal && (
+        <Modal title="Install from System Library" onClose={() => { setShowInstallModal(false); setInstallError(''); setInstallSuccess(''); }} maxWidth={560}>
+          <p className="text-[13px] text-slate-500 mb-4">
+            Browse published system agents and install them into your organisation.
+          </p>
+          {installError && (
+            <div className="mb-3 px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[13px]">{installError}</div>
+          )}
+          {installSuccess && (
+            <div className="mb-3 px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-[13px]">{installSuccess}</div>
+          )}
+          {systemLibrary.length === 0 && !installError ? (
+            <div className="py-8 text-center text-slate-500 text-[14px]">No published system agents available.</div>
+          ) : (
+            <div className="max-h-[360px] overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+              {systemLibrary.map((agent) => (
+                <div key={agent.id} className="flex items-center gap-3 px-4 py-3">
+                  {agent.icon && <span className="text-xl shrink-0">{agent.icon}</span>}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-800 text-[13px]">{agent.name}</div>
+                    {agent.description && (
+                      <div className="text-[12px] text-slate-500 mt-0.5 truncate">{agent.description}</div>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleInstall(agent.id)}
+                    disabled={installingId === agent.id}
+                    className={`px-3 py-1.5 text-[12px] font-medium rounded-md border-0 transition-colors shrink-0 ${installingId === agent.id ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'}`}
+                  >
+                    {installingId === agent.id ? 'Installing…' : 'Install'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => { setShowInstallModal(false); setInstallError(''); setInstallSuccess(''); }}
+              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as PageTab)}
@@ -249,23 +338,6 @@ export default function AdminAgentsPage({ user }: { user: User }) {
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading templates...</div>}>
           <AdminAgentTemplatesPage user={user} embedded />
         </Suspense>
-      )}
-
-      {/* Heartbeat Tab */}
-      {pageTab === 'heartbeat' && (
-        <HeartbeatEditor
-          levelLabel="agent"
-          agents={agents.map(a => ({
-            id: a.id, name: a.name, icon: a.icon,
-            heartbeatEnabled: a.heartbeatEnabled,
-            heartbeatIntervalHours: a.heartbeatIntervalHours,
-            heartbeatOffsetHours: a.heartbeatOffsetHours,
-          }))}
-          onUpdate={async (agentId, config) => {
-            await api.patch(`/api/agents/${agentId}`, config);
-            load();
-          }}
-        />
       )}
 
       {/* List Tab */}
@@ -338,7 +410,9 @@ export default function AdminAgentsPage({ user }: { user: User }) {
                   <tr key={agent.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-800">{agent.name}</span>
+                        <Link to={`/admin/agents/${agent.id}`} className="font-semibold text-slate-800 hover:text-indigo-600 no-underline transition-colors">
+                          {agent.name}
+                        </Link>
                         {agent.isSystemManaged && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 tracking-wide">
                             System
@@ -363,7 +437,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
                           to={`/admin/agents/${agent.id}`}
                           className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium no-underline transition-colors"
                         >
-                          Edit
+                          Manage
                         </Link>
                         {agent.status !== 'active' && (
                           <button

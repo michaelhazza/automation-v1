@@ -165,7 +165,7 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
                 return (
                   <tr key={skill.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-800">{skill.name}</div>
+                      <Link to={`/admin/skills/${skill.id}`} className="font-semibold text-slate-800 hover:text-indigo-600 no-underline transition-colors">{skill.name}</Link>
                       {skill.description && <div className="text-xs text-slate-500 mt-0.5 line-clamp-1">{skill.description}</div>}
                       <code className="text-[11px] bg-slate-100 px-1 py-0.5 rounded text-slate-500 mt-0.5 inline-block">{skill.slug}</code>
                     </td>

@@ -45,6 +45,7 @@ import {
 } from '../config/limits.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { langfuse, withTrace } from '../instrumentation.js';
+import { claudeCodeRunner } from './claudeCodeRunner.js';
 
 // ---------------------------------------------------------------------------
 // Agent trace throttle — batches iteration/tool_call events to max 2/sec
@@ -96,13 +97,15 @@ export interface AgentRunRequest {
   subaccountAgentId: string;
   organisationId: string;
   runType: 'scheduled' | 'manual' | 'triggered';
-  executionMode?: 'api' | 'headless';
+  executionMode?: 'api' | 'headless' | 'claude-code';
   taskId?: string;
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
   parentRunId?: string;
   isSubAgent?: boolean;
   parentSpawnRunId?: string;
+  /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
+  idempotencyKey?: string;
 }
 
 export interface AgentRunResult {
@@ -142,6 +145,29 @@ export const agentExecutionService = {
   async executeRun(request: AgentRunRequest): Promise<AgentRunResult> {
     const startTime = Date.now();
 
+    // ── 0. Idempotency check — return existing run if key already used ───
+    if (request.idempotencyKey) {
+      const [existing] = await db
+        .select()
+        .from(agentRuns)
+        .where(eq(agentRuns.idempotencyKey, request.idempotencyKey))
+        .limit(1);
+
+      if (existing) {
+        return {
+          runId: existing.id,
+          status: existing.status as AgentRunResult['status'],
+          summary: existing.summary,
+          totalToolCalls: existing.totalToolCalls,
+          totalTokens: existing.totalTokens,
+          durationMs: existing.durationMs ?? (Date.now() - startTime),
+          tasksCreated: existing.tasksCreated,
+          tasksUpdated: existing.tasksUpdated,
+          deliverablesCreated: existing.deliverablesCreated,
+        };
+      }
+    }
+
     // ── 1. Create the run record ──────────────────────────────────────────
     const [run] = await db
       .insert(agentRuns)
@@ -150,6 +176,7 @@ export const agentExecutionService = {
         subaccountId: request.subaccountId,
         agentId: request.agentId,
         subaccountAgentId: request.subaccountAgentId,
+        idempotencyKey: request.idempotencyKey ?? null,
         runType: request.runType,
         executionMode: request.executionMode ?? 'api',
         status: 'running',
@@ -407,42 +434,97 @@ export const agentExecutionService = {
         .values({ runId: run.id, systemPromptSnapshot: fullSystemPrompt })
         .onConflictDoNothing();
 
-      // ── 8. Execute the agentic loop with middleware pipeline ────────────
-      const pipeline = createDefaultPipeline();
+      // ── 8. Execute — branch by execution mode ─────────────────────────
+      const effectiveMode = request.executionMode ?? 'api';
 
-      const trace = langfuse.trace({
-        name:      'agent-run',
-        userId:    request.subaccountId,
-        sessionId: run.id,
-        metadata: {
-          agentId:    request.agentId,
-          runType:    request.runType,
-          orgId:      request.organisationId,
-        },
-      });
+      let loopResult: LoopResult;
 
-      const loopResult = await withTrace(trace, () => runAgenticLoop({
-        runId: run.id,
-        agent,
-        routerCtx: {
-          organisationId:    request.organisationId,
-          subaccountId:      request.subaccountId,
-          runId:             run.id,
-          subaccountAgentId: request.subaccountAgentId,
-          agentName:         agent.name,
-          sourceType:        'agent_run',
-        },
-        systemPrompt: fullSystemPrompt,
-        tools: enhancedTools,
-        tokenBudget,
-        maxToolCalls,
-        timeoutMs,
-        startTime,
-        request,
-        orgProcesses,
-        saLink,
-        pipeline,
-      }));
+      if (effectiveMode === 'claude-code') {
+        // ── 8a. Claude Code CLI execution ──────────────────────────────
+        // Spawn `claude -p` with the agent's prompt. Uses the host's
+        // Claude Max plan — zero API cost. The same prompts & skills
+        // will transfer to Docker-based execution later.
+        let projectRoot = '.';
+        try {
+          const { context: dec } = await devContextService.getContext(request.subaccountId);
+          projectRoot = dec.projectRoot;
+        } catch {
+          // DEC not configured — use current directory
+        }
+
+        const taskPrompt = workspaceContext || 'Review the current workspace and report status.';
+
+        emitAgentRunUpdate(run.id, 'agent:run:progress', {
+          type: 'execution_mode', mode: 'claude-code',
+          message: 'Spawning Claude Code CLI...',
+        });
+
+        const ccResult = await claudeCodeRunner.execute({
+          systemPrompt: fullSystemPrompt,
+          taskPrompt,
+          cwd: projectRoot,
+          maxTurns: maxToolCalls,
+          timeoutMs,
+          runId: run.id,
+        });
+
+        loopResult = {
+          summary: ccResult.result,
+          toolCallsLog: [{
+            type: 'claude_code_execution',
+            sessionId: ccResult.sessionId,
+            success: ccResult.success,
+            durationMs: ccResult.durationMs,
+            numTurns: ccResult.numTurns,
+            timedOut: ccResult.timedOut,
+          }],
+          totalToolCalls: ccResult.numTurns,
+          inputTokens: ccResult.inputTokens,
+          outputTokens: ccResult.outputTokens,
+          totalTokens: ccResult.totalTokens,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+          finalStatus: ccResult.timedOut ? 'timeout' : (ccResult.success ? 'completed' : 'failed'),
+        };
+      } else {
+        // ── 8b. Standard API agentic loop ──────────────────────────────
+        const pipeline = createDefaultPipeline();
+
+        const trace = langfuse.trace({
+          name:      'agent-run',
+          userId:    request.subaccountId,
+          sessionId: run.id,
+          metadata: {
+            agentId:    request.agentId,
+            runType:    request.runType,
+            orgId:      request.organisationId,
+          },
+        });
+
+        loopResult = await withTrace(trace, () => runAgenticLoop({
+          runId: run.id,
+          agent,
+          routerCtx: {
+            organisationId:    request.organisationId,
+            subaccountId:      request.subaccountId,
+            runId:             run.id,
+            subaccountAgentId: request.subaccountAgentId,
+            agentName:         agent.name,
+            sourceType:        'agent_run',
+          },
+          systemPrompt: fullSystemPrompt,
+          tools: enhancedTools,
+          tokenBudget,
+          maxToolCalls,
+          timeoutMs,
+          startTime,
+          request,
+          orgProcesses,
+          saLink,
+          pipeline,
+        }));
+      }
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;

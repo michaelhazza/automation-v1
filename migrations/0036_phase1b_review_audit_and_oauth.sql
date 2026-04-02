@@ -8,6 +8,29 @@
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
+-- 0. audit_events — lightweight security audit log for compliance & debugging
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS "audit_events" (
+  "id"               UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  "organisation_id"  UUID        REFERENCES "organisations"("id"),
+  "actor_id"         UUID,
+  "actor_type"       TEXT        NOT NULL,
+  "action"           TEXT        NOT NULL,
+  "entity_type"      TEXT,
+  "entity_id"        UUID,
+  "metadata"         JSONB,
+  "ip_address"       TEXT,
+  "created_at"       TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS "audit_events_org_created_idx"
+  ON "audit_events" ("organisation_id", "created_at");
+CREATE INDEX IF NOT EXISTS "audit_events_actor_created_idx"
+  ON "audit_events" ("actor_id", "created_at");
+CREATE INDEX IF NOT EXISTS "audit_events_action_created_idx"
+  ON "audit_events" ("action", "created_at");
+
+-- ---------------------------------------------------------------------------
 -- 1. review_audit_records
 --    Append-only. One row per human decision on a review-gated action.
 --    Modelled after CrewAI's HumanFeedbackResult schema.

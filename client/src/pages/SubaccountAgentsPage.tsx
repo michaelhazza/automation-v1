@@ -156,6 +156,11 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
   const [loadingTemplate, setLoadingTemplate] = useState(false);
   const [loadTemplateResult, setLoadTemplateResult] = useState<LoadResult | null>(null);
 
+  // Link Org Agent modal
+  const [showLinkOrgAgent, setShowLinkOrgAgent] = useState(false);
+  const [orgAgents, setOrgAgents] = useState<Array<{ id: string; name: string; description: string | null; icon: string | null; agentRole: string | null; status: string }>>([]);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+
   const load = async () => {
     if (!subaccountId) return;
     setLoading(true);
@@ -272,6 +277,38 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
     setParentAgentId('');
   };
 
+  // ── Link Org Agent ──────────────────────────────────────────────────────────
+
+  const openLinkOrgAgent = async () => {
+    setShowLinkOrgAgent(true);
+    setLinkingId(null);
+    try {
+      const { data } = await api.get('/api/agents');
+      const linkedIds = new Set(agentLinks.map((l) => l.agentId));
+      setOrgAgents(data.filter((a: { id: string }) => !linkedIds.has(a.id)));
+    } catch {
+      setError('Failed to load organisation agents');
+      setShowLinkOrgAgent(false);
+    }
+  };
+
+  const handleLinkOrgAgent = async (agentId: string) => {
+    if (!subaccountId) return;
+    setLinkingId(agentId);
+    try {
+      await api.post(`/api/subaccounts/${subaccountId}/agents`, { agentId });
+      setSuccess('Agent linked to subaccount.');
+      load();
+      // Remove linked agent from the list
+      setOrgAgents((prev) => prev.filter((a) => a.id !== agentId));
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setError(e.response?.data?.error ?? 'Failed to link agent');
+    } finally {
+      setLinkingId(null);
+    }
+  };
+
   if (loading) {
     return <div className="py-12 text-center text-slate-500 text-[14px]">Loading agents...</div>;
   }
@@ -292,6 +329,12 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
             className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
           >
             Load System Agents
+          </button>
+          <button
+            onClick={openLinkOrgAgent}
+            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+          >
+            + Link Org Agent
           </button>
           <button
             onClick={openLoadTemplate}
@@ -381,7 +424,12 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
                 {agentLinks.map((link) => (
                   <tr key={link.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
-                      <span className="font-semibold text-slate-800">{link.agent.name}</span>
+                      <Link
+                        to={`/admin/agents/${link.agentId}`}
+                        className="font-semibold text-slate-800 hover:text-indigo-600 no-underline transition-colors"
+                      >
+                        {link.agent.name}
+                      </Link>
                       {link.agent.status === 'draft' && (
                         <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">
                           Requires setup
@@ -581,6 +629,50 @@ export default function SubaccountAgentsPage({ user: _user }: { user: User }) {
               </button>
             </>
           )}
+        </Modal>
+      )}
+
+      {/* ── Link Org Agent Modal ─────────────────────────────────────────── */}
+      {showLinkOrgAgent && (
+        <Modal title="Link Org Agent" onClose={() => setShowLinkOrgAgent(false)} maxWidth={520}>
+          <p className="text-[13px] text-slate-500 mb-4">
+            Link an existing organisation agent to this subaccount.
+          </p>
+          {orgAgents.length === 0 ? (
+            <div className="py-8 text-center text-slate-500 text-[14px]">
+              No unlinked organisation agents available.
+            </div>
+          ) : (
+            <div className="max-h-[360px] overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+              {orgAgents.map((agent) => (
+                <div key={agent.id} className="flex items-center gap-3 px-4 py-3">
+                  {agent.icon && <span className="text-xl shrink-0">{agent.icon}</span>}
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-slate-800 text-[13px]">{agent.name}</div>
+                    {agent.description && (
+                      <div className="text-[12px] text-slate-500 mt-0.5 truncate">{agent.description}</div>
+                    )}
+                  </div>
+                  {agent.agentRole && <RoleBadge role={agent.agentRole} />}
+                  <button
+                    onClick={() => handleLinkOrgAgent(agent.id)}
+                    disabled={linkingId === agent.id}
+                    className={`px-3 py-1.5 text-[12px] font-medium rounded-md border-0 transition-colors shrink-0 ${linkingId === agent.id ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'}`}
+                  >
+                    {linkingId === agent.id ? 'Linking…' : 'Link'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={() => setShowLinkOrgAgent(false)}
+              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[14px] font-medium cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
         </Modal>
       )}
     </div>

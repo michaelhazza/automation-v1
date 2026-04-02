@@ -2,15 +2,24 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
+import { systemSkillService } from '../services/systemSkillService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
 
-// ─── List all skills (built-in + custom) for the skills library page ──
+// ─── List all skills (visible built-in + custom) for the skills library page ──
+// Built-in skills are only included if the matching system skill has isVisible=true.
 
 router.get('/api/skills/all', authenticate, asyncHandler(async (req, res) => {
-  const skills = await skillService.listSkills(req.orgId!);
-  res.json(skills);
+  const [skills, visibleSystemSkills] = await Promise.all([
+    skillService.listSkills(req.orgId!),
+    systemSkillService.listVisibleSkills(),
+  ]);
+  const visibleSlugs = new Set(visibleSystemSkills.map(s => s.slug));
+  const filtered = skills.filter((s: { skillType: string; slug: string }) =>
+    s.skillType !== 'built_in' || visibleSlugs.has(s.slug)
+  );
+  res.json(filtered);
 }));
 
 // ─── List skills (org-specific custom skills only; built-in skills are now system-level) ──

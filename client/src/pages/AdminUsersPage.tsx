@@ -121,31 +121,35 @@ export default function AdminUsersPage({ user }: { user: User }) {
       )}
 
       {showInviteForm && (
-        <Modal title="Invite new user" onClose={() => setShowInviteForm(false)} maxWidth={520}>
+        <Modal title="Invite new user" onClose={() => setShowInviteForm(false)} maxWidth={480}>
           {error && <div className="text-[13px] text-red-600 mb-3">{error}</div>}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="col-span-2">
+          <div className="grid gap-4 mb-6">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name *</label>
+                <input
+                  autoFocus
+                  value={form.firstName}
+                  onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name *</label>
+                <input
+                  value={form.lastName}
+                  onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+            <div>
               <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Email *</label>
               <input
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name</label>
-              <input
-                value={form.firstName}
-                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name</label>
-              <input
-                value={form.lastName}
-                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                placeholder="name@company.com"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
@@ -156,22 +160,22 @@ export default function AdminUsersPage({ user }: { user: User }) {
                 onChange={(e) => setForm({ ...form, role: e.target.value })}
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                {assignableRoles.map((r) => <option key={r} value={r}>{r}</option>)}
+                {assignableRoles.map((r) => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}
               </select>
             </div>
           </div>
-          <div className="flex gap-3">
-            <button
-              onClick={handleInvite}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[13px] font-semibold rounded-lg transition-colors"
-            >
-              Send invitation
-            </button>
+          <div className="flex gap-2 justify-end">
             <button
               onClick={() => setShowInviteForm(false)}
-              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg transition-colors"
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer"
             >
               Cancel
+            </button>
+            <button
+              onClick={handleInvite}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+            >
+              Send invitation
             </button>
           </div>
         </Modal>

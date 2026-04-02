@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
+import Modal from '../components/Modal';
 import RecurrencePicker, { type RecurrenceValue } from '../components/RecurrencePicker';
 
 interface ScheduledTask {
@@ -108,56 +109,53 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
       )}
 
       {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-8 w-[520px] max-h-[90vh] overflow-y-auto shadow-xl">
-            <h2 className="text-[18px] font-semibold text-slate-800 mb-5">New Scheduled Task</h2>
-            <div className="flex flex-col gap-3.5">
+        <Modal title="New Scheduled Task" onClose={() => setShowForm(false)} maxWidth={520}>
+          <div className="flex flex-col gap-3.5">
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1">Title *</label>
+              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className={inputCls} placeholder="e.g. Weekly Competitor Review" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1">Agent *</label>
+              <select value={form.assignedAgentId} onChange={(e) => setForm({ ...form, assignedAgentId: e.target.value })} className={inputCls}>
+                <option value="">Select agent...</option>
+                {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1">Brief / Instructions</label>
+              <textarea value={form.brief} onChange={(e) => setForm({ ...form, brief: e.target.value })} rows={3} className={`${inputCls} resize-vertical`} placeholder="What should the agent do each time?" />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Recurrence</label>
+              <RecurrencePicker
+                value={{ rrule: form.rrule, endsAt: form.endsAt, endsAfterRuns: form.endsAfterRuns }}
+                onChange={(rv: RecurrenceValue) => setForm({ ...form, rrule: rv.rrule, endsAt: rv.endsAt ?? null, endsAfterRuns: rv.endsAfterRuns ?? null })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1">Title *</label>
-                <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className={inputCls} placeholder="e.g. Weekly Competitor Review" />
+                <label className="block text-[13px] font-medium text-slate-700 mb-1">Time</label>
+                <input type="time" value={form.scheduleTime} onChange={(e) => setForm({ ...form, scheduleTime: e.target.value })} className={inputCls} />
               </div>
               <div>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1">Agent *</label>
-                <select value={form.assignedAgentId} onChange={(e) => setForm({ ...form, assignedAgentId: e.target.value })} className={inputCls}>
-                  <option value="">Select agent...</option>
-                  {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <label className="block text-[13px] font-medium text-slate-700 mb-1">Timezone</label>
+                <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls}>
+                  <option value="UTC">UTC</option>
+                  <option value="Pacific/Auckland">NZ (Auckland)</option>
+                  <option value="Australia/Sydney">AU (Sydney)</option>
+                  <option value="America/New_York">US East</option>
+                  <option value="America/Los_Angeles">US West</option>
+                  <option value="Europe/London">UK (London)</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1">Brief / Instructions</label>
-                <textarea value={form.brief} onChange={(e) => setForm({ ...form, brief: e.target.value })} rows={3} className={`${inputCls} resize-vertical`} placeholder="What should the agent do each time?" />
-              </div>
-              <div>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Recurrence</label>
-                <RecurrencePicker
-                  value={{ rrule: form.rrule, endsAt: form.endsAt, endsAfterRuns: form.endsAfterRuns }}
-                  onChange={(rv: RecurrenceValue) => setForm({ ...form, rrule: rv.rrule, endsAt: rv.endsAt ?? null, endsAfterRuns: rv.endsAfterRuns ?? null })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1">Time</label>
-                  <input type="time" value={form.scheduleTime} onChange={(e) => setForm({ ...form, scheduleTime: e.target.value })} className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1">Timezone</label>
-                  <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls}>
-                    <option value="UTC">UTC</option>
-                    <option value="Pacific/Auckland">NZ (Auckland)</option>
-                    <option value="Australia/Sydney">AU (Sydney)</option>
-                    <option value="America/New_York">US East</option>
-                    <option value="America/Los_Angeles">US West</option>
-                    <option value="Europe/London">UK (London)</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-2">
-                <button onClick={() => setShowForm(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium transition-colors">Cancel</button>
-                <button onClick={handleCreate} disabled={!form.title || !form.assignedAgentId} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold transition-colors">Create</button>
-              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={() => setShowForm(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium transition-colors cursor-pointer">Cancel</button>
+              <button onClick={handleCreate} disabled={!form.title || !form.assignedAgentId} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold transition-colors cursor-pointer">Create</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {items.length === 0 ? (

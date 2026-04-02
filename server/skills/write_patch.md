@@ -2,6 +2,7 @@
 name: Write Patch
 description: Propose a code change as a unified diff for human review and approval.
 isActive: true
+isVisible: true
 ---
 
 ```json

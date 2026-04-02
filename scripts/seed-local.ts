@@ -18,7 +18,7 @@ import bcrypt from 'bcryptjs';
 import { organisations } from '../server/db/schema/organisations.js';
 import { users } from '../server/db/schema/users.js';
 import { systemAgents } from '../server/db/schema/index.js';
-import { parseCompanyFolder, toSystemAgentRows } from './lib/companyParser.js';
+import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -51,12 +51,13 @@ async function seed() {
     await seedAdmin(org.id);
   }
 
+  await seedOrgAdmin();
   await seedSystemAgents();
 
   await pool.end();
   console.log('\nDone. You can now log in with:');
-  console.log('  Email:    admin@automation.os');
-  console.log('  Password: Admin123!');
+  console.log('  System Admin  admin@automation.os          / Admin123!');
+  console.log('  Org Admin     michael@breakoutsolutions.com / Zu5QzB5vG8!2');
 }
 
 async function seedAdmin(organisationId: string) {
@@ -81,6 +82,51 @@ async function seedAdmin(organisationId: string) {
   } else {
     console.log('  [ok]   Created system admin:', user.email);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Seed org admin (breakout solutions org + michael user)
+// ---------------------------------------------------------------------------
+
+async function seedOrgAdmin() {
+  // Create org
+  const [org] = await db
+    .insert(organisations)
+    .values({
+      name: 'Breakout Solutions',
+      slug: 'breakout-solutions',
+      plan: 'professional',
+      status: 'active',
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  const orgId = org
+    ? org.id
+    : (await db.select().from(organisations).where(eq(organisations.slug, 'breakout-solutions')))[0]?.id;
+
+  if (!orgId) throw new Error('Could not create or find breakout-solutions organisation');
+  if (!org) console.log('  [skip] breakout-solutions organisation already exists');
+  else console.log('  [ok]   Created organisation: breakout-solutions', orgId);
+
+  // Create org admin user
+  const passwordHash = await bcrypt.hash('Zu5QzB5vG8!2', 12);
+  const [user] = await db
+    .insert(users)
+    .values({
+      organisationId: orgId,
+      email: 'michael@breakoutsolutions.com',
+      passwordHash,
+      firstName: 'Michael',
+      lastName: 'Admin',
+      role: 'org_admin',
+      status: 'active',
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  if (!user) console.log('  [skip] michael@breakoutsolutions.com already exists');
+  else console.log('  [ok]   Created org admin:', user.email);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +172,33 @@ async function seedSystemAgents() {
         .returning({ id: systemAgents.id });
       console.log(`  [created] system agent: ${row.slug} (${created.id})`);
     }
+  }
+
+  // Second pass: set parentSystemAgentId from reportsTo slug
+  await seedAgentHierarchy(parsed);
+}
+
+async function seedAgentHierarchy(parsed: ParsedCompany) {
+  console.log('\n  Setting agent hierarchy...');
+
+  // Build slug → id map for all agents in this company
+  const allAgents = await db.select({ id: systemAgents.id, slug: systemAgents.slug }).from(systemAgents);
+  const slugToId = new Map(allAgents.map(a => [a.slug, a.id]));
+
+  for (const agent of parsed.agents) {
+    if (!agent.reportsTo || agent.reportsTo === 'null') continue;
+
+    const parentId = slugToId.get(agent.reportsTo);
+    if (!parentId) {
+      console.log(`  [warn] reportsTo slug not found: ${agent.reportsTo} (for ${agent.slug})`);
+      continue;
+    }
+
+    await db.update(systemAgents)
+      .set({ parentSystemAgentId: parentId })
+      .where(eq(systemAgents.slug, agent.slug));
+
+    console.log(`  [hierarchy] ${agent.slug} → ${agent.reportsTo}`);
   }
 }
 

@@ -110,6 +110,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "permission_sets_org_default_unique_idx"
 -- M-9 / M-10: Convert integer boolean flags to proper boolean columns
 -- ---------------------------------------------------------------------------
 -- tasks.is_sub_task
+ALTER TABLE "tasks" ALTER COLUMN "is_sub_task" DROP DEFAULT;
 ALTER TABLE "tasks"
   ALTER COLUMN "is_sub_task" TYPE boolean
   USING ("is_sub_task" != 0);
@@ -117,6 +118,7 @@ ALTER TABLE "tasks"
   ALTER COLUMN "is_sub_task" SET DEFAULT false;
 
 -- agent_runs.is_sub_agent
+ALTER TABLE "agent_runs" ALTER COLUMN "is_sub_agent" DROP DEFAULT;
 ALTER TABLE "agent_runs"
   ALTER COLUMN "is_sub_agent" TYPE boolean
   USING ("is_sub_agent" != 0);
@@ -124,6 +126,7 @@ ALTER TABLE "agent_runs"
   ALTER COLUMN "is_sub_agent" SET DEFAULT false;
 
 -- agents.allow_model_override
+ALTER TABLE "agents" ALTER COLUMN "allow_model_override" DROP DEFAULT;
 ALTER TABLE "agents"
   ALTER COLUMN "allow_model_override" TYPE boolean
   USING ("allow_model_override" != 0);
@@ -131,6 +134,7 @@ ALTER TABLE "agents"
   ALTER COLUMN "allow_model_override" SET DEFAULT true;
 
 -- agent_templates.allow_model_override (deprecated table, kept for compat)
+ALTER TABLE "agent_templates" ALTER COLUMN "allow_model_override" DROP DEFAULT;
 ALTER TABLE "agent_templates"
   ALTER COLUMN "allow_model_override" TYPE boolean
   USING ("allow_model_override" != 0);

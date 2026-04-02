@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS "skills" (
   "instructions" text,
   "is_active" boolean NOT NULL DEFAULT true,
   "created_at" timestamp DEFAULT now() NOT NULL,
-  "updated_at" timestamp DEFAULT now() NOT NULL
+  "updated_at" timestamp DEFAULT now() NOT NULL,
+  "deleted_at" timestamp
 );
 
 CREATE INDEX IF NOT EXISTS "skills_org_idx" ON "skills" ("organisation_id");

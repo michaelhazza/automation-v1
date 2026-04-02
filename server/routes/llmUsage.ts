@@ -473,6 +473,115 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
+// Per-agent budget and spend (subaccount agent level)
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/subaccounts/:subaccountId/agents/:agentId/budget',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, agentId } = req.params;
+    const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+
+    // Get the subaccount agent link for budget config
+    const { subaccountAgents } = await import('../db/schema/index.js');
+    const [saLink] = await db.select().from(subaccountAgents).where(
+      and(
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.agentId, agentId),
+        eq(subaccountAgents.organisationId, req.orgId!),
+      ),
+    );
+
+    if (!saLink) {
+      return res.status(404).json({ error: 'Agent not linked to this subaccount' });
+    }
+
+    // Get monthly spend from llm_requests for this agent in this subaccount
+    const [spend] = await db
+      .select({
+        totalCostCents: sql<number>`COALESCE(sum(${llmRequests.costWithMarginCents}), 0)::int`,
+        requestCount: sql<number>`count(*)::int`,
+        totalTokensIn: sql<number>`COALESCE(sum(${llmRequests.tokensIn}), 0)::int`,
+        totalTokensOut: sql<number>`COALESCE(sum(${llmRequests.tokensOut}), 0)::int`,
+        errorCount: sql<number>`count(*) filter (where ${llmRequests.status} != 'success')::int`,
+      })
+      .from(llmRequests)
+      .where(
+        and(
+          eq(llmRequests.subaccountId, subaccountId),
+          eq(llmRequests.billingMonth, billingMonth),
+          sql`${llmRequests.runId} IN (
+            SELECT id FROM agent_runs
+            WHERE agent_id = ${agentId} AND subaccount_id = ${subaccountId}
+          )`,
+        ),
+      );
+
+    // Get workspace-level limits
+    const [limits] = await db.select().from(workspaceLimits)
+      .where(eq(workspaceLimits.subaccountId, subaccountId)).limit(1);
+
+    res.json({
+      period: billingMonth,
+      agentId,
+      subaccountId,
+      spend: spend ?? { totalCostCents: 0, requestCount: 0, totalTokensIn: 0, totalTokensOut: 0, errorCount: 0 },
+      config: {
+        maxCostPerRunCents: saLink.maxCostPerRunCents,
+        maxLlmCallsPerRun: saLink.maxLlmCallsPerRun,
+        tokenBudgetPerRun: saLink.tokenBudgetPerRun,
+      },
+      limits: limits ? {
+        monthlyCostLimitCents: limits.monthlyCostLimitCents,
+        dailyCostLimitCents: limits.dailyCostLimitCents,
+        alertThresholdPct: limits.alertThresholdPct,
+      } : null,
+    });
+  }),
+);
+
+router.put(
+  '/api/subaccounts/:subaccountId/agents/:agentId/budget',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, agentId } = req.params;
+    const { maxCostPerRunCents, maxLlmCallsPerRun, tokenBudgetPerRun } = req.body as {
+      maxCostPerRunCents?: number | null;
+      maxLlmCallsPerRun?: number | null;
+      tokenBudgetPerRun?: number;
+    };
+
+    const { subaccountAgents } = await import('../db/schema/index.js');
+    const [saLink] = await db.select().from(subaccountAgents).where(
+      and(
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.agentId, agentId),
+        eq(subaccountAgents.organisationId, req.orgId!),
+      ),
+    );
+
+    if (!saLink) {
+      return res.status(404).json({ error: 'Agent not linked to this subaccount' });
+    }
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (maxCostPerRunCents !== undefined) updates.maxCostPerRunCents = maxCostPerRunCents;
+    if (maxLlmCallsPerRun !== undefined) updates.maxLlmCallsPerRun = maxLlmCallsPerRun;
+    if (tokenBudgetPerRun !== undefined) updates.tokenBudgetPerRun = tokenBudgetPerRun;
+
+    const [updated] = await db.update(subaccountAgents)
+      .set(updates)
+      .where(eq(subaccountAgents.id, saLink.id))
+      .returning();
+
+    res.json(updated);
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Org budget management
 // ---------------------------------------------------------------------------
 

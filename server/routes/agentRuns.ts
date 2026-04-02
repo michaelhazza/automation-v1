@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import crypto from 'crypto';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
@@ -20,7 +21,11 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
-    const { taskId } = req.body;
+    const { taskId, idempotencyKey, executionMode } = req.body as {
+      taskId?: string;
+      idempotencyKey?: string;
+      executionMode?: 'api' | 'claude-code';
+    };
 
     // Find the subaccount agent link
     const [saLink] = await db
@@ -39,15 +44,20 @@ router.post(
       return;
     }
 
+    // Generate idempotency key if not provided — prevents duplicate runs on retry
+    const effectiveIdempotencyKey = idempotencyKey ??
+      `manual:${agentId}:${subaccountId}:${req.user!.id}:${taskId ?? 'heartbeat'}:${Math.floor(Date.now() / 10000)}`;
+
     const result = await agentExecutionService.executeRun({
       agentId,
       subaccountId,
       subaccountAgentId: saLink.id,
       organisationId: req.orgId!,
       runType: 'manual',
-      executionMode: 'api',
+      executionMode: executionMode ?? 'api',
       taskId,
-      triggerContext: { triggeredBy: req.user!.id, source: 'manual' },
+      idempotencyKey: effectiveIdempotencyKey,
+      triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
     });
 
     res.json(result);

@@ -94,8 +94,18 @@ export default function SystemUsersPage({ user }: { user: User }) {
           {error && (
             <div className="text-red-600 text-[13px] mb-3">{error}</div>
           )}
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="col-span-2">
+          <div className="grid gap-4 mb-6">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name *</label>
+                <input autoFocus value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name *</label>
+                <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className={inputCls} />
+              </div>
+            </div>
+            <div>
               <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Email *</label>
               <input
                 type="email"
@@ -105,27 +115,19 @@ export default function SystemUsersPage({ user }: { user: User }) {
                 placeholder="admin@example.com"
               />
             </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">First name</label>
-              <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className={inputCls} />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Last name</label>
-              <input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className={inputCls} />
-            </div>
           </div>
-          <div className="flex gap-3">
-            <button
-              onClick={handleInvite}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors"
-            >
-              Send invitation
-            </button>
+          <div className="flex gap-2 justify-end">
             <button
               onClick={() => { setShowInviteForm(false); setError(''); }}
-              className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors"
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer"
             >
               Cancel
+            </button>
+            <button
+              onClick={handleInvite}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer transition-colors"
+            >
+              Send invitation
             </button>
           </div>
         </Modal>

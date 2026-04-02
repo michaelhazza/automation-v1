@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -24,6 +24,9 @@ export const agentRuns = pgTable(
     subaccountAgentId: uuid('subaccount_agent_id')
       .notNull()
       .references(() => subaccountAgents.id),
+
+    // Idempotency — prevents duplicate runs on retry
+    idempotencyKey: text('idempotency_key'),
 
     // How this run was initiated
     runType: text('run_type').notNull().$type<'scheduled' | 'manual' | 'triggered'>(),
@@ -93,6 +96,7 @@ export const agentRuns = pgTable(
     taskIdIdx: index('agent_runs_task_id_idx').on(table.taskId),
     parentRunIdIdx: index('agent_runs_parent_run_id_idx').on(table.parentRunId),
     parentSpawnRunIdIdx: index('agent_runs_parent_spawn_run_id_idx').on(table.parentSpawnRunId),
+    idempotencyKeyIdx: uniqueIndex('agent_runs_idempotency_key_idx').on(table.idempotencyKey),
   })
 );
 

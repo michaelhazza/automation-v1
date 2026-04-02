@@ -5,6 +5,8 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { devContextService, type DevContext } from './devContextService.js';
+import { connectionTokenService } from './connectionTokenService.js';
+import { getInstallationAccessToken } from '../routes/githubApp.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +14,8 @@ const execFileAsync = promisify(execFile);
 // Git Abstraction Service
 // Wraps all git operations. Skills call service methods; the service enforces
 // DEC git config. Agents never construct raw git commands.
+//
+// Supports both GitHub App installations (preferred) and legacy OAuth tokens.
 // ---------------------------------------------------------------------------
 
 export interface PROptions {
@@ -44,29 +48,54 @@ async function git(args: string[], cwd: string, timeout = 30000): Promise<string
   }
 }
 
-async function getGitHubCredentials(subaccountId: string): Promise<GitHubCredentials> {
+/**
+ * Get GitHub credentials for a subaccount.
+ * Supports both GitHub App (installation tokens) and legacy OAuth connections.
+ * If connectionId is provided, uses that specific connection; otherwise finds the first active one.
+ */
+async function getGitHubCredentials(subaccountId: string, connectionId?: string): Promise<GitHubCredentials> {
+  const conditions = [
+    eq(integrationConnections.subaccountId, subaccountId),
+    eq(integrationConnections.providerType, 'github'),
+    eq(integrationConnections.connectionStatus, 'active'),
+  ];
+
+  if (connectionId) {
+    conditions.push(eq(integrationConnections.id, connectionId));
+  }
+
   const [conn] = await db
     .select()
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.subaccountId, subaccountId),
-        eq(integrationConnections.providerType, 'github'),
-        eq(integrationConnections.connectionStatus, 'active')
-      )
-    );
+    .where(and(...conditions))
+    .limit(1);
 
   if (!conn) {
     throw {
       statusCode: 400,
-      message: 'No active GitHub integration found for this subaccount. Connect a GitHub account in integrations.',
+      message: connectionId
+        ? `GitHub connection ${connectionId} not found or inactive.`
+        : 'No active GitHub integration found for this subaccount. Connect GitHub in integrations.',
       errorCode: 'environment_failure',
     };
   }
 
-  // Credentials are stored encrypted in accessToken
-  const token = conn.accessToken;
-  if (!token) {
+  // GitHub App installation — mint a fresh installation access token
+  if (conn.authType === 'github_app') {
+    const config = conn.configJson as { installationId?: number } | null;
+    if (!config?.installationId) {
+      throw {
+        statusCode: 400,
+        message: 'GitHub App connection has no installation ID. Re-install the GitHub App.',
+        errorCode: 'environment_failure',
+      };
+    }
+    const token = await getInstallationAccessToken(config.installationId);
+    return { token };
+  }
+
+  // Legacy OAuth — decrypt stored access token
+  if (!conn.accessToken) {
     throw {
       statusCode: 400,
       message: 'GitHub integration is connected but has no access token. Re-connect GitHub.',
@@ -74,7 +103,7 @@ async function getGitHubCredentials(subaccountId: string): Promise<GitHubCredent
     };
   }
 
-  return { token };
+  return { token: connectionTokenService.decryptToken(conn.accessToken) };
 }
 
 // ---------------------------------------------------------------------------
@@ -196,8 +225,8 @@ export const gitService = {
    */
   async createPullRequest(subaccountId: string, opts: PROptions): Promise<string> {
     const { context } = await devContextService.getContext(subaccountId);
-    const { repoOwner, repoName, defaultBranch } = context.gitConfig;
-    const { token } = await getGitHubCredentials(subaccountId);
+    const { repoOwner, repoName, defaultBranch, githubConnectionId } = context.gitConfig;
+    const { token } = await getGitHubCredentials(subaccountId, githubConnectionId);
     const baseBranch = opts.baseBranch ?? defaultBranch;
 
     // Idempotency: check for existing open PR on this branch
