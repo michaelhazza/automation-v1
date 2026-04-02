@@ -1,40 +1,40 @@
-# Dev Brief: Org-Level Agents & Cross-Client Intelligence
+# Dev Brief: Org-Level Agents & Cross-Subaccount Intelligence
 
 **Date:** 2026-04-02
 **Status:** CEO brief -- strategic framing, not dev spec
-**Context:** Platform currently only supports agents running within a single subaccount (client workspace). This brief proposes extending agents to run at the org (agency) level, enabling cross-client intelligence, portfolio monitoring, and agency-wide automation.
+**Context:** Platform currently only supports agents running within a single subaccount. This brief proposes extending agents to run at the organisation level, enabling cross-subaccount intelligence, portfolio monitoring, and org-wide automation.
 
 ---
 
 ## Why This Matters
 
-GHL agencies manage 20-100+ client sub-accounts. Today, every agent run is scoped to a single client. There is no mechanism for an agent to:
+Today, every agent run is scoped to a single subaccount. There is no mechanism for an agent to:
 
-- Monitor health across all client accounts
-- Detect patterns that span clients (e.g. "dental clients convert best with same-day follow-up")
-- Generate cross-client reports or alerts
-- Operate at the agency level without being tied to one client
+- Monitor health across all subaccounts in an organisation
+- Detect patterns that span subaccounts (e.g. "subaccounts tagged 'dental' convert best with same-day follow-up")
+- Generate cross-subaccount reports or alerts
+- Operate at the org level without being tied to one subaccount
 
-GHL provides **nothing** at the agency level for intelligence, proactive alerting, or cross-account automation. Everything is siloed per sub-account. Agencies spend $500-2000/mo on duct-tape tools (AgencyAnalytics, Make.com, Airtable) and still can't get proactive monitoring.
+Subaccounts are a generic concept -- they represent whatever the organisation needs: clients, projects, departments, properties, portfolios. The platform doesn't prescribe what a subaccount is. But the org needs a way to operate *across* them.
 
-**This is our differentiation.** OpenClaw-style tools can't do persistent, multi-tenant, cross-account intelligence with human oversight. This is where we win.
+**This is our differentiation.** Fully autonomous agent tools can't do persistent, multi-tenant, cross-workspace intelligence with human oversight. This is where we win.
 
 ---
 
 ## What We're Building
 
-**An org-level agent capability** -- agents that belong to the agency (not a specific client) and can see across all clients. Think of it as the agency's AI operations manager.
+**An org-level agent capability** -- agents that belong to the organisation (not a specific subaccount) and can see across all subaccounts. The org's AI operations layer.
 
-### Use Cases Unlocked
+### Use Cases Unlocked (examples -- org defines these through configuration, not code)
 
 | Use Case | Description |
 |----------|-------------|
-| **Portfolio health monitoring** | Weekly heartbeat agent reviews all client boards, flags stalling pipelines, cold leads, at-risk accounts |
-| **Cross-client pattern detection** | "3 of your dental clients saw lead volume drop this week" / "Clients using same-day follow-up convert 2x better" |
-| **Automated agency reporting** | Generate per-client reports by reading each client's board + memory, send via email with review gate |
-| **Churn early warning** | Agent tracks engagement signals across clients, surfaces risk before the client cancels |
-| **Cohort analysis** | Compare performance across client segments (by vertical, region, plan tier) |
-| **Agency operations** | Internal task management, team coordination, process improvement |
+| **Portfolio health monitoring** | Heartbeat agent reviews all subaccount boards, flags stalling work, missed deadlines, at-risk accounts |
+| **Cross-subaccount pattern detection** | "Subaccounts tagged 'dental' saw lead volume drop this week" / "Projects using pattern X complete 2x faster" |
+| **Automated reporting** | Generate per-subaccount reports by reading each board + memory, send via email with review gate |
+| **Early warning signals** | Agent tracks activity signals across subaccounts, surfaces risk before problems escalate |
+| **Cohort analysis** | Compare performance across subaccount segments using user-defined tags |
+| **Org-level operations** | Internal task management, coordination, process improvement at the org level |
 
 ---
 
@@ -76,12 +76,12 @@ An org agent is an agent that runs at the organisation level -- no subaccount bi
 ```
 System Agent (platform IP)
       |
-Org Agent (agency-level)
+Org Agent (organisation-level)
       |--- can read across all subaccounts via new skills
       |--- has its own board, memory, review queue at org level
       |
-Subaccount Agent (client-level, unchanged)
-      |--- operates within a single client workspace
+Subaccount Agent (subaccount-level, unchanged)
+      |--- operates within a single subaccount workspace
 ```
 
 ### New Capabilities
@@ -96,15 +96,15 @@ Where subaccount agents get their run config (budget, skills, max tool calls, ti
 New `org_memory_entries` table -- stores insights that span clients. Not a replacement for subaccount memory. This is where cross-client patterns live.
 
 **3. Subaccount Tags**
-User-defined key-value tags on subaccounts (vertical, region, plan tier). The grouping primitive for cohort analysis. Not hardcoded categories.
+User-defined key-value tags on subaccounts. The grouping primitive for cohort analysis. Organisations define whatever dimensions matter to them -- the platform provides the tagging infrastructure, not the categories.
 
 **4. Three New Skills**
-- `query_client_cohort` -- read board health + memory summaries across multiple clients, filtered by tags
-- `read_cross_client_insights` -- query org-level memory
-- `write_cross_client_insight` -- store cross-client patterns in org memory
+- `query_subaccount_cohort` -- read board health + memory summaries across multiple subaccounts, filtered by tags
+- `read_org_insights` -- query org-level memory
+- `write_org_insight` -- store cross-subaccount patterns in org memory
 
-**5. Org-Level Board (optional, Phase 2)**
-A kanban board at the org level for agency operations tasks. Already partially supported (board config has nullable `subaccountId`), but tasks don't yet support it.
+**5. Org-Level Board (Phase 3)**
+A kanban board at the org level for org-wide work that doesn't belong to any single subaccount. Already partially supported (board config has nullable `subaccountId`), but tasks don't yet support it.
 
 **6. Org-Level Review Queue**
 When org agents propose actions (e.g. sending a report email), they need HITL review. Same mechanism, new scope.
@@ -127,30 +127,30 @@ What this involves:
 
 **What you get:** Org agents can run, execute skills, and have their actions reviewed. But they can't yet see across clients.
 
-### Phase 2: Cross-Client Read (Intelligence)
+### Phase 2: Cross-Subaccount Read (Intelligence)
 
-**Goal:** Org agents can read across client accounts.
+**Goal:** Org agents can read across subaccounts.
 
 What this involves:
 - Subaccount tags (schema + CRUD + UI)
-- `query_client_cohort` skill -- reads board state + memory summaries across clients, filtered by tags
+- `query_subaccount_cohort` skill -- reads board state + memory summaries across subaccounts, filtered by user-defined tags
 - Org-level memory (`org_memory_entries` table + service)
-- `read_cross_client_insights` and `write_cross_client_insight` skills
+- `read_org_insights` and `write_org_insight` skills
 
-**What you get:** An org-level "Intelligence Agent" can run weekly, review all client accounts, identify patterns, store insights, and create alert tasks. The agency's AI operations manager.
+**What you get:** An org-level agent can run on heartbeat, review all subaccounts, identify patterns, store insights, and create alert tasks. The org's cross-cutting intelligence layer.
 
-### Phase 3: Org-Level Workspace (Operations)
+### Phase 3: Org-Level Workspace
 
-**Goal:** The agency has its own workspace for internal operations.
+**Goal:** The organisation has its own workspace for org-wide work.
 
 What this involves:
 - Make `tasks.subaccountId` nullable -- org-level tasks
 - Org-level board UI
 - Org-level scheduled tasks
 - Org-level triggers (e.g. "when an org task is created, fire the org orchestrator")
-- Org-level connections (OAuth connections at agency level, shared across clients)
+- Org-level connections (OAuth connections at org level, available to org agents)
 
-**What you get:** Full parity with subaccount workspaces, but at the agency level. The agency can manage its own operations board with AI agents.
+**What you get:** A workspace at the org level for work that doesn't belong to any single subaccount. Same capabilities as subaccount workspaces -- board, tasks, scheduling, triggers, connections -- but scoped to the organisation.
 
 ---
 
@@ -187,16 +187,16 @@ What this involves:
 
 ## Strategic Framing
 
-This is the feature that turns Automation OS from a "per-client agent tool" into an "agency operating system." Without org-level agents, the agency still needs to manage each client manually. With them, the platform becomes the agency's AI-powered operations layer.
+This is the feature that turns the platform from a "per-subaccount agent tool" into a true operating system. Without org-level agents, the organisation still needs to manage each subaccount manually. With them, the platform becomes the org's AI-powered operations layer that works across all their workspaces.
 
-The cross-client intelligence capability (Phase 2) is specifically what no competitor offers -- not GHL, not OpenClaw, not any of the reporting tools agencies use today. It's persistent, accumulative, and gets smarter over time through workspace memory.
+The cross-subaccount intelligence capability (Phase 2) is persistent, accumulative, and gets smarter over time through workspace memory. This is a generic platform capability -- what orgs *do* with it depends on their domain. An agency monitors client health. A dev shop tracks project velocity. A property manager monitors building performance. The platform provides the infrastructure; the org provides the context through data and configuration, not code.
 
-**Recommended approach:** Build Phase 1 as a foundation sprint, validate with the agency contact that the cross-client read capabilities (Phase 2) match their actual needs, then build Phase 2. Phase 3 (org workspace) can follow based on demand.
+**Recommended approach:** Build Phase 1 as a foundation sprint, validate Phase 2 capabilities with real users, then build Phase 2. Phase 3 follows based on demand.
 
 ---
 
 ## Next Steps
 
-1. Talk to agency contact -- validate pain points and prioritise use cases
-2. If validated, produce a dev spec for Phase 1 (schema migrations, execution service changes, org agent config)
+1. Validate with real users that cross-subaccount capabilities match actual needs
+2. Produce a dev spec for Phase 1 (schema migrations, execution service changes, org agent config)
 3. Classify as **Significant** (multiple domains, new patterns) -- invoke architect agent before implementation
