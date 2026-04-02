@@ -521,6 +521,92 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
   },
+
+  // ── Page management actions ─────────────────────────────────────────────────
+
+  create_page: {
+    actionType: 'create_page',
+    description: 'Create a new page in a page project. The page is created in draft status. HTML is sanitised before storage. Returns a preview URL for HITL review.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: true,
+    payloadFields: ['projectId', 'slug', 'pageType', 'title', 'html', 'meta', 'formConfig'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'ID of the page project to create the page in' },
+        slug: { type: 'string', description: 'URL slug for the page (must be unique within the project)' },
+        pageType: { type: 'string', enum: ['website', 'landing'], description: 'Type of page — website or landing page' },
+        title: { type: 'string', description: 'Page title' },
+        html: { type: 'string', description: 'HTML content for the page (max 1 MB). Will be sanitised before storage.' },
+        meta: { type: 'object', properties: { title: {}, description: {}, ogImage: {}, canonicalUrl: {}, noIndex: {} }, description: 'SEO and social meta fields' },
+        formConfig: { type: 'object', description: 'Optional form configuration for the page' },
+      },
+      required: ['projectId', 'slug', 'pageType', 'html'],
+    },
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+  },
+
+  update_page: {
+    actionType: 'update_page',
+    description: 'Update an existing page HTML, meta, or formConfig. Saves a version snapshot before updating. Returns a preview URL.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: true,
+    payloadFields: ['pageId', 'projectId', 'html', 'meta', 'formConfig', 'changeNote'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string', description: 'ID of the page to update' },
+        projectId: { type: 'string', description: 'ID of the project the page belongs to' },
+        html: { type: 'string', description: 'Updated HTML content (max 1 MB). Will be sanitised before storage.' },
+        meta: { type: 'object', description: 'Updated SEO and social meta fields' },
+        formConfig: { type: 'object', description: 'Updated form configuration' },
+        changeNote: { type: 'string', description: 'Brief note describing the change (stored with the version snapshot)' },
+      },
+      required: ['pageId', 'projectId'],
+    },
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  publish_page: {
+    actionType: 'publish_page',
+    description: 'Publish a page — flips status from draft to published, sets publishedAt, and invalidates cache. Default gate is review so a human can preview before going live.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: true,
+    payloadFields: ['pageId', 'projectId'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string', description: 'ID of the page to publish' },
+        projectId: { type: 'string', description: 'ID of the project the page belongs to' },
+      },
+      required: ['pageId', 'projectId'],
+    },
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: [],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
 };
 
 /** Check if an action type is known */
