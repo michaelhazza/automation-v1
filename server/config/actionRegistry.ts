@@ -18,13 +18,30 @@ export interface McpAnnotations {
   openWorldHint: boolean;   // true = reaches external systems
 }
 
+/** JSON Schema describing the tool's input parameters */
+export interface ParameterSchema {
+  type: 'object';
+  properties: Record<string, {
+    type: string;
+    description?: string;
+    enum?: string[];
+    properties?: Record<string, unknown>;
+    items?: Record<string, unknown>;
+  }>;
+  required: string[];
+  additionalProperties?: boolean;
+}
+
 export interface ActionDefinition {
   actionType: string;
+  description: string;
   actionCategory: 'api' | 'worker' | 'browser' | 'devops';
   isExternal: boolean;
   defaultGateLevel: 'auto' | 'review' | 'block';
   createsBoardTask: boolean;
+  /** @deprecated Use parameterSchema instead. Kept for backward compat. */
   payloadFields: string[];
+  parameterSchema: ParameterSchema;
   retryPolicy: RetryPolicy;
   mcp?: { annotations: McpAnnotations };
 }
@@ -32,11 +49,23 @@ export interface ActionDefinition {
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   send_email: {
     actionType: 'send_email',
+    description: 'Send an email via a connected email provider. Requires human approval before sending.',
     actionCategory: 'api',
     isExternal: true,
     defaultGateLevel: 'review',
     createsBoardTask: true,
     payloadFields: ['to', 'subject', 'body', 'thread_id', 'provider'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject line' },
+        body: { type: 'string', description: 'Email body content (plain text or HTML)' },
+        thread_id: { type: 'string', description: 'Thread ID to reply within an existing conversation (optional)' },
+        provider: { type: 'string', description: 'Email provider to use (e.g. "gmail", "outlook"). Defaults to the configured default.' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
     retryPolicy: {
       maxRetries: 3,
       strategy: 'exponential_backoff',
@@ -47,11 +76,20 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   read_inbox: {
     actionType: 'read_inbox',
+    description: 'Read recent emails from a connected email provider inbox.',
     actionCategory: 'api',
     isExternal: true,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['provider', 'since'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', description: 'Email provider to read from (e.g. "gmail", "outlook")' },
+        since: { type: 'string', description: 'ISO 8601 timestamp — only return emails after this date' },
+      },
+      required: ['provider'],
+    },
     retryPolicy: {
       maxRetries: 3,
       strategy: 'exponential_backoff',
@@ -62,11 +100,24 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   create_task: {
     actionType: 'create_task',
+    description: 'Create a new task on the board with title, description, and optional agent assignment.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'brief', 'status', 'priority', 'assigned_agent_id'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short title for the work item' },
+        description: { type: 'string', description: 'Human-readable description visible in the task card' },
+        brief: { type: 'string', description: 'Self-contained instructions for the agent picking up this task' },
+        status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Initial status (default: todo)' },
+        priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'], description: 'Task priority (default: normal)' },
+        assigned_agent_id: { type: 'string', description: 'Agent ID to assign the task to' },
+      },
+      required: ['title'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -77,11 +128,20 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   move_task: {
     actionType: 'move_task',
+    description: 'Move a task to a different status column on the board.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['task_id', 'status'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'The ID of the task to move' },
+        status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Target status column' },
+      },
+      required: ['task_id', 'status'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -92,11 +152,20 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   reassign_task: {
     actionType: 'reassign_task',
+    description: 'Reassign a task to a different agent.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['task_id', 'assigned_agent_id'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'The ID of the task to reassign' },
+        assigned_agent_id: { type: 'string', description: 'The agent ID to assign the task to' },
+      },
+      required: ['task_id', 'assigned_agent_id'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -107,11 +176,22 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   add_deliverable: {
     actionType: 'add_deliverable',
+    description: 'Attach a deliverable (document, artifact, output) to a task.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['task_id', 'title', 'content', 'deliverable_type'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'The ID of the task to attach the deliverable to' },
+        title: { type: 'string', description: 'Title of the deliverable' },
+        content: { type: 'string', description: 'Content of the deliverable (text, markdown, or JSON)' },
+        deliverable_type: { type: 'string', enum: ['document', 'code', 'report', 'screenshot', 'other'], description: 'Type of deliverable' },
+      },
+      required: ['task_id', 'title', 'content'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -122,11 +202,22 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   update_record: {
     actionType: 'update_record',
+    description: 'Update a record in an external system (CRM, database, etc.) via a connected provider.',
     actionCategory: 'api',
     isExternal: true,
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['provider', 'record_type', 'record_id', 'fields'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string', description: 'Integration provider (e.g. "hubspot", "salesforce")' },
+        record_type: { type: 'string', description: 'Type of record to update (e.g. "contact", "deal")' },
+        record_id: { type: 'string', description: 'The ID of the record to update' },
+        fields: { type: 'object', description: 'Key-value pairs of fields to update' },
+      },
+      required: ['provider', 'record_type', 'record_id', 'fields'],
+    },
     retryPolicy: {
       maxRetries: 3,
       strategy: 'exponential_backoff',
@@ -137,11 +228,22 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   fetch_url: {
     actionType: 'fetch_url',
+    description: 'Fetch content from a URL via HTTP request.',
     actionCategory: 'api',
     isExternal: true,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['url', 'method', 'headers', 'body'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The URL to fetch' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], description: 'HTTP method (default: GET)' },
+        headers: { type: 'object', description: 'Optional HTTP headers as key-value pairs' },
+        body: { type: 'string', description: 'Optional request body (for POST/PUT/PATCH)' },
+      },
+      required: ['url'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -152,11 +254,22 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
   },
   request_approval: {
     actionType: 'request_approval',
+    description: 'Request human approval for a decision or action. Routes to the HITL review queue.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'context', 'options'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short title for the approval request' },
+        description: { type: 'string', description: 'What needs to be approved and why' },
+        context: { type: 'string', description: 'Additional context for the reviewer' },
+        options: { type: 'array', description: 'List of options for the reviewer to choose from', items: { type: 'string' } },
+      },
+      required: ['title', 'description'],
+    },
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -170,11 +283,19 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   read_codebase: {
     actionType: 'read_codebase',
+    description: 'Read the contents of a file from the project codebase.',
     actionCategory: 'devops',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['file_path'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Path to the file to read, relative to project root' },
+      },
+      required: ['file_path'],
+    },
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -186,11 +307,22 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   search_codebase: {
     actionType: 'search_codebase',
+    description: 'Search the project codebase for files or content matching a query.',
     actionCategory: 'devops',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['query', 'search_type', 'file_pattern', 'max_results'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query — text to find in the codebase' },
+        search_type: { type: 'string', enum: ['content', 'filename'], description: 'Search by file content or filename (default: content)' },
+        file_pattern: { type: 'string', description: 'Glob pattern to filter files (e.g. "**/*.ts")' },
+        max_results: { type: 'number', description: 'Maximum results to return (default: 20)' },
+      },
+      required: ['query'],
+    },
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -202,11 +334,19 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   run_tests: {
     actionType: 'run_tests',
+    description: 'Run the project test suite, optionally filtered to specific tests.',
     actionCategory: 'devops',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['test_filter'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        test_filter: { type: 'string', description: 'Filter to run specific tests (e.g. test name pattern or file path)' },
+      },
+      required: [],
+    },
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -218,11 +358,23 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   analyze_endpoint: {
     actionType: 'analyze_endpoint',
+    description: 'Make an HTTP request to an API endpoint and analyze the response.',
     actionCategory: 'api',
     isExternal: true,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['url', 'method', 'headers', 'body', 'expected_status'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'The endpoint URL to test' },
+        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], description: 'HTTP method (default: GET)' },
+        headers: { type: 'object', description: 'HTTP headers as key-value pairs' },
+        body: { type: 'string', description: 'Request body (for POST/PUT/PATCH)' },
+        expected_status: { type: 'number', description: 'Expected HTTP status code for validation' },
+      },
+      required: ['url'],
+    },
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -234,11 +386,25 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   report_bug: {
     actionType: 'report_bug',
+    description: 'File a bug report with severity, reproduction steps, and expected vs actual behavior.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: true,
     payloadFields: ['title', 'description', 'severity', 'confidence', 'steps_to_reproduce', 'expected_behavior', 'actual_behavior'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short, descriptive bug title' },
+        description: { type: 'string', description: 'Detailed description of the bug' },
+        severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Bug severity' },
+        confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Confidence that this is a real bug' },
+        steps_to_reproduce: { type: 'string', description: 'Step-by-step reproduction instructions' },
+        expected_behavior: { type: 'string', description: 'What should happen' },
+        actual_behavior: { type: 'string', description: 'What actually happens' },
+      },
+      required: ['title', 'description', 'severity'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -252,11 +418,23 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   write_patch: {
     actionType: 'write_patch',
+    description: 'Propose a code change as a unified diff. Review-gated — requires human approval before execution.',
     actionCategory: 'devops',
     isExternal: false,
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['file', 'diff', 'reasoning', 'base_commit', 'intent'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Path to the file to modify, relative to projectRoot' },
+        diff: { type: 'string', description: 'Unified diff (--- / +++ / @@ format). Must be minimal and targeted.' },
+        base_commit: { type: 'string', description: 'The git commit hash this diff is based on' },
+        intent: { type: 'string', enum: ['feature', 'bugfix', 'refactor', 'test', 'config'], description: 'Type of change' },
+        reasoning: { type: 'string', description: 'Why this change is needed. The reviewer sees this field and the diff.' },
+      },
+      required: ['file', 'diff', 'base_commit', 'reasoning'],
+    },
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -268,11 +446,19 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   run_command: {
     actionType: 'run_command',
+    description: 'Execute a shell command in the project environment. Review-gated for safety.',
     actionCategory: 'devops',
     isExternal: false,
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['command'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'The shell command to execute' },
+      },
+      required: ['command'],
+    },
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -284,11 +470,21 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   create_pr: {
     actionType: 'create_pr',
+    description: 'Create a pull request on GitHub from the current working branch.',
     actionCategory: 'devops',
     isExternal: true,
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'branch'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Pull request title' },
+        description: { type: 'string', description: 'Pull request body/description (markdown)' },
+        branch: { type: 'string', description: 'Source branch name' },
+      },
+      required: ['title', 'branch'],
+    },
     retryPolicy: {
       maxRetries: 2,
       strategy: 'exponential_backoff',
@@ -302,11 +498,21 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   assign_task: {
     actionType: 'assign_task',
+    description: 'Assign a task to a worker agent for autonomous execution.',
     actionCategory: 'worker',
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['worker_agent_slug', 'task_description', 'context'],
+    parameterSchema: {
+      type: 'object',
+      properties: {
+        worker_agent_slug: { type: 'string', description: 'Slug of the worker agent to assign the task to' },
+        task_description: { type: 'string', description: 'Description of the task for the worker agent' },
+        context: { type: 'string', description: 'Additional context or instructions for the worker' },
+      },
+      required: ['worker_agent_slug', 'task_description'],
+    },
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',

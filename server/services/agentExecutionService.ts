@@ -852,13 +852,14 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             taskId: request.taskId,
           },
         });
-      });
+      }, { actionType: toolCall.name });
 
       if (error) {
         resultContent = JSON.stringify({
           success: false,
           error: error.message,
           error_type: error.type,
+          error_category: error.category,
           retried,
         });
       } else {
