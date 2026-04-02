@@ -17,6 +17,7 @@ import { agentScheduleService } from './services/agentScheduleService.js';
 import { routerJobService } from './services/routerJobService.js';
 import { queueService } from './services/queueService.js';
 import { initializePageIntegrationWorker } from './services/pageIntegrationWorker.js';
+import { initializePaymentReconciliationJob } from './services/paymentReconciliationJob.js';
 import { client as dbClient } from './db/index.js';
 import { getIO } from './websocket/index.js';
 
@@ -69,8 +70,13 @@ import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+import pageProjectsRouter from './routes/pageProjects.js';
+import pageRoutesRouter from './routes/pageRoutes.js';
+import publicPageServingRouter from './routes/public/pageServing.js';
+import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
+import { subdomainResolution } from './middleware/subdomainResolution.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -129,6 +135,9 @@ app.use(express.urlencoded({ extended: true }));
 import { correlationMiddleware } from './middleware/correlation.js';
 app.use(correlationMiddleware);
 
+// Subdomain resolution — must run before page serving routes
+app.use(subdomainResolution);
+
 // Routes
 app.use(healthRouter);
 app.use(authRouter);
@@ -175,8 +184,12 @@ app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(pageProjectsRouter);
+app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
+app.use(publicPagePreviewRouter);
+app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
@@ -246,6 +259,7 @@ async function start() {
   await routerJobService.initializeRouterJobs();
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
+  await initializePaymentReconciliationJob();
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {
