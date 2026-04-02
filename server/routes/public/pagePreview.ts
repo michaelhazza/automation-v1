@@ -117,6 +117,12 @@ router.get('/preview/:pageSlug', asyncHandler(async (req: Request, res: Response
   }
 
   const { pageSlug } = req.params;
+
+  if (payload.slug !== pageSlug) {
+    res.status(401).json({ error: 'Token does not match this page' });
+    return;
+  }
+
   const page = await pageService.getForPreview(payload.pageId, project.id, pageSlug);
 
   if (!page) {

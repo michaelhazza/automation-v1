@@ -7,7 +7,17 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { formSubmissionService } from '../../services/formSubmissionService.js';
 
-// ── Simple in-memory rate limiter ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// MVP rate limiting — in-memory, per-process.
+//
+// Limitations:
+// - Not shared across server instances (each process has its own window)
+// - Effective limit multiplied by instance count behind a load balancer
+// - Resets on process restart
+//
+// For production: replace with Redis-backed counters (e.g. ioredis + sliding
+// window) or Postgres-backed rate limiting.
+// ---------------------------------------------------------------------------
 const ipHits = new Map<string, number[]>();
 const pageHits = new Map<string, number[]>();
 

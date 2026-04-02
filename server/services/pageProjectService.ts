@@ -4,6 +4,12 @@ import { eq, and, isNull } from 'drizzle-orm';
 
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
+/**
+ * Slug uniqueness is enforced GLOBALLY (not per-org or per-subaccount).
+ * This is intentional: each slug becomes a subdomain under *.synthetos.ai,
+ * and DNS subdomains are globally unique. Two different organisations cannot
+ * both have "acme.synthetos.ai".
+ */
 async function checkSlugUniqueness(
   slug: string,
   excludeId?: string
@@ -19,7 +25,7 @@ async function checkSlugUniqueness(
     .where(and(...conditions));
 
   if (existing && existing.id !== excludeId) {
-    throw { statusCode: 409, message: 'A page project with this slug already exists' };
+    throw { statusCode: 409, message: `Slug "${slug}" is already taken. Page project slugs must be globally unique because they become subdomains.` };
   }
 }
 
@@ -64,7 +70,7 @@ export const pageProjectService = {
       return created;
     } catch (err: unknown) {
       if ((err as { code?: string }).code === '23505') {
-        throw { statusCode: 409, message: `Slug "${data.slug}" is already taken` };
+        throw { statusCode: 409, message: `Slug "${data.slug}" is already taken. Page project slugs must be globally unique because they become subdomains.` };
       }
       throw err;
     }

@@ -76,7 +76,7 @@ export const pageService = {
       changeNote: 'Initial version',
     });
 
-    const token = previewTokenService.generate(page.id, data.projectId);
+    const token = previewTokenService.generate(page.id, data.projectId, page.slug, page.createdAt);
     const previewUrl = buildPreviewUrl(projectSlug, page.slug, token);
 
     return { ...page, previewUrl };
@@ -124,7 +124,7 @@ export const pageService = {
       .where(and(eq(pages.id, pageId), eq(pages.projectId, existing.projectId)))
       .returning();
 
-    const token = previewTokenService.generate(pageId, projectId);
+    const token = previewTokenService.generate(pageId, projectId, updated.slug, updated.updatedAt);
     const previewUrl = buildPreviewUrl(projectSlug, updated.slug, token);
 
     return { ...updated, previewUrl };
