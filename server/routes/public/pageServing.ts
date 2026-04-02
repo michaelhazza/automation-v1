@@ -7,6 +7,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { asyncHandler } from '../../lib/asyncHandler.js';
 import { pageService } from '../../services/pageService.js';
 import type { Page } from '../../db/schema/pages.js';
 import type { PageProject } from '../../db/schema/pageProjects.js';
@@ -153,13 +154,10 @@ function escapeHtml(str: string): string {
 
 // ─── Route: serve published pages ──────────────────────────────────────────────
 
-router.get('*', async (req: Request, res: Response, next: NextFunction) => {
-  // Only handle requests resolved by subdomain middleware
+router.get('*', asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.resolvedPageProject) {
     return next();
   }
-
-  // Skip /preview/ and /api/ paths — handled elsewhere
   if (req.path.startsWith('/preview/') || req.path.startsWith('/api/')) {
     return next();
   }
@@ -167,37 +165,31 @@ router.get('*', async (req: Request, res: Response, next: NextFunction) => {
   const pageSlug = req.resolvedPageSlug ?? 'index';
   const project = req.resolvedPageProject;
 
-  try {
-    const page = await pageService.getPublishedBySlug(project.id, pageSlug);
-
-    if (!page) {
-      res.status(404).send('Page not found');
-      return;
-    }
-
-    // ETag-based caching
-    const etag = `"${page.id}-${page.updatedAt.getTime()}"`;
-    if (req.headers['if-none-match'] === etag) {
-      res.status(304).end();
-      return;
-    }
-
-    const html = buildPageShell(page, project, {
-      trackingScript: buildTrackingScript(page.id),
-    });
-
-    res
-      .set({
-        'Content-Type': 'text/html; charset=utf-8',
-        ETag: etag,
-        'Cache-Control': 'public, max-age=300',
-        'Last-Modified': page.updatedAt.toUTCString(),
-        'Content-Security-Policy': CSP,
-      })
-      .send(html);
-  } catch (err) {
-    next(err);
+  const page = await pageService.getPublishedBySlug(project.id, pageSlug);
+  if (!page) {
+    res.status(404).send('Page not found');
+    return;
   }
-});
+
+  const etag = `"${page.id}-${page.updatedAt.getTime()}"`;
+  if (req.headers['if-none-match'] === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  const html = buildPageShell(page, project, {
+    trackingScript: buildTrackingScript(page.id),
+  });
+
+  res
+    .set({
+      'Content-Type': 'text/html; charset=utf-8',
+      ETag: etag,
+      'Cache-Control': 'public, max-age=300',
+      'Last-Modified': page.updatedAt.toUTCString(),
+      'Content-Security-Policy': CSP,
+    })
+    .send(html);
+}));
 
 export default router;

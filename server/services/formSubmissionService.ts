@@ -74,6 +74,9 @@ export const formSubmissionService = {
       }
     }
 
+    // Cache integration lookups for reuse during enqueue
+    const integrationCache = new Map<string, { connectionId: string; providerType: string }>();
+
     // 5. Adapter capability validation
     if (formConfig?.actions) {
       for (const [purpose, actionConfig] of Object.entries(formConfig.actions)) {
@@ -123,6 +126,8 @@ export const formSubmissionService = {
             message: `Adapter "${connection.providerType}" does not support action "${actionConfig.action}"`,
           };
         }
+
+        integrationCache.set(purpose, { connectionId: integration.connectionId, providerType: connection.providerType });
       }
     }
 
@@ -162,24 +167,15 @@ export const formSubmissionService = {
     // 9. Enqueue integration jobs
     if (formConfig?.actions) {
       for (const [purpose, actionConfig] of Object.entries(formConfig.actions)) {
-        const [integration] = await db
-          .select()
-          .from(projectIntegrations)
-          .where(
-            and(
-              eq(projectIntegrations.projectId, page.projectId),
-              eq(projectIntegrations.purpose, purpose as 'crm' | 'payments' | 'email' | 'ads' | 'analytics'),
-            ),
-          );
-
-        if (integration) {
+        const cached = integrationCache.get(purpose);
+        if (cached) {
           await enqueuePageIntegrationJob({
             submissionId: submission.id,
             pageId,
             purpose,
             action: actionConfig.action,
             fields: actionConfig.fields,
-            connectionId: integration.connectionId,
+            connectionId: cached.connectionId,
           });
         }
       }

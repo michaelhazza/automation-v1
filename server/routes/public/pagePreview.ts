@@ -7,12 +7,25 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
+import { asyncHandler } from '../../lib/asyncHandler.js';
 import { pageService } from '../../services/pageService.js';
 import type { Page } from '../../db/schema/pages.js';
 import type { PageProject } from '../../db/schema/pageProjects.js';
 import { previewTokenService } from '../../lib/previewTokenService.js';
 
 const router = Router();
+
+// ─── CSP header ────────────────────────────────────────────────────────────────
+
+const CSP = [
+  "default-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "frame-src https://link.msgsndr.com https://js.stripe.com https://buy.stripe.com https://www.youtube.com https://player.vimeo.com https://calendly.com",
+  "connect-src 'self'",
+  "script-src 'self' https://js.stripe.com 'unsafe-inline'",
+].join('; ');
 
 // ─── Preview banner ────────────────────────────────────────────────────────────
 
@@ -80,8 +93,7 @@ function escapeHtml(str: string): string {
 
 // ─── Route: preview page ───────────────────────────────────────────────────────
 
-router.get('/preview/:pageSlug', async (req: Request, res: Response, next: NextFunction) => {
-  // Only handle requests resolved by subdomain middleware
+router.get('/preview/:pageSlug', asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.resolvedPageProject) {
     return next();
   }
@@ -93,43 +105,31 @@ router.get('/preview/:pageSlug', async (req: Request, res: Response, next: NextF
   }
 
   const project = req.resolvedPageProject;
+  const payload = previewTokenService.verify(token);
 
-  try {
-    const payload = previewTokenService.verify(token);
-
-    // Ensure the token was issued for this project
-    if (payload.projectId !== project.id) {
-      res.status(401).json({ error: 'Token does not match this project' });
-      return;
-    }
-
-    const { pageSlug } = req.params;
-
-    // Look up page by slug + projectId + pageId (no status filter — serves drafts)
-    const page = await pageService.getForPreview(payload.pageId, project.id, pageSlug);
-
-    if (!page) {
-      res.status(404).send('Page not found');
-      return;
-    }
-
-    const html = buildPreviewShell(page, project);
-
-    res
-      .set({
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'X-Robots-Tag': 'noindex',
-      })
-      .send(html);
-  } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'statusCode' in err) {
-      const typed = err as { statusCode: number; message: string };
-      res.status(typed.statusCode).json({ error: typed.message });
-      return;
-    }
-    next(err);
+  if (payload.projectId !== project.id) {
+    res.status(401).json({ error: 'Token does not match this project' });
+    return;
   }
-});
+
+  const { pageSlug } = req.params;
+  const page = await pageService.getForPreview(payload.pageId, project.id, pageSlug);
+
+  if (!page) {
+    res.status(404).send('Page not found');
+    return;
+  }
+
+  const html = buildPreviewShell(page, project);
+
+  res
+    .set({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex',
+      'Content-Security-Policy': CSP,
+    })
+    .send(html);
+}));
 
 export default router;

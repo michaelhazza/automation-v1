@@ -5,18 +5,18 @@
 
 import { Router } from 'express';
 import { pageTrackingService } from '../../services/pageTrackingService.js';
+import { asyncHandler } from '../../lib/asyncHandler.js';
 
 const router = Router();
 
-router.post('/api/public/track', async (req, res) => {
-  // Always return 204 regardless of outcome
+router.post('/api/public/track', asyncHandler(async (req, res) => {
   res.status(204).end();
 
+  // Fire-and-forget — process after response is sent
+  const { pageId, sessionId, referrer, utmSource, utmMedium, utmCampaign } = req.body ?? {};
+  if (!pageId || typeof pageId !== 'string') return;
+
   try {
-    const { pageId, sessionId, referrer, utmSource, utmMedium, utmCampaign } = req.body ?? {};
-
-    if (!pageId || typeof pageId !== 'string') return;
-
     await pageTrackingService.recordView({
       pageId,
       sessionId: typeof sessionId === 'string' ? sessionId : undefined,
@@ -26,9 +26,8 @@ router.post('/api/public/track', async (req, res) => {
       utmCampaign: typeof utmCampaign === 'string' ? utmCampaign : undefined,
     });
   } catch (err) {
-    // Fire-and-forget — log but never fail the client
     console.error('[PageTracking] Failed to record page view:', err instanceof Error ? err.message : String(err));
   }
-});
+}));
 
 export default router;
