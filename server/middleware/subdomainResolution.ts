@@ -86,7 +86,7 @@ export const subdomainResolution = async (
     const [subaccount] = await db
       .select({ status: subaccounts.status })
       .from(subaccounts)
-      .where(eq(subaccounts.id, project.subaccountId));
+      .where(and(eq(subaccounts.id, project.subaccountId), isNull(subaccounts.deletedAt)));
 
     if (!subaccount || subaccount.status !== 'active') {
       return next();

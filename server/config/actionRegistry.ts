@@ -551,7 +551,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       retryOn: [],
       doNotRetryOn: [],
     },
-    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
   },
 
   update_page: {
@@ -561,17 +561,18 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
-    payloadFields: ['pageId', 'html', 'meta', 'formConfig', 'changeNote'],
+    payloadFields: ['pageId', 'projectId', 'html', 'meta', 'formConfig', 'changeNote'],
     parameterSchema: {
       type: 'object',
       properties: {
         pageId: { type: 'string', description: 'ID of the page to update' },
+        projectId: { type: 'string', description: 'ID of the project the page belongs to' },
         html: { type: 'string', description: 'Updated HTML content (max 1 MB). Will be sanitised before storage.' },
         meta: { type: 'object', description: 'Updated SEO and social meta fields' },
         formConfig: { type: 'object', description: 'Updated form configuration' },
         changeNote: { type: 'string', description: 'Brief note describing the change (stored with the version snapshot)' },
       },
-      required: ['pageId'],
+      required: ['pageId', 'projectId'],
     },
     retryPolicy: {
       maxRetries: 0,
@@ -589,13 +590,14 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isExternal: false,
     defaultGateLevel: 'review',
     createsBoardTask: true,
-    payloadFields: ['pageId'],
+    payloadFields: ['pageId', 'projectId'],
     parameterSchema: {
       type: 'object',
       properties: {
         pageId: { type: 'string', description: 'ID of the page to publish' },
+        projectId: { type: 'string', description: 'ID of the project the page belongs to' },
       },
-      required: ['pageId'],
+      required: ['pageId', 'projectId'],
     },
     retryPolicy: {
       maxRetries: 0,

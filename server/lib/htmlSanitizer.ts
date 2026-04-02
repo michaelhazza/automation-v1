@@ -79,7 +79,7 @@ export function sanitizePageHtml(html: string): string {
       td: ['colspan', 'rowspan', 'headers'],
       col: ['span'],
       colgroup: ['span'],
-      meta: ['charset', 'name', 'content', 'http-equiv', 'property'],
+      meta: ['charset', 'name', 'content', 'property'],
       link: ['rel', 'href', 'type', 'media', 'sizes', 'crossorigin', 'as'],
       style: ['type', 'media'],
       time: ['datetime'],
@@ -111,7 +111,7 @@ export function sanitizePageHtml(html: string): string {
       g: ['transform', 'fill', 'stroke', 'opacity'],
       filter: ['id', 'x', 'y', 'width', 'height'],
     },
-    allowedSchemes: ['http', 'https', 'mailto', 'tel', 'data'],
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
     allowedSchemesAppliedToAttributes: ['href', 'src', 'action', 'cite', 'poster'],
     allowVulnerableTags: false,
     transformTags: {

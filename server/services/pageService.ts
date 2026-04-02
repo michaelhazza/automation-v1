@@ -34,10 +34,8 @@ export const pageService = {
     const [row] = await db
       .select()
       .from(pages)
-      .where(eq(pages.id, id));
-
-    if (!row || row.projectId !== projectId) return null;
-    return row;
+      .where(and(eq(pages.id, id), eq(pages.projectId, projectId)));
+    return row ?? null;
   },
 
   async create(

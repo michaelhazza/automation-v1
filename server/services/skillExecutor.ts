@@ -2098,7 +2098,12 @@ async function executePublishPage(
   const projectId = String(input.projectId ?? '');
   if (!pageId || !projectId) return { success: false, error: 'pageId and projectId are required' };
 
+  const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
+
+  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  if (!project) return { success: false, error: 'Page project not found or access denied' };
+
   const page = await pageService.publish(pageId, projectId);
 
   return { success: true, pageId: page.id, status: page.status, publishedAt: page.publishedAt };
