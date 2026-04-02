@@ -156,6 +156,18 @@ export async function runReconciliation(): Promise<void> {
 
       // 5. Act on the status
       if (result.status === 'completed') {
+        // Dedupe: check one more time right before insert (handles concurrent workers)
+        const [alreadyResolved] = await db
+          .select({ id: conversionEvents.id })
+          .from(conversionEvents)
+          .where(
+            and(
+              eq(conversionEvents.submissionId, event.submissionId!),
+              inArray(conversionEvents.eventType, ['checkout_completed', 'checkout_abandoned']),
+            ),
+          );
+        if (alreadyResolved) continue;
+
         // Insert checkout_completed event
         await db.insert(conversionEvents).values({
           pageId: event.pageId,
@@ -191,6 +203,18 @@ export async function runReconciliation(): Promise<void> {
 
         console.log(`[PaymentReconciliation] Marked checkout completed for event ${event.id}`);
       } else if (result.status === 'failed' || result.status === 'expired') {
+        // Dedupe: check one more time right before insert (handles concurrent workers)
+        const [alreadyResolved] = await db
+          .select({ id: conversionEvents.id })
+          .from(conversionEvents)
+          .where(
+            and(
+              eq(conversionEvents.submissionId, event.submissionId!),
+              inArray(conversionEvents.eventType, ['checkout_completed', 'checkout_abandoned']),
+            ),
+          );
+        if (alreadyResolved) continue;
+
         // Insert checkout_abandoned event
         await db.insert(conversionEvents).values({
           pageId: event.pageId,

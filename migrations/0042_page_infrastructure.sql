@@ -125,3 +125,8 @@ CREATE OR REPLACE TRIGGER page_projects_updated_at
 CREATE OR REPLACE TRIGGER pages_updated_at
   BEFORE UPDATE ON pages
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Prevent duplicate terminal conversion events per submission
+CREATE UNIQUE INDEX conversion_events_submission_terminal_unique
+  ON conversion_events(submission_id, event_type)
+  WHERE event_type IN ('checkout_completed', 'checkout_abandoned', 'contact_created');

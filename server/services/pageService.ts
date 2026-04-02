@@ -104,6 +104,9 @@ export const pageService = {
       changeNote: updates.changeNote ?? null,
     });
 
+    // Note: updates to published pages modify live content after review approval.
+    // A version snapshot is saved above so the previous state can be restored.
+
     const updateValues: Partial<typeof pages.$inferInsert> = {
       updatedAt: new Date(),
     };
@@ -133,6 +136,10 @@ export const pageService = {
   async publish(pageId: string, projectId: string) {
     const existing = await this.getById(pageId, projectId);
     if (!existing) throw { statusCode: 404, message: 'Page not found' };
+
+    if (existing.status !== 'draft') {
+      throw { statusCode: 409, message: `Cannot publish a page with status "${existing.status}". Only draft pages can be published.` };
+    }
 
     const now = new Date();
     const [updated] = await db
