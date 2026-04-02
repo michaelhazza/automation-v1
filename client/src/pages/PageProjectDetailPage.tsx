@@ -58,7 +58,7 @@ function getPageUrl(projectSlug: string, pageSlug: string, pageType: 'website' |
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 export default function PageProjectDetailPage({ user: _user }: { user: User }) {
-  const { id: projectId } = useParams<{ id: string }>();
+  const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const clientId = getActiveClientId();
 
@@ -89,7 +89,7 @@ export default function PageProjectDetailPage({ user: _user }: { user: User }) {
       })
       .catch((err) => {
         console.error('[PageProjectDetail] Failed to load:', err);
-        navigate('/page-projects');
+        navigate(`/admin/subaccounts/${clientId}/page-projects`);
       })
       .finally(() => setLoading(false));
   }, [projectId, clientId]);
@@ -147,7 +147,7 @@ export default function PageProjectDetailPage({ user: _user }: { user: User }) {
     <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-3xl">
       {/* Back link */}
       <button
-        onClick={() => navigate('/page-projects')}
+        onClick={() => navigate(`/admin/subaccounts/${clientId}/page-projects`)}
         className="text-[13px] text-slate-500 hover:text-slate-700 mb-4 cursor-pointer bg-transparent border-0 p-0 transition-colors"
       >
         &larr; Back to Page Projects

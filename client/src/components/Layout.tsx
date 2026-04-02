@@ -595,6 +595,7 @@ export default function Layout({ user, children }: LayoutProps) {
               {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
               )}
+              <NavItem to={`/admin/subaccounts/${activeClientId}/page-projects`} icon={<Icons.portal />} label="Sites" />
             </>
           )}
 
