@@ -226,3 +226,123 @@ Phase 1 is complete when:
 - The org-level heartbeat schedule fires and produces a run
 - A HITL-gated action from an org agent appears in the org review queue and can be approved
 - No existing subaccount agent flows are affected (zero regression)
+
+---
+
+## Phase 2: Integration Layer + GHL Connector
+
+### What this phase delivers
+
+A platform-level service that connects to external platforms, ingests their data, normalises it to a canonical schema, and makes that normalised data available to agents and skills through a clean internal interface. Agents and skills never call external APIs directly. They consume normalised entities from this layer.
+
+This phase also delivers the first full implementation of that layer: the GHL connector, extending the existing `server/adapters/ghlAdapter.ts` pattern into a complete data ingestion system.
+
+### Building on what exists
+
+The codebase already has:
+- **Adapter interface** (`server/adapters/integrationAdapter.ts`) — defines `IntegrationAdapter` with `crm` and `payments` namespaces
+- **GHL adapter** (`server/adapters/ghlAdapter.ts`) — `crm.createContact` implemented with OAuth token handling
+- **Stripe adapter** (`server/adapters/stripeAdapter.ts`) — payments implemented
+- **OAuth lifecycle** (`integrationConnectionService.ts`) — advisory-lock token refresh, AES-256-GCM encryption, 15-minute early refresh buffer
+- **Connection storage** (`integrationConnections` schema) — per-subaccount credentials for multiple providers
+- **Adapter registry** (`server/adapters/index.ts`) — `Record<string, IntegrationAdapter>` keyed by provider name
+
+What's missing is the **data ingestion** side. The current adapter pattern handles outbound actions (create a contact, create a checkout). It does not handle inbound data retrieval (fetch all contacts, fetch pipeline state, receive webhooks). The integration layer extends the adapter pattern with ingestion capabilities.
+
+### Why a platform layer and not skills
+
+Skills are agent-invoked, synchronous, and stateless. They are suited to actions like looking up information or triggering a process. They are not suited to managing OAuth sessions across polling cycles, enforcing rate limits across a shared quota, ingesting webhook streams, or maintaining connection state across multiple sub-accounts.
+
+The integration layer handles all of that complexity once, centrally, so that skills and agents remain simple. A skill that calls `getOpportunities(orgId, accountId)` does not need to know about GHL's rate limits, OAuth token refresh, or the shape of GHL's API response.
+
+### The canonical schema
+
+The canonical schema is the set of normalised entity types that the integration layer produces and the rest of the system consumes. It is designed from GHL's real data model (the first implementation) but named and structured generically so that a second connector (HubSpot, Shopify, Stripe) can produce the same entity types from different raw data.
+
+The schema defines at minimum:
+
+**Account** — represents one subaccount mapped to an external platform account. Fields: identifier, display name, status, creation date, source connector reference. This is the central entity everything else hangs off.
+
+**Contact** — a person record within an account. Growth rate and recency of new contacts are key health signals.
+
+**Opportunity** — a deal or pipeline item within an account. Stage, value, age in stage, and movement history are key health signals.
+
+**Conversation** — a communication thread. Volume, recency, and response patterns are key health signals.
+
+**Revenue** — a transaction or recurring revenue record. Amount, date, and status.
+
+**CampaignActivity** — a marketing activity (email send, SMS, ad) with performance signals where available.
+
+**HealthSnapshot** — a point-in-time computed summary of an account's health. Written by the platform (Phase 3 intelligence skills), not ingested from the external source.
+
+**AnomalyEvent** — a detected deviation from baseline in any metric. Written by the intelligence skills (Phase 3). Not ingested.
+
+The schema is v1. It will be refactored when the second connector is built. The goal now is to get the right boundaries — agents consume entity types, not API responses — not to get the perfect field set on every entity.
+
+### The connector interface
+
+The existing `IntegrationAdapter` interface defines outbound actions (`crm.createContact`, `payments.createCheckout`). The integration layer extends this with an ingestion interface. Every connector must implement:
+
+- Fetch all accounts for an organisation (the sub-account list)
+- Fetch contacts for a given account, with optional date range
+- Fetch opportunities for a given account, including stage history
+- Fetch conversation activity for a given account
+- Fetch revenue records for a given account
+- Validate credentials for a given organisation's connector config
+- Handle incoming webhook events and normalise them to internal event types
+
+The relationship to the existing adapter pattern: the existing `IntegrationAdapter` interface continues to handle outbound actions. The new ingestion interface sits alongside it. A connector implements both. They share the same credential store (`integrationConnections`) and OAuth lifecycle (`integrationConnectionService`).
+
+### The GHL connector (ingestion extension)
+
+Extends the existing `ghlAdapter.ts` with data retrieval capabilities:
+
+**Authentication and credential management.** Already handled by `integrationConnectionService` with advisory-lock token refresh. The connector uses this existing infrastructure. No new auth code needed — only new API call methods that consume the decrypted token.
+
+**Sub-account enumeration.** GHL agencies have a parent agency account with many child sub-accounts (locations). The connector enumerates all sub-accounts associated with the agency's API credential and presents them as Account entities. The mapping between GHL location IDs and internal subaccount records is stored in the connector config.
+
+**Data ingestion.** The connector fetches data per sub-account and normalises it to canonical entities. It does not return raw GHL API responses to callers. It returns Contact, Opportunity, Conversation, and Revenue entities.
+
+**Rate limit management.** GHL's API allows 100 requests per 10 seconds and 200,000 requests per day per location. The connector implements a rate limiter that queues requests rather than dropping them, and surfaces rate limit warnings to the operator when approaching limits.
+
+**Webhook ingestion.** GHL fires webhooks for 59 documented event types. The existing `server/routes/githubWebhook.ts` pattern (unauthenticated endpoint with signature verification) is the model. The GHL connector receives webhook events, validates their signatures, and translates them into internal event types. Key events at minimum: contact created, opportunity stage changed, conversation started, conversation went inactive, appointment booked.
+
+**Scheduled polling.** Some metrics are not available via webhooks and require polling. The connector supports scheduled polling jobs managed through the existing pg-boss scheduler. Polling frequency is configurable per-organisation.
+
+### Connector configuration in the database
+
+Each organisation that uses the integration layer has one or more connector config records. A connector config stores:
+
+- Which connector type is active (GHL, in this case)
+- The authentication credentials for that connector (using existing `integrationConnections` storage with encrypted tokens)
+- The sub-account mapping (which external account IDs map to which internal subaccount records)
+- Polling schedule preferences
+- Status and last-sync metadata
+
+This builds on the existing `integrationConnections` table and `processConnectionMappings` pattern. The developer should evaluate whether the existing schema is sufficient or whether a new `connectorConfigs` table is needed for org-level connector state that spans subaccounts.
+
+### What to build vs what to configure
+
+**Build (generic):**
+- Extended connector interface (ingestion methods alongside existing action methods)
+- GHL ingestion implementation (fetch accounts, contacts, opportunities, conversations, revenue)
+- Rate limiter service
+- Webhook endpoint and event normalisation
+- Canonical schema entity tables
+- Scheduled polling via pg-boss
+
+**Configure (per-organisation):**
+- Which connector type to use
+- OAuth credentials (provided by operator)
+- Sub-account mapping (GHL location IDs to internal subaccounts)
+- Polling frequency
+- Which webhook events to process
+
+### Gate condition for Phase 3
+
+Phase 2 is complete when:
+- The GHL connector can successfully enumerate sub-accounts and produce normalised Account entities for a real GHL organisation
+- Opportunity, Contact, and Conversation entities are being produced correctly from GHL data
+- Webhook ingestion is operational for at minimum the five key event types
+- A developer working on Phase 3 can write skills that call the integration layer interface without touching GHL-specific code
+- Rate limiting is functional and surfaces warnings when approaching GHL limits
