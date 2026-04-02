@@ -259,7 +259,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
                 return (
                   <tr key={agent.id}>
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-slate-800">{agent.name}</div>
+                      <Link to={`/system/agents/${agent.id}`} className="font-semibold text-slate-800 hover:text-indigo-600 no-underline transition-colors">{agent.name}</Link>
                       {agent.description && (
                         <div className="text-[12px] text-slate-500 mt-0.5 max-w-[280px] overflow-hidden text-ellipsis whitespace-nowrap">
                           {agent.description}

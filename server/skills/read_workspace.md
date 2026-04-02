@@ -13,6 +13,8 @@ isActive: true
     "properties": {
       "status": { "type": "string", "description": "Filter by board column status (e.g. \"inbox\", \"todo\", \"assigned\", \"in_progress\", \"review\", \"done\")" },
       "assigned_to_me": { "type": "boolean", "description": "If true, only return tasks assigned to you" },
+      "parent_task_id": { "type": "string", "description": "Filter by parent task ID to retrieve all subtasks of a specific parent. Use this when evaluating whether all subtasks of a decomposed task are complete." },
+      "task_id": { "type": "string", "description": "Retrieve a single specific task by ID, including its full description and brief." },
       "limit": { "type": "number", "description": "Maximum tasks to return (default 20)" },
       "include_activities": { "type": "boolean", "description": "If true, include recent activity log for each task (default false)" }
     },

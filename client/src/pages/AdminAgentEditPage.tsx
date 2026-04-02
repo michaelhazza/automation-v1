@@ -38,6 +38,7 @@ interface AgentForm {
   heartbeatEnabled: boolean;
   heartbeatIntervalHours: number | null;
   heartbeatOffsetHours: number;
+  heartbeatOffsetMinutes: number;
   parentAgentId: string;
   agentRole: string;
   agentTitle: string;
@@ -169,7 +170,8 @@ const EMPTY_AGENT_FORM: AgentForm = {
   defaultSkillSlugs: [],
   heartbeatEnabled: false,
   heartbeatIntervalHours: null,
-  heartbeatOffsetHours: 0,
+  heartbeatOffsetHours: 9,
+  heartbeatOffsetMinutes: 0,
   parentAgentId: '',
   agentRole: '',
   agentTitle: '',
@@ -208,9 +210,12 @@ function SourceTypeBadge({ type }: { type: string }) {
 }
 
 // ── Heartbeat Timeline ───────────────────────────────────────────────────────
-function HeartbeatTimeline({ agentName, intervalHours, offsetHours }: { agentName: string; intervalHours: number; offsetHours: number }) {
-  const runHours: number[] = [];
-  for (let h = offsetHours; h < 24; h += intervalHours) runHours.push(h);
+function HeartbeatTimeline({ agentName, intervalHours, offsetHours, offsetMinutes = 0 }: { agentName: string; intervalHours: number; offsetHours: number; offsetMinutes?: number }) {
+  const startMins = offsetHours * 60 + offsetMinutes;
+  const runMins: number[] = [];
+  for (let m = startMins; m < 24 * 60; m += intervalHours * 60) runMins.push(m);
+
+  const fmtMin = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-[10px] px-[18px] py-[14px]">
@@ -221,27 +226,22 @@ function HeartbeatTimeline({ agentName, intervalHours, offsetHours }: { agentNam
         <span className="text-[11px] text-slate-400 w-[70px] shrink-0">every {intervalHours}h</span>
         {/* SVG timeline */}
         <svg width="100%" height="28" viewBox="0 0 480 28" preserveAspectRatio="none" className="flex-1 min-w-0">
-          {/* Base line */}
           <line x1="0" y1="14" x2="480" y2="14" stroke="#d1d5db" strokeWidth="1.5" />
-          {/* Hour ticks */}
           {[0, 4, 8, 12, 16, 20, 24].map((h) => (
             <line key={h} x1={h / 24 * 480} y1="10" x2={h / 24 * 480} y2="18" stroke="#d1d5db" strokeWidth="1" />
           ))}
-          {/* Run dots */}
-          {runHours.map((h) => (
-            <circle key={h} cx={h / 24 * 480} cy="14" r="5" fill="#6366f1" />
+          {runMins.map((m) => (
+            <circle key={m} cx={m / (24 * 60) * 480} cy="14" r="5" fill="#6366f1" />
           ))}
         </svg>
       </div>
-      {/* Hour labels */}
       <div className="flex justify-between pl-[202px] text-[10px] text-slate-400 mt-0.5">
         {[0, 4, 8, 12, 16, 20, 24].map((h) => (
           <span key={h}>{h === 24 ? '' : `${h}h`}</span>
         ))}
       </div>
-      {/* Run times list */}
       <div className="mt-2.5 pl-[202px] text-xs text-indigo-500 font-medium">
-        Runs at: {runHours.map(h => `${String(h).padStart(2, '0')}:00`).join('  ·  ')} UTC
+        Runs at: {runMins.map(fmtMin).join('  ·  ')}
       </div>
     </div>
   );
@@ -339,7 +339,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         defaultSkillSlugs: data.defaultSkillSlugs ?? [],
         heartbeatEnabled: data.heartbeatEnabled ?? false,
         heartbeatIntervalHours: data.heartbeatIntervalHours ?? null,
-        heartbeatOffsetHours: data.heartbeatOffsetHours ?? 0,
+        heartbeatOffsetHours: data.heartbeatOffsetHours ?? 9,
+        heartbeatOffsetMinutes: data.heartbeatOffsetMinutes ?? 0,
         parentAgentId: data.parentAgentId ?? '',
         agentRole: data.agentRole ?? '',
         agentTitle: data.agentTitle ?? '',
@@ -1430,6 +1431,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {!isNew && <SectionCard title="Heartbeat">
         <p className="m-0 mb-[18px] text-[13.5px] text-slate-500 leading-relaxed">
           Heartbeats keep your agent active — it wakes up on a schedule, checks its tasks, and acts autonomously.
+          The schedule runs in the company's timezone.
         </p>
 
         {/* Enable toggle */}
@@ -1444,56 +1446,63 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </label>
 
         {form.heartbeatEnabled && (
-          <div className="flex flex-col gap-5">
-            {/* Frequency */}
+          <div className="flex flex-wrap items-end gap-5">
+            {/* Start time */}
             <div>
-              <div className="text-[13px] font-semibold text-gray-700 mb-2">Frequency</div>
-              <div className="flex gap-2">
-                {([4, 8, 12, 24] as const).map((h) => (
+              <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Start time</div>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={form.heartbeatOffsetHours}
+                  onChange={(e) => setForm({ ...form, heartbeatOffsetHours: Number(e.target.value) })}
+                  className={`${inputCls} w-[80px]`}
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                  ))}
+                </select>
+                <span className="text-slate-400">:</span>
+                <select
+                  value={form.heartbeatOffsetMinutes}
+                  onChange={(e) => setForm({ ...form, heartbeatOffsetMinutes: Number(e.target.value) })}
+                  className={`${inputCls} w-[80px]`}
+                >
+                  {[0, 15, 30, 45].map((m) => (
+                    <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Interval */}
+            <div>
+              <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Repeat every</div>
+              <div className="flex gap-2 flex-wrap">
+                {([1, 2, 3, 4, 6, 8, 12, 24] as const).map((h) => (
                   <button
                     key={h}
                     type="button"
                     onClick={() => setForm({ ...form, heartbeatIntervalHours: h })}
-                    className={`px-[18px] py-[7px] rounded-lg border-2 text-[13px] font-semibold cursor-pointer transition-all duration-100 ${
+                    className={`px-3 py-1.5 rounded-lg border text-[13px] font-medium cursor-pointer transition-all duration-100 ${
                       form.heartbeatIntervalHours === h
                         ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                        : 'border-slate-200 bg-white text-slate-500'
+                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
                     }`}
                   >
-                    Every {h}h
+                    {h === 24 ? '1 day' : `${h}h`}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Offset */}
-            <div>
-              <div className="text-[13px] font-semibold text-gray-700 mb-1">Start offset</div>
-              <div className="text-xs text-slate-400 mb-2">
-                Stagger agents to spread load — e.g. Content Writer at 0h, SEO Agent at 2h, Social Manager at 4h
-              </div>
-              <div className="flex items-center gap-2.5">
-                <select
-                  value={form.heartbeatOffsetHours}
-                  onChange={(e) => setForm({ ...form, heartbeatOffsetHours: Number(e.target.value) })}
-                  className={`${inputCls} w-[120px]`}
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>{i === 0 ? 'No offset' : `+${i}h offset`}</option>
-                  ))}
-                </select>
-                <span className="text-[13px] text-slate-500">within each cycle</span>
-              </div>
-            </div>
-
             {/* Timeline preview */}
             {form.heartbeatIntervalHours && (
-              <div>
+              <div className="w-full">
                 <div className="text-[13px] font-semibold text-gray-700 mb-2.5">Schedule preview (24h)</div>
                 <HeartbeatTimeline
                   agentName={form.name || 'This agent'}
                   intervalHours={form.heartbeatIntervalHours}
                   offsetHours={form.heartbeatOffsetHours}
+                  offsetMinutes={form.heartbeatOffsetMinutes}
                 />
               </div>
             )}

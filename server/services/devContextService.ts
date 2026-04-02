@@ -45,6 +45,17 @@ export interface DevContext {
     maxLinesChanged: number;
   };
   safeMode: boolean;
+  /** Optional: Playwright config. Required for capture_screenshot and run_playwright_test skills. */
+  playwright?: {
+    /** Base URL of the running application to test against (e.g. "http://localhost:5173") */
+    baseUrl: string;
+    /** Directory to write screenshots, relative to projectRoot (default: ".playwright-screenshots") */
+    screenshotDir: string;
+    /** Timeout in ms for browser operations (default: 30000) */
+    timeoutMs: number;
+    /** Browser to use: chromium | firefox | webkit (default: chromium) */
+    browser: 'chromium' | 'firefox' | 'webkit';
+  };
 }
 
 export interface DevContextResult {
@@ -110,6 +121,14 @@ function validateDevContext(raw: unknown): DevContext {
       maxLinesChanged: ((ctx.patchLimits as Record<string, unknown>)?.maxLinesChanged as number) ?? 500,
     },
     safeMode: (ctx.safeMode as boolean) ?? true,
+    playwright: ctx.playwright
+      ? {
+          baseUrl: ((ctx.playwright as Record<string, unknown>).baseUrl as string) ?? 'http://localhost:5173',
+          screenshotDir: ((ctx.playwright as Record<string, unknown>).screenshotDir as string) ?? '.playwright-screenshots',
+          timeoutMs: ((ctx.playwright as Record<string, unknown>).timeoutMs as number) ?? 30000,
+          browser: (((ctx.playwright as Record<string, unknown>).browser as string) ?? 'chromium') as 'chromium' | 'firefox' | 'webkit',
+        }
+      : undefined,
   };
 }
 

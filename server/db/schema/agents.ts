@@ -50,6 +50,7 @@ export const agents = pgTable(
     heartbeatEnabled: boolean('heartbeat_enabled').notNull().default(false),
     heartbeatIntervalHours: integer('heartbeat_interval_hours'),
     heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
+    heartbeatOffsetMinutes: integer('heartbeat_offset_minutes').notNull().default(0),
     // Lifecycle
     status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

@@ -27,7 +27,10 @@ interface AgentForm {
   allowModelOverride: boolean;
   defaultSystemSkillSlugs: string[];
   defaultOrgSkillSlugs: string;
-  defaultScheduleCron: string;
+  // Schedule stored as friendly fields; cron generated on save
+  scheduleHour: number;
+  scheduleMinute: number;
+  scheduleIntervalHours: number; // 0 = disabled
   defaultTokenBudget: number;
   defaultMaxToolCalls: number;
   isPublished: boolean;
@@ -48,7 +51,9 @@ const EMPTY_FORM: AgentForm = {
   allowModelOverride: false,
   defaultSystemSkillSlugs: [],
   defaultOrgSkillSlugs: '',
-  defaultScheduleCron: '',
+  scheduleHour: 9,
+  scheduleMinute: 0,
+  scheduleIntervalHours: 0,
   defaultTokenBudget: 0,
   defaultMaxToolCalls: 0,
   isPublished: false,
@@ -56,6 +61,35 @@ const EMPTY_FORM: AgentForm = {
   agentRole: '',
   agentTitle: '',
 };
+
+// ── Schedule helpers ──────────────────────────────────────────────────────────
+
+const SCHEDULE_INTERVALS = [1, 2, 3, 4, 6, 8, 12, 24];
+
+/** Parse a simple cron like "30 9,13,17,21 * * *" or "0 9 * * *" → {hour,minute,interval} */
+function parseCron(cron: string | null | undefined): { hour: number; minute: number; interval: number } {
+  if (!cron) return { hour: 9, minute: 0, interval: 0 };
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 2) return { hour: 9, minute: 0, interval: 0 };
+  const minute = parseInt(parts[0]);
+  const hourPart = parts[1];
+  if (isNaN(minute)) return { hour: 9, minute: 0, interval: 0 };
+  // Handle "9,13,17,21" or "9"
+  const hours = hourPart.split(',').map(Number).filter(h => !isNaN(h));
+  if (hours.length === 0) return { hour: 9, minute: 0, interval: 0 };
+  const startHour = hours[0];
+  const interval = hours.length > 1 ? hours[1] - hours[0] : 24;
+  return { hour: startHour, minute: isNaN(minute) ? 0 : minute, interval };
+}
+
+/** Generate cron from friendly fields. Returns null if interval is 0 (disabled). */
+function buildCron(hour: number, minute: number, intervalHours: number): string | null {
+  if (intervalHours === 0) return null;
+  if (intervalHours >= 24) return `${minute} ${hour} * * *`;
+  const hours: number[] = [];
+  for (let h = hour; h < 24; h += intervalHours) hours.push(h);
+  return `${minute} ${hours.join(',')} * * *`;
+}
 
 const ICON_OPTIONS = [
   '\u{1F50D}', '\u{1F4CA}', '\u{1F4DD}', '\u{1F4E3}', '\u{1F916}', '\u2699\uFE0F',
@@ -144,6 +178,7 @@ export default function SystemAgentEditPage({ user: _user }: { user: User }) {
   const loadAgent = async (agentId: string) => {
     try {
       const { data } = await api.get(`/api/system/agents/${agentId}`);
+      const { hour, minute, interval } = parseCron(data.defaultScheduleCron);
       setForm({
         name: data.name ?? '',
         icon: data.icon ?? '',
@@ -158,7 +193,9 @@ export default function SystemAgentEditPage({ user: _user }: { user: User }) {
         defaultOrgSkillSlugs: Array.isArray(data.defaultOrgSkillSlugs)
           ? data.defaultOrgSkillSlugs.join(', ')
           : data.defaultOrgSkillSlugs ?? '',
-        defaultScheduleCron: data.defaultScheduleCron ?? '',
+        scheduleHour: hour,
+        scheduleMinute: minute,
+        scheduleIntervalHours: interval,
         defaultTokenBudget: data.defaultTokenBudget ?? 0,
         defaultMaxToolCalls: data.defaultMaxToolCalls ?? 0,
         isPublished: data.isPublished ?? false,
@@ -220,7 +257,7 @@ export default function SystemAgentEditPage({ user: _user }: { user: User }) {
         allowModelOverride: form.allowModelOverride,
         defaultSystemSkillSlugs: form.defaultSystemSkillSlugs,
         defaultOrgSkillSlugs: orgSlugs.length > 0 ? orgSlugs : null,
-        defaultScheduleCron: form.defaultScheduleCron || null,
+        defaultScheduleCron: buildCron(form.scheduleHour, form.scheduleMinute, form.scheduleIntervalHours),
         defaultTokenBudget: form.defaultTokenBudget || null,
         defaultMaxToolCalls: form.defaultMaxToolCalls || null,
         parentSystemAgentId: form.parentSystemAgentId || null,
@@ -607,15 +644,79 @@ export default function SystemAgentEditPage({ user: _user }: { user: User }) {
               subtitle="Default heartbeat configuration applied when this agent is installed into a subaccount."
             />
             <div className="p-5">
-              <div className="grid grid-cols-3 gap-4">
-                <Field label="Default Schedule (cron)" hint="e.g. 0 9 * * 1-5">
-                  <input
-                    value={form.defaultScheduleCron}
-                    onChange={(e) => setForm({ ...form, defaultScheduleCron: e.target.value })}
-                    className={inputCls}
-                    placeholder="0 9 * * 1-5"
-                  />
-                </Field>
+              {/* Schedule enable toggle */}
+              <div className="mb-5">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, scheduleIntervalHours: form.scheduleIntervalHours === 0 ? 8 : 0 })}
+                    className={`relative w-10 h-[22px] rounded-full border-0 cursor-pointer transition-colors ${form.scheduleIntervalHours > 0 ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute w-[16px] h-[16px] rounded-full bg-white top-[3px] transition-all shadow-sm ${form.scheduleIntervalHours > 0 ? 'left-[21px]' : 'left-[3px]'}`} />
+                  </button>
+                  <span className="text-[13px] font-medium text-slate-700">Enable default heartbeat schedule</span>
+                </label>
+              </div>
+
+              {form.scheduleIntervalHours > 0 && (
+                <div className="mb-5 flex flex-wrap items-end gap-5">
+                  {/* Start time */}
+                  <div>
+                    <div className="text-[12px] font-medium text-slate-600 mb-1.5">Start time (subaccount timezone)</div>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={form.scheduleHour}
+                        onChange={(e) => setForm({ ...form, scheduleHour: Number(e.target.value) })}
+                        className={`${inputCls} w-[80px]`}
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                        ))}
+                      </select>
+                      <span className="text-slate-400">:</span>
+                      <select
+                        value={form.scheduleMinute}
+                        onChange={(e) => setForm({ ...form, scheduleMinute: Number(e.target.value) })}
+                        className={`${inputCls} w-[80px]`}
+                      >
+                        {[0, 15, 30, 45].map((m) => (
+                          <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Interval */}
+                  <div>
+                    <div className="text-[12px] font-medium text-slate-600 mb-1.5">Repeat every</div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {SCHEDULE_INTERVALS.map((iv) => (
+                        <button
+                          key={iv}
+                          type="button"
+                          onClick={() => setForm({ ...form, scheduleIntervalHours: iv })}
+                          className={`px-3 py-1.5 rounded-lg border text-[12px] font-medium cursor-pointer transition-colors ${
+                            form.scheduleIntervalHours === iv
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          {iv === 24 ? '1 day' : `${iv}h`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div className="text-[12px] text-slate-400 self-end pb-0.5">
+                    Cron: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                      {buildCron(form.scheduleHour, form.scheduleMinute, form.scheduleIntervalHours) ?? '—'}
+                    </code>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
                 <Field label="Default Token Budget">
                   <input
                     type="number"

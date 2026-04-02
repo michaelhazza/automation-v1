@@ -136,7 +136,7 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
   const activeClientName = getActiveClientName();
 
   const [agents, setAgents] = useState<Omit<AgentNode, 'children'>[]>([]);
-  const [heartbeatAgents, setHeartbeatAgents] = useState<{ id: string; agentId: string; name: string; icon: string | null; heartbeatEnabled: boolean; heartbeatIntervalHours: number | null; heartbeatOffsetHours: number }[]>([]);
+  const [heartbeatAgents, setHeartbeatAgents] = useState<{ id: string; agentId: string; name: string; icon: string | null; heartbeatEnabled: boolean; heartbeatIntervalHours: number | null; heartbeatOffsetHours: number; heartbeatOffsetMinutes: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Pan & zoom
@@ -164,7 +164,8 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
         icon: a.agent?.icon ?? null,
         heartbeatEnabled: a.heartbeatEnabled ?? false,
         heartbeatIntervalHours: a.heartbeatIntervalHours ?? null,
-        heartbeatOffsetHours: a.heartbeatOffsetHours ?? 0,
+        heartbeatOffsetHours: a.heartbeatOffsetHours ?? 9,
+        heartbeatOffsetMinutes: a.heartbeatOffsetMinutes ?? 0,
       })));
     }).catch((err) => { console.error('[OrgChart] Failed to load org chart data:', err); setAgents([]); setHeartbeatAgents([]); })
       .finally(() => setLoading(false));
@@ -377,7 +378,8 @@ export default function OrgChartPage({ user: _user }: { user: User }) {
               name: a.agent?.name ?? 'Unknown', icon: a.agent?.icon ?? null,
               heartbeatEnabled: a.heartbeatEnabled ?? false,
               heartbeatIntervalHours: a.heartbeatIntervalHours ?? null,
-              heartbeatOffsetHours: a.heartbeatOffsetHours ?? 0,
+              heartbeatOffsetHours: a.heartbeatOffsetHours ?? 9,
+              heartbeatOffsetMinutes: a.heartbeatOffsetMinutes ?? 0,
             })));
           }}
         />

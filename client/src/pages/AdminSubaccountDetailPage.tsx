@@ -49,7 +49,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
   const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
-  const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active' });
+  const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active', timezone: 'UTC' });
   const [settingsSaved, setSettingsSaved] = useState('');
 
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
@@ -69,7 +69,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       setSa(saRes.data);
       setCategories(catRes.data);
       setLinkedProcesses(processRes.data.linkedProcesses ?? []);
-      setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status });
+      setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status, timezone: saRes.data.settings?.timezone ?? 'UTC' });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -135,7 +135,8 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const handleSaveSettings = async () => {
     setError(''); setSettingsSaved('');
     try {
-      await api.patch(`/api/subaccounts/${subaccountId}`, settingsForm);
+      const { timezone, ...rest } = settingsForm;
+      await api.patch(`/api/subaccounts/${subaccountId}`, { ...rest, settings: { timezone } });
       setSettingsSaved('Saved successfully'); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -442,6 +443,23 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                   <option value="suspended">Suspended</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Timezone</label>
+                <p className="text-[12px] text-slate-400 mb-1.5">Agent heartbeat schedules run in this timezone.</p>
+                <select value={settingsForm.timezone} onChange={(e) => setSettingsForm({ ...settingsForm, timezone: e.target.value })} className={inputCls}>
+                  {[
+                    'UTC',
+                    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+                    'America/Toronto', 'America/Vancouver', 'America/Sao_Paulo',
+                    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Amsterdam',
+                    'Europe/Stockholm', 'Europe/Warsaw', 'Europe/Istanbul',
+                    'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai',
+                    'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
+                  ].map((tz) => (
+                    <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">
               Save changes
@@ -639,7 +657,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {l.agent.icon && <span className="text-lg shrink-0">{l.agent.icon}</span>}
                     <div className="min-w-0">
-                      <div className="font-medium text-slate-800 text-[14px]">{l.agent.name}</div>
+                      <Link to={`/admin/agents/${l.agentId}`} className="font-medium text-slate-800 hover:text-indigo-600 no-underline transition-colors text-[14px]">{l.agent.name}</Link>
                       {l.agent.description && <div className="text-[12px] text-slate-400 mt-0.5 truncate">{l.agent.description}</div>}
                     </div>
                     {l.agentRole && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full shrink-0">{l.agentRole}</span>}

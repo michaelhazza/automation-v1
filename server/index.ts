@@ -65,6 +65,7 @@ import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
 import githubAppRouter from './routes/githubApp.js';
+import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
 
@@ -168,6 +169,7 @@ app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
 app.use(oauthIntegrationsRouter);
 app.use(githubAppRouter);
+app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
 

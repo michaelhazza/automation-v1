@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -9,11 +9,18 @@ export interface HeartbeatAgentConfig {
   heartbeatEnabled: boolean;
   heartbeatIntervalHours: number | null;
   heartbeatOffsetHours: number;
+  heartbeatOffsetMinutes: number;
 }
 
 interface Props {
   agents: HeartbeatAgentConfig[];
-  onUpdate: (agentId: string, config: { heartbeatEnabled: boolean; heartbeatIntervalHours: number | null; heartbeatOffsetHours: number }) => Promise<void>;
+  onUpdate: (agentId: string, config: {
+    heartbeatEnabled: boolean;
+    heartbeatIntervalHours: number | null;
+    heartbeatOffsetHours: number;
+    heartbeatOffsetMinutes: number;
+  }) => Promise<void>;
+  timezone?: string;
   /** Label for context: "system agent", "agent", "company agent" */
   levelLabel?: string;
 }
@@ -21,21 +28,25 @@ interface Props {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const HOUR_LABELS = [0, 4, 8, 12, 16, 20, 24];
-const INTERVALS = [2, 4, 6, 8, 12, 24];
-const TIMELINE_LEFT = 200; // px reserved for agent label
+const INTERVALS = [1, 2, 3, 4, 6, 8, 12, 24];
 
-function getRunHours(interval: number, offset: number): number[] {
-  const hours: number[] = [];
-  for (let h = offset; h < 24; h += interval) hours.push(h);
-  return hours;
+function getRunMinutes(intervalHours: number, startHour: number, startMinute: number): number[] {
+  const startTotal = startHour * 60 + startMinute;
+  const intervalMins = intervalHours * 60;
+  const mins: number[] = [];
+  for (let m = startTotal; m < 24 * 60; m += intervalMins) mins.push(m);
+  return mins;
+}
+
+function fmt(h: number, m: number) {
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function HeartbeatEditor({ agents, onUpdate, levelLabel = 'agent' }: Props) {
+export default function HeartbeatEditor({ agents, onUpdate, timezone = 'UTC', levelLabel = 'agent' }: Props) {
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
 
   const handleToggle = useCallback(async (agent: HeartbeatAgentConfig) => {
     const newEnabled = !agent.heartbeatEnabled;
@@ -45,151 +56,170 @@ export default function HeartbeatEditor({ agents, onUpdate, levelLabel = 'agent'
         heartbeatEnabled: newEnabled,
         heartbeatIntervalHours: newEnabled ? (agent.heartbeatIntervalHours ?? 8) : agent.heartbeatIntervalHours,
         heartbeatOffsetHours: agent.heartbeatOffsetHours,
+        heartbeatOffsetMinutes: agent.heartbeatOffsetMinutes,
       });
+      if (newEnabled) setEditingId(agent.id);
     } finally {
       setSaving((s) => { const next = new Set(s); next.delete(agent.id); return next; });
     }
   }, [onUpdate]);
 
-  const handleIntervalChange = useCallback(async (agent: HeartbeatAgentConfig, interval: number) => {
+  const handleUpdate = useCallback(async (
+    agent: HeartbeatAgentConfig,
+    patch: Partial<{ heartbeatIntervalHours: number; heartbeatOffsetHours: number; heartbeatOffsetMinutes: number }>
+  ) => {
     setSaving((s) => new Set(s).add(agent.id));
     try {
       await onUpdate(agent.id, {
         heartbeatEnabled: true,
-        heartbeatIntervalHours: interval,
-        heartbeatOffsetHours: agent.heartbeatOffsetHours % interval, // clamp offset within interval
+        heartbeatIntervalHours: patch.heartbeatIntervalHours ?? agent.heartbeatIntervalHours,
+        heartbeatOffsetHours: patch.heartbeatOffsetHours ?? agent.heartbeatOffsetHours,
+        heartbeatOffsetMinutes: patch.heartbeatOffsetMinutes ?? agent.heartbeatOffsetMinutes,
       });
     } finally {
       setSaving((s) => { const next = new Set(s); next.delete(agent.id); return next; });
     }
-  }, [onUpdate]);
-
-  const handleTimelineDrag = useCallback((agent: HeartbeatAgentConfig, e: React.MouseEvent) => {
-    if (!timelineRef.current || !agent.heartbeatIntervalHours) return;
-    const rect = timelineRef.current.getBoundingClientRect();
-    // Find the timeline area (same row) - approximate from click position
-    const row = (e.target as HTMLElement).closest('[data-timeline-row]');
-    if (!row) return;
-    const rowRect = row.getBoundingClientRect();
-    const relX = e.clientX - rowRect.left;
-    const pct = Math.max(0, Math.min(1, relX / rowRect.width));
-    const hour = Math.round(pct * 24);
-    const newOffset = Math.max(0, Math.min(23, hour)) % (agent.heartbeatIntervalHours ?? 8);
-
-    setSaving((s) => new Set(s).add(agent.id));
-    onUpdate(agent.id, {
-      heartbeatEnabled: true,
-      heartbeatIntervalHours: agent.heartbeatIntervalHours,
-      heartbeatOffsetHours: newOffset,
-    }).finally(() => {
-      setSaving((s) => { const next = new Set(s); next.delete(agent.id); return next; });
-    });
   }, [onUpdate]);
 
   if (agents.length === 0) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-8 text-center">
-        <p className="text-[14px] text-slate-500">No {levelLabel}s available. Add {levelLabel}s to configure heartbeat schedules.</p>
+        <p className="text-[14px] text-slate-500">No {levelLabel}s available.</p>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="mb-4">
-        <h2 className="text-[16px] font-extrabold text-slate-900 tracking-tight m-0 flex items-center gap-2">
-          <span>💓</span> Heartbeat Schedule
-        </h2>
-        <p className="text-[13px] text-slate-500 mt-1">
-          Configure when each {levelLabel} wakes up. Click the timeline to adjust start time. Toggle to enable/disable.
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-[16px] font-extrabold text-slate-900 tracking-tight m-0 flex items-center gap-2">
+            <span>💓</span> Heartbeat Schedule
+          </h2>
+          <p className="text-[13px] text-slate-500 mt-1">
+            Configure when each {levelLabel} wakes up and runs autonomously.
+          </p>
+        </div>
+        <span className="text-[12px] text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full font-medium">
+          🌍 {timezone}
+        </span>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl px-6 py-5" ref={timelineRef}>
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         {/* Hour labels */}
-        <div className="flex items-center mb-3" style={{ paddingLeft: TIMELINE_LEFT }}>
+        <div className="flex items-center px-6 pt-4 pb-1">
+          <div style={{ width: 200 }} className="shrink-0" />
           {HOUR_LABELS.map((h) => (
             <div key={h} className="flex-1 text-[11px] text-slate-400 font-medium">{h}h</div>
           ))}
         </div>
 
         {/* Agent rows */}
-        <div className="flex flex-col gap-4">
+        <div className="divide-y divide-slate-50">
           {agents.map((agent) => {
             const isSaving = saving.has(agent.id);
             const isEditing = editingId === agent.id;
             const interval = agent.heartbeatIntervalHours ?? 8;
-            const runHours = agent.heartbeatEnabled ? getRunHours(interval, agent.heartbeatOffsetHours) : [];
+            const runMins = agent.heartbeatEnabled ? getRunMinutes(interval, agent.heartbeatOffsetHours, agent.heartbeatOffsetMinutes) : [];
 
             return (
-              <div key={agent.id} className={`${isSaving ? 'opacity-60' : ''}`}>
+              <div key={agent.id} className={`px-6 py-3 ${isSaving ? 'opacity-60' : ''}`}>
                 <div className="flex items-center">
-                  {/* Agent label + controls */}
-                  <div className="shrink-0 flex items-center gap-2 pr-4" style={{ width: TIMELINE_LEFT }}>
-                    {/* Toggle */}
+                  {/* Agent label + toggle */}
+                  <div className="shrink-0 flex items-center gap-2 pr-4" style={{ width: 200 }}>
                     <button
                       onClick={() => handleToggle(agent)}
                       disabled={isSaving}
-                      className={`w-8 h-[18px] rounded-full relative transition-colors cursor-pointer border-0 ${agent.heartbeatEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}
+                      className={`w-8 h-[18px] rounded-full relative transition-colors cursor-pointer border-0 shrink-0 ${agent.heartbeatEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}
                     >
                       <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow-sm transition-transform ${agent.heartbeatEnabled ? 'left-[16px]' : 'left-[2px]'}`} />
                     </button>
                     <span className="text-[14px] shrink-0">{agent.icon || '🤖'}</span>
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-semibold text-slate-900 truncate">{agent.name}</div>
-                      {agent.heartbeatEnabled && (
+                      {agent.heartbeatEnabled ? (
                         <button
                           onClick={() => setEditingId(isEditing ? null : agent.id)}
                           className="text-[11px] text-indigo-500 hover:text-indigo-600 bg-transparent border-0 cursor-pointer p-0 font-medium"
                         >
-                          every {interval}h {isEditing ? '▾' : '▸'}
+                          {fmt(agent.heartbeatOffsetHours, agent.heartbeatOffsetMinutes)} · every {interval}h {isEditing ? '▾' : '▸'}
                         </button>
-                      )}
-                      {!agent.heartbeatEnabled && (
+                      ) : (
                         <div className="text-[11px] text-slate-400">disabled</div>
                       )}
                     </div>
                   </div>
 
-                  {/* Timeline */}
-                  <div
-                    className={`flex-1 relative h-7 ${agent.heartbeatEnabled ? 'cursor-pointer' : 'opacity-30'}`}
-                    data-timeline-row
-                    onClick={agent.heartbeatEnabled ? (e) => handleTimelineDrag(agent, e) : undefined}
-                  >
+                  {/* Timeline (read-only display) */}
+                  <div className={`flex-1 relative h-7 ${!agent.heartbeatEnabled ? 'opacity-30' : ''}`}>
                     <svg width="100%" height="28" className="block">
                       <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#e2e8f0" strokeWidth="1.5" />
                       {HOUR_LABELS.map((h) => (
                         <line key={h} x1={`${(h / 24) * 100}%`} y1="30%" x2={`${(h / 24) * 100}%`} y2="70%" stroke="#e2e8f0" strokeWidth="1" />
                       ))}
-                      {runHours.map((h) => (
-                        <circle key={h} cx={`${(h / 24) * 100}%`} cy="50%" r="5.5" fill={agent.heartbeatEnabled ? '#6366f1' : '#cbd5e1'} className="transition-all" />
+                      {runMins.map((m) => (
+                        <circle key={m} cx={`${(m / (24 * 60)) * 100}%`} cy="50%" r="5.5" fill="#6366f1" className="transition-all" />
                       ))}
                     </svg>
                   </div>
                 </div>
 
-                {/* Interval selector (expanded) */}
+                {/* Expanded config */}
                 {isEditing && agent.heartbeatEnabled && (
-                  <div className="mt-2 flex items-center gap-2" style={{ marginLeft: TIMELINE_LEFT }}>
-                    <span className="text-[11px] text-slate-500 font-medium">Interval:</span>
-                    {INTERVALS.map((iv) => (
-                      <button
-                        key={iv}
-                        onClick={() => handleIntervalChange(agent, iv)}
-                        disabled={isSaving}
-                        className={`px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors border cursor-pointer ${
-                          interval === iv
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        {iv}h
-                      </button>
-                    ))}
-                    <span className="text-[11px] text-slate-400 ml-2">
-                      Starts at {agent.heartbeatOffsetHours}:00 UTC — click timeline to change
-                    </span>
+                  <div className="mt-3 ml-[200px] flex flex-wrap items-end gap-4 pb-1">
+                    {/* Start time */}
+                    <div>
+                      <div className="text-[11px] text-slate-500 font-medium mb-1">Start time ({timezone})</div>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={agent.heartbeatOffsetHours}
+                          onChange={(e) => handleUpdate(agent, { heartbeatOffsetHours: Number(e.target.value) })}
+                          className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                          ))}
+                        </select>
+                        <span className="text-slate-400 text-[13px]">:</span>
+                        <select
+                          value={agent.heartbeatOffsetMinutes}
+                          onChange={(e) => handleUpdate(agent, { heartbeatOffsetMinutes: Number(e.target.value) })}
+                          className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {[0, 15, 30, 45].map((m) => (
+                            <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Interval */}
+                    <div>
+                      <div className="text-[11px] text-slate-500 font-medium mb-1">Repeat every</div>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {INTERVALS.map((iv) => (
+                          <button
+                            key={iv}
+                            onClick={() => handleUpdate(agent, { heartbeatIntervalHours: iv })}
+                            disabled={isSaving}
+                            className={`px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors border cursor-pointer ${
+                              interval === iv
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            {iv === 24 ? '1 day' : `${iv}h`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    {runMins.length > 0 && (
+                      <div className="text-[11px] text-slate-400 self-end pb-0.5">
+                        Runs at: {runMins.map(m => fmt(Math.floor(m / 60), m % 60)).join(', ')}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

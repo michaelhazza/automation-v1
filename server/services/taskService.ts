@@ -9,6 +9,7 @@ import {
 } from '../db/schema/index.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 import { triggerService } from './triggerService.js';
+import { subtaskWakeupService } from './subtaskWakeupService.js';
 
 const POSITION_GAP = 1000;
 
@@ -272,6 +273,13 @@ export const taskService = {
       emitSubaccountUpdate(existing.subaccountId, 'task:status_changed', {
         taskId: id, from: existing.status, to: data.status,
       });
+
+      // Wake the orchestrator when a subtask reaches a terminal or blocked state (non-blocking)
+      if (data.status === 'done' || data.status === 'blocked') {
+        subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId, existing.organisationId, data.status).catch((err: unknown) => {
+          console.error('[TaskService] subtask wakeup failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
+        });
+      }
     }
 
     return updated;
@@ -318,6 +326,13 @@ export const taskService = {
           error: err instanceof Error ? err.message : String(err),
         });
       });
+
+      // Wake the orchestrator when a subtask reaches a terminal or blocked state (non-blocking)
+      if (data.status === 'done' || data.status === 'blocked') {
+        subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId, existing.organisationId, data.status).catch((err: unknown) => {
+          console.error('[TaskService] subtask wakeup failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
+        });
+      }
     }
 
     return updated;
