@@ -26,6 +26,7 @@ interface Page {
   updatedAt: string;
 }
 
+// Matches PAGES_BASE_DOMAIN on the backend. Change here if the domain changes.
 const PAGES_BASE_DOMAIN = 'synthetos.ai';
 
 const STATUS_CLS: Record<string, string> = {
@@ -75,6 +76,7 @@ export default function PageProjectDetailPage({ user: _user }: { user: User }) {
   const [creating, setCreating] = useState(false);
 
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId || !clientId) return;
@@ -109,8 +111,11 @@ export default function PageProjectDetailPage({ user: _user }: { user: User }) {
       setNewSlug('');
       setSlugManuallyEdited(false);
       setNewPageType('website');
-    } catch {
-      // TODO: show error toast
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message
+        ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? 'Failed to create page';
+      setError(msg);
     } finally {
       setCreating(false);
     }
@@ -123,7 +128,7 @@ export default function PageProjectDetailPage({ user: _user }: { user: User }) {
       const { data } = await api.post(`/api/subaccounts/${clientId}/page-projects/${projectId}/pages/${pageId}/publish`);
       setPages((prev) => prev.map((p) => (p.id === pageId ? data : p)));
     } catch {
-      // TODO: show error toast
+      setError('Failed to publish page');
     } finally {
       setPublishingId(null);
     }
@@ -152,6 +157,13 @@ export default function PageProjectDetailPage({ user: _user }: { user: User }) {
       >
         &larr; Back to Page Projects
       </button>
+
+      {error && (
+        <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-[13px] text-red-700 flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 bg-transparent border-0 cursor-pointer text-[16px] leading-none">&times;</button>
+        </div>
+      )}
 
       {/* Header */}
       <div className="mb-6">

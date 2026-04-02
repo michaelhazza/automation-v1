@@ -4,6 +4,9 @@ import api from '../lib/api';
 import { getActiveClientId, getActiveClientName } from '../lib/auth';
 import { User } from '../lib/auth';
 
+// Matches PAGES_BASE_DOMAIN on the backend. Change here if the domain changes.
+const PAGES_BASE_DOMAIN = 'synthetos.ai';
+
 interface PageProject {
   id: string;
   name: string;
@@ -48,6 +51,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
   const [newSlug, setNewSlug] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return; }
@@ -69,8 +73,11 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
       const { data } = await api.post(`/api/subaccounts/${clientId}/page-projects`, { name: newName.trim(), slug: newSlug.trim() });
       setProjects((p) => [data, ...p]);
       setShowNew(false); setNewName(''); setNewSlug('');
-    } catch {
-      // TODO: show error toast
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: { message?: string }; message?: string } } })?.response?.data?.error?.message
+        ?? (err as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? 'Failed to create site';
+      setError(msg);
     } finally { setSaving(false); }
   };
 
@@ -82,7 +89,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
       await api.delete(`/api/subaccounts/${clientId}/page-projects/${id}`);
       setProjects((p) => p.filter((x) => x.id !== id));
     } catch {
-      // TODO: show error toast
+      setError('Failed to delete site');
     } finally { setDeleting(null); }
   };
 
@@ -108,6 +115,13 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
         </button>
       </div>
 
+      {error && (
+        <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-[13px] text-red-700 flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 bg-transparent border-0 cursor-pointer text-[16px] leading-none">&times;</button>
+        </div>
+      )}
+
       {showNew && (
         <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5">
           <div className="font-semibold text-[14px] text-slate-900 mb-3.5">New Site</div>
@@ -116,7 +130,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
             <div>
               <input className={inputCls} placeholder="slug" value={newSlug} onChange={(e) => setNewSlug(slugify(e.target.value))} />
               {newSlug && (
-                <div className="text-[12px] text-slate-400 mt-1.5">Your site will be available at <span className="font-medium text-slate-600">{newSlug}.synthetos.ai</span></div>
+                <div className="text-[12px] text-slate-400 mt-1.5">Your site will be available at <span className="font-medium text-slate-600">{newSlug}.{PAGES_BASE_DOMAIN}</span></div>
               )}
             </div>
             <div className="flex gap-2">
@@ -161,7 +175,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-semibold text-[14px] text-slate-900 leading-snug">{project.name}</div>
                 </div>
-                <div className="text-[13px] text-slate-500 mt-1.5 leading-relaxed">{project.slug}.synthetos.ai</div>
+                <div className="text-[13px] text-slate-500 mt-1.5 leading-relaxed">{project.slug}.{PAGES_BASE_DOMAIN}</div>
                 <div className="mt-3.5 flex items-center gap-2">
                   <div className="text-[11px] text-slate-400">{relativeDate(project.createdAt)}</div>
                   <div className="flex-1" />
