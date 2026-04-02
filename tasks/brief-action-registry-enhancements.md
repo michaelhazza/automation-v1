@@ -1,112 +1,111 @@
 # Development Brief: Action Registry Enhancements
 
 **Date:** 2026-04-02  
-**Status:** Proposal — pending sanity check  
+**Status:** Revised after codebase investigation  
 **Origin:** Claw-code architecture analysis (see `tasks/claw-code-deep-dive.md`)
 
 ---
 
-## Problem
+## Context
 
-Our action registry (`server/config/actionRegistry.ts`) defines 17 actions that power agent tool-calling and MCP exposure. Two gaps were identified when benchmarking against well-regarded open-source agent harness patterns:
-
-1. **No parameter schemas** — `payloadFields` is a string array with no types, constraints, or required/optional markers. The LLM has no structured definition of what each action accepts, and we have no schema-driven validation at runtime.
-
-2. **No per-agent tool scoping** — Every agent sees every action. There's no mechanism to restrict which actions an agent can access based on its role or purpose.
-
-3. **No action descriptions** — Actions have no human/LLM-readable description, which weakens MCP tool discovery and LLM tool selection accuracy.
+After benchmarking against claw-code's tool spec patterns, we identified 4 potential enhancements to our action registry. We then investigated our actual codebase to determine which (if any) are needed now.
 
 ---
 
-## Proposed Changes
+## Findings from Codebase Investigation
 
-### 1. Add `parameterSchema` (JSON Schema) to each action
+### 1. Centralized Parameter Schemas — DEFER
 
-Replace `payloadFields: string[]` with a standard JSON Schema object per action. This schema would serve as:
-- The MCP tool definition sent to LLMs
-- The runtime validation source (via Zod or ajv)
-- Self-documenting parameter reference
+**What we proposed:** Replace `payloadFields: string[]` with JSON Schema objects for centralized validation.
 
-**Example — `send_email` before/after:**
+**What we found:** Validation is already happening — it's just scattered. Every executor in `skillExecutor.ts` and `devopsAdapter.ts` manually checks required fields inline (`if (!field) return error`). This works. Additionally, skill `.md` files already define rich JSON Schemas in their `input_schema` blocks, which get sent to the LLM as tool definitions via `systemSkillService.ts`.
 
-```
-// Before
-payloadFields: ['to', 'subject', 'body', 'thread_id', 'provider']
+**The real picture — three sources of truth:**
 
-// After
-parameterSchema: {
-  type: 'object',
-  properties: {
-    to:        { type: 'string', format: 'email' },
-    subject:   { type: 'string', minLength: 1 },
-    body:      { type: 'string' },
-    thread_id: { type: 'string' },
-    provider:  { type: 'string', enum: ['sendgrid', 'resend'] },
-  },
-  required: ['to', 'subject', 'body', 'provider'],
-  additionalProperties: false,
-}
-```
+| Source | What it defines | Used for |
+|--------|----------------|----------|
+| `actionRegistry.ts` → `payloadFields` | Field names only (no types) | MCP tool catalogue display |
+| `server/skills/*.md` → `input_schema` | Full JSON Schema (types, required, enums) | LLM tool definitions |
+| `skillExecutor.ts` → inline checks | Ad-hoc `if (!field)` validation | Runtime validation |
 
-**Expected impact:** Fewer malformed tool calls from LLMs, single source of truth for validation, and cleaner MCP tool definitions.
+These three are disconnected but functional. The LLM gets good schemas (from skill `.md` files). The executor catches bad inputs. The registry's `payloadFields` is the weakest link but it's only used for MCP catalogue display.
 
-### 2. Add `allowedActions` filtering per agent context
-
-Allow agent definitions (or execution contexts) to specify which actions they can access:
-
-```
-allowedActions?: string[]  // If set, only these actions are exposed to the agent
-```
-
-An email-drafting agent would only see `send_email`, `read_inbox`, `create_task`. A devops agent would see `read_codebase`, `run_tests`, `write_patch`, `create_pr`. Actions not in the allowlist simply don't appear in the tool list sent to the LLM.
-
-**Expected impact:** Reduced hallucinated tool calls, better agent focus, defence-in-depth beyond gate levels.
-
-### 3. Add `description` field to each action
-
-A one-line human/LLM-readable description per action:
-
-```
-description: 'Send an email via the configured provider (SendGrid or Resend)'
-```
-
-**Expected impact:** Better LLM tool selection when actions are exposed via MCP.
-
-### 4. Add name normalization + aliases (minor)
-
-A `normalizeActionType()` function and small alias map (`'email'` → `'send_email'`, `'test'` → `'run_tests'`) to handle LLM name variations gracefully.
-
-**Expected impact:** Fewer tool-call failures from minor name mismatches.
+**Verdict: DEFER.** This is technical debt, not a bug. Consolidate when we refactor the skill executor or hit actual schema drift bugs. No evidence of LLMs making bad tool calls due to missing schemas — they get the schemas from the `.md` files already.
 
 ---
 
-## What This Does NOT Change
+### 2. Per-Agent Tool Scoping — ALREADY BUILT
 
-- Action state machine and lifecycle (proposed → executing → completed/failed) — untouched
-- Retry policies and error taxonomy — untouched
-- MCP annotations (readOnlyHint, destructiveHint, etc.) — untouched
-- HITL gate levels — untouched
-- `payloadFields` can be kept temporarily for backward compat and derived from the schema
+**What we proposed:** Add `allowedActions` filtering per agent context.
 
----
+**What we found:** This is already fully implemented:
+- `subaccountAgents.allowedSkillSlugs` (JSONB column) stores per-agent tool allowlists
+- `toolRestrictionMiddleware` enforces the allowlist before every tool call
+- `agentExecutionService.ts` resolves skills in 3 layers (system agent → org → subaccount) and only sends configured skills to the LLM
+- `claudeCodeRunner.ts` has its own `DEFAULT_ALLOWED_TOOLS` + `allowedTools` parameter
+- Backward-compatible: null/empty allowlist = all tools available
 
-## Effort Estimate
-
-| Change | Scope | Files Touched |
-|--------|-------|---------------|
-| `parameterSchema` | Define schemas for 17 actions | `actionRegistry.ts`, MCP server, skill executor |
-| `allowedActions` | Filter logic in tool exposure | Agent service, MCP server, execution layer |
-| `description` | Add strings to 17 actions | `actionRegistry.ts` |
-| Name normalization | Small utility function + alias map | `actionRegistry.ts` |
+**Verdict: NO WORK NEEDED.** Remove from the brief entirely.
 
 ---
 
-## Open Questions
+### 3. Action Descriptions — DEFER (with one exception)
 
-1. **Is this actually needed now?** Our current `payloadFields` approach works — agents successfully call tools. The question is whether the accuracy improvement from schemas justifies the effort, or if this is premature optimization.
+**What we proposed:** Add a `description` field to each action.
 
-2. **Zod vs ajv for runtime validation?** We already use Zod elsewhere. JSON Schema can be converted to Zod, or we could define in Zod and derive JSON Schema. Need to pick a direction.
+**What we found:** LLMs already get good descriptions from the skill `.md` files via `systemSkillService.ts`. The only place descriptions are bad is the MCP server, which auto-generates them from slugs (`"send email — category: api"`).
 
-3. **Should `allowedActions` live on the agent definition or the execution context?** Agent-level is simpler. Execution-context-level is more flexible (same agent, different scopes per workflow).
+**Verdict: DEFER** unless MCP is a near-term priority. If it is, fix MCP descriptions as part of the MCP improvement (item 4 below).
 
-4. **Do we version schemas?** If a schema changes, persisted action payloads from older executions may not match. Do we need a version field or schema hash?
+---
+
+### 4. MCP Tool Exposure — BUILD NOW (conditionally)
+
+**What we proposed:** Name normalization + aliases.
+
+**What we actually found:** The MCP problem is bigger than we initially scoped. The MCP server (`mcpServer.ts`) has three active issues:
+
+1. **Untyped parameters** — Every action gets `z.record(z.unknown())` as its schema. MCP clients get zero guidance on what fields to provide.
+2. **Auto-generated stub descriptions** — `"send email — category: api"` instead of the rich descriptions from skill `.md` files.
+3. **Missing ~40% of skills** — MCP only exposes `ACTION_REGISTRY` entries (~17 actions). But the system has ~30 skills total. Skills like `capture_screenshot`, `write_tests`, `update_task`, `spawn_sub_agents` are invisible to MCP clients.
+
+**Verdict: BUILD NOW — but only if MCP clients are actively being used or planned for Q2.** If MCP is still theoretical, defer everything.
+
+---
+
+### 5. Name Normalization — DEFER
+
+**What we proposed:** Alias map and normalization function.
+
+**What we found:** No evidence of tool-call failures from name mismatches. The skill resolution system uses exact slugs and works fine.
+
+**Verdict: DEFER.** Solve if we see actual evidence of this problem.
+
+---
+
+## Revised Recommendation
+
+| Enhancement | Original Priority | Revised Priority | Rationale |
+|------------|-------------------|-----------------|-----------|
+| Parameter schemas | HIGH | **DEFER** | Three sources of truth is messy but functional. LLMs already get schemas from skill `.md` files. |
+| Per-agent tool scoping | HIGH | **DONE** | Already built via `allowedSkillSlugs` + middleware. |
+| Action descriptions | MEDIUM | **DEFER** | Only affects MCP. LLMs get descriptions from skill files. |
+| MCP improvements | LOW | **CONDITIONAL** | Real problems exist, but only matter if MCP is actively used. |
+| Name normalization | HIGH | **DEFER** | No evidence of actual failures. |
+
+### Decision point
+
+**If MCP is a near-term priority:** The one thing worth building now is fixing `mcpServer.ts` to pull schemas and descriptions from the skill `.md` files instead of the bare action registry. This is a targeted fix (~1 file) rather than a registry-wide refactor.
+
+**If MCP is not a priority:** Defer everything. The internal agent execution path is well-structured and working.
+
+---
+
+## What Changed from the Original Brief
+
+The original brief was written based on patterns observed in claw-code's architecture. After actually investigating our codebase, we found:
+
+1. We overestimated the parameter schema gap — LLMs already get schemas via a different path (skill `.md` files)
+2. We proposed building something that already exists (tool scoping)
+3. The real gap is narrower than expected — it's specifically MCP tool exposure, not the whole registry
+4. The codebase has more structure than the registry alone suggests — the skill system carries the weight
