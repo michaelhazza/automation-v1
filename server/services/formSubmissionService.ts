@@ -142,6 +142,8 @@ export const formSubmissionService = {
       return { success: true, duplicate: true };
     }
 
+    const hasActions = formConfig?.actions && Object.keys(formConfig.actions).length > 0;
+
     // 7. Store submission
     const [submission] = await db
       .insert(formSubmissions)
@@ -149,7 +151,7 @@ export const formSubmissionService = {
         pageId,
         data,
         submissionHash,
-        integrationStatus: 'pending',
+        integrationStatus: hasActions ? 'pending' : 'success',
         ipAddress,
         userAgent,
       })
@@ -165,7 +167,7 @@ export const formSubmissionService = {
     });
 
     // 9. Enqueue integration jobs
-    if (formConfig?.actions) {
+    if (hasActions) {
       for (const [purpose, actionConfig] of Object.entries(formConfig.actions)) {
         const cached = integrationCache.get(purpose);
         if (cached) {

@@ -85,10 +85,10 @@ function buildPageShell(page: Page, project: PageProject, opts?: { trackingScrip
   const meta = page.meta ?? {};
 
   const cssVars = [
-    theme.primaryColor ? `--color-primary: ${theme.primaryColor};` : '',
-    theme.secondaryColor ? `--color-secondary: ${theme.secondaryColor};` : '',
-    theme.fontHeading ? `--font-heading: ${theme.fontHeading};` : '',
-    theme.fontBody ? `--font-body: ${theme.fontBody};` : '',
+    theme.primaryColor ? `--color-primary: ${sanitizeCssValue(theme.primaryColor)};` : '',
+    theme.secondaryColor ? `--color-secondary: ${sanitizeCssValue(theme.secondaryColor)};` : '',
+    theme.fontHeading ? `--font-heading: ${sanitizeCssValue(theme.fontHeading)};` : '',
+    theme.fontBody ? `--font-body: ${sanitizeCssValue(theme.fontBody)};` : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -142,6 +142,10 @@ ${page.html ?? ''}
 ${opts?.trackingScript ?? ''}
 </body>
 </html>`;
+}
+
+function sanitizeCssValue(val: string): string {
+  return val.replace(/[{};@<>"'\\]/g, '');
 }
 
 function escapeAttr(str: string): string {

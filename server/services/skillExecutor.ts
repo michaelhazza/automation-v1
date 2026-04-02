@@ -247,7 +247,7 @@ export const skillExecutor = {
       case 'create_page':
         return proposeReviewGatedAction('create_page', input, context);
       case 'update_page':
-        return executeWithActionAudit('update_page', input, context, () => executeUpdatePage(input, context));
+        return proposeReviewGatedAction('update_page', input, context);
       case 'publish_page':
         return proposeReviewGatedAction('publish_page', input, context);
 

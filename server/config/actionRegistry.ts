@@ -559,8 +559,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     description: 'Update an existing page HTML, meta, or formConfig. Saves a version snapshot before updating. Returns a preview URL.',
     actionCategory: 'worker',
     isExternal: false,
-    defaultGateLevel: 'auto',
-    createsBoardTask: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: true,
     payloadFields: ['pageId', 'projectId', 'html', 'meta', 'formConfig', 'changeNote'],
     parameterSchema: {
       type: 'object',

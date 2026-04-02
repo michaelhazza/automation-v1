@@ -42,10 +42,10 @@ function buildPreviewShell(page: Page, project: PageProject): string {
   const meta = page.meta ?? {};
 
   const cssVars = [
-    theme.primaryColor ? `--color-primary: ${theme.primaryColor};` : '',
-    theme.secondaryColor ? `--color-secondary: ${theme.secondaryColor};` : '',
-    theme.fontHeading ? `--font-heading: ${theme.fontHeading};` : '',
-    theme.fontBody ? `--font-body: ${theme.fontBody};` : '',
+    theme.primaryColor ? `--color-primary: ${sanitizeCssValue(theme.primaryColor)};` : '',
+    theme.secondaryColor ? `--color-secondary: ${sanitizeCssValue(theme.secondaryColor)};` : '',
+    theme.fontHeading ? `--font-heading: ${sanitizeCssValue(theme.fontHeading)};` : '',
+    theme.fontBody ? `--font-body: ${sanitizeCssValue(theme.fontBody)};` : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -81,6 +81,10 @@ ${PREVIEW_BANNER}
 ${page.html ?? ''}
 </body>
 </html>`;
+}
+
+function sanitizeCssValue(val: string): string {
+  return val.replace(/[{};@<>"'\\]/g, '');
 }
 
 function escapeAttr(str: string): string {

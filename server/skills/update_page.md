@@ -37,4 +37,4 @@ When updating a page, always include a `changeNote` explaining what changed and 
 ### Decision Rules
 - **Version history is automatic**: The current state is snapshotted before the update is applied.
 - **HTML is re-sanitized**: Updated HTML goes through the same sanitization as creation.
-- **Draft and published pages can both be updated**: Updating a published page changes the live content immediately.
+- **Draft and published pages can both be updated**: Updates go through human review before being applied to the live page.

@@ -59,8 +59,15 @@ export const pageProjectService = {
 
     await checkSlugUniqueness(data.slug);
 
-    const [created] = await db.insert(pageProjects).values(data).returning();
-    return created;
+    try {
+      const [created] = await db.insert(pageProjects).values(data).returning();
+      return created;
+    } catch (err: unknown) {
+      if ((err as { code?: string }).code === '23505') {
+        throw { statusCode: 409, message: `Slug "${data.slug}" is already taken` };
+      }
+      throw err;
+    }
   },
 
   async update(
