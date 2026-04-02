@@ -16,6 +16,7 @@ import { systemSkillService } from './services/systemSkillService.js';
 import { agentScheduleService } from './services/agentScheduleService.js';
 import { routerJobService } from './services/routerJobService.js';
 import { queueService } from './services/queueService.js';
+import { initializePageIntegrationWorker } from './services/pageIntegrationWorker.js';
 import { client as dbClient } from './db/index.js';
 import { getIO } from './websocket/index.js';
 
@@ -68,6 +69,8 @@ import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+import publicFormSubmissionRouter from './routes/public/formSubmission.js';
+import publicPageTrackingRouter from './routes/public/pageTracking.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -172,6 +175,8 @@ app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(publicFormSubmissionRouter);
+app.use(publicPageTrackingRouter);
 
 // Serve static files in production
 if (env.NODE_ENV === 'production') {
@@ -240,6 +245,7 @@ async function start() {
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
   await queueService.startMaintenanceJobs();
+  await initializePageIntegrationWorker();
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {
