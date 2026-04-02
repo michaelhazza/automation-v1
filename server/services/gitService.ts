@@ -5,6 +5,9 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { devContextService, type DevContext } from './devContextService.js';
+import { connectionTokenService } from './connectionTokenService.js';
+import { getInstallationAccessToken } from '../routes/githubApp.js';
+import { logger } from '../lib/logger.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +15,8 @@ const execFileAsync = promisify(execFile);
 // Git Abstraction Service
 // Wraps all git operations. Skills call service methods; the service enforces
 // DEC git config. Agents never construct raw git commands.
+//
+// Supports both GitHub App installations (preferred) and legacy OAuth tokens.
 // ---------------------------------------------------------------------------
 
 export interface PROptions {
@@ -29,6 +34,99 @@ export interface GitHubCredentials {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Fetch wrapper for GitHub API calls with retry + rate-limit handling.
+ *
+ * Retries on 429 (rate limit), 502, 503, and network errors.
+ * Respects Retry-After header when present. Max 3 attempts with
+ * exponential backoff (1s, 2s, 4s).
+ */
+async function githubFetch(
+  url: string,
+  init: RequestInit & { signal?: AbortSignal },
+  maxAttempts = 3
+): Promise<Response> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: init.signal ?? AbortSignal.timeout(15000),
+      });
+
+      // Rate limited — wait and retry
+      if (res.status === 429 || res.status === 403) {
+        const retryAfter = res.headers.get('retry-after');
+        const remaining = res.headers.get('x-ratelimit-remaining');
+
+        // Only retry 403 if it's actually a rate limit (remaining === '0')
+        if (res.status === 403 && remaining !== '0') {
+          return res; // Real 403, don't retry
+        }
+
+        const waitSec = retryAfter ? parseInt(retryAfter, 10) : Math.pow(2, attempt);
+        const waitMs = Math.min(waitSec * 1000, 30000); // cap at 30s
+
+        logger.warn('github.rate_limited', {
+          url,
+          status: res.status,
+          attempt: attempt + 1,
+          retryAfterSec: waitSec,
+          rateLimitRemaining: remaining,
+        });
+
+        if (attempt < maxAttempts - 1) {
+          await new Promise(r => setTimeout(r, waitMs));
+          continue;
+        }
+        return res; // Out of retries, return the 429
+      }
+
+      // Server errors — retry with backoff
+      if (res.status === 502 || res.status === 503) {
+        logger.warn('github.server_error', {
+          url,
+          status: res.status,
+          attempt: attempt + 1,
+        });
+
+        if (attempt < maxAttempts - 1) {
+          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+          continue;
+        }
+        return res; // Out of retries
+      }
+
+      return res;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+
+      // Network errors — retry with backoff
+      const isRetryable = lastError.message.includes('ECONNRESET')
+        || lastError.message.includes('ECONNREFUSED')
+        || lastError.message.includes('ETIMEDOUT')
+        || lastError.message.includes('fetch failed')
+        || lastError.name === 'AbortError';
+
+      logger.warn('github.fetch_error', {
+        url,
+        error: lastError.message,
+        attempt: attempt + 1,
+        retryable: isRetryable,
+      });
+
+      if (!isRetryable || attempt >= maxAttempts - 1) {
+        throw lastError;
+      }
+
+      await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+    }
+  }
+
+  throw lastError ?? new Error('GitHub API request failed after retries');
+}
+
 async function git(args: string[], cwd: string, timeout = 30000): Promise<string> {
   try {
     const { stdout } = await execFileAsync('git', args, {
@@ -44,29 +142,54 @@ async function git(args: string[], cwd: string, timeout = 30000): Promise<string
   }
 }
 
-async function getGitHubCredentials(subaccountId: string): Promise<GitHubCredentials> {
+/**
+ * Get GitHub credentials for a subaccount.
+ * Supports both GitHub App (installation tokens) and legacy OAuth connections.
+ * If connectionId is provided, uses that specific connection; otherwise finds the first active one.
+ */
+async function getGitHubCredentials(subaccountId: string, connectionId?: string): Promise<GitHubCredentials> {
+  const conditions = [
+    eq(integrationConnections.subaccountId, subaccountId),
+    eq(integrationConnections.providerType, 'github'),
+    eq(integrationConnections.connectionStatus, 'active'),
+  ];
+
+  if (connectionId) {
+    conditions.push(eq(integrationConnections.id, connectionId));
+  }
+
   const [conn] = await db
     .select()
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.subaccountId, subaccountId),
-        eq(integrationConnections.providerType, 'github'),
-        eq(integrationConnections.connectionStatus, 'active')
-      )
-    );
+    .where(and(...conditions))
+    .limit(1);
 
   if (!conn) {
     throw {
       statusCode: 400,
-      message: 'No active GitHub integration found for this subaccount. Connect a GitHub account in integrations.',
+      message: connectionId
+        ? `GitHub connection ${connectionId} not found or inactive.`
+        : 'No active GitHub integration found for this subaccount. Connect GitHub in integrations.',
       errorCode: 'environment_failure',
     };
   }
 
-  // Credentials are stored encrypted in accessToken
-  const token = conn.accessToken;
-  if (!token) {
+  // GitHub App installation — mint a fresh installation access token
+  if (conn.authType === 'github_app') {
+    const config = conn.configJson as { installationId?: number } | null;
+    if (!config?.installationId) {
+      throw {
+        statusCode: 400,
+        message: 'GitHub App connection has no installation ID. Re-install the GitHub App.',
+        errorCode: 'environment_failure',
+      };
+    }
+    const token = await getInstallationAccessToken(config.installationId);
+    return { token };
+  }
+
+  // Legacy OAuth — decrypt stored access token
+  if (!conn.accessToken) {
     throw {
       statusCode: 400,
       message: 'GitHub integration is connected but has no access token. Re-connect GitHub.',
@@ -74,7 +197,7 @@ async function getGitHubCredentials(subaccountId: string): Promise<GitHubCredent
     };
   }
 
-  return { token };
+  return { token: connectionTokenService.decryptToken(conn.accessToken) };
 }
 
 // ---------------------------------------------------------------------------
@@ -196,19 +319,18 @@ export const gitService = {
    */
   async createPullRequest(subaccountId: string, opts: PROptions): Promise<string> {
     const { context } = await devContextService.getContext(subaccountId);
-    const { repoOwner, repoName, defaultBranch } = context.gitConfig;
-    const { token } = await getGitHubCredentials(subaccountId);
+    const { repoOwner, repoName, defaultBranch, githubConnectionId } = context.gitConfig;
+    const { token } = await getGitHubCredentials(subaccountId, githubConnectionId);
     const baseBranch = opts.baseBranch ?? defaultBranch;
 
     // Idempotency: check for existing open PR on this branch
-    const listRes = await fetch(
+    const listRes = await githubFetch(
       `https://api.github.com/repos/${repoOwner}/${repoName}/pulls?state=open&head=${repoOwner}:${opts.branch}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github.v3+json',
         },
-        signal: AbortSignal.timeout(15000),
       }
     );
 
@@ -223,7 +345,7 @@ export const gitService = {
     await this.pushBranch(subaccountId, opts.branch);
 
     // Create new PR
-    const createRes = await fetch(
+    const createRes = await githubFetch(
       `https://api.github.com/repos/${repoOwner}/${repoName}/pulls`,
       {
         method: 'POST',
@@ -238,7 +360,6 @@ export const gitService = {
           head: opts.branch,
           base: baseBranch,
         }),
-        signal: AbortSignal.timeout(15000),
       }
     );
 

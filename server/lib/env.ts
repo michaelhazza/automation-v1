@@ -68,14 +68,18 @@ const envSchema = z.object({
   // OAuth provider credentials — OAUTH_{PROVIDER}_CLIENT_ID / _CLIENT_SECRET
   OAUTH_GMAIL_CLIENT_ID: z.string().optional(),
   OAUTH_GMAIL_CLIENT_SECRET: z.string().optional(),
-  OAUTH_GITHUB_CLIENT_ID: z.string().optional(),
-  OAUTH_GITHUB_CLIENT_SECRET: z.string().optional(),
+  // GitHub uses GitHub App model (not OAuth Apps) — see GITHUB_APP_* below
   OAUTH_HUBSPOT_CLIENT_ID: z.string().optional(),
   OAUTH_HUBSPOT_CLIENT_SECRET: z.string().optional(),
   OAUTH_SLACK_CLIENT_ID: z.string().optional(),
   OAUTH_SLACK_CLIENT_SECRET: z.string().optional(),
   OAUTH_GHL_CLIENT_ID: z.string().optional(),
   OAUTH_GHL_CLIENT_SECRET: z.string().optional(),
+  // GitHub App — fine-grained, per-repo access (replaces OAUTH_GITHUB_* OAuth App)
+  GITHUB_APP_ID: z.string().optional(),
+  GITHUB_APP_PRIVATE_KEY: z.string().optional(), // PEM key, base64-encoded for env vars
+  GITHUB_APP_SLUG: z.string().optional(),
+  GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

@@ -1,5 +1,5 @@
-import './instrumentation.js';
 import 'dotenv/config';
+import './instrumentation.js';
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
@@ -64,6 +64,8 @@ import llmUsageRouter from './routes/llmUsage.js';
 import hierarchyTemplatesRouter from './routes/hierarchyTemplates.js';
 import systemTemplatesRouter from './routes/systemTemplates.js';
 import oauthIntegrationsRouter from './routes/oauthIntegrations.js';
+import githubAppRouter from './routes/githubApp.js';
+import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
 
@@ -83,7 +85,21 @@ app.use(helmet({
           scriptSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", 'data:', 'blob:'],
-          connectSrc: ["'self'", 'ws:', 'wss:'],
+          connectSrc: [
+            "'self'",
+            // WebSocket — restrict to same origin only
+            `wss://${env.APP_BASE_URL.replace(/^https?:\/\//, '')}`,
+            // External APIs used by the server (not browser) — listed for completeness
+            // LLM providers are called server-side only so don't need CSP.
+            // OAuth providers redirect the browser, so their domains must be allowed:
+            'https://accounts.google.com',
+            'https://github.com',
+            'https://app.hubspot.com',
+            'https://slack.com',
+            'https://marketplace.leadconnectorhq.com',
+            // Langfuse observability (if browser SDK used)
+            'https://cloud.langfuse.com',
+          ],
         },
       }
     : false,
@@ -105,6 +121,10 @@ app.use(cors({
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Correlation ID — attaches unique ID to every request for tracing
+import { correlationMiddleware } from './middleware/correlation.js';
+app.use(correlationMiddleware);
 
 // Routes
 app.use(healthRouter);
@@ -148,6 +168,8 @@ app.use(llmUsageRouter);
 app.use(hierarchyTemplatesRouter);
 app.use(systemTemplatesRouter);
 app.use(oauthIntegrationsRouter);
+app.use(githubAppRouter);
+app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
 
@@ -168,26 +190,43 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Global error handler
-app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('[SERVER ERROR]', err);
-
+// Global error handler — standardised JSON response format
+import { logger } from './lib/logger.js';
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
+  let errorCode = 'internal_error';
 
   if (err instanceof Error) {
     message = err.message;
-    const withStatus = err as Error & { status?: number; statusCode?: number };
+    const withStatus = err as Error & { status?: number; statusCode?: number; errorCode?: string };
     statusCode = withStatus.status ?? withStatus.statusCode ?? 500;
+    errorCode = withStatus.errorCode ?? errorCode;
   } else if (typeof err === 'object' && err !== null) {
-    const e = err as { status?: number; statusCode?: number; message?: string };
+    const e = err as { status?: number; statusCode?: number; message?: string; errorCode?: string };
     statusCode = e.status ?? e.statusCode ?? 500;
     message = e.message ?? message;
+    errorCode = e.errorCode ?? errorCode;
   }
+
+  const correlationId = req.correlationId;
+
+  logger.error('unhandled_error', {
+    correlationId,
+    path: req.path,
+    method: req.method,
+    statusCode,
+    message,
+    stack: err instanceof Error ? err.stack : undefined,
+  });
 
   const isProduction = env.NODE_ENV === 'production';
   res.status(statusCode).json({
-    error: isProduction ? 'Internal server error' : message,
+    error: {
+      code: errorCode,
+      message: isProduction && statusCode >= 500 ? 'Internal server error' : message,
+    },
+    correlationId,
   });
 });
 

@@ -39,18 +39,23 @@ export const integrationConnectionService = {
     subaccountId: string,
     provider: string,
     organisationId: string,
+    connectionId?: string,
   ): Promise<DecryptedConnection> {
+    const conditions = [
+      eq(integrationConnections.subaccountId, subaccountId),
+      eq(integrationConnections.organisationId, organisationId),
+      eq(integrationConnections.providerType, provider as IntegrationConnection['providerType']),
+      eq(integrationConnections.connectionStatus, 'active'),
+    ];
+
+    if (connectionId) {
+      conditions.push(eq(integrationConnections.id, connectionId));
+    }
+
     const [conn] = await db
       .select()
       .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.subaccountId, subaccountId),
-          eq(integrationConnections.organisationId, organisationId),
-          eq(integrationConnections.providerType, provider as IntegrationConnection['providerType']),
-          eq(integrationConnections.connectionStatus, 'active'),
-        ),
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (!conn) {

@@ -2,6 +2,9 @@
 // OAuth Provider Configs — centralised registry for all supported OAuth2 providers.
 // Activepieces-inspired: one config object per provider, consumed by auth-url
 // generation, callback handler, and token refresh.
+//
+// GitHub uses the GitHub App (installation) model instead of OAuth Apps.
+// This gives clients fine-grained, per-repo access control.
 // ---------------------------------------------------------------------------
 
 export interface OAuthProviderConfig {
@@ -29,11 +32,8 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     extra: { access_type: 'offline', prompt: 'consent' },
   },
 
-  github: {
-    authUrl: 'https://github.com/login/oauth/authorize',
-    tokenUrl: 'https://github.com/login/oauth/access_token',
-    scopes: ['repo', 'read:org'],
-  },
+  // GitHub is handled via GitHub App installation flow, not OAuth.
+  // See server/routes/githubApp.ts for the installation endpoints.
 
   hubspot: {
     authUrl: 'https://app.hubspot.com/oauth/authorize',
@@ -54,7 +54,46 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   },
 };
 
-/** Env var prefix pattern: OAUTH_GMAIL_CLIENT_ID, OAUTH_GITHUB_CLIENT_SECRET, … */
+// ---------------------------------------------------------------------------
+// GitHub App Configuration
+// Uses the GitHub App (installation) model for fine-grained per-repo access.
+// Clients install the app on their GitHub org and choose which repos to share.
+//
+// Required env vars:
+//   GITHUB_APP_ID          — numeric App ID from GitHub App settings
+//   GITHUB_APP_PRIVATE_KEY — PEM private key (base64-encoded in env for Replit)
+//   GITHUB_APP_SLUG        — app slug for installation URL
+//   GITHUB_APP_WEBHOOK_SECRET — optional, for verifying webhook payloads
+// ---------------------------------------------------------------------------
+
+export interface GitHubAppConfig {
+  appId: string;
+  privateKey: string;
+  slug: string;
+  webhookSecret?: string;
+}
+
+export function getGitHubAppConfig(): GitHubAppConfig | null {
+  const appId = process.env.GITHUB_APP_ID;
+  const privateKeyRaw = process.env.GITHUB_APP_PRIVATE_KEY;
+  const slug = process.env.GITHUB_APP_SLUG;
+
+  if (!appId || !privateKeyRaw || !slug) return null;
+
+  // Support base64-encoded PEM (easier to store in env vars / Replit secrets)
+  const privateKey = privateKeyRaw.startsWith('-----')
+    ? privateKeyRaw
+    : Buffer.from(privateKeyRaw, 'base64').toString('utf8');
+
+  return {
+    appId,
+    privateKey,
+    slug,
+    webhookSecret: process.env.GITHUB_APP_WEBHOOK_SECRET,
+  };
+}
+
+/** Env var prefix pattern: OAUTH_GMAIL_CLIENT_ID, OAUTH_HUBSPOT_CLIENT_SECRET, … */
 export function getProviderClientId(provider: string): string | undefined {
   return process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
 }

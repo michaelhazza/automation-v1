@@ -2,6 +2,7 @@
 name: Read Codebase
 description: Read a file from the project codebase within the Dev Execution Context.
 isActive: true
+isVisible: true
 ---
 
 ```json

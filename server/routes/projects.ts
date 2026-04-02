@@ -43,10 +43,12 @@ router.post(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const { name, description, color } = req.body as {
+    const { name, description, color, repoUrl, githubConnectionId } = req.body as {
       name?: string;
       description?: string;
       color?: string;
+      repoUrl?: string;
+      githubConnectionId?: string;
     };
 
     if (!name?.trim()) throw { statusCode: 400, message: 'name is required' };
@@ -57,6 +59,8 @@ router.post(
       name: name.trim(),
       description: description?.trim() || null,
       color: color || '#6366f1',
+      repoUrl: repoUrl?.trim() || null,
+      githubConnectionId: githubConnectionId || null,
       createdBy: req.user?.id ?? null,
     }).returning();
 
@@ -82,11 +86,13 @@ router.patch(
 
     if (!existing) throw { statusCode: 404, message: 'Project not found' };
 
-    const { name, description, status, color } = req.body as {
+    const { name, description, status, color, repoUrl, githubConnectionId } = req.body as {
       name?: string;
       description?: string;
       status?: 'active' | 'completed' | 'archived';
       color?: string;
+      repoUrl?: string;
+      githubConnectionId?: string | null;
     };
 
     const updates: Partial<typeof projects.$inferInsert> = { updatedAt: new Date() };
@@ -94,6 +100,8 @@ router.patch(
     if (description !== undefined) updates.description = description?.trim() || null;
     if (status !== undefined) updates.status = status;
     if (color !== undefined) updates.color = color;
+    if (repoUrl !== undefined) updates.repoUrl = repoUrl?.trim() || null;
+    if (githubConnectionId !== undefined) updates.githubConnectionId = githubConnectionId || null;
 
     const [updated] = await db
       .update(projects)

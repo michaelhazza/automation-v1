@@ -27,6 +27,16 @@ router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSI
   res.status(201).json(result);
 }));
 
+router.post('/api/users/create-member', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), asyncHandler(async (req, res) => {
+  const { email, firstName, lastName, role } = req.body;
+  if (!email || !firstName || !lastName) {
+    res.status(400).json({ error: 'Validation failed', details: 'email, firstName, and lastName are required' });
+    return;
+  }
+  const result = await userService.createTeamMember(req.orgId!, req.user!.id, { email, firstName, lastName, role });
+  res.status(201).json(result);
+}));
+
 router.get('/api/users/me', authenticate, asyncHandler(async (req, res) => {
   const result = await userService.getCurrentUserProfile(req.user!.id);
   res.json(result);

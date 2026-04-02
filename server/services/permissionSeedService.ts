@@ -58,7 +58,7 @@ export async function seedDefaultPermissionSetsForOrg(
           organisationId,
           name: template.name,
           description: template.description,
-          isDefault: true,
+          isDefault: false,
         })
         .returning({ id: permissionSets.id });
 

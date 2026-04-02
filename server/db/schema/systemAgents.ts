@@ -45,6 +45,7 @@ export const systemAgents = pgTable('system_agents', {
   heartbeatEnabled: boolean('heartbeat_enabled').notNull().default(false),
   heartbeatIntervalHours: integer('heartbeat_interval_hours'),
   heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
+  heartbeatOffsetMinutes: integer('heartbeat_offset_minutes').notNull().default(0),
 
   // Execution mode preference
   executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless'>(),

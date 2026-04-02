@@ -31,6 +31,7 @@ import { skillExecutor } from './skillExecutor.js';
 import { actionService } from './actionService.js';
 import { reviewService } from './reviewService.js';
 import { ACTION_REGISTRY } from '../config/actionRegistry.js';
+import { logger } from '../lib/logger.js';
 import type { WorkflowDefinition, WorkflowCheckpoint, WorkflowRunStatus, WorkflowStep } from '../types/workflow.js';
 
 // HITL approval window — approvals arriving after this are rejected as stale
@@ -96,13 +97,13 @@ export async function resumeWorkflow(
   });
 
   if (!run) {
-    console.warn(`[WorkflowResume] Run ${workflowRunId} not found for org ${context.organisationId}`);
+    logger.warn('workflow.resume_run_not_found', { workflowRunId, organisationId: context.organisationId });
     return;
   }
 
   // Only paused runs can be resumed (guard against duplicate resume jobs)
   if (run.status !== 'paused') {
-    console.warn(`[WorkflowResume] Run ${workflowRunId} is in status '${run.status}' — skipping resume`);
+    logger.warn('workflow.resume_wrong_status', { workflowRunId, status: run.status });
     return;
   }
 
@@ -111,7 +112,7 @@ export async function resumeWorkflow(
 
   if (checkpoint?.timeoutAt && new Date() > new Date(checkpoint.timeoutAt)) {
     const msg = `Resume rejected: approval window expired at ${checkpoint.timeoutAt}`;
-    console.warn(`[WorkflowResume] ${workflowRunId}: ${msg}`);
+    logger.warn('workflow.resume_expired', { workflowRunId, timeoutAt: checkpoint.timeoutAt });
     await markRunFailed(workflowRunId, msg);
     return;
   }
@@ -125,7 +126,7 @@ export async function resumeWorkflow(
     const currentHash = hashPayload(approvedAction.payloadJson as Record<string, unknown>);
     if (currentHash !== checkpoint.inputHash) {
       const msg = 'Resume rejected: action payload was modified after checkpoint was written';
-      console.warn(`[WorkflowResume] ${workflowRunId}: ${msg}`);
+      logger.warn('workflow.resume_payload_tampered', { workflowRunId });
       await markRunFailed(workflowRunId, msg);
       return;
     }

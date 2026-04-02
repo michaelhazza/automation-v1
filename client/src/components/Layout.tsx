@@ -55,6 +55,7 @@ const Icons = {
   team:        () => <Ico><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></Ico>,
   orgs:        () => <Ico><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Ico>,
   skills:      () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></Ico>,
+  connections: () => <Ico><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><circle cx="18" cy="6" r="4"/><path d="M18 4v4"/><path d="M16 6h4"/></Ico>,
   diagnostic:  () => <Ico><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></Ico>,
   boardTpl:    () => <Ico><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Ico>,
   logout:      () => <Ico><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Ico>,
@@ -190,8 +191,24 @@ export default function Layout({ user, children }: LayoutProps) {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectColor, setNewProjectColor] = useState('#6366f1');
   const [createProjectLoading, setCreateProjectLoading] = useState(false);
+  const [newProjectRepoUrl, setNewProjectRepoUrl] = useState('');
 
   const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentDesc, setNewAgentDesc] = useState('');
+  const [newAgentPrompt, setNewAgentPrompt] = useState('');
+  const [newAgentIcon, setNewAgentIcon] = useState('');
+  const [newAgentRole, setNewAgentRole] = useState('');
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const [createAgentLoading, setCreateAgentLoading] = useState(false);
+  const [createAgentError, setCreateAgentError] = useState('');
+
+  // New Client modal
+  const [showCreateClient, setShowCreateClient] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientSlug, setNewClientSlug] = useState('');
+  const [createClientError, setCreateClientError] = useState('');
+  const [createClientLoading, setCreateClientLoading] = useState(false);
 
   // New Issue modal
   const [showNewIssue, setShowNewIssue] = useState(false);
@@ -215,8 +232,25 @@ export default function Layout({ user, children }: LayoutProps) {
 
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
   const hasAnyOrgPerm = orgPerms.size > 0;
-  const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has(key);
-  const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has(key);
+  const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has('__org_admin__') || orgPerms.has(key);
+  const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has('__org_admin__') || orgPerms.has('__org_admin__') || clientPerms.has(key);
+
+  // Auto-set org context for non-system-admin users who belong to an org
+  useEffect(() => {
+    if (!isSystemAdmin && user.organisationId && !activeOrgId) {
+      api.get('/api/organisations/mine').then(({ data }) => {
+        const name = data?.name ?? 'My Organisation';
+        setActiveOrg(user.organisationId, name);
+        setActiveOrgIdState(user.organisationId);
+        setActiveOrgNameState(name);
+      }).catch(() => {
+        // Fallback: set org ID without name so pages at least work
+        setActiveOrg(user.organisationId, 'My Organisation');
+        setActiveOrgIdState(user.organisationId);
+        setActiveOrgNameState('My Organisation');
+      });
+    }
+  }, [isSystemAdmin, user.organisationId, activeOrgId]);
 
   // Fetch orgs list (system admin)
   useEffect(() => {
@@ -472,6 +506,17 @@ export default function Layout({ user, children }: LayoutProps) {
           );
         })}
 
+        {/* New Client button */}
+        {hasOrgContext && hasOrgPerm('org.subaccounts.edit') && (
+          <button
+            onClick={() => { setShowCreateClient(true); setCreateClientError(''); setNewClientName(''); setNewClientSlug(''); }}
+            title="New company"
+            className="w-9 h-9 rounded-[14px] border border-dashed border-white/20 cursor-pointer bg-transparent text-white/40 hover:text-white/70 hover:border-white/40 text-lg font-light flex items-center justify-center transition-all duration-150"
+          >
+            +
+          </button>
+        )}
+
         <div className="flex-1" />
 
         {/* User avatar */}
@@ -572,7 +617,7 @@ export default function Layout({ user, children }: LayoutProps) {
           )}
 
           {/* ── Agents section — dynamic list */}
-          {hasOrgContext && activeClientId && hasOrgPerm('org.agents.view') && (
+          {hasOrgContext && activeClientId && (
             <>
               <NavSection label="Agents" action={<NavSectionAction onClick={() => setShowCreateAgent(true)} />} />
               {navAgents.length === 0 && (
@@ -603,6 +648,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
               <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+              <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
               {hasOrgPerm('org.subaccounts.edit') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
               )}
@@ -616,6 +662,7 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
+              <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
@@ -627,6 +674,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Platform" />
               <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
+              <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
@@ -727,10 +775,11 @@ export default function Layout({ user, children }: LayoutProps) {
               if (!newProjectName.trim() || createProjectLoading) return;
               setCreateProjectLoading(true);
               try {
-                const { data } = await api.post(`/api/subaccounts/${activeClientId}/projects`, { name: newProjectName.trim(), color: newProjectColor });
+                const { data } = await api.post(`/api/subaccounts/${activeClientId}/projects`, { name: newProjectName.trim(), color: newProjectColor, repoUrl: newProjectRepoUrl.trim() || undefined });
                 setShowCreateProject(false);
                 setNewProjectName('');
                 setNewProjectColor('#6366f1');
+                setNewProjectRepoUrl('');
                 // Refresh projects list and navigate
                 api.get(`/api/subaccounts/${activeClientId}/projects`).then(({ data: p }) =>
                   setNavProjects((p as NavProject[]).filter(pr => pr.status === 'active').slice(0, 12))
@@ -751,6 +800,10 @@ export default function Layout({ user, children }: LayoutProps) {
                   ))}
                 </div>
               </div>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">GitHub repo <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input type="url" value={newProjectRepoUrl} onChange={(e) => setNewProjectRepoUrl(e.target.value)} placeholder="https://github.com/org/repo" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
               <div className="flex gap-2 justify-end pt-1">
                 <button type="button" onClick={() => setShowCreateProject(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
                 <button type="submit" disabled={!newProjectName.trim() || createProjectLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createProjectLoading ? 'Creating...' : 'Create Project'}</button>
@@ -760,30 +813,203 @@ export default function Layout({ user, children }: LayoutProps) {
         </div>
       )}
 
-      {/* ── Add Agent dialog ──────────────────────────────────────────── */}
-      {showCreateAgent && activeClientId && (
+      {/* ── Create Agent modal ──────────────────────────────────────── */}
+      {showCreateAgent && activeClientId && (() => {
+        const AGENT_ICONS = [
+          // People & roles
+          '🤖','🧑‍💻','👩‍💼','🕵️','🧑‍🔬','👷','🧑‍🏫','🧑‍⚕️','🦸','🧙',
+          // Work & tools
+          '🔍','🛠️','📊','📋','🧪','🎯','💡','📝','🔧','⚙️',
+          // Communication
+          '💬','📢','🔔','📨','🤝','📞','🗂️','📂','📎','🏷️',
+          // Status & quality
+          '✅','🚀','⚡','🔒','🛡️','🏆','💎','🌟','🎨','🧩',
+          // Domain
+          '🐛','🔬','📐','🧮','📈','🗃️','🌐','☁️','🔗','🤔',
+        ];
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 sticky top-0 bg-white z-10">
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">Create Agent</h2>
+              <button onClick={() => { setShowCreateAgent(false); setShowIconPicker(false); }} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading) return;
+              setCreateAgentLoading(true);
+              setCreateAgentError('');
+              try {
+                const { data: agent } = await api.post('/api/agents', {
+                  name: newAgentName.trim(),
+                  description: newAgentDesc.trim() || undefined,
+                  masterPrompt: newAgentPrompt.trim(),
+                  icon: newAgentIcon.trim() || undefined,
+                  agentRole: newAgentRole.trim() || undefined,
+                  status: 'active',
+                });
+                await api.post(`/api/subaccounts/${activeClientId}/agents`, { agentId: agent.id });
+                setShowCreateAgent(false); setShowIconPicker(false);
+                setNewAgentName(''); setNewAgentDesc(''); setNewAgentPrompt('');
+                setNewAgentIcon(''); setNewAgentRole(''); setCreateAgentError('');
+                api.get(`/api/subaccounts/${activeClientId}/agents`).then(({ data }) =>
+                  setNavAgents((data as NavAgent[]).filter(a => a.isActive))
+                );
+                navigate(`/agents/${agent.id}`);
+              } catch (err: unknown) {
+                const e = err as { response?: { data?: { error?: string } } };
+                setCreateAgentError(e.response?.data?.error ?? 'Failed to create agent');
+              } finally { setCreateAgentLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              {createAgentError && <div className="text-[13px] text-red-600">{createAgentError}</div>}
+
+              {/* Icon + Name row */}
+              <div className="flex gap-3">
+                <div className="shrink-0 relative">
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Icon</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowIconPicker(!showIconPicker)}
+                    className={`w-12 h-10 text-center text-lg border rounded-lg cursor-pointer transition-colors flex items-center justify-center ${
+                      showIconPicker ? 'border-indigo-500 ring-2 ring-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    {newAgentIcon || <span className="text-slate-300 text-sm">+</span>}
+                  </button>
+
+                  {/* Icon picker popover */}
+                  {showIconPicker && (
+                    <div className="absolute top-full left-0 mt-2 z-20 bg-white border border-slate-200 rounded-xl shadow-xl p-3 w-[340px] animate-[fadeIn_0.1s_ease-out_both]">
+                      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Choose an icon</div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {AGENT_ICONS.map((icon) => (
+                          <button
+                            key={icon}
+                            type="button"
+                            onClick={() => { setNewAgentIcon(icon); setShowIconPicker(false); }}
+                            className={`w-10 h-10 rounded-lg text-2xl flex items-center justify-center cursor-pointer border-0 transition-all ${
+                              newAgentIcon === icon
+                                ? 'bg-indigo-100 ring-2 ring-indigo-500 scale-110'
+                                : 'bg-transparent hover:bg-slate-100'
+                            }`}
+                          >
+                            {icon}
+                          </button>
+                        ))}
+                      </div>
+                      {newAgentIcon && (
+                        <button
+                          type="button"
+                          onClick={() => { setNewAgentIcon(''); setShowIconPicker(false); }}
+                          className="mt-2 w-full text-[11px] text-slate-400 hover:text-slate-600 bg-transparent border-0 cursor-pointer"
+                        >
+                          Clear icon
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Name *</label>
+                  <input
+                    autoFocus
+                    value={newAgentName}
+                    onChange={(e) => setNewAgentName(e.target.value)}
+                    placeholder="e.g. QA Engineer"
+                    className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Description <span className="text-slate-400 font-normal">(optional)</span></label>
+                <input
+                  value={newAgentDesc}
+                  onChange={(e) => setNewAgentDesc(e.target.value)}
+                  placeholder="What does this agent do?"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Role <span className="text-slate-400 font-normal">(optional — displayed in org chart)</span></label>
+                <input
+                  value={newAgentRole}
+                  onChange={(e) => setNewAgentRole(e.target.value)}
+                  placeholder="e.g. Business Analyst, QA Lead, Senior Developer"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">System prompt *</label>
+                <textarea
+                  value={newAgentPrompt}
+                  onChange={(e) => setNewAgentPrompt(e.target.value)}
+                  placeholder="You are a QA engineer. Your job is to..."
+                  rows={5}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => { setShowCreateAgent(false); setShowIconPicker(false); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newAgentName.trim() || !newAgentPrompt.trim() || createAgentLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createAgentLoading ? 'Creating...' : 'Create Agent'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ── New Client modal ──────────────────────────────────────────── */}
+      {showCreateClient && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out_both]">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h2 className="text-[17px] font-bold text-slate-900 m-0">Add Agent</h2>
-              <button onClick={() => setShowCreateAgent(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+              <h2 className="text-[17px] font-bold text-slate-900 m-0">New Company</h2>
+              <button onClick={() => setShowCreateClient(false)} className="bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
             </div>
-            <div className="p-6">
-              <p className="text-[13px] text-slate-500 mb-4 mt-0">Agents are managed at the organisation level. Use Team Templates to load agent teams into this company.</p>
-              <div className="flex flex-col gap-2">
-                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
-                  <div className="text-[14px] font-semibold text-slate-800">Manage Org Agents</div>
-                  <div className="text-[12px] text-slate-500 mt-0.5">Create, edit, and configure agents at the organisation level</div>
-                </button>
-                <button onClick={() => { setShowCreateAgent(false); navigate('/admin/agents?tab=team-templates'); }} className="w-full px-4 py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-left transition-colors cursor-pointer">
-                  <div className="text-[14px] font-semibold text-slate-800">Load Team Template</div>
-                  <div className="text-[12px] text-slate-500 mt-0.5">Browse and apply a team template to this company</div>
-                </button>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newClientName.trim() || createClientLoading) return;
+              setCreateClientLoading(true);
+              setCreateClientError('');
+              try {
+                const { data } = await api.post('/api/subaccounts', {
+                  name: newClientName.trim(),
+                  slug: newClientSlug.trim() || undefined,
+                  status: 'active',
+                });
+                setShowCreateClient(false);
+                // Optimistically add the new company immediately so the icon appears right away
+                const newEntry: ClientOption = { id: data.id, name: data.name, slug: data.slug ?? '', status: data.status ?? 'active' };
+                setSubaccounts(prev => [...prev, newEntry]);
+                handleSelectClient(newEntry);
+                // Refresh list in background to sync any server-side changes
+                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(() => {});
+              } catch (err: unknown) {
+                const e = err as { response?: { status?: number; data?: { error?: string } } };
+                const msg = e.response?.data?.error;
+                if (e.response?.status === 403) setCreateClientError(msg ?? 'You do not have permission to create companies.');
+                else if (e.response?.status === 409) setCreateClientError(msg ?? 'A company with this slug already exists.');
+                else setCreateClientError(msg ?? 'Failed to create company.');
+              } finally { setCreateClientLoading(false); }
+            }} className="p-6 flex flex-col gap-4">
+              {createClientError && <div className="text-[13px] text-red-600">{createClientError}</div>}
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Company name *</label>
+                <input autoFocus type="text" value={newClientName} onChange={(e) => setNewClientName(e.target.value)} placeholder="e.g. Acme Corp" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
-              <div className="flex justify-end mt-4">
-                <button onClick={() => setShowCreateAgent(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Close</button>
+              <div>
+                <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Slug <span className="text-slate-400 font-normal">(optional, auto-generated)</span></label>
+                <input type="text" value={newClientSlug} onChange={(e) => setNewClientSlug(e.target.value)} placeholder="acme-corp" className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
-            </div>
+              <div className="flex gap-2 justify-end pt-1">
+                <button type="button" onClick={() => setShowCreateClient(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
+                <button type="submit" disabled={!newClientName.trim() || createClientLoading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] font-semibold cursor-pointer">{createClientLoading ? 'Creating...' : 'Create'}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

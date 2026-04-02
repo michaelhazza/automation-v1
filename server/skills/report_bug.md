@@ -2,6 +2,7 @@
 name: Report Bug
 description: File a structured bug report with severity and confidence scoring.
 isActive: true
+isVisible: true
 ---
 
 ```json
