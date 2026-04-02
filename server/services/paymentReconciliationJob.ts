@@ -111,6 +111,11 @@ export async function runReconciliation(): Promise<void> {
 
   console.log(`[PaymentReconciliation] Reconciling ${unresolvedEvents.length} pending checkout(s)`);
 
+  let completed = 0;
+  let abandoned = 0;
+  let skipped = 0;
+  let errors = 0;
+
   // Cache: pageId -> { adapter, connection } to avoid repeated lookups
   const adapterCache = new Map<
     string,
@@ -201,6 +206,7 @@ export async function runReconciliation(): Promise<void> {
           }
         }
 
+        completed++;
         console.log(`[PaymentReconciliation] Marked checkout completed for event ${event.id}`);
       } else if (result.status === 'failed' || result.status === 'expired') {
         // Dedupe: check one more time right before insert (handles concurrent workers)
@@ -229,16 +235,31 @@ export async function runReconciliation(): Promise<void> {
           occurredAt: now,
         });
 
+        abandoned++;
         console.log(`[PaymentReconciliation] Marked checkout abandoned (${result.status}) for event ${event.id}`);
       }
       // status === 'pending' -> skip, will check on next run
+      else {
+        skipped++;
+      }
     } catch (err) {
+      errors++;
       console.error(
         `[PaymentReconciliation] Error processing event ${event.id}:`,
         err instanceof Error ? err.message : String(err),
       );
     }
   }
+
+  console.log(JSON.stringify({
+    event: 'payment.reconciliation.complete',
+    total: unresolvedEvents.length,
+    completed,
+    abandoned,
+    skipped,
+    errors,
+    durationMs: Date.now() - now.getTime(),
+  }));
 }
 
 /**

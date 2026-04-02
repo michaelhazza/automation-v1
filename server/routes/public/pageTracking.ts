@@ -8,6 +8,7 @@ import { pageTrackingService } from '../../services/pageTrackingService.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 
 // ---------------------------------------------------------------------------
+// TODO(PROD-RATE-LIMIT): Replace with Redis-backed sliding window counters
 // MVP rate limiting — in-memory, per-process.
 //
 // Limitations:

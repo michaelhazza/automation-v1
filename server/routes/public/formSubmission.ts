@@ -8,6 +8,7 @@ import { asyncHandler } from '../../lib/asyncHandler.js';
 import { formSubmissionService } from '../../services/formSubmissionService.js';
 
 // ---------------------------------------------------------------------------
+// TODO(PROD-RATE-LIMIT): Replace with Redis-backed sliding window counters
 // MVP rate limiting — in-memory, per-process.
 //
 // Limitations:

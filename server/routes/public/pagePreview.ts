@@ -130,6 +130,12 @@ router.get('/preview/:pageSlug', asyncHandler(async (req: Request, res: Response
     return;
   }
 
+  // Soft revocation: reject if page has been archived or project context is stale
+  if (page.status === 'archived') {
+    res.status(410).json({ error: 'This page has been archived and is no longer previewable' });
+    return;
+  }
+
   const html = buildPreviewShell(page, project);
 
   res
