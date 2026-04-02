@@ -17,6 +17,8 @@ export interface SystemSkill {
   name: string;
   description: string;
   isActive: boolean;
+  /** Whether this skill is visible to org/subaccount admins. Defaults to false (platform-internal). */
+  isVisible: boolean;
   definition: AnthropicTool;
   instructions: string | null;
   methodology: string | null;
@@ -61,8 +63,11 @@ async function loadSkills(): Promise<Map<string, SystemSkill>> {
 
 /** Parse a skill .md file into a SystemSkill record */
 function parseSkillFile(slug: string, raw: string): SystemSkill | null {
+  // Normalize Windows CRLF → LF before any regex matching
+  const normalised = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
   // Split frontmatter
-  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!fmMatch) return null;
 
   const frontmatter = fmMatch[1];
@@ -81,6 +86,8 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
   const name = fm['name'] ?? slug;
   const description = fm['description'] ?? '';
   const isActive = fm['isActive'] !== 'false';
+  // isVisible defaults to false — skills must explicitly opt-in to be visible at org/subaccount level
+  const isVisible = fm['isVisible'] === 'true';
 
   // Extract JSON code block for tool definition
   const jsonMatch = body.match(/```json\n([\s\S]*?)\n```/);
@@ -102,7 +109,7 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
   const methodologyMatch = body.match(/^## Methodology\n([\s\S]*?)(?=^## |\s*$)/m);
   const methodology = methodologyMatch ? methodologyMatch[1].trim() : null;
 
-  return { id: slug, slug, name, description, isActive, definition, instructions, methodology };
+  return { id: slug, slug, name, description, isActive, isVisible, definition, instructions, methodology };
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +132,12 @@ export const systemSkillService = {
     return skills.filter(s => s.isActive);
   },
 
+  /** Skills that are both active AND visible to org/subaccount level */
+  async listVisibleSkills(): Promise<SystemSkill[]> {
+    const skills = await this.listSkills();
+    return skills.filter(s => s.isActive && s.isVisible);
+  },
+
   async getSkill(id: string): Promise<SystemSkill> {
     const map = await loadSkills();
     const skill = map.get(id);
@@ -137,6 +150,36 @@ export const systemSkillService = {
     const skill = map.get(slug);
     if (!skill || !skill.isActive) return null;
     return skill;
+  },
+
+  /**
+   * Toggle the isVisible flag on a skill by rewriting its .md frontmatter.
+   * The .md files are the source of truth so this is the only durable way to persist the change.
+   */
+  async updateSkillVisibility(slug: string, isVisible: boolean): Promise<SystemSkill> {
+    const map = await loadSkills();
+    const skill = map.get(slug);
+    if (!skill) throw { statusCode: 404, message: 'System skill not found' };
+
+    const filePath = join(SKILLS_DIR, `${slug}.md`);
+    const raw = await readFile(filePath, 'utf-8');
+
+    let updated: string;
+    if (/^isVisible:/m.test(raw)) {
+      // Replace existing isVisible line
+      updated = raw.replace(/^isVisible:.*$/m, `isVisible: ${isVisible}`);
+    } else {
+      // Inject after the last frontmatter key (before closing ---)
+      updated = raw.replace(/^(---\n[\s\S]*?)(^---)/m, `$1isVisible: ${isVisible}\n$2`);
+    }
+
+    const { writeFile } = await import('fs/promises');
+    await writeFile(filePath, updated, 'utf-8');
+
+    // Invalidate cache so the change is visible immediately
+    _cache = null;
+    const freshMap = await loadSkills();
+    return freshMap.get(slug)!;
   },
 
   /**

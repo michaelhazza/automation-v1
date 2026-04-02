@@ -3,7 +3,6 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
-import HeartbeatEditor from '../components/HeartbeatEditor';
 import SystemCompanyTemplatesPage from './SystemCompanyTemplatesPage';
 
 interface SystemAgent {
@@ -43,10 +42,9 @@ function PublishedBadge({ published }: { published: boolean }) {
   );
 }
 
-type ActiveTab = 'list' | 'team-templates' | 'heartbeat';
+type ActiveTab = 'list' | 'team-templates';
 
-
-const VALID_TABS = new Set<string>(['list', 'team-templates', 'heartbeat']);
+const VALID_TABS = new Set<string>(['list', 'team-templates']);
 
 export default function SystemAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
@@ -211,7 +209,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as ActiveTab)}
@@ -228,23 +226,6 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Team Templates Tab */}
       {activeTab === 'team-templates' && <SystemCompanyTemplatesPage user={user} />}
-
-      {/* Heartbeat Tab */}
-      {activeTab === 'heartbeat' && (
-        <HeartbeatEditor
-          levelLabel="system agent"
-          agents={agents.map(a => ({
-            id: a.id, name: a.name, icon: null,
-            heartbeatEnabled: (a as any).heartbeatEnabled ?? false,
-            heartbeatIntervalHours: (a as any).heartbeatIntervalHours ?? null,
-            heartbeatOffsetHours: (a as any).heartbeatOffsetHours ?? 0,
-          }))}
-          onUpdate={async (agentId, config) => {
-            await api.patch(`/api/system/agents/${agentId}`, config);
-            load();
-          }}
-        />
-      )}
 
       {/* List Tab */}
       {activeTab === 'list' && <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

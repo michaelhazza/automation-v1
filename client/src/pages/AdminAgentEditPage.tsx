@@ -868,59 +868,89 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
     </div>
   );
 
+  const agentInitial = agent?.name ? agent.name[0].toUpperCase() : (form.name ? form.name[0].toUpperCase() : '?');
+
   return (
     <>
-      {/* Back link + header */}
-      <div className="mb-4">
-        <Link to="/admin/agents" className="text-indigo-500 text-[13px] no-underline">
-          &larr; Back to agents
+      {/* ── Breadcrumb ─────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-1.5 text-[13px] text-slate-400 mb-5">
+        <Link to="/admin/agents" className="text-slate-400 no-underline hover:text-indigo-600 transition-colors">
+          Agents
         </Link>
-      </div>
-
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-[26px] font-bold text-slate-900 m-0">
-            {isNew ? 'New Agent' : `Edit Agent: ${agent?.name ?? ''}`}
-          </h1>
-          {!isNew && agent && (
-            <p className="mt-1.5 mb-0 text-slate-500 text-[13px]">
-              Created {new Date(agent.createdAt).toLocaleDateString()}
-            </p>
-          )}
-        </div>
-        {!isNew && agent && (
-          <div className="flex items-center gap-2.5">
-            <StatusBadge status={agent.status} />
-            {agent.status !== 'active' && (
-              <button
-                onClick={handleActivate}
-                disabled={statusLoading}
-                className={`px-3.5 py-1.5 bg-green-100 text-green-800 border-none rounded-md text-[13px] font-medium ${statusLoading ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                Activate
-              </button>
-            )}
-            {agent.status === 'active' && (
-              <button
-                onClick={handleDeactivate}
-                disabled={statusLoading}
-                className={`px-3.5 py-1.5 bg-orange-50 text-orange-800 border-none rounded-md text-[13px] font-medium ${statusLoading ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                Deactivate
-              </button>
-            )}
-          </div>
+        <span>›</span>
+        <span className="text-slate-600 font-medium">{isNew ? 'New Agent' : (agent?.name ?? '')}</span>
+        {!isNew && (
+          <>
+            <span>›</span>
+            <span className="text-slate-500 capitalize">{agentTab === 'config' ? 'Configuration' : agentTab}</span>
+          </>
         )}
       </div>
 
-      {/* Tab bar — only for existing agents */}
+      {/* ── Agent header ───────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between pb-5 border-b border-slate-200 mb-0">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-xl bg-indigo-100 flex items-center justify-center text-2xl shrink-0 border border-indigo-200">
+            {form.icon || <span className="text-indigo-500 font-bold text-[22px]">{agentInitial}</span>}
+          </div>
+          <div>
+            <div className="flex items-center gap-2.5 mb-0.5">
+              <h1 className="m-0 text-[22px] font-bold text-slate-900 leading-tight">
+                {isNew ? 'New Agent' : (agent?.name ?? '')}
+              </h1>
+              {!isNew && agent?.agentRole && (
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${
+                  agent.agentRole === 'orchestrator' ? 'bg-purple-100 text-purple-700' :
+                  agent.agentRole === 'specialist' ? 'bg-blue-100 text-blue-700' :
+                  'bg-slate-100 text-slate-600'
+                }`}>{agent.agentRole}</span>
+              )}
+              {!isNew && agent && <StatusBadge status={agent.status} />}
+            </div>
+            {!isNew && agent && (
+              <p className="m-0 text-[13px] text-slate-500">
+                {form.description || `Created ${new Date(agent.createdAt).toLocaleDateString()}`}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isNew && agent && agent.status !== 'active' && (
+            <button
+              onClick={handleActivate}
+              disabled={statusLoading}
+              className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-green-50 hover:border-green-200 hover:text-green-700 rounded-lg text-[13px] font-medium cursor-pointer transition-colors disabled:opacity-60 border-solid"
+            >
+              Activate
+            </button>
+          )}
+          {!isNew && agent && agent.status === 'active' && (
+            <button
+              onClick={handleDeactivate}
+              disabled={statusLoading}
+              className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-orange-50 hover:border-orange-200 hover:text-orange-700 rounded-lg text-[13px] font-medium cursor-pointer transition-colors disabled:opacity-60 border-solid"
+            >
+              Deactivate
+            </button>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className={`px-5 py-2 text-white border-0 rounded-lg text-[13px] font-medium transition-colors ${saving ? 'bg-slate-400 cursor-default' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'}`}
+          >
+            {saving ? 'Saving...' : isNew ? 'Create Agent' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Tab bar ────────────────────────────────────────────────────── */}
       {!isNew && (
-        <div className="flex gap-0.5 border-b border-slate-200 mb-6">
+        <div className="flex gap-0 border-b border-slate-200 mt-5 mb-6">
           {(['config', 'runs', 'budget'] as const).map(t => (
             <button
               key={t}
               onClick={() => setAgentTab(t)}
-              className={`px-4 py-2.5 text-[13px] font-semibold border-0 bg-transparent cursor-pointer transition-colors border-b-2 -mb-px [font-family:inherit] capitalize ${
+              className={`px-4 py-2.5 text-[13px] font-medium border-0 bg-transparent cursor-pointer transition-colors border-b-2 -mb-px [font-family:inherit] ${
                 agentTab === t
                   ? 'text-indigo-600 border-indigo-500'
                   : 'text-slate-500 border-transparent hover:text-slate-800'
@@ -1033,8 +1063,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       )}
 
       {/* ── Hierarchy ── */}
-      <SectionCard title="Hierarchy" subtitle="Position this agent in your organisation's agent hierarchy. Phase 1 is structural/visual only.">
-        <div className="grid grid-cols-3 gap-4">
+      {!isNew && <SectionCard title="Hierarchy" subtitle="Position this agent in your organisation's agent hierarchy.">
+        <div className="grid grid-cols-2 gap-4">
           <Field label="Reports to">
             <select
               value={form.parentAgentId}
@@ -1049,18 +1079,6 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                 ))}
             </select>
           </Field>
-          <Field label="Role">
-            <select
-              value={form.agentRole}
-              onChange={(e) => setForm({ ...form, agentRole: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">None</option>
-              <option value="orchestrator">Orchestrator</option>
-              <option value="specialist">Specialist</option>
-              <option value="worker">Worker</option>
-            </select>
-          </Field>
           <Field label="Title">
             <input
               value={form.agentTitle}
@@ -1070,10 +1088,10 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             />
           </Field>
         </div>
-      </SectionCard>
+      </SectionCard>}
 
       {/* ── Section 3: Model Configuration ── */}
-      <SectionCard title="Model Configuration">
+      {!isNew && <SectionCard title="Model Configuration">
         <div className="grid grid-cols-2 gap-4">
           <Field label="Model Provider">
             <select
@@ -1138,10 +1156,10 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               : 'Model settings are locked — sub-accounts cannot change them'}
           </span>
         </div>
-      </SectionCard>
+      </SectionCard>}
 
       {/* ── Section 4: Skills ── */}
-      <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
+      {!isNew && <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
         <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
           <div>
             <h2 className="m-0 text-[15px] font-semibold text-slate-900 inline">Skills</h2>
@@ -1217,7 +1235,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ── Section 5: Data Sources ── */}
       {!isNew && deleteDsId && (
@@ -1230,7 +1248,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         />
       )}
 
-      <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden mb-5">
+      {!isNew && <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden mb-5">
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
           <div>
@@ -1406,10 +1424,10 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </tbody>
           </table>
         )}
-      </div>
+      </div>}
 
       {/* ── Section 6: Heartbeat ── */}
-      <SectionCard title="Heartbeat">
+      {!isNew && <SectionCard title="Heartbeat">
         <p className="m-0 mb-[18px] text-[13.5px] text-slate-500 leading-relaxed">
           Heartbeats keep your agent active — it wakes up on a schedule, checks its tasks, and acts autonomously.
         </p>
@@ -1481,7 +1499,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             )}
           </div>
         )}
-      </SectionCard>
+      </SectionCard>}
 
       {/* Save button */}
       <div className="flex gap-3 mb-7">

@@ -18,7 +18,7 @@ import bcrypt from 'bcryptjs';
 import { organisations } from '../server/db/schema/organisations.js';
 import { users } from '../server/db/schema/users.js';
 import { systemAgents } from '../server/db/schema/index.js';
-import { parseCompanyFolder, toSystemAgentRows } from './lib/companyParser.js';
+import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
@@ -172,6 +172,33 @@ async function seedSystemAgents() {
         .returning({ id: systemAgents.id });
       console.log(`  [created] system agent: ${row.slug} (${created.id})`);
     }
+  }
+
+  // Second pass: set parentSystemAgentId from reportsTo slug
+  await seedAgentHierarchy(parsed);
+}
+
+async function seedAgentHierarchy(parsed: ParsedCompany) {
+  console.log('\n  Setting agent hierarchy...');
+
+  // Build slug → id map for all agents in this company
+  const allAgents = await db.select({ id: systemAgents.id, slug: systemAgents.slug }).from(systemAgents);
+  const slugToId = new Map(allAgents.map(a => [a.slug, a.id]));
+
+  for (const agent of parsed.agents) {
+    if (!agent.reportsTo || agent.reportsTo === 'null') continue;
+
+    const parentId = slugToId.get(agent.reportsTo);
+    if (!parentId) {
+      console.log(`  [warn] reportsTo slug not found: ${agent.reportsTo} (for ${agent.slug})`);
+      continue;
+    }
+
+    await db.update(systemAgents)
+      .set({ parentSystemAgentId: parentId })
+      .where(eq(systemAgents.slug, agent.slug));
+
+    console.log(`  [hierarchy] ${agent.slug} → ${agent.reportsTo}`);
   }
 }
 

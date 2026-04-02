@@ -980,11 +980,12 @@ export default function Layout({ user, children }: LayoutProps) {
                   status: 'active',
                 });
                 setShowCreateClient(false);
-                // Refresh subaccounts list and switch to the new one
-                const { data: updated } = await api.get('/api/subaccounts');
-                setSubaccounts(updated);
-                const created = updated.find((s: ClientOption) => s.id === data.id);
-                if (created) handleSelectClient(created);
+                // Optimistically add the new company immediately so the icon appears right away
+                const newEntry: ClientOption = { id: data.id, name: data.name, slug: data.slug ?? '', status: data.status ?? 'active' };
+                setSubaccounts(prev => [...prev, newEntry]);
+                handleSelectClient(newEntry);
+                // Refresh list in background to sync any server-side changes
+                api.get('/api/subaccounts').then(({ data: updated }) => setSubaccounts(updated)).catch(() => {});
               } catch (err: unknown) {
                 const e = err as { response?: { status?: number; data?: { error?: string } } };
                 const msg = e.response?.data?.error;
