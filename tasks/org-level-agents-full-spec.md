@@ -123,3 +123,106 @@ Phase 5 — Org-Level Workspace
   workspaces but scoped to the organisation. Independent of the
   intelligence layer; built based on demand.
 ```
+
+---
+
+## Phase 1: Org-Level Agent Execution (Foundation)
+
+### What this phase delivers
+
+The ability for agents to run at the organisation level without being bound to a subaccount. This is the platform prerequisite that everything else depends on. Today, every major subsystem hard-requires a `subaccountId` — agent runs, execution config, scheduling, memory, skills, triggers, review queue. This phase makes that coupling optional.
+
+### Why this must come first
+
+The Portfolio Health Agent in Phase 3 is an org-level agent. The cross-subaccount intelligence skills need to run in an org-level context. The configuration template system in Phase 4 needs to provision org-level agents. None of this is possible if the execution pipeline rejects a null `subaccountId`.
+
+### Schema migrations
+
+The following tables require `subaccountId` to become nullable:
+
+| Table | Current constraint | Change |
+|-------|-------------------|--------|
+| `agent_runs` | `subaccount_id NOT NULL` | Nullable — org-level runs have no subaccount |
+| `agent_runs` | `subaccount_agent_id NOT NULL` | Nullable — org-level runs use org agent config |
+| `review_items` | `subaccount_id NOT NULL` | Nullable — org-level HITL reviews |
+| `actions` | `subaccount_id NOT NULL` | Nullable — org-level action audit trail |
+| `scheduled_tasks` | `subaccount_id NOT NULL` | Deferred to Phase 5 |
+| `tasks` | `subaccount_id NOT NULL` | Deferred to Phase 5 |
+
+Index strategy: existing composite indexes that include `subaccountId` need corresponding partial indexes for the `subaccountId IS NULL` case, scoped to `organisationId` instead. The unique constraint on `actions(subaccountId, idempotencyKey)` needs a partial variant for org-level actions.
+
+### Org agent execution config
+
+Today, all per-run configuration lives on the `subaccountAgents` join table: `tokenBudgetPerRun`, `maxToolCallsPerRun`, `timeoutSeconds`, `skillSlugs`, `allowedSkillSlugs`, `customInstructions`, `maxCostPerRunCents`, `maxLlmCallsPerRun`.
+
+Org-level agents need equivalent configuration without the subaccount binding. Two options:
+
+**(a) New `orgAgentConfigs` table** — mirrors the relevant fields from `subaccountAgents`, keyed to `(organisationId, agentId)`. Clean separation. More tables.
+
+**(b) Promote config fields onto the `agents` table** — add the same fields directly to the org-level agent record with a flag like `orgExecutionEnabled`. Fewer tables. Muddies the `agents` table which currently holds only definition, not runtime config.
+
+**Recommendation:** Option (a). The `subaccountAgents` table works well because it cleanly separates "agent definition" from "agent deployment config." The org level should mirror this pattern rather than collapse it. The developer should validate this against the codebase and choose the approach that introduces the least friction.
+
+### Execution service changes
+
+`agentExecutionService.executeRun()` currently requires `subaccountId` and `subaccountAgentId` in the `AgentRunRequest` interface. The changes:
+
+1. **Make `subaccountId` and `subaccountAgentId` optional** on `AgentRunRequest`
+2. **Load config from the right source** — if `subaccountAgentId` is present, load from `subaccountAgents` (existing path). If absent, load from the new org agent config
+3. **Skip subaccount-specific context gracefully:**
+   - `buildTeamRoster()` — use org-level agent list instead of subaccount agents
+   - `workspaceMemoryService.getMemoryForPrompt()` — skip (no subaccount memory) or load org memory when Phase 3 is built
+   - `buildSmartBoardContext()` — skip (no subaccount board) or load org board when Phase 5 is built
+   - `devContextService.getContext()` — skip (no subaccount dev context)
+   - `checkWorkspaceLimits()` — skip subaccount limits; org + global limits still apply
+4. **Post-run memory extraction** — skip `extractRunInsights()` (subaccount-scoped) until org memory exists in Phase 3
+5. **Post-run triggers** — skip `triggerService.checkAndFire()` (subaccount-scoped) until org triggers exist in Phase 5
+6. **Langfuse trace** — use `organisationId` instead of `subaccountId` for attribution
+
+### Org-level heartbeat scheduling
+
+`agentScheduleService` currently keys schedules to `subaccountAgentId`. For org agents:
+
+- Schedule name format: `agent-org-scheduled-run:${agentId}` (distinct from subaccount schedule names)
+- Job payload: `{ agentId, organisationId }` (no `subaccountAgentId` or `subaccountId`)
+- `registerAllActiveSchedules()` must query both `subaccountAgents` (existing) and org agent configs (new) for active schedules
+- The heartbeat config fields (`heartbeatEnabled`, `heartbeatIntervalHours`, `heartbeatOffsetMinutes`) live on the org agent config
+
+### WebSocket emission
+
+When an org-level agent runs:
+- `emitAgentRunUpdate(run.id, ...)` — already org-scoped via the run-specific room (no change)
+- Replace `emitSubaccountUpdate()` with `emitOrgUpdate()` — this function already exists in `emitters.ts` but is not wired to the execution flow
+
+### Org-level review queue
+
+When org agents propose HITL-gated actions, review items need to be viewable and actionable:
+
+- New route: `GET /api/org/review-queue` — returns review items where `subaccountId IS NULL` for the authenticated org
+- New route: `GET /api/org/review-queue/count` — pending count for badge display
+- Approve/reject routes (`POST /api/review-items/:id/approve|reject`) already work without subaccount context — they operate on `reviewItem.id`
+- UI: new org-level review queue page or a tab/mode on the existing review queue
+
+### Skill execution context
+
+`SkillExecutionContext.subaccountId` must become optional (`string | null`). Skills that require a subaccount context (e.g. `create_task` targeting a subaccount board, `read_workspace` for a subaccount board) should check for `subaccountId` presence and return a clear error if called from an org-level context without a target subaccount specified.
+
+Cross-subaccount skills (Phase 3) will be designed to work specifically in the org-level context.
+
+### What this phase does NOT include
+
+- Org-level memory (Phase 3)
+- Org-level board or tasks (Phase 5)
+- Org-level triggers (Phase 5)
+- Org-level connections (Phase 5)
+- Cross-subaccount reading (Phase 3)
+- Any intelligence capabilities (Phase 3)
+
+### Gate condition for Phase 2
+
+Phase 1 is complete when:
+- An agent can be configured at the org level with execution config (budget, skills, schedule)
+- An org-level agent run can be triggered manually and completes successfully
+- The org-level heartbeat schedule fires and produces a run
+- A HITL-gated action from an org agent appears in the org review queue and can be approved
+- No existing subaccount agent flows are affected (zero regression)
