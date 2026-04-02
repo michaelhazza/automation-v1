@@ -24,15 +24,20 @@ CREATE TABLE IF NOT EXISTS workspace_entities (
 CREATE INDEX IF NOT EXISTS workspace_entities_subaccount_idx ON workspace_entities(subaccount_id);
 CREATE INDEX IF NOT EXISTS workspace_entities_org_idx ON workspace_entities(organisation_id);
 
--- Phase 2A: Vector memory search (pgvector)
-CREATE EXTENSION IF NOT EXISTS vector;
-ALTER TABLE workspace_memory_entries ADD COLUMN IF NOT EXISTS embedding vector(1536);
-CREATE INDEX IF NOT EXISTS idx_memory_entries_embedding
-  ON workspace_memory_entries USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 64);
-CREATE INDEX IF NOT EXISTS idx_memory_entries_recent
-  ON workspace_memory_entries (subaccount_id, created_at DESC)
-  WHERE embedding IS NOT NULL;
+-- Phase 2A: Vector memory search (pgvector) — optional, gracefully skipped if unavailable
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS vector;
+  ALTER TABLE workspace_memory_entries ADD COLUMN IF NOT EXISTS embedding vector(1536);
+  CREATE INDEX IF NOT EXISTS idx_memory_entries_embedding
+    ON workspace_memory_entries USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+  CREATE INDEX IF NOT EXISTS idx_memory_entries_recent
+    ON workspace_memory_entries (subaccount_id, created_at DESC)
+    WHERE embedding IS NOT NULL;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pgvector not available, skipping vector memory setup: %', SQLERRM;
+END $$;
 
 -- Phase 2B: Agent triggers
 CREATE TABLE IF NOT EXISTS agent_triggers (
