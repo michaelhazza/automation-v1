@@ -533,3 +533,247 @@ Phase 3 is complete when:
 - The Portfolio Health Agent successfully runs a scheduled scan cycle, invokes skills, and produces HealthSnapshot records
 - At least one end-to-end flow is demonstrated: a real metric changes, the integration layer detects it, the agent invokes `detect_anomaly`, a HITL gate proposal is generated, approval produces an intervention record
 - Skill outputs conform to the formats Phase 4's configuration system will reference
+
+---
+
+## Phase 4: Configuration Template System Extension
+
+### What this phase delivers
+
+An extension to the existing hierarchy template system that makes the full intelligence layer deployable via a single template load operation. A configuration template is a complete, loadable specification for what an organisation needs: which system agents are active, which skills are enabled on each agent, which connector is connected, and what the operational parameters are.
+
+This is the delivery mechanism for everything built in Phases 1-3. Without it, each organisation requires manual setup. With it, a "GHL Agency" configuration can be applied to a new organisation in minutes.
+
+### Building on what exists
+
+The codebase already has a mature template system:
+
+- **System hierarchy templates** (`systemHierarchyTemplates` + `systemHierarchyTemplateSlots`) — platform-level blueprints published by system admin
+- **Org hierarchy templates** (`hierarchyTemplates` + `hierarchyTemplateSlots`) — org-level templates that can be cloned from system templates
+- **Template versioning** — `appliedTemplateId` + `appliedTemplateVersion` tracked on `subaccountAgents`
+- **Template slots** — reference `systemAgentId` or `agentId`, carry full blueprint fields, self-referencing `parentSlotId` for tree structure
+- **Paperclip import** — system admin can import templates from manifests
+- **`systemTemplateService`** and **`hierarchyTemplateService`** — full CRUD with SHA-256 manifest hashing
+
+What's missing is the ability to include **connector references, skill enablement maps, and operational parameters** in a template. The current template defines the agent roster. The extended template defines the roster plus everything needed to make those agents operational for a specific use case.
+
+### What the extension adds to templates
+
+A configuration template includes the existing team template (agent roster and agent-level configuration) plus:
+
+**Connector specification**
+- Which connector type is required (e.g. `ghl`)
+- What configuration the operator must provide during activation (OAuth credentials, sub-account mapping)
+- The connector is not pre-authenticated — the template specifies the requirement; the operator fulfils it
+
+**Skill enablement map**
+- Per-agent skill permissions: which skills are enabled, which are disabled
+- This is what makes the Portfolio Health Agent's capabilities activatable via template — the intelligence skills are registered in the platform skill library but only enabled on agents that need them
+
+**Operational parameters**
+- Health score weight maps (configurable per template, overridable per organisation)
+- Anomaly detection thresholds and sensitivity settings
+- Churn risk signal weights and severity bands
+- Alert destinations (operator configures Slack/email during activation)
+- Scan frequency (default: every 4 hours)
+- Report schedule (default: weekly)
+- HITL gate requirements per intervention type
+
+**Workspace memory seeds**
+- Pre-populated org memory entries that give the agent initial context at activation
+- e.g. "This organisation manages a portfolio of client accounts. Monitor for pipeline stagnation, lead volume drops, and conversation engagement decline."
+
+### The GHL Agency Template
+
+The first published configuration template:
+
+- Orchestrator (enabled, standard configuration)
+- BA Agent (enabled, intake skills enabled)
+- Portfolio Health Agent (enabled — conditional agent, only appears in templates that need it)
+- GHL Connector (required — operator must provide OAuth credentials during activation)
+- Health scoring weights calibrated for GHL agency dynamics (pipeline velocity weighted highest, followed by conversation engagement, contact growth, platform activity)
+- Default anomaly sensitivity settings per metric type
+- Default alert destination configuration (operator provides Slack/email during activation)
+- Default scan frequency (every 4 hours) and report schedule (weekly, Monday 8am operator timezone)
+- Skill enablement: `compute_health_score`, `detect_anomaly`, `compute_churn_risk`, `generate_portfolio_report` enabled on Portfolio Health Agent; `trigger_account_intervention` enabled with explicit HITL approval on all paths
+
+### Loading a template into an organisation
+
+When a template is applied, the system must:
+
+1. Provision the specified system agents into the organisation (creating agent records, not duplicating code)
+2. Apply the skill enablement map to each agent
+3. Create the connector config record and prompt the operator to complete authentication
+4. Write the operational parameters to the organisation's configuration store
+5. Seed the org memory with template-defined initial context
+6. If org-level execution is enabled (Phase 1), configure the org agent execution configs
+7. Schedule the Portfolio Health Agent's first scan cycle via pg-boss
+8. Confirm activation to the operator with a summary of what was provisioned
+
+The operator provides: OAuth credentials, alert destinations (Slack webhook URL, email address). The system handles everything else.
+
+### Operator customisation after template load
+
+A template is a starting point, not a constraint. After loading, operators can:
+
+- Adjust health score weights for their portfolio
+- Change anomaly sensitivity thresholds globally or per subaccount
+- Modify scan frequency and report schedule
+- Add or remove alert destinations
+- Enable or disable specific skills
+- Adjust HITL gate behaviour (which interventions require approval)
+
+All customisation is through configuration — database values, not code changes.
+
+### Template versioning
+
+When a template is updated at the system admin level, existing organisations that loaded an older version are not automatically updated. The admin can push an update notification to affected organisations, and operators can choose to apply the update with a preview of what changes. This prevents silent regressions in live organisations.
+
+The existing `appliedTemplateVersion` tracking on `subaccountAgents` provides the foundation. The extension applies the same pattern to org-level agent configs and operational parameters.
+
+---
+
+## Phase 5: Org-Level Workspace
+
+### What this phase delivers
+
+A workspace at the organisation level for work that doesn't belong to any single subaccount. Same capabilities as subaccount workspaces — board, tasks, scheduling, triggers, connections — but scoped to the organisation.
+
+This phase is independent of the intelligence layer (Phases 2-4) and can be built based on demand. It is included in this spec because org-level agents (Phase 1) will naturally want to create tasks, manage work, and respond to events at the org level.
+
+### Schema changes
+
+| Table | Change |
+|-------|--------|
+| `tasks` | `subaccountId` becomes nullable — org-level tasks have `subaccountId = NULL` |
+| `scheduled_tasks` | `subaccountId` becomes nullable |
+| `agent_triggers` | `subaccountId` and `subaccountAgentId` become nullable; new org-level trigger support |
+| `integration_connections` | Support org-level connections (nullable `subaccountId`) for org agents that need OAuth access |
+
+### Org-level board
+
+- The `boardConfigs` table already supports nullable `subaccountId` — org-level board config exists
+- Tasks with `subaccountId = NULL` appear on the org board
+- UI: new org-level board page or a mode on the existing board
+- Org-level agents can create, move, and update tasks on the org board using existing task skills
+
+### Org-level scheduled tasks
+
+- `scheduled_tasks` with `subaccountId = NULL` are org-level recurring tasks
+- Assigned to org-level agents
+- Managed via new org-level scheduled tasks routes and UI
+
+### Org-level triggers
+
+- `agent_triggers` with `subaccountId = NULL` fire on org-level events
+- Event types: `org_task_created`, `org_task_moved`, `org_agent_completed`
+- The trigger fires an org-level agent run (using Phase 1 execution)
+
+### Org-level connections
+
+- OAuth connections at the org level, available to org agents
+- This enables org agents to send emails, post to Slack, etc. without borrowing a subaccount's connection
+- Same `integrationConnections` table with nullable `subaccountId`
+
+### Cross-boundary writes
+
+One key capability: **an org-level agent should be able to create a task on a subaccount's board.** If the Portfolio Health Agent detects an issue with a subaccount, it should be able to create an alert task on that subaccount's board — not just on its own org board.
+
+This requires the task-creation skills to accept an optional `targetSubaccountId` parameter when called from an org-level context. The skill validates that the target subaccount belongs to the same organisation before creating the task.
+
+This capability should be HITL-gated when writing to a subaccount board from an org context.
+
+### Gate condition
+
+Phase 5 is complete when:
+- Org-level tasks can be created, moved, and updated on an org board
+- Org-level scheduled tasks fire correctly
+- Org-level triggers fire on org events
+- Org-level connections can be created and used by org agents
+- Cross-boundary task creation (org agent creating a task on a subaccount board) works with HITL gate
+
+---
+
+## What to Build vs What to Configure (Consolidated)
+
+### Build (generic — lives in code, applies to every organisation)
+
+- Org-level agent execution pipeline (Phase 1)
+- Org agent config mechanism (Phase 1)
+- Extended connector interface with ingestion methods (Phase 2)
+- GHL connector implementation (Phase 2)
+- Rate limiter, webhook endpoint, scheduled polling (Phase 2)
+- Canonical schema entity types (Phase 2)
+- Subaccount tags infrastructure (Phase 3)
+- Org-level memory table and service (Phase 3)
+- Cross-subaccount query skills (Phase 3)
+- Portfolio Health Agent scheduling/coordination logic (Phase 3)
+- All five intelligence skills — scoring algorithms, detection, reporting (Phase 3)
+- Configuration template schema extension and load operation (Phase 4)
+- Template versioning (Phase 4)
+- Org-level board, tasks, triggers, connections (Phase 5)
+
+### Configure (specific — lives in database, different per organisation or template)
+
+- Health score weight maps
+- Anomaly thresholds and sensitivity settings
+- Churn risk signal weights and severity bands
+- Alert destinations (Slack, email)
+- Scan frequency and report schedule
+- HITL gate requirements per intervention type
+- OAuth credentials per organisation
+- Sub-account mappings (external IDs to internal subaccounts)
+- Subaccount tags (user-defined dimensions)
+- Workspace memory seeds
+- Report format and verbosity preferences
+- Which connector type to use
+- Skill enablement per agent per organisation
+
+---
+
+## Principles for Implementation
+
+These are decision criteria, not implementation instructions.
+
+**Phase 1 is the hidden prerequisite.** The original AIL brief assumed agents could run at org level. They can't. This is the highest-risk foundational work and must be solid before anything else proceeds.
+
+**The integration layer boundary is critical.** The canonical schema must be right enough that agents consuming it are platform-agnostic. If GHL concepts leak into the agent layer, the abstraction has failed and the second connector will be expensive. Validate the schema boundary explicitly before Phase 3.
+
+**Configuration over code.** If a decision requires a code change to alter behaviour for a specific organisation, that decision has been put in the wrong place.
+
+**The HITL gate is not optional for execution.** Any skill path that modifies external platform data or initiates external communication must go through the gate. Non-negotiable.
+
+**Baselines are subaccount-specific.** The anomaly detection skill must compare each subaccount to its own history, not to a portfolio average. Different subaccounts have different normal states.
+
+**The GHL connector is v1, not the canonical schema.** Design entity types to be as platform-agnostic as possible. Annotate GHL-specific fields as candidates for refactoring when connector 2 arrives.
+
+**Fail loudly on integration errors.** When a connector cannot fetch data, surface this to the operator rather than silently skipping. A missed scan is as dangerous as a detected anomaly.
+
+**Data isolation between subaccounts.** Org agents reading across subaccounts must not leak one subaccount's raw data into another's context. Cross-subaccount skills return aggregated summaries, not raw records.
+
+---
+
+## Out of Scope
+
+The following are explicitly deferred:
+
+- A second connector implementation (HubSpot, Shopify, Stripe). The architecture must support them; the code must not be written yet.
+- ML-based churn prediction models. Heuristic first. Architecture supports model replacement; model itself deferred.
+- Client-facing portals exposing health scores to end clients. This brief covers the operator-facing intelligence layer only.
+- Billing or pricing logic tied to connector usage or sub-account count.
+- Multi-connector organisations (one connector per organisation at MVP).
+- Org-level agent conversations/chat UI (the `AgentChatPage` pattern at org level). Can be added later.
+
+---
+
+## Success Criteria
+
+The feature is complete when:
+
+1. A new organisation can be provisioned by applying the GHL Agency Configuration Template
+2. The operator provides GHL OAuth credentials and a Slack webhook URL
+3. Within one scan cycle, all sub-accounts are enumerated and have initial health scores
+4. Within one week, the operator receives their first portfolio intelligence briefing without having logged into any individual GHL sub-account
+5. When a real anomaly occurs in a sub-account, the operator receives a push alert and a HITL gate proposal
+6. All of this happens without any action beyond the initial template activation
+7. The entire system works through generic infrastructure — replacing GHL with a different connector would require only a new connector implementation and a new configuration template, not changes to agents, skills, or the intelligence layer
