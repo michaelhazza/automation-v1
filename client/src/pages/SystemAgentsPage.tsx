@@ -20,9 +20,6 @@ interface SystemAgent {
   createdAt: string;
 }
 
-interface TreeNode extends SystemAgent {
-  children: TreeNode[];
-}
 
 const STATUS_CLS: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -46,81 +43,10 @@ function PublishedBadge({ published }: { published: boolean }) {
   );
 }
 
-type ActiveTab = 'list' | 'hierarchy' | 'company-templates' | 'heartbeat';
+type ActiveTab = 'list' | 'team-templates' | 'heartbeat';
 
-const ROLE_CLS: Record<string, string> = {
-  ceo: 'bg-amber-100 text-amber-800',
-  orchestrator: 'bg-purple-100 text-purple-800',
-  specialist: 'bg-blue-100 text-blue-800',
-  worker: 'bg-slate-100 text-slate-700',
-};
 
-function RoleBadge({ role }: { role: string | null }) {
-  if (!role) return null;
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${ROLE_CLS[role] ?? 'bg-slate-100 text-slate-600'}`}>
-      {role}
-    </span>
-  );
-}
-
-function HierarchyTreeRow({
-  node,
-  depth,
-  onNavigate,
-}: {
-  node: TreeNode;
-  depth: number;
-  onNavigate: (id: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  const hasChildren = node.children.length > 0;
-
-  return (
-    <>
-      <tr className="hover:bg-slate-50 transition-colors">
-        <td className="px-4 py-2.5">
-          <div className="flex items-center gap-1.5" style={{ paddingLeft: `${depth * 24}px` }}>
-            {hasChildren ? (
-              <button
-                onClick={() => setExpanded(!expanded)}
-                className="w-5 h-5 flex items-center justify-center bg-transparent border-0 cursor-pointer text-slate-400 hover:text-slate-700 text-[12px] transition-transform"
-                style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-              >
-                &#9654;
-              </button>
-            ) : (
-              <span className="w-5" />
-            )}
-            <span className="font-semibold text-slate-800 text-[14px]">{node.name}</span>
-          </div>
-        </td>
-        <td className="px-4 py-2.5">
-          <RoleBadge role={node.agentRole} />
-        </td>
-        <td className="px-4 py-2.5 text-[13px] text-slate-600">
-          {node.agentTitle || '—'}
-        </td>
-        <td className="px-4 py-2.5">
-          <StatusBadge status={node.status} />
-        </td>
-        <td className="px-4 py-2.5">
-          <button
-            onClick={() => onNavigate(node.id)}
-            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-md text-[12px] font-medium cursor-pointer transition-colors"
-          >
-            Edit
-          </button>
-        </td>
-      </tr>
-      {expanded && hasChildren && node.children.map((child) => (
-        <HierarchyTreeRow key={child.id} node={child} depth={depth + 1} onNavigate={onNavigate} />
-      ))}
-    </>
-  );
-}
-
-const VALID_TABS = new Set<string>(['list', 'hierarchy', 'company-templates', 'heartbeat']);
+const VALID_TABS = new Set<string>(['list', 'team-templates', 'heartbeat']);
 
 export default function SystemAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
@@ -128,7 +54,6 @@ export default function SystemAgentsPage({ user }: { user: User }) {
   const tabParam = searchParams.get('tab');
   const initialTab = tabParam && VALID_TABS.has(tabParam) ? (tabParam as ActiveTab) : 'list';
   const [agents, setAgents] = useState<SystemAgent[]>([]);
-  const [treeData, setTreeData] = useState<TreeNode[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
 
   const switchTab = (tab: ActiveTab) => {
@@ -140,37 +65,19 @@ export default function SystemAgentsPage({ user }: { user: User }) {
   const [actionError, setActionError] = useState<Record<string, string>>({});
   const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [importing, setImporting] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [agentsRes, treeRes] = await Promise.all([
-        api.get('/api/system/agents'),
-        api.get('/api/system/agents/tree'),
-      ]);
+      const agentsRes = await api.get('/api/system/agents');
       setAgents(agentsRes.data);
-      setTreeData(treeRes.data);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { load(); }, []);
-
-  const handleReconcile = async () => {
-    setReconciling(true);
-    try {
-      const { data } = await api.post('/api/system/agents/reconcile-hierarchy');
-      setImportStatus({ type: 'success', message: `Reconciled hierarchy: ${data.updated} agent(s) updated.` });
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setImportStatus({ type: 'error', message: e.response?.data?.error ?? 'Reconcile failed' });
-    } finally {
-      setReconciling(false);
-    }
-  };
 
   const handlePublish = async (id: string) => {
     setActionError((prev) => ({ ...prev, [id]: '' }));
@@ -304,7 +211,7 @@ export default function SystemAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['hierarchy', 'Team Templates'], ['company-templates', 'Company Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['heartbeat', 'Heartbeat'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as ActiveTab)}
@@ -319,50 +226,8 @@ export default function SystemAgentsPage({ user }: { user: User }) {
         ))}
       </div>
 
-      {/* Hierarchy Tab */}
-      {activeTab === 'hierarchy' && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          {treeData.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 text-[14px]">
-              No hierarchy configured yet. Edit agents to set parent relationships.
-            </div>
-          ) : (
-            <table className="w-full border-collapse text-[14px]">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Agent</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Role</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Title</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Status</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {treeData.map((node) => (
-                  <HierarchyTreeRow
-                    key={node.id}
-                    node={node}
-                    depth={0}
-                    onNavigate={(id) => navigate(`/system/agents/${id}`)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          )}
-          <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
-            <button
-              onClick={handleReconcile}
-              disabled={reconciling}
-              className={`px-3 py-1.5 bg-slate-100 text-slate-700 border-0 rounded-lg text-[13px] font-medium transition-colors ${reconciling ? 'opacity-60 cursor-not-allowed' : 'hover:bg-slate-200 cursor-pointer'}`}
-            >
-              {reconciling ? 'Reconciling...' : 'Reconcile Org Hierarchies'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Company Templates Tab */}
-      {activeTab === 'company-templates' && <SystemCompanyTemplatesPage user={user} />}
+      {/* Team Templates Tab */}
+      {activeTab === 'team-templates' && <SystemCompanyTemplatesPage user={user} />}
 
       {/* Heartbeat Tab */}
       {activeTab === 'heartbeat' && (

@@ -293,7 +293,7 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
         </Field>
       </SectionCard>
 
-      <SectionCard title="Hierarchy" subtitle="Configure this agent's position in the agent hierarchy. Phase 1 is structural/visual only.">
+      {!isNew && <SectionCard title="Hierarchy" subtitle="Configure this agent's position in the agent hierarchy. Phase 1 is structural/visual only.">
         <div className="grid grid-cols-3 gap-4">
           <Field label="Reports to">
             <select
@@ -325,7 +325,7 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
             <input value={form.agentTitle} onChange={(e) => setForm({ ...form, agentTitle: e.target.value })} className={inputCls} placeholder="e.g. Head of Research" />
           </Field>
         </div>
-      </SectionCard>
+      </SectionCard>}
 
       <SectionCard
         title="Master Prompt (Our IP)"
@@ -336,7 +336,7 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
         </Field>
       </SectionCard>
 
-      <SectionCard title="Model Configuration">
+      {!isNew && <SectionCard title="Model Configuration">
         <div className="grid grid-cols-2 gap-4">
           <Field label="Model Provider">
             <input value={form.modelProvider} onChange={(e) => setForm({ ...form, modelProvider: e.target.value })} className={inputCls} placeholder="anthropic" />
@@ -360,9 +360,9 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
             {form.allowModelOverride ? 'Org admins can override model settings' : 'Model settings are locked'}
           </span>
         </div>
-      </SectionCard>
+      </SectionCard>}
 
-      <SectionCard title="System Skills" subtitle="Select which system skills are bundled with this agent.">
+      {!isNew && <SectionCard title="System Skills" subtitle="Select which system skills are bundled with this agent.">
         {systemSkills.length === 0 ? (
           <div className="text-[13px] text-slate-400 italic">No system skills available.</div>
         ) : (
@@ -394,15 +394,15 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
             ))}
           </div>
         )}
-      </SectionCard>
+      </SectionCard>}
 
-      <SectionCard title="Default Org Skills" subtitle="Org-visible skill slugs suggested when this agent is installed.">
+      {!isNew && <SectionCard title="Default Org Skills" subtitle="Org-visible skill slugs suggested when this agent is installed.">
         <Field label="Org Skill Slugs" hint="Comma-separated list of skill slugs">
           <textarea value={form.defaultOrgSkillSlugs} onChange={(e) => setForm({ ...form, defaultOrgSkillSlugs: e.target.value })} className={`${textareaCls} min-h-[60px]`} placeholder="skill_one, skill_two, skill_three" />
         </Field>
-      </SectionCard>
+      </SectionCard>}
 
-      <SectionCard title="Scheduling Defaults">
+      {!isNew && <SectionCard title="Scheduling Defaults">
         <div className="grid grid-cols-3 gap-4">
           <Field label="Default Schedule Cron">
             <input value={form.defaultScheduleCron} onChange={(e) => setForm({ ...form, defaultScheduleCron: e.target.value })} className={inputCls} placeholder="0 9 * * 1-5" />
@@ -414,7 +414,7 @@ export default function SystemAgentEditPage({ user }: { user: User }) {
             <input type="number" value={form.defaultMaxToolCalls} onChange={(e) => setForm({ ...form, defaultMaxToolCalls: parseInt(e.target.value) || 0 })} className={inputCls} />
           </Field>
         </div>
-      </SectionCard>
+      </SectionCard>}
 
       {!isNew && (
         <SectionCard title="Publishing">
