@@ -336,6 +336,45 @@ export const skillExecutor = {
         );
       }
 
+      // ── Phase 3: Cross-subaccount intelligence skills ───────────────────
+      case 'query_subaccount_cohort': {
+        const { executeQuerySubaccountCohort } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('query_subaccount_cohort', input, context, () =>
+          executeQuerySubaccountCohort(input, context));
+      }
+      case 'read_org_insights': {
+        const { executeReadOrgInsights } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('read_org_insights', input, context, () =>
+          executeReadOrgInsights(input, context));
+      }
+      case 'write_org_insight': {
+        const { executeWriteOrgInsight } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('write_org_insight', input, context, () =>
+          executeWriteOrgInsight(input, context));
+      }
+      case 'compute_health_score': {
+        const { executeComputeHealthScore } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('compute_health_score', input, context, () =>
+          executeComputeHealthScore(input, context));
+      }
+      case 'detect_anomaly': {
+        const { executeDetectAnomaly } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('detect_anomaly', input, context, () =>
+          executeDetectAnomaly(input, context));
+      }
+      case 'compute_churn_risk': {
+        const { executeComputeChurnRisk } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('compute_churn_risk', input, context, () =>
+          executeComputeChurnRisk(input, context));
+      }
+      case 'generate_portfolio_report': {
+        const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('generate_portfolio_report', input, context, () =>
+          executeGeneratePortfolioReport(input, context));
+      }
+      case 'trigger_account_intervention':
+        return proposeReviewGatedAction('trigger_account_intervention', input, context);
+
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
     }
