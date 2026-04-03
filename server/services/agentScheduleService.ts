@@ -197,6 +197,9 @@ export const agentScheduleService = {
       console.log(`[AgentScheduler] Running org-level scheduled agent: ${data.agentId} for org ${data.organisationId}`);
 
       try {
+        // Deterministic idempotency key: floor timestamp to 10s window for dedupe
+        const scheduleTickKey = `org-scheduled:${data.agentId}:${data.organisationId}:${Math.floor(Date.now() / 10000)}`;
+
         await agentExecutionService.executeRun({
           agentId: data.agentId,
           organisationId: data.organisationId,
@@ -204,6 +207,7 @@ export const agentScheduleService = {
           orgAgentConfigId: data.orgAgentConfigId,
           runType: 'scheduled',
           executionMode: 'api',
+          idempotencyKey: scheduleTickKey,
           triggerContext: { source: 'org-schedule' },
         });
       } catch (err) {
