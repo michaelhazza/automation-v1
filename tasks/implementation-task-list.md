@@ -170,3 +170,237 @@ Modify `server/routes/agentRuns.ts`:
 - [ ] Verify approve/reject works on org-level review items
 - [ ] Verify zero regression on existing subaccount agent flows
 - [ ] Verify WebSocket emissions go to org room for org runs
+
+---
+
+## Phase 2: Integration Layer + GHL Connector
+
+### 2.1 Schema Migration: Canonical entity tables
+
+Write migration 0044 (or bundle with 0043 if Phase 1 hasn't shipped yet):
+
+- [ ] `connector_configs` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK → organisations, NOT NULL)
+  - `connectorType` (text NOT NULL — `'ghl' | 'hubspot' | 'stripe' | 'custom'`)
+  - `connectionId` (FK → integrationConnections, nullable — the OAuth connection used)
+  - `configJson` (jsonb — connector-specific config: sub-account mappings, polling prefs)
+  - `status` (text — `'active' | 'error' | 'disconnected'`)
+  - `lastSyncAt` (timestamptz, nullable)
+  - `lastSyncStatus` (text, nullable)
+  - `lastSyncError` (text, nullable)
+  - `pollIntervalMinutes` (integer, default 60)
+  - `webhookSecret` (text, nullable — for HMAC verification)
+  - `createdAt`, `updatedAt`
+  - Unique: `(organisationId, connectorType)` — one connector type per org at MVP
+
+- [ ] `canonical_accounts` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK → organisations, NOT NULL)
+  - `connectorConfigId` (FK → connector_configs, NOT NULL)
+  - `subaccountId` (FK → subaccounts, nullable — mapped internal subaccount)
+  - `externalId` (text NOT NULL — the ID in the external platform)
+  - `displayName` (text)
+  - `status` (text — `'active' | 'inactive' | 'suspended'`)
+  - `externalMetadata` (jsonb — raw metadata from external platform)
+  - `lastSyncAt` (timestamptz)
+  - `createdAt`, `updatedAt`
+  - Unique: `(connectorConfigId, externalId)`
+
+- [ ] `canonical_contacts` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK)
+  - `accountId` (FK → canonical_accounts, NOT NULL)
+  - `externalId` (text NOT NULL)
+  - `firstName`, `lastName`, `email`, `phone` (text, all nullable)
+  - `tags` (jsonb, nullable)
+  - `source` (text, nullable)
+  - `createdAt`, `updatedAt`, `externalCreatedAt` (timestamptz)
+  - Unique: `(accountId, externalId)`
+
+- [ ] `canonical_opportunities` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK)
+  - `accountId` (FK → canonical_accounts, NOT NULL)
+  - `externalId` (text NOT NULL)
+  - `name` (text)
+  - `stage` (text)
+  - `value` (numeric, nullable)
+  - `currency` (text, default 'USD')
+  - `status` (text — `'open' | 'won' | 'lost' | 'abandoned'`)
+  - `stageEnteredAt` (timestamptz, nullable)
+  - `stageHistory` (jsonb, nullable — array of `{stage, enteredAt, exitedAt}`)
+  - `createdAt`, `updatedAt`, `externalCreatedAt`
+  - Unique: `(accountId, externalId)`
+
+- [ ] `canonical_conversations` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK)
+  - `accountId` (FK → canonical_accounts, NOT NULL)
+  - `externalId` (text NOT NULL)
+  - `channel` (text — `'sms' | 'email' | 'chat' | 'phone' | 'other'`)
+  - `status` (text — `'active' | 'inactive' | 'closed'`)
+  - `messageCount` (integer, default 0)
+  - `lastMessageAt` (timestamptz, nullable)
+  - `lastResponseTimeSeconds` (integer, nullable)
+  - `createdAt`, `updatedAt`, `externalCreatedAt`
+  - Unique: `(accountId, externalId)`
+
+- [ ] `canonical_revenue` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK)
+  - `accountId` (FK → canonical_accounts, NOT NULL)
+  - `externalId` (text NOT NULL)
+  - `amount` (numeric NOT NULL)
+  - `currency` (text, default 'USD')
+  - `type` (text — `'one_time' | 'recurring' | 'refund'`)
+  - `status` (text — `'pending' | 'completed' | 'failed' | 'refunded'`)
+  - `transactionDate` (timestamptz)
+  - `createdAt`, `updatedAt`
+  - Unique: `(accountId, externalId)`
+
+- [ ] `health_snapshots` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK)
+  - `accountId` (FK → canonical_accounts, NOT NULL)
+  - `score` (integer, 0-100)
+  - `factorBreakdown` (jsonb — `{factor: string, score: number, weight: number}[]`)
+  - `trend` (text — `'improving' | 'stable' | 'declining'`)
+  - `confidence` (real, 0.0-1.0)
+  - `configVersion` (text — SHA-256 hash of scoring config at time of computation)
+  - `createdAt`
+  - Index: `(accountId, createdAt DESC)` for time-series queries
+
+- [ ] `anomaly_events` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK)
+  - `accountId` (FK → canonical_accounts, NOT NULL)
+  - `metricName` (text NOT NULL)
+  - `currentValue` (numeric)
+  - `baselineValue` (numeric)
+  - `deviationPercent` (real)
+  - `direction` (text — `'above' | 'below'`)
+  - `severity` (text — `'low' | 'medium' | 'high' | 'critical'`)
+  - `description` (text)
+  - `acknowledged` (boolean, default false)
+  - `createdAt`
+  - Index: `(accountId, createdAt DESC)`, `(organisationId, severity, acknowledged)`
+
+- [ ] Add all new tables to `server/db/schema/index.ts`
+
+### 2.2 Extend adapter interface
+
+Modify `server/adapters/integrationAdapter.ts`:
+
+- [ ] Add `ingestion` namespace to `IntegrationAdapter` interface:
+  ```
+  ingestion?: {
+    listAccounts(connection, config): Promise<CanonicalAccount[]>
+    fetchContacts(connection, accountExternalId, opts?): Promise<CanonicalContact[]>
+    fetchOpportunities(connection, accountExternalId, opts?): Promise<CanonicalOpportunity[]>
+    fetchConversations(connection, accountExternalId, opts?): Promise<CanonicalConversation[]>
+    fetchRevenue(connection, accountExternalId, opts?): Promise<CanonicalRevenue[]>
+    validateCredentials(connection): Promise<{valid: boolean, error?: string}>
+  }
+  ```
+- [ ] Define canonical entity TypeScript types matching the DB schema
+- [ ] Add `webhook` namespace:
+  ```
+  webhook?: {
+    verifySignature(payload: Buffer, signature: string, secret: string): boolean
+    normaliseEvent(rawEvent: unknown): NormalisedEvent | null
+  }
+  ```
+- [ ] Define `NormalisedEvent` type: `{ eventType, accountExternalId, entityType, entityExternalId, data, timestamp }`
+
+### 2.3 GHL connector: Ingestion implementation
+
+Extend `server/adapters/ghlAdapter.ts`:
+
+- [ ] Implement `ingestion.listAccounts` — calls GHL `/locations/search` or agency-level endpoint to enumerate sub-accounts
+- [ ] Implement `ingestion.fetchContacts` — calls GHL `/contacts/` with location filter, paginates, normalises to `CanonicalContact`
+- [ ] Implement `ingestion.fetchOpportunities` — calls GHL `/opportunities/search`, includes pipeline/stage data, normalises
+- [ ] Implement `ingestion.fetchConversations` — calls GHL `/conversations/`, normalises
+- [ ] Implement `ingestion.fetchRevenue` — calls GHL `/payments/orders` or transaction endpoints, normalises
+- [ ] Implement `ingestion.validateCredentials` — simple API call to verify token works
+- [ ] Add GHL case to `connectionTokenService.performTokenRefresh` (currently missing)
+
+### 2.4 GHL connector: Rate limiter
+
+New file `server/lib/rateLimiter.ts`:
+
+- [ ] Implement a token-bucket or sliding-window rate limiter
+- [ ] Support per-account limits (GHL: 100 req/10s per location, 200k/day)
+- [ ] Queue requests when approaching limit rather than dropping
+- [ ] Surface warnings when approaching thresholds (log + optional callback)
+- [ ] In-memory for MVP (note: not shared across server instances — same pattern as existing rate limiters with TODO for Redis)
+
+### 2.5 GHL connector: Webhook endpoint
+
+New route file `server/routes/webhooks/ghlWebhook.ts`:
+
+- [ ] `POST /api/webhooks/ghl` — unauthenticated (same pattern as `githubWebhook.ts`)
+- [ ] Raw body capture via `req.on('data')` / `req.on('end')` for HMAC verification
+- [ ] HMAC-SHA256 signature verification using `connector_configs.webhookSecret`
+- [ ] Ack immediately with `200 { received: true }`, process async
+- [ ] Call `ghlAdapter.webhook.normaliseEvent()` to translate to internal event type
+- [ ] Resolve connector config from webhook payload (GHL includes locationId)
+- [ ] Store normalised event — upsert to canonical entity tables
+- [ ] Key events to handle: `ContactCreate`, `OpportunityStageUpdate`, `ConversationCreated`, `ConversationInactive`, `AppointmentBooked`
+- [ ] Mount in `server/index.ts`
+
+### 2.6 GHL connector: Scheduled polling
+
+New file `server/services/connectorPollingService.ts`:
+
+- [ ] Register polling jobs via pg-boss for each active `connector_config`
+- [ ] Job name format: `connector-poll:${connectorConfigId}`
+- [ ] Job handler: load connector config → get decrypted connection → call ingestion methods → upsert canonical entities
+- [ ] Polling frequency from `connector_configs.pollIntervalMinutes`
+- [ ] Update `lastSyncAt`, `lastSyncStatus`, `lastSyncError` on connector config after each poll
+- [ ] Handle errors gracefully: set status to `'error'`, surface to operator via org update
+
+### 2.7 Service: Connector config management
+
+New service file `server/services/connectorConfigService.ts`:
+
+- [ ] CRUD for `connector_configs` table
+- [ ] `getActiveByOrg(orgId)` — returns active connector configs
+- [ ] `getByType(orgId, connectorType)` — get the connector for a given type
+- [ ] Account mapping management: store/retrieve GHL locationId → subaccountId mappings in `configJson`
+
+### 2.8 Routes: Connector config management
+
+New route file `server/routes/connectorConfigs.ts`:
+
+- [ ] `GET /api/org/connectors` — list connector configs
+- [ ] `POST /api/org/connectors` — create connector config (type + connection reference)
+- [ ] `GET /api/org/connectors/:id` — get config with sync status
+- [ ] `PATCH /api/org/connectors/:id` — update config (polling interval, account mappings)
+- [ ] `DELETE /api/org/connectors/:id` — delete config
+- [ ] `POST /api/org/connectors/:id/sync` — trigger manual sync
+- [ ] `POST /api/org/connectors/:id/validate` — test credentials
+- [ ] Mount in `server/index.ts`
+
+### 2.9 Service: Canonical data access layer
+
+New service file `server/services/canonicalDataService.ts`:
+
+- [ ] `getAccountsByOrg(orgId)` — list all canonical accounts
+- [ ] `getAccountsByTags(orgId, tags)` — list accounts filtered by subaccount tags (depends on Phase 3 tags, but interface defined now)
+- [ ] `getContactMetrics(accountId, dateRange?)` — contact count, growth rate, recent additions
+- [ ] `getOpportunityMetrics(accountId)` — pipeline value, stage distribution, velocity, stale deals
+- [ ] `getConversationMetrics(accountId)` — volume, response times, active/inactive ratio
+- [ ] `getRevenueMetrics(accountId, dateRange?)` — total, trend, recurring vs one-time
+- [ ] `getLatestHealthSnapshot(accountId)` — most recent snapshot
+- [ ] `getHealthHistory(accountId, limit?)` — time series of snapshots
+
+### 2.10 Testing & Verification
+
+- [ ] GHL connector can enumerate sub-accounts from a real GHL agency account
+- [ ] Contacts, opportunities, conversations normalise correctly
+- [ ] Webhook endpoint receives and processes GHL events
+- [ ] Rate limiter queues requests correctly under load
+- [ ] Polling job runs on schedule and updates canonical entities
+- [ ] A skill calling `canonicalDataService.getContactMetrics(accountId)` works without any GHL-specific code
+- [ ] Connector config CRUD works through API routes
