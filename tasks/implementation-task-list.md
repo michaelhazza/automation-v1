@@ -17,6 +17,27 @@ These were identified during the codebase audit and resolved before task creatio
 | Two parallel token refresh systems? | Use `integrationConnectionService.refreshWithLock` (advisory-lock pattern) for the integration layer. Add GHL case to refresh flow. |
 | No org-scope flag on systemAgents? | Add `executionScope` column (`'subaccount' \| 'org'`, default `'subaccount'`) to `systemAgents`. Template service uses this to route installation. |
 | HITL survivability (in-process memory)? | Accept as known limitation. Same risk exists for subaccount agents. DB-persisted HITL is a future improvement. |
+| Execution mode inference from nullable subaccountId? | Explicit `executionMode` flag on `agent_runs` and `AgentRunRequest`. Never infer from presence/absence of `subaccountId`. |
+| Run config reproducibility? | Snapshot resolved config (`configSnapshot`, `resolvedSkillSlugs`, `resolvedLimits`) on `agent_runs` at run creation time. |
+| Cross-scope idempotency collisions? | Add `action_scope` column to `actions`. Include in all idempotency checks. Separate partial indexes per scope. |
+| Backfill → live transition? | Explicit `syncPhase` state machine on `connector_configs`: `backfill` → `transition` → `live`. Webhooks queued during backfill, replayed during transition. |
+| Org-level kill switch? | `orgExecutionEnabled` flag on organisations table. Checked at top of `executeRun()` before config loading. Also checked at pg-boss dequeue for scheduled runs. |
+| Partial run results? | Add `resultStatus` (`success`/`partial`/`failed`) to `agent_runs`. Prevents false confidence in outputs from runs where some accounts failed. |
+| Config drift during long runs? | Snapshot `configHash` at run start. At completion, compare against current — log `configDriftDetected` if different. Don't block execution. |
+| Webhook queue ordering? | Queue keyed by `(accountId, entityType, entityId)`. Replay ordered by `source_timestamp`, fallback `event_ingested_at`. Prevents entity state regressions. |
+| Idempotency time dimension? | Rejected. Event idempotency already includes `source_timestamp`. Adding time buckets to action idempotency is over-engineering for v1. |
+| Connector health derivation? | Computed `healthStatus` (`healthy`/`degraded`/`failed`) from error rate and sync delays. Failed connectors suppress health scoring. |
+| Retry boundary policy? | Safe to retry: connector polling, webhook ingestion (idempotent), data reads, health scoring. NOT safe to retry: agent runs (non-idempotent side effects), intervention execution, alert delivery. Enforced at service layer. |
+| Partial run output contract? | Required structured output when `resultStatus` is `partial`/`failed`: `{ processedAccounts, successfulAccounts, failedAccounts, failures[] }`. |
+| Failure reason classification? | Standardised enum: `connector_timeout`, `rate_limited`, `auth_error`, `data_incomplete`, `internal_error`, `unknown`. `retryable` derived from reason, not manually set. |
+| No-data vs zero-data? | Every canonical query returns `dataStatus`: `fresh`/`stale`/`missing`. Missing data excluded from scoring (not treated as zero). Skills must surface which accounts lack data. |
+| Confidence floor? | Below 0.3 = unreliable. May display with warning, must not drive automated decisions. |
+| Unknown failure handling? | `unknown` reason treated as high-severity + operator log. Signals classification gap. |
+| Confidence propagation? | Multi-source output confidence = `MIN(all contributing confidences)`. Conservative default for v1. |
+| ExecutionMode mismatch? | Hard validation: org mode requires null subaccountId, subaccount mode requires present subaccountId. Reject mismatches at run creation. |
+| Reconciliation safety cap? | Max 30% of records per account per run. Exceeding halts repair + alerts operator. Prevents mass corruption from bad connector responses. |
+| Kill switch audit? | Every toggle logged with actor, timestamp, reason. Enterprise debugging requirement. |
+| Event group max size? | Cap at 20 events per group. Prevents runaway grouping under noisy webhook bursts. |
 | `agentTriggers.eventType` is 3-value enum? | Widen in Phase 5 when org-level triggers are built. Not needed before then. |
 | `actionRegistry.ts` is static TypeScript? | Acceptable. New skills require code deploy (new `.md` + executor). Dynamic registration deferred. |
 | GHL missing from `performTokenRefresh`? | Add GHL case to `connectionTokenService.performTokenRefresh` as part of Phase 2. |
@@ -31,9 +52,16 @@ Write a single Drizzle migration (0043) that:
 
 - [ ] Make `agent_runs.subaccount_id` nullable (drop NOT NULL)
 - [ ] Make `agent_runs.subaccount_agent_id` nullable (drop NOT NULL)
+- [ ] Add `agent_runs.execution_mode` column (`text NOT NULL`, values `'subaccount' | 'org'`, default `'subaccount'`) — explicit execution context, never inferred from nullable fields
+- [ ] Add `agent_runs.result_status` column (`text`, nullable, values `'success' | 'partial' | 'failed'`) — distinguishes fully-completed from partially-completed runs
+- [ ] Add `agent_runs.config_snapshot` column (`jsonb`, nullable) — frozen resolved config at run start for debugging/reproducibility
+- [ ] Add `agent_runs.config_hash` column (`text`, nullable) — SHA-256 of config snapshot for drift detection
+- [ ] Add `agent_runs.resolved_skill_slugs` column (`jsonb`, nullable) — effective skill list at run start
+- [ ] Add `agent_runs.resolved_limits` column (`jsonb`, nullable) — effective budget/timeout at run start
 - [ ] Make `review_items.subaccount_id` nullable (drop NOT NULL)
 - [ ] Make `actions.subaccount_id` nullable (drop NOT NULL)
-- [ ] Add partial unique index on `actions`: `UNIQUE (organisation_id, idempotency_key) WHERE subaccount_id IS NULL`
+- [ ] Add `actions.action_scope` column (`text NOT NULL`, values `'subaccount' | 'org'`, default `'subaccount'`) — explicit scope for idempotency separation
+- [ ] Add partial unique index on `actions`: `UNIQUE (organisation_id, idempotency_key) WHERE action_scope = 'org'`
 - [ ] Add composite index on `review_items`: `(organisation_id, review_status)` for org-level review queue queries
 - [ ] Verify existing `org_status_idx` on `agent_runs` covers org-level run queries (audit confirmed it exists)
 
@@ -97,7 +125,17 @@ New route file `server/routes/orgAgentConfigs.ts`:
 Modify `server/services/agentExecutionService.ts`:
 
 - [ ] Make `subaccountId` and `subaccountAgentId` optional on `AgentRunRequest` interface
-- [ ] Add config loading branch: if `subaccountAgentId` present → load from `subaccountAgents` (existing). If absent → load from `orgAgentConfigs` via `orgAgentConfigService.getByAgentId(orgId, agentId)`
+- [ ] Add `executionMode: 'subaccount' | 'org'` to `AgentRunRequest` — callers must set this explicitly
+- [ ] At run creation, set `executionMode` on the `agent_runs` record — this drives all downstream routing
+- [ ] Hard validation at run creation: if `executionMode === 'org'` then `subaccountId` must be null (reject if provided). If `executionMode === 'subaccount'` then `subaccountId` must be present (reject if missing).
+- [ ] Snapshot resolved config into `configSnapshot`, `resolvedSkillSlugs`, `resolvedLimits` on the `agent_runs` record before execution begins. Compute `configHash` (SHA-256 of snapshot). Include human-readable version metadata in snapshot: `configVersion`, `templateVersion`, `agentVersion`.
+- [ ] At run completion, compare current config hash against snapshotted `configHash`. If different, flag `configDriftDetected: true` in run metadata (log, don't block).
+- [ ] Set `resultStatus` on run completion: `'success'` if all work completed, `'partial'` if some accounts/steps failed, `'failed'` if no meaningful work completed
+- [ ] When `resultStatus` is `'partial'` or `'failed'`, write structured output: `{ processedAccounts, successfulAccounts, failedAccounts, failures: [{ accountId, reason, retryable }] }` — this contract is required, not optional
+- [ ] Use standardised failure reason enum: `connector_timeout`, `rate_limited`, `auth_error`, `data_incomplete`, `internal_error`, `unknown` — no free text
+- [ ] Derive `retryable` from reason (not set manually): `connector_timeout` and `rate_limited` → true; all others → false
+- [ ] Treat `unknown` failures as high-severity: produce operator-visible log entry (signals the classification system needs extending)
+- [ ] Add config loading branch: route by `executionMode`, not by presence of `subaccountAgentId`. If `'subaccount'` → load from `subaccountAgents` (existing). If `'org'` → load from `orgAgentConfigs` via `orgAgentConfigService.getByAgentId(orgId, agentId)`
 - [ ] Guard `buildTeamRoster()` call: if `subaccountId` → existing path. If null → new `buildOrgTeamRoster(orgId, agentId)` that queries `orgAgentConfigs` + `agents`
 - [ ] Guard `workspaceMemoryService.getMemoryForPrompt()`: skip when `subaccountId` is null (org memory comes in Phase 3)
 - [ ] Guard `workspaceMemoryService.getEntitiesForPrompt()`: skip when null
@@ -154,20 +192,58 @@ Modify `server/routes/agentRuns.ts`:
 - [ ] Add `GET /api/org/agents/:agentId/runs` — list runs for an org-level agent
 - [ ] Handler constructs `AgentRunRequest` without `subaccountId`/`subaccountAgentId`, loads config from `orgAgentConfigs`
 
-### 1.11 UI: Org agent management (minimal)
+### 1.11 Org vs Subaccount Authority Rules
+
+Enforce cross-cutting authority rules in the skill execution layer:
+
+- [ ] Add guard in `skillExecutor` (or a shared `authorityGuard` utility): when `executionMode === 'org'` and a skill targets a subaccount, validate `allowedSubaccountIds` from `orgAgentConfigs`. Reject if target not in allowed list.
+- [ ] Add guard: when `executionMode === 'subaccount'`, reject any attempt to access org memory (returns clear error: "Org memory is not accessible from subaccount context")
+- [ ] Add guard: when `executionMode === 'subaccount'`, scope all canonical data queries to the current subaccount only — prevent cross-subaccount reads
+- [ ] Add guard: cross-boundary writes (org agent writing to subaccount) always route through HITL gate regardless of skill gate level
+- [ ] Set `actions.action_scope` based on `executionMode` in `executeWithActionAudit` — do not infer from nullable `subaccountId`
+- [ ] Include `action_scope` in all idempotency checks
+- [ ] Log `authority_violation_attempt` event on every rejected authority check: include `agentId`, `executionMode`, `attemptedScope`, `targetId`, rejection reason. Surface in operator logs.
+
+### 1.12 Org-Level Execution Kill Switch
+
+- [ ] Add `orgExecutionEnabled` column to `organisations` table (boolean, default `true`) — or a dedicated org settings table if one exists
+- [ ] Check `orgExecutionEnabled` at the top of `agentExecutionService.executeRun()` when `executionMode === 'org'` — reject with clear error before any config loading
+- [ ] Check `orgExecutionEnabled` in pg-boss `agent-org-scheduled-run` worker at dequeue time — if disabled, silently drop job (no retry) and log operator-visible entry
+- [ ] Add API route to toggle: `PATCH /api/org/settings/execution-enabled` (org admin only)
+- [ ] Log audit event on every toggle: `org_execution_disabled` / `org_execution_enabled` with actor, timestamp, optional reason
+- [ ] Surface in org settings UI as an emergency stop toggle
+
+### 1.13 UI: Org agent management (minimal)
 
 - [ ] New page or section in admin UI for managing org agent configs
 - [ ] Display org-level agents with config (budget, skills, schedule)
 - [ ] Manual run trigger button
 - [ ] Org-level review queue page or tab on existing review queue
+- [ ] Kill switch toggle in org settings
 
-### 1.12 Testing & Verification
+### 1.14 Testing & Verification
 
 - [ ] Create an org agent config for a test agent
 - [ ] Trigger a manual org-level run — verify it completes successfully
 - [ ] Verify heartbeat schedule fires and produces a run
 - [ ] Verify HITL-gated action from org agent appears in org review queue
 - [ ] Verify approve/reject works on org-level review items
+- [ ] Verify `executionMode` is set correctly on agent_runs records (never inferred)
+- [ ] Verify `configSnapshot` is populated at run start and matches resolved config
+- [ ] Verify `configDriftDetected` is flagged when config changes mid-run
+- [ ] Verify `resultStatus` is set correctly: `'partial'` when some accounts fail, `'success'` when all complete
+- [ ] Verify partial run output includes structured failure details (accountId, reason, retryable)
+- [ ] Verify failure reasons use standardised enum only (no free text)
+- [ ] Verify `retryable` is derived from reason, not manually set
+- [ ] Verify executionMode mismatch is rejected (org mode + subaccountId present = error)
+- [ ] Verify `action_scope` is set correctly on actions and idempotency prevents cross-scope collisions
+- [ ] Verify authority rules: org agent cannot write to subaccount not in `allowedSubaccountIds`
+- [ ] Verify authority rules: subaccount agent cannot access org memory
+- [ ] Verify authority rules: subaccount agent cannot read other subaccounts' canonical data
+- [ ] Verify authority violation attempts are logged with full context (agentId, executionMode, target, reason)
+- [ ] Verify kill switch: setting `orgExecutionEnabled = false` immediately blocks all org runs
+- [ ] Verify kill switch: scheduled jobs are dropped (not retried) when kill switch is active
+- [ ] Verify kill switch toggle produces audit log entry with actor, timestamp, reason
 - [ ] Verify zero regression on existing subaccount agent flows
 - [ ] Verify WebSocket emissions go to org room for org runs
 
@@ -191,6 +267,8 @@ Write migration 0044 (or bundle with 0043 if Phase 1 hasn't shipped yet):
   - `lastSyncError` (text, nullable)
   - `pollIntervalMinutes` (integer, default 60)
   - `webhookSecret` (text, nullable — for HMAC verification)
+  - `syncPhase` (text NOT NULL, default `'backfill'`, values `'backfill' | 'transition' | 'live'`) — explicit state machine for backfill lifecycle
+  - `configVersion` (text, nullable — SHA-256 hash recomputed on config change, referenced by intelligence outputs)
   - `createdAt`, `updatedAt`
   - Unique: `(organisationId, connectorType)` — one connector type per org at MVP
 
@@ -267,6 +345,7 @@ Write migration 0044 (or bundle with 0043 if Phase 1 hasn't shipped yet):
   - `factorBreakdown` (jsonb — `{factor: string, score: number, weight: number}[]`)
   - `trend` (text — `'improving' | 'stable' | 'declining'`)
   - `confidence` (real, 0.0-1.0)
+  - `algorithmVersion` (text — skill code version that produced this snapshot)
   - `configVersion` (text — SHA-256 hash of scoring config at time of computation)
   - `createdAt`
   - Index: `(accountId, createdAt DESC)` for time-series queries
@@ -282,6 +361,8 @@ Write migration 0044 (or bundle with 0043 if Phase 1 hasn't shipped yet):
   - `direction` (text — `'above' | 'below'`)
   - `severity` (text — `'low' | 'medium' | 'high' | 'critical'`)
   - `description` (text)
+  - `algorithmVersion` (text — skill code version that produced this event)
+  - `configVersion` (text — SHA-256 hash of detection config at time of computation)
   - `acknowledged` (boolean, default false)
   - `createdAt`
   - Index: `(accountId, createdAt DESC)`, `(organisationId, severity, acknowledged)`
@@ -347,6 +428,12 @@ New route file `server/routes/webhooks/ghlWebhook.ts`:
 - [ ] Resolve connector config from webhook payload (GHL includes locationId)
 - [ ] Store normalised event — upsert to canonical entity tables
 - [ ] Key events to handle: `ContactCreate`, `OpportunityStageUpdate`, `ConversationCreated`, `ConversationInactive`, `AppointmentBooked`
+- [ ] Enforce `event_group_id` at ingestion layer: if connector provides one, use it. If not, auto-generate UUID. Group events arriving within 5s window for the same entity under the same group ID.
+- [ ] Respect `syncPhase`: if `'backfill'`, queue webhooks instead of applying. If `'transition'`, replay queued. If `'live'`, apply normally.
+- [ ] Webhook queue ordering: key queued events by `(accountId, entityType, entityId)`, replay strictly ordered by `source_timestamp` (fallback: `event_ingested_at`)
+- [ ] Webhook replay dedup: before applying each replayed event, check idempotency key `(source_connector, external_id, event_type, source_timestamp)` — skip if already exists (polling may have ingested same data during backfill)
+- [ ] Event group boundary rules: start new group when `event_type` differs or change direction reverses within the 5s window
+- [ ] Event group max size: cap at 20 events per group (configurable). If cap reached, start new group.
 - [ ] Mount in `server/index.ts`
 
 ### 2.6 GHL connector: Scheduled polling
@@ -359,6 +446,8 @@ New file `server/services/connectorPollingService.ts`:
 - [ ] Polling frequency from `connector_configs.pollIntervalMinutes`
 - [ ] Update `lastSyncAt`, `lastSyncStatus`, `lastSyncError` on connector config after each poll
 - [ ] Handle errors gracefully: set status to `'error'`, surface to operator via org update
+- [ ] Manage `syncPhase` transitions: `'backfill'` → `'transition'` on backfill_complete event, `'transition'` → `'live'` when queued webhooks fully replayed
+- [ ] Recompute `configVersion` hash when connector config changes
 
 ### 2.7 Service: Connector config management
 
@@ -394,8 +483,40 @@ New service file `server/services/canonicalDataService.ts`:
 - [ ] `getRevenueMetrics(accountId, dateRange?)` — total, trend, recurring vs one-time
 - [ ] `getLatestHealthSnapshot(accountId)` — most recent snapshot
 - [ ] `getHealthHistory(accountId, limit?)` — time series of snapshots
+- [ ] All query methods return data confidence metadata alongside results:
+  - `dataFreshnessScore` (0.0–1.0) — derived from `last_synced_at` vs expected poll interval
+  - `dataCompletenessScore` (0.0–1.0) — derived from last reconciliation drift report
+- [ ] Hard staleness cutoff: if `last_synced_at` > 2x poll interval, mark dataset as `stale`, include `staleness_warning` in response
+- [ ] Return `dataStatus` on every query: `'fresh'` (data exists, current), `'stale'` (data exists, exceeds threshold), `'missing'` (no data ever ingested for this entity type) — distinguishes "zero results" from "no data"
+- [ ] Confidence propagation rule: when a skill consumes multiple data sources, output confidence = `MIN(all contributing confidences)`
+- [ ] Confidence floor: if propagated confidence < 0.3, output may be displayed (with warning) but must not drive automated decisions (anomaly detection, alerts, HITL proposals)
+- [ ] Missing data behaviour: when `dataStatus === 'missing'` for any contributing source, exclude from scoring (not treated as zero). Skill output must surface which accounts have missing data.
+- [ ] Enforce query scope guards on all methods:
+  - Max accounts per query: 100 (configurable)
+  - Max time range: 90 days (configurable)
+  - Max rows per entity type: 10,000 (configurable, truncate with warning)
+- [ ] Derive connector `healthStatus` (`'healthy' | 'degraded' | 'failed'`) from error rate and sync delays:
+  - `healthy`: last sync OK, <5% error rate/24h, no delays >2x poll interval
+  - `degraded`: 5-25% error rate or delays >2x poll interval
+  - `failed`: 3+ consecutive sync failures or no successful sync in 24h
+- [ ] Include `healthStatus` in connector config API responses
+- [ ] Enforce explicit behaviour per connector health state:
+  - `healthy`: normal operation
+  - `degraded`: reduce data confidence scores proportionally, send operator warning
+  - `failed`: suppress health scoring, suspend anomaly detection, flag accounts as "data missing" in reports, send operator alert
+- [ ] Include `connectorHealthStatus` in data query responses so skills can handle appropriately
 
-### 2.10 Testing & Verification
+### 2.10 Sync event audit logging
+
+- [ ] Log sync events: polling cycle start/completion with entity counts and duration
+- [ ] Log webhook events: each webhook received with normalisation outcome (accepted, rejected, duplicate)
+- [ ] Log reconciliation repairs: each state repair with before/after values
+- [ ] Enforce max repair scope: if reconciliation would overwrite >30% of records for an account, halt for that account, flag `reconciliation_scope_exceeded`, raise operator alert. Operator must acknowledge before large-scope repair proceeds.
+- [ ] On reconciliation abort, emit `reconciliation_aborted` event with reason, affected account IDs, and attempted scope. Surface in sync audit logs.
+- [ ] Log connector state transitions: each `syncPhase` change
+- [ ] Surface sync logs to operators in connector config detail view
+
+### 2.11 Testing & Verification
 
 - [ ] GHL connector can enumerate sub-accounts from a real GHL agency account
 - [ ] Contacts, opportunities, conversations normalise correctly
@@ -403,6 +524,27 @@ New service file `server/services/canonicalDataService.ts`:
 - [ ] Rate limiter queues requests correctly under load
 - [ ] Polling job runs on schedule and updates canonical entities
 - [ ] A skill calling `canonicalDataService.getContactMetrics(accountId)` works without any GHL-specific code
+- [ ] Data confidence scores returned alongside canonical data queries
+- [ ] Query scope guards enforce limits (test with over-limit requests)
+- [ ] `syncPhase` transitions correctly: `backfill` → `transition` → `live`
+- [ ] Webhooks queued during backfill, replayed during transition
+- [ ] `event_group_id` always populated on ingested events (auto-generated when connector doesn't provide)
+- [ ] Sync event audit log captures poll cycles, webhook ingestion, reconciliation repairs, phase transitions
+- [ ] Webhook queue replays in correct per-entity order during transition phase
+- [ ] Webhook replay correctly deduplicates against events already ingested by polling
+- [ ] Event group boundaries respected (different event_type or direction reversal starts new group)
+- [ ] Event group capped at max size (new group started when cap reached)
+- [ ] Staleness cutoff triggers warning when data exceeds 2x poll interval
+- [ ] Connector health status correctly derived (`healthy`/`degraded`/`failed`)
+- [ ] Failed connector suppresses health scoring and anomaly detection for its accounts
+- [ ] Degraded connector reduces confidence scores proportionally
+- [ ] `connectorHealthStatus` included in data query responses
+- [ ] `dataStatus` (`fresh`/`stale`/`unavailable`) correctly distinguishes zero results from no data
+- [ ] Confidence propagation: multi-source skill outputs use MIN(all input confidences)
+- [ ] Reconciliation halts and alerts when repair scope exceeds 30% of records for an account
+- [ ] Reconciliation abort produces `reconciliation_aborted` event with affected accounts
+- [ ] Confidence floor enforced: outputs with confidence < 0.3 do not drive automated decisions
+- [ ] Missing data excluded from scoring (not treated as zero), surfaced in skill output
 - [ ] Connector config CRUD works through API routes
 
 ---
@@ -866,12 +1008,12 @@ Modify task-creation skills in `server/services/skillExecutor.ts`:
 
 | Phase | Tasks | Estimated Complexity |
 |-------|-------|---------------------|
-| Phase 1: Org-Level Agent Execution | 12 task groups | High — foundational, touches many files |
-| Phase 2: Integration Layer + GHL Connector | 10 task groups | High — new subsystem, external API integration |
+| Phase 1: Org-Level Agent Execution | 14 task groups | High — foundational, touches many files |
+| Phase 2: Integration Layer + GHL Connector | 11 task groups | High — new subsystem, external API integration |
 | Phase 3: Cross-Subaccount Intelligence | 14 task groups | Very high — largest phase, most new code |
 | Phase 4: Configuration Template System | 9 task groups | Medium — extends existing system |
 | Phase 5: Org-Level Workspace | 8 task groups | Medium — repeats nullable pattern from Phase 1 |
-| **Total** | **53 task groups** | |
+| **Total** | **56 task groups** | |
 
 ### Implementation Order Notes
 

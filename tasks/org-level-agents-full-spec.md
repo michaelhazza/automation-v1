@@ -144,12 +144,41 @@ The following tables require `subaccountId` to become nullable:
 |-------|-------------------|--------|
 | `agent_runs` | `subaccount_id NOT NULL` | Nullable — org-level runs have no subaccount |
 | `agent_runs` | `subaccount_agent_id NOT NULL` | Nullable — org-level runs use org agent config |
+| `agent_runs` | (new columns) | Add `executionMode` (`'subaccount' \| 'org'`, NOT NULL), `resultStatus` (`'success' \| 'partial' \| 'failed'`, nullable), `configSnapshot` (jsonb, nullable — frozen config at run start), `configHash` (text, nullable — hash of snapshot for drift detection), `resolvedSkillSlugs` (jsonb, nullable), `resolvedLimits` (jsonb, nullable) |
 | `review_items` | `subaccount_id NOT NULL` | Nullable — org-level HITL reviews |
 | `actions` | `subaccount_id NOT NULL` | Nullable — org-level action audit trail |
+| `actions` | (new column) | Add `actionScope` (`'subaccount' \| 'org'`, NOT NULL, default `'subaccount'`) — explicit scope prevents cross-scope idempotency collisions |
 | `scheduled_tasks` | `subaccount_id NOT NULL` | Deferred to Phase 5 |
 | `tasks` | `subaccount_id NOT NULL` | Deferred to Phase 5 |
 
-Index strategy: existing composite indexes that include `subaccountId` need corresponding partial indexes for the `subaccountId IS NULL` case, scoped to `organisationId` instead. The unique constraint on `actions(subaccountId, idempotencyKey)` needs a partial variant for org-level actions.
+**`executionMode` on agent runs.** The execution path must not be inferred from the presence or absence of `subaccountId`. An explicit `executionMode` flag (`'subaccount' | 'org'`) is set at run creation and used to route config loading, guard skills, and control logging/tracing. This prevents misrouting bugs where org logic accidentally runs in subaccount context or vice versa.
+
+**Run context snapshot.** At run start, the resolved configuration is frozen into `configSnapshot` on the `agent_runs` record. This includes the effective limits, skill slugs, and any org-specific overrides. A `configHash` (SHA-256 of the snapshot) is stored alongside it. The snapshot also includes human-readable version metadata: `configVersion` (the org config hash), `templateVersion` (the applied template version, if any), and `agentVersion` (the system agent version). The hash is for machine comparison; the versions are for human debugging. This is essential for debugging, reproducibility, and post-mortems — especially once configs become dynamic via the template system (Phase 4).
+
+**Config drift detection.** If the underlying config changes while a long-running org agent is mid-execution, the run continues using the snapshotted config (correct behaviour — mid-run config changes must not affect in-flight execution). However, at run completion, the system compares the current config hash against the snapshotted `configHash`. If they differ, the run is flagged with `configDriftDetected: true` in the run metadata. This aids debugging of inconsistencies in outputs that span a config change window.
+
+**Partial run handling.** Org-level runs (especially the Portfolio Health Agent) may process multiple accounts in a single run. If some accounts succeed and others fail (e.g. connector timeout for one account), the run should not be marked as a blanket `success` or `failure`. The `resultStatus` field on `agent_runs` captures three states: `'success'` (all work completed), `'partial'` (some work completed, some failed — details in run output), `'failed'` (no meaningful work completed). Downstream consumers (reporting, alerting) must check `resultStatus` and not assume a completed run means all data is fresh.
+
+**Partial run output contract.** When `resultStatus` is `'partial'`, the run output must include a structured summary:
+
+```json
+{
+  "processedAccounts": 47,
+  "successfulAccounts": 42,
+  "failedAccounts": 5,
+  "failures": [
+    { "accountId": "...", "reason": "connector_timeout", "retryable": true }
+  ]
+}
+```
+
+**Failure reason classification.** The `reason` field uses a standardised enum, not free text: `connector_timeout`, `rate_limited`, `auth_error`, `data_incomplete`, `internal_error`, `unknown`. This enables failure analytics, automated retry strategies, and consistent downstream logic. The `retryable` flag is derived from the reason, not set manually: `connector_timeout` and `rate_limited` are retryable; `auth_error`, `data_incomplete`, `internal_error`, and `unknown` are not. The `unknown` reason is additionally treated as high-severity and produces an operator-visible log entry — if failures are hitting `unknown`, the classification system needs extending. This prevents inconsistent retry behaviour across agents.
+
+This structure is stored in the existing run output field and is required (not optional) when `resultStatus` is `'partial'` or `'failed'`. It enables: targeted retry of only failed accounts in a subsequent run, accurate reporting that distinguishes "no data" from "stale data" from "fresh data," and operator visibility into which accounts are affected.
+
+**`actionScope` on actions.** The existing idempotency model uses `(subaccountId, idempotencyKey)`. With nullable `subaccountId`, a collision could occur if the same idempotency key is used in different scopes. The explicit `actionScope` column is included in all idempotency checks to prevent cross-scope dedupe bugs.
+
+Index strategy: existing composite indexes that include `subaccountId` need corresponding partial indexes for the `subaccountId IS NULL` case, scoped to `organisationId` instead. The unique constraint on `actions(subaccountId, idempotencyKey)` needs a partial variant for org-level actions: `UNIQUE (organisation_id, idempotency_key) WHERE action_scope = 'org'`.
 
 ### Org agent execution config
 
@@ -168,8 +197,11 @@ Org-level agents need equivalent configuration without the subaccount binding. T
 `agentExecutionService.executeRun()` currently requires `subaccountId` and `subaccountAgentId` in the `AgentRunRequest` interface. The changes:
 
 1. **Make `subaccountId` and `subaccountAgentId` optional** on `AgentRunRequest`
-2. **Load config from the right source** — if `subaccountAgentId` is present, load from `subaccountAgents` (existing path). If absent, load from the new org agent config
-3. **Skip subaccount-specific context gracefully:**
+2. **Set `executionMode` explicitly** — the caller specifies `'subaccount'` or `'org'` at run creation. This flag drives all downstream routing decisions. Never infer execution mode from the presence or absence of `subaccountId`.
+3. **Validate executionMode consistency** — hard validation at run creation: if `executionMode === 'org'`, then `subaccountId` must be null (reject with error if provided). If `executionMode === 'subaccount'`, then `subaccountId` must be present (reject if missing). This prevents silent corruption from mismatched parameters.
+3. **Snapshot config at run start** — freeze the resolved config (limits, skill slugs, overrides) into `configSnapshot` on the `agent_runs` record before execution begins
+4. **Load config from the right source** — based on `executionMode`: if `'subaccount'`, load from `subaccountAgents` (existing path). If `'org'`, load from the new org agent config
+5. **Skip subaccount-specific context gracefully:**
    - `buildTeamRoster()` — use org-level agent list instead of subaccount agents
    - `workspaceMemoryService.getMemoryForPrompt()` — skip (no subaccount memory) or load org memory when Phase 3 is built
    - `buildSmartBoardContext()` — skip (no subaccount board) or load org board when Phase 5 is built
@@ -208,6 +240,40 @@ When org agents propose HITL-gated actions, review items need to be viewable and
 `SkillExecutionContext.subaccountId` must become optional (`string | null`). Skills that require a subaccount context (e.g. `create_task` targeting a subaccount board, `read_workspace` for a subaccount board) should check for `subaccountId` presence and return a clear error if called from an org-level context without a target subaccount specified.
 
 Cross-subaccount skills (Phase 3) will be designed to work specifically in the org-level context.
+
+### Org vs subaccount authority rules
+
+These rules are cross-cutting and must be enforced from Phase 1, not deferred to Phase 5:
+
+- **Org agents cannot mutate subaccount state** unless: (a) the `orgAgentConfig` has `allowedSubaccountIds` that includes the target, AND (b) the action explicitly specifies the target subaccount. Without both, the mutation is rejected at the skill execution layer. Cross-boundary writes are always HITL-gated (Phase 5 implements the full UI; Phase 1 enforces the programmatic guard).
+- **Subaccount agents cannot read org memory directly.** Org memory (Phase 3) is only accessible from org-level execution context. Subaccount agents access only their own subaccount memory.
+- **Subaccount agents cannot read other subaccounts' canonical data.** When `executionMode === 'subaccount'`, all canonical data queries are scoped to the current subaccount only. Cross-subaccount reads require org-level context. This prevents accidental cross-client data leakage in multi-tenant setups.
+- **Org agents can read all canonical data for their organisation.** This is expected — org agents exist to operate across the portfolio. Read access is unrestricted within the organisation boundary.
+- **Execution mode is authoritative.** The `executionMode` flag on `agent_runs` determines which authority rules apply. A run with `executionMode: 'org'` uses org authority rules; `executionMode: 'subaccount'` uses subaccount rules. There is no blending.
+
+**Authority violation logging.** When any authority rule is violated (a skill attempts an action that the rules forbid), the system logs an `authority_violation_attempt` event containing: `agentId`, `executionMode`, `attemptedScope` (what the agent tried to do), `targetId` (the subaccount or resource it tried to access), and the rejection reason. These events are surfaced in operator logs and are critical for enterprise debugging and future compliance requirements. The violation is always rejected — logging is for visibility, not for approval workflows.
+
+These rules prevent accidental cross-boundary writes, security leakage, and future compliance issues. They are enforced in the skill execution layer, not delegated to individual skill implementations.
+
+### Retry boundary policy
+
+Not all operations are safe to retry. The following policy prevents duplicate side effects:
+
+- **Safe to retry (idempotent):** connector polling, webhook ingestion (deduplicated by idempotency key), canonical data reads, health score computation (overwrites previous snapshot), baseline recomputation.
+- **Not safe to retry (non-idempotent side effects):** agent execution runs (may produce duplicate actions, HITL proposals, or external API calls), intervention execution (may trigger duplicate external actions), alert delivery (may send duplicate notifications).
+
+The retry boundary is enforced at the service layer: `connectorPollingService` and `webhookIngestionService` implement automatic retry with exponential backoff. `agentExecutionService.executeRun()` does not retry — if a run fails, a new run is created (with a new run ID and fresh config snapshot). The Portfolio Health Agent's state machine (Phase 3) handles its own retry semantics per state, as defined in its retry table.
+
+### Org-level execution kill switch
+
+Org agent configs include an `orgExecutionEnabled` flag at the organisation level (not per-agent). When set to `false`, all org-level agent runs for that organisation are immediately rejected. This provides an emergency stop for all org agents without requiring individual config changes.
+
+The kill switch affects both new and scheduled runs:
+
+- **New runs:** Checked at run creation time in `agentExecutionService.executeRun()`, before any config loading or context building. Returns a clear error: "Org-level execution is disabled for this organisation."
+- **Scheduled runs:** When the pg-boss worker dequeues an `agent-org-scheduled-run` job, it checks `orgExecutionEnabled` before executing. If disabled, the job is silently dropped (not retried) and an operator-visible log entry is created. This prevents delayed executions from firing after an emergency shutdown.
+
+**Kill switch audit trail.** Every toggle of the kill switch produces an audit log entry: `org_execution_disabled` or `org_execution_enabled`, including the actor (user ID), timestamp, and optional reason. This is an enterprise requirement — when nothing ran for 6 hours, the first debugging question is "did someone flip the kill switch?" The audit trail answers it immediately.
 
 ### What this phase does NOT include
 
@@ -287,7 +353,7 @@ This split is critical: health scoring needs current state; anomaly detection ne
 
 Every event table entry includes, in addition to entity-specific fields:
 
-- `event_group_id` (optional) — groups related events that are part of the same real-world change (e.g. a pipeline move that triggers stage change + revenue update). Assigned by the connector when it can detect causality, or by the ingestion layer when events arrive within a short window for the same entity.
+- `event_group_id` (required, auto-generated if not provided by connector) — groups related events that are part of the same real-world change (e.g. a pipeline move that triggers stage change + revenue update). Assigned by the connector when it can detect causality, or auto-generated by the ingestion layer (UUID) when the connector does not provide one. When events arrive within a short window (configurable, default 5 seconds) for the same entity and from the same source, the ingestion layer assigns the same group ID. **Group boundary rules:** a new group is started when: (a) the `event_type` differs from the previous event in the window, OR (b) the change direction reverses (e.g. a metric goes up then down within the window). This prevents unrelated events from being incorrectly grouped, which would make anomaly detection noisy. **Max group size:** a group is capped at 20 events (configurable). If the cap is reached within the window, a new group is started. This prevents runaway grouping under noisy webhook bursts. This field is critical for anomaly detection, causality tracking, and debugging multi-event flows — it must not be left empty.
 - `event_source_type` — one of `webhook`, `poll`, or `derived` (computed by the platform, e.g. a churn risk event). Distinguishes how the event entered the system.
 - `event_ingested_at` — when the platform received the event. Separate from `source_updated_at` (when it happened in the source) and `last_synced_at` (when state was written). This three-timestamp model enables: sequence reconstruction, ingestion latency monitoring, and debugging "what actually happened vs when we knew about it."
 
@@ -375,6 +441,7 @@ The reconciliation job produces a drift report per account. Drift is considered 
 - **Polling (source) always wins for state.** The polled data is the source of truth. If the stored state differs from what polling returns, the stored state is overwritten — provided the polled `source_updated_at` is newer or equal. This is a repair, not a conflict.
 - **Webhooks are advisory.** Webhook-delivered data is applied optimistically (faster updates), but reconciliation can overwrite it. Webhooks are never authoritative over a more recent poll result.
 - **Repair behaviour:** On mismatch, the reconciliation job overwrites the stored state with the polled version and logs a `reconciliation_repair` event including the before/after values. No manual intervention required for state repairs. Event history is never modified — only state tables are repaired.
+- **Max repair scope.** A safety cap limits reconciliation to overwriting at most 30% of records for a given account in a single run (configurable). If the repair scope exceeds this threshold, the reconciliation job halts for that account, flags it as `reconciliation_scope_exceeded`, and raises an operator alert. This protects against: bad connector responses overwriting valid data, API bugs returning incorrect state, and mapping errors causing mass corruption. The operator must acknowledge and approve large-scope repairs manually. The halt produces a `reconciliation_aborted` event with the reason, affected account IDs, and the repair scope that was attempted. This is surfaced alongside other sync audit events so the operator understands why data remains stale.
 
 **Last seen cursor.** The ingestion layer tracks a `last_seen_cursor` per entity type per account — the most recent `source_updated_at` or page cursor successfully processed. Polling resumes from this cursor rather than re-fetching everything.
 
@@ -388,6 +455,10 @@ When a connector is first connected to an organisation:
 4. **Completion signal.** When backfill completes for an account, the system emits a `backfill_complete` event. The Portfolio Health Agent waits for this before running its first health scoring pass on that account.
 5. **Webhook queueing during backfill.** Webhooks that arrive while backfill is in progress for an account are queued (not dropped, not applied immediately). Once backfill completes, queued webhooks are replayed in order, subject to normal idempotency and timestamp rules. This prevents: duplicate events from overlapping data windows, incorrect baselines from mixing historical and live data, and false anomalies immediately post-connect.
 
+**Webhook queue ordering guarantee.** Queued webhooks are keyed by `(accountId, entityType, entityId)` and replayed strictly ordered by `source_timestamp`, with `event_ingested_at` as fallback when source timestamps are identical. This per-entity ordering prevents state regressions (e.g. an opportunity appearing to move backwards through pipeline stages) and ensures health signals reflect the correct sequence of changes.
+
+**Webhook replay deduplication.** During the `transition` phase, replayed webhooks may overlap with data already ingested by polling (which ran during backfill). Before applying any replayed event, the ingestion layer checks the existing idempotency key `(source_connector, external_id, event_type, source_timestamp)`. If a matching event already exists, the replay is silently skipped. This reuses the existing idempotency infrastructure — no new dedup mechanism is needed, but the check must be explicitly enforced during replay (not assumed).
+
 ### Connector configuration in the database
 
 Each organisation that uses the integration layer has one or more connector config records. A connector config stores:
@@ -397,6 +468,16 @@ Each organisation that uses the integration layer has one or more connector conf
 - The sub-account mapping (which external account IDs map to which internal subaccount records)
 - Polling schedule preferences
 - Status and last-sync metadata
+
+Additionally, each connector config tracks a `syncPhase` field with three states:
+
+- **`backfill`** — initial historical data ingestion is in progress. Webhooks for this account are queued, not applied. Anomaly detection is suppressed.
+- **`transition`** — backfill is complete. Queued webhooks are being replayed in order, subject to normal idempotency and timestamp rules.
+- **`live`** — normal operation. Webhooks and polling both apply normally.
+
+This explicit state machine prevents race conditions between polling and webhooks during initial setup, false anomalies immediately post-connect, and ambiguous system behaviour during the backfill-to-live transition. The transition from `backfill` → `transition` is triggered by the `backfill_complete` event. The transition from `transition` → `live` is triggered when all queued webhooks have been replayed.
+
+The connector config also tracks a `configVersion` (text) — a SHA-256 hash recomputed whenever the config changes. Intelligence skill outputs reference this hash for full reproducibility.
 
 This builds on the existing `integrationConnections` table and `processConnectionMappings` pattern. The developer should evaluate whether the existing schema is sufficient or whether a new `connectorConfigs` table is needed for org-level connector state that spans subaccounts.
 
@@ -416,6 +497,64 @@ This builds on the existing `integrationConnections` table and `processConnectio
 - Sub-account mapping (GHL location IDs to internal subaccounts)
 - Polling frequency
 - Which webhook events to process
+
+### Data confidence layer
+
+The canonical data service exposes a lightweight data confidence assessment alongside query results. This is computed at the query layer, not stored in schema:
+
+- **`dataFreshnessScore`** (0.0–1.0) — derived from `last_synced_at` relative to the expected polling interval. A score of 1.0 means the data was synced within the last polling cycle. Decays linearly as staleness increases.
+- **`dataCompletenessScore`** (0.0–1.0) — derived from reconciliation drift reports. A score of 1.0 means no known missing or stale entities. Decreases proportionally to the drift percentage detected by the last reconciliation job.
+
+These scores are returned on all canonical data queries and included in skill inputs. Intelligence skills should factor confidence into their outputs — a health score computed from low-confidence data should itself report low confidence. This prevents agents from making high-confidence decisions on stale or incomplete data, especially during the early lifecycle of a connector.
+
+**Confidence propagation rule.** When a skill consumes multiple data sources to produce an output (e.g. health scoring combines contact, opportunity, conversation, and revenue metrics), the output confidence is `MIN(all contributing confidences)`. The weakest input determines overall confidence. A weighted model may replace this later, but `MIN` is the correct conservative default for v1.
+
+**Confidence floor.** If the propagated confidence falls below 0.3, the output is treated as unreliable: it may be displayed to operators (with a clear warning) but must not drive automated decisions (anomaly detection, alert generation, HITL proposals). This prevents agents from acting on garbage data, especially during early connector lifecycle or degraded connector states.
+
+**No-data vs zero-data distinction.** Every canonical data query returns a `dataStatus` field alongside results: `'fresh'` (data exists and is current), `'stale'` (data exists but exceeds staleness threshold), or `'missing'` (no data has ever been ingested for this entity type). This distinction is critical: "0 contacts exist" (fresh, count is zero) is fundamentally different from "we have no contact data" (missing). Without this, health scoring would incorrectly interpret missing data as zero activity, producing false anomalies.
+
+**Missing data behaviour in skills.** When any contributing data source has `dataStatus: 'missing'`, that source is excluded from scoring entirely (not treated as zero). The skill output must explicitly surface which accounts have missing data: e.g. "3 accounts excluded from portfolio scoring due to missing contact data." This prevents silent bias in portfolio-level outputs and ensures operators know which accounts are not yet fully covered.
+
+**Hard staleness cutoff.** If `last_synced_at` for an account exceeds 2x the configured polling interval, the canonical data service marks the dataset as `stale` and includes a `staleness_warning` in the response. Intelligence skills receiving stale data must degrade gracefully — they may still compute outputs but must set confidence to the minimum (0.1) and include the staleness warning in their output. This prevents misleading health scores when a connector has silently stopped syncing.
+
+### Connector health state
+
+Each connector config exposes a derived `healthStatus` field: `'healthy' | 'degraded' | 'failed'`. This is computed (not stored) from:
+
+- **`healthy`** — last sync succeeded, error rate below 5% over the last 24 hours, no sync delays exceeding 2x poll interval
+- **`degraded`** — error rate between 5-25%, or sync delays exceeding 2x poll interval but data is still flowing
+- **`failed`** — last 3+ consecutive syncs failed, or no successful sync in the last 24 hours
+
+The health status is surfaced in the connector config API response and on the operator dashboard. The system enforces explicit behaviour per health state:
+
+| Health state | Behaviour |
+|-------------|-----------|
+| `healthy` | Normal operation. All scoring, anomaly detection, and reporting proceed as configured. |
+| `degraded` | Data confidence scores are reduced proportionally to error rate/delay severity. Intelligence skills still run but outputs carry lower confidence. Operator receives a warning notification (not an alert). |
+| `failed` | Health scoring is suppressed for all accounts on this connector. Anomaly detection is suspended (to prevent false anomalies from missing data). Affected accounts are flagged as "data missing" in portfolio reports. Operator receives an alert. The Portfolio Health Agent skips these accounts entirely rather than producing misleading outputs. |
+
+These rules are enforced at the `canonicalDataService` layer — when a skill requests data for an account whose connector is `failed`, the response includes `connectorHealthStatus: 'failed'` and the skill is expected to handle it (skip scoring, report unavailability). This is not optional behaviour left to individual skill implementations.
+
+### Query scope guards
+
+All canonical data service methods enforce hard limits to prevent runaway queries:
+
+- **Maximum accounts per query:** 100 (configurable). Queries spanning more accounts must paginate.
+- **Maximum time range:** 90 days (configurable). Historical queries beyond this require explicit override.
+- **Maximum rows returned per entity type:** 10,000 (configurable). Results exceeding this are truncated with a warning.
+
+These limits are enforced at the `canonicalDataService` layer, not in individual callers. This provides a consistent safety net regardless of whether the caller is a skill, the Portfolio Health Agent, or an API route.
+
+### Sync event audit log
+
+The integration layer logs the following events for operational visibility:
+
+- **Sync events** — every polling cycle start/completion, with entity counts and duration
+- **Webhook events** — every webhook received, with normalisation outcome (accepted, rejected, duplicate)
+- **Reconciliation repairs** — every state repair performed during reconciliation, with before/after values
+- **Connector state transitions** — every `syncPhase` change (`backfill` → `transition` → `live`)
+
+These events are stored in the existing audit infrastructure and surfaced to operators alongside agent action logs. They are essential for diagnosing "why didn't the system detect X?" questions.
 
 ### Gate condition for Phase 3
 
