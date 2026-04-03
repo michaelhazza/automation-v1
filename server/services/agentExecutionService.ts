@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
@@ -277,7 +278,24 @@ export const agentExecutionService = {
         configCustomInstructions = link.customInstructions;
       }
 
-      await db.update(agentRuns).set({ tokenBudget }).where(eq(agentRuns.id, run.id));
+      // ── 2a. Snapshot resolved config for reproducibility ──────────────
+      const resolvedConfig = {
+        tokenBudget,
+        maxToolCalls,
+        timeoutMs,
+        skillSlugs: configSkillSlugs,
+        customInstructions: configCustomInstructions,
+        executionScope: request.executionScope,
+      };
+      const configHashValue = createHash('sha256').update(JSON.stringify(resolvedConfig)).digest('hex');
+
+      await db.update(agentRuns).set({
+        tokenBudget,
+        configSnapshot: resolvedConfig,
+        configHash: configHashValue,
+        resolvedSkillSlugs: configSkillSlugs,
+        resolvedLimits: { tokenBudget, maxToolCalls, timeoutMs },
+      }).where(eq(agentRuns.id, run.id));
 
       // ── 2b. Workspace limit check (pre-run guard) ─────────────────────
       // Skip subaccount limits for org runs; org+global limits still apply via budgetService
