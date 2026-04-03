@@ -57,7 +57,9 @@ router.get('/api/org/subaccounts/by-tags', authenticate, asyncHandler(async (req
   const filtersParam = req.query.filters as string | undefined;
   let filters: Array<{ key: string; value: string }> = [];
   if (filtersParam) {
-    try { filters = JSON.parse(filtersParam); } catch { /* empty filters */ }
+    try { filters = JSON.parse(filtersParam); } catch {
+      return res.status(400).json({ message: 'Invalid filters JSON' });
+    }
   }
   const subaccountIds = await subaccountTagService.getSubaccountsByTags(req.orgId!, filters);
   res.json(subaccountIds);

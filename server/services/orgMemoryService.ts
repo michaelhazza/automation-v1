@@ -177,8 +177,8 @@ export const orgMemoryService = {
           sql`UPDATE org_memory_entries SET embedding = ${embedding}::vector WHERE id = ${entryId}`
         );
       }
-    } catch {
-      // Embedding generation is best-effort
+    } catch (err) {
+      console.error(`[OrgMemory] Embedding generation failed for entry ${entryId}:`, err instanceof Error ? err.message : err);
     }
   },
 
@@ -211,7 +211,9 @@ export const orgMemoryService = {
       db.execute(sql`
         UPDATE org_memory_entries SET access_count = access_count + 1, last_accessed_at = now()
         WHERE id = ANY(${ids}::uuid[])
-      `).catch(() => {});
+      `).catch((err) => {
+        console.error('[OrgMemory] Access counter update failed:', err instanceof Error ? err.message : err);
+      });
     }
 
     // Filter by scope tags if provided

@@ -41,14 +41,13 @@ export const connectorPollingService = {
     let connection;
     try {
       connection = await integrationConnectionService.getDecryptedConnection(
-        // For org-level connectors, we use the connection directly by ID
-        null as unknown as string, // subaccountId not used for direct lookup
+        null, // Org-level connector — no subaccountId
         config.connectorType,
         config.organisationId,
         config.connectionId
       );
     } catch {
-      await connectorConfigService.updateSyncStatus(config.id, {
+      await connectorConfigService.updateSyncStatus(config.id, config.organisationId, {
         lastSyncAt: new Date(),
         lastSyncStatus: 'error',
         lastSyncError: 'Failed to get decrypted connection — credentials may be expired',
@@ -121,7 +120,7 @@ export const connectorPollingService = {
 
       // Update sync status
       const syncStatus = errors.length === 0 ? 'success' : (accountsSynced > 0 ? 'partial' : 'error');
-      await connectorConfigService.updateSyncStatus(config.id, {
+      await connectorConfigService.updateSyncStatus(config.id, config.organisationId, {
         lastSyncAt: new Date(),
         lastSyncStatus: syncStatus,
         lastSyncError: errors.length > 0 ? JSON.stringify(errors.slice(0, 5)) : null,
@@ -135,7 +134,7 @@ export const connectorPollingService = {
       return { success: errors.length === 0, accountsSynced, errors };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await connectorConfigService.updateSyncStatus(config.id, {
+      await connectorConfigService.updateSyncStatus(config.id, config.organisationId, {
         lastSyncAt: new Date(),
         lastSyncStatus: 'error',
         lastSyncError: msg,

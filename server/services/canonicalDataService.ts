@@ -25,18 +25,19 @@ export const canonicalDataService = {
       .where(eq(canonicalAccounts.organisationId, organisationId));
   },
 
-  async getAccountById(accountId: string) {
+  async getAccountById(accountId: string, organisationId: string) {
     const [account] = await db
       .select()
       .from(canonicalAccounts)
-      .where(eq(canonicalAccounts.id, accountId));
+      .where(and(eq(canonicalAccounts.id, accountId), eq(canonicalAccounts.organisationId, organisationId)));
     return account ?? null;
   },
 
   // ── Contact metrics ──────────────────────────────────────────────────────
 
-  async getContactMetrics(accountId: string, dateRange?: { since: Date }) {
+  async getContactMetrics(accountId: string, dateRange?: { since: Date }, organisationId?: string) {
     const conditions = [eq(canonicalContacts.accountId, accountId)];
+    if (organisationId) conditions.push(eq(canonicalContacts.organisationId, organisationId));
     if (dateRange?.since) conditions.push(gte(canonicalContacts.createdAt, dateRange.since));
 
     const [totalResult] = await db
@@ -78,11 +79,14 @@ export const canonicalDataService = {
 
   // ── Opportunity metrics ──────────────────────────────────────────────────
 
-  async getOpportunityMetrics(accountId: string) {
+  async getOpportunityMetrics(accountId: string, organisationId?: string) {
+    const conditions = [eq(canonicalOpportunities.accountId, accountId)];
+    if (organisationId) conditions.push(eq(canonicalOpportunities.organisationId, organisationId));
+
     const opps = await db
       .select()
       .from(canonicalOpportunities)
-      .where(eq(canonicalOpportunities.accountId, accountId));
+      .where(and(...conditions));
 
     const open = opps.filter(o => o.status === 'open');
     const won = opps.filter(o => o.status === 'won');
@@ -109,11 +113,14 @@ export const canonicalDataService = {
 
   // ── Conversation metrics ─────────────────────────────────────────────────
 
-  async getConversationMetrics(accountId: string) {
+  async getConversationMetrics(accountId: string, organisationId?: string) {
+    const conditions = [eq(canonicalConversations.accountId, accountId)];
+    if (organisationId) conditions.push(eq(canonicalConversations.organisationId, organisationId));
+
     const convos = await db
       .select()
       .from(canonicalConversations)
-      .where(eq(canonicalConversations.accountId, accountId));
+      .where(and(...conditions));
 
     const active = convos.filter(c => c.status === 'active');
     const totalMessages = convos.reduce((sum, c) => sum + c.messageCount, 0);
@@ -130,8 +137,9 @@ export const canonicalDataService = {
 
   // ── Revenue metrics ──────────────────────────────────────────────────────
 
-  async getRevenueMetrics(accountId: string, dateRange?: { since: Date }) {
+  async getRevenueMetrics(accountId: string, dateRange?: { since: Date }, organisationId?: string) {
     const conditions = [eq(canonicalRevenue.accountId, accountId)];
+    if (organisationId) conditions.push(eq(canonicalRevenue.organisationId, organisationId));
     if (dateRange?.since) conditions.push(gte(canonicalRevenue.transactionDate, dateRange.since));
 
     const records = await db
@@ -154,21 +162,27 @@ export const canonicalDataService = {
 
   // ── Health snapshots ─────────────────────────────────────────────────────
 
-  async getLatestHealthSnapshot(accountId: string) {
+  async getLatestHealthSnapshot(accountId: string, organisationId?: string) {
+    const conditions = [eq(healthSnapshots.accountId, accountId)];
+    if (organisationId) conditions.push(eq(healthSnapshots.organisationId, organisationId));
+
     const [snapshot] = await db
       .select()
       .from(healthSnapshots)
-      .where(eq(healthSnapshots.accountId, accountId))
+      .where(and(...conditions))
       .orderBy(desc(healthSnapshots.createdAt))
       .limit(1);
     return snapshot ?? null;
   },
 
-  async getHealthHistory(accountId: string, limit = 30) {
+  async getHealthHistory(accountId: string, limit = 30, organisationId?: string) {
+    const conditions = [eq(healthSnapshots.accountId, accountId)];
+    if (organisationId) conditions.push(eq(healthSnapshots.organisationId, organisationId));
+
     return db
       .select()
       .from(healthSnapshots)
-      .where(eq(healthSnapshots.accountId, accountId))
+      .where(and(...conditions))
       .orderBy(desc(healthSnapshots.createdAt))
       .limit(limit);
   },

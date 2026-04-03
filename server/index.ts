@@ -132,6 +132,9 @@ app.use(cors({
   credentials: true,
 }));
 
+// Webhook routes that need raw body must be mounted BEFORE json body parsing
+app.use(ghlWebhookRouter);
+
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -191,7 +194,7 @@ app.use(mcpRouter);
 app.use(agentInboxRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
-app.use(ghlWebhookRouter);
+// ghlWebhookRouter mounted before body parsing (needs raw body for HMAC)
 app.use(subaccountTagsRouter);
 app.use(orgMemoryRouter);
 app.use(pageProjectsRouter);

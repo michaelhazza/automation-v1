@@ -154,8 +154,8 @@ router.patch('/api/org/settings/execution-enabled', authenticate, requireOrgPerm
       resourceId: req.orgId!,
       metadata: { reason: reason ?? null },
     });
-  } catch {
-    // Audit logging should not block the toggle
+  } catch (err) {
+    console.error('[OrgAgentConfigs] Audit log failed for execution toggle:', err instanceof Error ? err.message : err);
   }
 
   res.json({ enabled });

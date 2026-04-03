@@ -645,7 +645,7 @@ export const agentExecutionService = {
 
       // Update lastRunAt on the correct config table
       if (isOrgRun && request.orgAgentConfigId) {
-        await orgAgentConfigService.updateLastRunAt(request.orgAgentConfigId);
+        await orgAgentConfigService.updateLastRunAt(request.orgAgentConfigId, request.organisationId);
       } else if (request.subaccountAgentId) {
         await db.update(subaccountAgents).set({
           lastRunAt: new Date(),

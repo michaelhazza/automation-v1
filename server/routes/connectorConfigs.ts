@@ -91,7 +91,7 @@ router.post('/api/org/connectors/:id/validate', authenticate, requireOrgPermissi
 
   const { integrationConnectionService } = await import('../services/integrationConnectionService.js');
   const connection = await integrationConnectionService.getDecryptedConnection(
-    null as unknown as string,
+    null, // Org-level connector — no subaccountId
     config.connectorType,
     config.organisationId,
     config.connectionId

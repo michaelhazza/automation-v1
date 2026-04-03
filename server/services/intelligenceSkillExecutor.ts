@@ -52,9 +52,9 @@ export async function executeQuerySubaccountCohort(
 
   const results = [];
   for (const account of matchingAccounts) {
-    const healthSnapshot = await canonicalDataService.getLatestHealthSnapshot(account.id);
-    const contactMetrics = await canonicalDataService.getContactMetrics(account.id);
-    const oppMetrics = await canonicalDataService.getOpportunityMetrics(account.id);
+    const healthSnapshot = await canonicalDataService.getLatestHealthSnapshot(account.id, context.organisationId);
+    const contactMetrics = await canonicalDataService.getContactMetrics(account.id, undefined, context.organisationId);
+    const oppMetrics = await canonicalDataService.getOpportunityMetrics(account.id, context.organisationId);
 
     results.push({
       accountId: account.id,
@@ -106,8 +106,8 @@ export async function executeReadOrgInsights(
         );
         return { insights: results, searchType: 'semantic', query: semanticQuery };
       }
-    } catch {
-      // Fall through to list-based retrieval
+    } catch (err) {
+      console.error('[IntelligenceSkills] Semantic search failed, falling back to list retrieval:', err instanceof Error ? err.message : err);
     }
   }
 
@@ -159,14 +159,14 @@ export async function executeComputeHealthScore(
   const accountId = input.account_id as string;
   if (!accountId) return { error: 'account_id is required' };
 
-  const account = await canonicalDataService.getAccountById(accountId);
+  const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
   if (!account) return { error: `Account ${accountId} not found` };
 
   // Gather metrics
-  const contactMetrics = await canonicalDataService.getContactMetrics(accountId);
-  const oppMetrics = await canonicalDataService.getOpportunityMetrics(accountId);
-  const convoMetrics = await canonicalDataService.getConversationMetrics(accountId);
-  const revenueMetrics = await canonicalDataService.getRevenueMetrics(accountId);
+  const contactMetrics = await canonicalDataService.getContactMetrics(accountId, undefined, context.organisationId);
+  const oppMetrics = await canonicalDataService.getOpportunityMetrics(accountId, context.organisationId);
+  const convoMetrics = await canonicalDataService.getConversationMetrics(accountId, context.organisationId);
+  const revenueMetrics = await canonicalDataService.getRevenueMetrics(accountId, undefined, context.organisationId);
 
   // Compute factor scores (0-100 each)
   const factors = [];
@@ -202,7 +202,7 @@ export async function executeComputeHealthScore(
   const compositeScore = Math.round(factors.reduce((sum, f) => sum + f.score * f.weight, 0));
 
   // Determine trend from history
-  const history = await canonicalDataService.getHealthHistory(accountId, 5);
+  const history = await canonicalDataService.getHealthHistory(accountId, 5, context.organisationId);
   let trend: 'improving' | 'stable' | 'declining' = 'stable';
   if (history.length >= 2) {
     const avgRecent = history.slice(0, 2).reduce((s, h) => s + h.score, 0) / 2;
@@ -253,7 +253,7 @@ export async function executeDetectAnomaly(
   }
 
   // Get historical baseline from health snapshots
-  const history = await canonicalDataService.getHealthHistory(accountId, 30);
+  const history = await canonicalDataService.getHealthHistory(accountId, 30, context.organisationId);
   if (history.length < 3) {
     return {
       anomalyDetected: false,
@@ -323,9 +323,9 @@ export async function executeComputeChurnRisk(
   if (!accountId) return { error: 'account_id is required' };
 
   // Get recent health snapshot history
-  const history = await canonicalDataService.getHealthHistory(accountId, 10);
-  const oppMetrics = await canonicalDataService.getOpportunityMetrics(accountId);
-  const convoMetrics = await canonicalDataService.getConversationMetrics(accountId);
+  const history = await canonicalDataService.getHealthHistory(accountId, 10, context.organisationId);
+  const oppMetrics = await canonicalDataService.getOpportunityMetrics(accountId, context.organisationId);
+  const convoMetrics = await canonicalDataService.getConversationMetrics(accountId, context.organisationId);
 
   const signals: Array<{ signal: string; score: number; weight: number }> = [];
 
@@ -397,7 +397,7 @@ export async function executeGeneratePortfolioReport(
   // Get health snapshots for all accounts
   const accountHealthData = [];
   for (const account of accounts) {
-    const snapshot = await canonicalDataService.getLatestHealthSnapshot(account.id);
+    const snapshot = await canonicalDataService.getLatestHealthSnapshot(account.id, context.organisationId);
     accountHealthData.push({
       displayName: account.displayName,
       accountId: account.id,

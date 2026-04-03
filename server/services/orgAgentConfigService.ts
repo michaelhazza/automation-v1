@@ -131,10 +131,10 @@ export const orgAgentConfigService = {
     return deleted;
   },
 
-  async updateLastRunAt(id: string) {
+  async updateLastRunAt(id: string, organisationId: string) {
     await db
       .update(orgAgentConfigs)
       .set({ lastRunAt: new Date(), updatedAt: new Date() })
-      .where(eq(orgAgentConfigs.id, id));
+      .where(and(eq(orgAgentConfigs.id, id), eq(orgAgentConfigs.organisationId, organisationId)));
   },
 };

@@ -1,4 +1,5 @@
-import { Router } from 'express';
+import { Router, raw } from 'express';
+import crypto from 'crypto';
 import { db } from '../../db/index.js';
 import { connectorConfigs, canonicalAccounts } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
@@ -12,25 +13,33 @@ const router = Router();
  * Security: HMAC-SHA256 signature verification against connector_configs.webhook_secret.
  *
  * Pattern follows server/routes/githubWebhook.ts
+ *
+ * Uses raw body parser to capture the original bytes for HMAC verification.
+ * The JSON body is parsed separately after signature validation.
  */
-router.post('/api/webhooks/ghl', async (req, res) => {
-  // Always ack immediately to prevent GHL timeout
-  res.status(200).json({ received: true });
+router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, res) => {
+  // req.body is a Buffer when using raw() parser
+  const rawBody = req.body as Buffer;
+  let event: Record<string, unknown>;
 
   try {
-    // Collect raw body for HMAC verification
-    // Note: if body-parser has already parsed, req.body is available
-    const rawBody = JSON.stringify(req.body);
-    const event = req.body as Record<string, unknown>;
+    event = JSON.parse(rawBody.toString('utf-8'));
+  } catch {
+    res.status(400).json({ error: 'Invalid JSON' });
+    return;
+  }
 
-    const locationId = event.locationId as string | undefined;
-    if (!locationId) {
-      console.warn('[GHL Webhook] Event missing locationId, skipping');
-      return;
-    }
+  const locationId = event.locationId as string | undefined;
+  if (!locationId) {
+    res.status(400).json({ error: 'Missing locationId' });
+    return;
+  }
 
-    // Find the connector config by matching the locationId to a canonical account
-    const [account] = await db
+  // Find the connector config by matching the locationId to a canonical account
+  let config;
+  let dbAccount;
+  try {
+    const [result] = await db
       .select({ config: connectorConfigs, account: canonicalAccounts })
       .from(canonicalAccounts)
       .innerJoin(connectorConfigs, eq(connectorConfigs.id, canonicalAccounts.connectorConfigId))
@@ -40,29 +49,43 @@ router.post('/api/webhooks/ghl', async (req, res) => {
       ))
       .limit(1);
 
-    if (!account) {
+    if (!result) {
       console.warn(`[GHL Webhook] No connector config found for locationId ${locationId}`);
+      res.status(200).json({ received: true });
+      return;
+    }
+    config = result.config;
+    dbAccount = result.account;
+  } catch (err) {
+    console.error('[GHL Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Internal error' });
+    return;
+  }
+
+  // Verify HMAC signature if webhook secret is configured
+  if (config.webhookSecret) {
+    const signature = req.headers['x-ghl-signature'] as string | undefined;
+    if (!signature) {
+      console.warn('[GHL Webhook] Missing signature header, rejecting');
+      res.status(401).json({ error: 'Missing signature' });
       return;
     }
 
-    const config = account.config;
-
-    // Verify HMAC signature if webhook secret is configured
-    if (config.webhookSecret) {
-      const signature = req.headers['x-ghl-signature'] as string | undefined;
-      if (!signature) {
-        console.warn('[GHL Webhook] Missing signature header, skipping');
-        return;
-      }
-
-      const adapter = adapters.ghl;
-      if (!adapter?.webhook?.verifySignature(Buffer.from(rawBody), signature, config.webhookSecret)) {
-        console.warn('[GHL Webhook] Invalid signature, skipping');
-        return;
-      }
+    const adapter = adapters.ghl;
+    if (!adapter?.webhook?.verifySignature(rawBody, signature, config.webhookSecret)) {
+      console.warn('[GHL Webhook] Invalid signature, rejecting');
+      res.status(401).json({ error: 'Invalid signature' });
+      return;
     }
+  } else {
+    console.warn(`[GHL Webhook] No webhook secret configured for connector ${config.id} — processing without HMAC verification`);
+  }
 
-    // Normalise the event
+  // Ack after signature verification
+  res.status(200).json({ received: true });
+
+  // Process the event asynchronously (response already sent)
+  try {
     const adapter = adapters.ghl;
     if (!adapter?.webhook?.normaliseEvent) {
       console.warn('[GHL Webhook] GHL adapter has no webhook normaliser');
@@ -75,8 +98,6 @@ router.post('/api/webhooks/ghl', async (req, res) => {
       return;
     }
 
-    // Upsert the entity based on event type
-    const dbAccount = account.account;
     const orgId = config.organisationId;
 
     switch (normalised.entityType) {
@@ -122,7 +143,7 @@ router.post('/api/webhooks/ghl', async (req, res) => {
 
     console.log(`[GHL Webhook] Processed ${normalised.eventType} for account ${locationId}`);
   } catch (err) {
-    console.error('[GHL Webhook] Error processing event:', err instanceof Error ? err.message : err);
+    console.error(`[GHL Webhook] Error processing event for account ${locationId}:`, err instanceof Error ? err.message : err);
   }
 });
 

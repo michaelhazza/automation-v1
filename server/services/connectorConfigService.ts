@@ -85,10 +85,10 @@ export const connectorConfigService = {
     return deleted;
   },
 
-  async updateSyncStatus(id: string, status: { lastSyncAt: Date; lastSyncStatus: string; lastSyncError?: string | null }) {
+  async updateSyncStatus(id: string, organisationId: string, status: { lastSyncAt: Date; lastSyncStatus: string; lastSyncError?: string | null }) {
     await db
       .update(connectorConfigs)
       .set({ ...status, updatedAt: new Date() })
-      .where(eq(connectorConfigs.id, id));
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
   },
 };
