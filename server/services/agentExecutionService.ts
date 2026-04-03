@@ -8,6 +8,8 @@ import {
   tasks,
   taskActivities,
   taskDeliverables,
+  organisations,
+  subaccounts,
 } from '../db/schema/index.js';
 import { agentService } from './agentService.js';
 import { devContextService } from './devContextService.js';
@@ -166,6 +168,57 @@ export const agentExecutionService = {
           deliverablesCreated: existing.deliverablesCreated,
         };
       }
+    }
+
+    // ── 0b. Org + subaccount pre-run validation ────────────────────────
+    // Kill switch: reject if org is suspended (single enforcement point
+    // for all execution paths — scheduler, manual, trigger, handoff).
+    const [org] = await db
+      .select({ status: organisations.status })
+      .from(organisations)
+      .where(eq(organisations.id, request.organisationId))
+      .limit(1);
+
+    if (!org || org.status !== 'active') {
+      throw {
+        statusCode: 403,
+        message: `Organisation is ${org?.status ?? 'not found'} — agent execution is disabled.`,
+        errorCode: 'org_suspended',
+      };
+    }
+
+    // Validate subaccount exists, is active, and belongs to the org
+    const [subaccount] = await db
+      .select({ status: subaccounts.status, organisationId: subaccounts.organisationId })
+      .from(subaccounts)
+      .where(and(
+        eq(subaccounts.id, request.subaccountId),
+        isNull(subaccounts.deletedAt),
+      ))
+      .limit(1);
+
+    if (!subaccount) {
+      throw {
+        statusCode: 404,
+        message: `Subaccount ${request.subaccountId} not found or deleted.`,
+        errorCode: 'subaccount_not_found',
+      };
+    }
+
+    if (subaccount.organisationId !== request.organisationId) {
+      throw {
+        statusCode: 403,
+        message: 'Subaccount does not belong to this organisation.',
+        errorCode: 'scope_violation',
+      };
+    }
+
+    if (subaccount.status !== 'active') {
+      throw {
+        statusCode: 403,
+        message: `Subaccount is ${subaccount.status} — agent execution is disabled.`,
+        errorCode: 'subaccount_suspended',
+      };
     }
 
     // ── 1. Create the run record ──────────────────────────────────────────
