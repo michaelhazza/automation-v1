@@ -47,6 +47,7 @@ import {
 } from '../config/limits.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { langfuse, withTrace } from '../instrumentation.js';
+import { logger } from '../lib/logger.js';
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 
 // ---------------------------------------------------------------------------
@@ -171,8 +172,11 @@ export const agentExecutionService = {
     }
 
     // ── 0b. Org + subaccount pre-run validation ────────────────────────
-    // Kill switch: reject if org is suspended (single enforcement point
-    // for all execution paths — scheduler, manual, trigger, handoff).
+    // INVARIANT: This is the ONLY entry point for agent execution.
+    // All callers (scheduler, manual, trigger, handoff, subtask wakeup)
+    // MUST route through executeRun(). Never bypass this function.
+    //
+    // Kill switch: reject if org is suspended (single enforcement point).
     const [org] = await db
       .select({ status: organisations.status })
       .from(organisations)
@@ -180,6 +184,14 @@ export const agentExecutionService = {
       .limit(1);
 
     if (!org || org.status !== 'active') {
+      logger.warn('agent_run.rejected', {
+        reason: 'org_suspended',
+        orgId: request.organisationId,
+        orgStatus: org?.status ?? 'not_found',
+        agentId: request.agentId,
+        subaccountId: request.subaccountId,
+        runType: request.runType,
+      });
       throw {
         statusCode: 403,
         message: `Organisation is ${org?.status ?? 'not found'} — agent execution is disabled.`,
@@ -198,6 +210,13 @@ export const agentExecutionService = {
       .limit(1);
 
     if (!subaccount) {
+      logger.warn('agent_run.rejected', {
+        reason: 'subaccount_not_found',
+        orgId: request.organisationId,
+        agentId: request.agentId,
+        subaccountId: request.subaccountId,
+        runType: request.runType,
+      });
       throw {
         statusCode: 404,
         message: `Subaccount ${request.subaccountId} not found or deleted.`,
@@ -206,6 +225,14 @@ export const agentExecutionService = {
     }
 
     if (subaccount.organisationId !== request.organisationId) {
+      logger.error('agent_run.rejected', {
+        reason: 'scope_violation',
+        orgId: request.organisationId,
+        subaccountOrgId: subaccount.organisationId,
+        agentId: request.agentId,
+        subaccountId: request.subaccountId,
+        runType: request.runType,
+      });
       throw {
         statusCode: 403,
         message: 'Subaccount does not belong to this organisation.',
@@ -214,6 +241,14 @@ export const agentExecutionService = {
     }
 
     if (subaccount.status !== 'active') {
+      logger.warn('agent_run.rejected', {
+        reason: 'subaccount_suspended',
+        orgId: request.organisationId,
+        agentId: request.agentId,
+        subaccountId: request.subaccountId,
+        subaccountStatus: subaccount.status,
+        runType: request.runType,
+      });
       throw {
         statusCode: 403,
         message: `Subaccount is ${subaccount.status} — agent execution is disabled.`,
