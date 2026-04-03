@@ -652,3 +652,231 @@ Modify `server/services/agentExecutionService.ts`:
 - [ ] `trigger_account_intervention` goes through HITL gate correctly
 - [ ] End-to-end: metric changes → anomaly detected → HITL proposal generated → approval → intervention recorded
 - [ ] Data isolation: cohort queries return summaries, not raw subaccount data
+
+---
+
+## Phase 4: Configuration Template System Extension
+
+### 4.1 Schema Migration: Template extension fields
+
+- [ ] Add to `system_hierarchy_templates`:
+  - `requiredConnectorType` (text, nullable — e.g. `'ghl'`)
+  - `operationalDefaults` (jsonb, nullable — health score weights, anomaly thresholds, scan frequency, report schedule, alert config)
+  - `memorySeedsJson` (jsonb, nullable — array of `{content, entryType, scopeTags}` to pre-populate org memory)
+  - `requiredOperatorInputs` (jsonb, nullable — array of `{key, label, type, required}` describing what the operator must provide during activation)
+
+- [ ] Add to `system_hierarchy_template_slots`:
+  - `skillEnablementMap` (jsonb, nullable — `{skillSlug: boolean}` per-slot skill overrides)
+  - `executionScope` (text, nullable — `'subaccount' | 'org'`, inherited from system agent if not set)
+
+- [ ] Add to `hierarchy_templates` (org level):
+  - `appliedConnectorConfigId` (FK → connector_configs, nullable)
+  - `operationalConfig` (jsonb, nullable — org-specific overrides of template defaults)
+
+- [ ] Add to `org_agent_configs`:
+  - `appliedTemplateId` (FK → hierarchy_templates, nullable)
+  - `appliedTemplateVersion` (integer, nullable)
+
+### 4.2 Service: Extend `systemTemplateService`
+
+Modify `server/services/systemTemplateService.ts`:
+
+- [ ] Update `loadToSubaccount` → rename or extend to `loadToOrg(systemTemplateId, organisationId)`:
+  - For each slot: check `executionScope` (from slot or from system agent)
+  - `'subaccount'` scoped agents: skip (they get installed when template is applied to a subaccount)
+  - `'org'` scoped agents: create/reuse agent in `agents` table + create `orgAgentConfigs` entry
+  - Apply `skillEnablementMap` from slot to the agent's `skillSlugs`/`allowedSkillSlugs`
+- [ ] Handle `requiredConnectorType`:
+  - Check if org already has a matching `connector_config`
+  - If not: return activation checklist requiring operator to set up the connector
+  - If yes: link it
+- [ ] Handle `operationalDefaults`:
+  - Write defaults to org's `operationalConfig` (on the org-level `hierarchyTemplates` record)
+  - Operator can override later
+- [ ] Handle `memorySeedsJson`:
+  - Insert seed entries into `org_memory_entries` via `orgMemoryService.createEntry()`
+- [ ] Schedule org-level agents' heartbeats via `agentScheduleService`
+- [ ] Return activation summary: agents provisioned, connector status, config applied
+
+### 4.3 Service: Config version hash
+
+New utility or extend `server/services/orgConfigService.ts`:
+
+- [ ] `computeConfigVersion(orgId)` — SHA-256 hash of:
+  - `appliedTemplateVersion`
+  - Operator overrides (operationalConfig jsonb)
+  - Active connector config version (lastSyncAt or a connector config hash)
+- [ ] Store hash on org config record
+- [ ] Recompute whenever any input changes
+- [ ] Intelligence skill outputs reference this hash via `configVersion` field on `health_snapshots`
+
+### 4.4 Build GHL Agency Template
+
+Create the first system template as a seed/migration:
+
+- [ ] Insert `system_hierarchy_templates` record:
+  - `name`: "GHL Agency Intelligence"
+  - `requiredConnectorType`: `'ghl'`
+  - `operationalDefaults`: `{ healthScoreWeights: {pipelineVelocity: 0.30, conversationEngagement: 0.25, contactGrowth: 0.20, revenuetrend: 0.15, platformActivity: 0.10}, anomalyThresholds: {default: 2.0}, scanFrequencyHours: 4, reportSchedule: {dayOfWeek: 1, hour: 8}, alertDestinations: [] }`
+  - `memorySeedsJson`: `[{content: "This organisation manages a portfolio of client accounts. Monitor for pipeline stagnation, lead volume drops, and conversation engagement decline.", entryType: "preference"}]`
+  - `requiredOperatorInputs`: `[{key: "ghl_oauth", label: "GHL OAuth Credentials", type: "oauth", required: true}, {key: "slack_webhook", label: "Slack Webhook URL", type: "url", required: false}, {key: "alert_email", label: "Alert Email", type: "email", required: true}]`
+
+- [ ] Insert template slots:
+  - Orchestrator (executionScope: subaccount, standard skills)
+  - BA Agent (executionScope: subaccount, intake skills)
+  - Portfolio Health Agent (executionScope: org, intelligence skills enabled via `skillEnablementMap`)
+
+### 4.5 Routes: Template activation
+
+Modify or extend `server/routes/systemTemplates.ts`:
+
+- [ ] `POST /api/system-templates/:id/activate` — activates a system template for the authenticated org
+  - Calls `systemTemplateService.loadToOrg()`
+  - Returns activation summary + required operator inputs
+- [ ] `POST /api/org/template-config` — submit operator inputs (OAuth credentials, Slack webhook, email)
+  - Validates inputs, stores credentials, completes connector setup
+  - Triggers first scan cycle
+
+### 4.6 UI: Template activation flow
+
+- [ ] System template library page (or extend existing `SystemCompanyTemplatesPage`)
+- [ ] "Activate" button on template → opens activation wizard
+- [ ] Wizard steps: review what will be provisioned → provide required inputs (OAuth, Slack, email) → confirm
+- [ ] Post-activation dashboard showing: agents provisioned, connector status, next scan time
+
+### 4.7 Operator customisation UI
+
+- [ ] Settings page for active template config:
+  - Health score weight sliders
+  - Anomaly sensitivity slider
+  - Scan frequency dropdown
+  - Report schedule picker
+  - Alert destination management (add/remove Slack/email)
+  - HITL gate toggles per intervention type
+
+### 4.8 Template versioning
+
+- [ ] When system admin updates a template:
+  - Increment `version` on `system_hierarchy_templates`
+  - Do NOT auto-update existing org installations
+- [ ] Admin can view which orgs are on which template version
+- [ ] Org admin can view if a newer template version is available
+- [ ] "Update" action shows diff preview and applies new config (with confirmation)
+
+### 4.9 Testing & Verification
+
+- [ ] Create GHL Agency Template as system template
+- [ ] Activate template on a test org — verify agents provisioned correctly
+- [ ] Org-scoped agents created via `orgAgentConfigs`, subaccount-scoped via `subaccountAgents`
+- [ ] Connector config created and linked
+- [ ] Operator inputs (OAuth, Slack) stored correctly
+- [ ] Memory seeds inserted into org memory
+- [ ] Portfolio Health Agent's first heartbeat scheduled
+- [ ] Operator can customise weights/thresholds after activation
+- [ ] Template version update notification works
+
+---
+
+## Phase 5: Org-Level Workspace
+
+### 5.1 Schema Migration: Nullable subaccountId on workspace tables
+
+- [ ] Make `tasks.subaccount_id` nullable (drop NOT NULL)
+- [ ] Make `scheduled_tasks.subaccount_id` nullable (drop NOT NULL)
+- [ ] Make `agent_triggers.subaccount_id` nullable (drop NOT NULL)
+- [ ] Make `agent_triggers.subaccount_agent_id` nullable (drop NOT NULL)
+- [ ] Make `integration_connections.subaccount_id` nullable (drop NOT NULL)
+- [ ] Add partial indexes for org-level queries:
+  - `tasks`: `(organisation_id, status) WHERE subaccount_id IS NULL`
+  - `scheduled_tasks`: `(organisation_id, is_active) WHERE subaccount_id IS NULL`
+  - `agent_triggers`: `(organisation_id, event_type) WHERE subaccount_id IS NULL`
+- [ ] Update unique constraint on `integration_connections`: handle nullable subaccountId (partial index)
+
+### 5.2 Widen trigger event types
+
+- [ ] Extend `agentTriggers.eventType` TypeScript type to include: `'org_task_created' | 'org_task_moved' | 'org_agent_completed'`
+- [ ] Update `triggerService.checkAndFire()` to handle org-level events (query with `subaccountId IS NULL`)
+- [ ] Add org-level rate cap (separate from subaccount rate cap)
+
+### 5.3 Service updates for org-level tasks
+
+Modify `server/services/taskService.ts`:
+
+- [ ] Accept nullable `subaccountId` on `createTask`, `listTasks`, `updateTask`, `moveTask`
+- [ ] When `subaccountId` is null: scope queries to `organisationId` only
+- [ ] Guard existing task queries that assume `subaccountId` is present
+
+### 5.4 Service updates for org-level scheduled tasks
+
+Modify `server/services/scheduledTaskService.ts`:
+
+- [ ] Accept nullable `subaccountId` on CRUD methods
+- [ ] Org-level scheduled tasks assigned to org agents (via `orgAgentConfigs`)
+- [ ] Scheduler resolves agent execution through org agent config path
+
+### 5.5 Routes: Org-level workspace
+
+New or modified routes:
+
+- [ ] `GET /api/org/board-config` — org-level board config (already partially supported)
+- [ ] `GET /api/org/tasks` — list org-level tasks (subaccountId IS NULL)
+- [ ] `POST /api/org/tasks` — create org-level task
+- [ ] `PATCH /api/org/tasks/:id` — update org task
+- [ ] `PATCH /api/org/tasks/:id/move` — move org task
+- [ ] `DELETE /api/org/tasks/:id` — delete org task
+- [ ] `GET /api/org/scheduled-tasks` — list org scheduled tasks
+- [ ] `POST /api/org/scheduled-tasks` — create org scheduled task
+- [ ] `GET /api/org/triggers` — list org triggers
+- [ ] `POST /api/org/triggers` — create org trigger
+- [ ] `GET /api/org/connections` — list org-level connections
+- [ ] `POST /api/org/connections` — create org-level connection
+
+### 5.6 Cross-boundary writes
+
+Modify task-creation skills in `server/services/skillExecutor.ts`:
+
+- [ ] Add optional `targetSubaccountId` parameter to `create_task` skill when invoked from org context
+- [ ] Validate target subaccount belongs to same organisation
+- [ ] Check `allowedSubaccountIds` on `orgAgentConfigs` (if set, only those subaccounts are valid targets)
+- [ ] Cross-boundary task creation is HITL-gated (gate level `review`)
+- [ ] Enrich action audit record: `sourceContext: 'org'`, `reasoningSummary` from agent
+
+### 5.7 UI: Org-level workspace
+
+- [ ] Org board page (kanban view for org-level tasks)
+- [ ] Org scheduled tasks page
+- [ ] Org triggers management page
+- [ ] Org connections page
+- [ ] Navigation entries for org workspace in admin layout
+
+### 5.8 Testing & Verification
+
+- [ ] Org-level tasks: create, move, update, delete on org board
+- [ ] Org-level scheduled tasks fire correctly
+- [ ] Org-level triggers fire on org events (`org_task_created`, etc.)
+- [ ] Org-level connections created and usable by org agents
+- [ ] Cross-boundary write: org agent creates task on subaccount board via HITL gate
+- [ ] `allowedSubaccountIds` restriction enforced
+- [ ] Audit records include `sourceContext` and `reasoningSummary`
+- [ ] Zero regression on subaccount workspace flows
+
+---
+
+## Summary: Task Count by Phase
+
+| Phase | Tasks | Estimated Complexity |
+|-------|-------|---------------------|
+| Phase 1: Org-Level Agent Execution | 12 task groups | High — foundational, touches many files |
+| Phase 2: Integration Layer + GHL Connector | 10 task groups | High — new subsystem, external API integration |
+| Phase 3: Cross-Subaccount Intelligence | 14 task groups | Very high — largest phase, most new code |
+| Phase 4: Configuration Template System | 9 task groups | Medium — extends existing system |
+| Phase 5: Org-Level Workspace | 8 task groups | Medium — repeats nullable pattern from Phase 1 |
+| **Total** | **53 task groups** | |
+
+### Implementation Order Notes
+
+- Phase 1 must complete before any other phase
+- Phase 2 can overlap with Phase 1 (different subsystem) but must complete before Phase 3
+- Phase 3 depends on both Phase 1 and Phase 2
+- Phase 4 depends on Phase 3
+- Phase 5 is independent of Phases 2-4 and can be built any time after Phase 1
