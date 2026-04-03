@@ -5,7 +5,7 @@ import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { hitlService } from './hitlService.js';
 import { auditService } from './auditService.js';
-import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,10 @@ export const reviewService = {
     // Emit real-time update so the review queue badge increments
     if (action.subaccountId) {
       emitSubaccountUpdate(action.subaccountId, 'review:item_created', {
+        reviewItemId: item.id, actionType: reviewPayload.actionType,
+      });
+    } else {
+      emitOrgUpdate(action.organisationId, 'review:item_created', {
         reviewItemId: item.id, actionType: reviewPayload.actionType,
       });
     }

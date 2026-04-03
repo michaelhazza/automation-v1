@@ -55,7 +55,8 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
 export interface SkillExecutionContext {
   runId: string;
   organisationId: string;
-  subaccountId: string;
+  /** Null for org-level agent runs */
+  subaccountId: string | null;
   agentId: string;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   handoffDepth?: number;
@@ -71,6 +72,18 @@ interface SkillExecutionParams {
   skillName: string;
   input: Record<string, unknown>;
   context: SkillExecutionContext;
+}
+
+/**
+ * Asserts that the skill execution context has a subaccountId.
+ * Call this at the top of any skill that requires subaccount scope.
+ * Returns the subaccountId as a non-null string for downstream use.
+ */
+function requireSubaccountContext(context: SkillExecutionContext, skillName: string): string {
+  if (!context.subaccountId) {
+    throw new Error(`Skill '${skillName}' requires a subaccount context but this is an org-level run. Use a subaccount-scoped agent or specify a targetSubaccountId.`);
+  }
+  return context.subaccountId;
 }
 
 // ---------------------------------------------------------------------------
