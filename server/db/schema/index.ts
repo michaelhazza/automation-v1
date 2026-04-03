@@ -71,3 +71,5 @@ export * from './orgAgentConfigs';
 export * from './connectorConfigs';
 export * from './canonicalAccounts';
 export * from './canonicalEntities';
+export * from './subaccountTags';
+export * from './orgMemories';
