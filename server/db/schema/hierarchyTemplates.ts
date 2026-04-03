@@ -34,6 +34,10 @@ export const hierarchyTemplates = pgTable(
     // Version of the parser that produced this import (for reproducibility)
     parserVersion: text('parser_version'),
 
+    // Phase 4: Configuration template extension
+    appliedConnectorConfigId: uuid('applied_connector_config_id'),
+    operationalConfig: jsonb('operational_config').$type<Record<string, unknown>>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
