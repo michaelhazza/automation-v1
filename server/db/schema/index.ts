@@ -68,3 +68,6 @@ export * from './formSubmissions';
 export * from './pageViews';
 export * from './conversionEvents';
 export * from './orgAgentConfigs';
+export * from './connectorConfigs';
+export * from './canonicalAccounts';
+export * from './canonicalEntities';
