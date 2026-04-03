@@ -362,6 +362,7 @@ export const scheduledTaskService = {
         organisationId: st.organisationId,
         executionScope: 'subaccount',
         runType: 'scheduled',
+        runSource: 'scheduler',
         executionMode: 'api',
         taskId: task.id,
         triggerContext: {
@@ -516,6 +517,7 @@ export const scheduledTaskService = {
         organisationId: st.organisationId,
         executionScope: 'subaccount',
         runType: 'scheduled',
+        runSource: 'scheduler',
         executionMode: 'api',
         taskId: run.taskId,
         triggerContext: {

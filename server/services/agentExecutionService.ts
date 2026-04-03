@@ -114,6 +114,8 @@ export interface AgentRunRequest {
   idempotencyKey?: string;
   /** For org-level runs, the org agent config ID */
   orgAgentConfigId?: string;
+  /** How this run was sourced — for observability */
+  runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
 }
 
 export interface AgentRunResult {
@@ -208,6 +210,7 @@ export const agentExecutionService = {
         runType: request.runType,
         executionMode: request.executionMode ?? 'api',
         executionScope: request.executionScope,
+        runSource: request.runSource ?? null,
         status: 'running',
         triggerContext: request.triggerContext ?? null,
         taskId: request.taskId ?? null,

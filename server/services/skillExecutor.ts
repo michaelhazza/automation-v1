@@ -1313,6 +1313,7 @@ async function executeSpawnSubAgents(
             organisationId: context.organisationId,
             executionScope: context.subaccountId ? 'subaccount' : 'org',
             runType: 'triggered',
+            runSource: 'sub_agent',
             executionMode: 'api',
             taskId: job.task.id,
             triggerContext: {

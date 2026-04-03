@@ -33,6 +33,9 @@ export const agentRuns = pgTable(
     // Org vs subaccount execution scope (never inferred from nullable fields)
     executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
 
+    // How the run was sourced — explicit for observability and segmentation
+    runSource: text('run_source').$type<'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system'>(),
+
     // Run result classification (success/partial/failed)
     runResultStatus: text('run_result_status').$type<'success' | 'partial' | 'failed'>(),
 

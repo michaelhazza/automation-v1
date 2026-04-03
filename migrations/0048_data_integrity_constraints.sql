@@ -62,3 +62,23 @@ COMMENT ON COLUMN org_agent_configs.schedule_cron IS
 
 CREATE INDEX IF NOT EXISTS agent_runs_org_created_idx
   ON agent_runs (organisation_id, created_at DESC);
+
+-- =============================================================================
+-- 5. Run source field — explicit observability for how a run was initiated
+-- =============================================================================
+
+ALTER TABLE agent_runs ADD COLUMN run_source text;
+
+ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_run_source_enum
+  CHECK (run_source IS NULL OR run_source IN ('scheduler', 'manual', 'trigger', 'handoff', 'sub_agent', 'system'));
+
+-- Backfill from runType where possible (best-effort for existing rows)
+UPDATE agent_runs SET run_source = CASE
+  WHEN run_type = 'scheduled' THEN 'scheduler'
+  WHEN run_type = 'manual' THEN 'manual'
+  WHEN run_type = 'triggered' AND is_sub_agent = true THEN 'sub_agent'
+  WHEN run_type = 'triggered' AND parent_run_id IS NOT NULL THEN 'handoff'
+  WHEN run_type = 'triggered' THEN 'trigger'
+  ELSE NULL
+END
+WHERE run_source IS NULL;

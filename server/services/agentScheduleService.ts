@@ -168,6 +168,7 @@ export const agentScheduleService = {
           organisationId: data.organisationId,
           executionScope: 'subaccount',
           runType: 'scheduled',
+          runSource: 'scheduler',
           executionMode: 'api',
           triggerContext: { source: 'schedule' },
         });
@@ -178,6 +179,7 @@ export const agentScheduleService = {
 
     // Register the worker that processes org-level scheduled agent runs
     await pgboss.work(AGENT_ORG_RUN_QUEUE, async (job) => {
+      const jobId = (job as unknown as { id: string }).id;
       const data = job.data as {
         orgAgentConfigId: string;
         agentId: string;
@@ -197,8 +199,8 @@ export const agentScheduleService = {
       console.log(`[AgentScheduler] Running org-level scheduled agent: ${data.agentId} for org ${data.organisationId}`);
 
       try {
-        // Deterministic idempotency key: floor timestamp to 10s window for dedupe
-        const scheduleTickKey = `org-scheduled:${data.agentId}:${data.organisationId}:${Math.floor(Date.now() / 10000)}`;
+        // Deterministic idempotency key: use pg-boss job ID (unique per cron tick)
+        const scheduleTickKey = `org-scheduled:${data.agentId}:${data.organisationId}:${jobId}`;
 
         await agentExecutionService.executeRun({
           agentId: data.agentId,
@@ -206,6 +208,7 @@ export const agentScheduleService = {
           executionScope: 'org',
           orgAgentConfigId: data.orgAgentConfigId,
           runType: 'scheduled',
+          runSource: 'scheduler',
           executionMode: 'api',
           idempotencyKey: scheduleTickKey,
           triggerContext: { source: 'org-schedule' },
@@ -238,6 +241,7 @@ export const agentScheduleService = {
           organisationId: data.organisationId,
           executionScope: 'subaccount',
           runType: 'triggered',
+          runSource: 'handoff',
           executionMode: 'api',
           taskId: data.taskId,
           handoffDepth: data.handoffDepth,
@@ -283,6 +287,7 @@ export const agentScheduleService = {
           organisationId: data.organisationId,
           executionScope: 'subaccount',
           runType: 'triggered',
+          runSource: 'trigger',
           executionMode: 'api',
           triggerContext: data.triggerContext,
         });
