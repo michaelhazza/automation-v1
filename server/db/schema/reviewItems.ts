@@ -17,7 +17,6 @@ export const reviewItems = pgTable(
       .notNull()
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
-      .notNull()
       .references(() => subaccounts.id),
     actionId: uuid('action_id')
       .notNull()

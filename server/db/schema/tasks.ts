@@ -13,7 +13,6 @@ export const tasks = pgTable(
       .notNull()
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
-      .notNull()
       .references(() => subaccounts.id),
     title: text('title').notNull(),
     description: text('description'),

@@ -27,6 +27,12 @@ export const systemHierarchyTemplates = pgTable(
     // Quick reference count of agents in the template
     agentCount: integer('agent_count').notNull().default(0),
 
+    // Configuration template extension (Phase 4)
+    requiredConnectorType: text('required_connector_type'),
+    operationalDefaults: jsonb('operational_defaults').$type<Record<string, unknown>>(),
+    memorySeedsJson: jsonb('memory_seeds_json').$type<Array<{ content: string; entryType: string; scopeTags?: Record<string, string> }>>(),
+    requiredOperatorInputs: jsonb('required_operator_inputs').$type<Array<{ key: string; label: string; type: string; required: boolean }>>(),
+
     // Only published templates are visible to orgs
     isPublished: boolean('is_published').notNull().default(true),
 

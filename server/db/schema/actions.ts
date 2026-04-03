@@ -17,7 +17,6 @@ export const actions = pgTable(
       .notNull()
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
-      .notNull()
       .references(() => subaccounts.id),
     agentId: uuid('agent_id')
       .notNull()
@@ -25,6 +24,9 @@ export const actions = pgTable(
     agentRunId: uuid('agent_run_id')
       .references(() => agentRuns.id),
     parentActionId: uuid('parent_action_id'),
+
+    // Explicit scope for idempotency separation
+    actionScope: text('action_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
 
     // Action definition
     actionType: text('action_type').notNull(),

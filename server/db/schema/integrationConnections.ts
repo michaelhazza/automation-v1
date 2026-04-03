@@ -15,7 +15,6 @@ export const integrationConnections = pgTable(
       .notNull()
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
-      .notNull()
       .references(() => subaccounts.id),
     providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'custom'>(),
     authType: text('auth_type').notNull().$type<'oauth2' | 'api_key' | 'service_account' | 'github_app'>(),

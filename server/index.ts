@@ -70,6 +70,11 @@ import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
+import connectorConfigsRouter from './routes/connectorConfigs.js';
+import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
+import subaccountTagsRouter from './routes/subaccountTags.js';
+import orgMemoryRouter from './routes/orgMemory.js';
 import pageProjectsRouter from './routes/pageProjects.js';
 import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
@@ -126,6 +131,9 @@ app.use(cors({
   origin: corsOrigin,
   credentials: true,
 }));
+
+// Webhook routes that need raw body must be mounted BEFORE json body parsing
+app.use(ghlWebhookRouter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -184,6 +192,11 @@ app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(orgAgentConfigsRouter);
+app.use(connectorConfigsRouter);
+// ghlWebhookRouter mounted before body parsing (needs raw body for HMAC)
+app.use(subaccountTagsRouter);
+app.use(orgMemoryRouter);
 app.use(pageProjectsRouter);
 app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);

@@ -1,4 +1,4 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -36,17 +36,25 @@ export const integrationConnectionService = {
    * cross-tenant token leakage if a stale subaccountId is passed by mistake.
    */
   async getDecryptedConnection(
-    subaccountId: string,
+    subaccountId: string | null,
     provider: string,
     organisationId: string,
     connectionId?: string,
   ): Promise<DecryptedConnection> {
     const conditions = [
-      eq(integrationConnections.subaccountId, subaccountId),
       eq(integrationConnections.organisationId, organisationId),
       eq(integrationConnections.providerType, provider as IntegrationConnection['providerType']),
       eq(integrationConnections.connectionStatus, 'active'),
     ];
+
+    // For subaccount-scoped lookups, filter by subaccountId.
+    // For org-level lookups (null subaccountId), rely on connectionId or org+provider match.
+    if (subaccountId) {
+      conditions.push(eq(integrationConnections.subaccountId, subaccountId));
+    } else if (!connectionId) {
+      // Org-level lookup without connectionId: find connections with null subaccountId
+      conditions.push(isNull(integrationConnections.subaccountId));
+    }
 
     if (connectionId) {
       conditions.push(eq(integrationConnections.id, connectionId));
@@ -59,8 +67,9 @@ export const integrationConnectionService = {
       .limit(1);
 
     if (!conn) {
+      const scope = subaccountId ? `subaccount ${subaccountId}` : `organisation ${organisationId}`;
       throw Object.assign(
-        new Error(`No active ${provider} connection for subaccount ${subaccountId}`),
+        new Error(`No active ${provider} connection for ${scope}`),
         { statusCode: 404 },
       );
     }

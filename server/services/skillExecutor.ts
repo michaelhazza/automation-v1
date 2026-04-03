@@ -55,7 +55,8 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
 export interface SkillExecutionContext {
   runId: string;
   organisationId: string;
-  subaccountId: string;
+  /** Null for org-level agent runs */
+  subaccountId: string | null;
   agentId: string;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   handoffDepth?: number;
@@ -71,6 +72,18 @@ interface SkillExecutionParams {
   skillName: string;
   input: Record<string, unknown>;
   context: SkillExecutionContext;
+}
+
+/**
+ * Asserts that the skill execution context has a subaccountId.
+ * Call this at the top of any skill that requires subaccount scope.
+ * Returns the subaccountId as a non-null string for downstream use.
+ */
+function requireSubaccountContext(context: SkillExecutionContext, skillName: string): string {
+  if (!context.subaccountId) {
+    throw new Error(`Skill '${skillName}' requires a subaccount context but this is an org-level run. Use a subaccount-scoped agent or specify a targetSubaccountId.`);
+  }
+  return context.subaccountId;
 }
 
 // ---------------------------------------------------------------------------
@@ -186,24 +199,36 @@ export const skillExecutor = {
       // ── Direct skills (no action record) ──────────────────────────────
       case 'web_search':
         return executeWebSearch(input, context);
-      case 'read_workspace':
+      case 'read_workspace': {
+        requireSubaccountContext(context, 'read_workspace');
         return executeReadWorkspace(input, context);
-      case 'write_workspace':
+      }
+      case 'write_workspace': {
+        requireSubaccountContext(context, 'write_workspace');
         return executeWriteWorkspace(input, context);
-      case 'trigger_process':
+      }
+      case 'trigger_process': {
+        requireSubaccountContext(context, 'trigger_process');
         return executeTriggerProcess(input, context);
-      case 'spawn_sub_agents':
+      }
+      case 'spawn_sub_agents': {
+        requireSubaccountContext(context, 'spawn_sub_agents');
         return executeSpawnSubAgents(input, context);
+      }
 
       // ── Auto-gated skills (action record for audit, executes synchronously) ──
-      case 'create_task':
+      case 'create_task': {
+        requireSubaccountContext(context, 'create_task');
         return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
+      }
       case 'move_task':
         return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
       case 'add_deliverable':
         return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
-      case 'reassign_task':
+      case 'reassign_task': {
+        requireSubaccountContext(context, 'reassign_task');
         return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
+      }
       case 'update_task':
         return executeWithActionAudit('update_task', input, context, () => executeUpdateTask(input, context));
       case 'read_inbox':
@@ -219,37 +244,63 @@ export const skillExecutor = {
       case 'request_approval':
         return proposeReviewGatedAction('request_approval', input, context);
 
-      // ── Dev/QA auto-gated skills ──────────────────────────────────────────
-      case 'read_codebase':
+      // ── Dev/QA auto-gated skills (all require subaccount context) ─────────
+      case 'read_codebase': {
+        requireSubaccountContext(context, 'read_codebase');
         return executeWithActionAudit('read_codebase', input, context, () => executeReadCodebase(input, context));
-      case 'search_codebase':
+      }
+      case 'search_codebase': {
+        requireSubaccountContext(context, 'search_codebase');
         return executeWithActionAudit('search_codebase', input, context, () => executeSearchCodebase(input, context));
-      case 'run_tests':
+      }
+      case 'run_tests': {
+        requireSubaccountContext(context, 'run_tests');
         return executeWithActionAudit('run_tests', input, context, () => executeRunTests(input, context));
-      case 'analyze_endpoint':
+      }
+      case 'analyze_endpoint': {
+        requireSubaccountContext(context, 'analyze_endpoint');
         return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
-      case 'report_bug':
+      }
+      case 'report_bug': {
+        requireSubaccountContext(context, 'report_bug');
         return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
-      case 'capture_screenshot':
+      }
+      case 'capture_screenshot': {
+        requireSubaccountContext(context, 'capture_screenshot');
         return executeWithActionAudit('capture_screenshot', input, context, () => executeCaptureScreenshot(input, context));
-      case 'run_playwright_test':
+      }
+      case 'run_playwright_test': {
+        requireSubaccountContext(context, 'run_playwright_test');
         return executeWithActionAudit('run_playwright_test', input, context, () => executeRunPlaywrightTest(input, context));
+      }
 
-      // ── Dev review-gated skills (safeMode-checked) ───────────────────────
-      case 'write_patch':
+      // ── Dev review-gated skills (safeMode-checked, require subaccount) ───
+      case 'write_patch': {
+        requireSubaccountContext(context, 'write_patch');
         return proposeDevopsAction('write_patch', input, context);
-      case 'run_command':
+      }
+      case 'run_command': {
+        requireSubaccountContext(context, 'run_command');
         return proposeDevopsAction('run_command', input, context);
-      case 'create_pr':
+      }
+      case 'create_pr': {
+        requireSubaccountContext(context, 'create_pr');
         return proposeDevopsAction('create_pr', input, context);
+      }
 
-      // ── Page infrastructure skills ──────────────────────────────────────
-      case 'create_page':
+      // ── Page infrastructure skills (require subaccount) ────────────────
+      case 'create_page': {
+        requireSubaccountContext(context, 'create_page');
         return proposeReviewGatedAction('create_page', input, context);
-      case 'update_page':
+      }
+      case 'update_page': {
+        requireSubaccountContext(context, 'update_page');
         return proposeReviewGatedAction('update_page', input, context);
-      case 'publish_page':
+      }
+      case 'publish_page': {
+        requireSubaccountContext(context, 'publish_page');
         return proposeReviewGatedAction('publish_page', input, context);
+      }
 
       // ── Methodology skills — LLM-guided reasoning; executor returns a
       //    structured scaffold the agent fills using the injected instructions ─
@@ -322,6 +373,45 @@ export const skillExecutor = {
           executeAssignTask(input, context),
         );
       }
+
+      // ── Phase 3: Cross-subaccount intelligence skills ───────────────────
+      case 'query_subaccount_cohort': {
+        const { executeQuerySubaccountCohort } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('query_subaccount_cohort', input, context, () =>
+          executeQuerySubaccountCohort(input, context));
+      }
+      case 'read_org_insights': {
+        const { executeReadOrgInsights } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('read_org_insights', input, context, () =>
+          executeReadOrgInsights(input, context));
+      }
+      case 'write_org_insight': {
+        const { executeWriteOrgInsight } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('write_org_insight', input, context, () =>
+          executeWriteOrgInsight(input, context));
+      }
+      case 'compute_health_score': {
+        const { executeComputeHealthScore } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('compute_health_score', input, context, () =>
+          executeComputeHealthScore(input, context));
+      }
+      case 'detect_anomaly': {
+        const { executeDetectAnomaly } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('detect_anomaly', input, context, () =>
+          executeDetectAnomaly(input, context));
+      }
+      case 'compute_churn_risk': {
+        const { executeComputeChurnRisk } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('compute_churn_risk', input, context, () =>
+          executeComputeChurnRisk(input, context));
+      }
+      case 'generate_portfolio_report': {
+        const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
+        return executeWithActionAudit('generate_portfolio_report', input, context, () =>
+          executeGeneratePortfolioReport(input, context));
+      }
+      case 'trigger_account_intervention':
+        return proposeReviewGatedAction('trigger_account_intervention', input, context);
 
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
@@ -445,7 +535,7 @@ async function proposeReviewGatedAction(
 
   const span = getActiveTrace()?.span({ name: actionType, input, metadata: { gated: true } });
 
-  const keyParts = [actionType, context.subaccountId];
+  const keyParts = [actionType, context.subaccountId ?? `org:${context.organisationId}`];
   if (input.thread_id) keyParts.push(String(input.thread_id));
   if (input.record_id) keyParts.push(String(input.record_id));
   keyParts.push(String(Date.now()));
@@ -606,7 +696,7 @@ async function executeWebSearch(input: Record<string, unknown>, context: SkillEx
   }
 }
 
-function logSearchUsage(subaccountId: string, organisationId: string, runId: string): Promise<void> {
+function logSearchUsage(subaccountId: string | null, organisationId: string, runId: string): Promise<void> {
   // Structured usage log for per-subaccount Tavily billing tracking.
   // Log aggregation (e.g. Datadog, CloudWatch) captures this for billing.
   console.log(JSON.stringify({
@@ -1259,7 +1349,9 @@ async function executeSpawnSubAgents(
             subaccountId: context.subaccountId,
             subaccountAgentId: job.saLink.id,
             organisationId: context.organisationId,
+            executionScope: context.subaccountId ? 'subaccount' : 'org',
             runType: 'triggered',
+            runSource: 'sub_agent',
             executionMode: 'api',
             taskId: job.task.id,
             triggerContext: {

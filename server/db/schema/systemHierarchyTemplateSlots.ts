@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { systemHierarchyTemplates } from './systemHierarchyTemplates';
 import { systemAgents } from './systemAgents';
 
@@ -37,6 +37,10 @@ export const systemHierarchyTemplateSlots = pgTable(
 
     // Hierarchy within template (self-referencing)
     parentSlotId: uuid('parent_slot_id'),
+
+    // Phase 4: Per-slot skill enablement and execution scope
+    skillEnablementMap: jsonb('skill_enablement_map').$type<Record<string, boolean>>(),
+    executionScope: text('execution_scope').$type<'subaccount' | 'org'>(),
 
     // Display order among siblings
     sortOrder: integer('sort_order').notNull().default(0),

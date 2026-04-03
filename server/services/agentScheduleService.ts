@@ -1,10 +1,9 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents } from '../db/schema/index.js';
+import { subaccountAgents, agents, orgAgentConfigs, organisations } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
-import { isNull } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // Agent Schedule Service — manages cron-based agent scheduling via pg-boss
@@ -25,6 +24,7 @@ type PgBoss = {
 };
 
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
+const AGENT_ORG_RUN_QUEUE = 'agent-org-scheduled-run';
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 const AGENT_TRIGGERED_QUEUE = 'agent-triggered-run';
 
@@ -166,12 +166,55 @@ export const agentScheduleService = {
           subaccountId: data.subaccountId,
           subaccountAgentId: data.subaccountAgentId,
           organisationId: data.organisationId,
+          executionScope: 'subaccount',
           runType: 'scheduled',
+          runSource: 'scheduler',
           executionMode: 'api',
           triggerContext: { source: 'schedule' },
         });
       } catch (err) {
         console.error(`[AgentScheduler] Scheduled run failed:`, err);
+      }
+    });
+
+    // Register the worker that processes org-level scheduled agent runs
+    await pgboss.work(AGENT_ORG_RUN_QUEUE, async (job) => {
+      const jobId = (job as unknown as { id: string }).id;
+      const data = job.data as {
+        orgAgentConfigId: string;
+        agentId: string;
+        organisationId: string;
+      };
+
+      // Check kill switch before executing
+      const [org] = await db
+        .select({ orgExecutionEnabled: organisations.orgExecutionEnabled })
+        .from(organisations)
+        .where(eq(organisations.id, data.organisationId));
+      if (org && !org.orgExecutionEnabled) {
+        console.log(`[AgentScheduler] Org execution disabled, dropping org scheduled run for agent ${data.agentId}`);
+        return; // Drop silently, don't retry
+      }
+
+      console.log(`[AgentScheduler] Running org-level scheduled agent: ${data.agentId} for org ${data.organisationId}`);
+
+      try {
+        // Deterministic idempotency key: use pg-boss job ID (unique per cron tick)
+        const scheduleTickKey = `org-scheduled:${data.agentId}:${data.organisationId}:${jobId}`;
+
+        await agentExecutionService.executeRun({
+          agentId: data.agentId,
+          organisationId: data.organisationId,
+          executionScope: 'org',
+          orgAgentConfigId: data.orgAgentConfigId,
+          runType: 'scheduled',
+          runSource: 'scheduler',
+          executionMode: 'api',
+          idempotencyKey: scheduleTickKey,
+          triggerContext: { source: 'org-schedule' },
+        });
+      } catch (err) {
+        console.error(`[AgentScheduler] Org scheduled run failed:`, err);
       }
     });
 
@@ -196,7 +239,9 @@ export const agentScheduleService = {
           subaccountId: data.subaccountId,
           subaccountAgentId: data.subaccountAgentId,
           organisationId: data.organisationId,
+          executionScope: 'subaccount',
           runType: 'triggered',
+          runSource: 'handoff',
           executionMode: 'api',
           taskId: data.taskId,
           handoffDepth: data.handoffDepth,
@@ -240,7 +285,9 @@ export const agentScheduleService = {
           subaccountId: data.subaccountId,
           subaccountAgentId: data.subaccountAgentId,
           organisationId: data.organisationId,
+          executionScope: 'subaccount',
           runType: 'triggered',
+          runSource: 'trigger',
           executionMode: 'api',
           triggerContext: data.triggerContext,
         });
@@ -291,7 +338,43 @@ export const agentScheduleService = {
       }
     }
 
-    console.log(`[AgentScheduler] Registered ${registered} active schedules`);
+    console.log(`[AgentScheduler] Registered ${registered} active subaccount schedules`);
+
+    // Also register org-level agent schedules
+    const orgRows = await db
+      .select({
+        config: orgAgentConfigs,
+        agentStatus: agents.status,
+      })
+      .from(orgAgentConfigs)
+      .innerJoin(agents, eq(agents.id, orgAgentConfigs.agentId))
+      .where(
+        and(
+          eq(orgAgentConfigs.scheduleEnabled, true),
+          eq(orgAgentConfigs.isActive, true),
+          eq(agents.status, 'active'),
+          isNull(agents.deletedAt)
+        )
+      );
+
+    let orgRegistered = 0;
+    for (const row of orgRows) {
+      const config = row.config;
+      if (!config.scheduleCron) continue;
+
+      try {
+        await this.registerOrgSchedule(config.id, config.scheduleCron, {
+          orgAgentConfigId: config.id,
+          agentId: config.agentId,
+          organisationId: config.organisationId,
+        });
+        orgRegistered++;
+      } catch (err) {
+        console.error(`[AgentScheduler] Failed to register org schedule for ${config.id}:`, err);
+      }
+    }
+
+    console.log(`[AgentScheduler] Registered ${orgRegistered} active org schedules`);
   },
 
   /**
@@ -316,6 +399,28 @@ export const agentScheduleService = {
   async unregisterSchedule(subaccountAgentId: string) {
     const pgboss = await getBoss();
     const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
+    await pgboss.unschedule(scheduleName);
+  },
+
+  /**
+   * Register or update an org-level agent schedule.
+   */
+  async registerOrgSchedule(
+    orgAgentConfigId: string,
+    cron: string,
+    data: { orgAgentConfigId: string; agentId: string; organisationId: string }
+  ) {
+    const pgboss = await getBoss();
+    const scheduleName = `${AGENT_ORG_RUN_QUEUE}:${orgAgentConfigId}`;
+    await pgboss.schedule(scheduleName, cron, data, { tz: 'UTC' });
+  },
+
+  /**
+   * Remove an org-level schedule.
+   */
+  async unregisterOrgSchedule(orgAgentConfigId: string) {
+    const pgboss = await getBoss();
+    const scheduleName = `${AGENT_ORG_RUN_QUEUE}:${orgAgentConfigId}`;
     await pgboss.unschedule(scheduleName);
   },
 

@@ -50,6 +50,9 @@ export const systemAgents = pgTable('system_agents', {
   // Execution mode preference
   executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless'>(),
 
+  // Whether this agent runs at org level or subaccount level
+  executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
+
   // Publishing & lifecycle
   isPublished: boolean('is_published').notNull().default(false),
   version: integer('version').notNull().default(1),

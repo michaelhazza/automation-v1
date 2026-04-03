@@ -607,6 +607,112 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   },
+
+  // ── Cross-Subaccount Intelligence Skills (Phase 3) ──────────────────────
+
+  query_subaccount_cohort: {
+    actionType: 'query_subaccount_cohort',
+    description: 'Read aggregated board health and memory summaries across multiple subaccounts, filtered by tags.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['tag_filters'],
+    parameterSchema: { type: 'object', properties: { tag_filters: { type: 'string', description: 'Tag filters JSON' } }, required: [] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  read_org_insights: {
+    actionType: 'read_org_insights',
+    description: 'Query cross-subaccount insights stored in org-level memory.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: [],
+    parameterSchema: { type: 'object', properties: { semantic_query: { type: 'string', description: 'Semantic search query' } }, required: [] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  write_org_insight: {
+    actionType: 'write_org_insight',
+    description: 'Store a cross-subaccount pattern or insight in org-level memory.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['content', 'entry_type'],
+    parameterSchema: { type: 'object', properties: { content: { type: 'string', description: 'Insight content' }, entry_type: { type: 'string', description: 'Insight type' } }, required: ['content', 'entry_type'] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  compute_health_score: {
+    actionType: 'compute_health_score',
+    description: 'Calculate a composite health score (0-100) for a subaccount based on normalised metrics.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['account_id'],
+    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' } }, required: ['account_id'] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  detect_anomaly: {
+    actionType: 'detect_anomaly',
+    description: 'Compare current metrics against historical baseline and flag significant deviations.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['account_id', 'metric_name', 'current_value'],
+    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' }, metric_name: { type: 'string', description: 'Metric name' }, current_value: { type: 'string', description: 'Current metric value' } }, required: ['account_id', 'metric_name', 'current_value'] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  compute_churn_risk: {
+    actionType: 'compute_churn_risk',
+    description: 'Evaluate churn risk signals for a subaccount and produce a risk score with intervention recommendation.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['account_id'],
+    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' } }, required: ['account_id'] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  generate_portfolio_report: {
+    actionType: 'generate_portfolio_report',
+    description: 'Generate a structured portfolio intelligence briefing across the entire organisation.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: [],
+    parameterSchema: { type: 'object', properties: { reporting_period_days: { type: 'string', description: 'Days to cover' }, format: { type: 'string', description: 'Output format' } }, required: [] },
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+  },
+
+  trigger_account_intervention: {
+    actionType: 'trigger_account_intervention',
+    description: 'Propose an intervention for a subaccount — always HITL-gated, requires human approval.',
+    actionCategory: 'worker',
+    isExternal: true,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['account_id', 'intervention_type', 'evidence_summary'],
+    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' }, intervention_type: { type: 'string', description: 'Intervention type' }, evidence_summary: { type: 'string', description: 'Evidence justification' } }, required: ['account_id', 'intervention_type', 'evidence_summary'] },
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
+  },
 };
 
 /** Check if an action type is known */
