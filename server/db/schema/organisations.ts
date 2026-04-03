@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 export const organisations = pgTable(
   'organisations',
@@ -9,6 +9,7 @@ export const organisations = pgTable(
     plan: text('plan').notNull().$type<'starter' | 'pro' | 'agency'>(),
     status: text('status').notNull().default('active').$type<'active' | 'suspended'>(),
     settings: jsonb('settings'),
+    orgExecutionEnabled: boolean('org_execution_enabled').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

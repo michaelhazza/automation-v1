@@ -16,13 +16,11 @@ export const agentRuns = pgTable(
       .notNull()
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
-      .notNull()
       .references(() => subaccounts.id),
     agentId: uuid('agent_id')
       .notNull()
       .references(() => agents.id),
     subaccountAgentId: uuid('subaccount_agent_id')
-      .notNull()
       .references(() => subaccountAgents.id),
 
     // Idempotency — prevents duplicate runs on retry
@@ -31,6 +29,18 @@ export const agentRuns = pgTable(
     // How this run was initiated
     runType: text('run_type').notNull().$type<'scheduled' | 'manual' | 'triggered'>(),
     executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless'>(),
+
+    // Org vs subaccount execution scope (never inferred from nullable fields)
+    executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
+
+    // Run result classification (success/partial/failed)
+    runResultStatus: text('run_result_status').$type<'success' | 'partial' | 'failed'>(),
+
+    // Config snapshot for reproducibility and drift detection
+    configSnapshot: jsonb('config_snapshot'),
+    configHash: text('config_hash'),
+    resolvedSkillSlugs: jsonb('resolved_skill_slugs').$type<string[]>(),
+    resolvedLimits: jsonb('resolved_limits'),
 
     // Status tracking
     status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded'>(),
