@@ -404,3 +404,251 @@ New service file `server/services/canonicalDataService.ts`:
 - [ ] Polling job runs on schedule and updates canonical entities
 - [ ] A skill calling `canonicalDataService.getContactMetrics(accountId)` works without any GHL-specific code
 - [ ] Connector config CRUD works through API routes
+
+---
+
+## Phase 3: Cross-Subaccount Intelligence + Portfolio Health Agent
+
+### Part A: Generic Cross-Subaccount Capabilities
+
+### 3.1 Schema Migration: Subaccount tags
+
+Include in migration 0044 (or 0045 depending on Phase 2 bundling):
+
+- [ ] `subaccount_tags` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK → organisations, NOT NULL)
+  - `subaccountId` (FK → subaccounts, NOT NULL)
+  - `key` (text NOT NULL)
+  - `value` (text NOT NULL)
+  - `createdAt` (timestamptz)
+  - Unique: `(subaccountId, key)`
+  - Index: `(organisationId, key, value)` for cohort queries
+
+### 3.2 Service & Routes: Subaccount tags
+
+New service `server/services/subaccountTagService.ts`:
+
+- [ ] `setTag(orgId, subaccountId, key, value)` — upsert
+- [ ] `removeTag(orgId, subaccountId, key)` — delete
+- [ ] `getTags(orgId, subaccountId)` — list tags for a subaccount
+- [ ] `getSubaccountsByTags(orgId, filters: {key, value}[])` — return subaccount IDs matching ALL tag filters
+- [ ] `bulkSetTag(orgId, subaccountIds[], key, value)` — apply tag to multiple subaccounts
+- [ ] `listTagKeys(orgId)` — distinct tag keys across the org (for UI autocomplete)
+
+New route file `server/routes/subaccountTags.ts`:
+
+- [ ] `GET /api/subaccounts/:subaccountId/tags` — list tags
+- [ ] `PUT /api/subaccounts/:subaccountId/tags/:key` — set tag (body: `{value}`)
+- [ ] `DELETE /api/subaccounts/:subaccountId/tags/:key` — remove tag
+- [ ] `POST /api/org/subaccount-tags/bulk` — bulk set tag across subaccounts
+- [ ] `GET /api/org/subaccount-tags/keys` — list distinct tag keys
+- [ ] `GET /api/org/subaccounts/by-tags` — filter subaccounts by tag query
+- [ ] Mount in `server/index.ts`
+
+### 3.3 Schema Migration: Org-level memory
+
+- [ ] `org_memory_entries` table:
+  - `id` (uuid PK)
+  - `organisationId` (FK → organisations, NOT NULL)
+  - `sourceSubaccountIds` (jsonb — array of subaccount IDs that contributed)
+  - `agentRunId` (FK → agent_runs, nullable)
+  - `agentId` (FK → agents, nullable)
+  - `content` (text NOT NULL)
+  - `entryType` (text — `'observation' | 'decision' | 'preference' | 'issue' | 'pattern'`)
+  - `scopeTags` (jsonb — `{"key": "value"}` matching subaccount tag dimensions)
+  - `qualityScore` (real, 0.0-1.0)
+  - `embedding` (vector(1536), nullable)
+  - `evidenceCount` (integer, default 1)
+  - `includedInSummary` (boolean, default false)
+  - `accessCount` (integer, default 0)
+  - `lastAccessedAt` (timestamptz, nullable)
+  - `createdAt` (timestamptz)
+  - Index: `(organisationId, includedInSummary)`
+  - HNSW index on `embedding` (same as workspace_memory_entries)
+
+- [ ] `org_memories` table (compiled summary, one per org):
+  - `id` (uuid PK)
+  - `organisationId` (FK → organisations, NOT NULL, UNIQUE)
+  - `summary` (text)
+  - `qualityThreshold` (real, default 0.5)
+  - `runsSinceSummary` (integer, default 0)
+  - `summaryThreshold` (integer, default 5)
+  - `version` (integer, default 1)
+  - `summaryGeneratedAt` (timestamptz, nullable)
+  - `createdAt`, `updatedAt`
+
+### 3.4 Service: Org memory
+
+New service `server/services/orgMemoryService.ts`:
+
+- [ ] Mirror `workspaceMemoryService` patterns but scoped to org:
+  - `getOrCreateMemory(orgId)` — get or create the compiled org memory record
+  - `extractOrgInsights(runId, agentId, orgId, summary)` — LLM extraction of org-level insights from a run summary
+  - `listEntries(orgId, filters?)` — list entries with optional type/tag filters
+  - `createEntry(orgId, entry)` — insert with quality scoring + async embedding
+  - `updateEntry(entryId, updates)` — update content/tags
+  - `deleteEntry(entryId)` — delete
+  - `getRelevantInsights(orgId, queryEmbedding, scopeTags?)` — semantic search with combined scoring (same formula as subaccount: cosine 60% + quality 25% + recency 15%)
+  - `getInsightsForPrompt(orgId, taskContext?)` — formatted for injection into agent system prompt
+  - `regenerateSummary(orgId)` — LLM-compiled summary from unprocessed entries
+  - `dedup(orgId, newEntries)` — Mem0-style dedup against recent org entries
+- [ ] Reuse `scoreMemoryEntry()` from `workspaceMemoryService` (same scoring algorithm)
+- [ ] Reuse embedding infrastructure from `server/lib/embeddings.ts`
+
+### 3.5 Routes: Org memory
+
+New route file `server/routes/orgMemory.ts`:
+
+- [ ] `GET /api/org/memory` — get compiled org memory
+- [ ] `PUT /api/org/memory` — update compiled summary manually
+- [ ] `POST /api/org/memory/regenerate` — trigger summary regeneration
+- [ ] `GET /api/org/memory/entries` — list org memory entries (with filters)
+- [ ] `DELETE /api/org/memory/entries/:entryId` — delete an entry
+- [ ] Mount in `server/index.ts`
+
+### 3.6 Skills: Cross-subaccount query skills
+
+Three new skill files in `server/skills/`:
+
+- [ ] `query_subaccount_cohort.md` — skill definition with input schema (tag filters, metric focus, subaccount IDs)
+- [ ] `read_org_insights.md` — skill definition (scope tag filter, semantic query, entry type filter)
+- [ ] `write_org_insight.md` — skill definition (content, entry_type, scope_tags, source_subaccount_ids, evidence_count)
+
+Register in action registry (`server/config/actionRegistry.ts`):
+
+- [ ] `query_subaccount_cohort`: category `worker`, gate `auto`, readOnly, idempotent
+- [ ] `read_org_insights`: category `worker`, gate `auto`, readOnly, idempotent
+- [ ] `write_org_insight`: category `worker`, gate `auto`, not readOnly, idempotent
+
+Implement executors in `server/services/skillExecutor.ts`:
+
+- [ ] `executeQuerySubaccountCohort(params, context)`:
+  - Validate org-level context (subaccountId is null)
+  - Call `subaccountTagService.getSubaccountsByTags()` to resolve matching subaccounts
+  - For each matching subaccount: fetch board health summary (task counts by status), workspace memory summary excerpt, last activity date
+  - Return aggregated/anonymised data — NO raw subaccount records
+  - Respect `allowedSubaccountIds` from org agent config if set
+
+- [ ] `executeReadOrgInsights(params, context)`:
+  - Call `orgMemoryService.getRelevantInsights()` or `listEntries()` based on params
+  - Return entries with content, scope_tags, evidence_count
+
+- [ ] `executeWriteOrgInsight(params, context)`:
+  - Call `orgMemoryService.createEntry()` with quality scoring + embedding
+
+### Part B: Portfolio Health Agent
+
+### 3.7 Define Portfolio Health Agent as system agent
+
+- [ ] Create system agent seed/migration insert for `portfolio-health-agent`:
+  - `slug`: `portfolio-health-agent`
+  - `executionScope`: `'org'` (new column from Phase 1)
+  - `agentRole`: `analyst`
+  - `masterPrompt`: Write prompt focused on portfolio monitoring, anomaly coordination, alert delivery, report generation
+  - `defaultSystemSkillSlugs`: `['query_subaccount_cohort', 'read_org_insights', 'write_org_insight', 'compute_health_score', 'detect_anomaly', 'compute_churn_risk', 'generate_portfolio_report', 'trigger_account_intervention']`
+  - `defaultOrgSkillSlugs`: `['send_email', 'web_search']`
+  - `executionMode`: `'api'`
+  - `heartbeatEnabled`: true
+  - `heartbeatIntervalHours`: 4 (default scan frequency)
+  - `defaultTokenBudget`: 50000
+  - `defaultMaxToolCalls`: 30
+
+### 3.8 Update template service for org-scoped agents
+
+Modify `server/services/systemTemplateService.ts`:
+
+- [ ] Update `loadToSubaccount` (or add `loadToOrg`) to check `systemAgents.executionScope`
+- [ ] If `executionScope === 'org'`: create agent in `agents` table + create `orgAgentConfigs` entry (not `subaccountAgents`)
+- [ ] If `executionScope === 'subaccount'`: existing path (create `subaccountAgents` link)
+
+### Part C: Intelligence Skills
+
+### 3.9 Skills: Intelligence skill definitions
+
+Five new skill files in `server/skills/`:
+
+- [ ] `compute_health_score.md` — input: accountId. Output: composite score 0-100, factor breakdown, trend, confidence
+- [ ] `detect_anomaly.md` — input: accountId, metricName, currentValue. Output: anomaly flag, deviation, severity, description
+- [ ] `compute_churn_risk.md` — input: accountId. Output: risk score 0-100, drivers, intervention type, suggested action
+- [ ] `generate_portfolio_report.md` — input: reportingPeriod, preferences. Output: formatted briefing
+- [ ] `trigger_account_intervention.md` — input: accountId, interventionType, evidence. Output: intervention record. Gate: `review`
+
+Register all five in `server/config/actionRegistry.ts`:
+
+- [ ] `compute_health_score`: gate `auto`, readOnly (reads data, writes snapshot)
+- [ ] `detect_anomaly`: gate `auto`, readOnly
+- [ ] `compute_churn_risk`: gate `auto`, readOnly
+- [ ] `generate_portfolio_report`: gate `auto`, readOnly
+- [ ] `trigger_account_intervention`: gate `review` (HITL-gated, non-negotiable)
+
+### 3.10 Implement intelligence skill executors
+
+In `server/services/skillExecutor.ts` (or new file `server/services/intelligenceSkillExecutor.ts` to manage size):
+
+- [ ] `executeComputeHealthScore(params, context)`:
+  - Load canonical data from `canonicalDataService` for the account
+  - Load weight map from org config (or use defaults)
+  - Compute weighted score across dimensions (contact growth, pipeline velocity, conversation engagement, revenue trend)
+  - Write `health_snapshots` record with `configVersion` hash
+  - Return score + breakdown
+
+- [ ] `executeDetectAnomaly(params, context)`:
+  - Load historical snapshots for the account from `health_snapshots`
+  - Compute rolling baseline (configurable window, default 30 days)
+  - Compare current value against baseline using configured threshold
+  - If anomaly detected: write `anomaly_events` record
+  - Return anomaly assessment
+
+- [ ] `executeComputeChurnRisk(params, context)`:
+  - Load recent health snapshot history
+  - Evaluate heuristic signals (declining trajectory, stagnation duration, activity gaps)
+  - Apply configured weight map
+  - Return risk score + drivers + recommended intervention type
+
+- [ ] `executeGeneratePortfolioReport(params, context)`:
+  - Load all accounts with latest health snapshots
+  - Load recent anomaly events
+  - Load org memory insights
+  - Use LLM to generate natural language briefing
+  - Format for delivery (email-ready structure)
+  - Return formatted report
+
+- [ ] `executeTriggerAccountIntervention(params, context)`:
+  - Validate intervention type is in configured allowed list
+  - Package evidence and recommendation
+  - Submit through HITL gate (`proposeReviewGatedAction`)
+  - Return pending status with action ID
+  - On approval: execute via connector (e.g. GHL campaign pause) or internal action (create task, send email)
+
+### 3.11 Wire org memory extraction into org agent execution
+
+Modify `server/services/agentExecutionService.ts`:
+
+- [ ] After an org-level agent run completes, call `orgMemoryService.extractOrgInsights()` instead of `workspaceMemoryService.extractRunInsights()`
+- [ ] Inject org memory into org agent system prompt via `orgMemoryService.getInsightsForPrompt()`
+
+### 3.12 UI: Subaccount tags
+
+- [ ] Tag editor on subaccount settings/detail page (key-value pairs)
+- [ ] Bulk tagging interface in subaccounts list
+- [ ] Tag filter on subaccounts list page
+
+### 3.13 UI: Org memory
+
+- [ ] Org memory page showing compiled summary + individual entries
+- [ ] Same pattern as `WorkspaceMemoryPage` but at org level
+
+### 3.14 Testing & Verification
+
+- [ ] Subaccount tags: create, query, filter subaccounts by tags
+- [ ] Org memory: create entries, semantic search, dedup, regenerate summary
+- [ ] `query_subaccount_cohort` returns aggregated data filtered by tags
+- [ ] `read_org_insights` / `write_org_insight` work correctly
+- [ ] `compute_health_score` produces valid scores from canonical data
+- [ ] `detect_anomaly` correctly identifies deviations from baseline
+- [ ] `compute_churn_risk` produces risk scores with heuristic model
+- [ ] `generate_portfolio_report` produces readable briefing via LLM
+- [ ] `trigger_account_intervention` goes through HITL gate correctly
+- [ ] End-to-end: metric changes → anomaly detected → HITL proposal generated → approval → intervention recorded
+- [ ] Data isolation: cohort queries return summaries, not raw subaccount data
