@@ -50,13 +50,24 @@ CREATE TABLE org_memory_entries (
   entry_type text NOT NULL DEFAULT 'observation',
   scope_tags jsonb,
   quality_score real NOT NULL DEFAULT 0.5,
-  embedding vector(1536),
   evidence_count integer NOT NULL DEFAULT 1,
   included_in_summary boolean NOT NULL DEFAULT false,
   access_count integer NOT NULL DEFAULT 0,
   last_accessed_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Vector column for semantic search (optional — pgvector required)
+DO $$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS vector;
+  ALTER TABLE org_memory_entries ADD COLUMN IF NOT EXISTS embedding vector(1536);
+  CREATE INDEX IF NOT EXISTS org_memory_entries_embedding_idx
+    ON org_memory_entries USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'pgvector not available, skipping vector column on org_memory_entries: %', SQLERRM;
+END $$;
 
 CREATE INDEX org_memory_entries_org_idx ON org_memory_entries (organisation_id, included_in_summary);
 CREATE INDEX org_memory_entries_type_idx ON org_memory_entries (organisation_id, entry_type);

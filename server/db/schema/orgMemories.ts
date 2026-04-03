@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, real, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, boolean, jsonb, timestamp, uniqueIndex, index, customType } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { agentRuns } from './agentRuns.js';
@@ -43,7 +43,11 @@ export const orgMemoryEntries = pgTable(
     entryType: text('entry_type').notNull().default('observation').$type<'observation' | 'decision' | 'preference' | 'issue' | 'pattern'>(),
     scopeTags: jsonb('scope_tags').$type<Record<string, string>>(),
     qualityScore: real('quality_score').notNull().default(0.5),
-    embedding: sql`vector(1536)`.$type<number[]>(),
+    embedding: customType<{ data: number[]; driverData: string }>({
+      dataType() { return 'vector(1536)'; },
+      toDriver(value) { return JSON.stringify(value); },
+      fromDriver(value) { return typeof value === 'string' ? JSON.parse(value) : value as number[]; },
+    })('embedding'),
     evidenceCount: integer('evidence_count').notNull().default(1),
     includedInSummary: boolean('included_in_summary').notNull().default(false),
     accessCount: integer('access_count').notNull().default(0),

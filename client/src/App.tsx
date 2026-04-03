@@ -57,6 +57,7 @@ const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
 const PageProjectsPage = lazy(() => import('./pages/PageProjectsPage'));
 const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage'));
+const SystemTestsPage = lazy(() => import('./pages/SystemTestsPage'));
 
 function PageLoader() {
   return (
@@ -192,6 +193,7 @@ export default function App() {
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
+            <Route path="/system/tests" element={<SystemTestsPage user={user!} />} />
           </Route>
 
           {/* Subaccount connections */}

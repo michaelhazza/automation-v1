@@ -681,6 +681,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
+              <NavItem to="/system/tests" icon={<Icons.diagnostic />} label="Tests" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}

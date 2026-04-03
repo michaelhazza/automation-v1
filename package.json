@@ -15,7 +15,14 @@
     "db:studio": "drizzle-kit studio",
     "test": "npm run test:gates && npm run test:qa",
     "test:gates": "bash scripts/run-all-gates.sh",
-    "test:qa": "bash scripts/run-all-qa-tests.sh"
+    "test:qa": "bash scripts/run-all-qa-tests.sh",
+    "test:server": "vitest run --config vitest.config.ts",
+    "test:server:watch": "vitest --config vitest.config.ts",
+    "test:client": "vitest run --config vitest.config.client.ts",
+    "test:client:watch": "vitest --config vitest.config.client.ts",
+    "test:e2e": "playwright test",
+    "test:unit": "npm run test:server && npm run test:client",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage && vitest run --config vitest.config.client.ts --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.515.0",
@@ -53,6 +60,9 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -63,15 +73,21 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@types/sanitize-html": "^2.16.1",
+    "@types/supertest": "^7.2.0",
     "@types/uuid": "^9.0.7",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "autoprefixer": "^10.4.27",
     "concurrently": "^8.2.2",
     "drizzle-kit": "^0.31.10",
+    "jsdom": "^29.0.1",
+    "msw": "^2.12.14",
     "postcss": "^8.5.8",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "vitest": "^4.1.2"
   }
 }

@@ -75,6 +75,7 @@ import connectorConfigsRouter from './routes/connectorConfigs.js';
 import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import orgMemoryRouter from './routes/orgMemory.js';
+import systemTestsRouter from './routes/systemTests.js';
 import pageProjectsRouter from './routes/pageProjects.js';
 import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
@@ -197,6 +198,7 @@ app.use(connectorConfigsRouter);
 // ghlWebhookRouter mounted before body parsing (needs raw body for HMAC)
 app.use(subaccountTagsRouter);
 app.use(orgMemoryRouter);
+app.use(systemTestsRouter);
 app.use(pageProjectsRouter);
 app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);
