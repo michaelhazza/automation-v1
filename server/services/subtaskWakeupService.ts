@@ -124,6 +124,7 @@ export const subtaskWakeupService = {
       subaccountId,
       subaccountAgentId: saLink.id,
       organisationId: saLink.organisationId,
+      executionScope: 'subaccount',
       runType: 'triggered',
       executionMode: 'api',
       taskId: completedTask.parentTaskId,

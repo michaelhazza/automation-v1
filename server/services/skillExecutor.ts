@@ -1272,6 +1272,7 @@ async function executeSpawnSubAgents(
             subaccountId: context.subaccountId,
             subaccountAgentId: job.saLink.id,
             organisationId: context.organisationId,
+            executionScope: context.subaccountId ? 'subaccount' : 'org',
             runType: 'triggered',
             executionMode: 'api',
             taskId: job.task.id,
