@@ -53,6 +53,7 @@ router.post(
       subaccountId,
       subaccountAgentId: saLink.id,
       organisationId: req.orgId!,
+      executionScope: 'subaccount',
       runType: 'manual',
       executionMode: executionMode ?? 'api',
       taskId,
@@ -61,6 +62,76 @@ router.post(
     });
 
     res.json(result);
+  })
+);
+
+// ─── Manual trigger: Run an org-level agent ─────────────────────────────────
+
+router.post(
+  '/api/org/agents/:agentId/run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+    const { taskId, idempotencyKey } = req.body as {
+      taskId?: string;
+      idempotencyKey?: string;
+    };
+
+    // Find the org agent config
+    const { orgAgentConfigs } = await import('../db/schema/index.js');
+    const [orgConfig] = await db
+      .select()
+      .from(orgAgentConfigs)
+      .where(
+        and(
+          eq(orgAgentConfigs.agentId, agentId),
+          eq(orgAgentConfigs.organisationId, req.orgId!)
+        )
+      );
+
+    if (!orgConfig) {
+      res.status(404).json({ error: 'No org-level config found for this agent' });
+      return;
+    }
+
+    const effectiveIdempotencyKey = idempotencyKey ??
+      `manual:org:${agentId}:${req.user!.id}:${taskId ?? 'heartbeat'}:${Math.floor(Date.now() / 10000)}`;
+
+    const result = await agentExecutionService.executeRun({
+      agentId,
+      organisationId: req.orgId!,
+      executionScope: 'org',
+      orgAgentConfigId: orgConfig.id,
+      runType: 'manual',
+      executionMode: 'api',
+      taskId,
+      idempotencyKey: effectiveIdempotencyKey,
+      triggerContext: { triggeredBy: req.user!.id, source: 'manual-org' },
+    });
+
+    res.json(result);
+  })
+);
+
+// ─── Get org-level agent run history ─────────────────────────────────────────
+
+router.get(
+  '/api/org/agents/:agentId/runs',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+    const { limit, offset } = req.query;
+
+    const runs = await agentActivityService.listRuns({
+      organisationId: req.orgId!,
+      agentId,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
+
+    res.json(runs);
   })
 );
 

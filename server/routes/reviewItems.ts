@@ -34,6 +34,28 @@ router.get(
   })
 );
 
+// ─── Get org-level review queue ──────────────────────────────────────────────
+
+router.get(
+  '/api/org/review-queue',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_VIEW),
+  asyncHandler(async (req, res) => {
+    const items = await reviewService.getOrgReviewQueue(req.orgId!);
+    res.json(items);
+  })
+);
+
+router.get(
+  '/api/org/review-queue/count',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.REVIEW_VIEW),
+  asyncHandler(async (req, res) => {
+    const count = await reviewService.getOrgReviewQueueCount(req.orgId!);
+    res.json({ count });
+  })
+);
+
 // ─── Get single review item ──────────────────────────────────────────────────
 
 router.get(

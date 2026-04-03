@@ -1,4 +1,4 @@
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
@@ -303,6 +303,41 @@ export const reviewService = {
         )
       );
 
+    return result?.count ?? 0;
+  },
+
+  /**
+   * Get org-level review queue (items where subaccountId IS NULL).
+   */
+  async getOrgReviewQueue(organisationId: string) {
+    return db
+      .select()
+      .from(reviewItems)
+      .where(
+        and(
+          eq(reviewItems.organisationId, organisationId),
+          isNull(reviewItems.subaccountId),
+          sql`${reviewItems.reviewStatus} IN ('pending', 'edited_pending')`
+        )
+      )
+      .orderBy(reviewItems.createdAt)
+      .limit(100);
+  },
+
+  /**
+   * Org-level review queue count.
+   */
+  async getOrgReviewQueueCount(organisationId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(reviewItems)
+      .where(
+        and(
+          eq(reviewItems.organisationId, organisationId),
+          isNull(reviewItems.subaccountId),
+          sql`${reviewItems.reviewStatus} IN ('pending', 'edited_pending')`
+        )
+      );
     return result?.count ?? 0;
   },
 
