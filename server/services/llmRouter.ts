@@ -44,6 +44,9 @@ const LLMCallContextSchema = z.object({
   provider:           z.string().min(1).optional(),
   model:              z.string().min(1).optional(),
   routingMode:        z.enum(ROUTING_MODES).default('ceiling'),
+  // Escalation tracking — set by agentExecutionService when economy model fails validation
+  wasEscalated:       z.boolean().optional(),
+  escalationReason:   z.string().optional(),
 });
 
 export type LLMCallContext = z.infer<typeof LLMCallContextSchema>;
@@ -150,6 +153,14 @@ const FALLBACK_MODEL_MAP: Record<string, Record<string, string>> = {
     'gpt-4o-mini':       'openai/gpt-4o-mini',
   },
 };
+
+// Fallback chain entry — tracks each provider attempt for debugging
+interface FallbackAttempt {
+  provider: string;
+  model: string;
+  error?: string;
+  success?: boolean;
+}
 
 function isNonRetryableError(err: unknown): boolean {
   const e = err as { statusCode?: number; code?: string; message?: string };
@@ -312,8 +323,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         executionId:         ctx.executionId,
         agentName:           ctx.agentName,
         taskType:            ctx.taskType,
-        provider:            ctx.provider,
-        model:               ctx.model,
+        provider:            effectiveProvider,
+        model:               effectiveModel,
         tokensIn:            0,
         tokensOut:           0,
         costRaw:             '0',
@@ -325,6 +336,10 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         routerOverheadMs:    Date.now() - routerStart,
         status:              budgetBlockedStatus,
         errorMessage:        budgetErrorMessage,
+        requestedProvider:   effectiveProvider,
+        requestedModel:      effectiveModel,
+        wasEscalated:        ctx.wasEscalated ?? false,
+        escalationReason:    ctx.escalationReason,
         billingMonth,
         billingDay,
       })
@@ -345,6 +360,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let attemptNumber = 1;
   let actualProvider = effectiveProvider;
   let actualModel = effectiveModel;
+  const fallbackAttempts: FallbackAttempt[] = [];
 
   // Build fallback chain: primary provider first, then others in order
   const fallbackChain = [
@@ -399,6 +415,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         actualProvider = provider;
         actualModel = mappedModel;
         attemptNumber = attempt;
+        fallbackAttempts.push({ provider, model: mappedModel, success: true });
 
         if (provider !== effectiveProvider || mappedModel !== effectiveModel) {
           console.info('[llmRouter] provider_fallback_used', {
@@ -412,6 +429,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         break providerLoop;
       } catch (err: unknown) {
         lastError = err;
+        fallbackAttempts.push({ provider, model: mappedModel, error: (err as Error).message });
 
         // Non-retryable errors propagate immediately
         if (isNonRetryableError(err)) {
@@ -459,6 +477,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       provider: effectiveProvider, model: effectiveModel, status: callStatus, error: callError,
     });
 
+    const hasFallbackFailures = fallbackAttempts.some(a => a.error);
+
     await db
       .insert(llmRequests)
       .values({
@@ -490,6 +510,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         status:              callStatus,
         errorMessage:        callError,
         attemptNumber,
+        requestedProvider:   effectiveProvider,
+        requestedModel:      effectiveModel,
+        fallbackChain:       hasFallbackFailures ? JSON.stringify(fallbackAttempts) : null,
+        wasEscalated:        ctx.wasEscalated ?? false,
+        escalationReason:    ctx.escalationReason,
         billingMonth,
         billingDay,
       })
@@ -548,6 +573,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   });
 
   // ── 12. Write ledger — upsert so a successful retry overwrites a prior error row ──
+  const hasFallbackFailures = fallbackAttempts.some(a => a.error);
+
   await db
     .insert(llmRequests)
     .values({
@@ -583,6 +610,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       routerOverheadMs,
       status:              callStatus,
       attemptNumber,
+      requestedProvider:   effectiveProvider,
+      requestedModel:      effectiveModel,
+      fallbackChain:       hasFallbackFailures ? JSON.stringify(fallbackAttempts) : null,
+      wasEscalated:        ctx.wasEscalated ?? false,
+      escalationReason:    ctx.escalationReason,
       billingMonth,
       billingDay,
     })
