@@ -671,7 +671,10 @@ type FallbackChainEntry = { provider: string; model: string; error?: string; suc
 
 function parseFallbackChain(raw: string | null): FallbackChainEntry[] | null {
   if (!raw) return null;
-  try { return JSON.parse(raw) as FallbackChainEntry[]; } catch { return null; }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as FallbackChainEntry[] : null;
+  } catch { return null; }
 }
 
 const ANOMALY_THRESHOLDS = {
