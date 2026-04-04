@@ -688,7 +688,7 @@ export const agentService = {
     if (!existing) throw { statusCode: 404, message: 'Agent not found' };
 
     const now = new Date();
-    await db.update(agents).set({ deletedAt: now, updatedAt: now }).where(eq(agents.id, id));
+    await db.update(agents).set({ deletedAt: now, updatedAt: now }).where(and(eq(agents.id, id), eq(agents.organisationId, organisationId)));
     return { message: 'Agent deleted successfully' };
   },
 

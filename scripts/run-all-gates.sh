@@ -50,6 +50,19 @@ run_gate "$SCRIPT_DIR/verify-background-jobs-readiness.sh"
 run_gate "$SCRIPT_DIR/verify-email-readiness.sh"
 run_gate "$SCRIPT_DIR/verify-onboarding-telemetry.sh"
 
+# Architecture Guards — Tier 1 (hard fail)
+run_gate "$SCRIPT_DIR/verify-async-handler.sh"
+run_gate "$SCRIPT_DIR/verify-subaccount-resolution.sh"
+run_gate "$SCRIPT_DIR/verify-org-scoped-writes.sh"
+
+# Architecture Guards — Tier 2 (warning only, initially)
+run_gate "$SCRIPT_DIR/verify-no-db-in-routes.sh"
+run_gate "$SCRIPT_DIR/verify-no-direct-role-checks.sh"
+run_gate "$SCRIPT_DIR/verify-org-id-source.sh"
+run_gate "$SCRIPT_DIR/verify-permission-scope.sh"
+run_gate "$SCRIPT_DIR/verify-rate-limiting.sh"
+run_gate "$SCRIPT_DIR/verify-input-validation.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 
