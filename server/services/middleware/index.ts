@@ -1,4 +1,5 @@
 import type { MiddlewarePipeline } from './types.js';
+import { contextPressureMiddleware } from './contextPressure.js';
 import { budgetCheckMiddleware } from './budgetCheck.js';
 import { loopDetectionMiddleware } from './loopDetection.js';
 import { toolRestrictionMiddleware } from './toolRestriction.js';
@@ -23,7 +24,7 @@ export type {
 
 export function createDefaultPipeline(): MiddlewarePipeline {
   return {
-    preCall: [budgetCheckMiddleware],
+    preCall: [contextPressureMiddleware, budgetCheckMiddleware],
     preTool: [toolRestrictionMiddleware, loopDetectionMiddleware],
     postTool: [],
   };

@@ -296,6 +296,14 @@ export const agentScheduleService = {
       }
     });
 
+    // ── Stale run cleanup — runs every 5 minutes ────────────────────────
+    const STALE_CLEANUP_QUEUE = 'stale-run-cleanup';
+    await pgboss.work(STALE_CLEANUP_QUEUE, async () => {
+      const { staleRunCleanupService } = await import('./staleRunCleanupService.js');
+      await staleRunCleanupService.cleanupStaleRuns();
+    });
+    await pgboss.schedule(STALE_CLEANUP_QUEUE, '*/5 * * * *');
+
     // Register all active schedules
     await this.registerAllActiveSchedules();
   },

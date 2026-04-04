@@ -12,6 +12,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Write detailed specs upfront to reduce ambiguity
 - Define both execution steps AND verification steps before starting
 - If something goes sideways, STOP and re-plan immediately. Do not keep pushing.
+- **Stuck detection rule:** If you attempt the same approach twice and it fails both times, you are stuck. Do not try a third time.
 - Use plan mode for verification steps, not just building
 
 ## 2. Subagent Strategy
@@ -24,10 +25,11 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 
 ## 3. Self-Improvement Loop
 
-- After ANY correction from the user: update `tasks/lessons.md` with the pattern
-- Write rules for yourself that prevent the same mistake from recurring
-- Ruthlessly iterate on these lessons until the mistake rate drops
-- Review `tasks/lessons.md` at the start of each session for the relevant project
+- Review `KNOWLEDGE.md` at the start of each session
+- Write to `KNOWLEDGE.md` proactively — not just after corrections (see KNOWLEDGE.md for triggers)
+- After ANY correction from the user: always add a Correction entry to `KNOWLEDGE.md`
+- Be specific. Vague entries do not prevent future mistakes.
+- Never edit or remove existing entries — only append new ones
 - Convert every failure into a reusable rule
 
 ## 4. Verification Before Done
@@ -37,6 +39,29 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Diff behaviour between main and your changes when relevant
 - Compare expected vs actual behaviour
 - Ask yourself: "Would a senior/staff engineer approve this?"
+
+## Verification Commands
+
+Run these after every non-trivial change. No task is complete until all relevant checks pass.
+
+| Trigger | Command | Max auto-fix attempts |
+|---------|---------|----------------------|
+| Any code change | `npm run lint` | 3 |
+| Any TypeScript change | `npm run typecheck` | 3 |
+| Logic change in server/ | `npm test` (or relevant suite) | 2 |
+| Schema change | `npm run db:generate` — verify migration file | 1 |
+| Client change | `npm run build` | 2 |
+
+### Rules
+- Run the relevant checks, not all of them, unless the change spans client + server.
+- If a check fails, fix the issue and re-run. Do not mark the task complete.
+- After 3 failed fix attempts on the same check, STOP and escalate to the user with:
+  - The exact error output
+  - What you tried
+  - Your hypothesis for root cause
+- Never skip a failing check. Never suppress warnings to make a check pass.
+
+---
 
 ## 5. Demand Elegance
 
@@ -53,6 +78,31 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Zero context switching required from the user
 - Find root cause, not symptoms
 - Fix failing CI tests proactively without being told how
+
+## Stuck Detection Protocol
+
+When stuck (same approach fails twice):
+
+1. **STOP** — do not retry the same thing a third time
+2. **Write the blocker** to `tasks/todo.md` under a `## Blockers` heading:
+   - What was attempted (be specific — file, function, approach)
+   - Exact error or failure mode
+   - Why you think it failed (root cause hypothesis)
+   - What you would try next if unblocked
+3. **Ask the user** — present the blocker summary and wait for direction
+
+### What counts as "the same approach"
+- Same file edit that fails the same check twice
+- Same command that errors twice with the same message
+- Same architectural approach that hits the same wall
+- Rephrasing the same logic does NOT count as a different approach
+
+### What to do instead of retrying
+- Try a fundamentally different approach (different algorithm, different file, different pattern)
+- Read more context (maybe you're missing something)
+- Check if the problem is upstream (wrong assumption, stale data, missing dependency)
+
+---
 
 ## 7. Skills = System Layer
 

@@ -18,11 +18,17 @@ export interface MiddlewareContext {
   tokenBudget: number;
   maxToolCalls: number;
   timeoutMs: number;
+  // Context pressure warning flags
+  _softWarningIssued?: boolean;
+  _criticalWarningIssued?: boolean;
+  // Cycle detection cooldown flag
+  _cycleWarningIssued?: boolean;
 }
 
 export type PreCallResult =
   | { action: 'continue' }
-  | { action: 'stop'; reason: string; status: string };
+  | { action: 'stop'; reason: string; status: string }
+  | { action: 'inject_message'; message: string };
 
 export type PreToolResult =
   | { action: 'continue' }
