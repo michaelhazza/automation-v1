@@ -3,6 +3,7 @@
 # Source this at the top of each guard: source "$SCRIPT_DIR/lib/guard-utils.sh"
 #
 # Requires: jq
+command -v jq >/dev/null 2>&1 || { echo "[GUARD] Error: jq is required but not installed" >&2; exit 1; }
 
 # ── Suppression Comments ─────────────────────────────────────────────────────
 # Suppression uses a next-line directive. Place on the line ABOVE the violation.
