@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath // empty' | { read -r f; if [ -n \"$f\" ] && echo \"$f\" | grep -q 'server/routes'; then bash scripts/lint-route-rules.sh \"$f\"; fi; } 2>/dev/null || true",
+            "timeout": 10,
+            "statusMessage": "Checking architecture rules..."
+          }
+        ]
+      }
+    ]
+  }
+}

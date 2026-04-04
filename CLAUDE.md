@@ -201,6 +201,26 @@ These are non-negotiable. Violations are blocking issues in any code review.
 
 ---
 
+## Hooks (Deterministic Enforcement)
+
+CLAUDE.md is advisory (~80% followed). Hooks are deterministic, 100%. Non-negotiable architecture rules are enforced via hooks in `.claude/settings.json`, not just documented here.
+
+**Active hooks:**
+- **PostToolUse (Write|Edit)** — runs `scripts/lint-route-rules.sh` on any route file edit. Checks: asyncHandler usage, no direct db imports, resolveSubaccount presence, authenticate middleware, req.orgId over req.user.organisationId, soft-delete isNull filters.
+
+To add new deterministic rules: add them as hooks, not just CLAUDE.md prose.
+
+---
+
+## Checkpoint-Driven Experimentation
+
+Use checkpoints (Esc+Esc) to enable aggressive experimentation:
+- If an approach has a 40%+ chance of working, try it. Checkpoints make rollback free.
+- Prefer "try and revert" over "analyse endlessly before starting."
+- This complements "Iteration over Perfection" — ship attempts, rewind failures, keep wins.
+
+---
+
 ## Core Principles
 
 - **Simplicity First** -- Make every change as simple as possible. Impact minimal code.
