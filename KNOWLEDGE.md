@@ -33,4 +33,10 @@ Read this at the start of every session. Never edit or remove existing entries �
 
 ## Entries
 
-_No entries yet._
+### 2026-04-04 Decision — Injected middleware messages use role: 'user' not role: 'system'
+
+Anthropic's Messages API only supports `system` as the top-level parameter, not as mid-conversation messages. Context pressure warnings are injected as `role: 'user'` with a `[SYSTEM]` prefix. This is the correct pattern — `role: 'system'` inside the messages array would cause an API error.
+
+### 2026-04-04 Pattern — Persist execution phase to agentRuns for observability
+
+The agentic loop already computes `phase` ('planning' | 'execution' | 'synthesis') per iteration in `agentExecutionService.ts` (line ~940). Consider persisting this to the `agent_runs` row for debugging and post-mortem analysis. Deferred to next sprint — would require a schema change.

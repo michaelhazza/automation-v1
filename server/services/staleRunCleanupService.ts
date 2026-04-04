@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lt, or, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns } from '../db/schema/index.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
@@ -27,8 +27,9 @@ export const staleRunCleanupService = {
     const toolGraceThreshold = new Date(now.getTime() - TOOL_GRACE_PERIOD_MS);
     const legacyThreshold = new Date(now.getTime() - LEGACY_STALE_THRESHOLD_MS);
 
-    // Find all running runs
-    const runningRuns = await db
+    // Find stale running runs — push filtering into DB to use the index
+    // Catches: runs with stale heartbeats, OR legacy runs with no heartbeat at all
+    const candidates = await db
       .select({
         id: agentRuns.id,
         organisationId: agentRuns.organisationId,
@@ -40,21 +41,30 @@ export const staleRunCleanupService = {
         lastToolStartedAt: agentRuns.lastToolStartedAt,
       })
       .from(agentRuns)
-      .where(eq(agentRuns.status, 'running'));
+      .where(
+        and(
+          eq(agentRuns.status, 'running'),
+          or(
+            lt(agentRuns.lastActivityAt, staleThreshold),
+            isNull(agentRuns.lastActivityAt),
+          ),
+        )
+      )
+      .limit(100); // Prevent spike on mass failure
 
-    // Determine which runs are stale
-    const toCleanup = runningRuns.filter(run => {
+    // Refine in application code: tool grace period + legacy threshold
+    const toCleanup = candidates.filter(run => {
       if (run.lastActivityAt) {
         // If a tool is actively running (started after last heartbeat), use grace period
-        const lastActivity = run.lastActivityAt;
+        const lastActivity = run.lastActivityAt ?? run.startedAt;
         const lastTool = run.lastToolStartedAt;
-        if (lastTool && lastTool > lastActivity) {
+        if (lastTool && lastActivity && lastTool > lastActivity) {
           return lastTool < toolGraceThreshold;
         }
-        return lastActivity < staleThreshold;
+        return true; // Already filtered by DB: lastActivityAt < staleThreshold
       }
-      // Legacy: no heartbeat column populated yet
-      return run.startedAt && run.startedAt < legacyThreshold;
+      // Legacy: no heartbeat — check startedAt against longer threshold
+      return run.startedAt != null && run.startedAt < legacyThreshold;
     });
 
     for (const run of toCleanup) {

@@ -931,6 +931,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       }
       if (result.action === 'inject_message') {
         messages.push({ role: 'user', content: result.message });
+        logger.debug('middleware.inject_message', {
+          runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
+        });
       }
     }
 
