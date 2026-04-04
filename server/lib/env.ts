@@ -45,6 +45,11 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
+  // LLM Router — routing control flags
+  ROUTER_SHADOW_MODE: z.coerce.boolean().default(false),
+  ROUTER_ENABLE_ECONOMY: z.coerce.boolean().default(false),
+  ROUTER_FORCE_FRONTIER: z.coerce.boolean().default(false),
   // LLM Router — platform-level safety caps
   PLATFORM_MONTHLY_COST_LIMIT_CENTS: z.coerce.number().optional(),
   PLATFORM_MAX_REQUESTS_PER_MINUTE: z.coerce.number().optional().default(60),

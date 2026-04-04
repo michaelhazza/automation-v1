@@ -16,7 +16,24 @@ const FAILSAFE_PRICING: Record<string, { inputRate: number; outputRate: number }
   'openai:gpt-4o':               { inputRate: 0.0025,   outputRate: 0.01     },
   'openai:gpt-4o-mini':          { inputRate: 0.00015,  outputRate: 0.0006   },
   'gemini:gemini-2.0-flash':     { inputRate: 0.0001,   outputRate: 0.0004   },
+  'gemini:gemini-2.5-flash':     { inputRate: 0.0003,   outputRate: 0.0025   },
+  'gemini:gemini-2.5-flash-lite': { inputRate: 0.0001,  outputRate: 0.0004   },
+  'openrouter:deepseek/deepseek-v3':            { inputRate: 0.00027, outputRate: 0.0011  },
+  'openrouter:arcee-ai/trinity-large-thinking': { inputRate: 0.0003,  outputRate: 0.0009  },
+  'openrouter:anthropic/claude-sonnet-4-6':     { inputRate: 0.003,   outputRate: 0.015   },
   '__default__':                 { inputRate: 0.015,    outputRate: 0.075    },
+};
+
+// ---------------------------------------------------------------------------
+// Cache read discount multipliers by provider
+// Applied to cached input tokens — reduces effective input cost.
+// ---------------------------------------------------------------------------
+
+export const CACHE_READ_MULTIPLIERS: Record<string, number> = {
+  anthropic:  0.10,   // 90% discount on cached tokens
+  openai:     0.50,   // 50% discount (automatic caching)
+  gemini:     0.25,   // 75% discount
+  openrouter: 1.00,   // no caching through OpenRouter
 };
 
 // ---------------------------------------------------------------------------
@@ -153,14 +170,18 @@ export async function calculateCost(
   tokensIn: number,
   tokensOut: number,
   orgId:    string,
+  cachedPromptTokens: number = 0,
 ): Promise<CostResult> {
   const [pricing, margin] = await Promise.all([
     getPricing(provider, model),
     getMargin(orgId),
   ]);
 
+  const cacheMultiplier = CACHE_READ_MULTIPLIERS[provider] ?? 1.0;
+  const uncachedIn = tokensIn - cachedPromptTokens;
   const costRaw =
-    (tokensIn  / 1000) * pricing.inputRate +
+    (uncachedIn / 1000) * pricing.inputRate +
+    (cachedPromptTokens / 1000) * pricing.inputRate * cacheMultiplier +
     (tokensOut / 1000) * pricing.outputRate;
 
   const costWithMargin =
