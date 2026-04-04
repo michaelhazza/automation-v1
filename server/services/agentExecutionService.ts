@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { logger } from '../lib/logger.js';
 import {
   agents,
   subaccountAgents,
@@ -38,6 +39,7 @@ import {
   type MiddlewareContext,
   type MiddlewarePipeline,
 } from './middleware/index.js';
+import { maskObservations, tagIteration } from './middleware/observationMasking.js';
 import {
   MAX_LOOP_ITERATIONS,
   WRAP_UP_MAX_TOKENS,
@@ -221,6 +223,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
+        lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -632,6 +635,7 @@ export const agentExecutionService = {
         tasksCreated: loopResult.tasksCreated,
         tasksUpdated: loopResult.tasksUpdated,
         deliverablesCreated: loopResult.deliverablesCreated,
+        lastActivityAt: new Date(),
         completedAt: new Date(),
         durationMs,
         updatedAt: new Date(),
@@ -893,13 +897,25 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     mwCtx.tokensUsed = totalTokensUsed;
     mwCtx.toolCallsCount = totalToolCalls;
 
+    // ── Heartbeat: update lastActivityAt for stale run detection ──────
+    // Throttle to every 3rd iteration to avoid DB write pressure
+    if (iteration % 3 === 0) {
+      db.update(agentRuns)
+        .set({ lastActivityAt: new Date() })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')))
+        .catch((err) => {
+          logger.warn('heartbeat_update_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        });
+    }
+
     // ── Pre-call middleware ────────────────────────────────────────────
     for (const mw of pipeline.preCall) {
       const result = mw.execute(mwCtx);
       if (result.action === 'stop') {
         messages.push({ role: 'user', content: result.reason });
+        const maskedWrapUp = maskObservations(messages, iteration);
         const wrapUp = await routeCall({
-          messages,
+          messages: maskedWrapUp,
           system: systemPrompt,
           temperature: agent.temperature,
           maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
@@ -912,6 +928,12 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         totalTokensUsed += (wrapUp.tokensIn ?? 0) + (wrapUp.tokensOut ?? 0);
         finalStatus = result.status;
         break outerLoop;
+      }
+      if (result.action === 'inject_message') {
+        messages.push({ role: 'user', content: result.message });
+        logger.debug('middleware.inject_message', {
+          runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
+        });
       }
     }
 
@@ -934,9 +956,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       phase = 'planning';
     }
 
-    // ── Call LLM ──────────────────────────────────────────────────────
+    // ── Call LLM (with observation masking) ─────────────────────────────
+    const maskedMessages = maskObservations(messages, iteration);
     const response = await routeCall({
-      messages,
+      messages: maskedMessages,
       system: systemPrompt,
       tools: tools.length > 0 ? tools : undefined,
       temperature: agent.temperature,
@@ -961,7 +984,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         escalationAttempted = true;
         console.warn(`[agentLoop] escalating: ${validation.failureReason} — retrying with frontier model`);
         const escalatedResponse = await routeCall({
-          messages,
+          messages: maskedMessages,
           system: systemPrompt,
           tools: tools.length > 0 ? tools : undefined,
           temperature: agent.temperature,
@@ -1020,8 +1043,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             })),
           });
           messages.push({ role: 'user', content: result.reason });
+          const maskedStopMessages = maskObservations(messages, iteration);
           const wrapUp = await routeCall({
-            messages,
+            messages: maskedStopMessages,
             system: systemPrompt,
             temperature: agent.temperature,
             maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
@@ -1040,6 +1064,14 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
       totalToolCalls++;
       const toolStart = Date.now();
+
+      // Mark tool start for stale run grace period
+      db.update(agentRuns)
+        .set({ lastToolStartedAt: new Date() })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')))
+        .catch((err) => {
+          logger.warn('tool_start_update_failed', { runId, tool: toolCall.name, error: err instanceof Error ? err.message : String(err) });
+        });
 
       const inputHash = hashToolCall(toolCall.name, toolCall.input);
       mwCtx.toolCallHistory.push({ name: toolCall.name, inputHash, iteration });
@@ -1123,14 +1155,14 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
     }
 
-    messages.push({
+    messages.push(tagIteration({
       role: 'user',
       content: toolResults.map(tr => ({
         type: 'tool_result' as const,
         tool_use_id: tr.tool_use_id,
         content: tr.content,
       })),
-    });
+    }, iteration));
   }
 
   // Flush any pending throttled trace events before returning
