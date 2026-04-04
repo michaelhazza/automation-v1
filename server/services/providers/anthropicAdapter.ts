@@ -19,12 +19,26 @@ const anthropicAdapter: LLMProviderAdapter = {
       model: params.model,
       max_tokens: params.maxTokens ?? 4096,
       temperature: params.temperature ?? 0.7,
-      system: params.system ?? '',
       messages: params.messages,
     };
 
+    // Prompt caching: mark system prompt boundary for cache_control
+    if (params.system) {
+      body.system = [
+        { type: 'text', text: params.system, cache_control: { type: 'ephemeral' } },
+      ];
+    } else {
+      body.system = '';
+    }
+
+    // Prompt caching: mark last tool definition for cache_control
     if (params.tools && params.tools.length > 0) {
-      body.tools = params.tools;
+      const toolsCopy = params.tools.map((t, i) =>
+        i === params.tools!.length - 1
+          ? { ...t, cache_control: { type: 'ephemeral' } }
+          : t,
+      );
+      body.tools = toolsCopy;
     }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -69,6 +83,8 @@ const anthropicAdapter: LLMProviderAdapter = {
       usage: {
         input_tokens: number;
         output_tokens: number;
+        cache_creation_input_tokens?: number;
+        cache_read_input_tokens?: number;
       };
     };
 
@@ -83,6 +99,7 @@ const anthropicAdapter: LLMProviderAdapter = {
       stopReason: data.stop_reason,
       tokensIn:   data.usage.input_tokens,
       tokensOut:  data.usage.output_tokens,
+      cachedPromptTokens: data.usage.cache_read_input_tokens ?? 0,
       providerRequestId: data.id ?? providerRequestId,
     };
   },

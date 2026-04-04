@@ -2,6 +2,7 @@ import type { LLMProviderAdapter } from './types.js';
 import anthropicAdapter from './anthropicAdapter.js';
 import openaiAdapter from './openaiAdapter.js';
 import geminiAdapter from './geminiAdapter.js';
+import openrouterAdapter from './openrouterAdapter.js';
 
 // ---------------------------------------------------------------------------
 // Provider registry — the single source of truth for available adapters.
@@ -9,9 +10,10 @@ import geminiAdapter from './geminiAdapter.js';
 // ---------------------------------------------------------------------------
 
 const registry: Record<string, LLMProviderAdapter> = {
-  anthropic: anthropicAdapter,
-  openai:    openaiAdapter,
-  gemini:    geminiAdapter,
+  anthropic:   anthropicAdapter,
+  openai:      openaiAdapter,
+  gemini:      geminiAdapter,
+  openrouter:  openrouterAdapter,
 };
 
 export function getProviderAdapter(provider: string): LLMProviderAdapter {

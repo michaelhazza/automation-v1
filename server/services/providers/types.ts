@@ -39,6 +39,15 @@ export interface ProviderResponse {
   tokensIn:          number;
   tokensOut:         number;
   providerRequestId: string;
+  cachedPromptTokens?: number;
+
+  // Routing metadata — set by routeCall() (not provider adapters).
+  // Consumed by agent loop for escalation decisions.
+  routing?: {
+    tier:           'frontier' | 'economy';
+    wasDowngraded:  boolean;
+    reason:         string;
+  };
 }
 
 export interface LLMProviderAdapter {

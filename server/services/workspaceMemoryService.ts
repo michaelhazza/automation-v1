@@ -9,7 +9,6 @@ import { routeCall } from './llmRouter.js';
 import { taskService } from './taskService.js';
 import { generateEmbedding, formatVectorLiteral } from '../lib/embeddings.js';
 import {
-  EXTRACTION_MODEL,
   EXTRACTION_MAX_TOKENS,
   SUMMARY_MAX_TOKENS,
   DEFAULT_ENTRY_LIMIT,
@@ -186,8 +185,8 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
           sourceType: 'agent_run',
           agentName: agentId,
           taskType: 'memory_compile',
-          provider: 'anthropic',
-          model: EXTRACTION_MODEL,
+          executionPhase: 'execution',
+          routingMode: 'ceiling',
         },
       });
 
@@ -353,8 +352,8 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
         subaccountId,
         sourceType: 'system',
         taskType: 'memory_compile',
-        provider: 'anthropic',
-        model: EXTRACTION_MODEL,
+        executionPhase: 'execution',
+        routingMode: 'ceiling',
       },
     });
 
@@ -553,8 +552,8 @@ If none found: { "entities": [] }`,
           runId,
           sourceType: 'agent_run',
           taskType: 'memory_compile',
-          provider: 'anthropic',
-          model: EXTRACTION_MODEL,
+          executionPhase: 'execution',
+          routingMode: 'ceiling',
         },
       });
 
@@ -784,8 +783,8 @@ async function deduplicateEntries(
         runId,
         sourceType: 'agent_run',
         taskType: 'memory_compile',
-        provider: 'anthropic',
-        model: EXTRACTION_MODEL,
+        executionPhase: 'execution',
+        routingMode: 'ceiling',
       },
     });
 

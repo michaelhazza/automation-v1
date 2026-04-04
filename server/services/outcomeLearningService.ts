@@ -11,7 +11,7 @@
 
 import { routeCall } from './llmRouter.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
-import { EXTRACTION_MODEL, EXTRACTION_MAX_TOKENS } from '../config/limits.js';
+import { EXTRACTION_MAX_TOKENS } from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -108,8 +108,8 @@ Respond with only the lesson — no preamble, no quotes.`;
         sourceType: 'system',
         agentName: 'outcome-learning',
         taskType: 'memory_compile',
-        provider: 'anthropic',
-        model: EXTRACTION_MODEL,
+        executionPhase: 'execution',
+        routingMode: 'ceiling',
       },
     });
 

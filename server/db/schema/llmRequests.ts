@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, numeric, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, numeric, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
@@ -61,6 +61,22 @@ export const llmRequests = pgTable(
     errorMessage:  text('error_message'),
     attemptNumber: integer('attempt_number').notNull().default(1),
 
+    // Caching
+    cachedPromptTokens: integer('cached_prompt_tokens').notNull().default(0),
+
+    // Routing metadata
+    executionPhase:   text('execution_phase').notNull().default('planning'),
+    // 'planning' | 'execution' | 'synthesis'
+    capabilityTier:   text('capability_tier').notNull().default('frontier'),
+    // 'frontier' | 'economy'
+    wasDowngraded:    boolean('was_downgraded').notNull().default(false),
+    routingReason:    text('routing_reason'),
+    // 'forced' | 'ceiling' | 'economy' | 'fallback'
+
+    // Escalation tracking
+    wasEscalated:     boolean('was_escalated').notNull().default(false),
+    escalationReason: text('escalation_reason'),
+
     // Billing period (derived from created_at UTC at insert time — never app clock)
     billingMonth: text('billing_month').notNull(),  // 'YYYY-MM'
     billingDay:   text('billing_day').notNull(),    // 'YYYY-MM-DD'
@@ -75,6 +91,7 @@ export const llmRequests = pgTable(
     billingDayIdx:        index('llm_requests_billing_day_idx').on(table.billingDay),
     createdAtIdx:         index('llm_requests_created_at_idx').on(table.createdAt),
     executionIdIdx:       index('llm_requests_execution_id_idx').on(table.executionId),
+    executionPhaseIdx:    index('llm_requests_execution_phase_idx').on(table.executionPhase, table.billingMonth),
   }),
 );
 
@@ -114,3 +131,19 @@ export const LLM_REQUEST_STATUSES = [
   'provider_not_configured',
 ] as const;
 export type LlmRequestStatus = typeof LLM_REQUEST_STATUSES[number];
+
+// Execution phases for routing
+export const EXECUTION_PHASES = ['planning', 'execution', 'synthesis'] as const;
+export type ExecutionPhase = typeof EXECUTION_PHASES[number];
+
+// Capability tiers
+export const CAPABILITY_TIERS = ['frontier', 'economy'] as const;
+export type CapabilityTier = typeof CAPABILITY_TIERS[number];
+
+// Routing modes
+export const ROUTING_MODES = ['ceiling', 'forced'] as const;
+export type RoutingMode = typeof ROUTING_MODES[number];
+
+// Routing reasons (resolver decisions only — escalation tracked separately)
+export const ROUTING_REASONS = ['forced', 'ceiling', 'economy', 'fallback'] as const;
+export type RoutingReason = typeof ROUTING_REASONS[number];

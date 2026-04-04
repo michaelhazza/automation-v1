@@ -255,8 +255,10 @@ export const conversationService = {
         sourceType: 'agent_run',
         agentName: agent.name,
         taskType: 'general',
+        executionPhase: 'planning',
         provider: agent.modelProvider ?? 'anthropic',
         model: agent.modelId,
+        routingMode: 'ceiling',
       },
     });
 
@@ -370,8 +372,10 @@ export const conversationService = {
           sourceType: 'agent_run',
           agentName: agent.name,
           taskType: 'process_trigger',
+          executionPhase: 'synthesis',
           provider: agent.modelProvider ?? 'anthropic',
           model: agent.modelId,
+          routingMode: 'ceiling',
         },
       });
 
