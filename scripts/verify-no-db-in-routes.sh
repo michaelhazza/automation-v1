@@ -3,8 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+GUARD_ID="no-db-in-routes"
 GUARD_NAME="No Direct DB in Routes"
+
+source "$SCRIPT_DIR/lib/guard-utils.sh"
+
 VIOLATIONS=0
 FILES_SCANNED=0
 
@@ -24,7 +27,7 @@ is_whitelisted() {
   return 1
 }
 
-echo "[GUARD] $GUARD_NAME"
+emit_header "$GUARD_NAME"
 
 while IFS= read -r line; do
   file=$(echo "$line" | cut -d: -f1)
@@ -32,21 +35,17 @@ while IFS= read -r line; do
   content=$(echo "$line" | cut -d: -f3-)
 
   is_whitelisted "$file" && continue
+  is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
 
-  echo "❌ $file:$lineno"
-  echo "  $content"
-  echo "  → Move database queries to a service in server/services/"
-  echo ""
+  emit_violation "$GUARD_ID" "warning" "$file" "$lineno" \
+    "$content" \
+    "Move database queries to a service in server/services/"
   VIOLATIONS=$((VIOLATIONS + 1))
 done < <(grep -rn "import.*db.*from.*['\"].*\/db" "$ROOT_DIR/server/routes/" --include='*.ts' 2>/dev/null || true)
 
 FILES_SCANNED=$(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules/*' | wc -l)
 
-echo ""
-echo "Summary: $FILES_SCANNED files scanned, $VIOLATIONS violations found"
+emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-if [ $VIOLATIONS -gt 0 ]; then
-  exit 2  # Tier 2: warning (many existing violations)
-fi
-
-exit 0
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 2)
+exit "$exit_code"

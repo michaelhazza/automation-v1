@@ -3,8 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+GUARD_ID="org-scoped-writes"
 GUARD_NAME="Org-Scoped Writes"
+
+source "$SCRIPT_DIR/lib/guard-utils.sh"
+
 VIOLATIONS=0
 FILES_SCANNED=0
 
@@ -25,33 +28,9 @@ ORG_SCOPED_TABLES=(
   "permissionSets"
 )
 
-# Non-org-scoped tables (safe to update by id only)
-SAFE_TABLES=(
-  "budgetReservations"
-  "llmRequests"
-  "llmUsage"
-  "users"
-  "organisations"
-  "agentRuns"
-  "agentRunSteps"
-  "dataSources"
-  "dataSourceChunks"
-  "formSubmissions"
-  "portalSessions"
-)
-
-is_org_scoped() {
-  local table="$1"
-  for t in "${ORG_SCOPED_TABLES[@]}"; do
-    [[ "$table" == "$t" ]] && return 0
-  done
-  return 1
-}
-
-echo "[GUARD] $GUARD_NAME"
+emit_header "$GUARD_NAME"
 
 # Find update/delete with single eq(*.id, *) — no and()
-# Pattern: .where(eq( without and( on the same line, referencing .id
 while IFS= read -r line; do
   file=$(echo "$line" | cut -d: -f1)
   lineno=$(echo "$line" | cut -d: -f2)
@@ -64,30 +43,27 @@ while IFS= read -r line; do
   echo "$content" | grep -qE '^\s*//' && continue
 
   # Check if this involves an org-scoped table
-  is_violation=false
+  matched_table=""
   for table in "${ORG_SCOPED_TABLES[@]}"; do
     if echo "$content" | grep -q "${table}\.id"; then
-      is_violation=true
+      matched_table="$table"
       break
     fi
   done
 
-  if $is_violation; then
-    echo "❌ $file:$lineno"
-    echo "  $content"
-    echo "  → Add organisationId to WHERE clause: .where(and(eq(table.id, id), eq(table.organisationId, organisationId)))"
-    echo ""
+  if [ -n "$matched_table" ]; then
+    is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
+
+    emit_violation "$GUARD_ID" "error" "$file" "$lineno" \
+      "$content" \
+      ".where(and(eq(${matched_table}.id, id), eq(${matched_table}.organisationId, organisationId)))"
     VIOLATIONS=$((VIOLATIONS + 1))
   fi
 done < <(grep -rn '\.where(eq(' "$ROOT_DIR/server/services/" --include='*.ts' 2>/dev/null | grep '\.id,' | grep -v 'and(' || true)
 
 FILES_SCANNED=$(find "$ROOT_DIR/server/services/" -name '*.ts' -not -path '*/node_modules/*' | wc -l)
 
-echo ""
-echo "Summary: $FILES_SCANNED files scanned, $VIOLATIONS violations found"
+emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-if [ $VIOLATIONS -gt 0 ]; then
-  exit 1  # Tier 1: hard fail
-fi
-
-exit 0
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
+exit "$exit_code"

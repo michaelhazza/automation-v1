@@ -3,11 +3,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+GUARD_ID="rate-limiting"
 GUARD_NAME="Rate Limiting on Sensitive Endpoints"
+
+source "$SCRIPT_DIR/lib/guard-utils.sh"
+
 VIOLATIONS=0
 
-echo "[GUARD] $GUARD_NAME"
+emit_header "$GUARD_NAME"
 
 # Define sensitive endpoints that must have rate limiting
 # Format: "file|path_pattern|method"
@@ -27,19 +30,19 @@ for entry in "${REQUIRED_ENDPOINTS[@]}"; do
     continue
   fi
 
-  # Check if the endpoint exists and has rate limiting
-  # Look for the path pattern near a route definition
-  has_endpoint=$(grep -c "$path" "$full_path" 2>/dev/null || echo "0")
+  has_endpoint=false
+  grep -q "$path" "$full_path" 2>/dev/null && has_endpoint=true
 
-  if [ "$has_endpoint" -gt 0 ]; then
-    # Check if rate limiting is applied near that endpoint
-    # Look for rateLimit, rateLimiter, slidingWindow within a few lines of the endpoint
+  if $has_endpoint; then
     has_rate_limit=false
 
-    # Get line numbers of the endpoint
     while IFS= read -r line_info; do
       lineno=$(echo "$line_info" | cut -d: -f1)
-      # Check surrounding lines (10 lines before and after) for rate limiting
+
+      # Check suppression
+      is_suppressed "$full_path" "$lineno" "$GUARD_ID" && { has_rate_limit=true; break; }
+
+      # Check surrounding lines (10 before/after) for rate limiting
       start=$((lineno - 10))
       [ $start -lt 1 ] && start=1
       end=$((lineno + 10))
@@ -53,20 +56,15 @@ for entry in "${REQUIRED_ENDPOINTS[@]}"; do
 
     if ! $has_rate_limit; then
       lineno=$(grep -n "$path" "$full_path" | head -1 | cut -d: -f1)
-      echo "❌ $file:$lineno"
-      echo "  Sensitive endpoint '$path' missing rate limiting"
-      echo "  → Add rate limiting middleware to prevent brute-force and abuse"
-      echo ""
+      emit_violation "$GUARD_ID" "warning" "$file" "$lineno" \
+        "Sensitive endpoint '$path' missing rate limiting" \
+        "Add rate limiting middleware: router.post('/$path', rateLimit({ windowMs: 15*60*1000, max: 5 }), handler)"
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
   fi
 done
 
-echo ""
-echo "Summary: ${#REQUIRED_ENDPOINTS[@]} endpoints checked, $VIOLATIONS violations found"
+emit_summary "${#REQUIRED_ENDPOINTS[@]}" "$VIOLATIONS"
 
-if [ $VIOLATIONS -gt 0 ]; then
-  exit 2  # Tier 2: warning
-fi
-
-exit 0
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 2)
+exit "$exit_code"

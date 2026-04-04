@@ -3,8 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+GUARD_ID="async-handler"
 GUARD_NAME="Async Handler Wrapping"
+
+source "$SCRIPT_DIR/lib/guard-utils.sh"
+
 VIOLATIONS=0
 FILES_SCANNED=0
 
@@ -23,10 +26,9 @@ is_whitelisted() {
   return 1
 }
 
-echo "[GUARD] $GUARD_NAME"
+emit_header "$GUARD_NAME"
 
 # Find async route handlers not wrapped in asyncHandler
-# Look for route method calls (.get(, .post(, etc.) followed by async (req without asyncHandler
 while IFS= read -r line; do
   file=$(echo "$line" | cut -d: -f1)
   lineno=$(echo "$line" | cut -d: -f2)
@@ -39,29 +41,29 @@ while IFS= read -r line; do
 
   # Only flag lines that look like route handler definitions
   if echo "$content" | grep -qE '\.(get|post|put|patch|delete|all)\(|router\.(get|post|put|patch|delete|all)'; then
-    echo "❌ $file:$lineno"
-    echo "  $content"
-    echo "  → Wrap handler in asyncHandler() to ensure errors are caught and standardized"
-    echo ""
+    is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
+
+    emit_violation "$GUARD_ID" "error" "$file" "$lineno" \
+      "$content" \
+      "Wrap handler in asyncHandler(): router.post('/path', asyncHandler(async (req, res) => { ... }))"
     VIOLATIONS=$((VIOLATIONS + 1))
   fi
 done < <(grep -rn 'async (req' "$ROOT_DIR/server/routes/" --include='*.ts' 2>/dev/null | grep -v 'asyncHandler' | grep -v '^\s*//' | grep -v 'node_modules' || true)
 
 # Also check for async handlers on lines following route definitions
-# Pattern: route definition on one line, bare async on next
 while IFS= read -r file; do
   is_whitelisted "$file" && continue
 
-  # Use awk to find route definitions followed by async (req without asyncHandler
   while IFS= read -r match; do
     [ -z "$match" ] && continue
     lineno=$(echo "$match" | cut -d: -f1)
     content=$(echo "$match" | cut -d: -f2-)
 
-    echo "❌ $file:$lineno"
-    echo "  $content"
-    echo "  → Wrap handler in asyncHandler() to ensure errors are caught and standardized"
-    echo ""
+    is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
+
+    emit_violation "$GUARD_ID" "error" "$file" "$lineno" \
+      "$content" \
+      "Wrap handler in asyncHandler(): router.post('/path', asyncHandler(async (req, res) => { ... }))"
     VIOLATIONS=$((VIOLATIONS + 1))
   done < <(awk '
     /\.(get|post|put|patch|delete|all)\(/ && !/asyncHandler/ && !/async/ { route_line=NR; next }
@@ -76,11 +78,7 @@ done < <(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules
 
 FILES_SCANNED=$(find "$ROOT_DIR/server/routes/" -name '*.ts' -not -path '*/node_modules/*' | wc -l)
 
-echo ""
-echo "Summary: $FILES_SCANNED files scanned, $VIOLATIONS violations found"
+emit_summary "$FILES_SCANNED" "$VIOLATIONS"
 
-if [ $VIOLATIONS -gt 0 ]; then
-  exit 1  # Tier 1: hard fail
-fi
-
-exit 0
+exit_code=$(check_baseline "$GUARD_ID" "$VIOLATIONS" 1)
+exit "$exit_code"

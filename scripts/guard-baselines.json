@@ -1,0 +1,11 @@
+{
+  "no-db-in-routes": 19,
+  "async-handler": 1,
+  "subaccount-resolution": 9,
+  "org-scoped-writes": 44,
+  "no-direct-role-checks": 10,
+  "org-id-source": 3,
+  "permission-scope": 15,
+  "rate-limiting": 5,
+  "input-validation": 39
+}
