@@ -203,8 +203,17 @@ export interface ModelCapability {
 export interface ProviderResponse {
   // ... existing fields ...
   cachedPromptTokens?: number;   // tokens served from cache (Anthropic, OpenAI, Gemini)
+
+  // Routing metadata — set by routeCall(), consumed by agent loop for escalation decisions
+  routing?: {
+    tier:           CapabilityTier;
+    wasDowngraded:  boolean;
+    reason:         ResolveLLMReason;
+  };
 }
 ```
+
+The `routing` field is populated by `routeCall()` (not by provider adapters). This makes routing decisions visible to callers without leaking resolver internals. The agent loop uses `response.routing?.wasDowngraded` to decide whether to run tool call validation.
 
 ---
 
@@ -372,12 +381,15 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   const ctx = LLMCallContextSchema.parse(params.context);
 
   // ── 1b. Global kill switch — forces frontier on everything ──────────
+  //        Takes precedence over shadow mode and resolver.
+  //        "System behaves as if routing never existed."
   if (env.ROUTER_FORCE_FRONTIER) {
-    // Incident response lever: skip all routing, use ceiling model.
-    // Rollback = env change, not deploy.
     const effectiveProvider = ctx.provider ?? 'anthropic';
     const effectiveModel = ctx.model ?? 'claude-sonnet-4-6';
-    // ... proceed directly to step 2 with ceiling values, skip resolver
+    // Proceed directly to step 2 with ceiling values.
+    // Skip resolver, skip shadow mode, skip escalation.
+    // Attach routing metadata so callers know no downgrade occurred:
+    // response.routing = { tier: 'frontier', wasDowngraded: false, reason: 'forced' }
   }
 
   // ── 1c. Resolve provider + model from execution phase ─────────────
@@ -418,6 +430,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
   // ... rest of routeCall uses effectiveProvider/effectiveModel
   // ... resolved.tier, resolved.wasDowngraded, resolved.reason written to llm_requests record
+  // ... attach routing metadata to response for caller visibility:
+  //     providerResponse.routing = { tier: resolved.tier, wasDowngraded: resolved.wasDowngraded, reason: resolved.reason }
 }
 ```
 
@@ -525,7 +539,7 @@ const response = await routeCall({ /* economy model */ });
 
 // Skip validation entirely if kill switch is active (no economy model in play)
 // If economy model was used and returned tool calls, validate
-if (!env.ROUTER_FORCE_FRONTIER && resolved.wasDowngraded && response.toolCalls?.length && !escalationAttempted) {
+if (!env.ROUTER_FORCE_FRONTIER && response.routing?.wasDowngraded && response.toolCalls?.length && !escalationAttempted) {
   const validation = validateToolCalls(response.toolCalls, tools);
 
   if (!validation.valid) {
