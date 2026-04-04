@@ -147,7 +147,7 @@ export const skillService = {
     if (data.methodology !== undefined) update.methodology = data.methodology;
     if (data.isActive !== undefined) update.isActive = data.isActive;
 
-    const [updated] = await db.update(skills).set(update).where(eq(skills.id, id)).returning();
+    const [updated] = await db.update(skills).set(update).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId))).returning();
     return updated;
   },
 
@@ -161,7 +161,7 @@ export const skillService = {
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot delete built-in skills' };
 
     const now = new Date();
-    await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(eq(skills.id, id));
+    await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)));
     return { message: 'Skill deleted' };
   },
 

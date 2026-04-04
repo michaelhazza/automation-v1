@@ -119,12 +119,14 @@ app.use(helmet({
     : false,
 }));
 
+if (isProduction && env.CORS_ORIGINS === '*') {
+  console.error('[SERVER] FATAL: CORS_ORIGINS=* is not allowed in production. Set explicit origins.');
+  process.exit(1);
+}
+
 const corsOrigin = (() => {
   if (!isProduction) return '*';
-  if (env.CORS_ORIGINS === '*') {
-    console.warn('[SERVER] CORS_ORIGINS is wildcard in production. Set explicit origins via CORS_ORIGINS env var.');
-  }
-  return env.CORS_ORIGINS === '*' ? false as const : env.CORS_ORIGINS.split(',').map(o => o.trim());
+  return env.CORS_ORIGINS.split(',').map(o => o.trim());
 })();
 
 app.use(cors({
