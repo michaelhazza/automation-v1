@@ -25,9 +25,8 @@ while IFS= read -r file; do
     if ! $has_subaccount_perm && $has_org_perm; then
       lineno=$(grep -n ':subaccountId' "$file" | head -1 | cut -d: -f1)
 
-      # Check for file-level suppression
-      is_suppressed "$file" 1 "$GUARD_ID" && continue
-      is_suppressed "$file" 2 "$GUARD_ID" && continue
+      # Check suppression on the first :subaccountId line
+      is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
 
       emit_violation "$GUARD_ID" "warning" "$file" "$lineno" \
         "Route has :subaccountId but uses requireOrgPermission instead of requireSubaccountPermission" \

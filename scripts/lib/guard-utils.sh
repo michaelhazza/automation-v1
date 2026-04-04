@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 # Shared utilities for architecture guard scripts
 # Source this at the top of each guard: source "$SCRIPT_DIR/lib/guard-utils.sh"
+#
+# Requires: jq
 
 # ── Suppression Comments ─────────────────────────────────────────────────────
-# Pattern: // guard-ignore: <guard-id> reason="<explanation>"
-# The reason is required. Suppressions without reason are not honoured.
+# Suppression uses a next-line directive. Place on the line ABOVE the violation.
+#
+# Pattern:
+#   // guard-ignore-next-line: <guard-id> reason="<explanation>"
 #
 # Example:
-#   // guard-ignore: no-db-in-routes reason="MCP transport requires direct DB access"
+#   // guard-ignore-next-line: no-db-in-routes reason="MCP transport requires direct DB access"
 #   import { db } from '../db/index.js';
+#
+# Same-line comments are also supported:
+#   import { db } from '../db/index.js'; // guard-ignore: no-db-in-routes reason="MCP transport"
 
 # Check if a specific line in a file has a suppression comment for the given guard.
-# Looks at the line itself and the line immediately above it.
+# Checks: (1) same line for inline guard-ignore, (2) previous line for guard-ignore-next-line.
 # Usage: is_suppressed <file> <line_number> <guard_id>
 # Returns 0 if suppressed, 1 if not.
 is_suppressed() {
@@ -19,16 +26,21 @@ is_suppressed() {
   local lineno="$2"
   local guard_id="$3"
 
-  local prev_lineno=$((lineno - 1))
-  [ "$prev_lineno" -lt 1 ] && prev_lineno=1
-
-  # Check the line itself and the line above
-  local context
-  context=$(sed -n "${prev_lineno},${lineno}p" "$file" 2>/dev/null || true)
-
-  # Must match: guard-ignore: <guard_id> reason="<non-empty>"
-  if echo "$context" | grep -qE "guard-ignore:\s*${guard_id}\s+reason=\"[^\"]+\""; then
+  # Check same line for inline suppression: guard-ignore: <id> reason="..."
+  local current_line
+  current_line=$(sed -n "${lineno}p" "$file" 2>/dev/null || true)
+  if echo "$current_line" | grep -qE "guard-ignore:\s*${guard_id}\s+reason=\"[^\"]+\""; then
     return 0
+  fi
+
+  # Check previous line for next-line directive: guard-ignore-next-line: <id> reason="..."
+  local prev_lineno=$((lineno - 1))
+  if [ "$prev_lineno" -ge 1 ]; then
+    local prev_line
+    prev_line=$(sed -n "${prev_lineno}p" "$file" 2>/dev/null || true)
+    if echo "$prev_line" | grep -qE "guard-ignore-next-line:\s*${guard_id}\s+reason=\"[^\"]+\""; then
+      return 0
+    fi
   fi
 
   return 1
@@ -49,12 +61,14 @@ emit_violation() {
   local fix="$6"
 
   if [ "${GUARD_OUTPUT:-text}" = "json" ]; then
-    # Escape strings for JSON
-    local json_msg json_fix json_file
-    json_msg=$(echo "$message" | sed 's/"/\\"/g')
-    json_fix=$(echo "$fix" | sed 's/"/\\"/g')
-    json_file=$(echo "$file" | sed 's/"/\\"/g')
-    echo "{\"guard\":\"${guard_name}\",\"severity\":\"${severity}\",\"file\":\"${json_file}\",\"line\":${line},\"message\":\"${json_msg}\",\"fix\":\"${json_fix}\"}"
+    jq -nc \
+      --arg guard "$guard_name" \
+      --arg severity "$severity" \
+      --arg file "$file" \
+      --arg line "$line" \
+      --arg message "$message" \
+      --arg fix "$fix" \
+      '{guard:$guard, severity:$severity, file:$file, line:($line|tonumber), message:$message, fix:$fix}'
   else
     echo "❌ $file:$line"
     echo "  $message"
@@ -100,8 +114,7 @@ get_baseline() {
     return
   fi
   local count
-  count=$(grep "\"${guard_id}\"" "$BASELINE_FILE" 2>/dev/null | grep -oE '[0-9]+' | tail -1 || echo "-1")
-  [ -z "$count" ] && count="-1"
+  count=$(jq -r --arg id "$guard_id" '.[$id] // -1' "$BASELINE_FILE" 2>/dev/null || echo "-1")
   echo "$count"
 }
 

@@ -26,9 +26,8 @@ while IFS= read -r file; do
       lineno=$(grep -nE 'req\.body' "$file" | head -1 | cut -d: -f1)
       relative_file=${file#"$ROOT_DIR/"}
 
-      # Check for file-level suppression
-      is_suppressed "$file" 1 "$GUARD_ID" && continue
-      is_suppressed "$file" 2 "$GUARD_ID" && continue
+      # Check suppression on the first req.body line
+      is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
 
       emit_violation "$GUARD_ID" "warning" "$relative_file" "$lineno" \
         "POST/PATCH handler accesses req.body without schema validation" \

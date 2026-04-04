@@ -33,9 +33,8 @@ while IFS= read -r file; do
     if ! grep -q 'resolveSubaccount' "$file" 2>/dev/null; then
       lineno=$(grep -n ':subaccountId' "$file" | head -1 | cut -d: -f1)
 
-      # Check for file-level suppression (on line 1 or 2)
-      is_suppressed "$file" 1 "$GUARD_ID" && continue
-      is_suppressed "$file" 2 "$GUARD_ID" && continue
+      # Check suppression on the first :subaccountId line
+      is_suppressed "$file" "$lineno" "$GUARD_ID" && continue
 
       emit_violation "$GUARD_ID" "error" "$file" "$lineno" \
         "Route has :subaccountId parameter but no resolveSubaccount call" \
