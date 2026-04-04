@@ -13,7 +13,7 @@ export const costAggregates = pgTable(
   {
     id:                      uuid('id').defaultRandom().primaryKey(),
     entityType:              text('entity_type').notNull(),
-    // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider'
+    // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider' | 'platform' | 'execution_phase'
     entityId:                text('entity_id').notNull(),
     periodType:              text('period_type').notNull(),
     // 'daily' | 'monthly' | 'run' | 'minute' | 'hour'

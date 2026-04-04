@@ -1,14 +1,16 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { llmRequests, TASK_TYPES, SOURCE_TYPES } from '../db/schema/index.js';
+import { llmRequests, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES } from '../db/schema/index.js';
 import { getActiveTrace } from '../instrumentation.js';
-import type { TaskType, SourceType } from '../db/schema/index.js';
+import type { TaskType, SourceType, ExecutionPhase, RoutingMode } from '../db/schema/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProviderAdapter } from './providers/registry.js';
 import { pricingService } from './pricingService.js';
 import { budgetService, BudgetExceededError, RateLimitError } from './budgetService.js';
+import { resolveLLM } from './llmResolver.js';
 import type { ProviderMessage, ProviderTool, ProviderResponse } from './providers/types.js';
+import { env } from '../lib/env.js';
 import {
   PROVIDER_CALL_TIMEOUT_MS,
   PROVIDER_MAX_RETRIES,
@@ -38,8 +40,10 @@ const LLMCallContextSchema = z.object({
   sourceType:         z.enum(SOURCE_TYPES),
   agentName:          z.string().optional(),
   taskType:           z.enum(TASK_TYPES),
-  provider:           z.string().min(1),
-  model:              z.string().min(1),
+  executionPhase:     z.enum(EXECUTION_PHASES),
+  provider:           z.string().min(1).optional(),
+  model:              z.string().min(1).optional(),
+  routingMode:        z.enum(ROUTING_MODES).default('ceiling'),
 });
 
 export type LLMCallContext = z.infer<typeof LLMCallContextSchema>;
@@ -50,6 +54,7 @@ export interface RouterCallParams {
   tools?:       ProviderTool[];
   maxTokens?:   number;
   temperature?: number;
+  estimatedContextTokens?: number;
   context:      LLMCallContext;
 }
 
@@ -58,7 +63,12 @@ export interface RouterCallParams {
 // Includes provider + model: different provider/model = distinct financial event
 // ---------------------------------------------------------------------------
 
-function generateIdempotencyKey(ctx: LLMCallContext, messages: ProviderMessage[]): string {
+function generateIdempotencyKey(
+  ctx: LLMCallContext,
+  messages: ProviderMessage[],
+  provider: string,
+  model: string,
+): string {
   const messageHash = createHash('sha256')
     .update(JSON.stringify(messages))
     .digest('hex')
@@ -69,8 +79,8 @@ function generateIdempotencyKey(ctx: LLMCallContext, messages: ProviderMessage[]
     ctx.runId ?? ctx.executionId ?? 'system',
     ctx.agentName ?? 'no-agent',
     ctx.taskType,
-    ctx.provider,
-    ctx.model,
+    provider,
+    model,
     messageHash,
   ].join(':');
 }
@@ -124,11 +134,20 @@ function isProviderCoolingDown(provider: string): boolean {
 const FALLBACK_MODEL_MAP: Record<string, Record<string, string>> = {
   openai: {
     'claude-sonnet-4-6': 'gpt-4o',
-    'claude-haiku-4-5': 'gpt-4o-mini',
+    'claude-haiku-4-5':  'gpt-4o-mini',
+    'claude-opus-4-6':   'gpt-4o',
   },
   gemini: {
-    'claude-sonnet-4-6': 'gemini-2.0-flash',
-    'claude-haiku-4-5': 'gemini-2.0-flash-lite',
+    'claude-sonnet-4-6': 'gemini-2.5-flash',
+    'claude-haiku-4-5':  'gemini-2.5-flash-lite',
+    'claude-opus-4-6':   'gemini-2.5-flash',
+  },
+  openrouter: {
+    'claude-sonnet-4-6': 'anthropic/claude-sonnet-4-6',
+    'claude-haiku-4-5':  'anthropic/claude-haiku-4-5',
+    'claude-opus-4-6':   'anthropic/claude-opus-4-6',
+    'gpt-4o':            'openai/gpt-4o',
+    'gpt-4o-mini':       'openai/gpt-4o-mini',
   },
 };
 
@@ -149,11 +168,55 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // ── 1. Validate context ─────────────────────────────────────────────────
   const ctx = LLMCallContextSchema.parse(params.context);
 
+  // ── 1b. Resolve provider + model from execution phase ─────────────────
+  let effectiveProvider: string;
+  let effectiveModel: string;
+  let routingTier: 'frontier' | 'economy' = 'frontier';
+  let wasDowngraded = false;
+  let routingReason: string = 'ceiling';
+
+  if (env.ROUTER_FORCE_FRONTIER) {
+    // Kill switch: skip all routing, use ceiling model.
+    effectiveProvider = ctx.provider ?? 'anthropic';
+    effectiveModel = ctx.model ?? 'claude-sonnet-4-6';
+    routingReason = 'forced';
+  } else {
+    const resolved = resolveLLM({
+      phase:    ctx.executionPhase,
+      taskType: ctx.taskType,
+      ceiling:  (ctx.provider && ctx.model) ? { provider: ctx.provider, model: ctx.model } : undefined,
+      mode:     ctx.routingMode ?? 'ceiling',
+      constraints: {
+        requiresToolCalling: !!(params.tools && params.tools.length > 0),
+        estimatedContextTokens: params.estimatedContextTokens,
+        expectedMaxOutputTokens: params.maxTokens,
+      },
+    });
+
+    if (env.ROUTER_SHADOW_MODE) {
+      // Shadow mode: log what would have been used, but use ceiling
+      console.info('[llmRouter] shadow:', JSON.stringify({
+        wouldUse: { provider: resolved.provider, model: resolved.model, tier: resolved.tier },
+        actuallyUsing: { provider: ctx.provider, model: ctx.model },
+        reason: resolved.reason,
+      }));
+      effectiveProvider = ctx.provider ?? 'anthropic';
+      effectiveModel = ctx.model ?? 'claude-sonnet-4-6';
+      routingReason = 'ceiling';
+    } else {
+      effectiveProvider = resolved.provider;
+      effectiveModel = resolved.model;
+      routingTier = resolved.tier;
+      wasDowngraded = resolved.wasDowngraded;
+      routingReason = resolved.reason;
+    }
+  }
+
   // ── 2. Check provider is registered ────────────────────────────────────
-  const adapter = getProviderAdapter(ctx.provider);
+  const adapter = getProviderAdapter(effectiveProvider);
 
   // ── 3. Generate idempotency key ─────────────────────────────────────────
-  const idempotencyKey = generateIdempotencyKey(ctx, params.messages);
+  const idempotencyKey = generateIdempotencyKey(ctx, params.messages, effectiveProvider, effectiveModel);
 
   // ── 4–7. Idempotency check + budget reservation (atomic transaction) ────
   // Wrap the idempotency lookup and budget reservation in a single transaction
@@ -162,13 +225,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
   // ── 5. Resolve pricing and estimate cost (outside tx — read-only, no race) ──
   const [pricing, margin] = await Promise.all([
-    pricingService.getPricing(ctx.provider, ctx.model),
+    pricingService.getPricing(effectiveProvider, effectiveModel),
     pricingService.getMargin(ctx.organisationId),
   ]);
 
   const maxTokensForEstimate = params.maxTokens ?? 4096;
   const estimatedCostCents = await pricingService.estimateCost(
-    ctx.provider, ctx.model, maxTokensForEstimate, ctx.organisationId,
+    effectiveProvider, effectiveModel, maxTokensForEstimate, ctx.organisationId,
   );
 
   // ── 6. Compute request payload hash ────────────────────────────────────
@@ -280,13 +343,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   let callStatus: string = 'success';
   let callError: string | null = null;
   let attemptNumber = 1;
-  let actualProvider = ctx.provider;
-  let actualModel = ctx.model;
+  let actualProvider = effectiveProvider;
+  let actualModel = effectiveModel;
 
   // Build fallback chain: primary provider first, then others in order
   const fallbackChain = [
-    ctx.provider,
-    ...PROVIDER_FALLBACK_CHAIN.filter(p => p !== ctx.provider),
+    effectiveProvider,
+    ...PROVIDER_FALLBACK_CHAIN.filter(p => p !== effectiveProvider),
   ];
 
   let lastError: unknown = null;
@@ -299,9 +362,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     }
 
     // Map the original model to the equivalent model for this provider
-    const mappedModel = provider === ctx.provider
-      ? ctx.model
-      : FALLBACK_MODEL_MAP[provider]?.[ctx.model];
+    const mappedModel = provider === effectiveProvider
+      ? effectiveModel
+      : FALLBACK_MODEL_MAP[provider]?.[effectiveModel];
 
     // Skip this fallback provider if there is no explicit model mapping for it
     if (mappedModel === undefined) {
@@ -337,9 +400,9 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         actualModel = mappedModel;
         attemptNumber = attempt;
 
-        if (provider !== ctx.provider || mappedModel !== ctx.model) {
+        if (provider !== effectiveProvider || mappedModel !== effectiveModel) {
           console.info('[llmRouter] provider_fallback_used', {
-            requestedProvider: ctx.provider, requestedModel: ctx.model,
+            requestedProvider: effectiveProvider, requestedModel: effectiveModel,
             actualProvider: provider, actualModel: mappedModel,
             attemptNumber,
             organisationId: ctx.organisationId, runId: ctx.runId,
@@ -393,7 +456,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
     console.error('[llmRouter] All providers failed', {
       idempotencyKey, organisationId: ctx.organisationId, runId: ctx.runId,
-      provider: ctx.provider, model: ctx.model, status: callStatus, error: callError,
+      provider: effectiveProvider, model: effectiveModel, status: callStatus, error: callError,
     });
 
     await db
@@ -408,8 +471,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         executionId:         ctx.executionId,
         agentName:           ctx.agentName,
         taskType:            ctx.taskType,
-        provider:            ctx.provider,
-        model:               ctx.model,
+        executionPhase:      ctx.executionPhase,
+        capabilityTier:      routingTier,
+        wasDowngraded,
+        routingReason,
+        provider:            effectiveProvider,
+        model:               effectiveModel,
         tokensIn:            0,
         tokensOut:           0,
         costRaw:             '0',
@@ -440,6 +507,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     providerResponse.tokensIn,
     providerResponse.tokensOut,
     ctx.organisationId,
+    providerResponse.cachedPromptTokens ?? 0,
   );
 
   // ── 10. Compute response payload hash ───────────────────────────────────
@@ -449,7 +517,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
   const routerOverheadMs = Date.now() - routerStart - providerLatencyMs;
 
-  const usedFallback = actualProvider !== ctx.provider || actualModel !== ctx.model;
+  const usedFallback = actualProvider !== effectiveProvider || actualModel !== effectiveModel;
 
   // ── 11. Structured log — paper trail before DB write ────────────────────
   console.info('[llmRouter] request_completed', {
@@ -459,7 +527,12 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     runId:             ctx.runId,
     provider:          actualProvider,
     model:             actualModel,
-    ...(usedFallback ? { requestedProvider: ctx.provider, requestedModel: ctx.model } : {}),
+    executionPhase:    ctx.executionPhase,
+    tier:              routingTier,
+    routingReason,
+    wasDowngraded,
+    cachedPromptTokens: providerResponse.cachedPromptTokens ?? 0,
+    ...(usedFallback ? { requestedProvider: effectiveProvider, requestedModel: effectiveModel } : {}),
     providerRequestId: providerResponse.providerRequestId,
     tokensIn:          providerResponse.tokensIn,
     tokensOut:         providerResponse.tokensOut,
@@ -487,6 +560,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       executionId:         ctx.executionId,
       agentName:           ctx.agentName,
       taskType:            ctx.taskType,
+      executionPhase:      ctx.executionPhase,
+      capabilityTier:      routingTier,
+      wasDowngraded,
+      routingReason,
+      cachedPromptTokens:  providerResponse.cachedPromptTokens ?? 0,
       provider:            actualProvider,
       model:               actualModel,
       providerRequestId:   providerResponse.providerRequestId,
@@ -560,6 +638,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     console.error('[llmRouter] Failed to enqueue aggregate update', err);
   });
 
+  // ── 16. Attach routing metadata for caller visibility ───────────────────
+  providerResponse.routing = {
+    tier: routingTier,
+    wasDowngraded,
+    reason: routingReason,
+  };
+
   return providerResponse;
 }
 
@@ -589,5 +674,5 @@ async function enqueueAggregateUpdate(idempotencyKey: string): Promise<void> {
 // ---------------------------------------------------------------------------
 // Re-export types for callers
 // ---------------------------------------------------------------------------
-export type { TaskType, SourceType };
-export { TASK_TYPES, SOURCE_TYPES };
+export type { TaskType, SourceType, ExecutionPhase, RoutingMode };
+export { TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES };
