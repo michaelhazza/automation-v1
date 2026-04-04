@@ -517,14 +517,15 @@ When validation fails on an economy model response:
 **Location in agent loop:**
 
 ```typescript
-// Declare before the loop:
+// Inside the loop body, at the top of each iteration (resets per iteration):
 let escalationAttempted = false;
 
 // After routeCall at line 875:
 const response = await routeCall({ /* economy model */ });
 
+// Skip validation entirely if kill switch is active (no economy model in play)
 // If economy model was used and returned tool calls, validate
-if (resolved.wasDowngraded && response.toolCalls?.length && !escalationAttempted) {
+if (!env.ROUTER_FORCE_FRONTIER && resolved.wasDowngraded && response.toolCalls?.length && !escalationAttempted) {
   const validation = validateToolCalls(response.toolCalls, tools);
 
   if (!validation.valid) {
@@ -543,7 +544,9 @@ if (resolved.wasDowngraded && response.toolCalls?.length && !escalationAttempted
 }
 ```
 
-**Note:** `escalationAttempted` resets per iteration (declared inside the loop body, not before the loop). Each iteration gets exactly one escalation chance. This prevents cascade-of-cascades while still allowing escalation on different iterations.
+**Scope:** `escalationAttempted` is declared inside the loop body (not before it), so it resets to `false` on each iteration. Each iteration gets exactly one escalation chance. This prevents cascade-of-cascades while still allowing escalation on different iterations.
+
+**Kill switch:** When `ROUTER_FORCE_FRONTIER=true`, the validation + escalation block is skipped entirely. The kill switch means "system behaves as if routing never existed" — no economy models, no validation, no escalation.
 
 ### 6.4 What This Does NOT Do
 
@@ -1212,7 +1215,7 @@ Post-deployment, measure:
 ### Routing Metrics
 4. **% of calls on economy tier** — should be ~58% (7 of 12 call patterns)
 5. **`wasDowngraded` rate** — visibility into how often routing triggers
-6. **`reason` distribution** — breakdown of `economy` / `ceiling` / `forced` / `fallback` / `escalated`
+6. **`reason` distribution** — breakdown of `economy` / `ceiling` / `forced` / `fallback` (escalation tracked separately via `wasEscalated`)
 
 ### Quality Metrics
 7. **Escalation rate** — `was_escalated / total_economy_calls` (target: <5%, alert at >15%)
