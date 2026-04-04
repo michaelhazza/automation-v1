@@ -121,8 +121,9 @@ export type ResolveLLMReason =
   | 'forced'              // routing mode was forced
   | 'ceiling'             // frontier tier, returned ceiling model
   | 'economy'             // economy tier, returned cheapest candidate
-  | 'fallback'            // no candidates matched, fell back to ceiling
-  | 'escalated';          // economy model failed validation, retried with frontier
+  | 'fallback';           // no candidates matched, fell back to ceiling
+  // NOTE: 'escalated' is NOT a resolver reason — escalation happens in the agent loop
+  // after the resolver runs. Tracked separately via wasEscalated + escalationReason on the ledger.
 
 export interface ResolveLLMResult {
   provider:       string;
@@ -316,8 +317,10 @@ export function resolveLLM(params: ResolveLLMParams): ResolveLLMResult {
   }
 
   // Filter: context window — candidate must fit accumulated context + expected output
-  if (constraints?.estimatedContextTokens && constraints?.expectedMaxOutputTokens) {
-    const requiredWindow = constraints.estimatedContextTokens + constraints.expectedMaxOutputTokens;
+  const estimatedContext = constraints?.estimatedContextTokens ?? 0;
+  const expectedOutput = constraints?.expectedMaxOutputTokens ?? 4096;  // default if not specified
+  if (estimatedContext > 0) {
+    const requiredWindow = estimatedContext + expectedOutput;
     candidates = candidates.filter(m => m.maxContextTokens >= requiredWindow);
   }
 
@@ -343,6 +346,10 @@ export function resolveLLM(params: ResolveLLMParams): ResolveLLMResult {
 
   // ── 6. Return cheapest candidate ──────────────────────────────────
   const selected = candidates[0];
+
+  // Debug log — one line, saves hours in production
+  console.debug(`[resolver] phase=${phase} → ${selected.provider}/${selected.model} (reason=economy)`);
+
   return {
     provider:      selected.provider,
     model:         selected.model,
@@ -364,7 +371,16 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   // ── 1. Validate context ────────────────────────────────────────────
   const ctx = LLMCallContextSchema.parse(params.context);
 
-  // ── 1b. Resolve provider + model from execution phase (NEW) ────────
+  // ── 1b. Global kill switch — forces frontier on everything ──────────
+  if (env.ROUTER_FORCE_FRONTIER) {
+    // Incident response lever: skip all routing, use ceiling model.
+    // Rollback = env change, not deploy.
+    const effectiveProvider = ctx.provider ?? 'anthropic';
+    const effectiveModel = ctx.model ?? 'claude-sonnet-4-6';
+    // ... proceed directly to step 2 with ceiling values, skip resolver
+  }
+
+  // ── 1c. Resolve provider + model from execution phase ─────────────
   const resolved = resolveLLM({
     phase:       ctx.executionPhase,
     taskType:    ctx.taskType,
@@ -377,7 +393,7 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     },
   });
 
-  // ── 1c. Shadow mode — log resolution but use ceiling ───────────────
+  // ── 1d. Shadow mode — log resolution but use ceiling ───────────────
   if (env.ROUTER_SHADOW_MODE) {
     // Log what would have been used, but actually use the ceiling
     console.info('[llmRouter] shadow:', JSON.stringify({
@@ -435,6 +451,7 @@ Validation checks (in order):
 1. **Tool name exists** — is the tool name in the active tool set for this agent?
 2. **Arguments parse as JSON** — does `JSON.parse(toolCall.input)` succeed?
 3. **Required fields present** — do the required fields from the tool's `input_schema` exist in the parsed arguments?
+4. **Unexpected fields (log-only)** — if argument keys exist that are not in `input_schema.properties`, log a warning. Do NOT fail — economy models commonly hallucinate extra params that are harmless (the skill executor ignores them), but the log gives debugging value.
 
 ```typescript
 function validateToolCalls(
@@ -463,6 +480,15 @@ function validateToolCalls(
         }
       }
     }
+
+    // 4. Unexpected fields — log-only, do not fail
+    if (toolDef?.input_schema?.properties) {
+      const knownFields = new Set(Object.keys(toolDef.input_schema.properties));
+      const extraFields = Object.keys(tc.input).filter(k => !knownFields.has(k));
+      if (extraFields.length > 0) {
+        console.warn(`[toolCallValidator] unexpected fields in ${tc.name}: ${extraFields.join(', ')}`);
+      }
+    }
   }
 
   return { valid: true };
@@ -476,26 +502,35 @@ When validation fails on an economy model response:
 ```
 1. Economy model returns tool calls
 2. validateToolCalls() fails
-3. Re-call routeCall() with:
+3. Guard: if escalationAttempted → do NOT retry (prevents double execution)
+4. Re-call routeCall() with:
    - Same messages/system/tools
-   - executionPhase: 'execution' (unchanged)
-   - routingMode: 'forced' (force ceiling model)
-4. Use frontier response instead
-5. Record: wasEscalated = true, escalationReason = failureReason
+   - routingMode: 'forced' (force ceiling model — skips all resolver filtering
+     including context window guard, which is safe because forced mode returns
+     the ceiling model directly)
+5. Use frontier response instead
+6. Record: wasEscalated = true, escalationReason = failureReason
 ```
+
+**Important:** Escalation is tracked separately from resolver routing. The resolver never returns `reason: 'escalated'` — it returns `'economy'` on the first call. Escalation happens after the resolver, in the agent loop, when validation fails. This keeps clean attribution between routing decisions and execution failures.
 
 **Location in agent loop:**
 
 ```typescript
+// Declare before the loop:
+let escalationAttempted = false;
+
 // After routeCall at line 875:
 const response = await routeCall({ /* economy model */ });
 
 // If economy model was used and returned tool calls, validate
-if (resolved.wasDowngraded && response.toolCalls?.length) {
+if (resolved.wasDowngraded && response.toolCalls?.length && !escalationAttempted) {
   const validation = validateToolCalls(response.toolCalls, tools);
 
   if (!validation.valid) {
-    // Escalate: retry with ceiling model
+    escalationAttempted = true;  // prevent recursive retries
+
+    // Escalate: retry with ceiling model (forced mode bypasses all resolver filtering)
     const escalatedResponse = await routeCall({
       ...params,
       context: { ...params.context, routingMode: 'forced' },
@@ -508,12 +543,15 @@ if (resolved.wasDowngraded && response.toolCalls?.length) {
 }
 ```
 
+**Note:** `escalationAttempted` resets per iteration (declared inside the loop body, not before the loop). Each iteration gets exactly one escalation chance. This prevents cascade-of-cascades while still allowing escalation on different iterations.
+
 ### 6.4 What This Does NOT Do
 
 - No full JSON Schema validation of argument types (skill executor handles type mismatches)
-- No retry loops — exactly one escalation attempt per call
+- No retry loops — exactly one escalation attempt per iteration
 - No learning/adaptation — if escalation rate is high for a model, remove it from the registry manually
 - No escalation for non-tool-calling responses (text-only responses from economy models are fine)
+- No double execution — `escalationAttempted` guard prevents recursive retries
 
 ### 6.5 Monitoring
 
@@ -901,6 +939,7 @@ export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini', 'openro
 OPENROUTER_API_KEY: z.string().optional(),
 ROUTER_SHADOW_MODE: z.coerce.boolean().default(false),
 ROUTER_ENABLE_ECONOMY: z.coerce.boolean().default(false),
+ROUTER_FORCE_FRONTIER: z.coerce.boolean().default(false),  // kill switch — forces ceiling model globally
 ```
 
 ### 9.5 Pricing Service Update
@@ -1079,7 +1118,7 @@ Six phases, each independently deployable. Each phase delivers value on its own.
 | 2c | `server/services/conversationService.ts` | Add `executionPhase` to both contexts. |
 | 2d | `server/services/workspaceMemoryService.ts` | Replace `provider`/`model` with `executionPhase: 'execution'` on all 4 sites. |
 | 2e | `server/services/outcomeLearningService.ts` | Same. |
-| 2f | `server/lib/env.ts` | Add `ROUTER_SHADOW_MODE`, `ROUTER_ENABLE_ECONOMY`. |
+| 2f | `server/lib/env.ts` | Add `ROUTER_SHADOW_MODE`, `ROUTER_ENABLE_ECONOMY`, `ROUTER_FORCE_FRONTIER`. |
 
 **Rollout:** Deploy with `ROUTER_SHADOW_MODE=true` first. Validate routing decisions in logs for 7+ days. Then flip `ROUTER_ENABLE_ECONOMY=true` for Anthropic-only routing (Haiku as economy).
 
@@ -1147,7 +1186,7 @@ Six phases, each independently deployable. Each phase delivers value on its own.
 
 | Risk | Severity | Likelihood | Mitigation |
 |------|----------|-----------|------------|
-| Economy model tool-calling failures corrupt downstream tools | Critical | Medium | Cascade escalation + tool call validation (Phase 3). Monitor `was_escalated` rate. |
+| Economy model tool-calling failures corrupt downstream tools | Critical | Medium | Cascade escalation + tool call validation (Phase 3). Monitor `was_escalated` rate. Kill switch: `ROUTER_FORCE_FRONTIER=true`. |
 | Gemini 2.0 Flash deprecation (June 1 2026) | Critical | Certain | Removed from registry. Replaced with 2.5 Flash / Flash-Lite. |
 | Economy model misinterprets tool results silently | High | Low | Tool results are structured JSON — parsing is mechanical. Escalation catches structural failures. |
 | Context window overflow mid-loop on smaller economy model | High | Medium | Context window guard in resolver filters by `estimatedTotalTokensSoFar`. |
@@ -1157,6 +1196,7 @@ Six phases, each independently deployable. Each phase delivers value on its own.
 | `forced` mode forgotten on critical agents | Low | Low | Derived from existing `allowModelOverride` flag — no new config to forget. |
 | Synthesis on economy model (edge case miss) | Low | Low | Phase detection falls back to `planning` (frontier). Resolver falls back to ceiling. |
 | Cascade retry costs erode savings | Low | Low | Monitor escalation rate. If >15% for a model, remove from economy tier. |
+| Need to disable routing during incident | Low | Low | `ROUTER_FORCE_FRONTIER=true` — env change, no deploy needed. Disables routing, escalation, forces ceiling model globally. |
 
 ---
 
