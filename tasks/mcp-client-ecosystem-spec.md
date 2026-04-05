@@ -200,8 +200,14 @@ export const mcpServerConfigs = pgTable(
     // Contains API keys, tokens, config that the MCP server needs
     envEncrypted: text('env_encrypted'),
 
-    // Link to integration_connections for OAuth-backed servers
-    connectionId: uuid('connection_id')
+    // Credential resolution — how this server gets its auth tokens at runtime
+    // Provider type used to look up the right integration_connection per subaccount/org
+    // e.g. 'gmail' → find Gmail connection for the subaccount (or org fallback)
+    credentialProvider: text('credential_provider')
+      .$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'teamwork' | 'custom' | null>(),
+    // Optional fixed connection ID — overrides dynamic lookup.
+    // Use for servers that always use a specific org-level connection (e.g. shared API key).
+    fixedConnectionId: uuid('fixed_connection_id')
       .references(() => integrationConnections.id),
 
     // Tool filtering
@@ -322,7 +328,8 @@ CREATE TABLE mcp_server_configs (
   args JSONB,
   endpoint_url TEXT,
   env_encrypted TEXT,
-  connection_id UUID REFERENCES integration_connections(id),
+  credential_provider TEXT,
+  fixed_connection_id UUID REFERENCES integration_connections(id),
   allowed_tools JSONB,
   blocked_tools JSONB,
   default_gate_level TEXT NOT NULL DEFAULT 'auto',
@@ -881,25 +888,87 @@ if (cacheAge < CACHE_TTL && config.discoveredToolsJson?.length) {
 
 This reduces per-run latency by ~200-500ms per cached server and eliminates redundant DB writes when tools haven't changed. The 5-minute TTL is conservative — tune based on observed server stability.
 
-#### Credential Injection
+#### Credential Injection (Multi-Tenant Resolution)
 
-When a server config has a `connectionId`, the manager resolves the OAuth token at connect time:
+MCP servers need credentials. Both orgs and subaccounts can have connections. Resolution follows a **subaccount-first, org-fallback** model:
 
 ```typescript
 // In connectForRun, when building env for stdio transport:
-if (config.connectionId) {
-  const conn = await integrationConnectionService.getDecryptedConnection(
-    null, // org-level
-    config.slug, // provider
-    ctx.organisationId,
-    config.connectionId,
-  );
-  env.ACCESS_TOKEN = conn.accessToken;
-  if (conn.refreshToken) env.REFRESH_TOKEN = conn.refreshToken;
+
+async function resolveCredentials(
+  config: McpServerConfig,
+  subaccountId: string | null,
+  organisationId: string,
+): Promise<{ accessToken?: string; refreshToken?: string } | null> {
+
+  // 1. Fixed connection override — always use this specific connection
+  if (config.fixedConnectionId) {
+    const conn = await integrationConnectionService.getDecryptedConnection(
+      null, config.credentialProvider!, organisationId, config.fixedConnectionId,
+    );
+    return conn;
+  }
+
+  // 2. No credential provider configured — server uses envEncrypted only (e.g. API key servers)
+  if (!config.credentialProvider) return null;
+
+  // 3. Dynamic resolution: subaccount first, org fallback
+  if (subaccountId) {
+    try {
+      // Try subaccount's own connection (Client X's Gmail)
+      const conn = await integrationConnectionService.getDecryptedConnection(
+        subaccountId, config.credentialProvider, organisationId,
+      );
+      return conn;
+    } catch {
+      // Subaccount has no connection for this provider — fall through to org
+    }
+  }
+
+  try {
+    // Org-level fallback (shared agency Gmail)
+    const conn = await integrationConnectionService.getDecryptedConnection(
+      null, config.credentialProvider, organisationId,
+    );
+    return conn;
+  } catch {
+    // Neither subaccount nor org has a connection — server unavailable for this run
+    return null;
+  }
 }
 ```
 
-This means OAuth tokens flow from your existing `integration_connections` table into MCP server processes — no new auth system needed.
+Then in `connectForRun`:
+
+```typescript
+const creds = await resolveCredentials(config, ctx.subaccountId, ctx.organisationId);
+
+if (config.credentialProvider && !creds) {
+  // Server requires credentials but none available — skip this server
+  logger.info('mcp.no_credentials', { serverSlug: config.slug, subaccountId: ctx.subaccountId });
+  continue;
+}
+
+if (creds) {
+  env.ACCESS_TOKEN = creds.accessToken;
+  if (creds.refreshToken) env.REFRESH_TOKEN = creds.refreshToken;
+}
+```
+
+**How this works in practice:**
+
+| Scenario | Subaccount Connection | Org Connection | Result |
+|----------|----------------------|----------------|--------|
+| Client X has Gmail connected | Client X's token | Agency's token | Uses Client X's token |
+| Client Y has no Gmail | — | Agency's token | Uses agency's token (fallback) |
+| Client Z has no Gmail, org has no Gmail | — | — | Gmail MCP server skipped for this run |
+| Shared API key service (e.g. Brave Search) | — | Fixed connection | Always uses org connection via `fixedConnectionId` |
+
+This means:
+- Each client's data stays isolated — their Gmail token accesses their inbox, not the agency's
+- Org connections serve as shared fallbacks (agency tools, shared API keys)
+- No new auth system needed — reuses `integration_connections` with existing OAuth refresh, encryption, and advisory locks
+- Agents don't need to know which credential level was used — it's resolved transparently
 
 ### Service: `mcpServerConfigService.ts`
 
@@ -1224,13 +1293,22 @@ Triggered by "+ Add Server" button or card "Edit" button. Uses the existing `Mod
 │  └─────────────────────────────────────────────┘ │
 │  ⓘ Values are encrypted at rest                   │
 │                                                   │
-│  ── OR link to existing connection ────────────── │
+│  ── Credential resolution ─────────────────────── │
 │                                                   │
-│  Integration Connection (optional)                │
+│  Credential Provider (optional)                   │
 │  ┌─────────────────────────────────────────────┐ │
-│  │ Gmail - Support Account             ▼       │ │
+│  │ gmail                               ▼       │ │
 │  └─────────────────────────────────────────────┘ │
-│  ⓘ OAuth tokens auto-injected as ACCESS_TOKEN     │
+│  ⓘ At runtime, looks up the subaccount's           │
+│    connection for this provider. Falls back to     │
+│    org-level connection if subaccount has none.    │
+│                                                   │
+│  Fixed Connection Override (optional)             │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ None — use dynamic resolution       ▼       │ │
+│  └─────────────────────────────────────────────┘ │
+│  ⓘ Force a specific connection (e.g. shared API   │
+│    key). Overrides per-subaccount lookup.          │
 │                                                   │
 │  ── Gate & filtering ──────────────────────────── │
 │                                                   │
@@ -1266,8 +1344,9 @@ interface McpServerForm {
   command: string;           // stdio only
   args: string;              // textarea, split by newline
   endpointUrl: string;       // http only
-  envVars: string;           // textarea, KEY=VALUE per line
-  connectionId: string;      // optional, from dropdown
+  envVars: string;              // textarea, KEY=VALUE per line
+  credentialProvider: string;   // optional, dropdown of provider types
+  fixedConnectionId: string;    // optional, dropdown of org connections
   defaultGateLevel: 'auto' | 'review' | 'block';
   status: 'active' | 'disabled';
 }
