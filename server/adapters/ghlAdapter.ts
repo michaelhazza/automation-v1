@@ -245,9 +245,10 @@ export const ghlAdapter: IntegrationAdapter = {
       if (!mapping) return null;
 
       const entityExternalId = (event.id as string) ?? (event.contactId as string) ?? '';
+      const sourceTs = event.dateAdded ? String(event.dateAdded) : event.dateUpdated ? String(event.dateUpdated) : '';
       const externalEventId = event.traceId
         ? String(event.traceId)
-        : `${eventType}:${entityExternalId}:${Date.now()}`;
+        : `${eventType}:${entityExternalId}:${sourceTs}`;
 
       return {
         eventType: mapping.normalisedType,

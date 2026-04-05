@@ -1,6 +1,7 @@
 import { Router, raw } from 'express';
 import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
+import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 
 const router = Router();
 
@@ -8,8 +9,9 @@ const router = Router();
  * Teamwork Desk Webhook endpoint — unauthenticated.
  * Security: HMAC-SHA256 signature verification against connector_configs.webhook_secret.
  *
- * Teamwork sends webhook payloads with an `X-Teamwork-Signature` header.
- * The event payload contains the event type and ticket data.
+ * Teamwork Desk sends:
+ *   - Event type in X-Desk-Event header (not in payload body)
+ *   - Signature in X-Desk-Signature header
  */
 router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (req, res) => {
   const rawBody = req.body as Buffer;
@@ -20,6 +22,12 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (
   } catch {
     res.status(400).json({ error: 'Invalid JSON' });
     return;
+  }
+
+  // Teamwork Desk sends event type via header, not payload
+  const eventType = req.headers['x-desk-event'] as string | undefined;
+  if (eventType) {
+    event.event = eventType;
   }
 
   // Find active Teamwork connector configs via service layer
@@ -35,10 +43,10 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (
 
     // Match by verifying HMAC signature against each config's webhook secret
     const adapter = adapters.teamwork;
-    const signature = req.headers['x-teamwork-signature'] as string | undefined;
+    const signature = req.headers['x-desk-signature'] as string | undefined;
 
     if (!signature) {
-      console.warn('[Teamwork Webhook] Missing signature header, rejecting');
+      console.warn('[Teamwork Webhook] Missing X-Desk-Signature header, rejecting');
       res.status(401).json({ error: 'Missing signature' });
       return;
     }
@@ -74,6 +82,12 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (
 
     const normalised = adapter.webhook.normaliseEvent(event);
     if (!normalised) return; // Unrecognised event type
+
+    // Deduplicate — skip if already processed
+    if (normalised.externalEventId && webhookDedupeStore.isDuplicate(normalised.externalEventId)) {
+      console.log(`[Teamwork Webhook] Skipping duplicate event ${normalised.externalEventId}`);
+      return;
+    }
 
     console.log(`[Teamwork Webhook] Processed ${normalised.eventType} for ticket ${normalised.entityExternalId}`);
 

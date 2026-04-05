@@ -283,10 +283,11 @@ export const teamworkAdapter: IntegrationAdapter = {
       // accountExternalId maps to the inbox or installation — use inboxId if available
       const inboxId = ticket?.inboxId ? String(ticket.inboxId) : '';
 
-      // Use eventId from payload for deduplication, fall back to eventType:ticketId
+      // Use eventId from payload for deduplication, fall back to deterministic key
+      const sourceTs = ticket?.createdAt ? String(ticket.createdAt) : ticket?.updatedAt ? String(ticket.updatedAt) : '';
       const externalEventId = event.eventId
         ? String(event.eventId)
-        : `${eventType}:${ticketId}:${Date.now()}`;
+        : `${eventType}:${ticketId}:${sourceTs}`;
 
       return {
         eventType: mapping.normalisedType,

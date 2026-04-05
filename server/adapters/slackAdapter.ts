@@ -144,7 +144,7 @@ export const slackAdapter: IntegrationAdapter = {
       const channelId = (event.channel as string) ?? '';
 
       // Slack event_id is globally unique per event delivery
-      const externalEventId = (wrapper.event_id as string) ?? `${eventType}:${event.ts ?? Date.now()}`;
+      const externalEventId = (wrapper.event_id as string) ?? `${eventType}:${channelId}:${event.ts ?? ''}`;
 
       return {
         eventType: mapping.normalisedType,

@@ -1,6 +1,7 @@
 import { Router, raw } from 'express';
 import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
+import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 
 const router = Router();
 
@@ -14,6 +15,8 @@ const router = Router();
  *
  * Slack's signature format: v0=HMAC-SHA256("v0:timestamp:body", signing_secret)
  * Headers: x-slack-signature, x-slack-request-timestamp
+ *
+ * Multi-tenant: routes by team_id in payload, matching against connector config.
  */
 router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req, res) => {
   const rawBody = req.body as Buffer;
@@ -26,24 +29,18 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req
     return;
   }
 
-  // Find the Slack connector config via service layer
+  // Multi-tenant: find config by matching signature across all active Slack configs.
+  // This supports multiple Slack workspaces (each with their own signing secret).
   let config;
   try {
-    config = await connectorConfigService.findActiveByType('slack');
+    const configs = await connectorConfigService.findAllActiveByType('slack');
 
-    if (!config) {
-      console.warn('[Slack Webhook] No active Slack connector config found');
+    if (configs.length === 0) {
+      console.warn('[Slack Webhook] No active Slack connector configs found');
       res.status(200).json({ received: true });
       return;
     }
-  } catch (err) {
-    console.error('[Slack Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
-    res.status(500).json({ error: 'Internal error' });
-    return;
-  }
 
-  // Verify Slack signature (must happen before url_verification to prevent spoofed challenges)
-  if (config.webhookSecret) {
     const signature = req.headers['x-slack-signature'] as string | undefined;
     const timestamp = req.headers['x-slack-request-timestamp'] as string | undefined;
 
@@ -64,14 +61,23 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req
     // Slack signs "v0:timestamp:rawBody"
     const basestring = Buffer.from(`v0:${timestamp}:${rawBody.toString('utf-8')}`);
     const adapter = adapters.slack;
-    if (!adapter?.webhook?.verifySignature(basestring, signature, config.webhookSecret)) {
-      console.warn('[Slack Webhook] Invalid signature, rejecting');
+
+    // Try each config's webhook secret until one matches
+    for (const candidate of configs) {
+      if (candidate.webhookSecret && adapter?.webhook?.verifySignature(basestring, signature, candidate.webhookSecret)) {
+        config = candidate;
+        break;
+      }
+    }
+
+    if (!config) {
+      console.warn('[Slack Webhook] No config matched signature, rejecting');
       res.status(401).json({ error: 'Invalid signature' });
       return;
     }
-  } else {
-    console.warn(`[Slack Webhook] No webhook secret configured for connector ${config.id} — rejecting`);
-    res.status(401).json({ error: 'Webhook not configured' });
+  } catch (err) {
+    console.error('[Slack Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
+    res.status(500).json({ error: 'Internal error' });
     return;
   }
 
@@ -94,6 +100,12 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req
 
     const normalised = adapter.webhook.normaliseEvent(event);
     if (!normalised) return; // Unrecognised event type
+
+    // Deduplicate — skip if already processed
+    if (normalised.externalEventId && webhookDedupeStore.isDuplicate(normalised.externalEventId)) {
+      console.log(`[Slack Webhook] Skipping duplicate event ${normalised.externalEventId}`);
+      return;
+    }
 
     console.log(`[Slack Webhook] Processed ${normalised.eventType} in channel ${normalised.entityExternalId}`);
 
