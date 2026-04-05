@@ -66,6 +66,12 @@ export interface SkillExecutionContext {
   timeoutMs?: number;
   /** The task this agent run is working on, if any. Used for gate escalation. */
   taskId?: string;
+  /** MCP client instances for this run. Set by agentExecutionService. */
+  _mcpClients?: Map<string, import('./mcpClientManager.js').McpClientInstance>;
+  /** MCP lazy server registry for deferred connection. */
+  _mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig>;
+  /** MCP call counter for budget enforcement. */
+  mcpCallCount?: number;
 }
 
 interface SkillExecutionParams {
@@ -184,6 +190,25 @@ export function setHandoffJobSender(sender: (name: string, data: object) => Prom
 export const skillExecutor = {
   async execute(params: SkillExecutionParams): Promise<unknown> {
     const { skillName, input, context } = params;
+
+    // MCP tool dispatch — tool slugs start with "mcp."
+    if (skillName.startsWith('mcp.') && context._mcpClients) {
+      const { mcpClientManager } = await import('./mcpClientManager.js');
+      return mcpClientManager.callTool(
+        context._mcpClients,
+        context._mcpLazyRegistry ?? new Map(),
+        skillName,
+        input,
+        {
+          runId: context.runId,
+          organisationId: context.organisationId,
+          agentId: context.agentId,
+          subaccountId: context.subaccountId,
+          taskId: context.taskId,
+          mcpCallCount: context.mcpCallCount,
+        },
+      );
+    }
 
     switch (skillName) {
       // ── Meta tools — BM25 tool discovery (no action record) ─────────────

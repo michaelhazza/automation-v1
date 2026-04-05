@@ -80,6 +80,7 @@ import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
 import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import orgMemoryRouter from './routes/orgMemory.js';
+import mcpServersRouter from './routes/mcpServers.js';
 import pageProjectsRouter from './routes/pageProjects.js';
 import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
@@ -207,6 +208,7 @@ app.use(connectorConfigsRouter);
 // ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
 app.use(subaccountTagsRouter);
 app.use(orgMemoryRouter);
+app.use(mcpServersRouter);
 app.use(pageProjectsRouter);
 app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);
