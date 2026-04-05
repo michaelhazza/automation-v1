@@ -150,6 +150,12 @@ Most MCP servers ship as npm packages that run as subprocesses via stdio. This i
 **3. Client instances are per-run, not long-lived**
 Each agent run creates fresh MCP client connections, uses them for the run duration, and tears them down. No shared mutable state across runs. This matches your existing pattern of creating fresh `McpServer` instances per request in `server/routes/mcp.ts`.
 
+**Explicit rules:**
+- No cross-run caching of client instances
+- No shared state across concurrent runs
+- All client instances must be fully disposable
+- **On run resume:** `_mcpClients` from the previous execution context is invalid. The resumed run must call `connectForRun()` again to establish fresh connections. Never reuse stale client references.
+
 **4. MCP tools go through the action audit pipeline**
 Every MCP tool call creates an `actions` record with `actionCategory: 'mcp'`. This gives you the same audit trail, gate evaluation, and policy engine coverage as internal skills. The default gate level for MCP tools is configurable per-server (auto/review/block).
 
@@ -476,14 +482,20 @@ export const mcpClientManager = {
 
 1. Load active `mcp_server_configs` for the org
 2. Filter by agent links (if any exist for this agent; otherwise all active servers)
-3. For each server config:
-   a. Resolve environment variables — decrypt `envEncrypted`, inject OAuth tokens from linked `connectionId`
-   b. Create `StdioClientTransport` with `command` + `args` + resolved env
-   c. Create `Client`, call `client.connect(transport)`
-   d. Call `client.listTools()` to discover available tools
-   e. Apply `allowedTools` / `blockedTools` filters
-   f. Namespace tool names: `mcp.<server_slug>.<tool_name>`
-   g. Convert to Anthropic tool format
+3. **Connect to servers in parallel** (bounded concurrency = 3):
+   ```typescript
+   const results = await pMap(serverConfigs, async (config) => {
+     // a. Resolve environment variables — decrypt envEncrypted, inject OAuth tokens
+     // b. Create StdioClientTransport with command + args + resolved env
+     // c. Create Client, call client.connect(transport)
+     // d. Call client.listTools() (or use warm cache — see below)
+     // e. Apply allowedTools / blockedTools filters
+     // f. Validate tool schemas (see Schema Validation section)
+     // g. Namespace tool names: mcp.<server_slug>.<tool_name>
+     // h. Convert to Anthropic tool format
+   }, { concurrency: 3 });
+   ```
+   Bounded at 3 to prevent CPU spikes from too many subprocess spawns. With 5-10 servers at ~300-800ms each, parallel connect reduces startup from 3-8s to ~1-2s.
 4. Merge all MCP tools into a single array
 5. Return tools + client map (keyed by server slug)
 
@@ -1438,9 +1450,18 @@ MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
 Stdio MCP servers run as child processes. Security measures:
 
 1. **No shell execution** — use `spawn()` not `exec()`. The `StdioClientTransport` from the SDK already does this.
-2. **Environment scoping** — only pass explicitly configured env vars to the child process, not `process.env`. Prevent leaking server secrets.
-3. **Timeout enforcement** — kill child process if it exceeds connection timeout (10s) or per-call timeout (30s).
-4. **Resource limits** — consider `ulimit` or cgroup constraints for stdio processes in production. Phase 2 concern.
+2. **Command allowlist** — restrict executable commands to a known-safe set:
+   ```typescript
+   const ALLOWED_COMMANDS = new Set(['npx', 'node', 'docker', 'uvx', 'python3']);
+
+   if (!ALLOWED_COMMANDS.has(config.command)) {
+     throw new Error(`Command "${config.command}" not in allowed list. Contact system admin.`);
+   }
+   ```
+   Enforced in `connectForRun` before spawning. System admins can extend the allowlist via `server/config/limits.ts`. This prevents arbitrary binary execution from misconfigured or malicious server configs.
+3. **Environment scoping** — only pass explicitly configured env vars to the child process, not `process.env`. Prevent leaking server secrets.
+4. **Timeout enforcement** — kill child process if it exceeds connection timeout (10s) or per-call timeout (30s).
+5. **Resource limits** — consider `ulimit` or cgroup constraints for stdio processes in production. Phase 2 concern.
 
 ### Credential Security
 
