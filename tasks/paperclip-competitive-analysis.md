@@ -288,11 +288,49 @@ It's important to note where Automation OS is ahead of Paperclip:
 | **Page Builder** | Landing pages, forms, portal system | No page/portal system |
 | **Permission System** | Two-tier RBAC (org + subaccount) with custom permission sets | Single admin model, simpler |
 | **Workflow Engine** | Process definitions, webhook triggers, multi-engine support | No workflow engine |
-| **Real-time Architecture** | WebSocket rooms for live updates | HTTP polling (5-15s intervals) |
+| **Real-time Architecture** | WebSocket rooms for live updates | SSE (Server-Sent Events) — see analysis below |
 
 ---
 
-## 5. Key Takeaway
+## 5. Real-Time Architecture: WebSocket vs SSE
+
+Paperclip uses **Server-Sent Events (SSE)** for real-time updates, not WebSockets. Their implementation is an EventEmitter-based live events system with per-company SSE streams at `/api/companies/{id}/events/ws`. They pair this with 3-5 second HTTP polling for live run status as a supplement.
+
+**Our approach:** Socket.IO WebSockets with JWT-authenticated connections, room-based isolation (org, subaccount, execution, agent-run, conversation), event envelopes with UUID dedup and timestamps, observability counters, and automatic long-polling fallback.
+
+### Should We Adopt SSE?
+
+**No. Our WebSocket approach is superior for our use case.** Here's the analysis:
+
+| Factor | Our WebSockets (Socket.IO) | Paperclip's SSE |
+|--------|---------------------------|-----------------|
+| **Direction** | Bidirectional — client can send events to server | Server-to-client only — client must use separate HTTP requests for actions |
+| **Room isolation** | Native room system — subscribe to specific subaccounts, runs, conversations | Company-wide stream — client filters events locally |
+| **Auth** | JWT verified on connection handshake, then maintained | Re-authenticated per SSE connection or relies on cookies |
+| **Reconnection** | Socket.IO handles automatically with backoff | Browser handles reconnection, but state sync is harder |
+| **Scalability** | Can scale horizontally with Redis adapter | Simpler to scale (stateless HTTP), but less capable |
+| **Transport fallback** | Auto-falls back to long-polling if WS blocked | Works everywhere (plain HTTP), no fallback needed |
+| **Granularity** | Room-scoped — only receive events you subscribed to | All company events — client-side filtering wastes bandwidth |
+
+### Where SSE Could Be Useful (Supplementary)
+
+There's one scenario where SSE would complement (not replace) our WebSockets:
+
+1. **Agent run log streaming** — SSE is ideal for streaming long-running agent output (token-by-token or chunk-by-chunk) because it maps naturally to a unidirectional append-only stream. Paperclip uses 8KB chunked live updates for run logs. If we ever build a live transcript viewer for agent runs, SSE could be a good fit for that specific endpoint alongside our existing WebSocket infrastructure.
+
+2. **Public/unauthenticated feeds** — If we build public status pages or portal-facing real-time updates, SSE avoids the complexity of WebSocket auth for read-only consumers.
+
+### Recommendation
+
+**Keep WebSockets as our primary real-time layer.** Our implementation is more capable than Paperclip's SSE approach — room-based granularity means clients only receive relevant events, bidirectional communication enables future interactive features, and Socket.IO's auto-reconnection with fallback is battle-tested.
+
+**Consider adding SSE for one narrow use case:** agent run log streaming, where the unidirectional append-only pattern is a natural fit and the overhead of a full WebSocket connection per run transcript may not be warranted.
+
+**Effort:** Low (if we add the supplementary SSE endpoint). Zero (if we keep current approach).
+
+---
+
+## 6. Key Takeaway
 
 Paperclip's core insight is powerful: **model the company, not just the agents.** Their org chart, goal hierarchy, routines, and governance features create a coherent system where agents operate within an organisational structure rather than as isolated tools.
 
@@ -308,7 +346,7 @@ The best path forward: adopt Paperclip's organisational structure concepts (goal
 
 ---
 
-## 6. Additional Technical Details Worth Noting
+## 7. Additional Technical Details Worth Noting
 
 ### Secrets Management
 Paperclip has a two-level secrets system: named secrets with immutable versioned values, SHA-256 hashing per version, environment variable binding (plain text or secret references), sensitive key detection via pattern matching, strict mode that forces sensitive keys to use secret refs, and creator attribution (user or agent) per version. This is more structured than typical env var management.
@@ -336,7 +374,7 @@ Agent sessions auto-compact when thresholds are exceeded, preventing unbounded c
 
 ---
 
-## 7. Market Context & Positioning
+## 8. Market Context & Positioning
 
 ### Paperclip's Growth & Traction
 - **47,800+ stars** and **7,700+ forks** in ~1 month (launched March 4, 2026)
