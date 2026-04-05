@@ -167,6 +167,8 @@ interface ChainRun {
 1. Recursive CTE walking `parentRunId` up to root
 2. Single query: `WHERE parentRunId IN (:chainIds) OR parentSpawnRunId IN (:chainIds)` to get all descendants
 
+**Index note:** Both `parentRunId` and `parentSpawnRunId` already have B-tree indexes (`agent_runs_parent_run_id_idx`, `agent_runs_parent_spawn_run_id_idx`) in the schema. No migration needed -- chain traversal is index-backed.
+
 **Graph integrity safeguards:**
 
 The upward/downward traversal must handle corrupted data gracefully:
@@ -493,7 +495,10 @@ Expandable panel showing DLQ jobs for a selected queue:
 
 - Payload shown in collapsible JSON viewer (truncated to 5KB)
 - "View Run Trace" links to `RunTraceViewerPage` if run ID is in payload
-- "Retry" re-enqueues the job to the source queue (requires confirmation dialog)
+- "Retry" re-enqueues the job to the source queue with idempotency safeguards:
+  - Confirmation dialog with warning: "Retrying may cause duplicate side effects if the original job partially completed. Proceed?"
+  - If the job payload contains an `idempotencyKey`, check whether a completed job with that key already exists before re-enqueuing
+  - If a matching completed job is found, show an additional warning: "A job with this idempotency key already completed. Retry anyway?"
 - Pagination: 20 per page
 
 **Section 3: Job Search**
@@ -795,6 +800,18 @@ Add to `server/config/jobConfig.ts`:
 },
 ```
 
+**Backpressure protection:** Ingestion spikes can flood this queue and hit LLM rate limits. Add concurrency cap:
+
+```typescript
+// In worker registration -- limit to 3 concurrent enrichment jobs
+// This bounds LLM API pressure regardless of ingestion rate
+createWorker({
+  queue: 'memory-context-enrichment',
+  boss,
+  logger,
+  concurrency: 3,  // hard cap: max 3 concurrent enrichment jobs
+```
+
 Worker registered in `queueService.ts` (or `agentScheduleService.ts`):
 
 ```typescript
@@ -802,6 +819,7 @@ createWorker({
   queue: 'memory-context-enrichment',
   boss,
   logger,
+  concurrency: 3,
   handler: async (job) => {
     const { entryIds, runSummary, agentName, taskTitle } = job.data;
     const entries = await loadEntries(entryIds);
@@ -951,6 +969,17 @@ async function getRelevantMemories(
 
   const overRetrieveLimit = limit * 4;  // Retrieve 20 from each source for RRF
 
+  // Guard: check if queryText produces a valid tsquery (stopword-only queries produce empty tsquery)
+  // If empty, skip fulltext CTE entirely and use semantic-only retrieval
+  const tsqueryCheck = await db.execute(
+    sql`SELECT plainto_tsquery('english', ${queryText})::text AS q`
+  );
+  const hasValidTsquery = tsqueryCheck.rows[0]?.q && tsqueryCheck.rows[0].q !== '';
+
+  // Hard cap on query duration to prevent slow queries blocking the request thread.
+  // SET LOCAL scopes to the current transaction only.
+  await db.execute(sql`SET LOCAL statement_timeout = '200ms'`);
+
   const result = await db.execute(sql`
     WITH semantic AS (
       SELECT
@@ -968,6 +997,8 @@ async function getRelevantMemories(
       ORDER BY embedding <=> ${formatVectorLiteral(queryEmbedding)}::vector
       LIMIT ${overRetrieveLimit}
     ),
+    -- Skip fulltext CTE if tsquery is empty (stopword-only queries like "the a an")
+    -- Use conditional query building: if !hasValidTsquery, omit this CTE entirely
     fulltext AS (
       SELECT
         id, content, entry_type, quality_score, created_at, last_accessed_at,
@@ -984,34 +1015,35 @@ async function getRelevantMemories(
       ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', ${queryText})) DESC
       LIMIT ${overRetrieveLimit}
     ),
+    -- Use UNION ALL + GROUP BY instead of FULL OUTER JOIN for simpler execution plan
+    -- and better scaling beyond 1k rows (avoids null merging, easier for planner)
+    rrf_scores AS (
+      SELECT id, 1.0 / (60 + rank) AS rrf_component FROM semantic
+      UNION ALL
+      SELECT id, 1.0 / (60 + rank) AS rrf_component FROM fulltext
+    ),
     fused AS (
       SELECT
-        COALESCE(s.id, f.id) AS id,
-        COALESCE(s.content, f.content) AS content,
-        COALESCE(s.entry_type, f.entry_type) AS entry_type,
-        COALESCE(s.quality_score, f.quality_score) AS quality_score,
-        COALESCE(s.created_at, f.created_at) AS created_at,
-        s.cosine_dist,
-        -- RRF fusion (k=60)
-        COALESCE(1.0 / (60 + s.rank), 0.0)
-          + COALESCE(1.0 / (60 + f.rank), 0.0) AS rrf_score,
-        -- Recency decay (30-day half-life) using max of created/accessed to prevent drift
-        1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
-          COALESCE(s.created_at, f.created_at),
-          COALESCE(s.last_accessed_at, f.last_accessed_at, s.created_at, f.created_at)
-        ))) / 86400.0 / 30.0) AS recency_score
-      FROM semantic s
-      FULL OUTER JOIN fulltext f ON s.id = f.id
+        r.id,
+        SUM(r.rrf_component) AS rrf_score,
+        COUNT(*) AS source_count  -- 2 = found by both pipelines
+      FROM rrf_scores r
+      GROUP BY r.id
     )
     SELECT
-      id, content, entry_type, quality_score, created_at,
-      cosine_dist,
-      rrf_score,
+      f.id, cp.content, cp.entry_type, cp.quality_score, cp.created_at,
+      f.rrf_score,
+      f.source_count,
       -- Combined score: RRF (70%) + quality (15%) + recency (15%)
-      rrf_score * 0.70
-        + COALESCE(quality_score, 0.5) * 0.15
-        + recency_score * 0.15 AS combined_score
-    FROM fused
+      f.rrf_score * 0.70
+        + COALESCE(cp.quality_score, 0.5) * 0.15
+        + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
+            cp.created_at,
+            COALESCE(cp.last_accessed_at, cp.created_at)
+          ))) / 86400.0 / 30.0)) * 0.15 AS combined_score
+    FROM fused f
+    JOIN candidate_pool cp ON cp.id = f.id
+    WHERE f.rrf_score >= ${RRF_MIN_SCORE}  -- floor: drop low-quality tail results
     ORDER BY combined_score DESC
     LIMIT ${limit}
   `);
@@ -1020,13 +1052,13 @@ async function getRelevantMemories(
     id: row.id,
     content: row.content,
     entryType: row.entry_type,
-    similarity: row.cosine_dist ? 1 - row.cosine_dist : null,
     rrf_score: row.rrf_score,
     combined_score: row.combined_score,
+    source_count: row.source_count,
     // Retrieval confidence based on source overlap (useful for agent decisioning)
-    confidence: (row.semantic_rank && row.keyword_rank) ? 'high'    // found by both pipelines
-              : row.rrf_score > 0.01                     ? 'medium'  // found by one with decent score
-              :                                            'low',
+    confidence: row.source_count >= 2 ? 'high'       // found by both pipelines
+              : row.rrf_score > 0.01  ? 'medium'     // found by one with decent score
+              :                         'low',
   }));
 }
 ```
@@ -1114,6 +1146,7 @@ Mirror the hybrid search in `server/services/orgMemoryService.ts`.
 // Replace VECTOR_SIMILARITY_THRESHOLD with RRF-based config
 export const RRF_OVER_RETRIEVE_MULTIPLIER = 4;  // Retrieve 4x limit from each source
 export const RRF_K = 60;                         // RRF constant
+export const RRF_MIN_SCORE = 0.005;              // Floor: drop results below this RRF score
 export const MAX_MEMORY_SCAN = 1000;             // Hard cap on candidate pool
 
 // Scoring weights -- configurable per retrieval context
@@ -1300,6 +1333,7 @@ export const RERANKER_MODEL = process.env.RERANKER_MODEL ?? 'rerank-v3.5';
 export const RERANKER_TOP_N = 5;           // Final result count after reranking
 export const RERANKER_CANDIDATE_COUNT = 20; // Over-retrieve this many from hybrid search
 export const RERANKER_TIMEOUT_MS = 500;    // Abort reranker if slower than this
+export const RERANKER_MAX_CALLS_PER_RUN = 3;  // Budget guard: max rerank calls per agent run
 ```
 
 **Environment variables:**
@@ -1341,6 +1375,8 @@ const results = candidates
 ```
 
 **Graceful degradation:** If the reranker API call fails (timeout, rate limit, API error), fall back to the hybrid search results without reranking. Log the failure but don't block the agent run.
+
+**Budget guard:** Track rerank calls per agent run via a simple counter on the execution context. If `RERANKER_MAX_CALLS_PER_RUN` (default 3) is exceeded, skip reranking for remaining retrievals in that run. This prevents silent cost creep on runs that make many memory lookups. Ties into the existing token budget system conceptually -- the reranker has its own call budget per run.
 
 ### Verification
 
@@ -1448,17 +1484,20 @@ const hydeCache = new Map<string, { value: string; expiresAt: number }>();
 const HYDE_CACHE_TTL_MS = 10 * 60 * 1000;  // 10 minutes
 const HYDE_CACHE_MAX_SIZE = 200;
 
-// Wrap with TTL-aware get/set
+// LRU-style TTL cache: get promotes to end, eviction removes from front
 function hydeCacheGet(key: string): string | undefined {
   const entry = hydeCache.get(key);
   if (!entry) return undefined;
   if (Date.now() > entry.expiresAt) { hydeCache.delete(key); return undefined; }
+  // LRU: move to end by re-inserting (Map preserves insertion order)
+  hydeCache.delete(key);
+  hydeCache.set(key, entry);
   return entry.value;
 }
 
 function hydeCacheSet(key: string, value: string): void {
+  // Evict LRU entry (first in Map) when at capacity
   if (hydeCache.size >= HYDE_CACHE_MAX_SIZE) {
-    // Evict oldest entry
     const firstKey = hydeCache.keys().next().value;
     if (firstKey) hydeCache.delete(firstKey);
   }
