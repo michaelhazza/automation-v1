@@ -240,7 +240,9 @@ await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamCo
 - `server/services/paymentReconciliationJob.ts` — 1 `work()` call
 - `server/services/pageIntegrationWorker.ts` — 1 `work()` call, 1 `send()` call (already configured)
 
-#### Step 4: Add retry classification — retryable vs non-retryable errors
+#### Step 4: Add retry classification, handler timeouts, and idempotency guards
+
+##### 4a: Retryable vs non-retryable errors
 
 Not all errors should be retried. Retrying a validation error or missing entity wastes cycles and adds noise.
 
@@ -270,12 +272,63 @@ export function isNonRetryable(err: unknown): boolean {
 export function getRetryCount(job: { retrycount?: number } & Record<string, unknown>): number {
   return job.retrycount ?? 0;
 }
+
+/** Wrap a handler with a timeout — prevents hung LLM calls or stuck API requests from starving workers */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Job handler timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
 ```
 
-**Apply in every worker handler — use `boss.fail()` for non-retryable errors:**
+##### 4b: Handler timeout wrapping
+
+`expireInSeconds` only controls job lifecycle in pg-boss — it does NOT stop long-running code inside a handler. A hung LLM call or stuck API request will block a worker indefinitely.
+
+**Wrap all handlers with `withTimeout`:**
 
 ```typescript
-import { isNonRetryable, getRetryCount } from '../lib/jobErrors.js';
+// Timeout should be slightly less than expireInSeconds to allow clean failure
+const HANDLER_TIMEOUT_MS = (getJobConfig('agent-scheduled-run').expireInSeconds - 30) * 1000;
+
+await withTimeout(handler(job), HANDLER_TIMEOUT_MS);
+```
+
+Timeout values per tier:
+- Tier 1 (agent execution): `expireInSeconds - 30` seconds (e.g., 270s for 300s expiry)
+- Tier 2 (financial): `expireInSeconds - 10` seconds
+- Tier 3 (maintenance): `expireInSeconds - 30` seconds
+
+##### 4c: Idempotency invariant
+
+**All job handlers must be idempotent.** If a job partially executes, throws, then retries, it must not produce duplicate side effects.
+
+For Tier 1 + Tier 2 jobs, use existing idempotency mechanisms:
+- **Execution runs:** Check `execution.status` before re-processing — if already `completed`, skip
+- **LLM aggregate updates:** Already use idempotency keys on `llm_requests` table
+- **Agent runs:** Check `agentRun.status` — if already `completed` or `failed`, skip
+- **Payment reconciliation:** Already double-checks before inserts
+
+**Pattern for handlers that need explicit guards:**
+
+```typescript
+// At top of handler:
+const existing = await getExecutionStatus(job.data.executionId);
+if (existing === 'completed' || existing === 'failed') {
+  logger.info('job_already_processed', { queue: queueName, jobId: job.id });
+  return; // safe to return here — job completed successfully (was already done)
+}
+```
+
+##### 4d: Full worker pattern
+
+**Apply in every worker handler:**
+
+```typescript
+import { isNonRetryable, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
 
 await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job) => {
@@ -285,7 +338,7 @@ await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamCo
   }
 
   try {
-    await handler(job);
+    await withTimeout(handler(job), 270_000); // 270s timeout for 300s expiry
   } catch (err) {
     if (isNonRetryable(err)) {
       logger.warn('job_non_retryable_failure', {
@@ -326,7 +379,7 @@ const DLQ_QUEUES = [
 export async function startDlqMonitor(boss: PgBoss) {
   for (const dlqName of DLQ_QUEUES) {
     const sourceQueue = dlqName.replace('__dlq', '');
-    await boss.work(dlqName, async (job) => {
+    await boss.work(dlqName, { teamSize: 2, teamConcurrency: 1 }, async (job) => {
       const payload = job.data as Record<string, unknown>;
       logger.error('job_dlq', {
         queue: sourceQueue,
@@ -392,13 +445,23 @@ if (retryCount > 0) {
 }
 ```
 
-#### Step 8: Graceful shutdown update
+#### Step 8: Startup sequencing and graceful shutdown
 
-Update `server/index.ts` shutdown to use the centralised instance:
+**Startup order matters.** DLQ monitor must start after pg-boss is ready. Add explicitly to `server/index.ts` startup:
 
 ```typescript
-import { stopPgBoss } from './lib/pgBossInstance.js';
+import { getPgBoss, stopPgBoss } from './lib/pgBossInstance.js';
+import { startDlqMonitor } from './services/dlqMonitorService.js';
 
+// In startup sequence:
+const boss = await getPgBoss();
+await startDlqMonitor(boss);
+// Then register all queue workers...
+```
+
+**Graceful shutdown** — update `server/index.ts` shutdown handler:
+
+```typescript
 // In shutdown handler:
 await stopPgBoss();
 ```
@@ -416,6 +479,10 @@ await stopPgBoss();
 - [ ] All DLQ and retry events use structured `logger` (not `console.error`)
 - [ ] Retry attempts logged with `job_retry` event for flap detection
 - [ ] `getRetryCount()` helper used instead of `(job as any).retrycount`
+- [ ] All Tier 1 + Tier 2 handlers wrapped with `withTimeout()` (timeout < expireInSeconds)
+- [ ] All Tier 1 + Tier 2 handlers are idempotent (check status before re-processing)
+- [ ] DLQ monitor started after pg-boss in startup sequence
+- [ ] DLQ monitor has concurrency (`teamSize: 2`)
 - [ ] `npm run typecheck` passes
 - [ ] `npm test` passes
 - [ ] Manual test: kill a job mid-execution → verify retry fires
@@ -526,7 +593,7 @@ server/schemas/
 
 **Conventions:**
 - Each schema file exports inferred TypeScript types: `export type XInput = z.infer<typeof xBody>;`
-- Every entity with CRUD gets a formalised pair: `createXBody` + `updateXBody = createXBody.partial()`
+- Every entity with CRUD gets a formalised pair: `createXBody` + `updateXBody = createXBody.partial().refine(obj => Object.keys(obj).length > 0, { message: 'At least one field must be provided' })`
 - Use `.strict()` on public endpoints (reject unexpected fields). Internal routes use default behaviour (strip unknown fields).
 - Use `.max()` on all string fields to prevent memory abuse. Set limits based on DB column sizes.
 
@@ -638,7 +705,7 @@ Work through route files in order of data sensitivity. For each file:
 
 1. Read the route handler to understand expected fields
 2. Define `createXBody` schema in corresponding `server/schemas/*.ts` file
-3. Define `updateXBody = createXBody.partial()` for PATCH routes
+3. Define `updateXBody = createXBody.partial().refine(obj => Object.keys(obj).length > 0, { message: 'At least one field must be provided' })` for PATCH routes
 4. Export inferred types: `export type XInput = z.infer<typeof xBody>;`
 5. Wire `validateBody(schema, 'warn')` into the route middleware chain
 6. Remove inline manual validation that the schema now covers
@@ -735,7 +802,7 @@ For routes that don't accept HTML: `Raw input → Zod schema → Business logic`
 1. **Schemas live in `server/schemas/`, not inline in routes** — keeps routes clean, schemas reusable, testable independently.
 2. **`validateBody` replaces `req.body` with parsed data** — coerced types work transparently.
 3. **Export inferred types from every schema** — `export type XInput = z.infer<typeof xBody>` eliminates type drift between route and service.
-4. **Formalised PATCH pattern** — every entity: `createXBody` + `updateXBody = createXBody.partial()`. Prevents requiring fields on update that were required on create.
+4. **Formalised PATCH pattern** — every entity: `createXBody` + `updateXBody = createXBody.partial().refine(obj => Object.keys(obj).length > 0, { message: 'At least one field must be provided' })`. Prevents requiring fields on update that were required on create. The `.refine()` guard rejects empty `{}` payloads that would be valid under `.partial()` but result in no-op updates.
 5. **Don't over-schema GET routes** — only add `validateQuery` where query params affect DB queries or business logic.
 6. **Keep inline validation for service-layer checks** — Zod validates shape/type at the boundary. Business logic validation stays in services.
 7. **`.strict()` on public endpoints only** — prevent payload stuffing. Internal routes use default (strip unknown fields).
@@ -745,7 +812,7 @@ For routes that don't accept HTML: `Raw input → Zod schema → Business logic`
 
 - [ ] `server/schemas/` directory created with domain-specific schema files
 - [ ] Every schema exports inferred TypeScript type
-- [ ] Every entity with CRUD has `createXBody` + `updateXBody = createXBody.partial()`
+- [ ] Every entity with CRUD has `createXBody` + `updateXBody` with `.partial().refine()` (rejects empty `{}`)
 - [ ] All public routes have `validateBody` in `enforce` mode with `.strict()`
 - [ ] All auth routes have `validateBody` in `enforce` mode
 - [ ] All POST/PUT/PATCH routes on priority list have `validateBody`
