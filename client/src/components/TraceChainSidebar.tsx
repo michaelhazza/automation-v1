@@ -18,6 +18,8 @@ interface ChainRun {
   totalTokens: number | null;
   totalToolCalls: number | null;
   errorMessage: string | null;
+  errorDetail: Record<string, unknown> | null;
+  costCents: number | null;
 }
 
 interface ChainResponse {
@@ -59,10 +61,22 @@ function formatTokens(tokens: number | null): string {
   return `${tokens}`;
 }
 
+function formatCost(cents: number | null): string {
+  if (cents === null || cents === 0) return '';
+  if (cents < 100) return `${cents}c`;
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+const MAX_RENDER_DEPTH = 8;
+
 function buildTree(runs: ChainRun[]): Map<string | null, ChainRun[]> {
   const tree = new Map<string | null, ChainRun[]>();
   for (const run of runs) {
-    const parentKey = run.parentRunId ?? run.parentSpawnRunId ?? null;
+    // Explicit precedence: handoff parent > spawn parent > root
+    const parentKey =
+      run.parentRunId !== null ? run.parentRunId
+      : run.parentSpawnRunId !== null ? run.parentSpawnRunId
+      : null;
     if (!tree.has(parentKey)) tree.set(parentKey, []);
     tree.get(parentKey)!.push(run);
   }
@@ -103,15 +117,22 @@ function TreeNode({
           <div className="text-xs text-slate-500 flex gap-2">
             <span>{formatDuration(run.durationMs)}</span>
             <span>{formatTokens(run.totalTokens)}t</span>
+            {run.costCents ? <span>{formatCost(run.costCents)}</span> : null}
           </div>
           {run.errorMessage && (
             <div className="text-xs text-red-500 truncate mt-0.5">{run.errorMessage}</div>
           )}
         </div>
       </button>
-      {children.map(child => (
-        <TreeNode key={child.id} run={child} tree={tree} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} />
-      ))}
+      {depth < MAX_RENDER_DEPTH ? (
+        children.map(child => (
+          <TreeNode key={child.id} run={child} tree={tree} depth={depth + 1} selectedId={selectedId} onSelect={onSelect} />
+        ))
+      ) : children.length > 0 ? (
+        <div className="text-xs text-slate-400 italic" style={{ paddingLeft: `${8 + (depth + 1) * 16}px` }}>
+          +{children.length} more (depth limit)
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -149,6 +170,7 @@ export default function TraceChainSidebar({ runId, onSelectRun }: Props) {
   const rootRuns = tree.get(null) ?? [];
   const totalDuration = chain.runs.reduce((sum, r) => sum + (r.durationMs ?? 0), 0);
   const totalTokens = chain.runs.reduce((sum, r) => sum + (r.totalTokens ?? 0), 0);
+  const totalCost = chain.runs.reduce((sum, r) => sum + (r.costCents ?? 0), 0);
 
   if (collapsed) {
     return (
@@ -175,6 +197,7 @@ export default function TraceChainSidebar({ runId, onSelectRun }: Props) {
         <span>{formatDuration(totalDuration)}</span>
         <span className="mx-1.5">·</span>
         <span>{formatTokens(totalTokens)} tokens</span>
+        {totalCost > 0 && <><span className="mx-1.5">·</span><span>{formatCost(totalCost)}</span></>}
         {!chain.metadata.isComplete && (
           <div className="mt-1 text-amber-600">
             Chain incomplete: {chain.metadata.truncationReason}

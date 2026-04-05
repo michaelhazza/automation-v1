@@ -69,8 +69,23 @@ export default function JobQueueDashboardPage() {
 
   useEffect(() => {
     fetchSummaries();
-    const interval = setInterval(fetchSummaries, 30000);
-    return () => clearInterval(interval);
+    let interval = setInterval(fetchSummaries, 30000);
+
+    // Pause polling when tab is not visible
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearInterval(interval);
+      } else {
+        fetchSummaries();
+        interval = setInterval(fetchSummaries, 30000);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [fetchSummaries]);
 
   const fetchDlq = async (queue: string) => {

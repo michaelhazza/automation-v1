@@ -237,8 +237,33 @@ export const agentActivityService = {
         totalTokens: run.totalTokens,
         totalToolCalls: run.totalToolCalls,
         errorMessage: run.errorMessage,
+        errorDetail: run.errorDetail,
         triggerContext: run.triggerContext,
+        costCents: null as number | null,
       }));
+
+    // Batch-fetch cost per run from cost aggregates (single query, not N+1)
+    if (runs.length > 0) {
+      try {
+        const runIds = runs.map(r => r.id);
+        const costRows = await db.execute<{ entity_id: string; total_cost_cents: number }>(sql`
+          SELECT entity_id, total_cost_cents
+          FROM cost_aggregates
+          WHERE entity_id = ANY(${runIds}::uuid[])
+            AND entity_type = 'run'
+            AND period = 'total'
+        `);
+        const costMap = new Map(
+          (costRows as unknown as Array<{ entity_id: string; total_cost_cents: number }>)
+            .map(r => [r.entity_id, r.total_cost_cents])
+        );
+        for (const run of runs) {
+          run.costCents = costMap.get(run.id) ?? null;
+        }
+      } catch {
+        // Cost data is best-effort; don't fail the chain response
+      }
+    }
 
     return {
       runs,
