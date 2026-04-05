@@ -8,9 +8,11 @@
  * Observability must never break execution (Section 16.2).
  */
 
+import { createHash } from 'crypto';
 import type { LangfuseSpanClient, LangfuseGenerationClient } from 'langfuse';
 import { getTraceContext, type TraceContext } from '../instrumentation.js';
 import { logger } from './logger.js';
+import { MAX_METADATA_SIZE_BYTES } from '../config/limits.js';
 
 // ── Naming Registry (Section 7.2) ─────────────────────────────────────────
 // All span, generation, and event names are compile-time enforced.
@@ -138,6 +140,20 @@ function getDefaultMetadata(ctx: TraceContext): Record<string, unknown> {
   };
 }
 
+/** Guard against oversized metadata (Section 7.3) */
+function safeMetadata(meta: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const str = JSON.stringify(meta);
+    if (str.length > MAX_METADATA_SIZE_BYTES) {
+      logger.warn('tracing_metadata_oversized', { size: str.length, limit: MAX_METADATA_SIZE_BYTES });
+      return { ...getDefaultMetadata(getTraceContext()!), _truncated: true, _originalSize: str.length };
+    }
+    return meta;
+  } catch {
+    return meta;
+  }
+}
+
 // ── Core Helpers ──────────────────────────────────────────────────────────
 // All helpers are fail-safe (Section 16.2): try/catch with structured warning.
 
@@ -158,7 +174,7 @@ export function createSpan(
     ctx.spanCount++;
 
     const parent = options?.parentSpan ?? ctx.trace;
-    const merged = { ...getDefaultMetadata(ctx), ...metadata };
+    const merged = safeMetadata({ ...getDefaultMetadata(ctx), ...metadata });
 
     return parent.span({
       name,
@@ -198,7 +214,7 @@ export function createGeneration(
     ctx.spanCount++;
 
     const parent = params.parentSpan ?? ctx.trace;
-    const merged = { ...getDefaultMetadata(ctx), ...params.metadata };
+    const merged = safeMetadata({ ...getDefaultMetadata(ctx), ...params.metadata });
 
     return parent.generation({
       name,
@@ -239,7 +255,7 @@ export function createEvent(
     ctx.eventCount++;
 
     const parent = options?.parentSpan ?? ctx.trace;
-    const merged = { ...getDefaultMetadata(ctx), ...metadata };
+    const merged = safeMetadata({ ...getDefaultMetadata(ctx), ...metadata });
 
     parent.event({
       name,
@@ -344,11 +360,5 @@ export function generateRunFingerprint(
   skillSlugs: string[],
 ): string {
   const input = `${agentId}:${taskType}:${[...skillSlugs].sort().join(',')}`;
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    const char = input.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return `fp_${Math.abs(hash).toString(36)}`;
+  return `fp_${createHash('sha1').update(input).digest('hex').slice(0, 12)}`;
 }

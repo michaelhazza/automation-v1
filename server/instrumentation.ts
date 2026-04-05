@@ -20,6 +20,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { Langfuse } from 'langfuse';
 import type { LangfuseTraceClient } from 'langfuse';
 import { env } from './lib/env.js';
+import { MAX_SPANS_PER_RUN, MAX_EVENTS_PER_RUN } from './config/limits.js';
 
 // ---------------------------------------------------------------------------
 // Langfuse singleton — no-ops automatically if keys are not configured
@@ -52,8 +53,6 @@ export interface TraceContext {
   eventCount: number;
   maxSpans: number;
   maxEvents: number;
-  /** Tracks emitted span IDs for deduplication (Section 7.6) */
-  emittedSpanIds: Set<string>;
   /** Whether an agent.loop.terminated event has been emitted (Section 15.4) */
   loopTerminated: boolean;
 }
@@ -85,9 +84,8 @@ export async function withTrace<T>(
     ...runContext,
     spanCount: 0,
     eventCount: 0,
-    maxSpans: 500,
-    maxEvents: 1000,
-    emittedSpanIds: new Set(),
+    maxSpans: MAX_SPANS_PER_RUN,
+    maxEvents: MAX_EVENTS_PER_RUN,
     loopTerminated: false,
   };
   return traceStorage.run(ctx, fn);
