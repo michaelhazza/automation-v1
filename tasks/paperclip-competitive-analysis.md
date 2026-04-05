@@ -305,3 +305,37 @@ We should adopt this thinking selectively:
 But we should NOT try to become Paperclip. Our multi-tenant agency model, deep HITL controls, MCP ecosystem, and integration depth are genuine advantages for the agency/enterprise automation market. Paperclip targets solo founders running "zero-human companies." We target agencies and teams using AI to augment human operations.
 
 The best path forward: adopt Paperclip's organisational structure concepts (goals, org chart, routines) while preserving our depth in governance, integrations, and multi-tenancy.
+
+---
+
+## 6. Market Context & Positioning
+
+### Paperclip's Growth & Traction
+- **47,800+ stars** and **7,700+ forks** in ~1 month (launched March 4, 2026)
+- One of the fastest-growing open-source AI projects of Q1 2026
+- Created by pseudonymous developer **@dotta**
+- Covered by eWeek, Towards AI, DEV Community, Dealroom.co, and multiple AI-focused outlets
+- Greg Isenberg (influencer) called it "one of the FASTEST growing open-source projects in AI"
+
+### Their Commercial Play
+- **paperclip.ing** — Open-source marketing site
+- **paperclip.inc** — Managed hosting (multi-tier, 14-day Pro trial)
+- **usepaperclip.app** — Simplified one-click hosted ("Paperclip Web", 100 free credits)
+- **Clipmart** (upcoming) — Marketplace for pre-built "company templates" (content agency, dev shop, trading desk, etc.)
+- Monetisation follows open-core model: free self-hosted, paid managed hosting
+
+### Public Sentiment
+**Positive:** UX described as "Linear-quality" (rare for open-source agent tools). Budget controls, governance, and audit trail called "best-in-class for multi-agent orchestration."
+
+**Concerns:** Still experimental ("not a polished, supported product yet"). Community docs and production-readiness lag behind more established tools. Anonymous founder raises some eyebrows.
+
+### Competitive Positioning
+Paperclip explicitly differentiates from CrewAI/AutoGen/LangGraph — those are **composition frameworks** (build agent pipelines), while Paperclip is an **organisational layer** (govern pipelines once running). Their tagline: *"Your agents don't need better prompts. They need an org chart."*
+
+The "zero-human company" positioning is bold and polarising — generates stars and press but may limit enterprise appeal. Enterprises want "AI-augmented" not "AI-replaced."
+
+### Implications for Us
+1. **The governance layer is their real moat** — budget enforcement, audit trails, multi-company isolation. We should ensure our governance (which is already deeper) is equally well-marketed.
+2. **Their explosive growth validates the category** — there's massive demand for agent orchestration platforms.
+3. **Their maturity gap is our opportunity** — they're weeks old and experimental. We have production-grade infrastructure they lack (HITL policies, MCP, OAuth integrations, vector memory).
+4. **Template marketplace (Clipmart) is a smart move** — we should prioritise our own template/marketplace system before they capture that mindshare.
