@@ -85,6 +85,38 @@ export const connectorConfigService = {
     return deleted;
   },
 
+  /** Find the first active connector config for a given type (across all orgs). Used by webhook routes. */
+  async findActiveByType(connectorType: string) {
+    const [config] = await db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.connectorType, connectorType), eq(connectorConfigs.status, 'active')))
+      .limit(1);
+    return config ?? null;
+  },
+
+  /** Find all active connector configs for a given type (across all orgs). Used by webhook routes that match by signature. */
+  async findAllActiveByType(connectorType: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.connectorType, connectorType), eq(connectorConfigs.status, 'active')));
+  },
+
+  /** Find a connector config by matching a canonical account's externalId to a connectorType. Used by GHL webhook. */
+  async findByAccountExternalId(accountExternalId: string, connectorType: string) {
+    const [result] = await db
+      .select({ config: connectorConfigs, account: canonicalAccounts })
+      .from(canonicalAccounts)
+      .innerJoin(connectorConfigs, eq(connectorConfigs.id, canonicalAccounts.connectorConfigId))
+      .where(and(
+        eq(canonicalAccounts.externalId, accountExternalId),
+        eq(connectorConfigs.connectorType, connectorType),
+      ))
+      .limit(1);
+    return result ?? null;
+  },
+
   async updateSyncStatus(id: string, organisationId: string, status: { lastSyncAt: Date; lastSyncStatus: string; lastSyncError?: string | null }) {
     await db
       .update(connectorConfigs)

@@ -121,20 +121,16 @@ export const slackAdapter: IntegrationAdapter = {
   // ── Webhook handling ────────────────────────────────────────────────────
   webhook: {
     verifySignature(payload: Buffer, signature: string, secret: string): boolean {
-      // Slack uses v0:timestamp:body format for HMAC-SHA256
-      // The signature header contains the full "v0=hash" value
-      // The timestamp is passed separately in x-slack-request-timestamp
-      // For verification, the caller must construct the basestring externally
-      // and pass it as the payload. The secret is the signing secret.
+      // Slack signs "v0:timestamp:body" and the signature header is "v0=<hex>".
+      // The caller constructs the basestring and passes it as payload.
       const computed = 'v0=' + crypto
         .createHmac('sha256', secret)
         .update(payload)
         .digest('hex');
-      try {
-        return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computed));
-      } catch {
-        return false;
-      }
+      const sig = Buffer.from(signature);
+      const comp = Buffer.from(computed);
+      if (sig.length !== comp.length) return false;
+      return crypto.timingSafeEqual(sig, comp);
     },
 
     normaliseEvent(rawEvent: unknown): NormalisedEvent | null {

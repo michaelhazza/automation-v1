@@ -1,7 +1,5 @@
 import { Router, raw } from 'express';
-import { db } from '../../db/index.js';
-import { connectorConfigs } from '../../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
 
 const router = Router();
@@ -28,37 +26,23 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req
     return;
   }
 
-  // Handle Slack URL verification challenge (required during webhook setup)
-  if (event.type === 'url_verification') {
-    res.status(200).json({ challenge: event.challenge });
-    return;
-  }
-
-  // Find the Slack connector config
+  // Find the Slack connector config via service layer
   let config;
   try {
-    const [result] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(
-        eq(connectorConfigs.connectorType, 'slack'),
-        eq(connectorConfigs.status, 'active'),
-      ))
-      .limit(1);
+    config = await connectorConfigService.findActiveByType('slack');
 
-    if (!result) {
+    if (!config) {
       console.warn('[Slack Webhook] No active Slack connector config found');
       res.status(200).json({ received: true });
       return;
     }
-    config = result;
   } catch (err) {
     console.error('[Slack Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
     res.status(500).json({ error: 'Internal error' });
     return;
   }
 
-  // Verify Slack signature
+  // Verify Slack signature (must happen before url_verification to prevent spoofed challenges)
   if (config.webhookSecret) {
     const signature = req.headers['x-slack-signature'] as string | undefined;
     const timestamp = req.headers['x-slack-request-timestamp'] as string | undefined;
@@ -86,7 +70,15 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req
       return;
     }
   } else {
-    console.warn(`[Slack Webhook] No webhook secret configured for connector ${config.id} — processing without HMAC verification`);
+    console.warn(`[Slack Webhook] No webhook secret configured for connector ${config.id} — rejecting`);
+    res.status(401).json({ error: 'Webhook not configured' });
+    return;
+  }
+
+  // Handle Slack URL verification challenge (after signature verification)
+  if (event.type === 'url_verification') {
+    res.status(200).json({ challenge: event.challenge });
+    return;
   }
 
   // Ack immediately (Slack requires 200 within 3 seconds)

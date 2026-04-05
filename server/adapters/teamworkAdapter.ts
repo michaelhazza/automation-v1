@@ -261,11 +261,10 @@ export const teamworkAdapter: IntegrationAdapter = {
         .createHmac('sha256', secret)
         .update(payload)
         .digest('hex');
-      try {
-        return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computed));
-      } catch {
-        return false;
-      }
+      const sig = Buffer.from(signature);
+      const comp = Buffer.from(computed);
+      if (sig.length !== comp.length) return false;
+      return crypto.timingSafeEqual(sig, comp);
     },
 
     normaliseEvent(rawEvent: unknown): NormalisedEvent | null {

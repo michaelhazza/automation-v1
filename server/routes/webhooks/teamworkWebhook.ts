@@ -1,7 +1,5 @@
 import { Router, raw } from 'express';
-import { db } from '../../db/index.js';
-import { connectorConfigs } from '../../db/schema/index.js';
-import { eq, and } from 'drizzle-orm';
+import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
 
 const router = Router();
@@ -24,18 +22,10 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (
     return;
   }
 
-  // Find the connector config for Teamwork Desk.
-  // Unlike GHL (which routes by locationId), Teamwork routes by org-level connector config.
-  // If multiple orgs use Teamwork, we match by webhook secret signature.
+  // Find active Teamwork connector configs via service layer
   let config;
   try {
-    const configs = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(
-        eq(connectorConfigs.connectorType, 'teamwork'),
-        eq(connectorConfigs.status, 'active'),
-      ));
+    const configs = await connectorConfigService.findAllActiveByType('teamwork');
 
     if (configs.length === 0) {
       console.warn('[Teamwork Webhook] No active Teamwork connector configs found');
@@ -47,22 +37,23 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (
     const adapter = adapters.teamwork;
     const signature = req.headers['x-teamwork-signature'] as string | undefined;
 
+    if (!signature) {
+      console.warn('[Teamwork Webhook] Missing signature header, rejecting');
+      res.status(401).json({ error: 'Missing signature' });
+      return;
+    }
+
     for (const candidate of configs) {
-      if (candidate.webhookSecret && signature && adapter?.webhook?.verifySignature(rawBody, signature, candidate.webhookSecret)) {
+      if (candidate.webhookSecret && adapter?.webhook?.verifySignature(rawBody, signature, candidate.webhookSecret)) {
         config = candidate;
         break;
       }
     }
 
-    // If no signature match, use the first config (single-org setup without HMAC)
     if (!config) {
-      if (signature) {
-        console.warn('[Teamwork Webhook] No config matched signature, rejecting');
-        res.status(401).json({ error: 'Invalid signature' });
-        return;
-      }
-      config = configs[0];
-      console.warn(`[Teamwork Webhook] No webhook secret configured for connector ${config.id} — processing without HMAC verification`);
+      console.warn('[Teamwork Webhook] No config matched signature, rejecting');
+      res.status(401).json({ error: 'Invalid signature' });
+      return;
     }
   } catch (err) {
     console.error('[Teamwork Webhook] DB lookup failed:', err instanceof Error ? err.message : err);
