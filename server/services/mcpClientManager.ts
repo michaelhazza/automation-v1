@@ -291,26 +291,30 @@ export const mcpClientManager = {
     else ctx.mcpCallCount = 1;
 
     // Execute the call
+    const callStart = Date.now();
     try {
       const result = await withTimeout(
         instance.client.callTool({ name: toolName, arguments: args }),
         MCP_CALL_TIMEOUT_MS,
         `mcp.${serverSlug}.${toolName}`,
       );
+      const durationMs = Date.now() - callStart;
 
       // Output size guard
       const serialised = JSON.stringify(result);
       if (serialised.length > MAX_MCP_RESPONSE_SIZE) {
-        logger.warn('mcp.output_truncated', { serverSlug, toolName, size: serialised.length });
+        logger.warn('mcp.output_truncated', { serverSlug, toolName, size: serialised.length, durationMs });
         return serialised.slice(0, MAX_MCP_RESPONSE_SIZE) + '\n[... response truncated at 100KB]';
       }
 
+      logger.info('mcp.call.success', { serverSlug, toolName, durationMs, responseSize: serialised.length });
       return result;
     } catch (err) {
+      const durationMs = Date.now() - callStart;
       const classified = classifyMcpError(err);
-      logger.warn('mcp.tool_call_failed', {
+      logger.warn('mcp.call.error', {
         serverSlug, toolName, reason: classified.reason,
-        retryable: classified.retryable, retryCount,
+        retryable: classified.retryable, retryCount, durationMs,
       });
 
       if (classified.retryable && retryCount < 1) {

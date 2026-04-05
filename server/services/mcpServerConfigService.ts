@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { mcpServerConfigs, mcpServerAgentLinks } from '../db/schema/index.js';
 import type { McpServerConfig, NewMcpServerConfig } from '../db/schema/mcpServerConfigs.js';
@@ -95,14 +95,18 @@ export const mcpServerConfigService = {
 
   /** List active servers for an agent run. Respects agent links if any exist. */
   async listForAgent(agentId: string, organisationId: string): Promise<McpServerConfig[]> {
-    // Check if agent has explicit links
+    // Check if agent has explicit links — org-scoped via join to prevent cross-org leakage
     const links = await db
       .select({ mcpServerConfigId: mcpServerAgentLinks.mcpServerConfigId })
       .from(mcpServerAgentLinks)
-      .where(eq(mcpServerAgentLinks.agentId, agentId));
+      .innerJoin(mcpServerConfigs, eq(mcpServerAgentLinks.mcpServerConfigId, mcpServerConfigs.id))
+      .where(and(
+        eq(mcpServerAgentLinks.agentId, agentId),
+        eq(mcpServerConfigs.organisationId, organisationId),
+      ));
 
     if (links.length > 0) {
-      // Agent has explicit links — only return those servers
+      // Agent has explicit links — only return those servers that are active
       const linkedIds = new Set(links.map((l: { mcpServerConfigId: string }) => l.mcpServerConfigId));
       const allActive = await db
         .select()
@@ -121,16 +125,14 @@ export const mcpServerConfigService = {
   // ── Circuit breaker helpers ─────────────────────────────────────────────────
 
   async incrementFailure(id: string): Promise<void> {
-    await db.execute(
-      // Raw SQL for atomic increment
-      /* sql */`
-      UPDATE mcp_server_configs
-      SET consecutive_failures = consecutive_failures + 1,
-          last_error = 'Connection failed',
-          updated_at = NOW()
-      WHERE id = '${id}'
-      `
-    );
+    await db
+      .update(mcpServerConfigs)
+      .set({
+        consecutiveFailures: sql`${mcpServerConfigs.consecutiveFailures} + 1`,
+        lastError: 'Connection failed',
+        updatedAt: new Date(),
+      })
+      .where(eq(mcpServerConfigs.id, id));
   },
 
   async openCircuit(id: string, until: Date): Promise<void> {

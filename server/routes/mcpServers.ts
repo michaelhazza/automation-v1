@@ -36,6 +36,15 @@ router.post('/api/mcp-servers', authenticate, requireOrgPermission(ORG_PERMISSIO
     return res.status(400).json({ message: `Unknown preset: ${presetSlug}` });
   }
 
+  // Validate envVars format (KEY=VALUE lines)
+  if (envVars) {
+    const lines = String(envVars).split('\n').filter((l: string) => l.trim());
+    const invalid = lines.filter((l: string) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(l.trim()));
+    if (invalid.length > 0) {
+      return res.status(400).json({ message: `Invalid env var format. Expected KEY=VALUE. Invalid lines: ${invalid.map((l: string) => l.trim().slice(0, 30)).join(', ')}` });
+    }
+  }
+
   const config = await mcpServerConfigService.create(req.orgId!, {
     presetSlug: preset.slug,
     name: preset.name,
@@ -60,6 +69,16 @@ type McpServerConfigCredProvider = 'gmail' | 'github' | 'hubspot' | 'slack' | 'g
 
 router.patch('/api/mcp-servers/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.MCP_SERVERS_MANAGE), asyncHandler(async (req, res, _next: NextFunction) => {
   const { envVars, defaultGateLevel, toolGateOverrides, status, allowedTools, blockedTools } = req.body;
+
+  // Validate envVars format
+  if (envVars) {
+    const lines = String(envVars).split('\n').filter((l: string) => l.trim());
+    const invalid = lines.filter((l: string) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(l.trim()));
+    if (invalid.length > 0) {
+      return res.status(400).json({ message: `Invalid env var format. Expected KEY=VALUE.` });
+    }
+  }
+
   const updates: Record<string, unknown> = {};
 
   if (envVars !== undefined) updates.envEncrypted = envVars;

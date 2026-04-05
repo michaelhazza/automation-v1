@@ -442,8 +442,11 @@ export const agentExecutionService = {
         mcpClients = mcp.clients;
         mcpLazyRegistry = mcp.lazyRegistry;
         if (mcp.tools.length > 0) {
-          enhancedTools.push(...mcp.tools);
-          logger.info('mcp.tools_loaded', { runId, mcpToolCount: mcp.tools.length, serverCount: mcp.clients.size });
+          // Defense in depth: cap is also enforced in connectForRun
+          const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
+          const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
+          enhancedTools.push(...cappedTools);
+          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
         }
       } catch (err) {
         logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
