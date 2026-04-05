@@ -308,7 +308,35 @@ The best path forward: adopt Paperclip's organisational structure concepts (goal
 
 ---
 
-## 6. Market Context & Positioning
+## 6. Additional Technical Details Worth Noting
+
+### Secrets Management
+Paperclip has a two-level secrets system: named secrets with immutable versioned values, SHA-256 hashing per version, environment variable binding (plain text or secret references), sensitive key detection via pattern matching, strict mode that forces sensitive keys to use secret refs, and creator attribution (user or agent) per version. This is more structured than typical env var management.
+
+### Command Palette (Cmd+K)
+They ship a command palette (Ctrl/Cmd+K) for global search across issues, agents, projects with quick-create actions. This is a power-user feature that dramatically improves navigation speed. We should consider adding this.
+
+### Dark/Light Theme
+Full theme toggle support throughout the UI. Table stakes for developer-focused tools.
+
+### Configuration Revision History
+Every agent config change is stored as a revision with full diff capability and rollback (with safeguards preventing rollback of redacted secrets). This gives full auditability of "what changed when an agent started behaving differently."
+
+### Webhook Triggers with HMAC Signing
+Routine webhook triggers support bearer token or HMAC SHA-256 signing with secret rotation. Production-grade external trigger support.
+
+### Smart Notification Gating
+Rate-limited to 3 per 10 seconds per category with context-aware suppression and self-event filtering (you don't get notified about your own actions). Prevents notification fatigue.
+
+### Cross-Tab Sync
+Company sidebar synchronises across browser tabs via localStorage events. Small but polished touch.
+
+### Session Compaction
+Agent sessions auto-compact when thresholds are exceeded, preventing unbounded context growth. Similar problem to what we solve with workspace memory summarisation.
+
+---
+
+## 7. Market Context & Positioning
 
 ### Paperclip's Growth & Traction
 - **47,800+ stars** and **7,700+ forks** in ~1 month (launched March 4, 2026)
@@ -334,8 +362,17 @@ Paperclip explicitly differentiates from CrewAI/AutoGen/LangGraph — those are 
 
 The "zero-human company" positioning is bold and polarising — generates stars and press but may limit enterprise appeal. Enterprises want "AI-augmented" not "AI-replaced."
 
+### Their Gaps (Where They're Weak)
+- **No multi-user collaboration** — "multiple human users" listed as upcoming. Currently single-operator model.
+- **No cloud deployment** — local-only with Docker. Cloud listed as roadmap.
+- **No billing/payments** — no Stripe integration or subscription tiers in code.
+- **No RBAC** — single board vs. agent distinction. No role-based access.
+- **No marketplace yet** — Clipmart announced but not implemented.
+- **Authentication is minimal** — single `better-auth.ts` file.
+
 ### Implications for Us
 1. **The governance layer is their real moat** — budget enforcement, audit trails, multi-company isolation. We should ensure our governance (which is already deeper) is equally well-marketed.
 2. **Their explosive growth validates the category** — there's massive demand for agent orchestration platforms.
 3. **Their maturity gap is our opportunity** — they're weeks old and experimental. We have production-grade infrastructure they lack (HITL policies, MCP, OAuth integrations, vector memory).
 4. **Template marketplace (Clipmart) is a smart move** — we should prioritise our own template/marketplace system before they capture that mindshare.
+5. **Their multi-user gap is significant** — enterprise buyers need RBAC, team permissions, and multi-user collaboration. We already have this. Lean into it.
