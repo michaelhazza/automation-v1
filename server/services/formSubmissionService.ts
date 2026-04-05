@@ -168,7 +168,7 @@ export const formSubmissionService = {
 
     // 9. Enqueue integration jobs
     if (hasActions) {
-      for (const [purpose, actionConfig] of Object.entries(formConfig.actions)) {
+      for (const [purpose, actionConfig] of Object.entries(formConfig.actions!)) {
         const cached = integrationCache.get(purpose);
         if (cached) {
           await enqueuePageIntegrationJob({

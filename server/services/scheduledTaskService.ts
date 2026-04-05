@@ -318,7 +318,7 @@ export const scheduledTaskService = {
     try {
       const task = await taskService.createTask(
         st.organisationId,
-        st.subaccountId,
+        st.subaccountId!,
         {
           title: taskTitle,
           description: st.description ?? undefined,
@@ -343,7 +343,7 @@ export const scheduledTaskService = {
         .from(subaccountAgents)
         .where(
           and(
-            eq(subaccountAgents.subaccountId, st.subaccountId),
+            eq(subaccountAgents.subaccountId, st.subaccountId!),
             eq(subaccountAgents.agentId, st.assignedAgentId),
             eq(subaccountAgents.isActive, true)
           )
@@ -496,7 +496,7 @@ export const scheduledTaskService = {
       .from(subaccountAgents)
       .where(
         and(
-          eq(subaccountAgents.subaccountId, st.subaccountId),
+          eq(subaccountAgents.subaccountId, st.subaccountId!),
           eq(subaccountAgents.agentId, st.assignedAgentId),
           eq(subaccountAgents.isActive, true)
         )

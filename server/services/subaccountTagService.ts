@@ -60,7 +60,7 @@ export const subaccountTagService = {
       HAVING COUNT(DISTINCT key) = ${filters.length}
     `);
 
-    return (result.rows as Array<{ subaccount_id: string }>).map(r => r.subaccount_id);
+    return (result as unknown as Array<{ subaccount_id: string }>).map(r => r.subaccount_id);
   },
 
   async bulkSetTag(organisationId: string, subaccountIds: string[], key: string, value: string) {
@@ -88,6 +88,6 @@ export const subaccountTagService = {
       WHERE organisation_id = ${organisationId}
       ORDER BY key
     `);
-    return (result.rows as Array<{ key: string }>).map(r => r.key);
+    return (result as unknown as Array<{ key: string }>).map(r => r.key);
   },
 };
