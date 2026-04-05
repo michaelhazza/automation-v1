@@ -5,6 +5,25 @@ import { connectionTokenService } from './connectionTokenService.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 // ---------------------------------------------------------------------------
+// Connection Resolution Contract
+//
+// When resolving a connection for execution, the precedence order is:
+//   1. Exact subaccount match — connection.subaccountId === target subaccountId
+//   2. Org-level fallback    — connection.subaccountId IS NULL, same org
+//   3. Error                 — no active connection found
+//
+// This means subaccount-specific connections always override org-level ones.
+// Org-level connections act as shared defaults across all subaccounts.
+//
+// Both scopes enforce:
+//   - connection.organisationId === caller's orgId (tenant isolation)
+//   - connection.connectionStatus === 'active'
+//
+// Labels: the same label can exist at both org and subaccount level.
+// Resolution always picks the most specific scope first.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Integration Connection Service — Activepieces-pattern OAuth token management
 //
 // Key behaviours:
