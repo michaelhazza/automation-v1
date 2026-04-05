@@ -840,3 +840,110 @@ The trace data we're collecting isn't just for debugging. Once mature, it become
 | **Automated debugging suggestions** | When a run fails, find the most similar successful run and diff the trace trees. | Faster root cause analysis |
 
 **This is not in scope for this brief.** But every design decision here (fingerprints, decision events, structured metadata, trace versioning) is intentionally laying the groundwork. We're building observability that becomes intelligence — not a logging system that stays a logging system.
+
+---
+
+## Final Refinements
+
+### 14.1 Tracing QA / Audit Mechanism
+
+Even with contracts and registries, instrumentation drifts over time. Add a lightweight validation check.
+
+**Mechanism:** A daily (or CI-triggered) audit that samples 5-10 recent traces and validates:
+- Required spans exist (at least MVT: trace + iteration + generation + finalisation)
+- Span names match the registry (no ad hoc names)
+- Metadata schemas are valid (required fields present, types correct)
+- Trace finalisation is present with `finalStatus`
+
+**Day one:** A script that queries Langfuse API, validates, and logs warnings. Not blocking.
+
+**Later:** Integrate into CI. New features that touch agent execution must produce a valid trace in test, or the pipeline warns.
+
+### 14.2 Cross-System Correlation ID
+
+Traces in Langfuse are strong, but real debugging requires jumping between Langfuse, application logs, and database records.
+
+**Add a `correlationId` field** (use the existing `runId`) propagated consistently across:
+- Langfuse traces (already present as `sessionId` on the trace)
+- Application logs (structured log field)
+- Database writes (`agentRuns`, `llmRequests`, `agentActions`)
+- Queue jobs (pg-boss job data)
+
+**Result:** Given any runId, you can instantly cross-reference Langfuse traces, application logs, DB audit records, and queue job history. This is the "jump from Langfuse to logs" capability.
+
+**Implementation:** The `runId` already flows through most of these systems. The gap is ensuring it's consistently included in structured log output (add to the logger context) and in Langfuse span metadata (handled by the contract layer's default injection).
+
+### 14.3 Nuanced Completion Status
+
+Binary success/failure loses information. Add granular final statuses:
+
+```
+finalStatus:
+  completed              # Clean success — all tools succeeded, no retries
+  completed_with_retries # Succeeded but required provider fallbacks or TripWire retries
+  partial_success        # Some tools succeeded, some failed — agent completed anyway
+  failed                 # Run failed outright
+  timeout                # Run hit time limit
+  budget_exceeded        # Run stopped due to budget
+  loop_detected          # Middleware detected stuck loop
+```
+
+**Why this matters:** `completed_with_retries` and `partial_success` are invisible today but critical for quality tracking. An agent that "succeeds" after 3 provider fallbacks is not the same as one that succeeds cleanly. This distinction becomes essential for the intelligence layer (scoring, anomaly detection, routing optimisation).
+
+### 14.4 Instrumentation as PR Requirement
+
+Add to the team's PR checklist:
+
+> Any change touching agent execution, LLM routing, skill execution, or memory must either:
+> (a) include appropriate instrumentation using the tracing helpers, or
+> (b) explicitly document why instrumentation is not needed
+
+This prevents instrumentation debt from accumulating silently. Not a hard gate — just a review checkpoint.
+
+### 14.5 Critical Path Tagging
+
+Not all spans are equal. Some are on the critical path (blocking the run's progress), others are background work.
+
+**Add optional metadata:**
+```
+metadata.criticalPath: true | false
+```
+
+**Apply to:**
+- LLM calls: always `true` (agent is blocked waiting)
+- HITL review waits: always `true` (agent is blocked)
+- Blocking skill executions: `true`
+- Memory extraction (post-run): `false` (non-blocking)
+- Insight extraction: `false` (non-blocking)
+
+**Value:** Instantly filter to "what was the agent actually waiting on?" — the critical path spans are the only ones that matter for latency optimisation.
+
+### 14.6 Time Source Consistency
+
+All span timing must use a consistent clock source to prevent negative durations or skew across async boundaries.
+
+**Rule:** Use `performance.now()` (monotonic clock) for duration calculations, not `Date.now()`. Convert to absolute timestamps only for Langfuse's `startTime`/`endTime` fields.
+
+**Implementation:** The `createSpan()` helper captures `performance.now()` at creation and computes duration at `end()`. Langfuse receives `Date.now()` timestamps for display, but duration is always monotonic.
+
+### 14.7 Instrumentation Version
+
+Separate from `traceSchemaVersion` (data shape), add:
+
+```
+metadata.instrumentationVersion: "1.0"
+```
+
+**Difference:**
+- `traceSchemaVersion` = what fields exist and their types
+- `instrumentationVersion` = what logic decides which spans/events are emitted
+
+**Why:** When we change what gets instrumented (e.g., add memory spans in Phase 4), we can compare traces before and after. Also lets us debug instrumentation bugs — "traces from instrumentationVersion 1.0 are missing skill spans" immediately tells you which code version to look at.
+
+---
+
+## Spec Status: Final
+
+This brief is complete. No further additions recommended — the risk of overengineering now exceeds the risk of missing something.
+
+**Next step:** Convert Phase 0 + Phase 1 into exact implementation tasks. Lock the helper APIs. Build.
