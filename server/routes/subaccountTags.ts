@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { subaccountTagService } from '../services/subaccountTagService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -17,7 +17,7 @@ router.get('/api/subaccounts/:subaccountId/tags', authenticate, asyncHandler(asy
 
 // ── Set a tag ─────────────────────────────────────────────────────────────
 
-router.put('/api/subaccounts/:subaccountId/tags/:key', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.put('/api/subaccounts/:subaccountId/tags/:key', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res, _next: NextFunction) => {
   await resolveSubaccount(req.params.subaccountId, req.orgId!);
   const { value } = req.body;
   if (!value) return res.status(400).json({ message: 'value is required' });
@@ -35,7 +35,7 @@ router.delete('/api/subaccounts/:subaccountId/tags/:key', authenticate, requireO
 
 // ── Bulk set tag across subaccounts ───────────────────────────────────────
 
-router.post('/api/org/subaccount-tags/bulk', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.post('/api/org/subaccount-tags/bulk', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res, _next: NextFunction) => {
   const { subaccountIds, key, value } = req.body;
   if (!subaccountIds?.length || !key || !value) {
     return res.status(400).json({ message: 'subaccountIds, key, and value are required' });
@@ -53,7 +53,7 @@ router.get('/api/org/subaccount-tags/keys', authenticate, asyncHandler(async (re
 
 // ── Filter subaccounts by tags ────────────────────────────────────────────
 
-router.get('/api/org/subaccounts/by-tags', authenticate, asyncHandler(async (req, res) => {
+router.get('/api/org/subaccounts/by-tags', authenticate, asyncHandler(async (req, res, _next: NextFunction) => {
   const filtersParam = req.query.filters as string | undefined;
   let filters: Array<{ key: string; value: string }> = [];
   if (filtersParam) {

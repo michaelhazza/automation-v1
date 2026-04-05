@@ -189,11 +189,11 @@ export const skillExecutor = {
       // ── Meta tools — BM25 tool discovery (no action record) ─────────────
       case 'search_tools': {
         const { executeSearchTools } = await import('../tools/meta/searchTools.js');
-        return executeSearchTools(input, context);
+        return executeSearchTools(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
       }
       case 'load_tool': {
         const { executeLoadTool } = await import('../tools/meta/searchTools.js');
-        return executeLoadTool(input, context);
+        return executeLoadTool(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
       }
 
       // ── Direct skills (no action record) ──────────────────────────────
@@ -370,7 +370,7 @@ export const skillExecutor = {
       case 'assign_task': {
         const { executeAssignTask } = await import('../tools/internal/assignTask.js');
         return executeWithActionAudit('assign_task', input, context, () =>
-          executeAssignTask(input, context),
+          executeAssignTask(input, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
         );
       }
 
@@ -782,7 +782,7 @@ async function executeReadWorkspace(
     // Subtask listing by parent
     if (input.parent_task_id) {
       const parentId = String(input.parent_task_id);
-      const allItems = await taskService.listTasks(context.organisationId, context.subaccountId, {});
+      const allItems = await taskService.listTasks(context.organisationId, context.subaccountId!, {});
       const subtasks = allItems.filter(t => (t as { parentTaskId?: string | null }).parentTaskId === parentId);
       return {
         success: true,
@@ -798,7 +798,7 @@ async function executeReadWorkspace(
     if (input.status) filters.status = String(input.status);
     if (input.assigned_to_me) filters.assignedAgentId = context.agentId;
 
-    const items = await taskService.listTasks(context.organisationId, context.subaccountId, filters);
+    const items = await taskService.listTasks(context.organisationId, context.subaccountId!, filters);
     const sliced = items.slice(0, limit);
 
     if (includeActivities) {
@@ -897,7 +897,7 @@ async function executeTriggerProcess(
       context.agentId,
       inputData,
       {
-        subaccountId: context.subaccountId,
+        subaccountId: context.subaccountId ?? undefined,
         triggerType: 'agent',
         triggerSourceId: context.runId,
         configOverrides,
@@ -961,7 +961,7 @@ async function executeCreateTask(
   try {
     const item = await taskService.createTask(
       context.organisationId,
-      context.subaccountId,
+      context.subaccountId!,
       {
         title,
         description,
@@ -982,7 +982,7 @@ async function executeCreateTask(
         enqueueHandoff({
           taskId: item.id,
           agentId,
-          subaccountId: context.subaccountId,
+          subaccountId: context.subaccountId!,
           organisationId: context.organisationId,
           sourceRunId: context.runId,
           handoffDepth: currentDepth + 1,
@@ -1024,7 +1024,7 @@ async function executeMoveTask(
   try {
     // Get current item to find subaccount
     const item = await taskService.getTask(taskId, context.organisationId);
-    const position = await taskService._nextPosition(item.subaccountId, status);
+    const position = await taskService._nextPosition(item.subaccountId!, status);
 
     const updated = await taskService.moveTask(
       taskId,
@@ -1288,7 +1288,7 @@ async function executeReassignTask(
         enqueueHandoff({
           taskId,
           agentId,
-          subaccountId: context.subaccountId,
+          subaccountId: context.subaccountId!,
           organisationId: context.organisationId,
           sourceRunId: context.runId,
           handoffDepth: currentDepth + 1,
@@ -1362,7 +1362,7 @@ async function executeSpawnSubAgents(
     for (const st of subTasks) {
       const task = await taskService.createTask(
         context.organisationId,
-        context.subaccountId,
+        context.subaccountId!,
         {
           title: st.title.slice(0, MAX_TASK_TITLE_LENGTH),
           brief: st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
@@ -1381,7 +1381,7 @@ async function executeSpawnSubAgents(
         .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
         .where(
           and(
-            eq(subaccountAgents.subaccountId, context.subaccountId),
+            eq(subaccountAgents.subaccountId, context.subaccountId!),
             eq(subaccountAgents.agentId, st.assigned_agent_id),
             eq(subaccountAgents.isActive, true),
             eq(agents.status, 'active'),
@@ -1543,7 +1543,7 @@ async function proposeDevopsAction(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -1639,7 +1639,7 @@ async function executeReadCodebase(
   if (!filePath) return { success: false, error: 'file_path is required' };
 
   try {
-    const { context: devCtx } = await devContextService.getContext(context.subaccountId);
+    const { context: devCtx } = await devContextService.getContext(context.subaccountId!);
     const absolutePath = resolve(devCtx.projectRoot, filePath);
 
     assertPathInRoot(absolutePath, devCtx.projectRoot);
@@ -1682,7 +1682,7 @@ async function executeSearchCodebase(
   if (!query) return { success: false, error: 'query is required' };
 
   try {
-    const { context: devCtx } = await devContextService.getContext(context.subaccountId);
+    const { context: devCtx } = await devContextService.getContext(context.subaccountId!);
     const root = devCtx.projectRoot;
 
     if (searchType === 'filename') {
@@ -1750,7 +1750,7 @@ async function executeRunTests(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -1933,7 +1933,7 @@ async function executeReportBug(
   try {
     const task = await taskService.createTask(
       context.organisationId,
-      context.subaccountId,
+      context.subaccountId!,
       {
         title: `[BUG] ${title}`,
         description,
@@ -1974,7 +1974,7 @@ async function executeCaptureScreenshot(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -2079,7 +2079,7 @@ async function executeRunPlaywrightTest(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -2194,7 +2194,7 @@ async function executeCreatePage(
   const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
 
-  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  const project = await pageProjectService.getById(projectId, context.subaccountId!, context.organisationId);
   if (!project) return { success: false, error: 'Page project not found' };
 
   const page = await pageService.create(
@@ -2225,7 +2225,7 @@ async function executeUpdatePage(
   const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
 
-  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  const project = await pageProjectService.getById(projectId, context.subaccountId!, context.organisationId);
   if (!project) return { success: false, error: 'Page project not found' };
 
   const result = await pageService.update(
@@ -2254,7 +2254,7 @@ async function executePublishPage(
   const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
 
-  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  const project = await pageProjectService.getById(projectId, context.subaccountId!, context.organisationId);
   if (!project) return { success: false, error: 'Page project not found or access denied' };
 
   const page = await pageService.publish(pageId, projectId);

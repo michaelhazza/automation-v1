@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { orgMemoryService } from '../services/orgMemoryService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -15,7 +15,7 @@ router.get('/api/org/memory', authenticate, requireOrgPermission(ORG_PERMISSIONS
 
 // ── Update compiled summary manually ──────────────────────────────────────
 
-router.put('/api/org/memory', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.put('/api/org/memory', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res, _next: NextFunction) => {
   const { summary } = req.body;
   if (!summary) return res.status(400).json({ message: 'summary is required' });
   await orgMemoryService.updateSummary(req.orgId!, summary);
