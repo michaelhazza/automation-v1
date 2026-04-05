@@ -5,6 +5,82 @@
 
 ---
 
+## Cross-Cutting Concerns (Apply to ALL Features)
+
+These rules apply globally across every feature below. They are non-negotiable.
+
+### CC-1: Multi-Tenant Enforcement
+
+Every service method MUST:
+- Require `organisationId` as a parameter
+- Validate the entity belongs to BOTH `organisationId` AND `subaccountId` (where applicable) at query level
+
+```ts
+// CORRECT — always scope by org + subaccount
+where(
+  and(
+    eq(goals.id, goalId),
+    eq(goals.organisationId, orgId),
+    eq(goals.subaccountId, subaccountId)
+  )
+)
+
+// WRONG — trusting upstream to filter
+where(eq(goals.id, goalId))
+```
+
+Apply to: goals, inbox aggregation, attachments, feedback, webhook callbacks, prompt revisions, and any new table.
+
+### CC-2: Audit Event Logging
+
+Every new write operation MUST emit an audit event to the existing `auditEvents` table. Minimum events per feature:
+
+| Feature | Events |
+|---------|--------|
+| Goals | `goal.created`, `goal.updated`, `goal.deleted` |
+| Instruction Versioning | `agent.prompt.updated`, `agent.prompt.rollback` |
+| Inbox | `inbox.item.archived`, `inbox.item.read` |
+| HTTP Adapter | `webhook.invoked`, `webhook.failed`, `webhook.callback_received` |
+| Attachments | `attachment.uploaded`, `attachment.deleted` |
+| Feedback | `feedback.submitted` |
+| Hiring Gate | `agent.approval_requested`, `agent.approval_resolved` |
+
+Use existing `auditEventService` pattern: `{ actorId, actorType, action, resourceType, resourceId, orgId, metadata }`.
+
+### CC-3: Soft-Delete Consistency
+
+Global rule for every query across all features:
+- All reads MUST filter `isNull(table.deletedAt)` on soft-delete tables
+- All cascade operations MUST soft-delete children (never hard delete)
+- New tables that have `deletedAt` must follow this pattern without exception
+
+### CC-4: Idempotency on Write Paths
+
+High-risk write operations must be idempotent:
+
+| Operation | Strategy |
+|-----------|----------|
+| Inbox mark-read (bulk) | Upsert on `(userId, entityType, entityId)` — already unique, just ensure ON CONFLICT DO UPDATE |
+| Feedback votes | Upsert on unique constraint (already designed correctly) |
+| Webhook callbacks | Validate one-time callback token (JWT with expiry), reject reused tokens |
+| Attachment uploads | Client sends `idempotencyKey` (UUID), server dedupes on `(taskId, idempotencyKey)` |
+| Goal deletion cascade | Wrap in transaction, check deletedAt before cascading |
+
+### CC-5: Rate Limiting on New APIs
+
+Apply per-user rate limits to prevent spam:
+
+| Endpoint | Limit |
+|----------|-------|
+| `POST /api/feedback` | 30/min per user |
+| `POST /api/inbox/mark-read` | 60/min per user |
+| `POST /api/tasks/:id/attachments` | 10/min per user |
+| `POST /api/webhooks/agent-callback/:runId` | 100/min per agent |
+
+Use existing rate-limiting middleware or add `express-rate-limit` scoped per route group.
+
+---
+
 ## Feature 1: Goal Hierarchy System
 
 ### Overview
@@ -65,9 +141,14 @@ All routes under `/api/subaccounts/:subaccountId/goals`
 - `listGoals(subaccountId, orgId)` — flat list, filtered by deletedAt IS NULL
 - `createGoal(data)` — validate parentGoalId belongs to same subaccount if set
 - `updateGoal(goalId, data, orgId)` — standard update with resolveSubaccount
-- `deleteGoal(goalId, orgId)` — soft-delete, cascade to children
+- `deleteGoal(goalId, orgId)` — soft-delete, cascade to children (in transaction)
 - `getGoalAncestry(goalId)` — recursive CTE query returning chain from goal up to root mission
 - `getGoalContext(taskId)` — if task has goalId, return formatted ancestry string for prompt injection
+
+**Integrity constraints (from review feedback):**
+- **Circular reference prevention:** On create/update where `parentGoalId` is set, walk the ancestor chain (max 10 levels) and reject if `goalId` appears in its own ancestry. Use the same recursive CTE as `getGoalAncestry` with a cycle check.
+- **Cross-subaccount prevention:** Enforce `parent.subaccountId === child.subaccountId` at service layer.
+- **Goal owner alignment:** When a task is created with a `goalId` and the goal has an `ownerAgentId`, suggest (but don't force) assigning the task to that agent. Include owner info in the API response for the frontend to use as a default.
 
 ### Frontend
 
@@ -314,6 +395,29 @@ Visual hint: show keyboard shortcut legend via `?` key or a small footer hint.
 - `archiveItems(userId, items)` — set isArchived = true
 - `getCounts(userId, orgId)` — count unread per category
 
+**Performance strategy (from review feedback):**
+Aggregating across 4 tables live will degrade as data grows. Two-phase approach:
+
+**Phase 1 (launch):** Live queries with strict limits. Each source query is capped: max 50 tasks, 50 reviews, 20 failed runs, 10 alerts. Combined, sorted by updatedAt DESC, paginated (cursor-based). This is acceptable for moderate scale.
+
+**Phase 2 (when needed):** Materialised `inbox_items` table populated by write-time triggers. When a task enters inbox status, a review item is created, or a run fails, insert/upsert a row into `inbox_items`. This gives O(1) reads. Migrate when query latency exceeds 200ms p95.
+
+**Inbox priority ordering (from review feedback):**
+Default sort order:
+1. Unread items first
+2. Then by priority: urgent > high > normal > low
+3. Then by recency (updatedAt DESC)
+
+Expose `sortBy` query param to allow override: `recency`, `priority`, `unread_first` (default).
+
+### WebSocket Integration
+
+Emit to org room when inbox-relevant events occur:
+- `inbox:new_item` — when a new task enters inbox, review item created, or run fails
+- `inbox:item_resolved` — when a review is approved/rejected or a failed run is retried
+
+Client uses these to update badge counts and prepend new items without polling.
+
 ---
 
 ## Feature 4: Agent Instruction Versioning
@@ -336,6 +440,7 @@ Track every change to an agent's masterPrompt and additionalPrompt as a revision
 | changeDescription | text | nullable — auto-generated or user-provided |
 | changedBy | uuid | nullable, FK → users.id |
 | changedByAgentId | uuid | nullable, FK → agents.id |
+| promptHash | text | notNull — SHA-256 of (masterPrompt + additionalPrompt), used for dedup and quick comparison |
 | createdAt | timestamp | notNull, defaultNow(), withTimezone |
 
 **Indexes:**
@@ -349,10 +454,12 @@ Track every change to an agent's masterPrompt and additionalPrompt as a revision
 
 Before persisting an agent update, if `masterPrompt` or `additionalPrompt` changed:
 1. Fetch current agent prompt values
-2. Compare old vs new — if different, create a new `agent_prompt_revisions` row
-3. Auto-increment `revisionNumber` (max existing + 1)
-4. Auto-generate `changeDescription` by diffing: "masterPrompt changed (±X chars)" / "additionalPrompt changed (±X chars)"
-5. Persist the agent update as normal
+2. Compute hash: `SHA-256(masterPrompt + '\0' + additionalPrompt)`
+3. Compare hash vs latest revision hash — if identical, skip revision creation (dedup)
+4. If different, create a new `agent_prompt_revisions` row
+5. Auto-increment `revisionNumber` (max existing + 1)
+6. Auto-generate `changeDescription` by diffing: "masterPrompt changed (±X chars)" / "additionalPrompt changed (±X chars)"
+7. Persist the agent update as normal
 
 **New methods in `agentService.ts`:**
 - `getPromptRevisions(agentId, orgId, limit?, offset?)` — paginated revision list
@@ -392,6 +499,7 @@ CREATE TABLE agent_prompt_revisions (
   revision_number INTEGER NOT NULL,
   master_prompt TEXT NOT NULL,
   additional_prompt TEXT NOT NULL,
+  prompt_hash TEXT NOT NULL,
   change_description TEXT,
   changed_by UUID REFERENCES users(id),
   changed_by_agent_id UUID REFERENCES agents(id),
@@ -444,25 +552,35 @@ When a scheduled heartbeat or cron fires but the agent's previous run is still a
 
 **Modify heartbeat/schedule execution path:**
 
-In `agentScheduleService.ts` or wherever runs are triggered:
+In `agentScheduleService.ts` or wherever runs are triggered.
+
+**IMPORTANT — Race condition prevention (from review feedback):**
+A naive `countActiveRuns()` check is not safe — two triggers can pass simultaneously. Use one of:
+1. **pg-boss queue (preferred):** Since we already use pg-boss, enqueue all triggers as jobs and let the queue enforce concurrency via `teamSize` / `teamConcurrency` options per queue name. The concurrency policy becomes a pre-enqueue check using pg-boss's built-in job state queries (which are transactional).
+2. **PostgreSQL advisory lock:** `SELECT pg_try_advisory_xact_lock(hashtext(subaccountAgentId))` — if lock acquired, proceed; if not, apply policy. This is transactional and race-safe.
 
 ```ts
-async function shouldEnqueueRun(subaccountAgentId: string): Promise<boolean> {
+async function enqueueRunWithPolicy(subaccountAgentId: string): Promise<boolean> {
+  // Use pg-boss to atomically check + enqueue
   const config = await getSubaccountAgent(subaccountAgentId);
-  const activeRuns = await countActiveRuns(subaccountAgentId); // status = 'running' or 'queued'
+  const queueName = `agent-run:${subaccountAgentId}`;
 
-  if (activeRuns >= config.maxConcurrentRuns) {
+  // pg-boss getQueueSize returns active + queued count atomically
+  const activeCount = await boss.getQueueSize(queueName, { before: 'completed' });
+
+  if (activeCount >= config.maxConcurrentRuns) {
     switch (config.concurrencyPolicy) {
       case 'skip_if_active':
         logger.info('heartbeat_skipped', { subaccountAgentId, reason: 'active_run' });
         return false;
       case 'coalesce_if_active':
-        const queuedRuns = await countQueuedRuns(subaccountAgentId);
-        if (queuedRuns > 0) {
+        // pg-boss can check for existing queued jobs atomically
+        const queuedCount = await boss.getQueueSize(queueName, { before: 'active' });
+        if (queuedCount > 0) {
           logger.info('heartbeat_coalesced', { subaccountAgentId, reason: 'already_queued' });
           return false;
         }
-        return true; // queue exactly one
+        return true;
       case 'always_enqueue':
         return true;
     }
@@ -578,7 +696,14 @@ Accept: `targetDate`, `budgetCents`, `budgetWarningPercent`
 - `checkProjectBudget(projectId, orgId)` — returns utilization %, fires alert if > warningPercent
 
 **`costAggregateService.ts` — modify:**
-- When recording cost for a run, look up the triggering task's projectId and include it in the cost aggregate row
+- When recording cost for a run, include the projectId in the cost aggregate row
+
+**Project cost attribution strategy (from review feedback):**
+Don't infer projectId from the task at cost-recording time — this is fragile for multi-task runs, retries, and agent-triggered runs. Instead:
+- Attach `projectId` directly to `agentRuns` at run creation time (when the run is triggered from a task, copy the task's projectId to the run)
+- Add `projectId` column to `agent_runs` table (nullable, FK → projects.id)
+- Cost aggregation then reads projectId from the run, not inferred from the task
+- This survives task reassignment, retries, and multi-task scenarios
 
 ### Migration
 
@@ -591,6 +716,10 @@ ALTER TABLE projects
 ALTER TABLE cost_aggregates
   ADD COLUMN project_id UUID REFERENCES projects(id);
 CREATE INDEX cost_agg_project_idx ON cost_aggregates(project_id);
+
+ALTER TABLE agent_runs
+  ADD COLUMN project_id UUID REFERENCES projects(id);
+CREATE INDEX agent_runs_project_idx ON agent_runs(project_id);
 ```
 
 ---
@@ -625,7 +754,7 @@ A new agent adapter type that sends heartbeat/task payloads to an external HTTP 
 | authHeaderName | text | nullable — custom header name for api_key_header type (default: X-API-Key) |
 | timeoutMs | integer | notNull, default(300000) — 5 min default |
 | retryCount | integer | notNull, default(2) |
-| retryDelayMs | integer | notNull, default(5000) |
+| retryBackoffMs | integer | notNull, default(5000) — base delay, exponential backoff with jitter: delay = base * 2^attempt + random(0, base/2) |
 | expectCallback | boolean | notNull, default(false) — if true, system waits for callback instead of sync response |
 | callbackSecret | text | nullable — secret for validating incoming callbacks (HMAC) |
 | createdAt | timestamp | notNull, defaultNow(), withTimezone |
@@ -680,6 +809,13 @@ interface WebhookAgentResponse {
 | POST | `/api/webhooks/agent-callback/:runId` | Receive async callback from external agent |
 
 Callback endpoint validates `callbackToken` from request header, updates run status, and processes task updates.
+
+**Webhook security hardening (from review feedback):**
+- `callbackToken` MUST be a signed JWT containing: `{ runId, agentId, orgId, exp }` with 15-minute expiry
+- Reject tokens where `runId` doesn't match the URL parameter
+- Reject tokens that have already been used (track in a `used_callback_tokens` set or check run status — if already completed/failed, reject)
+- Require `X-Timestamp` header, reject requests with drift > 5 minutes
+- Log all callback attempts (success and failure) to audit events
 
 ### Service Layer
 
@@ -777,6 +913,13 @@ Use `multer` middleware for multipart upload handling (already a common Express 
 | DELETE | `/api/attachments/:attachmentId` | Soft-delete attachment |
 
 Upload endpoint accepts multiple files. For images, auto-generate a thumbnail (max 200px width) using `sharp` (already in many Node.js stacks).
+
+**File validation (from review feedback):**
+- Validate MIME type server-side using magic bytes (not just file extension) — use `file-type` npm package
+- Allowlist MIME types: `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml`, `application/pdf`, `text/plain`, `text/markdown`
+- Reject SVGs with embedded scripts (sanitise SVG content before storing)
+- Enforce file size limit server-side (10MB default, configurable via `MAX_ATTACHMENT_SIZE_MB` env var)
+- **Idempotency:** Accept optional `idempotencyKey` (client-generated UUID) in the upload request. Add `idempotency_key` column (nullable, text) to `task_attachments` with unique index on `(task_id, idempotency_key)`. On conflict, return existing attachment instead of creating duplicate.
 
 ### Service Layer
 
@@ -904,6 +1047,7 @@ CREATE TABLE feedback_votes (
 
 CREATE INDEX feedback_agent_idx ON feedback_votes(agent_id);
 CREATE INDEX feedback_org_idx ON feedback_votes(organisation_id);
+CREATE INDEX feedback_agent_time_idx ON feedback_votes(agent_id, created_at);
 ```
 
 ---
@@ -958,6 +1102,12 @@ This is a CSS/layout audit, not a feature build. Use Tailwind responsive breakpo
 - Add `MobileBottomNav` for small screens
 - Ensure command palette (Cmd+K) still works on mobile via menu button
 
+### Performance on Mobile (from review feedback)
+- **Inbox:** Limit initial fetch to 20 items, load more on scroll (cursor pagination)
+- **Org Chart:** Lazy-load agent cards. For 20+ agents, virtualise rendering — only render nodes visible in the viewport. Collapse deep branches by default on mobile.
+- **Task lists:** Use virtualised list (`react-window` or `@tanstack/react-virtual`) for subaccounts with 100+ tasks
+- **Dashboard charts:** Use lightweight chart rendering. Consider skipping charts on mobile and showing numeric summaries only.
+
 ### Testing
 - Use Chrome DevTools responsive mode at 375px (iPhone SE), 390px (iPhone 14), 768px (iPad)
 - Test touch targets: minimum 44×44px per Apple HIG
@@ -982,11 +1132,16 @@ Allow organisations to set a logo and brand colour that appears in the nav bar a
 ### API Changes
 
 **Extend `PATCH /api/organisations/:orgId`:**
-- Accept `brandColor` (validate hex format)
+- Accept `brandColor` — validate strict hex format: `/^#[0-9a-fA-F]{6}$/`
 
 **New endpoint:**
 - `POST /api/organisations/:orgId/logo` — upload logo image (multipart, reuse attachment storage logic from Feature 8)
 - `DELETE /api/organisations/:orgId/logo` — remove logo
+
+**Validation rules (from review feedback):**
+- Logo: accept PNG, JPEG, WebP, GIF only (max 2MB). **Reject SVG** to prevent XSS injection via embedded scripts.
+- Brand colour: strict hex validation, no CSS keywords or rgb() values
+- Logo dimensions: recommend 200×200px or smaller, warn if larger than 500×500px
 
 ### Frontend Changes
 
