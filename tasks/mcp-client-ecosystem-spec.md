@@ -215,6 +215,9 @@ export const mcpServerConfigs = pgTable(
     toolGateOverrides: jsonb('tool_gate_overrides')
       .$type<Record<string, 'auto' | 'review' | 'block'> | null>(),
 
+    // Priority — higher values = tools from this server are preferred when tool limit is hit
+    priority: integer('priority').notNull().default(0),
+
     // Status
     status: text('status').notNull().default('active')
       .$type<'active' | 'disabled' | 'error'>(),
@@ -234,6 +237,12 @@ export const mcpServerConfigs = pgTable(
           openWorldHint?: boolean;
         };
       }> | null>(),
+
+    // Hash of discovered tools JSON — used to detect changes without deep comparison
+    discoveredToolsHash: text('discovered_tools_hash'),
+    lastToolsRefreshAt: timestamp('last_tools_refresh_at', { withTimezone: true }),
+    // Count of tools that failed schema validation (for admin visibility)
+    rejectedToolCount: integer('rejected_tool_count').default(0),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -306,10 +315,14 @@ CREATE TABLE mcp_server_configs (
   blocked_tools JSONB,
   default_gate_level TEXT NOT NULL DEFAULT 'auto',
   tool_gate_overrides JSONB,
+  priority INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   last_connected_at TIMESTAMPTZ,
   last_error TEXT,
   discovered_tools_json JSONB,
+  discovered_tools_hash TEXT,
+  last_tools_refresh_at TIMESTAMPTZ,
+  rejected_tool_count INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -369,6 +382,7 @@ No static `ACTION_REGISTRY` entries needed — MCP tools are registered dynamica
 | `server/services/agentExecutionService.ts` | Merge MCP tools into agent's tool array at run startup |
 | `server/services/executionLayerService.ts` | Register `mcp` adapter category |
 | `server/config/actionRegistry.ts` | Add `mcp` to `actionCategory` type union |
+| `server/config/limits.ts` | Add `MAX_MCP_TOOLS_PER_RUN` and `MAX_MCP_CALLS_PER_RUN` |
 | `server/lib/permissions.ts` | Add `org.mcp_servers.view` and `org.mcp_servers.manage` permission keys |
 | `server/db/schema/index.ts` | Export new tables |
 | `server/index.ts` | Mount new routes |
@@ -466,7 +480,19 @@ export const mcpClientManager = {
 
 **Timeout:** 10s per server connection. If a server fails to connect, log the error, mark server status as `error`, and continue with remaining servers. One flaky server should not block the entire run.
 
-**Tool limit:** Max 30 MCP tools per run (configurable in `server/config/limits.ts`). If total exceeds limit, prioritise servers by `mcp_server_agent_links` order, then by `mcp_server_configs.createdAt`.
+**Tool limit:** Max 30 MCP tools per run (configurable in `server/config/limits.ts` as `MAX_MCP_TOOLS_PER_RUN`).
+
+**Tool prioritisation strategy** (when total exceeds limit):
+
+```
+Priority order:
+  1. Tools in agent's allowedToolsOverride (explicit selection = highest)
+  2. Tools from servers with higher priority value (server.priority field)
+  3. Read-only tools preferred over destructive (from MCP annotations)
+  4. Alphabetical fallback (deterministic ordering)
+```
+
+This avoids random exclusion. Admins control priority via the `priority` field on server configs; agents get further control via `allowedToolsOverride` on their links.
 
 #### `callTool` — Implementation Notes
 
@@ -478,7 +504,7 @@ export const mcpClientManager = {
      actionType: toolSlug,           // "mcp.gmail.send_email"
      actionCategory: 'mcp',
      isExternal: true,
-     defaultGateLevel: resolveGateLevel(serverConfig, toolName),
+     defaultGateLevel: resolveGateLevel(serverConfig, toolName, toolAnnotations),
      payload: args,
    }
    ```
@@ -487,6 +513,203 @@ export const mcpClientManager = {
 6. If gate result is `approved` → call `client.callTool({ name: toolName, arguments: args })`
 7. Mark action as `completed` or `failed` based on MCP response
 8. Return tool result to agent
+
+#### Failure Classification & Retry
+
+MCP tool calls can fail in fundamentally different ways. Classify failures structurally to inform retry decisions and surface actionable diagnostics.
+
+```typescript
+type McpFailureReason =
+  | 'timeout'          // call exceeded 30s deadline
+  | 'process_crash'    // stdio child process exited unexpectedly
+  | 'invalid_response' // response failed schema validation
+  | 'auth_error'       // 401/403 or MCP auth failure
+  | 'rate_limited'     // server indicated rate limit
+  | 'unknown';         // unclassified
+
+interface McpCallResult {
+  success: boolean;
+  data?: unknown;
+  failureReason?: McpFailureReason;
+  retryable: boolean;
+  durationMs: number;
+}
+```
+
+Inside `callTool()`:
+
+```typescript
+try {
+  const result = await withTimeout(client.callTool({ name, arguments: args }), 30_000);
+  return { success: true, data: result, durationMs };
+} catch (err) {
+  const classified = classifyMcpError(err);
+
+  if (classified.retryable && retryCount < 1) {
+    // One retry max — same philosophy as LLM router
+    return callTool(clients, toolSlug, args, ctx, retryCount + 1);
+  }
+
+  // Record structured failure on action
+  await actionService.markFailed(actionId, organisationId, classified.message, classified.reason);
+  return { success: false, failureReason: classified.reason, retryable: false, durationMs };
+}
+```
+
+Classification rules:
+- `timeout`: AbortError or deadline exceeded → retryable once
+- `process_crash`: child process exit code !== 0 or SIGTERM → not retryable
+- `auth_error`: error message contains "auth", "401", "403", or "token" → not retryable (stale creds)
+- `rate_limited`: error message contains "rate" or "429" → retryable once
+- `invalid_response`: JSON parse failure or schema mismatch → not retryable
+- `unknown`: everything else → not retryable
+
+#### Tool Schema Validation
+
+MCP tool definitions come from external servers. Validate before converting to Anthropic tools to prevent malformed schemas, excessive payloads, or prompt injection via descriptions.
+
+```typescript
+function validateMcpToolSchema(tool: McpToolDefinition): { valid: boolean; reason?: string } {
+  // Name constraints
+  if (!tool.name || tool.name.length > 100) return { valid: false, reason: 'name too long or empty' };
+  if (!/^[a-zA-Z0-9_.-]+$/.test(tool.name)) return { valid: false, reason: 'invalid name characters' };
+
+  // Description constraints — prevent prompt injection via excessively long descriptions
+  if (tool.description && tool.description.length > 1000) return { valid: false, reason: 'description exceeds 1000 chars' };
+
+  // Input schema constraints
+  if (tool.inputSchema) {
+    const schema = tool.inputSchema;
+    const propCount = Object.keys(schema.properties ?? {}).length;
+    if (propCount > 50) return { valid: false, reason: 'too many properties (>50)' };
+    if (jsonDepth(schema) > 5) return { valid: false, reason: 'schema too deeply nested (>5)' };
+    if (JSON.stringify(schema).length > 10_000) return { valid: false, reason: 'schema too large (>10KB)' };
+  }
+
+  return { valid: true };
+}
+```
+
+In `connectForRun`, after `tools/list`:
+
+```typescript
+const validTools = discoveredTools.filter(tool => {
+  const check = validateMcpToolSchema(tool);
+  if (!check.valid) {
+    logger.warn('mcp.tool_schema_rejected', { serverSlug, tool: tool.name, reason: check.reason });
+  }
+  return check.valid;
+});
+```
+
+Invalid tools are dropped silently (from the agent's perspective) but logged for admin visibility. The rejected tool count is stored on the server config for display in the UI.
+
+#### Observability Hooks
+
+All MCP operations emit structured trace spans, integrated with the existing Langfuse instrumentation in `server/lib/tracing.ts`.
+
+**Spans emitted:**
+
+| Span | Attributes | When |
+|------|-----------|------|
+| `mcp.connect` | `serverSlug`, `transport`, `durationMs`, `success`, `error` | Each server connect in `connectForRun` |
+| `mcp.tools.list` | `serverSlug`, `toolCount`, `rejectedCount`, `durationMs` | After `tools/list` + validation |
+| `mcp.tool.call` | `serverSlug`, `toolName`, `durationMs`, `success`, `failureReason`, `gateLevel` | Each `callTool` invocation |
+| `mcp.disconnect` | `serverSlug`, `durationMs` | Each server disconnect |
+
+Implementation — wrap operations with `getActiveTrace()`:
+
+```typescript
+const span = getActiveTrace()?.span({ name: 'mcp.tool.call', input: { serverSlug, toolName, args } });
+try {
+  const result = await client.callTool({ name, arguments: args });
+  span?.end({ output: { success: true, durationMs } });
+  return result;
+} catch (err) {
+  span?.end({ output: { success: false, failureReason: classified.reason, durationMs } });
+  throw err;
+}
+```
+
+This gives you:
+- Per-server connection reliability metrics
+- Per-tool latency and error rates
+- Full trace chains: agent run → MCP connect → tool call → result
+- Direct visibility in Langfuse dashboards
+
+#### Gate Resolution with MCP Annotations
+
+Gate level is resolved in priority order:
+
+```typescript
+function resolveGateLevel(
+  serverConfig: McpServerConfig,
+  toolName: string,
+  annotations?: { destructiveHint?: boolean; readOnlyHint?: boolean },
+): 'auto' | 'review' | 'block' {
+  // 1. Explicit per-tool override (highest priority — admin intent)
+  if (serverConfig.toolGateOverrides?.[toolName]) {
+    return serverConfig.toolGateOverrides[toolName];
+  }
+
+  // 2. MCP annotation-driven default — destructive tools escalate to review
+  if (annotations?.destructiveHint && serverConfig.defaultGateLevel === 'auto') {
+    return 'review';
+  }
+
+  // 3. Server-level default
+  return serverConfig.defaultGateLevel;
+}
+```
+
+This means destructive tools (e.g. `delete_email`, `drop_table`) automatically require human approval unless the admin has explicitly set them to `auto` via a per-tool override. Read-only tools respect the server default.
+
+#### Config Validation at Create/Update Time
+
+Validate MCP server configs before persisting to catch misconfigurations early (not at runtime):
+
+```typescript
+function validateMcpServerConfig(input: NewMcpServerConfig): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+
+  if (!input.name || input.name.length > 100) errors.push('Name required, max 100 chars');
+  if (!input.slug || !/^[a-z0-9_]+$/.test(input.slug)) errors.push('Slug must match [a-z0-9_]+');
+  if (input.slug && input.slug.length > 50) errors.push('Slug max 50 chars');
+
+  if (input.transport === 'stdio') {
+    if (!input.command) errors.push('Command required for stdio transport');
+    if (input.command && input.command.includes('..')) errors.push('Command must not contain path traversal');
+    if (input.endpointUrl) errors.push('Endpoint URL not applicable for stdio transport');
+  }
+
+  if (input.transport === 'http') {
+    if (!input.endpointUrl) errors.push('Endpoint URL required for http transport');
+    if (input.endpointUrl) {
+      try { new URL(input.endpointUrl); } catch { errors.push('Invalid endpoint URL'); }
+    }
+    if (input.command) errors.push('Command not applicable for http transport');
+  }
+
+  if (input.args && !Array.isArray(input.args)) errors.push('Args must be an array');
+
+  return { valid: errors.length === 0, errors };
+}
+```
+
+Validation runs in `mcpServerConfigService.create()` and `.update()`. Returns 400 with the error array if invalid.
+
+#### MCP Call Budget Protection
+
+MCP tool calls count against the agent run's existing budget system to prevent runaway costs:
+
+```typescript
+// In limits.ts:
+export const MAX_MCP_CALLS_PER_RUN = 10;  // separate from MAX_TOOL_CALLS to prevent MCP domination
+```
+
+Tracked in `mcpClientManager.callTool()` via a counter on the run context. When exceeded, return a structured error to the agent: `"MCP tool call limit reached (10/10). Use internal skills or request a budget increase."`
+
+This works alongside the existing `maxToolCallsPerRun` limit — MCP calls count toward both the MCP-specific limit and the total tool call limit.
 
 #### Credential Injection
 
@@ -569,13 +792,54 @@ try {
 
 const allTools = [...skillTools, ...mcpTools];
 
-// ... main loop uses allTools ...
-
-// --- NEW: teardown MCP clients after run ---
-if (mcpClients) {
-  await mcpClientManager.disconnectAll(mcpClients).catch(() => {});
+// --- Main loop wrapped with guaranteed cleanup ---
+try {
+  // ... main loop uses allTools ...
+} finally {
+  // --- NEW: teardown MCP clients after run (guaranteed) ---
+  if (mcpClients) {
+    await mcpClientManager.disconnectAll(mcpClients).catch((err) => {
+      logger.error('mcp.disconnect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+    });
+  }
 }
 ```
+
+**Lifecycle cleanup guarantee:** The `finally` block ensures MCP clients are torn down even if the agent run throws, times out, or is cancelled. This prevents child process leaks.
+
+Inside `disconnectAll()`, cleanup is defensive:
+
+```typescript
+async disconnectAll(clients: Map<string, McpClientInstance>): Promise<void> {
+  const results = await Promise.allSettled(
+    Array.from(clients.values()).map(async ({ client, transport, serverSlug }) => {
+      try {
+        await withTimeout(client.close(), 5_000);
+      } catch {
+        // SDK close failed — force-kill the transport
+      }
+      // Forcibly terminate stdio child process if still alive
+      if (transport.process?.pid && !transport.process.killed) {
+        transport.process.kill('SIGTERM');
+        // If SIGTERM doesn't work within 2s, escalate to SIGKILL
+        setTimeout(() => {
+          if (!transport.process?.killed) {
+            transport.process?.kill('SIGKILL');
+          }
+        }, 2_000);
+      }
+    })
+  );
+  // Log any failures but never throw — cleanup is best-effort
+  for (const r of results) {
+    if (r.status === 'rejected') {
+      logger.warn('mcp.client_cleanup_failed', { error: String(r.reason) });
+    }
+  }
+}
+```
+
+**PID tracking:** `StdioClientTransport` exposes the child `ChildProcess` via `transport.process`. Track PIDs explicitly in `McpClientInstance` as a fallback if the SDK property is unavailable.
 
 #### `skillExecutor.ts` — Changes
 
@@ -1137,7 +1401,7 @@ Stdio MCP servers run as child processes. Security measures:
 |------|-------------|
 | `server/db/schema/mcpServerConfigs.ts` | ~60 |
 | `server/db/schema/mcpServerAgentLinks.ts` | ~30 |
-| `server/services/mcpClientManager.ts` | ~250 |
+| `server/services/mcpClientManager.ts` | ~350 |
 | `server/services/mcpServerConfigService.ts` | ~120 |
 | `server/routes/mcpServers.ts` | ~150 |
 | `server/routes/mcpServerAgentLinks.ts` | ~80 |
@@ -1145,14 +1409,15 @@ Stdio MCP servers run as child processes. Security measures:
 | `client/src/pages/McpServersPage.tsx` | ~450 |
 | `client/src/components/McpToolBrowser.tsx` | ~200 |
 
-### Modified Files (8)
+### Modified Files (9)
 
 | File | Change |
 |------|--------|
 | `server/services/skillExecutor.ts` | +15 lines (MCP dispatch branch) |
-| `server/services/agentExecutionService.ts` | +25 lines (MCP tool merging + teardown) |
+| `server/services/agentExecutionService.ts` | +30 lines (MCP tool merging + guaranteed cleanup) |
 | `server/services/executionLayerService.ts` | +5 lines (register mcp adapter) |
 | `server/config/actionRegistry.ts` | +1 line (add 'mcp' to category union) |
+| `server/config/limits.ts` | +3 lines (MAX_MCP_TOOLS_PER_RUN, MAX_MCP_CALLS_PER_RUN) |
 | `server/lib/permissions.ts` | +5 lines (new permission keys) |
 | `server/db/schema/index.ts` | +2 lines (export new tables) |
 | `server/index.ts` | +3 lines (mount new routes) |
