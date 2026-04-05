@@ -23,7 +23,7 @@ export interface DecryptedConnection {
   refreshToken?: string;
   scopes: string[] | null;
   organisationId: string;
-  subaccountId: string;
+  subaccountId: string | null;
 }
 
 export const integrationConnectionService = {

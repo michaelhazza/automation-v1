@@ -206,7 +206,7 @@ export const orgMemoryService = {
     `);
 
     // Bump access counters asynchronously
-    const ids = (results.rows as Array<{ id: string }>).map(r => r.id);
+    const ids = (results as unknown as Array<{ id: string }>).map(r => r.id);
     if (ids.length > 0) {
       db.execute(sql`
         UPDATE org_memory_entries SET access_count = access_count + 1, last_accessed_at = now()
@@ -217,7 +217,7 @@ export const orgMemoryService = {
     }
 
     // Filter by scope tags if provided
-    let rows = results.rows as Array<Record<string, unknown>>;
+    let rows = results as unknown as Array<Record<string, unknown>>;
     if (scopeTags && Object.keys(scopeTags).length > 0) {
       rows = rows.filter(r => {
         const tags = r.scope_tags as Record<string, string> | null;

@@ -71,11 +71,11 @@ async function executeWritePatch(action: Action, start: number): Promise<Executi
   if (taskId) {
     // Use a stable 12-char suffix of the taskId as the branch slug
     const taskSlug = taskId.replace(/-/g, '').slice(-12);
-    await gitService.getOrCreateTaskBranch(action.subaccountId, taskSlug);
+    await gitService.getOrCreateTaskBranch(action.subaccountId!, taskSlug);
   }
 
   const commitHash = await gitService.applyPatch(
-    action.subaccountId,
+    action.subaccountId!,
     file,
     diff,
     baseCommit
@@ -111,7 +111,7 @@ async function executeRunCommand(action: Action, start: number): Promise<Executi
     };
   }
 
-  const { context } = await devContextService.getContext(action.subaccountId);
+  const { context } = await devContextService.getContext(action.subaccountId!);
 
   // Final safety check before execution (belt-and-suspenders)
   const blocked = devContextService.validateCommand(command, context);
@@ -177,9 +177,9 @@ async function executeCreatePr(action: Action, start: number): Promise<Execution
   }
 
   // If no branch specified, use current branch
-  const targetBranch = branch ?? await gitService.getCurrentBranch(action.subaccountId);
+  const targetBranch = branch ?? await gitService.getCurrentBranch(action.subaccountId!);
 
-  const prUrl = await gitService.createPullRequest(action.subaccountId, {
+  const prUrl = await gitService.createPullRequest(action.subaccountId!, {
     title,
     description,
     branch: targetBranch,

@@ -354,7 +354,7 @@ export const agentExecutionService = {
             .from(agentRuns)
             .where(and(
               eq(agentRuns.taskId, request.taskId),
-              eq(agentRuns.subaccountId, request.subaccountId),
+              eq(agentRuns.subaccountId, request.subaccountId!),
             ));
           // Subtract 1 because current run is already inserted
           iteration = Math.max(0, Number(total) - 1);
@@ -546,7 +546,7 @@ export const agentExecutionService = {
         // will transfer to Docker-based execution later.
         let projectRoot = '.';
         try {
-          const { context: dec } = await devContextService.getContext(request.subaccountId);
+          const { context: dec } = await devContextService.getContext(request.subaccountId!);
           projectRoot = dec.projectRoot;
         } catch {
           // DEC not configured — use current directory
@@ -641,9 +641,9 @@ export const agentExecutionService = {
             agent,
             routerCtx: {
               organisationId:    request.organisationId,
-              subaccountId:      request.subaccountId,
+              subaccountId:      request.subaccountId ?? undefined,
               runId:             run.id,
-              subaccountAgentId: request.subaccountAgentId,
+              subaccountAgentId: request.subaccountAgentId ?? undefined,
               agentName:         agent.name,
               sourceType:        'agent_run',
             },
@@ -655,7 +655,7 @@ export const agentExecutionService = {
             startTime,
             request,
             orgProcesses,
-            saLink,
+            saLink: saLink!,
             pipeline,
           });
 
