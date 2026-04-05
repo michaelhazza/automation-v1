@@ -5,6 +5,25 @@ import { connectionTokenService } from './connectionTokenService.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 // ---------------------------------------------------------------------------
+// Connection Resolution Contract
+//
+// When resolving a connection for execution, the precedence order is:
+//   1. Exact subaccount match — connection.subaccountId === target subaccountId
+//   2. Org-level fallback    — connection.subaccountId IS NULL, same org
+//   3. Error                 — no active connection found
+//
+// This means subaccount-specific connections always override org-level ones.
+// Org-level connections act as shared defaults across all subaccounts.
+//
+// Both scopes enforce:
+//   - connection.organisationId === caller's orgId (tenant isolation)
+//   - connection.connectionStatus === 'active'
+//
+// Labels: the same label can exist at both org and subaccount level.
+// Resolution always picks the most specific scope first.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Integration Connection Service — Activepieces-pattern OAuth token management
 //
 // Key behaviours:
@@ -26,7 +45,124 @@ export interface DecryptedConnection {
   subaccountId: string | null;
 }
 
+/** Sanitise a connection row before sending to client — strip all secrets. */
+function sanitizeConnection(conn: IntegrationConnection) {
+  const { accessToken, refreshToken, secretsRef, clientIdEnc, clientSecretEnc, ...rest } = conn;
+  return {
+    ...rest,
+    hasAccessToken: !!accessToken,
+    hasRefreshToken: !!refreshToken,
+    hasSecretsRef: !!secretsRef,
+  };
+}
+
 export const integrationConnectionService = {
+  // ── Org-level connection CRUD ──────────────────────────────────────────────
+
+  async listOrgConnections(organisationId: string) {
+    const rows = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.organisationId, organisationId),
+        isNull(integrationConnections.subaccountId),
+      ));
+    return rows.map(sanitizeConnection);
+  },
+
+  async getOrgConnection(id: string, organisationId: string) {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+        isNull(integrationConnections.subaccountId),
+      ));
+    return conn ? sanitizeConnection(conn) : null;
+  },
+
+  async createOrgConnection(organisationId: string, data: {
+    providerType: string;
+    authType: string;
+    label?: string | null;
+    displayName?: string | null;
+    configJson?: Record<string, unknown> | null;
+    accessToken?: string | null;
+    refreshToken?: string | null;
+    tokenExpiresAt?: string | null;
+    secretsRef?: string | null;
+  }) {
+    const encryptedAccess = data.accessToken ? connectionTokenService.encryptToken(data.accessToken) : null;
+    const encryptedRefresh = data.refreshToken ? connectionTokenService.encryptToken(data.refreshToken) : null;
+    const encryptedSecret = data.secretsRef ? connectionTokenService.encryptToken(data.secretsRef) : null;
+
+    const [connection] = await db.insert(integrationConnections).values({
+      organisationId,
+      subaccountId: null,
+      providerType: data.providerType as IntegrationConnection['providerType'],
+      authType: data.authType as IntegrationConnection['authType'],
+      label: data.label ?? null,
+      displayName: data.displayName ?? null,
+      configJson: data.configJson ?? null,
+      accessToken: encryptedAccess,
+      refreshToken: encryptedRefresh,
+      tokenExpiresAt: data.tokenExpiresAt ? new Date(data.tokenExpiresAt) : null,
+      secretsRef: encryptedSecret,
+      connectionStatus: 'active',
+    }).returning();
+
+    return sanitizeConnection(connection);
+  },
+
+  async updateOrgConnection(id: string, organisationId: string, data: Record<string, unknown>) {
+    const [existing] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+        isNull(integrationConnections.subaccountId),
+      ));
+    if (!existing) return null;
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (data.label !== undefined) updates.label = data.label;
+    if (data.displayName !== undefined) updates.displayName = data.displayName;
+    if (data.connectionStatus !== undefined) updates.connectionStatus = data.connectionStatus;
+    if (data.configJson !== undefined) updates.configJson = data.configJson;
+    if (data.accessToken) updates.accessToken = connectionTokenService.encryptToken(data.accessToken as string);
+    if (data.refreshToken) updates.refreshToken = connectionTokenService.encryptToken(data.refreshToken as string);
+    if (data.tokenExpiresAt) updates.tokenExpiresAt = new Date(data.tokenExpiresAt as string);
+    if (data.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(data.secretsRef as string);
+
+    const [updated] = await db.update(integrationConnections)
+      .set(updates)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+      ))
+      .returning();
+    return updated ? sanitizeConnection(updated) : null;
+  },
+
+  async revokeOrgConnection(id: string, organisationId: string) {
+    const [existing] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+        isNull(integrationConnections.subaccountId),
+      ));
+    if (!existing) return false;
+
+    await db.update(integrationConnections)
+      .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
+    return true;
+  },
   /**
    * Get a decrypted, valid connection for a subaccount + provider.
    * Auto-refreshes if the token expires within the next 15 minutes.
@@ -48,11 +184,10 @@ export const integrationConnectionService = {
     ];
 
     // For subaccount-scoped lookups, filter by subaccountId.
-    // For org-level lookups (null subaccountId), rely on connectionId or org+provider match.
+    // For org-level lookups (null subaccountId), always restrict to org-scoped connections.
     if (subaccountId) {
       conditions.push(eq(integrationConnections.subaccountId, subaccountId));
-    } else if (!connectionId) {
-      // Org-level lookup without connectionId: find connections with null subaccountId
+    } else {
       conditions.push(isNull(integrationConnections.subaccountId));
     }
 
@@ -103,7 +238,7 @@ export const integrationConnectionService = {
    * Encrypts all sensitive fields before storage.
    */
   async upsertFromOAuth(params: {
-    subaccountId: string;
+    subaccountId?: string | null;
     organisationId: string;
     providerType: IntegrationConnection['providerType'];
     accessToken: string;
@@ -123,47 +258,92 @@ export const integrationConnectionService = {
     const encClientId = connectionTokenService.encryptToken(params.clientId);
     const encClientSecret = connectionTokenService.encryptToken(params.clientSecret);
 
-    await db
-      .insert(integrationConnections)
-      .values({
-        subaccountId: params.subaccountId,
-        organisationId: params.organisationId,
-        providerType: params.providerType,
-        authType: 'oauth2',
-        connectionStatus: 'active',
-        accessToken: encAccess,
-        refreshToken: encRefresh,
-        claimedAt: params.claimedAt,
-        expiresIn: params.expiresIn,
-        tokenUrl: params.tokenUrl,
-        clientIdEnc: encClientId,
-        clientSecretEnc: encClientSecret,
-        configJson: { scopes: params.scopes },
-        label: params.label ?? null,
-        oauthStatus: 'active',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [
-          integrationConnections.subaccountId,
-          integrationConnections.providerType,
-          integrationConnections.label,
-        ],
-        set: {
-          accessToken: encAccess,
-          refreshToken: encRefresh ?? sql`refresh_token`,
-          claimedAt: params.claimedAt,
-          expiresIn: params.expiresIn,
-          tokenUrl: params.tokenUrl,
-          clientIdEnc: encClientId,
-          clientSecretEnc: encClientSecret,
-          configJson: { scopes: params.scopes },
-          connectionStatus: 'active',
-          oauthStatus: 'active',
-          updatedAt: new Date(),
-        },
-      });
+    const updateSet = {
+      accessToken: encAccess,
+      refreshToken: encRefresh ?? sql`refresh_token`,
+      claimedAt: params.claimedAt,
+      expiresIn: params.expiresIn,
+      tokenUrl: params.tokenUrl,
+      clientIdEnc: encClientId,
+      clientSecretEnc: encClientSecret,
+      configJson: { scopes: params.scopes },
+      connectionStatus: 'active' as const,
+      oauthStatus: 'active' as const,
+      updatedAt: new Date(),
+    };
+
+    const insertValues = {
+      subaccountId: params.subaccountId ?? null,
+      organisationId: params.organisationId,
+      providerType: params.providerType,
+      authType: 'oauth2' as const,
+      connectionStatus: 'active' as const,
+      accessToken: encAccess,
+      refreshToken: encRefresh,
+      claimedAt: params.claimedAt,
+      expiresIn: params.expiresIn,
+      tokenUrl: params.tokenUrl,
+      clientIdEnc: encClientId,
+      clientSecretEnc: encClientSecret,
+      configJson: { scopes: params.scopes },
+      label: params.label ?? null,
+      oauthStatus: 'active' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // Partial unique indexes don't support onConflictDoUpdate target, so we
+    // use a non-atomic check-then-insert/update pattern with a 23505 catch
+    // for concurrent OAuth callbacks. Safe under expected callback frequency.
+    const conditions = [
+      eq(integrationConnections.organisationId, params.organisationId),
+      eq(integrationConnections.providerType, params.providerType as IntegrationConnection['providerType']),
+    ];
+
+    if (params.subaccountId) {
+      conditions.push(eq(integrationConnections.subaccountId, params.subaccountId));
+    } else {
+      conditions.push(isNull(integrationConnections.subaccountId));
+    }
+
+    // Label matching: NULL label matches NULL
+    if (params.label) {
+      conditions.push(eq(integrationConnections.label, params.label));
+    } else {
+      conditions.push(isNull(integrationConnections.label));
+    }
+
+    const [existing] = await db.select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(and(...conditions))
+      .limit(1);
+
+    if (existing) {
+      await db.update(integrationConnections)
+        .set(updateSet)
+        .where(eq(integrationConnections.id, existing.id));
+    } else {
+      try {
+        await db.insert(integrationConnections).values(insertValues);
+      } catch (err: unknown) {
+        // Handle race condition: concurrent OAuth callback already inserted
+        const isUniqueViolation = (err as { code?: string }).code === '23505';
+        if (isUniqueViolation) {
+          // Re-query and update the row that won the race
+          const [raceWinner] = await db.select({ id: integrationConnections.id })
+            .from(integrationConnections)
+            .where(and(...conditions))
+            .limit(1);
+          if (raceWinner) {
+            await db.update(integrationConnections)
+              .set(updateSet)
+              .where(eq(integrationConnections.id, raceWinner.id));
+          }
+        } else {
+          throw err;
+        }
+      }
+    }
   },
 };
 
@@ -174,8 +354,8 @@ export const integrationConnectionService = {
 // ---------------------------------------------------------------------------
 
 async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedConnection> {
-  // Derive a stable integer lock key from subaccountId + providerType
-  const lockKey = hashToLockKey(`oauth_refresh:${conn.subaccountId}:${conn.providerType}`);
+  // Derive a stable integer lock key from orgId + subaccountId + providerType
+  const lockKey = hashToLockKey(`oauth_refresh:${conn.organisationId}:${conn.subaccountId ?? 'org'}:${conn.providerType}`);
 
   // Try to acquire advisory lock — non-blocking
   const [lockResult] = await db.execute<{ acquired: boolean }>(
