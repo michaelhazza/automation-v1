@@ -14,7 +14,7 @@ const updateLinkBase = z.object({
   agentTitle: z.string().nullable(),
   heartbeatEnabled: z.boolean(),
   heartbeatIntervalHours: z.number().positive().nullable(),
-  heartbeatOffsetHours: z.number().nonnegative(),
+  heartbeatOffsetMinutes: z.number().nonnegative(),
 });
 export const updateLinkBody = updateLinkBase.partial().refine(
   obj => Object.keys(obj).length > 0,

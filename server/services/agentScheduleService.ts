@@ -69,6 +69,7 @@ export const agentScheduleService = {
       } catch (err) {
         if (isNonRetryable(err)) {
           logger.warn('job_non_retryable_failure', { queue: AGENT_RUN_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
           return;
         }
         if (isTimeoutError(err)) {
@@ -123,6 +124,7 @@ export const agentScheduleService = {
       } catch (err) {
         if (isNonRetryable(err)) {
           logger.warn('job_non_retryable_failure', { queue: AGENT_ORG_RUN_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
           return;
         }
         if (isTimeoutError(err)) {
@@ -176,6 +178,7 @@ export const agentScheduleService = {
       } catch (err) {
         if (isNonRetryable(err)) {
           logger.warn('job_non_retryable_failure', { queue: AGENT_HANDOFF_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
           return;
         }
         if (isTimeoutError(err)) {
@@ -224,6 +227,7 @@ export const agentScheduleService = {
       } catch (err) {
         if (isNonRetryable(err)) {
           logger.warn('job_non_retryable_failure', { queue: AGENT_TRIGGERED_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
           return;
         }
         if (isTimeoutError(err)) {
@@ -248,6 +252,7 @@ export const agentScheduleService = {
       } catch (err) {
         if (isNonRetryable(err)) {
           logger.warn('job_non_retryable_failure', { queue: STALE_CLEANUP_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
           return;
         }
         if (isTimeoutError(err)) {

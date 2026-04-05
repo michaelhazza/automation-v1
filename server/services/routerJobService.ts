@@ -221,6 +221,7 @@ export async function initializeRouterJobs(): Promise<void> {
     } catch (err) {
       if (isNonRetryable(err)) {
         logger.warn('job_non_retryable_failure', { queue: JOB_AGGREGATE_UPDATE, jobId: job.id, error: String(err) });
+        await (boss as any).fail(job.id);
         return;
       }
       if (isTimeoutError(err)) {
@@ -260,6 +261,7 @@ export async function initializeRouterJobs(): Promise<void> {
     } catch (err) {
       if (isNonRetryable(err)) {
         logger.warn('job_non_retryable_failure', { queue: JOB_MONTHLY_INVOICES, jobId: job.id, error: String(err) });
+        await (boss as any).fail(job.id);
         return;
       }
       if (isTimeoutError(err)) {

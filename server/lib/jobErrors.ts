@@ -32,12 +32,11 @@ export function getRetryCount(job: { retrycount?: number } & Record<string, unkn
 
 /** Wrap a handler with a timeout — prevents hung LLM calls from starving workers */
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Job handler timed out after ${ms}ms`)), ms),
-    ),
-  ]);
+  let handle: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    handle = setTimeout(() => reject(new Error(`Job handler timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(handle!));
 }
 
 /** Safe-serialize payload for logging — prevents log bloat from large LLM contexts */

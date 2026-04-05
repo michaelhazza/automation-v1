@@ -88,6 +88,14 @@ export const JOB_CONFIG = {
   'llm-clean-old-aggregates': {
     expireInSeconds: 120,
   },
+
+  // ── Already configured (kept for single source of truth) ────────
+  'page-integration': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120,
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

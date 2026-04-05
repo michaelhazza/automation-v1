@@ -10,6 +10,7 @@ import { formSubmissions, integrationConnections, conversionEvents } from '../db
 import { adapters } from '../adapters/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
+import { getJobConfig } from '../config/jobConfig.js';
 import { env } from '../lib/env.js';
 import { logger } from '../lib/logger.js';
 
@@ -40,12 +41,7 @@ export async function enqueuePageIntegrationJob(payload: PageIntegrationJobPaylo
     return;
   }
   const pgboss = await getPgBoss();
-  await pgboss.send(QUEUE_NAME, payload, {
-    retryLimit: 3,
-    retryDelay: 5,
-    retryBackoff: true,
-    expireInSeconds: 120,
-  });
+  await pgboss.send(QUEUE_NAME, payload, getJobConfig('page-integration'));
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +149,7 @@ export async function initializePageIntegrationWorker(): Promise<void> {
   const pgboss = await getPgBoss();
   await (pgboss as any).work(
     QUEUE_NAME,
-    { teamSize: 5, teamConcurrency: 1 },
+    { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 },
     async (job: any) => {
       const payload = job.data as unknown as PageIntegrationJobPayload;
       await processPageIntegrationJob(payload);
