@@ -637,3 +637,206 @@ These three additions should be built as **Phase 0** — a small foundational la
 **Total for Phases 0-4: ~4-6 days.**
 
 The sampling strategy (7.4), cardinality control (7.3), idempotency protection (7.6), and performance budget (7.7) are built into Phase 0's contract layer — they're properties of the helpers, not separate work.
+
+---
+
+## Usage Layer
+
+Instrumentation that nobody uses is shelfware. This section defines who uses traces, how they use them, and what workflows to follow.
+
+### 10.1 Primary Consumers
+
+| Consumer | What they need | How they access it |
+|----------|---------------|-------------------|
+| **Engineers** | Debug failed runs, trace slow paths, understand agent decisions | Langfuse trace view — click into a specific run |
+| **Product/Ops** | Understand agent behaviour patterns, identify bottlenecks, monitor HITL response times | Langfuse dashboards — filter by agent, subaccount, time range |
+| **Cost optimisation** | Track spend per agent/model/skill, validate model routing decisions, find waste | Langfuse cost dashboard + generation metadata queries |
+
+### 10.2 Core Workflows
+
+**Debug a failed run:**
+1. Find the run in Langfuse (filter: `finalStatus = failed`, or search by runId)
+2. Open trace → check `run.status.changed` event for failure reason
+3. Follow the waterfall → find the last successful span
+4. Inspect the next span/event → that's where it broke
+5. Check `errorType` + `errorMessage` in metadata
+6. If LLM-related: check `llm.router.fallback` events for provider chain failures
+7. If skill-related: check `skill.action.failed` event for classification
+
+**Optimise cost for an agent:**
+1. Filter traces by `agentId` in Langfuse
+2. Sort by `totalCostCents` (trace metadata) — find expensive runs
+3. Open an expensive run → inspect cost overlay on each generation
+4. Check `routingTier` — are economy calls being escalated to frontier? How often?
+5. Check `budgetVariance` — are estimates wildly off? (indicates model pricing is stale)
+6. Compare `costPerIteration` across runs — identify whether cost is in planning, execution, or synthesis
+
+**Investigate slow HITL workflows:**
+1. Filter traces containing `skill.review.wait` spans
+2. Sort by review wait duration
+3. Identify which skills/agents create the longest review queues
+4. Check approval vs rejection rate — are reviewers rubber-stamping or genuinely evaluating?
+
+**Compare agent behaviour over time:**
+1. Group by `runFingerprint`
+2. Compare iteration count, cost, and scores across date ranges
+3. If a fingerprint's performance degrades, diff the trace trees of good vs bad runs
+4. Check if config changed (different `configHash`) or if prompts/skills changed
+
+### 10.3 Anti-Patterns
+
+Things that will degrade observability quality over time. Enforce these in code review.
+
+| Anti-pattern | Why it's bad | What to do instead |
+|-------------|-------------|-------------------|
+| Log everything "just in case" | Noise drowns signal, cardinality explodes, costs grow | Only instrument what answers the Top 5 Questions |
+| Put raw payloads into metadata | Breaks dashboards, high cardinality, slow queries | Use `input`/`output` fields for content; metadata for structured, queryable fields only |
+| Create new span names ad hoc | Naming drift, broken queries, inconsistent dashboards | All names must exist in the registry (Section 7.2). PR rejected if new name not added to registry. |
+| Bypass tracing helpers | Inconsistent metadata, missing context, no schema validation | Never call `getActiveTrace()?.span()` directly — always use `createSpan()` helper |
+| Instrument inside tight loops without limits | Span explosion, performance degradation | Use performance budget limits (Section 7.7). Aggregate loop data, don't span each iteration of inner loops. |
+| Rely on Langfuse for business logic | Coupling observability to execution, fragile when Langfuse is down | Langfuse is read-only observability. Business logic uses our own ledger/DB. |
+| Turn decisions into spans | Clutters waterfall, wastes span budget on zero-duration items | Decisions are events. Spans are for work with duration. (Section 7.2 enforces this via the registry.) |
+| Span names with dynamic content | `skill.execute.send_email` creates unbounded cardinality | Use `skill.pipeline.run` with `skillName: "send_email"` in metadata |
+
+---
+
+## Rollout Strategy
+
+### 11.1 Incremental Rollout Plan
+
+This won't be clean. There will be a period of partial instrumentation. That's fine — define what "done" looks like at each phase so partial is still useful.
+
+**Rollout pattern:**
+
+```
+Phase 0: Ship helpers → validate they work on 1 existing call site (refactor llmRouter.ts generation)
+Phase 1: Instrument loop + router → validate in Langfuse UI with real runs
+Phase 2: Instrument skills → validate skill spans nest correctly under iterations
+Phase 3: Add session linking → validate handoff chains appear as single sessions
+Phase 4: Instrument memory → validate recall spans appear under correct iterations
+```
+
+**At each phase boundary:**
+1. Run 3-5 real agent runs through the instrumented paths
+2. Open traces in Langfuse UI
+3. Verify: trace tree structure matches the design (Section 9.2)
+4. Verify: no cardinality explosions (check Langfuse observation count)
+5. Verify: can answer at least one of the Top 5 Questions
+6. Only proceed to next phase if validation passes
+
+### 11.2 Definition of Done (per phase)
+
+| Phase | Done when... |
+|-------|-------------|
+| 0 | Helpers exist, existing generation span refactored to use them, trace finalisation works, one test run produces a clean trace |
+| 1 | Opening any agent run trace shows iteration spans, generation spans with routing metadata, decision events. Can answer "why did this run fail?" and "where did cost go?" |
+| 2 | Skill executions appear as nested spans under iterations. HITL wait time visible. Can answer "where did time go?" |
+| 3 | Handoff chains visible as single session. Run fingerprint on all traces. Can answer "what changed vs a successful run?" |
+| 4 | Memory recall spans show query + results + scores. Budget metadata on generations. Can answer all 5 questions. |
+
+### 11.3 Minimal Viable Trace
+
+Not every run needs full instrumentation from day one. Define the minimum that makes a trace useful:
+
+**A trace is "validly instrumented" if it has:**
+- Trace with complete metadata (agentId, orgId, subaccountId, executionMode, runFingerprint)
+- At least 1 iteration span with phase label
+- At least 1 generation span with model + tokens + cost
+- Trace finalisation with `finalStatus`, `totalCostCents`, `durationMs`
+
+This ensures partial instrumentation is still useful. A trace missing skill spans is less useful but still debuggable. A trace missing finalisation is broken.
+
+**Validation:** The `finalizeTrace()` helper should log a warning if the trace doesn't meet MVT requirements (e.g., zero generations recorded). This catches instrumentation bugs early.
+
+### 11.4 Trace Versioning
+
+Once shipped, the metadata schema becomes a contract. Changing it breaks dashboards and queries.
+
+**Add to every trace:**
+```
+metadata.traceSchemaVersion: "v1"
+```
+
+**Rules:**
+- Additive changes (new fields): no version bump needed
+- Renamed or removed fields: bump to `v2`, update dashboards
+- Changed field semantics: bump version, document migration
+
+**Why this matters:**
+- Dashboards can filter by version during migrations
+- Old traces remain queryable with their original schema
+- Enables A/B instrumentation experiments (test new metadata shape on 10% of runs)
+
+---
+
+## Execution Path Parity
+
+### 12.1 All Paths Must Produce the Same Trace Structure
+
+The codebase has multiple execution paths that must all produce equivalent traces:
+
+| Path | Current coverage | Required |
+|------|-----------------|----------|
+| API agentic loop | Partial (trace + generation + skill spans) | Full trace tree |
+| Claude Code CLI | Zero | Same trace structure — create trace before CLI spawn, emit events for turns |
+| MCP tool invocations | Zero (delegates to skillExecutor) | Same skill spans, plus MCP session context in metadata |
+| Sub-agent spawns (Promise.all) | Zero | Parent span wrapping fan-out, child traces linked via sessionId |
+| Handoff queue runs | Trace exists but no linking | Same trace structure + sessionId linking to parent |
+
+**Rule:** If two execution paths can produce the same logical operation (e.g., an LLM call), they must produce the same trace structure. Otherwise comparisons break and fingerprints become meaningless.
+
+**Claude Code path specifically:** This is the biggest gap. If a run uses Claude Code mode, it's completely invisible. At minimum:
+- Create a trace before CLI spawn
+- Capture turn-level events from CLI output
+- Finalise trace with outcome
+- Use the same metadata schema as API loop traces
+
+### 12.2 Alerting Hooks (Future-Ready)
+
+We don't need full monitoring now, but build the emission points so we can add alerting later without re-instrumenting.
+
+**Define metric emission points in the tracing helpers:**
+
+```typescript
+// Conceptual — not implementation spec
+emitMetric("agent.run.completed", { agentId, durationMs, costCents, status })
+emitMetric("agent.run.failed", { agentId, errorType, iterationCount })
+emitMetric("llm.fallback.triggered", { fromProvider, toProvider, reason })
+emitMetric("llm.escalation.triggered", { fromModel, toModel, reason })
+emitMetric("skill.review.timeout", { skillName, agentId, waitDurationMs })
+emitMetric("budget.threshold.warning", { orgId, headroomPercent })
+```
+
+**Day one implementation:** These are no-ops (or simple `console.log` behind a feature flag). The point is that the emission points exist in the code, at the right locations, with the right data.
+
+**Future integration:** Swap the no-op for StatsD, Prometheus, or Langfuse Metrics API. Connect to Slack/PagerDuty for:
+- Error rate spikes (> X% of runs failing in last hour)
+- Cost anomalies (run cost > 3x median for that fingerprint)
+- HITL bottlenecks (review wait > 10 minutes)
+- Provider degradation (fallback rate > 20%)
+
+---
+
+## Future: Intelligence Layer
+
+### 13.1 From Observability to Optimisation
+
+The trace data we're collecting isn't just for debugging. Once mature, it becomes the foundation for an agent intelligence layer.
+
+**What we'll have after Phase 4:**
+- Structured decision data (every routing choice, gate decision, middleware action)
+- Cost + latency + outcome data per run, per iteration, per skill
+- Behaviour traces (what agents do, in what order, with what results)
+- Run fingerprints for clustering similar runs
+
+**What this enables (not now — after 2-4 weeks of production data):**
+
+| Capability | How | Value |
+|-----------|-----|-------|
+| **Auto-tune model routing** | Analyse cost vs outcome by tier. If economy succeeds 95% of the time for skill X, stop escalating. | Direct cost reduction |
+| **Policy refinement** | Analyse gate decisions vs outcomes. If auto-gated actions for skill Y fail 30% of the time, suggest review-gating. | Improved reliability |
+| **Anomaly detection** | Flag runs that deviate from fingerprint baselines (cost, iterations, duration). | Early warning system |
+| **Agent performance ranking** | Score agents by success rate, cost efficiency, iteration count, HITL approval rate. | Data-driven agent improvement |
+| **Automated debugging suggestions** | When a run fails, find the most similar successful run and diff the trace trees. | Faster root cause analysis |
+
+**This is not in scope for this brief.** But every design decision here (fingerprints, decision events, structured metadata, trace versioning) is intentionally laying the groundwork. We're building observability that becomes intelligence — not a logging system that stays a logging system.
