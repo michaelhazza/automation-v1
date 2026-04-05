@@ -2,6 +2,11 @@ import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { connectorConfigs, canonicalAccounts } from '../db/schema/index.js';
 
+type ConnectorInsert = typeof connectorConfigs.$inferInsert;
+type ConnectorType = ConnectorInsert['connectorType'];
+type ConnectorStatus = ConnectorInsert['status'];
+type SyncPhase = ConnectorInsert['syncPhase'];
+
 export const connectorConfigService = {
   async listByOrg(organisationId: string) {
     return db
@@ -23,7 +28,7 @@ export const connectorConfigService = {
     const [config] = await db
       .select()
       .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.connectorType, connectorType)));
+      .where(and(eq(connectorConfigs.organisationId, organisationId), eq(connectorConfigs.connectorType, connectorType as ConnectorType)));
     return config ?? null;
   },
 
@@ -45,7 +50,7 @@ export const connectorConfigService = {
       .insert(connectorConfigs)
       .values({
         organisationId,
-        connectorType: data.connectorType,
+        connectorType: data.connectorType as ConnectorType,
         connectionId: data.connectionId ?? null,
         configJson: data.configJson ?? null,
         pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
@@ -58,10 +63,10 @@ export const connectorConfigService = {
   async update(id: string, organisationId: string, data: Partial<{
     connectionId: string | null;
     configJson: Record<string, unknown>;
-    status: string;
+    status: ConnectorStatus;
     pollIntervalMinutes: number;
     webhookSecret: string | null;
-    syncPhase: string;
+    syncPhase: SyncPhase;
     lastSyncAt: Date;
     lastSyncStatus: string;
     lastSyncError: string | null;
@@ -90,7 +95,7 @@ export const connectorConfigService = {
     const [config] = await db
       .select()
       .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.connectorType, connectorType), eq(connectorConfigs.status, 'active')))
+      .where(and(eq(connectorConfigs.connectorType, connectorType as ConnectorType), eq(connectorConfigs.status, 'active')))
       .limit(1);
     return config ?? null;
   },
@@ -100,7 +105,7 @@ export const connectorConfigService = {
     return db
       .select()
       .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.connectorType, connectorType), eq(connectorConfigs.status, 'active')));
+      .where(and(eq(connectorConfigs.connectorType, connectorType as ConnectorType), eq(connectorConfigs.status, 'active')));
   },
 
   /** Find a connector config by matching a canonical account's externalId to a connectorType. Used by GHL webhook. */
@@ -111,7 +116,7 @@ export const connectorConfigService = {
       .innerJoin(connectorConfigs, eq(connectorConfigs.id, canonicalAccounts.connectorConfigId))
       .where(and(
         eq(canonicalAccounts.externalId, accountExternalId),
-        eq(connectorConfigs.connectorType, connectorType),
+        eq(connectorConfigs.connectorType, connectorType as ConnectorType),
       ))
       .limit(1);
     return result ?? null;
