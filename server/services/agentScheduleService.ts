@@ -4,6 +4,7 @@ import { subaccountAgents, agents, orgAgentConfigs, organisations } from '../db/
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
+import { setContextEnrichmentJobSender } from './workspaceMemoryService.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
@@ -35,6 +36,11 @@ export const agentScheduleService = {
     // Wire up the trigger job sender so triggerService can enqueue triggered runs
     setTriggerJobSender(async (name: string, data: object) => {
       return pgboss.send(name, data, getJobConfig(name as any));
+    });
+
+    // Wire up context enrichment job sender for workspace memory (Phase B1)
+    setContextEnrichmentJobSender(async (name: string, data: unknown, options?: Record<string, unknown>) => {
+      return pgboss.send(name, data, { ...getJobConfig(name as any), ...options });
     });
 
     // Register the worker that processes scheduled agent runs

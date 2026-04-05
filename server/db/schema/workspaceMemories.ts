@@ -102,6 +102,9 @@ export const workspaceMemoryEntries = pgTable(
     // Semantic embedding for vector search (populated asynchronously)
     embedding: vector('embedding'),
 
+    // LLM-generated context prefix for contextual retrieval (Phase B1)
+    embeddingContext: text('embedding_context'),
+
     // Mem0 scoring columns — access tracking and task scoping (Phase 1C)
     accessCount:    integer('access_count').notNull().default(0),
     lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),

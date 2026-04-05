@@ -557,6 +557,28 @@ export const queueService = {
         }
       });
 
+      // Context enrichment worker (Phase B1) — async embedding context generation
+      await (boss as any).work('memory-context-enrichment', { teamSize: 3, teamConcurrency: 1 }, async (job: any) => {
+        const retryCount = getRetryCount(job);
+        if (retryCount > 0) {
+          logger.warn('job_retry', { queue: 'memory-context-enrichment', jobId: job.id, retryCount });
+        }
+        try {
+          const { processContextEnrichment } = await import('./workspaceMemoryService.js');
+          await withTimeout(
+            processContextEnrichment(job.data),
+            90_000,
+          );
+        } catch (err) {
+          if (isNonRetryable(err)) {
+            logger.error('job_non_retryable_failure', { queue: 'memory-context-enrichment', jobId: job.id, error: String(err) });
+            await (boss as any).fail(job.id);
+            return;
+          }
+          throw err;
+        }
+      });
+
       await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily

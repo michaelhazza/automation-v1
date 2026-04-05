@@ -101,6 +101,7 @@ export async function executeReadOrgInsights(
         const results = await orgMemoryService.getRelevantInsights(
           context.organisationId,
           embedding,
+          semanticQuery,
           Object.keys(scopeTags).length > 0 ? scopeTags : undefined,
           limit
         );
