@@ -5,7 +5,7 @@ import { glob } from 'glob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { env } from '../lib/env.js';
-import { getActiveTrace } from '../instrumentation.js';
+import { createSpan, createEvent } from '../lib/tracing.js';
 import { TripWire } from '../lib/tripwire.js';
 import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
@@ -437,7 +437,7 @@ async function executeWithActionAudit(
   executor: () => Promise<unknown>
 ): Promise<unknown> {
   const idempotencyKey = `${actionType}:${context.runId}:${Date.now()}`;
-  const span = getActiveTrace()?.span({ name: actionType, input });
+  const pipelineSpan = createSpan('skill.pipeline.run', { skillName: actionType, gateLevel: 'auto' }, { input });
 
   try {
     const proposed = await actionService.proposeAction({
@@ -451,22 +451,32 @@ async function executeWithActionAudit(
       taskId: context.taskId,
     });
 
+    createEvent('skill.action.proposed', {
+      skillName: actionType, actionId: proposed.actionId, status: proposed.status,
+    }, { parentSpan: pipelineSpan });
+
     // Duplicate detected — return existing status
     if (!proposed.isNew) {
       const dupeResult = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
-      span?.end({ output: dupeResult });
+      pipelineSpan.end({ output: dupeResult });
       return dupeResult;
     }
 
     // Policy engine escalated to block — return denial immediately
     if (proposed.status === 'blocked') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'block', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
-      span?.end({ output: denial });
+      pipelineSpan.end({ output: denial });
       return denial;
     }
 
     // Policy engine escalated to review — block and await human decision
     if (proposed.status === 'pending_approval') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'review', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       const action = await actionService.getAction(proposed.actionId, context.organisationId);
       await reviewService.createReviewItem(action, {
         actionType,
@@ -474,17 +484,22 @@ async function executeWithActionAudit(
         proposedPayload: input,
       });
       const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
-      span?.end({ output: reviewResult });
+      pipelineSpan.end({ output: reviewResult });
       return reviewResult;
     }
+
+    createEvent('skill.gate.decision', {
+      gateLevel: 'auto', skillName: actionType, actionId: proposed.actionId,
+    }, { parentSpan: pipelineSpan });
 
     // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
-      span?.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
+      pipelineSpan.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
+    const executeSpan = createSpan('skill.phase.execute', { skillName: actionType }, { parentSpan: pipelineSpan });
     const result = await runWithProcessors(
       actionType,
       input,
@@ -492,6 +507,8 @@ async function executeWithActionAudit(
       (_processedInput) => executor(),
       proposed.actionId,
     );
+    executeSpan.end({ output: result });
+
     const resultObj = result as Record<string, unknown>;
     if (resultObj?.success) {
       await actionService.markCompleted(proposed.actionId, context.organisationId, result);
@@ -499,17 +516,21 @@ async function executeWithActionAudit(
       await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj?.error ?? 'Unknown error'));
     }
 
-    span?.end({ output: result });
+    pipelineSpan.end({ output: result });
     return result;
   } catch (err) {
     if (err instanceof TripWire && !err.options.retry) {
-      // Fatal TripWire — surface as denied result so the loop halts gracefully
-      span?.end({ output: { success: false, error: err.reason } });
+      createEvent('skill.tripwire.triggered', {
+        skillName: actionType, fatal: true, reason: err.reason, code: err.options.code,
+      }, { parentSpan: pipelineSpan, level: 'ERROR' });
+      pipelineSpan.end({ output: { success: false, error: err.reason } });
       return { success: false, error: `Action halted: ${err.reason}`, code: err.options.code };
     }
-    // If action tracking fails, execute directly to preserve existing behaviour
+    createEvent('skill.action.failed', {
+      skillName: actionType, error: String(err).slice(0, 200),
+    }, { parentSpan: pipelineSpan, level: 'ERROR' });
     console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
-    span?.end({ output: { error: String(err) } });
+    pipelineSpan.end({ output: { error: String(err) } });
     return executor();
   }
 }
@@ -533,7 +554,7 @@ async function proposeReviewGatedAction(
     return { success: false, error: `Unknown action type: ${actionType}` };
   }
 
-  const span = getActiveTrace()?.span({ name: actionType, input, metadata: { gated: true } });
+  const pipelineSpan = createSpan('skill.pipeline.run', { skillName: actionType, gateLevel: 'review' }, { input });
 
   const keyParts = [actionType, context.subaccountId ?? `org:${context.organisationId}`];
   if (input.thread_id) keyParts.push(String(input.thread_id));
@@ -554,28 +575,42 @@ async function proposeReviewGatedAction(
       taskId: context.taskId,
     });
 
+    createEvent('skill.action.proposed', {
+      skillName: actionType, actionId: proposed.actionId, status: proposed.status,
+    }, { parentSpan: pipelineSpan });
+
     // Duplicate — return its current status
     if (!proposed.isNew) {
       const result = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Action already exists (duplicate detected)' };
-      span?.end({ output: result });
+      pipelineSpan.end({ output: result });
       return result;
     }
 
     // Policy engine blocked it — return denial immediately, no review queue entry
     if (proposed.status === 'blocked') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'block', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
-      span?.end({ output: denial });
+      pipelineSpan.end({ output: denial });
       return denial;
     }
 
     // Policy engine auto-approved it — should not happen for review-gated skills,
     // but handle it gracefully by dispatching immediately
     if (proposed.status === 'approved') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'auto', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       await executionLayerService.executeAction(proposed.actionId, context.organisationId);
       const result = { success: true, action_id: proposed.actionId, status: 'completed', message: 'Action auto-approved and executed.' };
-      span?.end({ output: result });
+      pipelineSpan.end({ output: result });
       return result;
     }
+
+    createEvent('skill.gate.decision', {
+      gateLevel: 'review', skillName: actionType, actionId: proposed.actionId,
+    }, { parentSpan: pipelineSpan });
 
     // pending_approval — create review item, then block until decision
     const action = await actionService.getAction(proposed.actionId, context.organisationId);
@@ -585,12 +620,27 @@ async function proposeReviewGatedAction(
       proposedPayload: input,
     });
 
+    const reviewStartTime = Date.now();
+    const reviewSpan = createSpan('skill.review.wait', {
+      skillName: actionType, actionId: proposed.actionId, criticalPath: true,
+    }, { parentSpan: pipelineSpan });
+
     const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
-    span?.end({ output: reviewResult });
+
+    reviewSpan.end({
+      output: {
+        approved: !!(reviewResult && typeof reviewResult === 'object' && (reviewResult as Record<string, unknown>).success),
+        waitDurationMs: Date.now() - reviewStartTime,
+      },
+    });
+    pipelineSpan.end({ output: reviewResult });
     return reviewResult;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    span?.end({ output: { success: false, error: errMsg } });
+    createEvent('skill.action.failed', {
+      skillName: actionType, error: errMsg.slice(0, 200),
+    }, { parentSpan: pipelineSpan, level: 'ERROR' });
+    pipelineSpan.end({ output: { success: false, error: errMsg } });
     return { success: false, error: `Failed to propose ${actionType}: ${errMsg}` };
   }
 }
@@ -1112,6 +1162,12 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       handoffDepth: req.handoffDepth,
       handoffContext: req.handoffContext,
     });
+    createEvent('agent.handoff.enqueued', {
+      targetAgentId: req.agentId,
+      sourceRunId: req.sourceRunId,
+      handoffDepth: req.handoffDepth,
+      taskId: req.taskId,
+    });
     return true;
   } catch (err) {
     console.error('[Handoff] Failed to enqueue handoff job:', err);
@@ -1341,6 +1397,11 @@ async function executeSpawnSubAgents(
     }
 
     // Execute all children in parallel
+    createEvent('agent.spawn.fanout', {
+      fanOutCount: childJobs.length,
+      perChildBudget,
+      perChildTimeoutMs: perChildTimeout,
+    });
     const childResults = await Promise.all(
       childJobs.map(async (job) => {
         try {

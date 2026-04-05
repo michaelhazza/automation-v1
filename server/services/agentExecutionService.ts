@@ -52,6 +52,11 @@ import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate } from '../webs
 import { orgAgentConfigService } from './orgAgentConfigService.js';
 import { organisations } from '../db/schema/index.js';
 import { langfuse, withTrace } from '../instrumentation.js';
+import {
+  createSpan, createEvent, finalizeTrace, emitLoopTermination,
+  generateRunFingerprint,
+  type FinalStatus, type ErrorType,
+} from '../lib/tracing.js';
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 
 // ---------------------------------------------------------------------------
@@ -586,18 +591,51 @@ export const agentExecutionService = {
         // ── 8b. Standard API agentic loop ──────────────────────────────
         const pipeline = createDefaultPipeline();
 
+        // Session linking (Section WS2): group related runs
+        let traceSessionId: string;
+        if (request.runSource === 'handoff' && request.parentRunId) {
+          traceSessionId = `handoff-chain-${request.parentRunId}`;
+        } else if (request.runType === 'scheduled') {
+          const dateStr = new Date().toISOString().slice(0, 10);
+          traceSessionId = `schedule-${request.agentId}-${dateStr}`;
+        } else if (request.runSource === 'sub_agent' && request.parentSpawnRunId) {
+          traceSessionId = `spawn-${request.parentSpawnRunId}`;
+        } else {
+          traceSessionId = run.id;
+        }
+
+        // Run fingerprint (Section 8.3)
+        const skillSlugs = enhancedTools.map(t => t.name);
+        const runFingerprint = generateRunFingerprint(request.agentId, 'development', skillSlugs);
+
         const trace = langfuse.trace({
           name:      'agent-run',
           userId:    request.subaccountId,
-          sessionId: run.id,
+          sessionId: traceSessionId,
           metadata: {
-            agentId:    request.agentId,
-            runType:    request.runType,
-            orgId:      request.organisationId,
+            agentId:       request.agentId,
+            runType:       request.runType,
+            orgId:         request.organisationId,
+            subaccountId:  request.subaccountId,
+            executionMode: 'api',
+            traceSchemaVersion: 'v1',
+            instrumentationVersion: '1.0',
+            startedAt:     new Date().toISOString(),
+            runFingerprint,
+            handoffDepth:     request.handoffDepth ?? 0,
+            parentRunId:      request.parentRunId ?? null,
+            isSubAgent:       request.isSubAgent ?? false,
+            parentSpawnRunId: request.parentSpawnRunId ?? null,
           },
         });
 
-        loopResult = await withTrace(trace, () => runAgenticLoop({
+        loopResult = await withTrace(trace, {
+          runId:         run.id,
+          orgId:         request.organisationId,
+          subaccountId:  request.subaccountId ?? undefined,
+          agentId:       request.agentId ?? undefined,
+          executionMode: 'api',
+        }, () => runAgenticLoop({
           runId: run.id,
           agent,
           routerCtx: {
@@ -673,6 +711,44 @@ export const agentExecutionService = {
         emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: finalStatus,
         });
+      }
+
+      // ── 9b. Finalize Langfuse trace ────────────────────────────────────
+      {
+        const traceFinalStatus: FinalStatus =
+          finalStatus === 'timeout' ? 'timeout'
+          : finalStatus === 'budget_exceeded' ? 'budget_exceeded'
+          : finalStatus === 'loop_detected' ? 'loop_detected'
+          : finalStatus === 'failed' ? 'failed'
+          : 'completed';
+
+        const traceErrorType: ErrorType | null =
+          finalStatus === 'timeout' ? 'timeout'
+          : finalStatus === 'budget_exceeded' ? 'budget_exceeded'
+          : finalStatus === 'loop_detected' ? 'loop_detected'
+          : finalStatus === 'failed' ? 'internal_error'
+          : null;
+
+        const finalizationSpan = createSpan('agent.finalization.run');
+        createEvent('run.status.changed', {
+          fromStatus: 'running', toStatus: traceFinalStatus,
+        });
+        finalizationSpan.end();
+
+        finalizeTrace({
+          finalStatus: traceFinalStatus,
+          totalTokensIn: loopResult.inputTokens,
+          totalTokensOut: loopResult.outputTokens,
+          iterationCount: loopResult.toolCallsLog.length > 0
+            ? Math.max(...loopResult.toolCallsLog.map(t => (t as { iteration: number }).iteration)) + 1
+            : 0,
+          toolCallCount: loopResult.totalToolCalls,
+          durationMs,
+          errorType: traceErrorType,
+          startedAt: new Date(startTime).toISOString(),
+        });
+
+        langfuse.flushAsync().catch(() => {});
       }
 
       // ── 10. Extract insights for workspace memory + entities ─────────────
@@ -912,6 +988,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     for (const mw of pipeline.preCall) {
       const result = mw.execute(mwCtx);
       if (result.action === 'stop') {
+        createEvent('agent.middleware.decision', {
+          middlewareName: mw.name, decision: 'stop', reason: result.reason, iteration,
+        });
         messages.push({ role: 'user', content: result.reason });
         const maskedWrapUp = maskObservations(messages, iteration);
         const wrapUp = await routeCall({
@@ -927,9 +1006,15 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         lastTextContent = wrapUp.content;
         totalTokensUsed += (wrapUp.tokensIn ?? 0) + (wrapUp.tokensOut ?? 0);
         finalStatus = result.status;
+        emitLoopTermination('middleware_stop', {
+          iteration, middlewareName: mw.name, reason: result.reason, totalToolCalls,
+        });
         break outerLoop;
       }
       if (result.action === 'inject_message') {
+        createEvent('agent.middleware.decision', {
+          middlewareName: mw.name, decision: 'inject_message', iteration,
+        });
         messages.push({ role: 'user', content: result.message });
         logger.debug('middleware.inject_message', {
           runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
@@ -955,6 +1040,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     } else {
       phase = 'planning';
     }
+
+    const iterationSpan = createSpan('agent.loop.iteration', {
+      iteration, phase, totalToolCalls, tokensUsed: totalTokensUsed,
+    });
 
     // ── Call LLM (with observation masking) ─────────────────────────────
     const maskedMessages = maskObservations(messages, iteration);
@@ -1006,6 +1095,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     }
 
     if (!response.toolCalls || response.toolCalls.length === 0) {
+      iterationSpan.end({ output: { phase, noToolCalls: true } });
+      emitLoopTermination('no_tool_calls', { iteration, totalToolCalls });
       break;
     }
 
@@ -1034,6 +1125,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           break;
         }
         if (result.action === 'stop') {
+          createEvent('agent.middleware.decision', {
+            middlewareName: mw.name, decision: 'stop', reason: result.reason, iteration,
+          });
           messages.push({
             role: 'user',
             content: toolResults.map(tr => ({
@@ -1056,6 +1150,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           });
           lastTextContent = wrapUp.content;
           finalStatus = result.status;
+          iterationSpan.end({ output: { phase, middlewareStop: true } });
+          emitLoopTermination('middleware_stop', {
+            iteration, middlewareName: mw.name, reason: result.reason, totalToolCalls,
+          });
           break outerLoop;
         }
       }
@@ -1127,6 +1225,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         );
         if (postResult.action === 'stop') {
           finalStatus = postResult.status;
+          iterationSpan.end({ output: { phase, postToolStop: true } });
+          emitLoopTermination('middleware_stop', {
+            iteration, middlewareName: mw.name, totalToolCalls,
+          });
           break outerLoop;
         }
         if (postResult.content) {
@@ -1163,6 +1265,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         content: tr.content,
       })),
     }, iteration));
+
+    iterationSpan.end({ output: { phase, toolCallsThisIteration: response.toolCalls?.length ?? 0 } });
+
+    // Check if we've hit the max iteration limit
+    if (iteration >= MAX_LOOP_ITERATIONS - 1) {
+      emitLoopTermination('max_iterations', { iteration, totalToolCalls });
+    }
   }
 
   // Flush any pending throttled trace events before returning
