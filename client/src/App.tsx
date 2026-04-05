@@ -58,6 +58,7 @@ const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
 const PageProjectsPage = lazy(() => import('./pages/PageProjectsPage'));
 const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage'));
+const JobQueueDashboardPage = lazy(() => import('./pages/JobQueueDashboardPage'));
 
 function PageLoader() {
   return (
@@ -188,6 +189,7 @@ export default function App() {
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
+            <Route path="/system/job-queues" element={<JobQueueDashboardPage />} />
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
