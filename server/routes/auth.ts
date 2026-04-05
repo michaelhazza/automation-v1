@@ -3,6 +3,9 @@ import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { auditService } from '../services/auditService.js';
+import { validateBody } from '../middleware/validate.js';
+import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody } from '../schemas/auth.js';
+import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput } from '../schemas/auth.js';
 
 const router = Router();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -31,12 +34,8 @@ function validatePasswordStrength(password: string): string | null {
   return null;
 }
 
-router.post('/api/auth/login', asyncHandler(async (req, res) => {
-  const { email, password, organisationSlug } = req.body;
-  if (!email || !password) {
-    res.status(400).json({ error: 'Validation failed', details: 'email and password are required' });
-    return;
-  }
+router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req, res) => {
+  const { email, password, organisationSlug } = req.body as LoginInput;
   const rateKey = `${req.ip}:${String(email).toLowerCase()}`;
   if (!enforceLoginRateLimit(rateKey)) {
     res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
@@ -66,27 +65,19 @@ router.post('/api/auth/login', asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
-router.post('/api/auth/invite/accept', asyncHandler(async (req, res) => {
-  const { token, password, firstName, lastName } = req.body;
-  if (!token || !password || !firstName || !lastName) {
-    res.status(400).json({ error: 'Validation failed', details: 'token, password, firstName, lastName are required' });
-    return;
-  }
+router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHandler(async (req, res) => {
+  const { token, password, firstName, lastName } = req.body as AcceptInviteInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {
-    res.status(400).json({ error: 'Validation failed', details: passwordError });
+    res.status(400).json({ error: 'Validation failed', details: { password: [passwordError] } });
     return;
   }
   const result = await authService.acceptInvite(token, password, firstName, lastName);
   res.json(result);
 }));
 
-router.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
-  const { email } = req.body;
-  if (!email) {
-    res.status(400).json({ error: 'Validation failed', details: 'email is required' });
-    return;
-  }
+router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
+  const { email } = req.body as ForgotPasswordInput;
   const result = await authService.forgotPassword(email);
   auditService.log({
     actorType: 'user',
@@ -97,15 +88,11 @@ router.post('/api/auth/forgot-password', asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
-router.post('/api/auth/reset-password', asyncHandler(async (req, res) => {
-  const { token, password } = req.body;
-  if (!token || !password) {
-    res.status(400).json({ error: 'Validation failed', details: 'token and password are required' });
-    return;
-  }
+router.post('/api/auth/reset-password', validateBody(resetPasswordBody), asyncHandler(async (req, res) => {
+  const { token, password } = req.body as ResetPasswordInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {
-    res.status(400).json({ error: 'Validation failed', details: passwordError });
+    res.status(400).json({ error: 'Validation failed', details: { password: [passwordError] } });
     return;
   }
   const result = await authService.resetPassword(token, password);

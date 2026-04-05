@@ -20,6 +20,8 @@ import { initializePageIntegrationWorker } from './services/pageIntegrationWorke
 import { initializePaymentReconciliationJob } from './services/paymentReconciliationJob.js';
 import { client as dbClient } from './db/index.js';
 import { getIO } from './websocket/index.js';
+import { getPgBoss, stopPgBoss } from './lib/pgBossInstance.js';
+import { startDlqMonitor } from './services/dlqMonitorService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -270,6 +272,11 @@ async function start() {
   await boardService.seedDefaultTemplate();
   await skillService.seedBuiltInSkills();
   // System skills are file-based (server/skills/*.md) — no seeding needed.
+  // Initialize shared pg-boss instance + DLQ monitor before registering workers
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    const boss = await getPgBoss();
+    await startDlqMonitor(boss);
+  }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
   await queueService.startMaintenanceJobs();
@@ -322,12 +329,12 @@ async function gracefulShutdown(signal: string) {
       console.log('[SHUTDOWN] Socket.IO server closed');
     }
 
-    // 3. Stop agent schedule service (pg-boss instance)
+    // 3. Stop shared pg-boss instance (covers all queue workers)
     try {
-      await agentScheduleService.shutdown();
-      console.log('[SHUTDOWN] Agent schedule service stopped');
+      await stopPgBoss();
+      console.log('[SHUTDOWN] pg-boss stopped');
     } catch (err) {
-      console.error('[SHUTDOWN] Error stopping agent schedule service', err);
+      console.error('[SHUTDOWN] Error stopping pg-boss', err);
     }
 
     // 4. Close database connection pool

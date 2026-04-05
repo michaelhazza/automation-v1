@@ -3,7 +3,8 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { validateMultipart } from '../middleware/validate.js';
+import { validateMultipart, validateBody } from '../middleware/validate.js';
+import { createAgentBody, updateAgentBody, createDataSourceBody, updateDataSourceBody, sendMessageBody } from '../schemas/agents.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
@@ -25,7 +26,7 @@ router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
-router.post('/api/agents', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res) => {
+router.post('/api/agents', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), validateBody(createAgentBody, 'warn'), asyncHandler(async (req, res) => {
   const { name, description, masterPrompt, modelProvider, modelId, temperature, maxTokens, responseMode, outputSize, allowModelOverride, defaultSkillSlugs, icon } = req.body;
   if (!name || !masterPrompt) {
     res.status(400).json({ error: 'Validation failed', details: 'name and masterPrompt are required' });
@@ -46,7 +47,7 @@ router.get('/api/agents/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS
   res.json(result);
 }));
 
-router.patch('/api/agents/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.patch('/api/agents/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateBody(updateAgentBody, 'warn'), asyncHandler(async (req, res) => {
   const result = await agentService.updateAgent(req.params.id, req.orgId!, req.body);
   res.json(result);
 }));
@@ -78,7 +79,7 @@ router.post('/api/agents/:id/data-sources/upload', authenticate, requireOrgPermi
   res.status(201).json(result);
 }));
 
-router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateBody(createDataSourceBody, 'warn'), asyncHandler(async (req, res) => {
   const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes } = req.body;
   if (!name || !sourceType || !sourcePath) {
     res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
@@ -90,7 +91,7 @@ router.post('/api/agents/:id/data-sources', authenticate, requireOrgPermission(O
   res.status(201).json(result);
 }));
 
-router.patch('/api/agents/:id/data-sources/:sourceId', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.patch('/api/agents/:id/data-sources/:sourceId', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), validateBody(updateDataSourceBody, 'warn'), asyncHandler(async (req, res) => {
   const result = await agentService.updateDataSource(req.params.sourceId, req.params.id, req.orgId!, req.body);
   res.json(result);
 }));
@@ -129,7 +130,7 @@ router.delete('/api/agents/:id/conversations/:convId', authenticate, requireOrgP
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
-router.post('/api/agents/:id/conversations/:convId/messages', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT), asyncHandler(async (req, res) => {
+router.post('/api/agents/:id/conversations/:convId/messages', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CHAT), validateBody(sendMessageBody, 'warn'), asyncHandler(async (req, res) => {
   const { content, attachments } = req.body;
   if (!content || typeof content !== 'string' || !content.trim()) {
     res.status(400).json({ error: 'Message content is required' });
