@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import TraceChainSidebar from '../components/TraceChainSidebar';
 
 interface ToolCallEntry {
   tool?: string;
@@ -175,10 +176,17 @@ function JsonBlock({ data, maxHeight = 300 }: { data: unknown; maxHeight?: numbe
 }
 
 export default function RunTraceViewerPage({ user: _user }: { user: User }) {
-  const { runId } = useParams<{ subaccountId: string; runId: string }>();
+  const { subaccountId, runId: routeRunId } = useParams<{ subaccountId: string; runId: string }>();
+  const navigate = useNavigate();
+  const [activeRunId, setActiveRunId] = useState(routeRunId ?? '');
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep activeRunId in sync with route
+  useEffect(() => { if (routeRunId) setActiveRunId(routeRunId); }, [routeRunId]);
+
+  const runId = activeRunId || routeRunId;
 
   useEffect(() => {
     if (!runId) return;
@@ -188,6 +196,14 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       .catch((err) => setError(err.response?.data?.error ?? 'Failed to load run'))
       .finally(() => setLoading(false));
   }, [runId]);
+
+  const handleSelectRun = useCallback((id: string) => {
+    setActiveRunId(id);
+    // Update URL without full page reload
+    if (subaccountId) {
+      navigate(`/admin/subaccounts/${subaccountId}/runs/${id}`, { replace: true });
+    }
+  }, [navigate, subaccountId]);
 
   if (loading) {
     return (
@@ -211,7 +227,9 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const toolCalls: ToolCallEntry[] = Array.isArray(run.toolCallsLog) ? run.toolCallsLog : [];
 
   return (
-    <div className="animate-[fadeIn_0.2s_ease-out_both] max-w-[960px] mx-auto">
+    <div className="flex animate-[fadeIn_0.2s_ease-out_both]">
+      <TraceChainSidebar runId={runId!} onSelectRun={handleSelectRun} />
+      <div className="flex-1 max-w-[960px] mx-auto">
       <div className="mb-4 text-[13px] text-slate-500 flex items-center gap-1.5">
         <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
           {run.subaccountName ?? 'Workspace'}
@@ -340,6 +358,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       )}
 
       <div className="h-10" />
+      </div>
     </div>
   );
 }

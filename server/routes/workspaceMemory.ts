@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
+import { generateEmbedding } from '../lib/embeddings.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { MAX_SUMMARY_LENGTH, MAX_ENTRY_LIMIT } from '../config/limits.js';
+import { MAX_SUMMARY_LENGTH, MAX_ENTRY_LIMIT, MAX_QUERY_TEXT_CHARS } from '../config/limits.js';
 
 const router = Router();
 
@@ -131,6 +132,45 @@ router.delete(
     }
 
     res.json({ success: true });
+  })
+);
+
+// ─── Search diagnostics (Phase B2) ─────────────────────────────────────────
+
+router.post(
+  '/api/subaccounts/:subaccountId/workspace-memory/search-test',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    const { query } = req.body as { query?: string };
+
+    if (!query || typeof query !== 'string' || query.trim().length < 3) {
+      res.status(400).json({ error: 'Query must be at least 3 characters' });
+      return;
+    }
+
+    const memory = await workspaceMemoryService.getMemory(req.orgId!, subaccountId);
+    if (!memory) {
+      res.json([]);
+      return;
+    }
+
+    const queryText = query.slice(0, MAX_QUERY_TEXT_CHARS);
+    const embedding = await generateEmbedding(queryText);
+    if (!embedding) {
+      res.status(500).json({ error: 'Failed to generate query embedding' });
+      return;
+    }
+
+    const results = await workspaceMemoryService.getRelevantMemories(
+      subaccountId,
+      memory.qualityThreshold,
+      embedding,
+      queryText,
+    );
+
+    res.json(results);
   })
 );
 
