@@ -1230,38 +1230,267 @@ In `App.tsx`, inside the org admin guard:
 
 ### Page: `McpServersPage.tsx`
 
-Full-page admin view for managing MCP server connections. Follows the card-grid pattern from `ConnectionsPage.tsx` and `AdminSkillsPage.tsx`.
+Full-page admin view for managing MCP server connections. Two tabs: **My Servers** (configured) and **Catalogue** (available presets).
 
 #### Page Layout
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  MCP Servers                                    [+ Add Server] │
-│  Connect external tool servers to expand agent capabilities   │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────────────┐  ┌──────────────────────┐         │
-│  │ ● Gmail              │  │ ● Slack              │         │
-│  │ stdio · 5 tools      │  │ stdio · 8 tools      │         │
-│  │ Gate: auto            │  │ Gate: review          │         │
-│  │ Last connected: 2m ago│  │ Last connected: 5m ago│         │
-│  │                       │  │                       │         │
-│  │ [Test] [Edit] [Delete]│  │ [Test] [Edit] [Delete]│         │
-│  └──────────────────────┘  └──────────────────────┘         │
-│                                                               │
-│  ┌──────────────────────┐  ┌──────────────────────┐         │
-│  │ ○ HubSpot    ERROR   │  │ ● GitHub             │         │
-│  │ stdio · 0 tools      │  │ stdio · 12 tools     │         │
-│  │ Error: ENOENT npx    │  │ Gate: auto            │         │
-│  │                       │  │ Last connected: 1h ago│         │
-│  │ [Test] [Edit] [Delete]│  │ [Test] [Edit] [Delete]│         │
-│  └──────────────────────┘  └──────────────────────┘         │
-│                                                               │
-│  No servers? Show empty state:                                │
-│  "No MCP servers configured yet. Add your first server to    │
-│   give agents access to external tools."                      │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  MCP Servers                                     [+ Custom Server] │
+│  Connect external tool servers to expand agent capabilities       │
+├─────────────────────────────────────────────────────────────────┤
+│  [My Servers]  [Catalogue]                                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ── MY SERVERS tab ───────────────────────────────────────────── │
+│                                                                   │
+│  ┌──────────────────────┐  ┌──────────────────────┐             │
+│  │ ● Gmail              │  │ ● Slack              │             │
+│  │ stdio · 5 tools      │  │ stdio · 8 tools      │             │
+│  │ Gate: auto            │  │ Gate: review          │             │
+│  │ Last connected: 2m ago│  │ Last connected: 5m ago│             │
+│  │                       │  │                       │             │
+│  │ [Test] [Edit] [Delete]│  │ [Test] [Edit] [Delete]│             │
+│  └──────────────────────┘  └──────────────────────┘             │
+│                                                                   │
+│  No servers? Show empty state:                                    │
+│  "No MCP servers configured yet. Browse the catalogue to add     │
+│   your first integration, or add a custom server."                │
+│                                                                   │
+│  ── CATALOGUE tab ────────────────────────────────────────────── │
+│                                                                   │
+│  Search: [________________]    Filter: [All ▼] [Communication ▼] │
+│                                                                   │
+│  ── Communication ──────────────────────────────────────────────  │
+│                                                                   │
+│  ┌──────────────────────┐  ┌──────────────────────┐             │
+│  │ 📧 Gmail             │  │ 💬 Slack              │             │
+│  │ Send and read emails  │  │ Post messages, read   │             │
+│  │ via Google Gmail      │  │ channels              │             │
+│  │                       │  │                       │             │
+│  │ Requires: Gmail OAuth │  │ Requires: Slack OAuth │             │
+│  │ Tools: 5              │  │ Tools: 8              │             │
+│  │                       │  │                       │             │
+│  │ [+ Add to Org]        │  │ ✓ Already added       │             │
+│  └──────────────────────┘  └──────────────────────┘             │
+│                                                                   │
+│  ── CRM ────────────────────────────────────────────────────────  │
+│                                                                   │
+│  ┌──────────────────────┐  ┌──────────────────────┐             │
+│  │ 🏢 HubSpot           │  │ 💼 Salesforce         │             │
+│  │ Manage contacts,      │  │ Manage leads,         │             │
+│  │ deals, and companies  │  │ opportunities, cases   │             │
+│  │                       │  │                       │             │
+│  │ Requires: HubSpot     │  │ Requires: Salesforce  │             │
+│  │ OAuth                 │  │ OAuth                 │             │
+│  │ Tools: 12             │  │ Tools: 15             │             │
+│  │                       │  │                       │             │
+│  │ [+ Add to Org]        │  │ [+ Add to Org]        │             │
+│  └──────────────────────┘  └──────────────────────┘             │
+│                                                                   │
+│  ── Developer Tools ────────────────────────────────────────────  │
+│  ── Data & Search ──────────────────────────────────────────────  │
+│  ── Finance ────────────────────────────────────────────────────  │
+│  ── Files & Storage ────────────────────────────────────────────  │
+│  ...                                                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+#### Preset Catalogue
+
+The catalogue is a **static TypeScript config** shipped with the app — not fetched from an external registry. This keeps it reliable, auditable, and fast.
+
+```typescript
+// server/config/mcpPresets.ts
+
+export interface McpPreset {
+  slug: string;                              // "gmail", "slack", "hubspot"
+  name: string;                              // "Gmail"
+  description: string;                       // "Send and read emails via Google Gmail"
+  category: McpPresetCategory;               // "communication"
+  iconUrl?: string;                          // optional, or use emoji fallback
+  transport: 'stdio';
+  command: string;                           // "npx"
+  args: string[];                            // ["-y", "@anthropic/gmail-mcp-server@1.2.3"]
+  credentialProvider?: string;               // "gmail" — links to OAuth provider
+  requiresConnection: boolean;               // true if OAuth is needed
+  recommendedGateLevel: 'auto' | 'review';   // sensible default
+  toolCount: number;                         // approximate, for display
+  toolHighlights: string[];                  // ["send_email", "read_inbox", "search_messages"]
+  setupNotes?: string;                       // "Requires Gmail OAuth. Enable Gmail API in Google Cloud Console."
+}
+
+export type McpPresetCategory =
+  | 'communication'    // Gmail, Slack, Teams
+  | 'crm'             // HubSpot, Salesforce
+  | 'developer'       // GitHub, GitLab, Sentry, Linear
+  | 'data_search'     // Brave Search, Google Search, Tavily
+  | 'finance'         // Stripe, QuickBooks
+  | 'files_storage'   // Google Drive, Dropbox, S3
+  | 'productivity'    // Notion, Confluence, Jira
+  | 'browser';        // Puppeteer, Playwright, Browserbase
+
+export const MCP_PRESETS: McpPreset[] = [
+  {
+    slug: 'gmail',
+    name: 'Gmail',
+    description: 'Send, read, and search emails via Google Gmail.',
+    category: 'communication',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@anthropic/gmail-mcp-server@1.0.0'],
+    credentialProvider: 'gmail',
+    requiresConnection: true,
+    recommendedGateLevel: 'review',
+    toolCount: 5,
+    toolHighlights: ['send_email', 'read_inbox', 'search_messages', 'read_thread', 'list_labels'],
+    setupNotes: 'Requires a Gmail OAuth connection. The subaccount or org must have Gmail connected.',
+  },
+  {
+    slug: 'slack',
+    name: 'Slack',
+    description: 'Post messages, read channels, and manage conversations in Slack.',
+    category: 'communication',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@anthropic/slack-mcp-server@1.0.0'],
+    credentialProvider: 'slack',
+    requiresConnection: true,
+    recommendedGateLevel: 'auto',
+    toolCount: 8,
+    toolHighlights: ['post_message', 'list_channels', 'read_channel', 'search_messages'],
+    setupNotes: 'Requires a Slack OAuth connection with chat:write and channels:read scopes.',
+  },
+  {
+    slug: 'hubspot',
+    name: 'HubSpot',
+    description: 'Manage contacts, deals, and companies in HubSpot CRM.',
+    category: 'crm',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@anthropic/hubspot-mcp-server@1.0.0'],
+    credentialProvider: 'hubspot',
+    requiresConnection: true,
+    recommendedGateLevel: 'auto',
+    toolCount: 12,
+    toolHighlights: ['search_contacts', 'create_contact', 'search_deals', 'create_deal', 'list_companies'],
+    setupNotes: 'Requires a HubSpot OAuth connection with contacts, content, and deals scopes.',
+  },
+  {
+    slug: 'github',
+    name: 'GitHub',
+    description: 'Manage repositories, issues, pull requests, and code on GitHub.',
+    category: 'developer',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@anthropic/github-mcp-server@1.0.0'],
+    credentialProvider: 'github',
+    requiresConnection: true,
+    recommendedGateLevel: 'auto',
+    toolCount: 12,
+    toolHighlights: ['search_repos', 'create_issue', 'list_prs', 'read_file', 'create_pr'],
+  },
+  {
+    slug: 'brave_search',
+    name: 'Brave Search',
+    description: 'Web search via Brave Search API. No OAuth needed — uses API key.',
+    category: 'data_search',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@anthropic/brave-search-mcp-server@1.0.0'],
+    requiresConnection: false,
+    recommendedGateLevel: 'auto',
+    toolCount: 2,
+    toolHighlights: ['web_search', 'local_search'],
+    setupNotes: 'Requires BRAVE_API_KEY in environment variables. Get one at brave.com/search/api.',
+  },
+  // ... more presets added as MCP ecosystem grows
+];
+```
+
+**Why static config, not a remote registry:**
+- No external dependency at runtime
+- Auditable — every preset is in version control
+- Curated — only include servers we've tested and trust
+- Versionable — package versions are pinned
+- Can be updated via app releases
+
+#### "Add from Catalogue" Flow
+
+When user clicks "+ Add to Org" on a catalogue card:
+
+```
+1. Pre-fill the create modal with preset values:
+   - Name, slug, description, command, args — all pre-filled, read-only
+   - Credential provider — auto-set from preset
+   - Gate level — pre-filled with recommendedGateLevel
+   - Environment variables — empty (user fills API keys if needed)
+
+2. If preset.requiresConnection:
+   - Show info banner: "This integration requires a [Gmail] connection."
+   - Show link: "Connect [Gmail] →" (navigates to connections page)
+   - If org already has the connection, show green check: "✓ Gmail connected"
+   - If not, the server can still be saved but will be skipped at runtime
+     until a connection exists (graceful degradation)
+
+3. User clicks "Save Server" → creates mcp_server_configs with preset values
+   → redirects to My Servers tab with the new card visible
+
+4. User clicks "Test Connection" → verifies everything works
+```
+
+#### Catalogue Card Component
+
+Each catalogue card shows:
+
+- **Icon** (emoji or image from preset)
+- **Name** (bold, 16px)
+- **Description** (1-2 lines)
+- **Credential requirement**: "Requires: Gmail OAuth" or "Requires: API key in env" or "No credentials needed"
+- **Tool count**: "5 tools"
+- **Tool highlights**: show 3-4 key tool names as pills/tags
+- **Status**: "+ Add to Org" button, or "Already added" (greyed) if slug already exists in org's mcp_server_configs
+- **Category header**: cards grouped under category headings
+
+#### Catalogue Search & Filter
+
+- **Search**: filters by name and description (client-side, instant)
+- **Category filter**: dropdown or pill buttons for categories
+- **"Already added" toggle**: option to hide presets already configured
+
+#### Setup Notes & Guidance
+
+When a preset has `setupNotes`, show them in the create modal as an info banner:
+
+```
+┌─────────────────────────────────────────────────┐
+│  ⓘ Setup Notes                                   │
+│  Requires a Gmail OAuth connection. The           │
+│  subaccount or org must have Gmail connected.     │
+│  Enable Gmail API in Google Cloud Console.        │
+│                                                   │
+│  [Connect Gmail →]                               │
+└─────────────────────────────────────────────────┘
+```
+
+#### Preset API Route
+
+The catalogue is served from a simple endpoint so the client doesn't need to bundle the full preset data:
+
+```
+GET /api/mcp-presets                     — returns all presets
+GET /api/mcp-presets?category=crm        — filter by category
+```
+
+No auth required beyond `authenticate` — presets are public knowledge within an org.
+
+#### Custom Server Flow (unchanged)
+
+The "+ Custom Server" button opens the existing create/edit modal with all fields empty and editable. This is for advanced users who want to connect servers not in the catalogue.
+
+The two flows coexist:
+- **Catalogue** → guided, pre-filled, opinionated (most users)
+- **Custom** → raw, flexible, full control (power users)
 
 #### Server Card Component
 
@@ -1693,19 +1922,21 @@ Stdio MCP servers run as child processes. Security measures:
 
 ## File Summary
 
-### New Files (9)
+### New Files (11)
 
 | File | Lines (est.) |
 |------|-------------|
-| `server/db/schema/mcpServerConfigs.ts` | ~60 |
+| `server/db/schema/mcpServerConfigs.ts` | ~70 |
 | `server/db/schema/mcpServerAgentLinks.ts` | ~30 |
-| `server/services/mcpClientManager.ts` | ~350 |
+| `server/config/mcpPresets.ts` | ~200 |
+| `server/services/mcpClientManager.ts` | ~400 |
 | `server/services/mcpServerConfigService.ts` | ~120 |
-| `server/routes/mcpServers.ts` | ~150 |
+| `server/routes/mcpServers.ts` | ~170 |
 | `server/routes/mcpServerAgentLinks.ts` | ~80 |
-| `migrations/0053_mcp_server_configs.sql` | ~25 |
-| `client/src/pages/McpServersPage.tsx` | ~450 |
+| `migrations/0053_mcp_server_configs.sql` | ~30 |
+| `client/src/pages/McpServersPage.tsx` | ~650 |
 | `client/src/components/McpToolBrowser.tsx` | ~200 |
+| `client/src/components/McpCatalogue.tsx` | ~250 |
 
 ### Modified Files (9)
 
