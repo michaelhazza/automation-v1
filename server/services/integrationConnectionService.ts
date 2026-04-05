@@ -293,7 +293,8 @@ export const integrationConnectionService = {
     };
 
     // Partial unique indexes don't support onConflictDoUpdate target, so we
-    // use an explicit check-then-insert/update pattern.
+    // use a non-atomic check-then-insert/update pattern with a 23505 catch
+    // for concurrent OAuth callbacks. Safe under expected callback frequency.
     const conditions = [
       eq(integrationConnections.organisationId, params.organisationId),
       eq(integrationConnections.providerType, params.providerType as IntegrationConnection['providerType']),
