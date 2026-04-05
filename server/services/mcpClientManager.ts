@@ -224,7 +224,7 @@ export const mcpClientManager = {
       if (!config.discoveredToolsJson?.length) continue;
       lazyRegistry.set(config.slug, config);
       // Use cached tool definitions
-      const cachedTools = config.discoveredToolsJson.filter(t => validateMcpToolSchema(t).valid);
+      const cachedTools = config.discoveredToolsJson.filter((t: McpToolDefinition) => validateMcpToolSchema(t).valid);
       allTools.push(...this._toAnthropicTools(cachedTools, config.slug));
     }
 

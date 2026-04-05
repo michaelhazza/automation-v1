@@ -103,12 +103,12 @@ export const mcpServerConfigService = {
 
     if (links.length > 0) {
       // Agent has explicit links — only return those servers
-      const linkedIds = new Set(links.map(l => l.mcpServerConfigId));
+      const linkedIds = new Set(links.map((l: { mcpServerConfigId: string }) => l.mcpServerConfigId));
       const allActive = await db
         .select()
         .from(mcpServerConfigs)
         .where(and(eq(mcpServerConfigs.organisationId, organisationId), eq(mcpServerConfigs.status, 'active')));
-      return allActive.filter(c => linkedIds.has(c.id));
+      return allActive.filter((c: { id: string }) => linkedIds.has(c.id));
     }
 
     // No explicit links — return all active servers (opt-out model)

@@ -849,11 +849,6 @@ export const agentExecutionService = {
         deliverablesCreated: loopResult.deliverablesCreated,
       };
     } catch (err) {
-      // MCP cleanup on failure
-      if (mcpClients?.size) {
-        const { mcpClientManager } = await import('./mcpClientManager.js');
-        await mcpClientManager.disconnectAll(mcpClients).catch(() => {});
-      }
       const durationMs = Date.now() - startTime;
       const errorMessage = err instanceof Error ? err.message : String(err);
 
