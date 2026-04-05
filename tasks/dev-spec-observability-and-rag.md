@@ -167,7 +167,50 @@ interface ChainRun {
 1. Recursive CTE walking `parentRunId` up to root
 2. Single query: `WHERE parentRunId IN (:chainIds) OR parentSpawnRunId IN (:chainIds)` to get all descendants
 
-**Performance:** Chain depth is bounded by `MAX_HANDOFF_DEPTH = 5` and sub-agent spawns are typically 1-2 levels. Total chain size should be < 20 runs. No pagination needed.
+**Graph integrity safeguards:**
+
+The upward/downward traversal must handle corrupted data gracefully:
+
+```typescript
+const visited = new Set<string>();
+const MAX_CHAIN_NODES = 50;  // hard cap on total nodes
+
+async function walkUp(runId: string): Promise<string[]> {
+  const chain: string[] = [];
+  let current = runId;
+
+  while (current && chain.length < MAX_CHAIN_NODES) {
+    if (visited.has(current)) break;  // cycle guard
+    visited.add(current);
+    chain.unshift(current);
+
+    const run = await getRun(current);
+    if (!run || !run.parentRunId) break;
+    current = run.parentRunId;
+  }
+
+  return chain;
+}
+```
+
+The response includes metadata about chain completeness:
+
+```typescript
+interface ChainResponse {
+  runs: ChainRun[];
+  metadata: {
+    rootRunId: string;
+    totalNodes: number;
+    isComplete: boolean;     // false if truncated or missing parents
+    truncated: boolean;
+    truncationReason?: 'cycle' | 'depth_limit' | 'missing_parent';
+  };
+}
+```
+
+This prevents silent corruption in the UI -- the sidebar can show a warning badge when `isComplete: false`.
+
+**Performance:** Chain depth is bounded by `MAX_HANDOFF_DEPTH = 5` and sub-agent spawns are typically 1-2 levels. Total chain size should be < 20 runs. Hard cap at 50 nodes prevents runaway traversals. No pagination needed.
 
 #### New endpoint: `GET /api/agent-runs/:runId/related-workflows`
 
@@ -252,7 +295,9 @@ Closer Agent     |░░░░░░░░░░░░░████✗░░|
 
 - [ ] Chain endpoint returns correct tree for handoff chain (depth 0 -> 1 -> 2)
 - [ ] Chain endpoint returns correct tree for sub-agent spawns
-- [ ] Chain endpoint handles orphaned runs (parentRunId points to deleted run)
+- [ ] Chain endpoint handles orphaned runs (parentRunId points to deleted run) -- returns `isComplete: false, truncationReason: 'missing_parent'`
+- [ ] Chain endpoint detects cycles (corrupted parentRunId loop) -- returns `truncationReason: 'cycle'`
+- [ ] Chain endpoint enforces 50-node hard cap -- returns `truncated: true, truncationReason: 'depth_limit'`
 - [ ] Chain endpoint respects org scoping (cannot view other org's runs)
 - [ ] Sidebar renders tree with correct indentation and status icons
 - [ ] Clicking a run in sidebar loads its detail without page reload
@@ -300,7 +345,44 @@ interface QueueSummary {
 }
 ```
 
-Query: Use pg-boss's `getQueueSize()` for active/pending counts, plus direct SQL for historical aggregates. pg-boss stores jobs in `pgboss.job` with `state` column (`created`, `active`, `completed`, `failed`, `cancelled`).
+**Live counts** (active, pending, DLQ depth): Use pg-boss's `getQueueSize()` -- these are cheap and always current.
+
+**Historical aggregates** (completed, failed, avg duration, retry rate): Querying the raw `pgboss.job` table for 24h aggregates will become expensive under load. Use a rolling aggregates table instead:
+
+**Migration:** `migrations/0056_job_queue_stats.sql`
+
+```sql
+CREATE TABLE job_queue_stats (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  queue TEXT NOT NULL,
+  window_start TIMESTAMPTZ NOT NULL,
+  window_minutes INTEGER NOT NULL DEFAULT 5,  -- 5-minute buckets
+  completed_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  total_duration_ms BIGINT NOT NULL DEFAULT 0,
+  UNIQUE(queue, window_start)
+);
+
+CREATE INDEX idx_job_queue_stats_queue_window
+  ON job_queue_stats (queue, window_start DESC);
+```
+
+**Write-time aggregation:** Add a lightweight hook in `createWorker()` that increments the current 5-minute bucket on job completion/failure:
+
+```typescript
+// In createWorker(), after handler completes:
+await upsertQueueStat(options.queue, {
+  completed: success ? 1 : 0,
+  failed: success ? 0 : 1,
+  retried: retryCount > 0 ? 1 : 0,
+  durationMs,
+});
+```
+
+**Dashboard reads from `job_queue_stats`**, not raw pg-boss tables. Sum buckets for the last 24h (288 rows per queue). This is a constant-time query regardless of job volume.
+
+**Cleanup:** Add a maintenance job to prune stats older than 7 days (runs daily with existing maintenance tier).
 
 **`getDlqJobs(queue: string, limit: number, offset: number)`**
 
@@ -669,22 +751,88 @@ Respond with a JSON array of context strings, one per entry. Each context should
 - Context stored in `embedding_context` column for reproducibility
 - Embedding input becomes: `${context}\n\n${content}`
 - The `content` column is NOT modified -- agents see the original text
-- If context generation fails, fall back to embedding content-only (graceful degradation)
+- **Decoupled from ingestion path** -- context generation must NOT block memory insertion
 
-**In `generateEmbedding()` call (around line 280):**
+**Two-phase write pattern (critical for production reliability):**
 
-Change from:
-```typescript
-const embedding = await generateEmbedding(entry.content);
+Context generation adds an LLM dependency to the ingestion path. If this fails or slows down, the entire memory system backs up. Instead, use a two-phase write:
+
+```
+Phase 1 (synchronous, in extractRunInsights):
+  → Insert memory entry immediately
+  → Generate embedding from content-only (as today)
+  → Memory is searchable immediately
+
+Phase 2 (async job, non-blocking):
+  → Enqueue 'memory-context-enrichment' job per batch
+  → Job generates contexts via LLM
+  → Job updates embedding_context column
+  → Job re-generates embeddings with context prefix
+  → If job fails, entry remains searchable with content-only embedding
 ```
 
-To:
 ```typescript
-const embeddingInput = entry.embeddingContext
-  ? `${entry.embeddingContext}\n\n${entry.content}`
-  : entry.content;
-const embedding = await generateEmbedding(embeddingInput);
+// In extractRunInsights(), after inserting entries:
+await pgBossSend('memory-context-enrichment', {
+  entryIds: insertedIds,
+  runSummary,
+  agentName,
+  taskTitle,
+});
 ```
+
+**New job: `memory-context-enrichment`**
+
+Add to `server/config/jobConfig.ts`:
+
+```typescript
+'memory-context-enrichment': {
+  retryLimit: 2,
+  retryDelay: 30,
+  retryBackoff: true,
+  expireInSeconds: 120,
+  timeoutMs: 90_000,
+},
+```
+
+Worker registered in `queueService.ts` (or `agentScheduleService.ts`):
+
+```typescript
+createWorker({
+  queue: 'memory-context-enrichment',
+  boss,
+  logger,
+  handler: async (job) => {
+    const { entryIds, runSummary, agentName, taskTitle } = job.data;
+    const entries = await loadEntries(entryIds);
+    const contexts = await generateEmbeddingContexts(entries, runSummary, agentName, taskTitle);
+
+    for (const [entryId, context] of contexts) {
+      const entry = entries.find(e => e.id === entryId);
+      const embeddingInput = `${context}\n\n${entry.content}`;
+
+      // Guard: cap embedding input size
+      const trimmedInput = embeddingInput.slice(0, MAX_EMBEDDING_INPUT_CHARS);
+
+      const embedding = await generateEmbedding(trimmedInput);
+      await updateEntry(entryId, { embeddingContext: context, embedding });
+    }
+  },
+});
+```
+
+This gives: zero ingestion latency impact, retryability, isolation from LLM failures.
+
+**Embedding input size guard:**
+
+Concatenating context + content can produce unexpectedly long inputs. Add a hard cap:
+
+```typescript
+// In server/config/limits.ts
+export const MAX_EMBEDDING_INPUT_CHARS = 2000;  // Cap before sending to embedding API
+```
+
+The existing `generateEmbedding()` already slices to 8192 chars, but 2000 is a tighter bound that prevents inconsistent embeddings from overly long inputs. If `context + content` exceeds 2000 chars, trim the context (not the content).
 
 #### Backfill job: `server/jobs/contextualRetrievalBackfillJob.ts`
 
@@ -877,6 +1025,41 @@ async function getRelevantMemories(
 
 **Note:** The similarity threshold (`VECTOR_SIMILARITY_THRESHOLD = 0.75`) is removed for RRF-based retrieval. RRF scores are not on a 0-1 cosine scale, so the old threshold doesn't apply. Instead, we rely on the `LIMIT` to control result count.
 
+**Scaling safeguard: candidate pool hard cap**
+
+The FULL OUTER JOIN on two ranked sets with window functions will become a bottleneck as workspaces grow beyond 1,000 entries. Add a pre-filter candidate pool before the semantic and fulltext CTEs:
+
+```sql
+WITH candidate_pool AS (
+  SELECT id, content, entry_type, quality_score, created_at, embedding, tsv
+  FROM workspace_memory_entries
+  WHERE workspace_id = ${workspaceId}
+    AND quality_score >= ${qualityThreshold}
+    AND (task_slug = ${taskSlug} OR task_slug IS NULL)
+    AND created_at >= NOW() - INTERVAL '${VECTOR_SEARCH_RECENCY_DAYS} days'
+  ORDER BY created_at DESC
+  LIMIT ${MAX_MEMORY_SCAN}  -- hard cap: 1000 rows
+),
+semantic AS (
+  SELECT ... FROM candidate_pool WHERE embedding IS NOT NULL ...
+),
+fulltext AS (
+  SELECT ... FROM candidate_pool WHERE tsv @@ ... ...
+),
+...
+```
+
+This ensures:
+- Both sub-queries operate on the same bounded set (no divergent scans)
+- Total rows scanned per query is capped regardless of workspace size
+- The `ORDER BY created_at DESC` pre-filter favours recent entries (aligned with recency weighting)
+
+Add to `server/config/limits.ts`:
+
+```typescript
+export const MAX_MEMORY_SCAN = 1000;  // Hard cap on candidate pool for hybrid search
+```
+
 #### Update `getMemoryForPrompt()` (around line 454)
 
 Pass `queryText` alongside `queryEmbedding`:
@@ -902,10 +1085,25 @@ Mirror the hybrid search in `server/services/orgMemoryService.ts`.
 // Replace VECTOR_SIMILARITY_THRESHOLD with RRF-based config
 export const RRF_OVER_RETRIEVE_MULTIPLIER = 4;  // Retrieve 4x limit from each source
 export const RRF_K = 60;                         // RRF constant
-export const RRF_WEIGHT = 0.70;                  // RRF fusion weight in combined score
-export const QUALITY_WEIGHT = 0.15;              // Quality score weight
-export const RECENCY_WEIGHT = 0.15;              // Recency decay weight
+export const MAX_MEMORY_SCAN = 1000;             // Hard cap on candidate pool
+
+// Scoring weights -- configurable per retrieval context
+export const RRF_WEIGHTS = {
+  general:  { rrf: 0.70, quality: 0.15, recency: 0.15 },
+  factual:  { rrf: 0.80, quality: 0.15, recency: 0.05 },  // Prioritise relevance over freshness
+  temporal: { rrf: 0.50, quality: 0.10, recency: 0.40 },  // Prioritise recent entries
+} as const;
+
+export type RetrievalProfile = keyof typeof RRF_WEIGHTS;
 ```
+
+**Retrieval profile selection:** The `getMemoryForPrompt()` function selects a profile based on available context:
+
+- `'temporal'` when the task context contains time-related terms ("latest", "recent", "last week", "today")
+- `'factual'` when the query is longer (> 200 chars) and specific
+- `'general'` as the default
+
+This future-proofs the weighting system without adding complexity now. Profiles are selected by a simple heuristic, not ML.
 
 ### Client Changes
 
@@ -1097,14 +1295,11 @@ const reranked = await rerank(
 );
 
 // 3. Map back to full results, preserving reranker scores
-const rerankedIds = new Set(reranked.map(r => r.id));
+// Use Map for O(1) lookup instead of O(N) find per candidate
+const scoreMap = new Map(reranked.map(r => [r.id, r.score]));
 const results = candidates
-  .filter(c => rerankedIds.has(c.id))
-  .sort((a, b) => {
-    const aScore = reranked.find(r => r.id === a.id)!.score;
-    const bScore = reranked.find(r => r.id === b.id)!.score;
-    return bScore - aScore;
-  });
+  .filter(c => scoreMap.has(c.id))
+  .sort((a, b) => (scoreMap.get(b.id) ?? 0) - (scoreMap.get(a.id) ?? 0));
 ```
 
 **Graceful degradation:** If the reranker API call fails (timeout, rate limit, API error), fall back to the hybrid search results without reranking. Log the failure but don't block the agent run.
@@ -1146,9 +1341,19 @@ let embeddingInput = taskContext;
 
 if (taskContext.length < HYDE_THRESHOLD && taskContext.length >= MIN_QUERY_CONTEXT_LENGTH) {
   try {
-    const hypothetical = await generateHypotheticalMemory(taskContext, agentName);
-    if (hypothetical) {
-      embeddingInput = hypothetical;
+    // Cache HyDE results to avoid spamming LLM on repetitive queries
+    // ("check status", "follow up", etc.)
+    const cacheKey = `hyde:${createHash('sha256').update(taskContext + agentName).digest('hex').slice(0, 16)}`;
+    const cached = hydeCache.get(cacheKey);
+
+    if (cached) {
+      embeddingInput = cached;
+    } else {
+      const hypothetical = await generateHypotheticalMemory(taskContext, agentName);
+      if (hypothetical) {
+        embeddingInput = hypothetical;
+        hydeCache.set(cacheKey, hypothetical);
+      }
     }
   } catch (err) {
     // Fall back to original query -- HyDE is a best-effort optimisation
@@ -1194,6 +1399,34 @@ Respond with only the hypothetical memory entry, nothing else.`;
 - Original query text still used for keyword search (tsvector match)
 - Only the embedding is replaced with the HyDE output
 - Graceful degradation on failure
+- **In-memory cache with TTL** to avoid repeated LLM calls for identical/similar queries
+
+**HyDE cache:**
+
+```typescript
+// Simple TTL cache -- bounded size, auto-expiry
+// Module-level in workspaceMemoryService.ts
+const hydeCache = new Map<string, { value: string; expiresAt: number }>();
+const HYDE_CACHE_TTL_MS = 10 * 60 * 1000;  // 10 minutes
+const HYDE_CACHE_MAX_SIZE = 200;
+
+// Wrap with TTL-aware get/set
+function hydeCacheGet(key: string): string | undefined {
+  const entry = hydeCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiresAt) { hydeCache.delete(key); return undefined; }
+  return entry.value;
+}
+
+function hydeCacheSet(key: string, value: string): void {
+  if (hydeCache.size >= HYDE_CACHE_MAX_SIZE) {
+    // Evict oldest entry
+    const firstKey = hydeCache.keys().next().value;
+    if (firstKey) hydeCache.delete(firstKey);
+  }
+  hydeCache.set(key, { value, expiresAt: Date.now() + HYDE_CACHE_TTL_MS });
+}
+```
 
 #### Configuration
 
@@ -1277,18 +1510,61 @@ After each phase ships, re-run the same evaluation:
 
 ### Automated Monitoring
 
-Add structured log events for ongoing tracking:
+Add structured log events for ongoing tracking. **This is critical for tuning** -- without per-retrieval breakdowns, you cannot diagnose why a query returned poor results.
+
+**Retrieval breakdown event (emit on every memory retrieval):**
 
 ```typescript
 logger.info('memory_retrieval', {
   workspaceId,
   queryLength: taskContext.length,
+  retrievalProfile: 'general' | 'factual' | 'temporal',
   hydeUsed: boolean,
   rerankingUsed: boolean,
-  semanticCandidates: number,
-  keywordCandidates: number,
+  semanticCandidates: number,   // how many results from vector search
+  keywordCandidates: number,    // how many results from full-text search
+  overlapCount: number,         // how many appeared in both (validates fusion value)
   fusedResults: number,
   topScore: number,
+  bottomScore: number,          // score of worst returned result
+  latencyMs: number,
+  latencyBreakdown: {
+    hydeMs: number | null,      // null if HyDE not used
+    embeddingMs: number,
+    hybridQueryMs: number,
+    rerankMs: number | null,    // null if reranker disabled
+  },
+});
+```
+
+**Per-result source attribution (emit per result in debug mode):**
+
+```typescript
+logger.debug('memory_retrieval_result', {
+  workspaceId,
+  entryId: string,
+  semanticRank: number | null,  // null if only found via keyword
+  keywordRank: number | null,   // null if only found via semantic
+  rrfScore: number,
+  qualityScore: number,
+  recencyScore: number,
+  combinedScore: number,
+  source: 'semantic_only' | 'keyword_only' | 'both',  // which pipeline found it
+  hasEmbeddingContext: boolean,  // whether contextual retrieval was applied
+});
+```
+
+The `source` field is essential for understanding whether the hybrid search investment is paying off. If > 80% of results come from `semantic_only`, keyword search isn't adding value and weights need adjustment.
+
+**Context enrichment event:**
+
+```typescript
+logger.info('memory_context_enrichment', {
+  workspaceId,
+  batchSize: number,
+  successCount: number,
+  failureCount: number,
+  avgContextLength: number,
   latencyMs: number,
 });
 ```
@@ -1313,6 +1589,7 @@ This enables dashboarding retrieval quality over time without manual evaluation.
 | `client/src/components/TraceChainTimeline.tsx` | A1 | Component |
 | `migrations/0054_contextual_retrieval.sql` | B1 | Migration |
 | `migrations/0055_hybrid_search.sql` | B2 | Migration |
+| `migrations/0056_job_queue_stats.sql` | A2 | Migration |
 
 ### Modified Files
 
@@ -1348,6 +1625,36 @@ This enables dashboarding retrieval quality over time without manual evaluation.
 | HyDE adding latency to every short query (B4) | Only triggers for 20-100 char queries; uses Haiku (fast); conditional |
 | pg-boss internal table schema changes | Query pg-boss tables via documented API where possible; pin pg-boss version |
 | Migration on large existing datasets | tsvector GENERATED column backfills automatically; contextual retrieval backfill is batched and idempotent |
+| Memory drift (stale entries dominating results) | Access-based boosting + existing decay job mitigate; see cross-cutting concern below |
+
+---
+
+## Cross-Cutting Concern: Memory Drift Protection
+
+Improving retrieval quality (B1-B4) risks amplifying a latent problem: well-worded but stale entries can dominate results because they have high quality scores and strong embeddings, even when they're no longer accurate.
+
+The existing memory decay job (`memoryDecayJob.ts`) prunes entries older than 90 days with quality < 0.3 and access count < 3. This handles the bottom of the barrel but doesn't address "good but outdated" entries.
+
+**Mitigation (implement alongside B2):**
+
+1. **Access-based recency boost:** The `lastAccessedAt` field already tracks when an entry was last retrieved. Incorporate it into the combined score alongside `createdAt`:
+
+```typescript
+// In the hybrid search query, add access recency as a signal:
+// An entry accessed 2 days ago is more likely still relevant than one last accessed 60 days ago
+const accessRecencyScore = lastAccessedAt
+  ? 1.0 / (1.0 + daysSince(lastAccessedAt) / 30.0)
+  : 0.0;  // never accessed = no boost
+```
+
+This doesn't add weight -- it's folded into the existing recency component: use `MAX(createdAt, lastAccessedAt)` instead of just `createdAt` for the recency decay calculation. Entries that keep getting retrieved stay fresh; entries that haven't been retrieved in months naturally decay.
+
+2. **Surfacing drift in the UI:** On the WorkspaceMemoryPage Entries tab, add a "Stale" badge (amber) for entries that:
+   - Were created > 60 days ago
+   - Have quality score > 0.5 (so they're not already pruning candidates)
+   - Have access count < 2 (not being retrieved)
+
+This gives users visibility into entries that might need manual review without automating deletion of potentially valuable long-term knowledge.
 
 ---
 
