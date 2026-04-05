@@ -64,13 +64,10 @@ export const slackAdapter: IntegrationAdapter = {
         const accessToken = decryptAccessToken(connection);
         await getProviderRateLimiter('slack').acquire(connection.id);
 
-        const body: Record<string, unknown> = {
-          channel: channelId,
-          text,
-          ...(options?.blocks && { blocks: options.blocks }),
-          ...(options?.threadTs && { thread_ts: options.threadTs }),
-          ...(options?.unfurlLinks !== undefined && { unfurl_links: options.unfurlLinks }),
-        };
+        const body: Record<string, unknown> = { channel: channelId, text };
+        if (options?.blocks) body.blocks = options.blocks;
+        if (options?.threadTs) body.thread_ts = options.threadTs;
+        if (options?.unfurlLinks !== undefined) body.unfurl_links = options.unfurlLinks;
 
         const response = await axios.post(`${SLACK_API_BASE}/chat.postMessage`, body, {
           headers: getHeaders(accessToken),

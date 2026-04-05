@@ -130,18 +130,14 @@ export const teamworkAdapter: IntegrationAdapter = {
         const headers = getAuthHeaders(connection);
         await getProviderRateLimiter('teamwork').acquire(connection.id);
 
-        const body: Record<string, unknown> = {
-          subject: fields.subject as string,
-          ...(fields.previewText && { previewText: fields.previewText }),
-          ...(fields.status && { status: fields.status }),
-          ...(fields.priority && { priority: fields.priority }),
-          ...(fields.assignedTo && { assignedTo: fields.assignedTo }),
-          ...(fields.inboxId && { inboxId: fields.inboxId }),
-          ...(fields.customerEmail && {
-            customer: { email: fields.customerEmail as string },
-          }),
-          ...(fields.tags && { tags: fields.tags }),
-        };
+        const body: Record<string, unknown> = { subject: fields.subject as string };
+        if (fields.previewText) body.previewText = fields.previewText;
+        if (fields.status) body.status = fields.status;
+        if (fields.priority) body.priority = fields.priority;
+        if (fields.assignedTo) body.assignedTo = fields.assignedTo;
+        if (fields.inboxId) body.inboxId = fields.inboxId;
+        if (fields.customerEmail) body.customer = { email: fields.customerEmail as string };
+        if (fields.tags) body.tags = fields.tags;
 
         const response = await axios.post(`${baseUrl}/tickets.json`, { ticket: body }, {
           headers,

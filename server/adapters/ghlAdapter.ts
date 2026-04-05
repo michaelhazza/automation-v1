@@ -56,14 +56,12 @@ export const ghlAdapter: IntegrationAdapter = {
           lastName = parts.length > 1 ? parts.slice(1).join(' ') : undefined;
         }
 
-        const body: Record<string, unknown> = {
-          locationId,
-          ...(firstName && { firstName }),
-          ...(lastName && { lastName }),
-          ...(fields.email && { email: fields.email }),
-          ...(fields.phone && { phone: fields.phone }),
-          ...(fields.tags && { tags: fields.tags }),
-        };
+        const body: Record<string, unknown> = { locationId };
+        if (firstName) body.firstName = firstName;
+        if (lastName) body.lastName = lastName;
+        if (fields.email) body.email = fields.email;
+        if (fields.phone) body.phone = fields.phone;
+        if (fields.tags) body.tags = fields.tags;
 
         if (fields.pipelineStage) {
           const stage = fields.pipelineStage as { pipelineId?: string; stageId?: string };
