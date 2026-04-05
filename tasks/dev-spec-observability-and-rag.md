@@ -809,13 +809,24 @@ createWorker({
 
     for (const [entryId, context] of contexts) {
       const entry = entries.find(e => e.id === entryId);
+
+      // Idempotency guard: skip entries already enriched (handles retries + duplicate jobs)
+      if (entry.embeddingContext) continue;
+
       const embeddingInput = `${context}\n\n${entry.content}`;
 
       // Guard: cap embedding input size
       const trimmedInput = embeddingInput.slice(0, MAX_EMBEDDING_INPUT_CHARS);
 
       const embedding = await generateEmbedding(trimmedInput);
-      await updateEntry(entryId, { embeddingContext: context, embedding });
+
+      // Conditional update: only write if still NULL (race condition guard)
+      await db.update(workspaceMemoryEntries)
+        .set({ embeddingContext: context, embedding: formatVectorLiteral(embedding) })
+        .where(and(
+          eq(workspaceMemoryEntries.id, entryId),
+          isNull(workspaceMemoryEntries.embeddingContext)  // CAS guard
+        ));
     }
   },
 });
@@ -943,7 +954,7 @@ async function getRelevantMemories(
   const result = await db.execute(sql`
     WITH semantic AS (
       SELECT
-        id, content, entry_type, quality_score, created_at,
+        id, content, entry_type, quality_score, created_at, last_accessed_at,
         (embedding <=> ${formatVectorLiteral(queryEmbedding)}::vector) AS cosine_dist,
         ROW_NUMBER() OVER (
           ORDER BY embedding <=> ${formatVectorLiteral(queryEmbedding)}::vector
@@ -959,7 +970,7 @@ async function getRelevantMemories(
     ),
     fulltext AS (
       SELECT
-        id, content, entry_type, quality_score, created_at,
+        id, content, entry_type, quality_score, created_at, last_accessed_at,
         ts_rank_cd(tsv, plainto_tsquery('english', ${queryText})) AS ft_score,
         ROW_NUMBER() OVER (
           ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', ${queryText})) DESC
@@ -984,8 +995,11 @@ async function getRelevantMemories(
         -- RRF fusion (k=60)
         COALESCE(1.0 / (60 + s.rank), 0.0)
           + COALESCE(1.0 / (60 + f.rank), 0.0) AS rrf_score,
-        -- Recency decay (30-day half-life)
-        1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - COALESCE(s.created_at, f.created_at))) / 86400.0 / 30.0) AS recency_score
+        -- Recency decay (30-day half-life) using max of created/accessed to prevent drift
+        1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
+          COALESCE(s.created_at, f.created_at),
+          COALESCE(s.last_accessed_at, f.last_accessed_at, s.created_at, f.created_at)
+        ))) / 86400.0 / 30.0) AS recency_score
       FROM semantic s
       FULL OUTER JOIN fulltext f ON s.id = f.id
     )
@@ -1009,6 +1023,10 @@ async function getRelevantMemories(
     similarity: row.cosine_dist ? 1 - row.cosine_dist : null,
     rrf_score: row.rrf_score,
     combined_score: row.combined_score,
+    // Retrieval confidence based on source overlap (useful for agent decisioning)
+    confidence: (row.semantic_rank && row.keyword_rank) ? 'high'    // found by both pipelines
+              : row.rrf_score > 0.01                     ? 'medium'  // found by one with decent score
+              :                                            'low',
   }));
 }
 ```
@@ -1049,10 +1067,17 @@ fulltext AS (
 ...
 ```
 
+Use `GREATEST(created_at, last_accessed_at)` for ordering instead of just `created_at` -- this aligns with the memory drift protection and keeps frequently-accessed knowledge alive, not just recent inserts:
+
+```sql
+  ORDER BY GREATEST(created_at, COALESCE(last_accessed_at, created_at)) DESC
+  LIMIT ${MAX_MEMORY_SCAN}
+```
+
 This ensures:
 - Both sub-queries operate on the same bounded set (no divergent scans)
 - Total rows scanned per query is capped regardless of workspace size
-- The `ORDER BY created_at DESC` pre-filter favours recent entries (aligned with recency weighting)
+- Ordering favours both recent AND frequently-accessed entries (not just recency)
 
 Add to `server/config/limits.ts`:
 
@@ -1062,13 +1087,17 @@ export const MAX_MEMORY_SCAN = 1000;  // Hard cap on candidate pool for hybrid s
 
 #### Update `getMemoryForPrompt()` (around line 454)
 
-Pass `queryText` alongside `queryEmbedding`:
+Pass `queryText` alongside `queryEmbedding`, with size guard:
 
 ```typescript
+// Guard: cap query text size for plainto_tsquery safety (prevents very long inputs
+// and potential performance degradation in full-text parsing)
+const queryText = taskContext.slice(0, 500);
+
 const memories = await getRelevantMemories(
   workspaceId,
   embedding,
-  taskContext,  // NEW: pass raw text for full-text search
+  queryText,  // NEW: pass capped text for full-text search
   { taskSlug, qualityThreshold, limit }
 );
 ```
@@ -1221,19 +1250,27 @@ export async function rerank(
     // POST https://api.cohere.com/v2/rerank
     // model: 'rerank-v3.5'
     // query, documents, top_n, return_documents: false
-    const response = await fetch('https://api.cohere.com/v2/rerank', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: config.model ?? 'rerank-v3.5',
-        query,
-        documents: documents.map(d => d.content),
-        top_n: config.topN,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), RERANKER_TIMEOUT_MS);  // 500ms default
+
+    try {
+      const response = await fetch('https://api.cohere.com/v2/rerank', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: config.model ?? 'rerank-v3.5',
+          query,
+          documents: documents.map(d => d.content),
+          top_n: config.topN,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     const data = await response.json();
     return data.results.map((r: any) => ({
       id: documents[r.index].id,
@@ -1262,6 +1299,7 @@ export const RERANKER_PROVIDER = process.env.RERANKER_PROVIDER ?? 'none';  // 'c
 export const RERANKER_MODEL = process.env.RERANKER_MODEL ?? 'rerank-v3.5';
 export const RERANKER_TOP_N = 5;           // Final result count after reranking
 export const RERANKER_CANDIDATE_COUNT = 20; // Over-retrieve this many from hybrid search
+export const RERANKER_TIMEOUT_MS = 500;    // Abort reranker if slower than this
 ```
 
 **Environment variables:**
@@ -1427,6 +1465,8 @@ function hydeCacheSet(key: string, value: string): void {
   hydeCache.set(key, { value, expiresAt: Date.now() + HYDE_CACHE_TTL_MS });
 }
 ```
+
+**Multi-instance note:** This cache is per-process/per-instance. In a multi-instance deployment, duplicate LLM calls will occur across nodes for the same query. This is acceptable at current scale -- HyDE calls are cheap (Haiku) and infrequent (only short queries). If this becomes a problem at scale, promote to Redis or a shared cache layer.
 
 #### Configuration
 
