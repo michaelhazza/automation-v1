@@ -57,6 +57,9 @@ export const ORG_PERMISSIONS = {
   // Review
   REVIEW_VIEW: 'org.review.view',
   REVIEW_APPROVE: 'org.review.approve',
+  // MCP Servers
+  MCP_SERVERS_VIEW: 'org.mcp_servers.view',
+  MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -179,6 +182,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.review
   { key: SUBACCOUNT_PERMISSIONS.REVIEW_VIEW,    description: 'View review queue in portal',              groupName: 'subaccount.review' },
   { key: SUBACCOUNT_PERMISSIONS.REVIEW_APPROVE, description: 'Approve or reject review items in portal', groupName: 'subaccount.review' },
+  // org.mcp_servers
+  { key: ORG_PERMISSIONS.MCP_SERVERS_VIEW,   description: 'View MCP server configurations',              groupName: 'org.mcp_servers' },
+  { key: ORG_PERMISSIONS.MCP_SERVERS_MANAGE, description: 'Create/edit/delete MCP server configurations', groupName: 'org.mcp_servers' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

@@ -427,6 +427,32 @@ export const agentExecutionService = {
         return tool;
       });
 
+      // ── 5b. MCP tool resolution ────────────────────────────────────────
+      let mcpClients: Map<string, import('./mcpClientManager.js').McpClientInstance> | null = null;
+      let mcpLazyRegistry: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null = null;
+
+      try {
+        const { mcpClientManager } = await import('./mcpClientManager.js');
+        const mcp = await mcpClientManager.connectForRun({
+          runId,
+          organisationId: request.organisationId,
+          agentId: request.agentId,
+          subaccountId: request.subaccountId ?? null,
+        });
+        mcpClients = mcp.clients;
+        mcpLazyRegistry = mcp.lazyRegistry;
+        if (mcp.tools.length > 0) {
+          // Defense in depth: cap is also enforced in connectForRun
+          const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
+          const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
+          enhancedTools.push(...cappedTools);
+          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
+        }
+      } catch (err) {
+        logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        // Non-fatal — agent runs without MCP tools
+      }
+
       // ── 6. Build task context (with smart offloading) ───────────────────
       let workspaceContext = '';
       let targetItem: typeof tasks.$inferSelect | null = null;
@@ -657,6 +683,8 @@ export const agentExecutionService = {
             orgProcesses,
             saLink: saLink!,
             pipeline,
+            mcpClients,
+            mcpLazyRegistry,
           });
 
           // ── Finalize Langfuse trace (inside withTrace so context is available) ──
@@ -804,6 +832,14 @@ export const agentExecutionService = {
         });
       }
 
+      // ── 12. MCP cleanup (guaranteed) ────────────────────────────────────
+      if (mcpClients?.size) {
+        const { mcpClientManager } = await import('./mcpClientManager.js');
+        await mcpClientManager.disconnectAll(mcpClients).catch((e) => {
+          logger.error('mcp.disconnect_failed', { runId: run.id, error: e instanceof Error ? e.message : String(e) });
+        });
+      }
+
       return {
         runId: run.id,
         status: finalStatus as AgentRunResult['status'],
@@ -875,6 +911,8 @@ interface LoopParams {
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   saLink: typeof subaccountAgents.$inferSelect;
   pipeline: MiddlewarePipeline;
+  mcpClients?: Map<string, import('./mcpClientManager.js').McpClientInstance> | null;
+  mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null;
 }
 
 interface LoopResult {
@@ -937,7 +975,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
-    saLink, pipeline,
+    saLink, pipeline, mcpClients, mcpLazyRegistry,
   } = params;
 
   const toolCallsLog: object[] = [];
@@ -1196,6 +1234,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             startTime,
             timeoutMs,
             taskId: request.taskId,
+            _mcpClients: mcpClients ?? undefined,
+            _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
           },
         });
       }, { actionType: toolCall.name });
