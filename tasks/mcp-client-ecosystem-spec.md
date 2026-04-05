@@ -217,6 +217,8 @@ export const mcpServerConfigs = pgTable(
 
     // Priority — higher values = tools from this server are preferred when tool limit is hit
     priority: integer('priority').notNull().default(0),
+    // Max concurrent tool calls to this server (default 1 for single-threaded servers)
+    maxConcurrency: integer('max_concurrency').notNull().default(1),
 
     // Status
     status: text('status').notNull().default('active')
@@ -243,6 +245,10 @@ export const mcpServerConfigs = pgTable(
     lastToolsRefreshAt: timestamp('last_tools_refresh_at', { withTimezone: true }),
     // Count of tools that failed schema validation (for admin visibility)
     rejectedToolCount: integer('rejected_tool_count').default(0),
+
+    // Circuit breaker state
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    circuitOpenUntil: timestamp('circuit_open_until', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -316,6 +322,7 @@ CREATE TABLE mcp_server_configs (
   default_gate_level TEXT NOT NULL DEFAULT 'auto',
   tool_gate_overrides JSONB,
   priority INTEGER NOT NULL DEFAULT 0,
+  max_concurrency INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'active',
   last_connected_at TIMESTAMPTZ,
   last_error TEXT,
@@ -323,6 +330,8 @@ CREATE TABLE mcp_server_configs (
   discovered_tools_hash TEXT,
   last_tools_refresh_at TIMESTAMPTZ,
   rejected_tool_count INTEGER DEFAULT 0,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  circuit_open_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -710,6 +719,155 @@ export const MAX_MCP_CALLS_PER_RUN = 10;  // separate from MAX_TOOL_CALLS to pre
 Tracked in `mcpClientManager.callTool()` via a counter on the run context. When exceeded, return a structured error to the agent: `"MCP tool call limit reached (10/10). Use internal skills or request a budget increase."`
 
 This works alongside the existing `maxToolCallsPerRun` limit — MCP calls count toward both the MCP-specific limit and the total tool call limit.
+
+#### Per-Server Concurrency Control
+
+Some MCP servers are single-threaded or rely on shared state. Concurrent calls can cause corruption or race conditions.
+
+Add a per-server semaphore (default concurrency: 1):
+
+```typescript
+interface McpClientInstance {
+  client: Client;
+  transport: StdioClientTransport;
+  serverSlug: string;
+  tools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>;
+  semaphore: Semaphore;  // NEW — controls max concurrent calls to this server
+}
+```
+
+In `connectForRun`, initialise with the default:
+
+```typescript
+const semaphore = new Semaphore(serverConfig.maxConcurrency ?? 1);
+```
+
+In `callTool`, wrap the MCP call:
+
+```typescript
+const result = await instance.semaphore.acquire(async () => {
+  return client.callTool({ name: toolName, arguments: args });
+});
+```
+
+Add `maxConcurrency` field to `mcp_server_configs` (integer, default 1, nullable). Admins can increase for servers known to handle parallelism (e.g. stateless HTTP servers).
+
+#### Output Size Guard
+
+MCP servers can return arbitrarily large responses. Guard against massive payloads before passing results to the LLM or tracing system.
+
+```typescript
+const MAX_MCP_RESPONSE_SIZE = 100_000; // 100KB
+
+function guardMcpOutput(result: unknown): { data: unknown; truncated: boolean } {
+  const serialised = JSON.stringify(result);
+  if (serialised.length <= MAX_MCP_RESPONSE_SIZE) {
+    return { data: result, truncated: false };
+  }
+
+  // Truncate to limit + append notice
+  const truncated = serialised.slice(0, MAX_MCP_RESPONSE_SIZE);
+  logger.warn('mcp.output_truncated', { size: serialised.length, limit: MAX_MCP_RESPONSE_SIZE });
+
+  return {
+    data: truncated + '\n[... response truncated at 100KB]',
+    truncated: true,
+  };
+}
+```
+
+Applied in `callTool()` after receiving the MCP response, before returning to the agent. The `truncated` flag is recorded on the action for observability.
+
+#### Idempotency Key Passthrough
+
+MCP tool calls that mutate external state (send_email, create_contact, etc.) risk duplicate execution on retry. Pass the action ID as an idempotency hint.
+
+```typescript
+const mcpArgs = {
+  ...args,
+  _meta: {
+    idempotencyKey: actionId,  // unique per action record
+  },
+};
+
+const result = await client.callTool({ name: toolName, arguments: mcpArgs });
+```
+
+The `_meta.idempotencyKey` field is a convention — MCP servers that support idempotency can use it; others will ignore it. This is forward-compatible with emerging MCP server patterns.
+
+The action record itself already enforces idempotency on the Automation OS side (via `actionService.proposeAction` with idempotency keys). This extends that guarantee to the external system where possible.
+
+#### Circuit Breaker
+
+Prevent wasting agent run time on servers that are consistently failing.
+
+Track on `mcp_server_configs`:
+
+```typescript
+consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+circuitOpenUntil: timestamp('circuit_open_until', { withTimezone: true }),
+```
+
+Logic in `connectForRun`:
+
+```typescript
+// Skip server if circuit is open
+if (config.circuitOpenUntil && config.circuitOpenUntil > new Date()) {
+  logger.info('mcp.circuit_open', { serverSlug: config.slug, until: config.circuitOpenUntil });
+  continue; // skip this server, proceed with others
+}
+
+try {
+  await connect(config);
+  // Reset on success
+  await resetCircuit(config.id);
+} catch (err) {
+  await incrementFailure(config.id);
+  // Open circuit after 3 consecutive failures — back off for 5 minutes
+  if (config.consecutiveFailures + 1 >= 3) {
+    await openCircuit(config.id, new Date(Date.now() + 5 * 60 * 1000));
+  }
+}
+```
+
+Circuit states:
+- **Closed** (normal): `consecutiveFailures < 3` — connect normally
+- **Open** (backing off): `circuitOpenUntil > now` — skip server entirely
+- **Half-open** (probe): `circuitOpenUntil <= now` — try once, reset or re-open
+
+The UI shows circuit state on server cards: "Circuit open — retrying in 3m" with the option to manually reset.
+
+#### Warm Tool Cache
+
+Avoid redundant `tools/list` calls when discovered tools haven't changed.
+
+In `connectForRun`, after connecting to the server:
+
+```typescript
+const cacheAge = config.lastToolsRefreshAt
+  ? Date.now() - config.lastToolsRefreshAt.getTime()
+  : Infinity;
+
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+let tools: McpToolDefinition[];
+
+if (cacheAge < CACHE_TTL && config.discoveredToolsJson?.length) {
+  // Use cached tools — skip tools/list call
+  tools = config.discoveredToolsJson;
+} else {
+  // Discover fresh tools
+  tools = await client.listTools();
+  const newHash = createHash('sha256').update(JSON.stringify(tools)).digest('hex');
+
+  // Only write to DB if tools actually changed
+  if (newHash !== config.discoveredToolsHash) {
+    await updateDiscoveredTools(config.id, tools, newHash);
+  }
+}
+```
+
+This reduces per-run latency by ~200-500ms per cached server and eliminates redundant DB writes when tools haven't changed. The 5-minute TTL is conservative — tune based on observed server stability.
 
 #### Credential Injection
 
