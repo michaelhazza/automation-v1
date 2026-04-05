@@ -11,7 +11,8 @@ import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { db } from '../db/index.js';
 import { subaccounts } from '../db/schema/index.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, checkOrgPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId, getProviderClientSecret } from '../config/oauthProviders.js';
 import { integrationConnectionService } from '../services/integrationConnectionService.js';
@@ -39,6 +40,16 @@ router.get(
 
     if (!provider || (!subaccountId && !isOrgLevel)) {
       throw Object.assign(new Error('provider and either subaccountId or scope=org are required'), { statusCode: 400 });
+    }
+
+    // Org-level OAuth requires org.connections.manage permission
+    if (isOrgLevel) {
+      const hasPermission = await checkOrgPermission(
+        req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.CONNECTIONS_MANAGE,
+      );
+      if (!hasPermission) {
+        throw Object.assign(new Error('Forbidden: org.connections.manage permission required'), { statusCode: 403 });
+      }
     }
 
     const config = OAUTH_PROVIDERS[provider];

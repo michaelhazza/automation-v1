@@ -118,9 +118,12 @@ export const integrationConnectionService = {
 
     const [updated] = await db.update(integrationConnections)
       .set(updates)
-      .where(eq(integrationConnections.id, id))
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+      ))
       .returning();
-    return sanitizeConnection(updated);
+    return updated ? sanitizeConnection(updated) : null;
   },
 
   async revokeOrgConnection(id: string, organisationId: string) {
@@ -135,7 +138,10 @@ export const integrationConnectionService = {
 
     await db.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, id));
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+      ));
     return true;
   },
   /**
@@ -159,11 +165,10 @@ export const integrationConnectionService = {
     ];
 
     // For subaccount-scoped lookups, filter by subaccountId.
-    // For org-level lookups (null subaccountId), rely on connectionId or org+provider match.
+    // For org-level lookups (null subaccountId), always restrict to org-scoped connections.
     if (subaccountId) {
       conditions.push(eq(integrationConnections.subaccountId, subaccountId));
-    } else if (!connectionId) {
-      // Org-level lookup without connectionId: find connections with null subaccountId
+    } else {
       conditions.push(isNull(integrationConnections.subaccountId));
     }
 
@@ -298,7 +303,26 @@ export const integrationConnectionService = {
         .set(updateSet)
         .where(eq(integrationConnections.id, existing.id));
     } else {
-      await db.insert(integrationConnections).values(insertValues);
+      try {
+        await db.insert(integrationConnections).values(insertValues);
+      } catch (err: unknown) {
+        // Handle race condition: concurrent OAuth callback already inserted
+        const isUniqueViolation = (err as { code?: string }).code === '23505';
+        if (isUniqueViolation) {
+          // Re-query and update the row that won the race
+          const [raceWinner] = await db.select({ id: integrationConnections.id })
+            .from(integrationConnections)
+            .where(and(...conditions))
+            .limit(1);
+          if (raceWinner) {
+            await db.update(integrationConnections)
+              .set(updateSet)
+              .where(eq(integrationConnections.id, raceWinner.id));
+          }
+        } else {
+          throw err;
+        }
+      }
     }
   },
 };
