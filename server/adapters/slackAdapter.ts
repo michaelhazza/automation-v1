@@ -5,9 +5,11 @@ import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import type {
   IntegrationAdapter,
   NormalisedEvent,
+  MessageSendOptions,
   MessageSendResult,
   MessageChannelData,
 } from './integrationAdapter.js';
+import { classifyAdapterError } from './integrationAdapter.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const SLACK_API_BASE = 'https://slack.com/api';
@@ -58,7 +60,7 @@ export const slackAdapter: IntegrationAdapter = {
       connection: IntegrationConnection,
       channelId: string,
       text: string,
-      options?: Record<string, unknown>,
+      options?: MessageSendOptions,
     ): Promise<MessageSendResult> {
       try {
         const accessToken = decryptAccessToken(connection);
@@ -76,13 +78,12 @@ export const slackAdapter: IntegrationAdapter = {
 
         const data = response.data as { ok?: boolean; ts?: string; error?: string };
         if (!data.ok) {
-          return { messageId: '', success: false, error: `Slack API error: ${data.error}` };
+          return { messageId: '', success: false, error: { code: 'provider_error', retryable: false, message: `Slack API error: ${data.error}` } };
         }
 
         return { messageId: data.ts ?? '', success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { messageId: '', success: false, error: `Slack sendMessage failed: ${message}` };
+        return { messageId: '', success: false, error: classifyAdapterError(err, 'slack', 'sendMessage') };
       }
     },
 
@@ -142,11 +143,15 @@ export const slackAdapter: IntegrationAdapter = {
       const teamId = (wrapper.team_id as string) ?? '';
       const channelId = (event.channel as string) ?? '';
 
+      // Slack event_id is globally unique per event delivery
+      const externalEventId = (wrapper.event_id as string) ?? `${eventType}:${event.ts ?? Date.now()}`;
+
       return {
         eventType: mapping.normalisedType,
         accountExternalId: teamId,
         entityType: mapping.entityType,
         entityExternalId: channelId,
+        externalEventId,
         data: wrapper,
         timestamp: new Date(),
         sourceTimestamp: event.ts ? new Date(Number(event.ts as string) * 1000) : undefined,

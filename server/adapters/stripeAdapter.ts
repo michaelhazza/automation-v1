@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { connectionTokenService } from '../services/connectionTokenService.js';
-import type { IntegrationAdapter } from './integrationAdapter.js';
+import type { IntegrationAdapter, PaymentsCreateCheckoutInput } from './integrationAdapter.js';
+import { classifyAdapterError } from './integrationAdapter.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const STRIPE_API_BASE = 'https://api.stripe.com/v1';
@@ -10,26 +11,24 @@ export const stripeAdapter: IntegrationAdapter = {
   supportedActions: ['create_checkout', 'get_payment_status'],
 
   payments: {
-    async createCheckout(connection: IntegrationConnection, fields: Record<string, unknown>) {
+    async createCheckout(connection: IntegrationConnection, fields: PaymentsCreateCheckoutInput) {
       try {
         if (!connection.secretsRef) {
-          return { checkoutUrl: '', sessionId: '', success: false, error: 'Connection has no secret key configured' };
+          return { checkoutUrl: '', sessionId: '', success: false, error: { code: 'auth_error' as const, retryable: false, message: 'Connection has no secret key configured' } };
         }
 
         const secretKey = connectionTokenService.decryptToken(connection.secretsRef);
 
-        const amount = fields.amount as number;
-        const currency = (fields.currency as string) || 'usd';
-        const productName = (fields.productName as string) || 'Purchase';
-        const successUrl = fields.successUrl as string;
-        const cancelUrl = fields.cancelUrl as string;
+        const { amount, successUrl, cancelUrl } = fields;
+        const currency = fields.currency || 'usd';
+        const productName = fields.productName || 'Purchase';
 
         if (!amount || !successUrl || !cancelUrl) {
           return {
             checkoutUrl: '',
             sessionId: '',
             success: false,
-            error: 'Missing required fields: amount, successUrl, cancelUrl',
+            error: { code: 'validation_error' as const, retryable: false, message: 'Missing required fields: amount, successUrl, cancelUrl' },
           };
         }
 
@@ -57,15 +56,14 @@ export const stripeAdapter: IntegrationAdapter = {
           success: true,
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { checkoutUrl: '', sessionId: '', success: false, error: `Stripe createCheckout failed: ${message}` };
+        return { checkoutUrl: '', sessionId: '', success: false, error: classifyAdapterError(err, 'stripe', 'createCheckout') };
       }
     },
 
     async getPaymentStatus(connection: IntegrationConnection, sessionId: string) {
       try {
         if (!connection.secretsRef) {
-          return { status: 'failed' as const, success: false, error: 'Connection has no secret key configured' };
+          return { status: 'failed' as const, success: false, error: { code: 'auth_error' as const, retryable: false, message: 'Connection has no secret key configured' } };
         }
 
         const secretKey = connectionTokenService.decryptToken(connection.secretsRef);
@@ -94,8 +92,7 @@ export const stripeAdapter: IntegrationAdapter = {
 
         return { status, success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { status: 'failed' as const, success: false, error: `Stripe getPaymentStatus failed: ${message}` };
+        return { status: 'failed' as const, success: false, error: classifyAdapterError(err, 'stripe', 'getPaymentStatus') };
       }
     },
   },

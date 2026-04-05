@@ -5,11 +5,14 @@ import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 import type {
   IntegrationAdapter,
   NormalisedEvent,
+  TicketCreateInput,
+  TicketUpdateInput,
   TicketCreateResult,
   TicketUpdateResult,
   TicketReplyResult,
   TicketData,
 } from './integrationAdapter.js';
+import { classifyAdapterError } from './integrationAdapter.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 const TIMEOUT_MS = 12_000;
@@ -18,11 +21,16 @@ const TIMEOUT_MS = 12_000;
 // Helpers
 // ---------------------------------------------------------------------------
 
+const SITE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 function getBaseUrl(connection: IntegrationConnection): string {
   const config = connection.configJson as Record<string, unknown> | null;
   const siteName = config?.siteName as string | undefined;
   if (!siteName) {
     throw { statusCode: 400, message: 'No siteName in connection config — required for Teamwork Desk API' };
+  }
+  if (!SITE_NAME_PATTERN.test(siteName)) {
+    throw { statusCode: 400, message: 'Invalid Teamwork siteName format — must be lowercase alphanumeric with hyphens' };
   }
   return `https://${siteName}.teamwork.com/desk/v1`;
 }
@@ -123,20 +131,20 @@ export const teamworkAdapter: IntegrationAdapter = {
   ticketing: {
     async createTicket(
       connection: IntegrationConnection,
-      fields: Record<string, unknown>,
+      fields: TicketCreateInput,
     ): Promise<TicketCreateResult> {
       try {
         const baseUrl = getBaseUrl(connection);
         const headers = getAuthHeaders(connection);
         await getProviderRateLimiter('teamwork').acquire(connection.id);
 
-        const body: Record<string, unknown> = { subject: fields.subject as string };
+        const body: Record<string, unknown> = { subject: fields.subject };
         if (fields.previewText) body.previewText = fields.previewText;
         if (fields.status) body.status = fields.status;
         if (fields.priority) body.priority = fields.priority;
         if (fields.assignedTo) body.assignedTo = fields.assignedTo;
         if (fields.inboxId) body.inboxId = fields.inboxId;
-        if (fields.customerEmail) body.customer = { email: fields.customerEmail as string };
+        if (fields.customerEmail) body.customer = { email: fields.customerEmail };
         if (fields.tags) body.tags = fields.tags;
 
         const response = await axios.post(`${baseUrl}/tickets.json`, { ticket: body }, {
@@ -150,15 +158,14 @@ export const teamworkAdapter: IntegrationAdapter = {
           success: true,
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ticketId: '', success: false, error: `Teamwork createTicket failed: ${message}` };
+        return { ticketId: '', success: false, error: classifyAdapterError(err, 'teamwork', 'createTicket') };
       }
     },
 
     async updateTicket(
       connection: IntegrationConnection,
       ticketId: string,
-      fields: Record<string, unknown>,
+      fields: TicketUpdateInput,
     ): Promise<TicketUpdateResult> {
       try {
         const baseUrl = getBaseUrl(connection);
@@ -179,8 +186,7 @@ export const teamworkAdapter: IntegrationAdapter = {
 
         return { success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { success: false, error: `Teamwork updateTicket failed: ${message}` };
+        return { success: false, error: classifyAdapterError(err, 'teamwork', 'updateTicket') };
       }
     },
 
@@ -212,8 +218,7 @@ export const teamworkAdapter: IntegrationAdapter = {
           success: true,
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { replyId: '', success: false, error: `Teamwork addReply failed: ${message}` };
+        return { replyId: '', success: false, error: classifyAdapterError(err, 'teamwork', 'addReply') };
       }
     },
 
@@ -278,11 +283,17 @@ export const teamworkAdapter: IntegrationAdapter = {
       // accountExternalId maps to the inbox or installation — use inboxId if available
       const inboxId = ticket?.inboxId ? String(ticket.inboxId) : '';
 
+      // Use eventId from payload for deduplication, fall back to eventType:ticketId
+      const externalEventId = event.eventId
+        ? String(event.eventId)
+        : `${eventType}:${ticketId}:${Date.now()}`;
+
       return {
         eventType: mapping.normalisedType,
         accountExternalId: inboxId,
         entityType: mapping.entityType,
         entityExternalId: ticketId,
+        externalEventId,
         data: event,
         timestamp: new Date(),
         sourceTimestamp: ticket?.createdAt ? new Date(ticket.createdAt as string) : undefined,
