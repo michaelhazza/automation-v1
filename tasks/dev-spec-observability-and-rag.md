@@ -249,6 +249,7 @@ interface RelatedWorkflow {
 │ Trace Chain                          [collapse] │
 │                                                  │
 │ Total: 4 runs · 12.4s · 8,421 tokens            │
+│ Critical path: 10.6s (longest sequential chain)  │
 │                                                  │
 │ ● Scheduler trigger                    10:04:02  │
 │ ├─ ✓ Lead Qualifier (depth 0)    3.2s   2,100t  │
@@ -266,7 +267,8 @@ Visual elements:
 - Tree structure using CSS border-left lines with indentation per depth
 - Status icons: `✓` completed (green), `✗` failed (red), `◐` running (blue pulse), `○` pending (grey), `⏸` paused (amber)
 - Currently selected run highlighted with indigo background
-- Aggregate stats at top: total runs, total duration, total tokens
+- Aggregate stats at top: total runs, total duration, total tokens, critical path duration
+- **Critical path duration:** The longest sequential chain through the tree (sum of durations along the path from root to deepest leaf, excluding parallel sub-agents). This shows the real wall-clock bottleneck -- parallel sub-agents inflate total duration but don't affect critical path. Computed client-side from the chain data.
 - Workflow section at bottom (only shown if related workflows exist)
 - Click any run to load its detail in the main panel (client-side navigation, no page reload)
 
@@ -499,6 +501,7 @@ Expandable panel showing DLQ jobs for a selected queue:
   - Confirmation dialog with warning: "Retrying may cause duplicate side effects if the original job partially completed. Proceed?"
   - If the job payload contains an `idempotencyKey`, check whether a completed job with that key already exists before re-enqueuing
   - If a matching completed job is found, show an additional warning: "A job with this idempotency key already completed. Retry anyway?"
+  - **Soft lock on repeated failures:** If the same job has been retried from DLQ more than 2 times (track via a `dlq_retry_count` field in the job payload), disable the retry button and show "Max retries exhausted -- manual investigation required". This prevents retry hammering on fundamentally broken jobs.
 - Pagination: 20 per page
 
 **Section 3: Job Search**
@@ -778,12 +781,14 @@ Phase 2 (async job, non-blocking):
 
 ```typescript
 // In extractRunInsights(), after inserting entries:
+// Job-level dedup key prevents duplicate enrichment during ingestion spikes
+const jobKey = `ctx-enrich:${insertedIds.sort().join(',')}`;
 await pgBossSend('memory-context-enrichment', {
   entryIds: insertedIds,
   runSummary,
   agentName,
   taskTitle,
-});
+}, { singletonKey: jobKey });
 ```
 
 **New job: `memory-context-enrichment`**
@@ -1047,6 +1052,24 @@ async function getRelevantMemories(
     ORDER BY combined_score DESC
     LIMIT ${limit}
   `);
+
+  // Safety fallback: if RRF_MIN_SCORE filtering removed all results, fall back to
+  // top semantic-only results rather than returning empty memory context
+  if (result.rows.length === 0) {
+    logger.warn('rrf_empty_after_filter', { workspaceId, queryLength: queryText.length });
+    const fallback = await db.execute(sql`
+      SELECT id, content, entry_type, quality_score, created_at,
+        (embedding <=> ${formatVectorLiteral(queryEmbedding)}::vector) AS cosine_dist
+      FROM candidate_pool
+      WHERE embedding IS NOT NULL
+      ORDER BY embedding <=> ${formatVectorLiteral(queryEmbedding)}::vector
+      LIMIT ${limit}
+    `);
+    return fallback.rows.map(row => ({
+      id: row.id, content: row.content, entryType: row.entry_type,
+      rrf_score: null, combined_score: null, source_count: 0, confidence: 'low' as const,
+    }));
+  }
 
   return result.rows.map(row => ({
     id: row.id,
