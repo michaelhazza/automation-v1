@@ -1,6 +1,10 @@
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { orgMemories, orgMemoryEntries } from '../db/schema/index.js';
+import {
+  RRF_K, RRF_MIN_SCORE, MAX_MEMORY_SCAN, MAX_QUERY_TEXT_CHARS,
+  VECTOR_SEARCH_RECENCY_DAYS, RRF_WEIGHTS, MAX_EMBEDDING_INPUT_CHARS,
+} from '../config/limits.js';
 
 // Re-use scoring from workspace memory
 const VALID_ENTRY_TYPES = ['observation', 'decision', 'preference', 'issue', 'pattern'];
@@ -183,24 +187,83 @@ export const orgMemoryService = {
   },
 
   /**
-   * Semantic search across org memory entries.
+   * Hybrid search across org memory entries using RRF (Phase B2).
    */
   async getRelevantInsights(
     organisationId: string,
     queryEmbedding: number[],
+    queryText?: string,
     scopeTags?: Record<string, string>,
     limit = 5
   ) {
+    const vectorLiteral = `[${queryEmbedding.join(',')}]`;
+    const safeQueryText = (queryText ?? '').slice(0, MAX_QUERY_TEXT_CHARS);
+    const weights = RRF_WEIGHTS.general;
+    const overRetrieveLimit = limit * 4;
+
+    // Check for valid tsquery
+    let hasValidTsquery = false;
+    if (safeQueryText) {
+      const tsqCheck = await db.execute<{ q: string }>(
+        sql`SELECT plainto_tsquery('english', ${safeQueryText})::text AS q`
+      );
+      hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
+    }
+
+    const fullTextCte = hasValidTsquery
+      ? sql`
+        , fulltext AS (
+          SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
+            ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', ${safeQueryText})) DESC
+          )) AS rrf_component
+          FROM candidate_pool
+          WHERE tsv @@ plainto_tsquery('english', ${safeQueryText})
+          LIMIT ${overRetrieveLimit}
+        )`
+      : sql``;
+
+    const fullTextUnion = hasValidTsquery
+      ? sql`UNION ALL SELECT id, rrf_component FROM fulltext`
+      : sql``;
+
     const results = await db.execute(sql`
+      WITH candidate_pool AS (
+        SELECT id, content, entry_type, scope_tags, quality_score, evidence_count,
+               created_at, last_accessed_at, embedding, tsv
+        FROM org_memory_entries
+        WHERE organisation_id = ${organisationId}
+          AND created_at >= NOW() - INTERVAL '${VECTOR_SEARCH_RECENCY_DAYS} days'
+        ORDER BY GREATEST(created_at, COALESCE(last_accessed_at, created_at)) DESC
+        LIMIT ${MAX_MEMORY_SCAN}
+      ),
+      semantic AS (
+        SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
+          ORDER BY embedding <=> ${vectorLiteral}::vector
+        )) AS rrf_component
+        FROM candidate_pool
+        WHERE embedding IS NOT NULL
+        LIMIT ${overRetrieveLimit}
+      )
+      ${fullTextCte}
+      , rrf_scores AS (
+        SELECT id, rrf_component FROM semantic
+        ${fullTextUnion}
+      ),
+      fused AS (
+        SELECT r.id, SUM(r.rrf_component) AS rrf_score, COUNT(*) AS source_count
+        FROM rrf_scores r GROUP BY r.id
+      )
       SELECT
-        id, content, entry_type, scope_tags, quality_score, evidence_count, created_at,
-        (1 - (embedding <=> ${queryEmbedding}::vector)) * 0.60 +
-        COALESCE(quality_score, 0.5) * 0.25 +
-        (1.0 / (1.0 + EXTRACT(EPOCH FROM (now() - created_at)) / 86400 / 30)) * 0.15
-        AS combined_score
-      FROM org_memory_entries
-      WHERE organisation_id = ${organisationId}
-        AND embedding IS NOT NULL
+        f.id, cp.content, cp.entry_type, cp.scope_tags, cp.quality_score,
+        cp.evidence_count, cp.created_at, f.rrf_score, f.source_count,
+        f.rrf_score * ${weights.rrf}
+          + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
+          + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
+              cp.created_at, COALESCE(cp.last_accessed_at, cp.created_at)
+            ))) / 86400.0 / 30.0)) * ${weights.recency} AS combined_score
+      FROM fused f
+      JOIN candidate_pool cp ON cp.id = f.id
+      WHERE f.rrf_score >= ${RRF_MIN_SCORE}
       ORDER BY combined_score DESC
       LIMIT ${limit}
     `);

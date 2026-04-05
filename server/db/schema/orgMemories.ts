@@ -60,6 +60,7 @@ export const orgMemoryEntries = pgTable(
     scopeTags: jsonb('scope_tags').$type<Record<string, string>>(),
     qualityScore: real('quality_score').notNull().default(0.5),
     embedding: vector('embedding'),
+    embeddingContext: text('embedding_context'),
     evidenceCount: integer('evidence_count').notNull().default(1),
     includedInSummary: boolean('included_in_summary').notNull().default(false),
     accessCount: integer('access_count').notNull().default(0),

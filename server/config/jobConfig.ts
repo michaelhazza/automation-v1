@@ -89,6 +89,14 @@ export const JOB_CONFIG = {
     expireInSeconds: 120,
   },
 
+  // ── Tier 4: Memory enrichment (async, non-critical) ────────────
+  'memory-context-enrichment': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+  },
+
   // ── Already configured (kept for single source of truth) ────────
   'page-integration': {
     retryLimit: 3,

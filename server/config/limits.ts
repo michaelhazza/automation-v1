@@ -138,7 +138,7 @@ export const PROVIDER_COOLDOWN_MS = 60000;
 /** Max memory entries returned by vector search */
 export const VECTOR_SEARCH_LIMIT = 5;
 
-/** Minimum cosine similarity for a result to be included */
+/** Minimum cosine similarity for a result to be included (legacy, used as fallback) */
 export const VECTOR_SIMILARITY_THRESHOLD = 0.75;
 
 /** Only search entries created within this many days */
@@ -149,6 +149,66 @@ export const ABBREVIATED_SUMMARY_LENGTH = 500;
 
 /** Minimum task context length (chars) required to run vector search */
 export const MIN_QUERY_CONTEXT_LENGTH = 20;
+
+// ── Hybrid Search / RRF (Phase B2) ────────────────────────────────────────
+
+/** Retrieve N * multiplier from each source for RRF fusion */
+export const RRF_OVER_RETRIEVE_MULTIPLIER = 4;
+
+/** RRF constant k (higher = more weight to lower-ranked results) */
+export const RRF_K = 60;
+
+/** Minimum RRF score to include in results (drops low-quality tail) */
+export const RRF_MIN_SCORE = 0.005;
+
+/** Hard cap on candidate pool for hybrid search */
+export const MAX_MEMORY_SCAN = 1000;
+
+/** Max chars for embedding input (context + content) */
+export const MAX_EMBEDDING_INPUT_CHARS = 2000;
+
+/** Max chars for query text passed to plainto_tsquery */
+export const MAX_QUERY_TEXT_CHARS = 500;
+
+/** Scoring weights per retrieval profile */
+export const RRF_WEIGHTS = {
+  general:  { rrf: 0.70, quality: 0.15, recency: 0.15 },
+  factual:  { rrf: 0.80, quality: 0.15, recency: 0.05 },
+  temporal: { rrf: 0.50, quality: 0.10, recency: 0.40 },
+} as const;
+
+export type RetrievalProfile = keyof typeof RRF_WEIGHTS;
+
+// ── Reranking (Phase B3) ──────────────────────────────────────────────────
+
+/** Reranker provider: 'cohere' | 'none' */
+export const RERANKER_PROVIDER = (process.env.RERANKER_PROVIDER ?? 'none') as 'cohere' | 'none';
+
+/** Reranker model name */
+export const RERANKER_MODEL = process.env.RERANKER_MODEL ?? 'rerank-v3.5';
+
+/** Final result count after reranking */
+export const RERANKER_TOP_N = 5;
+
+/** Over-retrieve this many from hybrid search before reranking */
+export const RERANKER_CANDIDATE_COUNT = 20;
+
+/** Abort reranker if slower than this (ms) */
+export const RERANKER_TIMEOUT_MS = 500;
+
+/** Max rerank API calls per agent run */
+export const RERANKER_MAX_CALLS_PER_RUN = 3;
+
+// ── Query Expansion / HyDE (Phase B4) ─────────────────────────────────────
+
+/** Queries shorter than this (chars) trigger HyDE */
+export const HYDE_THRESHOLD = 100;
+
+/** Model for HyDE generation */
+export const HYDE_MODEL = 'claude-haiku-4-5-20251001';
+
+/** Max tokens for HyDE response */
+export const HYDE_MAX_TOKENS = 200;
 
 // ── Phase 1A: HITL review gate ───────────────────────────────────────────────
 
