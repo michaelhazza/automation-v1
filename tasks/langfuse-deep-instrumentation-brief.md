@@ -942,6 +942,125 @@ metadata.instrumentationVersion: "1.0"
 
 ---
 
+## Appendix A: Updates from Main (pg-boss hardening + Zod rollout)
+
+The following changes landed on main after the initial brief was written. They affect implementation approach and create new observability opportunities.
+
+### A.1 What Changed
+
+| Change | Files | Impact on this spec |
+|--------|-------|-------------------|
+| **Singleton pg-boss instance** | `server/lib/pgBossInstance.ts` | Replaces per-service lazy loading. Tracing context for queue jobs should be set up via the singleton, not per-service. |
+| **Centralised job config** | `server/config/jobConfig.ts` | All queue names, retry limits, backoff, expiration, and DLQ mappings in one place. Our naming registry (Section 7.2) should include queue job span names aligned with these queue names. |
+| **Job error classification** | `server/lib/jobErrors.ts` | `isNonRetryable()`, `isTimeoutError()`, `getRetryCount()`, `withTimeout()`, `safeSerialize()`. These directly map to our error taxonomy (Section 7.5). Reuse these classifications in Langfuse spans. |
+| **DLQ monitoring** | `server/services/dlqMonitorService.ts` | All DLQ queues now have workers that log structured errors with `organisationId`, `agentId`, `subaccountId`. This is a natural place to emit Langfuse events for dead-lettered jobs. |
+| **Structured logging in workers** | `agentScheduleService.ts`, `queueService.ts` | Workers now log `job_retry`, `job_non_retryable_failure`, `job_timeout` with `jobId` and `retryCount`. These log events should have corresponding Langfuse events. |
+| **Deterministic idempotency keys** | `agentScheduleService.ts` | Scheduled runs use `scheduled:${subaccountAgentId}:${jobId}`, handoffs use `handoff:${agentId}:${jobId}`. These keys should be included in trace metadata for cross-referencing. |
+| **Zod validation middleware** | `server/middleware/validate.ts`, `server/schemas/*.ts` | Route-level validation with `'warn'` and `'enforce'` modes. Validation failures in warn mode are logged but not rejected — these should emit Langfuse events when they occur on agent-related routes. |
+
+### A.2 Spec Adjustments Required
+
+**1. Error taxonomy (Section 7.5) — align with jobErrors.ts**
+
+The new `jobErrors.ts` introduces error classification that our Langfuse error taxonomy should reuse directly:
+
+| jobErrors.ts function | Maps to error taxonomy |
+|----------------------|----------------------|
+| `isNonRetryable(err)` (4xx status codes) | `validation_error` (400, 422), `internal_error` (401, 403, 404, 409) |
+| `isTimeoutError(err)` | `timeout` |
+| `getRetryCount(job) > 0` | Not an error type — but should be metadata: `retryCount` on the span |
+
+**Implementation note:** Don't duplicate classification logic. The tracing helpers should call `isNonRetryable()` and `isTimeoutError()` from `jobErrors.ts` rather than re-implementing.
+
+**2. Naming registry (Section 7.2) — add queue job spans**
+
+Add to the registry:
+
+```
+# Queue job spans
+queue.job.scheduled          # Scheduled agent run job processing
+queue.job.handoff            # Handoff job processing
+queue.job.triggered          # Triggered run job processing
+queue.job.execution          # Execution queue job processing
+queue.job.workflow_resume    # Workflow resume job processing
+
+# Queue job events
+queue.job.retry              # Job being retried (with retryCount)
+queue.job.non_retryable      # Job failed with non-retryable error, sent to DLQ
+queue.job.timeout            # Job handler timed out
+queue.job.dlq                # Job landed in dead letter queue
+```
+
+**3. Cross-system correlation (Section 14.2) — use pg-boss jobId**
+
+The pg-boss `jobId` is now logged consistently across all workers. Add it to Langfuse trace metadata:
+
+```
+metadata.pgBossJobId: job.id
+metadata.idempotencyKey: "scheduled:${subaccountAgentId}:${jobId}"
+```
+
+This enables: Langfuse trace → pg-boss job ID → application logs → DLQ records. Complete correlation chain.
+
+**4. DLQ monitoring — add Langfuse events**
+
+`dlqMonitorService.ts` already has the right data shape (queue, jobId, organisationId, agentId, subaccountId, payload). Add a Langfuse event emission alongside the existing `logger.error`:
+
+```typescript
+// In DLQ worker handler — alongside existing logger.error
+createEvent('queue.job.dlq', {
+  queue: sourceQueue,
+  jobId: job.id,
+  organisationId: payload.organisationId,
+  agentId: payload.agentId,
+});
+```
+
+**Note:** DLQ events happen outside a trace context (no active run). These should create standalone traces or be emitted as top-level events. This is a design decision for Phase 3 — DLQ events linked to the original run's sessionId if available.
+
+**5. Zod validation warnings — optional observability**
+
+Routes now use `validateBody(schema, 'warn')` which logs but doesn't reject. If validation fails on an agent-related route (e.g., agent creation, run trigger), it could indicate payload drift that affects agent behaviour.
+
+**Low priority** — add this only if validation warnings become a debugging concern. For now, the `logger.warn('validation_warn', ...)` in `validate.ts` is sufficient.
+
+**6. withTimeout wrapper — trace timeout separately**
+
+All job handlers now use `withTimeout(promise, ms)`. When a timeout fires, it throws a specific error (`timed out after ${ms}ms`). The tracing helpers should detect this pattern and:
+- Set span `level: ERROR`
+- Set `metadata.errorType: 'timeout'`
+- Set `metadata.timeoutMs` to the configured limit
+- Include `metadata.retryCount` from `getRetryCount(job)`
+
+**7. Implementation approach — leverage singleton**
+
+The new `getPgBoss()` singleton creates a single integration point. For Phase 3 (cross-run session linking), the trace context for queue-processed runs can be set up in one place — wrapping the singleton's worker registration — rather than modifying each individual worker.
+
+Conceptually:
+```typescript
+// Wrapper around boss.work() that sets up trace context for every job
+function instrumentedWork(boss, queueName, handler) {
+  boss.work(queueName, async (job) => {
+    const trace = langfuse.trace({ name: 'queue.job.*', ... });
+    await withTrace(trace, () => handler(job));
+  });
+}
+```
+
+This is an implementation detail for the technical spec, not this brief — but the singleton pattern makes it clean.
+
+### A.3 No Changes Required
+
+The following aspects of the spec remain valid and do not need updates:
+
+- **Trace tree structure (Workstream 1)** — the hierarchy is unchanged. Queue jobs are an entry point to `agentExecutionService.executeRun()`, which is already the instrumentation target.
+- **Skill pipeline (Workstream 4)** — no changes to skill executor.
+- **Memory/RAG (Workstream 5)** — no changes to memory service.
+- **Standardisation layer (Section 7)** — the contract, naming, cardinality, sampling, and performance budget sections are all still valid. The new queue infrastructure aligns with rather than conflicts with these.
+- **Success criteria (Section 9)** — the Top 5 Questions and debug view design are unaffected.
+
+---
+
 ## Spec Status: Final
 
 This brief is complete. No further additions recommended — the risk of overengineering now exceeds the risk of missing something.
