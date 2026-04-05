@@ -181,6 +181,9 @@ export const mcpServerConfigs = pgTable(
       .notNull()
       .references(() => organisations.id),
 
+    // Preset reference — links to MCP_PRESETS config for upgrade path
+    presetSlug: text('preset_slug'),           // matches McpPreset.slug; null if somehow orphaned
+
     // Display
     name: text('name').notNull(),              // "Gmail", "Slack", "HubSpot"
     slug: text('slug').notNull(),              // "gmail", "slack", "hubspot" — used in tool namespacing
@@ -324,6 +327,7 @@ export const mcpServerAgentLinks = pgTable(
 CREATE TABLE mcp_server_configs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organisation_id UUID NOT NULL REFERENCES organisations(id),
+  preset_slug TEXT,
   name TEXT NOT NULL,
   slug TEXT NOT NULL,
   description TEXT,
@@ -1236,7 +1240,7 @@ Full-page admin view for managing MCP server connections. Two tabs: **My Servers
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  MCP Servers                                     [+ Custom Server] │
+│  MCP Servers                                                       │
 │  Connect external tool servers to expand agent capabilities       │
 ├─────────────────────────────────────────────────────────────────┤
 │  [My Servers]  [Catalogue]                                        │
@@ -1254,8 +1258,8 @@ Full-page admin view for managing MCP server connections. Two tabs: **My Servers
 │  └──────────────────────┘  └──────────────────────┘             │
 │                                                                   │
 │  No servers? Show empty state:                                    │
-│  "No MCP servers configured yet. Browse the catalogue to add     │
-│   your first integration, or add a custom server."                │
+│  "No integrations configured yet. Browse the catalogue to add    │
+│   your first integration."                                        │
 │                                                                   │
 │  ── CATALOGUE tab ────────────────────────────────────────────── │
 │                                                                   │
@@ -1484,14 +1488,6 @@ GET /api/mcp-presets?category=crm        — filter by category
 
 No auth required beyond `authenticate` — presets are public knowledge within an org.
 
-#### Custom Server Flow (unchanged)
-
-The "+ Custom Server" button opens the existing create/edit modal with all fields empty and editable. This is for advanced users who want to connect servers not in the catalogue.
-
-The two flows coexist:
-- **Catalogue** → guided, pre-filled, opinionated (most users)
-- **Custom** → raw, flexible, full control (power users)
-
 #### Server Card Component
 
 Each card displays:
@@ -1512,121 +1508,93 @@ const MCP_STATUS_STYLES: Record<string, string> = {
 };
 ```
 
-#### Create/Edit Modal
+#### Add Integration Modal (from Catalogue)
 
-Triggered by "+ Add Server" button or card "Edit" button. Uses the existing `Modal` component.
+Triggered by "+ Add to Org" on a catalogue card. Name, slug, description, command, args, and transport are pre-filled from the preset and **not editable** — the user only configures credentials and gates.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Add MCP Server                              [×] │
+│  Add Gmail                                   [×] │
 ├─────────────────────────────────────────────────┤
 │                                                   │
-│  Name *                                           │
+│  Send, read, and search emails via Google Gmail.  │
+│  Tools: send_email, read_inbox, search_messages,  │
+│         read_thread, list_labels                  │
+│                                                   │
+│  ── Connection ────────────────────────────────── │
+│                                                   │
 │  ┌─────────────────────────────────────────────┐ │
-│  │ Gmail                                       │ │
+│  │ ⓘ This integration requires a Gmail OAuth    │ │
+│  │   connection. At runtime, the subaccount's   │ │
+│  │   connection is used. If unavailable, falls  │ │
+│  │   back to the org-level connection.          │ │
+│  │                                               │ │
+│  │   Org connection: ✓ Connected                │ │
+│  │   [Manage Connections →]                     �� │
 │  └─────────────────────────────────────────────┘ │
 │                                                   │
-│  Slug * (used in tool namespacing: mcp.<slug>.)   │
+│  Environment Variables (optional, KEY=VALUE)      │
 │  ┌─────────────────────────────────────────────┐ │
-│  │ gmail                                       │ │
+│  │                                             │ │
 │  └─────────────────────────────────────────────┘ │
+│  ⓘ Only needed if the server requires extra       │
+│    config beyond OAuth (e.g. API keys).           │
+│    Values are encrypted at rest.                  │
 │                                                   │
-│  Description                                      │
+│  ── Gate Level ────────────────────────────────── │
+│                                                   │
+│  Default Gate Level                               │
 │  ┌─────────────────────────────────────────────┐ │
-│  │ Google Gmail integration for email          │ │
-│  └─────────────────────────────────────────────┘ │
-│                                                   │
-│  Transport *                                      │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ stdio                              ▼        │ │
-│  └─────────────────────────────────────────────┘ │
-│                                                   │
-│  ── stdio config ──────────────────────────────── │
-│                                                   │
-│  Command *                                        │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ npx                                         │ │
-│  └─────────────────────────────────────────────┘ │
-│                                                   │
-│  Arguments (one per line)                         │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ -y                                          │ │
-│  │ @anthropic/gmail-mcp-server                 │ │
-│  └─────────────────────────────────────────────┘ │
-│                                                   │
-│  Environment Variables (KEY=VALUE, one per line)  │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ GMAIL_CLIENT_ID=xxx                         │ │
-│  │ GMAIL_CLIENT_SECRET=yyy                     │ │
-│  └─────────────────────────────────────────────┘ │
-│  ⓘ Values are encrypted at rest                   │
-│                                                   │
-│  ── Credential resolution ─────────────────────── │
-│                                                   │
-│  Credential Provider (optional)                   │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ gmail                               ▼       │ │
-│  └─────────────────────────────────────────────┘ │
-│  ⓘ At runtime, looks up the subaccount's           │
-│    connection for this provider. Falls back to     │
-│    org-level connection if subaccount has none.    │
-│                                                   │
-│  Fixed Connection Override (optional)             │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ None — use dynamic resolution       ▼       │ │
-│  └─────────────────────────────────────────────┘ │
-│  ⓘ Force a specific connection (e.g. shared API   │
-│    key). Overrides per-subaccount lookup.          │
-│                                                   │
-│  ── Gate & filtering ──────────────────────────── │
-│                                                   │
-│  Default Gate Level *                             │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ auto                               ▼        │ │
+│  │ review (recommended)                ▼       │ │
 │  └─────────────────────────────────────────────┘ │
 │  ⓘ auto = execute immediately                     │
 │  ⓘ review = require human approval                │
 │  ⓘ block = deny all tool calls                    │
 │                                                   │
-│  Status                                           │
-│  ┌─────────────────────────────────────────────┐ │
-│  │ active                             ▼        │ │
-│  └─────────────────────────────────────────────┘ │
-│                                                   │
-│          [Cancel]              [Save Server]       │
+│         [Cancel]            [Add Integration]     │
 └─────────────────────────────────────────────────┘
 ```
 
-**Conditional fields:**
-- When `transport === 'stdio'`: show Command, Arguments fields
-- When `transport === 'http'`: show Endpoint URL field instead
-- Integration Connection dropdown: populated from `GET /api/org-connections` (org-level connections)
+#### Edit Modal
 
-**Form state:**
+For already-added servers, the edit modal shows the same fields (env vars, gate level, status toggle) but **not** the preset-owned fields (name, command, args). Preset updates come via app releases, not admin edits.
+
+```
+┌─────────────────────────────────────────────────┐
+│  Gmail Settings                              [×] │
+├─────────────────────────────────────────────────┤
+│                                                   │
+│  Environment Variables (KEY=VALUE, one per line)  │
+│  ┌─────────────────────────────────────────────┐ │
+│  │                                             │ │
+│  └─────────────────────────────────────────────┘ │
+│  ⓘ Values are encrypted at rest                   │
+│                                                   │
+│  Default Gate Level                               │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ review                              ▼       │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│  Status                                           │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ active                              ▼       │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│         [Cancel]               [Save Changes]     │
+└─────────────────────────────────────────────────┘
+```
+
+**Form state** (user-editable fields only — preset fields are read-only):
 ```typescript
 interface McpServerForm {
-  name: string;
-  slug: string;
-  description: string;
-  transport: 'stdio' | 'http';
-  command: string;           // stdio only
-  args: string;              // textarea, split by newline
-  endpointUrl: string;       // http only
-  envVars: string;              // textarea, KEY=VALUE per line
-  credentialProvider: string;   // optional, dropdown of provider types
-  fixedConnectionId: string;    // optional, dropdown of org connections
+  presetSlug: string;                           // which preset this came from
+  envVars: string;                              // textarea, KEY=VALUE per line (optional)
   defaultGateLevel: 'auto' | 'review' | 'block';
   status: 'active' | 'disabled';
 }
 ```
 
-**Slug auto-generation:** When creating, auto-generate slug from name (lowercase, hyphens replaced with underscores, special chars stripped). Allow manual override.
-
-**Validation:**
-- Name required, max 100 chars
-- Slug required, must match `^[a-z0-9_]+$`, max 50 chars
-- Command required when transport is stdio
-- Endpoint URL required when transport is http
+All other fields (name, slug, description, transport, command, args, credentialProvider) come from the preset and are stored on creation but not editable. Preset updates flow via app releases — the `presetSlug` field allows matching server configs to updated presets for future upgrade paths.
 
 #### Test Connection Flow
 
