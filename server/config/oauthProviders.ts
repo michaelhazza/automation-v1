@@ -52,6 +52,14 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
     tokenUrl: 'https://services.leadconnectorhq.com/oauth/token',
     scopes: ['contacts.readonly', 'contacts.write', 'opportunities.readonly'],
   },
+
+  teamwork: {
+    authUrl: 'https://www.teamwork.com/launchpad/login',
+    tokenUrl: 'https://www.teamwork.com/launchpad/v1/token.json',
+    // TODO: Teamwork Desk scopes must be configured before production use.
+    // See https://apidocs.teamwork.com/docs/teamwork-rest-api for available scopes.
+    scopes: [],
+  },
 };
 
 // ---------------------------------------------------------------------------

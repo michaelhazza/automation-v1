@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { connectionTokenService } from '../services/connectionTokenService.js';
 import type {
   IntegrationAdapter,
+  CrmCreateContactInput,
   CanonicalAccountData,
   CanonicalContactData,
   CanonicalOpportunityData,
@@ -11,7 +12,8 @@ import type {
   NormalisedEvent,
   FetchOptions,
 } from './integrationAdapter.js';
-import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
+import { classifyAdapterError } from './integrationAdapter.js';
+import type { IntegrationConnection } from '../db/schema/index.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const TIMEOUT_MS = 12_000;
@@ -37,17 +39,17 @@ export const ghlAdapter: IntegrationAdapter = {
 
   // ── Outbound CRM actions (existing) ──────────────────────────────────────
   crm: {
-    async createContact(connection: IntegrationConnection, fields: Record<string, unknown>) {
+    async createContact(connection: IntegrationConnection, fields: CrmCreateContactInput) {
       try {
         const accessToken = decryptAccessToken(connection);
         const config = connection.configJson as Record<string, unknown> | null;
         const locationId = config?.locationId as string | undefined;
 
         if (!locationId) {
-          return { contactId: '', success: false, error: 'No locationId in connection config' };
+          return { contactId: '', success: false, error: { code: 'validation_error' as const, retryable: false, message: 'No locationId in connection config' } };
         }
 
-        const name = fields.name as string | undefined;
+        const name = fields.name;
         let firstName: string | undefined;
         let lastName: string | undefined;
         if (name) {
@@ -56,14 +58,12 @@ export const ghlAdapter: IntegrationAdapter = {
           lastName = parts.length > 1 ? parts.slice(1).join(' ') : undefined;
         }
 
-        const body: Record<string, unknown> = {
-          locationId,
-          ...(firstName && { firstName }),
-          ...(lastName && { lastName }),
-          ...(fields.email && { email: fields.email }),
-          ...(fields.phone && { phone: fields.phone }),
-          ...(fields.tags && { tags: fields.tags }),
-        };
+        const body: Record<string, unknown> = { locationId };
+        if (firstName) body.firstName = firstName;
+        if (lastName) body.lastName = lastName;
+        if (fields.email) body.email = fields.email;
+        if (fields.phone) body.phone = fields.phone;
+        if (fields.tags) body.tags = fields.tags;
 
         if (fields.pipelineStage) {
           const stage = fields.pipelineStage as { pipelineId?: string; stageId?: string };
@@ -80,8 +80,7 @@ export const ghlAdapter: IntegrationAdapter = {
         const contactId = (response.data as { contact?: { id?: string } })?.contact?.id ?? '';
         return { contactId, success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { contactId: '', success: false, error: `GHL createContact failed: ${message}` };
+        return { contactId: '', success: false, error: classifyAdapterError(err, 'ghl', 'createContact') };
       }
     },
   },
@@ -245,11 +244,18 @@ export const ghlAdapter: IntegrationAdapter = {
       const mapping = mapGhlEventType(eventType);
       if (!mapping) return null;
 
+      const entityExternalId = (event.id as string) ?? (event.contactId as string) ?? '';
+      const sourceTs = event.dateAdded ? String(event.dateAdded) : event.dateUpdated ? String(event.dateUpdated) : '';
+      const externalEventId = event.traceId
+        ? String(event.traceId)
+        : `${eventType}:${entityExternalId}:${sourceTs}`;
+
       return {
         eventType: mapping.normalisedType,
         accountExternalId: locationId,
         entityType: mapping.entityType,
-        entityExternalId: (event.id as string) ?? (event.contactId as string) ?? '',
+        entityExternalId,
+        externalEventId,
         data: event,
         timestamp: new Date(),
         sourceTimestamp: event.dateAdded ? new Date(event.dateAdded as string) : undefined,

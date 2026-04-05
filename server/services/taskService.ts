@@ -215,7 +215,7 @@ export const taskService = {
     if (!existing) throw { statusCode: 404, message: 'Task not found' };
 
     if (data.status && data.status !== existing.status) {
-      await this._validateStatus(organisationId, existing.subaccountId, data.status);
+      await this._validateStatus(organisationId, existing.subaccountId!, data.status);
     }
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -271,13 +271,13 @@ export const taskService = {
         createdAt: new Date(),
       });
 
-      emitSubaccountUpdate(existing.subaccountId, 'task:status_changed', {
+      emitSubaccountUpdate(existing.subaccountId!, 'task:status_changed', {
         taskId: id, from: existing.status, to: data.status,
       });
 
       // Wake the orchestrator when a subtask reaches a terminal or blocked state (non-blocking)
       if (data.status === 'done' || data.status === 'blocked') {
-        subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId, existing.organisationId, data.status).catch((err: unknown) => {
+        subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId!, existing.organisationId, data.status).catch((err: unknown) => {
           logger.error('task.subtask_wakeup_failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
         });
       }
@@ -294,7 +294,7 @@ export const taskService = {
 
     if (!existing) throw { statusCode: 404, message: 'Task not found' };
 
-    await this._validateStatus(organisationId, existing.subaccountId, data.status);
+    await this._validateStatus(organisationId, existing.subaccountId!, data.status);
 
     const statusChanged = data.status !== existing.status;
 
@@ -315,7 +315,7 @@ export const taskService = {
       });
 
       // Fire task_moved triggers (non-blocking)
-      triggerService.checkAndFire(existing.subaccountId, existing.organisationId, 'task_moved', {
+      triggerService.checkAndFire(existing.subaccountId!, existing.organisationId, 'task_moved', {
         taskId: id,
         from: existing.status,
         to: data.status,
@@ -330,7 +330,7 @@ export const taskService = {
 
       // Wake the orchestrator when a subtask reaches a terminal or blocked state (non-blocking)
       if (data.status === 'done' || data.status === 'blocked') {
-        subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId, existing.organisationId, data.status).catch((err: unknown) => {
+        subtaskWakeupService.notifySubtaskCompleted(id, existing.subaccountId!, existing.organisationId, data.status).catch((err: unknown) => {
           logger.error('task.subtask_wakeup_failed', { taskId: id, error: err instanceof Error ? err.message : String(err) });
         });
       }

@@ -75,6 +75,7 @@ export async function executeAssignTask(
     subaccountId: context.subaccountId,
     subaccountAgentId: saLink.sa.id,
     organisationId: context.organisationId,
+    executionScope: 'subaccount' as const,
     runType: 'triggered' as const,
     executionMode: 'api' as const,
     triggerContext: {

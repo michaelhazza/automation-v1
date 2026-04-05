@@ -227,7 +227,11 @@ export const canonicalDataService = {
   }) {
     const [event] = await db
       .insert(anomalyEvents)
-      .values(data)
+      .values({
+        ...data,
+        currentValue: String(data.currentValue),
+        baselineValue: String(data.baselineValue),
+      } as typeof anomalyEvents.$inferInsert)
       .returning();
     return event;
   },
@@ -264,11 +268,11 @@ export const canonicalDataService = {
         target: [canonicalAccounts.connectorConfigId, canonicalAccounts.externalId],
         set: {
           displayName: data.displayName,
-          status: (data.status as 'active') ?? 'active',
+          status: (data.status as 'active' | 'inactive' | 'suspended') ?? 'active',
           externalMetadata: data.externalMetadata,
           lastSyncAt: new Date(),
           updatedAt: new Date(),
-        },
+        } as typeof canonicalAccounts.$inferInsert,
       })
       .returning();
     return result;
@@ -286,10 +290,10 @@ export const canonicalDataService = {
   }) {
     await db
       .insert(canonicalContacts)
-      .values({ organisationId, accountId, ...data })
+      .values({ organisationId, accountId, ...data } as typeof canonicalContacts.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalContacts.accountId, canonicalContacts.externalId],
-        set: { ...data, updatedAt: new Date() },
+        set: { ...data, updatedAt: new Date() } as typeof canonicalContacts.$inferInsert,
       });
   },
 
@@ -306,10 +310,10 @@ export const canonicalDataService = {
   }) {
     await db
       .insert(canonicalOpportunities)
-      .values({ organisationId, accountId, ...data })
+      .values({ organisationId, accountId, ...data } as typeof canonicalOpportunities.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalOpportunities.accountId, canonicalOpportunities.externalId],
-        set: { ...data, updatedAt: new Date() },
+        set: { ...data, updatedAt: new Date() } as typeof canonicalOpportunities.$inferInsert,
       });
   },
 
@@ -324,10 +328,10 @@ export const canonicalDataService = {
   }) {
     await db
       .insert(canonicalConversations)
-      .values({ organisationId, accountId, ...data })
+      .values({ organisationId, accountId, ...data } as typeof canonicalConversations.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalConversations.accountId, canonicalConversations.externalId],
-        set: { ...data, updatedAt: new Date() },
+        set: { ...data, updatedAt: new Date() } as typeof canonicalConversations.$inferInsert,
       });
   },
 
@@ -341,10 +345,10 @@ export const canonicalDataService = {
   }) {
     await db
       .insert(canonicalRevenue)
-      .values({ organisationId, accountId, ...data })
+      .values({ organisationId, accountId, ...data } as typeof canonicalRevenue.$inferInsert)
       .onConflictDoUpdate({
         target: [canonicalRevenue.accountId, canonicalRevenue.externalId],
-        set: { ...data, updatedAt: new Date() },
+        set: { ...data, updatedAt: new Date() } as typeof canonicalRevenue.$inferInsert,
       });
   },
 };

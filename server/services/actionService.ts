@@ -348,7 +348,7 @@ async function resolveGateLevel(
   // 1. Policy engine — first-match, with registry default as fallback
   const policyDecision = await policyEngineService.evaluatePolicy({
     toolSlug: input.actionType,
-    subaccountId: input.subaccountId,
+    subaccountId: input.subaccountId!,
     organisationId: input.organisationId,
     input: input.payload,
   });
