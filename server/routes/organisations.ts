@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { organisationService } from '../services/organisationService.js';
-import { parsePositiveInt } from '../middleware/validate.js';
+import { parsePositiveInt, validateBody } from '../middleware/validate.js';
+import { createOrganisationBody, updateOrganisationBody } from '../schemas/organisations.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
@@ -15,7 +16,7 @@ router.get('/api/organisations', authenticate, requireSystemAdmin, asyncHandler(
   res.json(result);
 }));
 
-router.post('/api/organisations', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.post('/api/organisations', authenticate, requireSystemAdmin, validateBody(createOrganisationBody, 'warn'), asyncHandler(async (req, res) => {
   const { name, slug, plan, adminEmail, adminFirstName, adminLastName } = req.body;
   if (!name || !slug || !plan || !adminEmail || !adminFirstName || !adminLastName) {
     res.status(400).json({ error: 'Validation failed' });
@@ -38,7 +39,7 @@ router.get('/api/organisations/:id', authenticate, requireSystemAdmin, asyncHand
   res.json(result);
 }));
 
-router.patch('/api/organisations/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.patch('/api/organisations/:id', authenticate, requireSystemAdmin, validateBody(updateOrganisationBody, 'warn'), asyncHandler(async (req, res) => {
   const result = await organisationService.updateOrganisation(req.params.id, req.body);
   res.json(result);
 }));

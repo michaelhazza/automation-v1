@@ -2,6 +2,11 @@ import { db } from '../db/index.js';
 import { llmRequests, budgetReservations, costAggregates } from '../db/schema/index.js';
 import { eq, and, lt, sql } from 'drizzle-orm';
 import { costAggregateService } from './costAggregateService.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { getJobConfig } from '../config/jobConfig.js';
+import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
+import { logger } from '../lib/logger.js';
+import { env } from '../lib/env.js';
 
 // ---------------------------------------------------------------------------
 // Router job service — manages async jobs for the LLM router
@@ -19,39 +24,17 @@ const JOB_RECONCILE            = 'llm-reconcile-reservations';
 const JOB_CLEAN_AGGREGATES     = 'llm-clean-old-aggregates';
 const JOB_MONTHLY_INVOICES     = 'llm-monthly-invoices';
 
-// Lazily resolved pg-boss instance (shared with queueService)
-let pgBoss: {
-  send(name: string, data?: object, opts?: object): Promise<string | null>;
-  work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
-  schedule(name: string, cron: string, data?: object, opts?: object): Promise<void>;
-} | null = null;
-
-async function getPgBoss() {
-  if (pgBoss) return pgBoss;
-
-  const { env } = await import('../lib/env.js');
-  if (env.JOB_QUEUE_BACKEND !== 'pg-boss') return null;
-
-  const PgBossModule = await import('pg-boss');
-  const PgBossClass = (PgBossModule.default ?? PgBossModule) as unknown as new (connectionString: string) => typeof pgBoss & { start(): Promise<void> };
-  const instance = new PgBossClass(env.DATABASE_URL);
-  await instance.start();
-  pgBoss = instance;
-  return pgBoss;
-}
-
 // ---------------------------------------------------------------------------
 // Enqueue aggregate update after each LLM request
 // ---------------------------------------------------------------------------
 
 export async function enqueueAggregateUpdate(idempotencyKey: string): Promise<void> {
-  const boss = await getPgBoss();
-  if (boss) {
-    await boss.send(JOB_AGGREGATE_UPDATE, { idempotencyKey });
-  } else {
-    // In-memory fallback: run immediately
+  if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
     await processAggregateUpdate(idempotencyKey);
+    return;
   }
+  const boss = await getPgBoss();
+  await boss.send(JOB_AGGREGATE_UPDATE, { idempotencyKey }, getJobConfig('llm-aggregate-update'));
 }
 
 async function processAggregateUpdate(idempotencyKey: string): Promise<void> {
@@ -215,17 +198,37 @@ async function generateInvoiceForSubaccount(subaccountId: string, period: string
 // ---------------------------------------------------------------------------
 
 export async function initializeRouterJobs(): Promise<void> {
-  const boss = await getPgBoss();
-  if (!boss) {
-    console.info('[routerJobService] pg-boss not configured — router jobs run in-process');
+  if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
+    logger.info('router_jobs_skipped', { reason: 'pg-boss not configured — router jobs run in-process' });
     return;
   }
 
+  const boss = await getPgBoss();
+  const workOpts = { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 };
+
   // Register workers
-  await boss.work(JOB_AGGREGATE_UPDATE, async (job) => {
-    const idempotencyKey = String(job.data.idempotencyKey ?? '');
-    if (!idempotencyKey) return;
-    await processAggregateUpdate(idempotencyKey);
+
+  // Aggregate update — Tier 2, has retries
+  await (boss as any).work(JOB_AGGREGATE_UPDATE, workOpts, async (job: any) => {
+    const retryCount = getRetryCount(job);
+    if (retryCount > 0) {
+      logger.warn('job_retry', { queue: JOB_AGGREGATE_UPDATE, jobId: job.id, retryCount });
+    }
+    try {
+      const idempotencyKey = String(job.data.idempotencyKey ?? '');
+      if (!idempotencyKey) return;
+      await withTimeout(processAggregateUpdate(idempotencyKey), 30_000); // 60 - 30
+    } catch (err) {
+      if (isNonRetryable(err)) {
+        logger.error('job_non_retryable_failure', { queue: JOB_AGGREGATE_UPDATE, jobId: job.id, error: String(err) });
+        await (boss as any).fail(job.id);
+        return;
+      }
+      if (isTimeoutError(err)) {
+        logger.error('job_timeout', { queue: JOB_AGGREGATE_UPDATE, jobId: job.id, retryCount });
+      }
+      throw err;
+    }
   });
 
   // Schedule recurring jobs
@@ -237,11 +240,38 @@ export async function initializeRouterJobs(): Promise<void> {
     // schedule() may fail if already registered — safe to ignore
   }
 
-  await boss.work(JOB_RECONCILE,        async () => { await reconcileReservations(); });
-  await boss.work(JOB_CLEAN_AGGREGATES, async () => { await cleanOldAggregates(); });
-  await boss.work(JOB_MONTHLY_INVOICES, async () => { await generateMonthlyInvoices(); });
+  // Reconcile reservations — Tier 2, no retries, just timeout
+  await (boss as any).work(JOB_RECONCILE, workOpts, async () => {
+    await withTimeout(reconcileReservations(), 60_000); // 90 - 30
+  });
 
-  console.info('[routerJobService] Router jobs registered');
+  // Clean old aggregates — Tier 3, no retries, just timeout
+  await (boss as any).work(JOB_CLEAN_AGGREGATES, workOpts, async () => {
+    await withTimeout(cleanOldAggregates(), 90_000); // 120 - 30
+  });
+
+  // Monthly invoices — Tier 2, has retries
+  await (boss as any).work(JOB_MONTHLY_INVOICES, workOpts, async (job: any) => {
+    const retryCount = getRetryCount(job);
+    if (retryCount > 0) {
+      logger.warn('job_retry', { queue: JOB_MONTHLY_INVOICES, jobId: job.id, retryCount });
+    }
+    try {
+      await withTimeout(generateMonthlyInvoices(), 570_000); // 600 - 30
+    } catch (err) {
+      if (isNonRetryable(err)) {
+        logger.error('job_non_retryable_failure', { queue: JOB_MONTHLY_INVOICES, jobId: job.id, error: String(err) });
+        await (boss as any).fail(job.id);
+        return;
+      }
+      if (isTimeoutError(err)) {
+        logger.error('job_timeout', { queue: JOB_MONTHLY_INVOICES, jobId: job.id, retryCount });
+      }
+      throw err;
+    }
+  });
+
+  logger.info('router_jobs_registered', { jobs: [JOB_AGGREGATE_UPDATE, JOB_RECONCILE, JOB_CLEAN_AGGREGATES, JOB_MONTHLY_INVOICES] });
 }
 
 export const routerJobService = {

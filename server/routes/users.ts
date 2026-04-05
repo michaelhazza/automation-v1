@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { userService } from '../services/userService.js';
-import { parsePositiveInt } from '../middleware/validate.js';
+import { parsePositiveInt, validateBody } from '../middleware/validate.js';
+import { inviteUserBody, createMemberBody, updateProfileBody, updateUserBody } from '../schemas/users.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
@@ -17,7 +18,7 @@ router.get('/api/users', authenticate, requireOrgPermission(ORG_PERMISSIONS.USER
   res.json(result);
 }));
 
-router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), asyncHandler(async (req, res) => {
+router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), validateBody(inviteUserBody, 'warn'), asyncHandler(async (req, res) => {
   const { email, role, firstName, lastName } = req.body;
   if (!email || !role) {
     res.status(400).json({ error: 'Validation failed', details: 'email and role are required' });
@@ -27,7 +28,7 @@ router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSI
   res.status(201).json(result);
 }));
 
-router.post('/api/users/create-member', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), asyncHandler(async (req, res) => {
+router.post('/api/users/create-member', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), validateBody(createMemberBody, 'warn'), asyncHandler(async (req, res) => {
   const { email, firstName, lastName, role } = req.body;
   if (!email || !firstName || !lastName) {
     res.status(400).json({ error: 'Validation failed', details: 'email, firstName, and lastName are required' });
@@ -42,7 +43,7 @@ router.get('/api/users/me', authenticate, asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
-router.patch('/api/users/me', authenticate, asyncHandler(async (req, res) => {
+router.patch('/api/users/me', authenticate, validateBody(updateProfileBody, 'warn'), asyncHandler(async (req, res) => {
   const result = await userService.updateCurrentUserProfile(req.user!.id, req.body);
   res.json(result);
 }));
@@ -52,7 +53,7 @@ router.get('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.
   res.json(result);
 }));
 
-router.patch('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_EDIT), asyncHandler(async (req, res) => {
+router.patch('/api/users/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_EDIT), validateBody(updateUserBody, 'warn'), asyncHandler(async (req, res) => {
   const result = await userService.updateUser(req.params.id, req.orgId!, req.body);
   res.json(result);
 }));

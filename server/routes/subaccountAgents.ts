@@ -4,6 +4,8 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { validateBody } from '../middleware/validate.js';
+import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
 
 const router = Router();
 
@@ -24,6 +26,7 @@ router.post(
   '/api/subaccounts/:subaccountId/agents',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  validateBody(linkAgentBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { agentId } = req.body as { agentId?: string };
@@ -72,6 +75,7 @@ router.patch(
   '/api/subaccounts/:subaccountId/agents/:linkId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  validateBody(updateLinkBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { isActive, parentSubaccountAgentId, agentRole, agentTitle, heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours } = req.body as {
@@ -113,6 +117,7 @@ router.post(
   '/api/subaccounts/:subaccountId/agents/:linkId/data-sources',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  validateBody(createSubaccountDataSourceBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { name, description, sourceType, sourcePath, sourceHeaders, contentType, priority, maxTokenBudget, cacheMinutes, syncMode } =
