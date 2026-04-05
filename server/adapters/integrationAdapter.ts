@@ -1,7 +1,7 @@
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
 // ---------------------------------------------------------------------------
-// Outbound action result types (existing)
+// Outbound action result types — CRM
 // ---------------------------------------------------------------------------
 
 export interface CrmCreateContactResult {
@@ -9,6 +9,10 @@ export interface CrmCreateContactResult {
   success: boolean;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Outbound action result types — Payments
+// ---------------------------------------------------------------------------
 
 export interface PaymentsCreateCheckoutResult {
   checkoutUrl: string;
@@ -21,6 +25,59 @@ export interface PaymentsGetStatusResult {
   status: 'pending' | 'completed' | 'failed' | 'expired';
   success: boolean;
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Outbound action result types — Ticketing
+// ---------------------------------------------------------------------------
+
+export interface TicketCreateResult {
+  ticketId: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface TicketUpdateResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface TicketReplyResult {
+  replyId: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface TicketData {
+  externalId: string;
+  subject: string;
+  status: 'active' | 'waiting' | 'closed' | 'resolved';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  assignee?: string;
+  customerEmail?: string;
+  customerName?: string;
+  tags?: string[];
+  inboxId?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+  metadata?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Outbound action result types — Messaging
+// ---------------------------------------------------------------------------
+
+export interface MessageSendResult {
+  messageId: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface MessageChannelData {
+  externalId: string;
+  name: string;
+  type: 'channel' | 'dm' | 'group';
+  metadata?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +140,7 @@ export interface CanonicalRevenueData {
 export interface NormalisedEvent {
   eventType: string;
   accountExternalId: string;
-  entityType: 'contact' | 'opportunity' | 'conversation' | 'revenue' | 'account';
+  entityType: 'contact' | 'opportunity' | 'conversation' | 'revenue' | 'account' | 'ticket' | 'message';
   entityExternalId: string;
   data: Record<string, unknown>;
   timestamp: Date;
@@ -102,24 +159,45 @@ export interface FetchOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Integration Adapter — the contract every connector must implement
+// Integration Adapter — the contract every connector must implement.
+//
+// Each capability group is optional. An adapter implements only the groups
+// relevant to its integration type:
+//   - GHL:           crm + ingestion + webhook
+//   - Stripe:        payments
+//   - Teamwork Desk: ticketing + webhook
+//   - Slack:         messaging + webhook
 // ---------------------------------------------------------------------------
 
 export interface IntegrationAdapter {
   supportedActions: string[];
 
-  /** Outbound CRM actions */
+  /** Outbound CRM actions (e.g. GHL, HubSpot) */
   crm?: {
     createContact(connection: IntegrationConnection, fields: Record<string, unknown>): Promise<CrmCreateContactResult>;
   };
 
-  /** Outbound payment actions */
+  /** Outbound payment actions (e.g. Stripe) */
   payments?: {
     createCheckout(connection: IntegrationConnection, fields: Record<string, unknown>): Promise<PaymentsCreateCheckoutResult>;
     getPaymentStatus(connection: IntegrationConnection, sessionId: string): Promise<PaymentsGetStatusResult>;
   };
 
-  /** Inbound data ingestion — fetch normalised entities from external platform */
+  /** Outbound ticketing actions (e.g. Teamwork Desk, Zendesk, Freshdesk) */
+  ticketing?: {
+    createTicket(connection: IntegrationConnection, fields: Record<string, unknown>): Promise<TicketCreateResult>;
+    updateTicket(connection: IntegrationConnection, ticketId: string, fields: Record<string, unknown>): Promise<TicketUpdateResult>;
+    addReply(connection: IntegrationConnection, ticketId: string, body: string, options?: { status?: string }): Promise<TicketReplyResult>;
+    getTicket(connection: IntegrationConnection, ticketId: string): Promise<TicketData>;
+  };
+
+  /** Outbound messaging actions (e.g. Slack) */
+  messaging?: {
+    sendMessage(connection: IntegrationConnection, channelId: string, text: string, options?: Record<string, unknown>): Promise<MessageSendResult>;
+    listChannels(connection: IntegrationConnection): Promise<MessageChannelData[]>;
+  };
+
+  /** Inbound data ingestion — fetch normalised entities from external platform (e.g. GHL) */
   ingestion?: {
     listAccounts(connection: IntegrationConnection, config: Record<string, unknown>): Promise<CanonicalAccountData[]>;
     fetchContacts(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalContactData[]>;

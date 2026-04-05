@@ -75,6 +75,8 @@ import agentInboxRouter from './routes/agentInbox.js';
 import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
 import connectorConfigsRouter from './routes/connectorConfigs.js';
 import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
+import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
+import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import orgMemoryRouter from './routes/orgMemory.js';
 import pageProjectsRouter from './routes/pageProjects.js';
@@ -138,6 +140,8 @@ app.use(cors({
 
 // Webhook routes that need raw body must be mounted BEFORE json body parsing
 app.use(ghlWebhookRouter);
+app.use(teamworkWebhookRouter);
+app.use(slackWebhookRouter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));

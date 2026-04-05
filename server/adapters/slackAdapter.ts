@@ -1,0 +1,165 @@
+import axios from 'axios';
+import crypto from 'crypto';
+import { connectionTokenService } from '../services/connectionTokenService.js';
+import { getProviderRateLimiter } from '../lib/rateLimiter.js';
+import type {
+  IntegrationAdapter,
+  NormalisedEvent,
+  MessageSendResult,
+  MessageChannelData,
+} from './integrationAdapter.js';
+import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
+
+const SLACK_API_BASE = 'https://slack.com/api';
+const TIMEOUT_MS = 12_000;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function decryptAccessToken(connection: IntegrationConnection): string {
+  if (!connection.accessToken) throw new Error('Slack connection has no access token');
+  return connectionTokenService.decryptToken(connection.accessToken);
+}
+
+function getHeaders(accessToken: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json; charset=utf-8',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Slack webhook event type mapping
+// ---------------------------------------------------------------------------
+
+type SlackEventMapping = { normalisedType: string; entityType: NormalisedEvent['entityType'] };
+
+function mapSlackEventType(eventType: string): SlackEventMapping | null {
+  switch (eventType) {
+    case 'message':
+    case 'app_mention':
+      return { normalisedType: eventType, entityType: 'message' };
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Slack Adapter
+// ---------------------------------------------------------------------------
+
+const rateLimiter = getProviderRateLimiter('slack');
+
+export const slackAdapter: IntegrationAdapter = {
+  supportedActions: ['send_message', 'list_channels'],
+
+  // ── Outbound messaging actions ──────────────────────────────────────────
+  messaging: {
+    async sendMessage(
+      connection: IntegrationConnection,
+      channelId: string,
+      text: string,
+      options?: Record<string, unknown>,
+    ): Promise<MessageSendResult> {
+      try {
+        const accessToken = decryptAccessToken(connection);
+        await rateLimiter.acquire(connection.id);
+
+        const body: Record<string, unknown> = {
+          channel: channelId,
+          text,
+          ...(options?.blocks && { blocks: options.blocks }),
+          ...(options?.threadTs && { thread_ts: options.threadTs }),
+          ...(options?.unfurlLinks !== undefined && { unfurl_links: options.unfurlLinks }),
+        };
+
+        const response = await axios.post(`${SLACK_API_BASE}/chat.postMessage`, body, {
+          headers: getHeaders(accessToken),
+          timeout: TIMEOUT_MS,
+        });
+
+        const data = response.data as { ok?: boolean; ts?: string; error?: string };
+        if (!data.ok) {
+          return { messageId: '', success: false, error: `Slack API error: ${data.error}` };
+        }
+
+        return { messageId: data.ts ?? '', success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { messageId: '', success: false, error: `Slack sendMessage failed: ${message}` };
+      }
+    },
+
+    async listChannels(connection: IntegrationConnection): Promise<MessageChannelData[]> {
+      const accessToken = decryptAccessToken(connection);
+      await rateLimiter.acquire(connection.id);
+
+      const response = await axios.get(`${SLACK_API_BASE}/conversations.list`, {
+        headers: getHeaders(accessToken),
+        params: { types: 'public_channel,private_channel', limit: 200, exclude_archived: true },
+        timeout: TIMEOUT_MS,
+      });
+
+      const data = response.data as {
+        ok?: boolean;
+        channels?: Array<Record<string, unknown>>;
+        error?: string;
+      };
+
+      if (!data.ok) throw new Error(`Slack API error: ${data.error}`);
+
+      return (data.channels ?? []).map((ch) => ({
+        externalId: ch.id as string,
+        name: (ch.name as string) ?? '',
+        type: ch.is_im ? 'dm' as const : ch.is_mpim ? 'group' as const : 'channel' as const,
+        metadata: ch,
+      }));
+    },
+  },
+
+  // ── Webhook handling ────────────────────────────────────────────────────
+  webhook: {
+    verifySignature(payload: Buffer, signature: string, secret: string): boolean {
+      // Slack uses v0:timestamp:body format for HMAC-SHA256
+      // The signature header contains the full "v0=hash" value
+      // The timestamp is passed separately in x-slack-request-timestamp
+      // For verification, the caller must construct the basestring externally
+      // and pass it as the payload. The secret is the signing secret.
+      const computed = 'v0=' + crypto
+        .createHmac('sha256', secret)
+        .update(payload)
+        .digest('hex');
+      try {
+        return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(computed));
+      } catch {
+        return false;
+      }
+    },
+
+    normaliseEvent(rawEvent: unknown): NormalisedEvent | null {
+      const wrapper = rawEvent as Record<string, unknown>;
+
+      // Slack Events API wraps the actual event inside an "event" field
+      const event = (wrapper.event as Record<string, unknown>) ?? wrapper;
+      const eventType = event.type as string | undefined;
+      if (!eventType) return null;
+
+      const mapping = mapSlackEventType(eventType);
+      if (!mapping) return null;
+
+      const teamId = (wrapper.team_id as string) ?? '';
+      const channelId = (event.channel as string) ?? '';
+
+      return {
+        eventType: mapping.normalisedType,
+        accountExternalId: teamId,
+        entityType: mapping.entityType,
+        entityExternalId: channelId,
+        data: wrapper,
+        timestamp: new Date(),
+        sourceTimestamp: event.ts ? new Date(Number(event.ts as string) * 1000) : undefined,
+      };
+    },
+  },
+};

@@ -7,7 +7,7 @@ export const connectorConfigs = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
-    connectorType: text('connector_type').notNull().$type<'ghl' | 'hubspot' | 'stripe' | 'custom'>(),
+    connectorType: text('connector_type').notNull().$type<'ghl' | 'hubspot' | 'stripe' | 'slack' | 'teamwork' | 'custom'>(),
     connectionId: uuid('connection_id').references(() => integrationConnections.id),
     configJson: jsonb('config_json').$type<Record<string, unknown>>(),
     status: text('status').notNull().default('active').$type<'active' | 'error' | 'disconnected'>(),
