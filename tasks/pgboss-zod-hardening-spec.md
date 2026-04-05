@@ -2,7 +2,7 @@
 
 **Date:** 2025-04-05
 **Priority:** High
-**Status:** Draft
+**Status:** Final Draft
 **Scope:** System reliability (pg-boss) + data integrity (Zod)
 
 ---
@@ -26,6 +26,8 @@ The system runs **16 distinct job types** across 5 independent pg-boss instances
 - No singleton/deduplication via pg-boss options (only 2 jobs use app-level idempotency keys)
 - No expiration/timeout on 15 of 16 job types
 - Failed agent runs (scheduled, triggered, handoff) are logged and silently dropped
+- No retry classification — transient errors (network timeout) and permanent errors (validation, missing entity) treated identically
+- No failure visibility beyond DLQ — no counters, no alerting on flapping jobs
 
 ### Job Inventory with Proposed Configuration
 
@@ -33,7 +35,7 @@ The system runs **16 distinct job types** across 5 independent pg-boss instances
 
 | Job | Queue Name | Current Config | Proposed Config |
 |-----|-----------|---------------|-----------------|
-| Agent scheduled run | `agent-scheduled-run` | None | retryLimit: 2, retryDelay: 10, retryBackoff: true, expireInSeconds: 300, singletonKey per agent+schedule |
+| Agent scheduled run | `agent-scheduled-run` | None | retryLimit: 2, retryDelay: 10, retryBackoff: true, expireInSeconds: 300, singletonKey per agent+schedule tick |
 | Agent org-scheduled run | `agent-org-scheduled-run` | App-level idempotency key | retryLimit: 2, retryDelay: 10, retryBackoff: true, expireInSeconds: 300 (keep app-level key) |
 | Agent handoff run | `agent-handoff-run` | None | retryLimit: 1, retryDelay: 5, retryBackoff: true, expireInSeconds: 180 |
 | Agent triggered run | `agent-triggered-run` | None | retryLimit: 2, retryDelay: 10, retryBackoff: true, expireInSeconds: 300 |
@@ -76,36 +78,42 @@ export const JOB_CONFIG = {
     retryDelay: 10,
     retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'agent-scheduled-run__dlq',
   },
   'agent-org-scheduled-run': {
     retryLimit: 2,
     retryDelay: 10,
     retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'agent-org-scheduled-run__dlq',
   },
   'agent-handoff-run': {
     retryLimit: 1,
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 180,
+    deadLetter: 'agent-handoff-run__dlq',
   },
   'agent-triggered-run': {
     retryLimit: 2,
     retryDelay: 10,
     retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'agent-triggered-run__dlq',
   },
   'execution-run': {
     retryLimit: 1,
     retryDelay: 15,
     retryBackoff: true,
     expireInSeconds: 600,
+    deadLetter: 'execution-run__dlq',
   },
   'workflow-resume': {
     retryLimit: 2,
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'workflow-resume__dlq',
   },
 
   // ── Tier 2: Financial ───────────────────────────────────────────
@@ -114,6 +122,7 @@ export const JOB_CONFIG = {
     retryDelay: 5,
     retryBackoff: true,
     expireInSeconds: 60,
+    deadLetter: 'llm-aggregate-update__dlq',
   },
   'llm-reconcile-reservations': {
     expireInSeconds: 90,
@@ -123,6 +132,7 @@ export const JOB_CONFIG = {
     retryDelay: 60,
     retryBackoff: true,
     expireInSeconds: 600,
+    deadLetter: 'llm-monthly-invoices__dlq',
   },
   'payment-reconciliation': {
     expireInSeconds: 300,
@@ -147,7 +157,14 @@ export const JOB_CONFIG = {
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;
+
+/** Type-safe config accessor — prevents undefined lookups */
+export function getJobConfig(name: JobName) {
+  return JOB_CONFIG[name];
+}
 ```
+
+**Naming convention:** DLQ queues use `${queueName}__dlq` suffix. Only Tier 1 and Tier 2 jobs with retries get DLQs. Tier 3 maintenance jobs don't need them — they self-heal on next schedule tick.
 
 #### Step 2: Centralise pg-boss instance management
 
@@ -190,13 +207,13 @@ export async function stopPgBoss(): Promise<void> {
 **For `send()` calls** — spread job config into send options:
 
 ```typescript
-import { JOB_CONFIG } from '../config/jobConfig.js';
+import { getJobConfig } from '../config/jobConfig.js';
 
 // Before:
 await boss.send('agent-scheduled-run', payload);
 
 // After:
-await boss.send('agent-scheduled-run', payload, JOB_CONFIG['agent-scheduled-run']);
+await boss.send('agent-scheduled-run', payload, getJobConfig('agent-scheduled-run'));
 ```
 
 **For `work()` calls** — apply concurrency from env:
@@ -211,6 +228,11 @@ await boss.work('agent-scheduled-run', handler);
 await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, handler);
 ```
 
+**Concurrency model intent:**
+- `teamSize` = number of parallel workers polling the queue (controlled by `QUEUE_CONCURRENCY` env var, default: 5)
+- `teamConcurrency` = max jobs each worker processes simultaneously (always 1 — our handlers are not designed for concurrent execution within a single worker)
+- For I/O-heavy maintenance jobs (file cleanup, aggregation), `teamConcurrency: 2` may be safe but is not the initial default
+
 **Files to modify:**
 - `server/services/agentScheduleService.ts` — 5 `work()` calls, 2+ `send()` calls
 - `server/services/queueService.ts` — 5 `work()` calls, 2 `send()` calls
@@ -218,27 +240,78 @@ await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamCo
 - `server/services/paymentReconciliationJob.ts` — 1 `work()` call
 - `server/services/pageIntegrationWorker.ts` — 1 `work()` call, 1 `send()` call (already configured)
 
-#### Step 4: Add dead letter queue handling
+#### Step 4: Add retry classification — retryable vs non-retryable errors
 
-pg-boss supports dead letter queues via the `deadLetter` option on `send()`. When a job exhausts retries, it gets moved to a DLQ.
+Not all errors should be retried. Retrying a validation error or missing entity wastes cycles and adds noise.
 
-**Add DLQ queue name convention:** `${queueName}__dlq`
+**Create** `server/lib/jobErrors.ts`:
 
 ```typescript
-// In JOB_CONFIG, add deadLetter to Tier 1 and Tier 2 jobs:
-'agent-scheduled-run': {
-  retryLimit: 2,
-  retryDelay: 10,
-  retryBackoff: true,
-  expireInSeconds: 300,
-  deadLetter: 'agent-scheduled-run__dlq',
-},
+// server/lib/jobErrors.ts
+
+/** Errors that should NOT be retried — fail immediately to DLQ */
+const NON_RETRYABLE_CODES = new Set([
+  400, // validation error
+  401, // auth error
+  403, // permission error
+  404, // missing entity
+  409, // conflict / duplicate
+  422, // unprocessable
+]);
+
+export function isNonRetryable(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'statusCode' in err) {
+    return NON_RETRYABLE_CODES.has((err as { statusCode: number }).statusCode);
+  }
+  return false;
+}
+
+/** Type-safe retry count accessor — avoids (job as any).retrycount */
+export function getRetryCount(job: { retrycount?: number } & Record<string, unknown>): number {
+  return job.retrycount ?? 0;
+}
 ```
 
-**Add a DLQ monitor** — a single worker that logs/alerts on DLQ arrivals:
+**Apply in every worker handler — use `boss.fail()` for non-retryable errors:**
+
+```typescript
+import { isNonRetryable, getRetryCount } from '../lib/jobErrors.js';
+import { logger } from '../lib/logger.js';
+
+await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job) => {
+  const retryCount = getRetryCount(job);
+  if (retryCount > 0) {
+    logger.warn('job_retry', { queue: 'agent-scheduled-run', jobId: job.id, retryCount });
+  }
+
+  try {
+    await handler(job);
+  } catch (err) {
+    if (isNonRetryable(err)) {
+      logger.warn('job_non_retryable_failure', {
+        queue: 'agent-scheduled-run',
+        jobId: job.id,
+        error: String(err),
+      });
+      await boss.fail(job.id); // mark as failed → routes to DLQ, skips retries
+      return;
+    }
+    throw err; // transient error — let pg-boss retry
+  }
+});
+```
+
+**Critical:** Use `boss.fail(job.id)` for non-retryable errors, NOT `return`. Returning without error marks the job as **success**, which loses DLQ routing and corrupts failure metrics.
+
+#### Step 5: Add DLQ monitor with structured logging and correlation context
+
+**Create** `server/services/dlqMonitorService.ts` — uses the existing structured `logger` (not raw `console.error`). Includes correlation context (orgId, agentId) for debuggability.
 
 ```typescript
 // server/services/dlqMonitorService.ts
+import PgBoss from 'pg-boss';
+import { logger } from '../lib/logger.js';
+
 const DLQ_QUEUES = [
   'agent-scheduled-run__dlq',
   'agent-org-scheduled-run__dlq',
@@ -251,39 +324,75 @@ const DLQ_QUEUES = [
 ];
 
 export async function startDlqMonitor(boss: PgBoss) {
-  for (const queue of DLQ_QUEUES) {
-    await boss.work(queue, async (job) => {
-      console.error(`[DLQ] Job failed permanently`, {
-        queue: queue.replace('__dlq', ''),
+  for (const dlqName of DLQ_QUEUES) {
+    const sourceQueue = dlqName.replace('__dlq', '');
+    await boss.work(dlqName, async (job) => {
+      const payload = job.data as Record<string, unknown>;
+      logger.error('job_dlq', {
+        queue: sourceQueue,
         jobId: job.id,
-        data: job.data,
-        // Emit WebSocket event to admin dashboard
+        // Correlation context for debugging
+        organisationId: payload.organisationId,
+        agentId: payload.agentId,
+        subaccountId: payload.subaccountId,
+        // Job metadata
+        payload,
       });
-      // Future: emit to monitoring/alerting system
+      // Future: emit WebSocket event to admin dashboard
+      // Future: write to dedicated DLQ audit table
     });
   }
 }
 ```
 
-#### Step 5: Add singleton keys for idempotent scheduled jobs
+#### Step 6: Add singleton keys with schedule-tick scoping
 
-Prevent duplicate scheduled runs when pg-boss schedule fires before previous run completes:
+Prevent duplicate scheduled runs, but **avoid global dedup** that could skip legitimate executions when a job runs longer than its interval.
+
+**Key design:** Use the schedule tick identifier when available (from pg-boss schedule payload), fall back to time-bucket.
 
 ```typescript
-// agent-scheduled-run — singleton per subaccountAgent + schedule tick
+// Prefer schedule tick from payload (deterministic, aligns with scheduler)
+// Fall back to minute-bucket for non-scheduled jobs
+
+function getSingletonKey(prefix: string, agentId: string, payload: Record<string, unknown>): string {
+  if (payload.scheduledAt) {
+    return `${prefix}:${agentId}:${payload.scheduledAt}`;
+  }
+  // Fallback: floor to nearest minute
+  const now = new Date();
+  const bucket = `${now.getUTCFullYear()}${String(now.getUTCMonth()).padStart(2,'0')}${String(now.getUTCDate()).padStart(2,'0')}T${String(now.getUTCHours()).padStart(2,'0')}${String(now.getUTCMinutes()).padStart(2,'0')}`;
+  return `${prefix}:${agentId}:${bucket}`;
+}
+
+// agent-scheduled-run — singleton per agent + schedule tick
 await boss.send('agent-scheduled-run', payload, {
-  ...JOB_CONFIG['agent-scheduled-run'],
-  singletonKey: `scheduled:${payload.subaccountAgentId}`,
+  ...getJobConfig('agent-scheduled-run'),
+  singletonKey: getSingletonKey('scheduled', payload.subaccountAgentId, payload),
 });
 
-// agent-triggered-run — singleton per trigger event
+// agent-triggered-run — singleton per agent + trigger + tick
 await boss.send('agent-triggered-run', payload, {
-  ...JOB_CONFIG['agent-triggered-run'],
-  singletonKey: `triggered:${payload.subaccountAgentId}:${payload.triggerId}`,
+  ...getJobConfig('agent-triggered-run'),
+  singletonKey: `triggered:${payload.subaccountAgentId}:${payload.triggerId}:${getSingletonKey('t', payload.subaccountAgentId, payload)}`,
 });
 ```
 
-#### Step 6: Graceful shutdown update
+This ensures: same agent can't be double-triggered within the same schedule tick, but the next tick creates a fresh singleton key.
+
+#### Step 7: Add failure visibility — retry logging
+
+Beyond DLQ, log every retry attempt to catch flapping jobs before they exhaust retries. This feeds into existing structured logging — alerting thresholds can be added later via log aggregation rules without code changes.
+
+Already shown in Step 4 worker pattern:
+```typescript
+const retryCount = getRetryCount(job);
+if (retryCount > 0) {
+  logger.warn('job_retry', { queue: queueName, jobId: job.id, retryCount });
+}
+```
+
+#### Step 8: Graceful shutdown update
 
 Update `server/index.ts` shutdown to use the centralised instance:
 
@@ -299,12 +408,19 @@ await stopPgBoss();
 - [ ] All 16 job types have explicit config in `jobConfig.ts`
 - [ ] Single pg-boss instance shared across all services
 - [ ] `QUEUE_CONCURRENCY` env var applied to all `work()` calls
+- [ ] Concurrency model documented: `teamSize` = workers, `teamConcurrency` = 1
 - [ ] Tier 1 + Tier 2 jobs have dead letter queues
-- [ ] Singleton keys prevent duplicate scheduled/triggered runs
+- [ ] Singleton keys with schedule-tick scoping prevent duplicate scheduled/triggered runs
+- [ ] Non-retryable errors use `boss.fail()` — NOT return (which marks as success)
+- [ ] All DLQ logs include correlation context (orgId, agentId, subaccountId)
+- [ ] All DLQ and retry events use structured `logger` (not `console.error`)
+- [ ] Retry attempts logged with `job_retry` event for flap detection
+- [ ] `getRetryCount()` helper used instead of `(job as any).retrycount`
 - [ ] `npm run typecheck` passes
-- [ ] `npm test` passes (existing job-related tests)
+- [ ] `npm test` passes
 - [ ] Manual test: kill a job mid-execution → verify retry fires
-- [ ] Manual test: exhaust retries → verify DLQ entry created
+- [ ] Manual test: exhaust retries → verify DLQ entry created with structured log + correlation
+- [ ] Manual test: throw 404 in handler → verify `boss.fail()` called, no retry, DLQ entry
 
 ---
 
@@ -317,6 +433,7 @@ await stopPgBoss();
 - ~64% of route handlers have **no validation at all**
 - Zod is used effectively for env validation (`env.ts`) and LLM context validation (`llmRouter.ts`)
 - No `.refine()`, `.transform()`, or discriminated union usage anywhere
+- Error response shape is inconsistent — some routes return `{ error, details }`, others throw `{ statusCode, message }`
 
 ### Strategy
 
@@ -326,6 +443,63 @@ await stopPgBoss();
 2. **Write routes** (POST/PUT/PATCH/DELETE) — data mutation risk
 3. **Admin/system routes** — privilege escalation risk
 4. **Read routes with query params** — injection/type confusion risk
+
+### Rollout Safety: Warn-Then-Enforce Mode
+
+**Problem:** Switching from no validation to strict validation will reject requests that previously passed. Frontend or integrations may break.
+
+**Solution:** Add a `mode` option to the validation middleware for phased rollout:
+
+```typescript
+// server/middleware/validate.ts — updated
+
+type ValidationMode = 'enforce' | 'warn';
+
+export const validateBody = <T extends ZodTypeAny>(schema: T, mode: ValidationMode = 'enforce') => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      if (mode === 'warn') {
+        logger.warn('validation_warn', {
+          path: req.path,
+          method: req.method,
+          errors: result.error.flatten(),
+        });
+        next(); // pass through — log only
+        return;
+      }
+      res.status(400).json({
+        error: 'Validation failed',
+        details: result.error.flatten().fieldErrors,
+      });
+      return;
+    }
+    req.body = result.data;
+    next();
+  };
+};
+```
+
+**Rollout phases:**
+1. Deploy all schemas in `warn` mode → monitor logs for unexpected rejections
+2. Fix any frontend/integration issues surfaced by warnings
+3. Switch to `enforce` mode (default) per route batch
+
+### Standardised Error Response Shape
+
+All validation errors return a consistent structure:
+
+```json
+{
+  "error": "Validation failed",
+  "details": {
+    "name": ["Required"],
+    "email": ["Invalid email"]
+  }
+}
+```
+
+This uses Zod's `flatten().fieldErrors` format — field names as keys, arrays of error messages as values. Frontend can map these directly to form fields.
 
 ### Schema Organisation
 
@@ -349,6 +523,12 @@ server/schemas/
 ├── common.ts         # shared schemas (pagination, UUID params, etc.)
 └── index.ts          # re-exports
 ```
+
+**Conventions:**
+- Each schema file exports inferred TypeScript types: `export type XInput = z.infer<typeof xBody>;`
+- Every entity with CRUD gets a formalised pair: `createXBody` + `updateXBody = createXBody.partial()`
+- Use `.strict()` on public endpoints (reject unexpected fields). Internal routes use default behaviour (strip unknown fields).
+- Use `.max()` on all string fields to prevent memory abuse. Set limits based on DB column sizes.
 
 ### Implementation Plan
 
@@ -382,7 +562,7 @@ export const subaccountIdParam = z.object({
 **Files:** `server/routes/public/formSubmission.ts`, `pageTracking.ts`, `pagePreview.ts`, `pageServing.ts`
 **Also:** `server/routes/webhooks.ts`, `githubWebhook.ts`
 
-These routes accept external input with no authentication. Schemas are mandatory.
+These routes accept external input with no authentication. Schemas are mandatory — deploy in `enforce` mode immediately.
 
 ```typescript
 // server/schemas/public.ts
@@ -396,18 +576,22 @@ export const formSubmissionBody = z.object({
     referrer: z.string().url().max(2000).optional(),
     ip: z.string().optional(),
   }).optional(),
-});
+}).strict();
+
+export type FormSubmissionInput = z.infer<typeof formSubmissionBody>;
 
 export const pageTrackingBody = z.object({
   pageId: z.string().uuid(),
   event: z.string().max(100),
   data: z.record(z.string(), z.unknown()).optional(),
-});
+}).strict();
+
+export type PageTrackingInput = z.infer<typeof pageTrackingBody>;
 ```
 
 #### Step 3: Auth routes
 
-**File:** `server/routes/auth.ts` — login, register, invite acceptance, password reset
+**File:** `server/routes/auth.ts` — deploy in `enforce` mode (auth payloads are well-defined).
 
 ```typescript
 // server/schemas/auth.ts
@@ -418,6 +602,7 @@ export const loginBody = z.object({
   password: z.string().min(1).max(500),
   organisationSlug: z.string().max(100).optional(),
 });
+export type LoginInput = z.infer<typeof loginBody>;
 
 export const registerBody = z.object({
   name: z.string().min(1).max(255),
@@ -426,21 +611,25 @@ export const registerBody = z.object({
   organisationName: z.string().min(1).max(255),
   organisationSlug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
 });
+export type RegisterInput = z.infer<typeof registerBody>;
 
 export const acceptInviteBody = z.object({
   token: z.string().min(1),
   name: z.string().min(1).max(255),
   password: z.string().min(8).max(500),
 });
+export type AcceptInviteInput = z.infer<typeof acceptInviteBody>;
 
 export const forgotPasswordBody = z.object({
   email: z.string().email().max(255),
 });
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordBody>;
 
 export const resetPasswordBody = z.object({
   token: z.string().min(1),
   password: z.string().min(8).max(500),
 });
+export type ResetPasswordInput = z.infer<typeof resetPasswordBody>;
 ```
 
 #### Step 4: Core write routes (POST/PUT/PATCH/DELETE)
@@ -448,44 +637,44 @@ export const resetPasswordBody = z.object({
 Work through route files in order of data sensitivity. For each file:
 
 1. Read the route handler to understand expected fields
-2. Define schema in corresponding `server/schemas/*.ts` file
-3. Wire `validateBody(schema)` into the route middleware chain
-4. Remove inline manual validation that the schema now covers
-5. Run `npm run typecheck` after each file
+2. Define `createXBody` schema in corresponding `server/schemas/*.ts` file
+3. Define `updateXBody = createXBody.partial()` for PATCH routes
+4. Export inferred types: `export type XInput = z.infer<typeof xBody>;`
+5. Wire `validateBody(schema, 'warn')` into the route middleware chain
+6. Remove inline manual validation that the schema now covers
+7. Run `npm run typecheck` after each file
 
 **Priority order for write routes:**
 
-| Priority | Route File | Handlers | Risk Level |
-|----------|-----------|----------|------------|
-| 1 | `auth.ts` | 6 | Credential handling |
-| 2 | `users.ts` | 8 | User management, role assignment |
-| 3 | `organisations.ts` | ~5 | Org settings, billing |
-| 4 | `agents.ts` | 18 | Agent config affects execution |
-| 5 | `subaccountAgents.ts` | ~8 | Agent-workspace binding |
-| 6 | `tasks.ts` | 11 | Task CRUD |
-| 7 | `processes.ts` | 11 | Process definitions |
-| 8 | `projects.ts` | 5 | Project CRUD |
-| 9 | `skills.ts` | ~6 | Skill definitions |
-| 10 | `executions.ts` | 5 | Execution triggers |
-| 11 | `subaccounts.ts` | ~5 | Workspace CRUD |
-| 12 | `scheduledTasks.ts` | ~4 | Schedule config |
-| 13 | `agentTriggers.ts` | ~4 | Trigger definitions |
-| 14 | `permissionSets.ts` | ~4 | Permission management |
-| 15 | `files.ts` | ~3 | File upload params |
-| 16 | `pageRoutes.ts` / `pageProjects.ts` | ~8 | Page builder |
-| 17 | `boardConfig.ts` / `boardTemplates.ts` | ~4 | Board config |
-| 18 | `categories.ts` | ~3 | Category CRUD |
-| 19 | `orgAgentConfigs.ts` | ~4 | Org-level agent config |
-| 20 | `workspaceMemory.ts` / `orgMemory.ts` | ~6 | Memory management |
-| 21 | Remaining route files | ~20 | Lower risk |
+| Priority | Route File | Handlers | Risk Level | Initial Mode |
+|----------|-----------|----------|------------|-------------|
+| 1 | `auth.ts` | 6 | Credential handling | enforce |
+| 2 | `users.ts` | 8 | User management, role assignment | warn → enforce |
+| 3 | `organisations.ts` | ~5 | Org settings, billing | warn → enforce |
+| 4 | `agents.ts` | 18 | Agent config affects execution | warn → enforce |
+| 5 | `subaccountAgents.ts` | ~8 | Agent-workspace binding | warn → enforce |
+| 6 | `tasks.ts` | 11 | Task CRUD | warn → enforce |
+| 7 | `processes.ts` | 11 | Process definitions | warn → enforce |
+| 8 | `projects.ts` | 5 | Project CRUD | warn → enforce |
+| 9 | `skills.ts` | ~6 | Skill definitions | warn → enforce |
+| 10 | `executions.ts` | 5 | Execution triggers | warn → enforce |
+| 11 | `subaccounts.ts` | ~5 | Workspace CRUD | warn → enforce |
+| 12 | `scheduledTasks.ts` | ~4 | Schedule config | warn → enforce |
+| 13 | `agentTriggers.ts` | ~4 | Trigger definitions | warn → enforce |
+| 14 | `permissionSets.ts` | ~4 | Permission management | warn → enforce |
+| 15 | `files.ts` | ~3 | File upload params | warn → enforce |
+| 16 | `pageRoutes.ts` / `pageProjects.ts` | ~8 | Page builder | warn → enforce |
+| 17 | `boardConfig.ts` / `boardTemplates.ts` | ~4 | Board config | warn → enforce |
+| 18 | `categories.ts` | ~3 | Category CRUD | warn → enforce |
+| 19 | `orgAgentConfigs.ts` | ~4 | Org-level agent config | warn → enforce |
+| 20 | `workspaceMemory.ts` / `orgMemory.ts` | ~6 | Memory management | warn → enforce |
+| 21 | Remaining route files | ~20 | Lower risk | warn → enforce |
 
 #### Step 5: Read routes with query parameters
 
-Add `validateQuery()` for routes that accept filtering/pagination/search params. Use `paginationQuery` from common schemas as a base and extend per-route.
+Add `validateQuery()` for routes that accept filtering/pagination/search params:
 
-**Example pattern:**
 ```typescript
-// In route file:
 import { validateQuery } from '../middleware/validate.js';
 import { paginationQuery } from '../schemas/common.js';
 
@@ -505,7 +694,7 @@ router.get(
 
 #### Step 6: Wire schemas into route middleware
 
-**Pattern for each route — before:**
+**Before:**
 ```typescript
 router.post('/api/agents', authenticate, requireOrgPermission(...), asyncHandler(async (req, res) => {
   const { name, masterPrompt } = req.body;
@@ -520,70 +709,112 @@ router.post('/api/agents', authenticate, requireOrgPermission(...), asyncHandler
 **After:**
 ```typescript
 import { validateBody } from '../middleware/validate.js';
-import { createAgentBody } from '../schemas/agents.js';
+import { createAgentBody, type CreateAgentInput } from '../schemas/agents.js';
 
 router.post('/api/agents', authenticate, requireOrgPermission(...), validateBody(createAgentBody), asyncHandler(async (req, res) => {
-  const { name, masterPrompt } = req.body;
+  const { name, masterPrompt } = req.body as CreateAgentInput;
   // No inline validation needed — schema enforces required fields + types
   // ...
 }));
 ```
 
+### Sanitisation Order Rule
+
+**Mandatory ordering for routes that accept HTML content:**
+
+```
+Raw input → sanitize-html → Zod schema → Business logic
+```
+
+`sanitize-html` runs as middleware **before** `validateBody()`, so Zod validates the cleaned output. Never validate raw HTML then sanitise after.
+
+For routes that don't accept HTML: `Raw input → Zod schema → Business logic`.
+
 ### Key Design Decisions
 
-1. **Schemas live in `server/schemas/`, not inline in routes** — keeps routes clean, schemas reusable, and testable independently.
-
-2. **`validateBody` replaces `req.body` with parsed data** — this means coerced types (e.g., `z.coerce.number()`) work transparently. The handler receives typed, validated data.
-
-3. **Don't over-schema GET routes** — only add `validateQuery` where query params affect DB queries or business logic. Simple ID-based GETs don't need it.
-
-4. **Keep inline validation for service-layer checks** — Zod validates shape/type at the boundary. Business logic validation (e.g., "this agent belongs to this org") stays in services.
-
-5. **Use `.max()` on all string fields** — prevents memory abuse from oversized payloads. Set reasonable limits based on DB column sizes.
-
-6. **Sanitize before schema where needed** — `sanitize-html` runs before Zod for fields that accept HTML content (e.g., page builder content).
+1. **Schemas live in `server/schemas/`, not inline in routes** — keeps routes clean, schemas reusable, testable independently.
+2. **`validateBody` replaces `req.body` with parsed data** — coerced types work transparently.
+3. **Export inferred types from every schema** — `export type XInput = z.infer<typeof xBody>` eliminates type drift between route and service.
+4. **Formalised PATCH pattern** — every entity: `createXBody` + `updateXBody = createXBody.partial()`. Prevents requiring fields on update that were required on create.
+5. **Don't over-schema GET routes** — only add `validateQuery` where query params affect DB queries or business logic.
+6. **Keep inline validation for service-layer checks** — Zod validates shape/type at the boundary. Business logic validation stays in services.
+7. **`.strict()` on public endpoints only** — prevent payload stuffing. Internal routes use default (strip unknown fields).
+8. **Warn-then-enforce rollout** — non-auth, non-public routes start in `warn` mode. Monitor logs, then switch.
 
 ### Verification
 
 - [ ] `server/schemas/` directory created with domain-specific schema files
-- [ ] All public routes have `validateBody` / `validateQuery`
-- [ ] All auth routes have `validateBody`
+- [ ] Every schema exports inferred TypeScript type
+- [ ] Every entity with CRUD has `createXBody` + `updateXBody = createXBody.partial()`
+- [ ] All public routes have `validateBody` in `enforce` mode with `.strict()`
+- [ ] All auth routes have `validateBody` in `enforce` mode
 - [ ] All POST/PUT/PATCH routes on priority list have `validateBody`
-- [ ] Inline manual validation removed where schema covers it
+- [ ] Inline manual validation removed where schema now covers it
+- [ ] Standardised error shape: `{ error: "Validation failed", details: { field: ["message"] } }`
+- [ ] Sanitisation order correct: sanitize-html before Zod where HTML accepted
 - [ ] `npm run typecheck` passes after each batch
 - [ ] `npm run lint` passes
 - [ ] `npm test` passes
-- [ ] Manual test: send malformed body to validated route → get 400 with structured error
+- [ ] Manual test: send malformed body → get 400 with structured field errors
 - [ ] Manual test: send oversized string → get 400
+- [ ] Manual test: `warn` mode logs validation issues but passes request through
+- [ ] Manual test: extra fields rejected on public `.strict()` routes
 
 ---
 
 ## Execution Order
 
 ### Phase 1: pg-boss foundation (do first — fewer files, higher reliability impact)
-1. Create `server/config/jobConfig.ts`
-2. Create `server/lib/pgBossInstance.ts`
-3. Migrate services to shared instance
-4. Apply job config to all `send()` calls
-5. Apply `QUEUE_CONCURRENCY` to all `work()` calls
-6. Add DLQ config + monitor
-7. Add singleton keys
-8. Update graceful shutdown
-9. Verify
+1. Create `server/config/jobConfig.ts` with all 16 job configs + DLQ names + `getJobConfig()` helper
+2. Create `server/lib/pgBossInstance.ts` singleton
+3. Create `server/lib/jobErrors.ts` with `isNonRetryable()` + `getRetryCount()` helpers
+4. Migrate all 5 services to shared pg-boss instance
+5. Apply job config to all `send()` calls via `getJobConfig()`
+6. Apply `QUEUE_CONCURRENCY` to all `work()` calls (`teamSize: N, teamConcurrency: 1`)
+7. Add retry classification (non-retryable → `boss.fail()`) to all workers
+8. Add retry-attempt logging (`job_retry` event) to all workers
+9. Create `server/services/dlqMonitorService.ts` with structured logging + correlation context
+10. Add singleton keys with schedule-tick scoping to scheduled + triggered jobs
+11. Update graceful shutdown in `server/index.ts`
+12. Verify (typecheck, tests, manual DLQ/retry tests)
 
 ### Phase 2: Zod validation (do second — more files, incremental rollout)
-1. Create `server/schemas/common.ts`
-2. Schema + wire public routes
-3. Schema + wire auth routes
-4. Schema + wire core write routes (batches of 3-4 files at a time)
-5. Schema + wire query validation for list endpoints
-6. Clean up redundant inline validation
-7. Verify
+1. Update `server/middleware/validate.ts` with `warn`/`enforce` mode support + standardised error shape
+2. Create `server/schemas/common.ts` with shared types
+3. Create schema + wire public routes in `enforce` mode with `.strict()`
+4. Create schema + wire auth routes in `enforce` mode
+5. Create schema + wire core write routes in `warn` mode (batches of 3-4 files)
+6. Formalise PATCH pattern: `updateXBody = createXBody.partial()` for every entity
+7. Monitor `validation_warn` logs — fix any frontend/integration mismatches
+8. Switch validated routes from `warn` → `enforce`
+9. Add `validateQuery` for list endpoints with query params
+10. Clean up redundant inline validation
+11. Export inferred types, update service signatures where beneficial
+12. Verify (typecheck, lint, tests, manual 400 response tests)
 
 ### Estimated Scope
-- **pg-boss:** ~8 files modified, 2 new files created
-- **Zod:** ~56 route files modified, ~15 new schema files created
-- **Risk:** Low — additive changes, no breaking API contracts. Retry config adds resilience. Validation adds strictness but returns clear 400 errors.
+
+- **pg-boss:** ~8 files modified, 4 new files (`jobConfig.ts`, `pgBossInstance.ts`, `jobErrors.ts`, `dlqMonitorService.ts`)
+- **Zod:** ~56 route files modified, ~15 new schema files, 1 middleware file updated
+
+### Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Zod rejects previously-accepted requests | Medium | High | Warn mode rollout — log before enforcing |
+| Singleton keys too aggressive — skip legitimate runs | Low | High | Schedule-tick scoping (not global dedup) |
+| Retry storms on transient provider outages | Low | Medium | `isNonRetryable()` filter + max 2-3 retries + expiration |
+| Non-retryable handler marks job as success instead of failure | Low | High | Use `boss.fail()` — explicitly documented as critical pattern |
+| Existing DB data doesn't conform to new schemas | Low | Low | Schemas validate inbound only. Use `.partial()` for PATCH. |
+| Multiple pg-boss instances during migration | Low | Low | Migrate all services in one PR. Instance is lazy — created once. |
+
+### Migration Strategy for Existing Data
+
+Zod validation applies at the **API boundary only** — validates inbound requests, not existing DB rows. Awareness during implementation:
+
+- **PATCH routes:** Use `createXBody.partial()` so all fields become optional. Existing records without a field can be updated without sending every field.
+- **Enum tightening:** If a schema restricts to specific enum values, ensure no existing records have values outside that set before the field appears in update forms.
+- **No data migration needed** — this is additive input validation, not a data model change.
 
 ---
 
@@ -592,5 +823,8 @@ router.post('/api/agents', authenticate, requireOrgPermission(...), validateBody
 - Langfuse deep instrumentation (separate development thread)
 - Drizzle relation definitions (medium priority, separate spec)
 - MCP client capability (medium priority, separate spec)
-- New pg-boss features (job archiving UI, metrics dashboard)
+- New pg-boss features (job archiving UI, metrics dashboard, admin DLQ viewer)
 - Response validation (Zod on outbound — not needed yet)
+- pg-boss monitoring alerts (thresholds/paging) — log events are the foundation; alerting rules come after
+- `validateParams()` / `validateHeaders()` — params validated by route matching + `resolveSubaccount()`, headers by auth middleware
+- Zod schema unit tests — schemas validated implicitly via route tests; dedicated tests are optional follow-up
