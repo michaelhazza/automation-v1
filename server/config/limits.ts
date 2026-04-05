@@ -163,3 +163,20 @@ export const HITL_REVIEW_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Max triggered agent runs per minute per workspace before suppression */
 export const MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
+
+// ── Tracing limits (Section 7.7) ───────────────────────────────────────────
+
+/** Max spans emitted per agent run before helpers return no-ops */
+export const MAX_SPANS_PER_RUN = 500;
+
+/** Max total observations (spans + events) per agent run */
+export const MAX_EVENTS_PER_RUN = 1000;
+
+/** Max nesting depth from trace root — flatten if exceeded */
+export const MAX_NESTING_DEPTH = 10;
+
+/** Max JSON-serialised metadata size per span (bytes) */
+export const MAX_METADATA_SIZE_BYTES = 4096;
+
+/** Max events emitted within a single loop iteration */
+export const MAX_EVENTS_PER_ITERATION = 20;
