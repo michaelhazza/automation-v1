@@ -33,8 +33,8 @@ export const TOKEN_OUTPUT_RATIO = 0.3;
 
 // ── Model defaults ──────────────────────────────────────────────────────────
 
-/** Model used for internal extraction / summarisation (not the agent's model) */
-export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
+// EXTRACTION_MODEL removed — internal extraction calls now use executionPhase: 'execution'
+// and the resolver picks the cheapest economy model dynamically.
 
 // ── Pagination & list limits ────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ export const PROVIDER_MAX_RETRIES = 2;
 export const PROVIDER_BACKOFF_MS = [1000, 3000] as const;
 
 /** Ordered fallback chain of provider names */
-export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini'] as const;
+export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini', 'openrouter'] as const;
 
 /** Timeout (ms) for a single provider call before it's treated as a failure */
 export const PROVIDER_CALL_TIMEOUT_MS = 30000;

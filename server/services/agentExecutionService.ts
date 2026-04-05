@@ -25,6 +25,8 @@ import {
 } from './llmService.js';
 import { routeCall } from './llmRouter.js';
 import type { LLMCallContext } from './llmRouter.js';
+import { env } from '../lib/env.js';
+import type { ProviderTool } from './providers/types.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import { triggerService } from './triggerService.js';
@@ -777,7 +779,7 @@ export const agentExecutionService = {
 interface LoopParams {
   runId: string;
   agent: { modelId: string; modelProvider: string; temperature: number; maxTokens: number };
-  routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model'>;
+  routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model' | 'executionPhase' | 'routingMode'>;
   systemPrompt: string;
   tools: AnthropicTool[];
   tokenBudget: number;
@@ -801,6 +803,49 @@ interface LoopResult {
   tasksUpdated: number;
   deliverablesCreated: number;
   finalStatus?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Tool call validation — lightweight checks before execution.
+// Used for cascade escalation: if economy model produces invalid tool calls,
+// we retry with the frontier (ceiling) model.
+// ---------------------------------------------------------------------------
+
+function validateToolCalls(
+  toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
+  activeTools: ProviderTool[],
+): { valid: boolean; failureReason?: string } {
+  const toolNames = new Set(activeTools.map(t => t.name));
+
+  for (const tc of toolCalls) {
+    if (!toolNames.has(tc.name)) {
+      return { valid: false, failureReason: `unknown_tool:${tc.name}` };
+    }
+
+    if (tc.input === null || typeof tc.input !== 'object') {
+      return { valid: false, failureReason: `invalid_input:${tc.name}` };
+    }
+
+    const toolDef = activeTools.find(t => t.name === tc.name);
+    if (toolDef?.input_schema?.required) {
+      for (const field of toolDef.input_schema.required) {
+        if (!(field in tc.input)) {
+          return { valid: false, failureReason: `missing_field:${tc.name}.${field}` };
+        }
+      }
+    }
+
+    // Log-only: unexpected fields (common hallucination, usually harmless)
+    if (toolDef?.input_schema?.properties) {
+      const knownFields = new Set(Object.keys(toolDef.input_schema.properties));
+      const extraFields = Object.keys(tc.input).filter(k => !knownFields.has(k));
+      if (extraFields.length > 0) {
+        console.warn(`[toolCallValidator] unexpected fields in ${tc.name}: ${extraFields.join(', ')}`);
+      }
+    }
+  }
+
+  return { valid: true };
 }
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
@@ -840,6 +885,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const messages: LLMMessage[] = [{ role: 'user', content: initialMessage }];
 
   let lastTextContent = '';
+  let previousResponseHadToolCalls = false;
 
   outerLoop:
   for (let iteration = 0; iteration < MAX_LOOP_ITERATIONS; iteration++) {
@@ -857,7 +903,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           system: systemPrompt,
           temperature: agent.temperature,
           maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
-          context: { ...routerCtx, taskType: 'general', provider: agent.modelProvider, model: agent.modelId },
+          context: {
+            ...routerCtx, taskType: 'general', executionPhase: 'synthesis' as const,
+            provider: agent.modelProvider, model: agent.modelId, routingMode: 'ceiling' as const,
+          },
         });
         lastTextContent = wrapUp.content;
         totalTokensUsed += (wrapUp.tokensIn ?? 0) + (wrapUp.tokensOut ?? 0);
@@ -871,6 +920,20 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       iteration, tokensUsed: totalTokensUsed, toolCallsCount: totalToolCalls,
     });
 
+    // ── Determine execution phase for this iteration ─────────────────
+    let phase: 'planning' | 'execution' | 'synthesis';
+    if (iteration === 0) {
+      phase = 'planning';
+    } else if (previousResponseHadToolCalls) {
+      phase = 'execution';
+    } else if (totalToolCalls > 0 && !previousResponseHadToolCalls) {
+      phase = 'synthesis';
+    } else if (iteration > 0 && totalToolCalls === 0) {
+      phase = 'synthesis';
+    } else {
+      phase = 'planning';
+    }
+
     // ── Call LLM ──────────────────────────────────────────────────────
     const response = await routeCall({
       messages,
@@ -878,12 +941,46 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       tools: tools.length > 0 ? tools : undefined,
       temperature: agent.temperature,
       maxTokens: agent.maxTokens,
-      context: { ...routerCtx, taskType: 'development', provider: agent.modelProvider, model: agent.modelId },
+      estimatedContextTokens: totalTokensUsed,
+      context: {
+        ...routerCtx, taskType: 'development', executionPhase: phase,
+        provider: agent.modelProvider, model: agent.modelId, routingMode: 'ceiling' as const,
+      },
     });
 
     totalTokensUsed += (response.tokensIn ?? 0) + (response.tokensOut ?? 0);
 
     lastTextContent = response.content;
+    previousResponseHadToolCalls = !!(response.toolCalls && response.toolCalls.length > 0);
+
+    // ── Cascade escalation: validate economy model tool calls ────────
+    let escalationAttempted = false;
+    if (!env.ROUTER_FORCE_FRONTIER && response.routing?.wasDowngraded && response.toolCalls?.length) {
+      const validation = validateToolCalls(response.toolCalls, tools as unknown as ProviderTool[]);
+      if (!validation.valid && !escalationAttempted) {
+        escalationAttempted = true;
+        console.warn(`[agentLoop] escalating: ${validation.failureReason} — retrying with frontier model`);
+        const escalatedResponse = await routeCall({
+          messages,
+          system: systemPrompt,
+          tools: tools.length > 0 ? tools : undefined,
+          temperature: agent.temperature,
+          maxTokens: agent.maxTokens,
+          estimatedContextTokens: totalTokensUsed,
+          context: {
+            ...routerCtx, taskType: 'development', executionPhase: phase,
+            provider: agent.modelProvider, model: agent.modelId, routingMode: 'forced' as const,
+          },
+        });
+        // Replace response with escalated version
+        Object.assign(response, escalatedResponse);
+        totalTokensUsed += (escalatedResponse.tokensIn ?? 0) + (escalatedResponse.tokensOut ?? 0);
+        lastTextContent = escalatedResponse.content;
+        previousResponseHadToolCalls = !!(escalatedResponse.toolCalls && escalatedResponse.toolCalls.length > 0);
+        // TODO: Write wasEscalated + escalationReason to the ledger row
+        // (The escalated routeCall creates its own ledger entry; the original economy entry remains.)
+      }
+    }
 
     if (!response.toolCalls || response.toolCalls.length === 0) {
       break;
@@ -928,7 +1025,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             system: systemPrompt,
             temperature: agent.temperature,
             maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
-            context: { ...routerCtx, taskType: 'general', provider: agent.modelProvider, model: agent.modelId },
+            context: {
+              ...routerCtx, taskType: 'general', executionPhase: 'synthesis' as const,
+              provider: agent.modelProvider, model: agent.modelId, routingMode: 'ceiling' as const,
+            },
           });
           lastTextContent = wrapUp.content;
           finalStatus = result.status;

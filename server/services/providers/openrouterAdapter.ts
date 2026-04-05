@@ -3,17 +3,18 @@ import type { LLMProviderAdapter, ProviderCallParams, ProviderResponse } from '.
 import { toOpenAIMessages, toOpenAITools, fromOpenAIResponse, buildOpenAIRequestBody } from './openaiFormat.js';
 
 // ---------------------------------------------------------------------------
-// OpenAI provider adapter
-// Uses the shared OpenAI-format utilities for message/tool translation.
+// OpenRouter provider adapter
+// OpenAI-compatible API with different base URL and auth.
+// Reuses shared openaiFormat utilities.
 // ---------------------------------------------------------------------------
 
-const openaiAdapter: LLMProviderAdapter = {
-  provider: 'openai',
+const openrouterAdapter: LLMProviderAdapter = {
+  provider: 'openrouter',
 
   async call(params: ProviderCallParams): Promise<ProviderResponse> {
-    const apiKey = env.OPENAI_API_KEY;
+    const apiKey = env.OPENROUTER_API_KEY;
     if (!apiKey) {
-      throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'openai', message: 'OpenAI adapter not configured. Set OPENAI_API_KEY.' };
+      throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'openrouter', message: 'OpenRouter adapter not configured. Set OPENROUTER_API_KEY.' };
     }
 
     const messages = toOpenAIMessages(params.messages, params.system);
@@ -26,11 +27,13 @@ const openaiAdapter: LLMProviderAdapter = {
       temperature: params.temperature,
     });
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://automationos.app',
+        'X-Title': 'Automation OS',
       },
       body: JSON.stringify(body),
     });
@@ -47,10 +50,10 @@ const openaiAdapter: LLMProviderAdapter = {
       }
 
       if (response.status === 503 || response.status === 529) {
-        throw { statusCode: 503, code: 'PROVIDER_UNAVAILABLE', provider: 'openai', message: `OpenAI unavailable: ${errorDetail}` };
+        throw { statusCode: 503, code: 'PROVIDER_UNAVAILABLE', provider: 'openrouter', message: `OpenRouter unavailable: ${errorDetail}` };
       }
 
-      throw { statusCode: response.status >= 500 ? 503 : 400, message: `OpenAI API error: ${errorDetail}`, code: 'PROVIDER_ERROR' };
+      throw { statusCode: response.status >= 500 ? 503 : 400, message: `OpenRouter API error: ${errorDetail}`, code: 'PROVIDER_ERROR' };
     }
 
     const data = await response.json();
@@ -58,4 +61,4 @@ const openaiAdapter: LLMProviderAdapter = {
   },
 };
 
-export default openaiAdapter;
+export default openrouterAdapter;
