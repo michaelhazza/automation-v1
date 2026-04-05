@@ -149,5 +149,3 @@ export function getProviderRateLimiter(provider: string): RateLimiter {
   return limiter;
 }
 
-/** @deprecated Use getProviderRateLimiter('ghl') instead */
-export const ghlRateLimiter = getProviderRateLimiter('ghl');

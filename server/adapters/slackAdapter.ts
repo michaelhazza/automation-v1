@@ -49,8 +49,6 @@ function mapSlackEventType(eventType: string): SlackEventMapping | null {
 // Slack Adapter
 // ---------------------------------------------------------------------------
 
-const rateLimiter = getProviderRateLimiter('slack');
-
 export const slackAdapter: IntegrationAdapter = {
   supportedActions: ['send_message', 'list_channels'],
 
@@ -64,7 +62,7 @@ export const slackAdapter: IntegrationAdapter = {
     ): Promise<MessageSendResult> {
       try {
         const accessToken = decryptAccessToken(connection);
-        await rateLimiter.acquire(connection.id);
+        await getProviderRateLimiter('slack').acquire(connection.id);
 
         const body: Record<string, unknown> = {
           channel: channelId,
@@ -93,7 +91,7 @@ export const slackAdapter: IntegrationAdapter = {
 
     async listChannels(connection: IntegrationConnection): Promise<MessageChannelData[]> {
       const accessToken = decryptAccessToken(connection);
-      await rateLimiter.acquire(connection.id);
+      await getProviderRateLimiter('slack').acquire(connection.id);
 
       const response = await axios.get(`${SLACK_API_BASE}/conversations.list`, {
         headers: getHeaders(accessToken),

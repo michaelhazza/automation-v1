@@ -202,7 +202,7 @@ app.use(mcpRouter);
 app.use(agentInboxRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
-// ghlWebhookRouter mounted before body parsing (needs raw body for HMAC)
+// ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
 app.use(subaccountTagsRouter);
 app.use(orgMemoryRouter);
 app.use(pageProjectsRouter);

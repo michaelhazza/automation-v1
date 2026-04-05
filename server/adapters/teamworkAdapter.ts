@@ -21,7 +21,9 @@ const TIMEOUT_MS = 12_000;
 function getBaseUrl(connection: IntegrationConnection): string {
   const config = connection.configJson as Record<string, unknown> | null;
   const siteName = config?.siteName as string | undefined;
-  if (!siteName) throw new Error('No siteName in connection config — required for Teamwork Desk API');
+  if (!siteName) {
+    throw { statusCode: 400, message: 'No siteName in connection config — required for Teamwork Desk API' };
+  }
   return `https://${siteName}.teamwork.com/desk/v1`;
 }
 
@@ -45,7 +47,7 @@ function getAuthHeaders(connection: IntegrationConnection): Record<string, strin
     };
   }
 
-  throw new Error('Teamwork connection has neither access token nor API key');
+  throw { statusCode: 401, message: 'Teamwork connection has neither access token nor API key' };
 }
 
 function mapTicketStatus(status: string): TicketData['status'] {
@@ -114,8 +116,6 @@ function mapTeamworkEventType(eventType: string): TeamworkEventMapping | null {
 // Teamwork Desk Adapter
 // ---------------------------------------------------------------------------
 
-const rateLimiter = getProviderRateLimiter('teamwork');
-
 export const teamworkAdapter: IntegrationAdapter = {
   supportedActions: ['create_ticket', 'update_ticket', 'add_reply', 'get_ticket'],
 
@@ -128,7 +128,7 @@ export const teamworkAdapter: IntegrationAdapter = {
       try {
         const baseUrl = getBaseUrl(connection);
         const headers = getAuthHeaders(connection);
-        await rateLimiter.acquire(connection.id);
+        await getProviderRateLimiter('teamwork').acquire(connection.id);
 
         const body: Record<string, unknown> = {
           subject: fields.subject as string,
@@ -167,7 +167,7 @@ export const teamworkAdapter: IntegrationAdapter = {
       try {
         const baseUrl = getBaseUrl(connection);
         const headers = getAuthHeaders(connection);
-        await rateLimiter.acquire(connection.id);
+        await getProviderRateLimiter('teamwork').acquire(connection.id);
 
         const body: Record<string, unknown> = {};
         if (fields.status) body.status = fields.status;
@@ -197,7 +197,7 @@ export const teamworkAdapter: IntegrationAdapter = {
       try {
         const baseUrl = getBaseUrl(connection);
         const headers = getAuthHeaders(connection);
-        await rateLimiter.acquire(connection.id);
+        await getProviderRateLimiter('teamwork').acquire(connection.id);
 
         const payload: Record<string, unknown> = {
           body,
@@ -227,7 +227,7 @@ export const teamworkAdapter: IntegrationAdapter = {
     ): Promise<TicketData> {
       const baseUrl = getBaseUrl(connection);
       const headers = getAuthHeaders(connection);
-      await rateLimiter.acquire(connection.id);
+      await getProviderRateLimiter('teamwork').acquire(connection.id);
 
       const response = await axios.get(`${baseUrl}/tickets/${ticketId}.json`, {
         headers,
@@ -235,7 +235,7 @@ export const teamworkAdapter: IntegrationAdapter = {
       });
 
       const t = (response.data as { ticket?: Record<string, unknown> })?.ticket;
-      if (!t) throw new Error(`Ticket ${ticketId} not found`);
+      if (!t) throw { statusCode: 404, message: `Ticket ${ticketId} not found` };
 
       return {
         externalId: String(t.id),
