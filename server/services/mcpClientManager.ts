@@ -222,6 +222,14 @@ export const mcpClientManager = {
     // Register lazy server tools from cache (no process spawned)
     for (const config of lazyConfigs) {
       if (!config.discoveredToolsJson?.length) continue;
+      // Skip stale cache — tools must have been refreshed within TTL
+      const cacheAge = config.lastToolsRefreshAt
+        ? Date.now() - config.lastToolsRefreshAt.getTime()
+        : Infinity;
+      if (cacheAge > MCP_TOOLS_CACHE_TTL_MS) {
+        logger.info('mcp.lazy_cache_stale', { serverSlug: config.slug, cacheAgeMs: cacheAge });
+        continue; // stale tools not registered — server won't be available this run
+      }
       lazyRegistry.set(config.slug, config);
       // Use cached tool definitions
       const cachedTools = config.discoveredToolsJson.filter((t: McpToolDefinition) => validateMcpToolSchema(t).valid);
