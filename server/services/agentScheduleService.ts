@@ -63,12 +63,13 @@ export const agentScheduleService = {
             runType: 'scheduled',
             runSource: 'scheduler',
             executionMode: 'api',
+            idempotencyKey: `scheduled:${data.subaccountAgentId}:${job.id}`,
             triggerContext: { source: 'schedule' },
           });
         })(), 270_000);
       } catch (err) {
         if (isNonRetryable(err)) {
-          logger.warn('job_non_retryable_failure', { queue: AGENT_RUN_QUEUE, jobId: job.id, error: String(err) });
+          logger.error('job_non_retryable_failure', { queue: AGENT_RUN_QUEUE, jobId: job.id, error: String(err) });
           await pgboss.fail(job.id);
           return;
         }
@@ -123,7 +124,7 @@ export const agentScheduleService = {
         })(), 270_000);
       } catch (err) {
         if (isNonRetryable(err)) {
-          logger.warn('job_non_retryable_failure', { queue: AGENT_ORG_RUN_QUEUE, jobId: job.id, error: String(err) });
+          logger.error('job_non_retryable_failure', { queue: AGENT_ORG_RUN_QUEUE, jobId: job.id, error: String(err) });
           await pgboss.fail(job.id);
           return;
         }
@@ -164,6 +165,7 @@ export const agentScheduleService = {
             runType: 'triggered',
             runSource: 'handoff',
             executionMode: 'api',
+            idempotencyKey: `handoff:${data.agentId}:${job.id}`,
             taskId: data.taskId,
             handoffDepth: data.handoffDepth,
             parentRunId: data.sourceRunId,
@@ -177,7 +179,7 @@ export const agentScheduleService = {
         })(), 150_000);
       } catch (err) {
         if (isNonRetryable(err)) {
-          logger.warn('job_non_retryable_failure', { queue: AGENT_HANDOFF_QUEUE, jobId: job.id, error: String(err) });
+          logger.error('job_non_retryable_failure', { queue: AGENT_HANDOFF_QUEUE, jobId: job.id, error: String(err) });
           await pgboss.fail(job.id);
           return;
         }
@@ -221,12 +223,13 @@ export const agentScheduleService = {
             runType: 'triggered',
             runSource: 'trigger',
             executionMode: 'api',
+            idempotencyKey: `triggered:${data.subaccountAgentId}:${job.id}`,
             triggerContext: data.triggerContext,
           });
         })(), 270_000);
       } catch (err) {
         if (isNonRetryable(err)) {
-          logger.warn('job_non_retryable_failure', { queue: AGENT_TRIGGERED_QUEUE, jobId: job.id, error: String(err) });
+          logger.error('job_non_retryable_failure', { queue: AGENT_TRIGGERED_QUEUE, jobId: job.id, error: String(err) });
           await pgboss.fail(job.id);
           return;
         }
@@ -251,7 +254,7 @@ export const agentScheduleService = {
         })(), 210_000);
       } catch (err) {
         if (isNonRetryable(err)) {
-          logger.warn('job_non_retryable_failure', { queue: STALE_CLEANUP_QUEUE, jobId: job.id, error: String(err) });
+          logger.error('job_non_retryable_failure', { queue: STALE_CLEANUP_QUEUE, jobId: job.id, error: String(err) });
           await pgboss.fail(job.id);
           return;
         }

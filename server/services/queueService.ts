@@ -105,7 +105,7 @@ async function getQueueBackend() {
         await withTimeout(processExecution(executionId), 570_000); // 600 - 30
       } catch (err) {
         if (isNonRetryable(err)) {
-          logger.warn('job_non_retryable_failure', { queue: EXECUTION_QUEUE_NAME, jobId: job.id, error: String(err) });
+          logger.error('job_non_retryable_failure', { queue: EXECUTION_QUEUE_NAME, jobId: job.id, error: String(err) });
           await (boss as any).fail(job.id);
           return;
         }
@@ -546,7 +546,7 @@ export const queueService = {
           );
         } catch (err) {
           if (isNonRetryable(err)) {
-            logger.warn('job_non_retryable_failure', { queue: WORKFLOW_RESUME_QUEUE, jobId: job.id, error: String(err) });
+            logger.error('job_non_retryable_failure', { queue: WORKFLOW_RESUME_QUEUE, jobId: job.id, error: String(err) });
             await (boss as any).fail(job.id);
             return;
           }
