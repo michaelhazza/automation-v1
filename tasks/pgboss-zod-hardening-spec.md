@@ -282,6 +282,18 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     ),
   ]);
 }
+
+/** Check if error is a handler timeout (retryable, but log explicitly for visibility) */
+export function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('timed out after');
+}
+
+/** Safe-serialize payload for logging — prevents log bloat from large LLM contexts */
+export function safeSerialize(payload: unknown, maxBytes = 5000): unknown {
+  const str = JSON.stringify(payload);
+  if (str.length <= maxBytes) return payload;
+  return { _truncated: true, _originalSize: str.length, _preview: str.slice(0, maxBytes) };
+}
 ```
 
 ##### 4b: Handler timeout wrapping
@@ -328,7 +340,7 @@ if (existing === 'completed' || existing === 'failed') {
 **Apply in every worker handler:**
 
 ```typescript
-import { isNonRetryable, getRetryCount, withTimeout } from '../lib/jobErrors.js';
+import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
 import { logger } from '../lib/logger.js';
 
 await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job) => {
@@ -349,6 +361,10 @@ await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamCo
       await boss.fail(job.id); // mark as failed → routes to DLQ, skips retries
       return;
     }
+    if (isTimeoutError(err)) {
+      logger.error('job_timeout', { queue: 'agent-scheduled-run', jobId: job.id, retryCount });
+      // Let pg-boss retry — timeout is transient, but log at error level for visibility
+    }
     throw err; // transient error — let pg-boss retry
   }
 });
@@ -364,6 +380,7 @@ await boss.work('agent-scheduled-run', { teamSize: env.QUEUE_CONCURRENCY, teamCo
 // server/services/dlqMonitorService.ts
 import PgBoss from 'pg-boss';
 import { logger } from '../lib/logger.js';
+import { safeSerialize } from '../lib/jobErrors.js';
 
 const DLQ_QUEUES = [
   'agent-scheduled-run__dlq',
@@ -388,8 +405,8 @@ export async function startDlqMonitor(boss: PgBoss) {
         organisationId: payload.organisationId,
         agentId: payload.agentId,
         subaccountId: payload.subaccountId,
-        // Job metadata
-        payload,
+        // Job metadata — safe-serialized to prevent log bloat from large LLM contexts
+        payload: safeSerialize(payload),
       });
       // Future: emit WebSocket event to admin dashboard
       // Future: write to dedicated DLQ audit table
@@ -532,7 +549,7 @@ export const validateBody = <T extends ZodTypeAny>(schema: T, mode: ValidationMo
           method: req.method,
           errors: result.error.flatten(),
         });
-        next(); // pass through — log only
+        next(); // pass through — log only, don't reject
         return;
       }
       res.status(400).json({
@@ -541,6 +558,7 @@ export const validateBody = <T extends ZodTypeAny>(schema: T, mode: ValidationMo
       });
       return;
     }
+    // Always assign parsed data — even in warn mode, valid input gets coerced types
     req.body = result.data;
     next();
   };
