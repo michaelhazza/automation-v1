@@ -8,6 +8,10 @@ import {
   integrationConnections,
 } from '../db/schema/index.js';
 import { adapters } from '../adapters/index.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { env } from '../lib/env.js';
+import { logger } from '../lib/logger.js';
+import { withTimeout } from '../lib/jobErrors.js';
 
 // ---------------------------------------------------------------------------
 // Payment Reconciliation Job — checks pending checkout sessions every 15 min
@@ -15,40 +19,6 @@ import { adapters } from '../adapters/index.js';
 
 const JOB_NAME = 'payment-reconciliation';
 const SCHEDULE_CRON = '*/15 * * * *';
-
-// pg-boss instance — lazy-loaded (same pattern as agentScheduleService)
-let boss: PgBoss | null = null;
-
-type PgBoss = {
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  send(name: string, data?: object, options?: object): Promise<string | null>;
-  schedule(name: string, cron: string, data?: object, options?: object): Promise<void>;
-  work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
-};
-
-async function getBoss(): Promise<PgBoss | null> {
-  if (boss) return boss;
-
-  try {
-    const PgBossModule = await import('pg-boss');
-    const PgBossClass = PgBossModule.default ?? PgBossModule;
-    const { env } = await import('../lib/env.js');
-
-    boss = new (PgBossClass as unknown as new (config: { connectionString: string }) => PgBoss)({
-      connectionString: env.DATABASE_URL,
-    });
-
-    await boss.start();
-    return boss;
-  } catch (err) {
-    console.warn(
-      '[PaymentReconciliation] pg-boss not available, skipping:',
-      err instanceof Error ? err.message : String(err),
-    );
-    return null;
-  }
-}
 
 /**
  * Core reconciliation logic. Can be called directly for manual/testing use.
@@ -298,24 +268,15 @@ async function resolvePaymentAdapter(pageId: string) {
  * Called once on server startup.
  */
 export async function initializePaymentReconciliationJob(): Promise<void> {
-  const pgboss = await getBoss();
-  if (!pgboss) {
-    console.warn('[PaymentReconciliation] Skipping job initialization (pg-boss unavailable)');
+  if (env.JOB_QUEUE_BACKEND !== 'pg-boss') {
+    logger.warn('payment_reconciliation_skipped', { reason: 'pg-boss not configured' });
     return;
   }
-
-  // Register worker
-  await pgboss.work(JOB_NAME, async () => {
-    console.log('[PaymentReconciliation] Running scheduled reconciliation');
-    try {
-      await runReconciliation();
-    } catch (err) {
-      console.error('[PaymentReconciliation] Scheduled run failed:', err);
-    }
+  const pgboss = await getPgBoss();
+  await (pgboss as any).work(JOB_NAME, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async () => {
+    logger.info('payment_reconciliation_start');
+    await withTimeout(runReconciliation(), 270_000); // 300 - 30
   });
-
-  // Register cron schedule
-  await pgboss.schedule(JOB_NAME, SCHEDULE_CRON, {}, { tz: 'UTC' } as object);
-
-  console.log(`[PaymentReconciliation] Scheduled at ${SCHEDULE_CRON}`);
+  await pgboss.schedule(JOB_NAME, SCHEDULE_CRON, {}, { tz: 'UTC' });
+  logger.info('payment_reconciliation_scheduled', { cron: SCHEDULE_CRON });
 }

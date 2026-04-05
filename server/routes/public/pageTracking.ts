@@ -6,6 +6,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { pageTrackingService } from '../../services/pageTrackingService.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
+import { validateBody } from '../../middleware/validate.js';
+import { pageTrackingBody } from '../../schemas/public.js';
+import type { PageTrackingInput } from '../../schemas/public.js';
 
 // ---------------------------------------------------------------------------
 // TODO(PROD-RATE-LIMIT): Replace with Redis-backed sliding window counters
@@ -53,12 +56,11 @@ router.post('/api/public/track', (req, res, next) => {
     return;
   }
   next();
-}, asyncHandler(async (req, res) => {
+}, validateBody(pageTrackingBody), asyncHandler(async (req, res) => {
   res.status(204).end();
 
   // Fire-and-forget — process after response is sent
-  const { pageId, sessionId, referrer, utmSource, utmMedium, utmCampaign } = req.body ?? {};
-  if (!pageId || typeof pageId !== 'string') return;
+  const { pageId, sessionId, referrer, utmSource, utmMedium, utmCampaign } = req.body as PageTrackingInput;
 
   try {
     await pageTrackingService.recordView({
