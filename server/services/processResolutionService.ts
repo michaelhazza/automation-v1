@@ -205,7 +205,8 @@ export const processResolutionService = {
         throw { statusCode: 400, message: `Connection ${mapping.connectionId} for slot "${key}" not found` };
       }
 
-      if (connection.subaccountId !== subaccountId) {
+      // Accept connections that belong to this subaccount OR are org-level (subaccountId IS NULL)
+      if (connection.subaccountId !== subaccountId && connection.subaccountId !== null) {
         throw { statusCode: 403, message: `Connection for slot "${key}" does not belong to this subaccount` };
       }
 

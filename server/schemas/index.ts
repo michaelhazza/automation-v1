@@ -6,3 +6,4 @@ export * from './agents.js';
 export * from './tasks.js';
 export * from './organisations.js';
 export * from './subaccountAgents.js';
+export * from './connections.js';
