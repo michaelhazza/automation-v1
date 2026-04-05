@@ -173,6 +173,17 @@ router.get(
   })
 );
 
+// ─── Get trace chain for a run (A1) ──────────────────────────────────────────
+
+router.get(
+  '/api/agent-runs/:id/chain',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const chain = await agentActivityService.getRunChain(req.params.id, req.orgId!);
+    res.json(chain);
+  })
+);
+
 // ─── Configure subaccount agent (schedule, skills, limits) ───────────────────
 
 router.patch(

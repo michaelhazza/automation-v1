@@ -1,6 +1,8 @@
-import { eq, and, desc, gte, sql } from 'drizzle-orm';
+import { eq, and, desc, gte, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentRuns, agents, subaccounts, taskActivities } from '../db/schema/index.js';
+
+const MAX_CHAIN_NODES = 50;
 
 // ---------------------------------------------------------------------------
 // Agent Activity Service — scoped activity queries for dashboard/activity page
@@ -149,5 +151,104 @@ export const agentActivityService = {
       .limit(limit);
 
     return query;
+  },
+
+  /**
+   * Reconstruct the full trace chain for a run (A1).
+   * Walks parentRunId up to root, then collects all descendants.
+   */
+  async getRunChain(runId: string, organisationId: string) {
+    const visited = new Set<string>();
+    let truncated = false;
+    let truncationReason: 'cycle' | 'depth_limit' | 'missing_parent' | undefined;
+
+    // Walk UP to find root
+    const chainIds: string[] = [];
+    let currentId: string | null = runId;
+
+    while (currentId && chainIds.length < MAX_CHAIN_NODES) {
+      if (visited.has(currentId)) {
+        truncated = true;
+        truncationReason = 'cycle';
+        break;
+      }
+      visited.add(currentId);
+      chainIds.unshift(currentId);
+
+      const [run] = await db
+        .select({ parentRunId: agentRuns.parentRunId })
+        .from(agentRuns)
+        .where(and(eq(agentRuns.id, currentId), eq(agentRuns.organisationId, organisationId)));
+
+      if (!run) {
+        if (currentId !== runId) {
+          truncated = true;
+          truncationReason = 'missing_parent';
+        }
+        break;
+      }
+      currentId = run.parentRunId;
+    }
+
+    if (chainIds.length >= MAX_CHAIN_NODES) {
+      truncated = true;
+      truncationReason = 'depth_limit';
+    }
+
+    const rootRunId = chainIds[0] ?? runId;
+
+    // Walk DOWN: get all descendants of runs in the chain
+    const descendantRows = await db
+      .select({
+        run: agentRuns,
+        agentName: agents.name,
+        subaccountName: subaccounts.name,
+      })
+      .from(agentRuns)
+      .innerJoin(agents, eq(agents.id, agentRuns.agentId))
+      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .where(and(
+        eq(agentRuns.organisationId, organisationId),
+        sql`(${agentRuns.id} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentRunId} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentSpawnRunId} = ANY(${chainIds}::uuid[]))`,
+      ));
+
+    // Deduplicate and build flat list
+    const seen = new Set<string>();
+    const runs = descendantRows
+      .filter(r => {
+        if (seen.has(r.run.id)) return false;
+        seen.add(r.run.id);
+        return true;
+      })
+      .map(({ run, agentName, subaccountName }) => ({
+        id: run.id,
+        parentRunId: run.parentRunId,
+        parentSpawnRunId: run.parentSpawnRunId,
+        isSubAgent: run.isSubAgent,
+        handoffDepth: run.handoffDepth,
+        runSource: run.runSource,
+        runType: run.runType,
+        status: run.status,
+        agentName,
+        subaccountName,
+        startedAt: run.startedAt,
+        completedAt: run.completedAt,
+        durationMs: run.durationMs,
+        totalTokens: run.totalTokens,
+        totalToolCalls: run.totalToolCalls,
+        errorMessage: run.errorMessage,
+        triggerContext: run.triggerContext,
+      }));
+
+    return {
+      runs,
+      metadata: {
+        rootRunId,
+        totalNodes: runs.length,
+        isComplete: !truncated,
+        truncated,
+        truncationReason,
+      },
+    };
   },
 };
