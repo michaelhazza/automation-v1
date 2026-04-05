@@ -77,6 +77,11 @@ export const llmRequests = pgTable(
     wasEscalated:     boolean('was_escalated').notNull().default(false),
     escalationReason: text('escalation_reason'),
 
+    // Fallback tracking — what the resolver originally picked vs what was actually used
+    requestedProvider:  text('requested_provider'),
+    requestedModel:     text('requested_model'),
+    fallbackChain:      text('fallback_chain'),  // JSON as text for write performance. [{provider,model,error?} | {provider,model,success:true}]
+
     // Billing period (derived from created_at UTC at insert time — never app clock)
     billingMonth: text('billing_month').notNull(),  // 'YYYY-MM'
     billingDay:   text('billing_day').notNull(),    // 'YYYY-MM-DD'

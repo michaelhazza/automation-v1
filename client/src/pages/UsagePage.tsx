@@ -62,6 +62,58 @@ interface DayBucket {
   total: number;
 }
 
+// ─── Routing tab types ────────────────────────────────────────────────────────
+
+interface RoutingDistribution {
+  totalRequests: number;
+  totalCostCents: number;
+  byTier: { frontier: number; economy: number };
+  byReason: Record<string, number>;
+  byPhase: Record<string, number>;
+  byStatus: Record<string, number>;
+  byProvider: Record<string, number>;
+  costByTier: { frontier: number; economy: number };
+  costByReason: Record<string, number>;
+  latencyByProvider: Record<string, number>;
+  latencyByTier: { frontier: number; economy: number };
+  fallbackPct: number;
+  escalationPct: number;
+  downgradePct: number;
+}
+
+interface RoutingLogItem {
+  id: string;
+  createdAt: string;
+  agentName: string | null;
+  provider: string;
+  model: string;
+  requestedProvider: string | null;
+  requestedModel: string | null;
+  executionPhase: string;
+  capabilityTier: string;
+  routingReason: string | null;
+  status: string;
+  providerLatencyMs: number | null;
+  routerOverheadMs: number | null;
+  costWithMarginCents: number;
+  wasDowngraded: boolean;
+  wasEscalated: boolean;
+  escalationReason: string | null;
+  fallbackChain: string | null;
+  tokensIn: number;
+  tokensOut: number;
+  cachedPromptTokens: number;
+  costRaw: string;
+  costWithMargin: string;
+  marginMultiplier: string;
+  requestPayloadHash: string | null;
+  responsePayloadHash: string | null;
+  idempotencyKey: string;
+  runId: string | null;
+  executionId: string | null;
+  taskType: string;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatCents(cents: number | null | undefined): string {
@@ -140,7 +192,7 @@ function BudgetBar({ spent, limit, label }: { spent: number; limit: number | nul
 
 // ─── Tab bar ───────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'agents' | 'models' | 'runs';
+type Tab = 'overview' | 'agents' | 'models' | 'runs' | 'routing';
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
@@ -148,6 +200,7 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
     { id: 'agents',   label: 'Agents' },
     { id: 'models',   label: 'Models' },
     { id: 'runs',     label: 'Runs' },
+    { id: 'routing',  label: 'Routing' },
   ];
   return (
     <div className="flex gap-0.5 border-b border-slate-200 mb-6">
@@ -185,6 +238,15 @@ export default function UsagePage({ user: _user, embedded = false }: { user: Use
   const [loading, setLoading]     = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
 
+  // Routing tab state
+  const [routingDist, setRoutingDist]         = useState<RoutingDistribution | null>(null);
+  const [routingLog, setRoutingLog]           = useState<RoutingLogItem[]>([]);
+  const [routingNextCursor, setRoutingNextCursor]   = useState<string | null>(null);
+  const [routingNextCursorId, setRoutingNextCursorId] = useState<string | null>(null);
+  const [routingLoadingMore, setRoutingLoadingMore] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<RoutingLogItem | null>(null);
+  const [routingFilters, setRoutingFilters]   = useState<Record<string, string>>({});
+
   // Load summary + daily activity on month change
   useEffect(() => {
     if (!subaccountId) return;
@@ -212,10 +274,21 @@ export default function UsagePage({ user: _user, embedded = false }: { user: Use
       } else if (t === 'runs') {
         const { data } = await api.get(`/api/subaccounts/${subaccountId}/usage/runs`);
         setRuns(data.runs ?? []);
+      } else if (t === 'routing') {
+        const params: Record<string, string> = { month, ...routingFilters };
+        const [distRes, logRes] = await Promise.all([
+          api.get(`/api/subaccounts/${subaccountId}/usage/routing-distribution`, { params: { month } }),
+          api.get(`/api/subaccounts/${subaccountId}/usage/routing-log`, { params }),
+        ]);
+        setRoutingDist(distRes.data);
+        setRoutingLog(logRes.data.items ?? []);
+        setRoutingNextCursor(logRes.data.nextCursor);
+        setRoutingNextCursorId(logRes.data.nextCursorId);
+        setSelectedRequest(null);
       }
     } catch { /* ignore */ }
     finally { setTabLoading(false); }
-  }, [subaccountId, month]);
+  }, [subaccountId, month, routingFilters]);
 
   useEffect(() => { loadTab(tab); }, [tab, loadTab]);
 
@@ -557,6 +630,447 @@ export default function UsagePage({ user: _user, embedded = false }: { user: Use
           </table>
         </div>
       )}
+
+      {/* Tab: Routing */}
+      {tab === 'routing' && (
+        <RoutingTab
+          subaccountId={subaccountId!}
+          month={month}
+          distribution={routingDist}
+          log={routingLog}
+          nextCursor={routingNextCursor}
+          nextCursorId={routingNextCursorId}
+          loadingMore={routingLoadingMore}
+          selectedRequest={selectedRequest}
+          filters={routingFilters}
+          tabLoading={tabLoading}
+          shimmer={shimmer}
+          onFilterChange={(f) => { setRoutingFilters(f); }}
+          onLoadMore={async () => {
+            if (!routingNextCursor || !subaccountId) return;
+            setRoutingLoadingMore(true);
+            try {
+              const params: Record<string, string> = { month, ...routingFilters, cursor: routingNextCursor, cursorId: routingNextCursorId! };
+              const { data } = await api.get(`/api/subaccounts/${subaccountId}/usage/routing-log`, { params });
+              setRoutingLog(prev => [...prev, ...(data.items ?? [])]);
+              setRoutingNextCursor(data.nextCursor);
+              setRoutingNextCursorId(data.nextCursorId);
+            } catch { /* ignore */ }
+            finally { setRoutingLoadingMore(false); }
+          }}
+          onSelectRequest={setSelectedRequest}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Routing tab ──────────────────────────────────────────────────────────────
+
+type FallbackChainEntry = { provider: string; model: string; error?: string; success?: boolean };
+
+function parseFallbackChain(raw: string | null): FallbackChainEntry[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as FallbackChainEntry[] : null;
+  } catch { return null; }
+}
+
+const ANOMALY_THRESHOLDS = {
+  fallback:   { warn: 0.05, danger: 0.15 },
+  escalation: { warn: 0.10, danger: 0.25 },
+};
+
+function anomalyColor(value: number, thresholds: { warn: number; danger: number }): string {
+  if (value >= thresholds.danger) return 'text-red-600 bg-red-50 border-red-200';
+  if (value >= thresholds.warn) return 'text-amber-600 bg-amber-50 border-amber-200';
+  return 'text-emerald-600 bg-emerald-50 border-emerald-200';
+}
+
+const TIER_COLORS: Record<string, string> = { frontier: 'bg-indigo-100 text-indigo-700', economy: 'bg-emerald-100 text-emerald-700' };
+const REASON_COLORS: Record<string, string> = { forced: 'bg-purple-100 text-purple-700', ceiling: 'bg-blue-100 text-blue-700', economy: 'bg-emerald-100 text-emerald-700', fallback: 'bg-amber-100 text-amber-700' };
+const STATUS_COLORS: Record<string, string> = { success: 'bg-emerald-100 text-emerald-700', error: 'bg-red-100 text-red-700', timeout: 'bg-amber-100 text-amber-700', budget_blocked: 'bg-orange-100 text-orange-700', rate_limited: 'bg-yellow-100 text-yellow-700', provider_unavailable: 'bg-slate-100 text-slate-700', provider_not_configured: 'bg-slate-100 text-slate-600', partial: 'bg-blue-100 text-blue-700' };
+
+function Badge({ label, colorMap }: { label: string | null; colorMap: Record<string, string> }) {
+  if (!label) return <span className="text-slate-400">—</span>;
+  const cls = colorMap[label] ?? 'bg-slate-100 text-slate-600';
+  return <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${cls}`}>{label}</span>;
+}
+
+function DistributionBar({ label, items }: { label: string; items: { name: string; count: number; cost: number; color: string }[] }) {
+  const totalCount = items.reduce((s, i) => s + i.count, 0) || 1;
+  return (
+    <div className="mb-4">
+      <div className="text-[12px] font-semibold text-slate-700 mb-1.5">{label}</div>
+      <div className="flex h-5 rounded-full overflow-hidden bg-slate-100">
+        {items.filter(i => i.count > 0).map(item => (
+          <div
+            key={item.name}
+            className={`${item.color} flex items-center justify-center text-[10px] font-bold text-white transition-all duration-500`}
+            style={{ width: `${Math.max((item.count / totalCount) * 100, 2)}%` }}
+            title={`${item.name}: ${item.count} requests (${formatCents(item.cost)})`}
+          >
+            {(item.count / totalCount) > 0.08 ? item.name : ''}
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1.5">
+        {items.filter(i => i.count > 0).map(item => (
+          <span key={item.name} className="text-[11px] text-slate-500">
+            <span className={`inline-block w-2 h-2 rounded-full mr-1 ${item.color}`} />
+            {item.name}: {item.count} ({Math.round((item.count / totalCount) * 100)}%) {item.cost > 0 ? `· ${formatCents(item.cost)}` : ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface RoutingTabProps {
+  subaccountId: string;
+  month: string;
+  distribution: RoutingDistribution | null;
+  log: RoutingLogItem[];
+  nextCursor: string | null;
+  nextCursorId: string | null;
+  loadingMore: boolean;
+  selectedRequest: RoutingLogItem | null;
+  filters: Record<string, string>;
+  tabLoading: boolean;
+  shimmer: string;
+  onFilterChange: (f: Record<string, string>) => void;
+  onLoadMore: () => void;
+  onSelectRequest: (r: RoutingLogItem | null) => void;
+}
+
+function RoutingTab({ distribution: dist, log, nextCursor, loadingMore, selectedRequest, filters, tabLoading, shimmer, onFilterChange, onLoadMore, onSelectRequest }: RoutingTabProps) {
+  if (tabLoading && !dist) {
+    return (
+      <div className="space-y-4">
+        <div className={`h-20 ${shimmer}`} />
+        <div className={`h-48 ${shimmer}`} />
+        <div className={`h-64 ${shimmer}`} />
+      </div>
+    );
+  }
+
+  const setFilter = (key: string, value: string) => {
+    const next = { ...filters };
+    if (value) next[key] = value;
+    else delete next[key];
+    onFilterChange(next);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Anomaly flags */}
+      {dist && dist.totalRequests > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Fallback Rate', value: dist.fallbackPct, thresholds: ANOMALY_THRESHOLDS.fallback, desc: 'of requests required provider fallback' },
+            { label: 'Escalation Rate', value: dist.escalationPct, thresholds: ANOMALY_THRESHOLDS.escalation, desc: 'of requests escalated from economy to frontier' },
+            { label: 'Economy Usage', value: dist.downgradePct, thresholds: { warn: 2, danger: 2 }, desc: 'of requests used economy tier' },
+          ].map(flag => (
+            <div key={flag.label} className={`border rounded-xl px-4 py-3 ${flag.label === 'Economy Usage' ? 'text-slate-600 bg-slate-50 border-slate-200' : anomalyColor(flag.value, flag.thresholds)}`}>
+              <div className="text-[20px] font-extrabold">{Math.round(flag.value * 100)}%</div>
+              <div className="text-[11px] font-bold uppercase tracking-wider mt-0.5">{flag.label}</div>
+              <div className="text-[11px] mt-0.5 opacity-75">{flag.desc}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Distribution charts */}
+      {dist && dist.totalRequests > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[14px] font-bold text-slate-900 m-0">Routing Distribution</h3>
+            <div className="text-[13px] text-slate-500">
+              <span className="font-semibold text-slate-900">{formatCents(dist.totalCostCents)}</span>
+              <span className="mx-1.5 text-slate-300">·</span>
+              {dist.totalRequests.toLocaleString()} requests
+            </div>
+          </div>
+
+          <DistributionBar
+            label="Capability Tier"
+            items={[
+              { name: 'frontier', count: dist.byTier.frontier, cost: dist.costByTier.frontier, color: 'bg-indigo-400' },
+              { name: 'economy', count: dist.byTier.economy, cost: dist.costByTier.economy, color: 'bg-emerald-400' },
+            ]}
+          />
+          <DistributionBar
+            label="Routing Reason"
+            items={Object.entries(dist.byReason).map(([name, count]) => ({
+              name, count, cost: dist.costByReason[name] ?? 0,
+              color: name === 'forced' ? 'bg-purple-400' : name === 'ceiling' ? 'bg-blue-400' : name === 'economy' ? 'bg-emerald-400' : 'bg-amber-400',
+            }))}
+          />
+          <DistributionBar
+            label="Status"
+            items={Object.entries(dist.byStatus).map(([name, count]) => ({
+              name, count, cost: 0,
+              color: name === 'success' ? 'bg-emerald-400' : name === 'error' ? 'bg-red-400' : name === 'timeout' ? 'bg-amber-400' : 'bg-slate-400',
+            }))}
+          />
+          <DistributionBar
+            label="Execution Phase"
+            items={Object.entries(dist.byPhase).map(([name, count]) => ({
+              name, count, cost: 0,
+              color: name === 'planning' ? 'bg-blue-400' : name === 'execution' ? 'bg-emerald-400' : 'bg-violet-400',
+            }))}
+          />
+
+          {/* Latency summary */}
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <h4 className="text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2">Avg Model Time</h4>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-[12px]">
+              <span className="text-slate-500">Frontier: <span className="font-semibold text-slate-700">{dist.latencyByTier.frontier ? `${(dist.latencyByTier.frontier / 1000).toFixed(1)}s` : '—'}</span></span>
+              <span className="text-slate-500">Economy: <span className="font-semibold text-slate-700">{dist.latencyByTier.economy ? `${(dist.latencyByTier.economy / 1000).toFixed(1)}s` : '—'}</span></span>
+              {Object.entries(dist.latencyByProvider).map(([p, ms]) => (
+                <span key={p} className="text-slate-500 capitalize">{p}: <span className="font-semibold text-slate-700">{ms ? `${(ms / 1000).toFixed(1)}s` : '—'}</span></span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter bar */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="flex flex-wrap gap-2 items-center">
+          <FilterSelect label="Provider" value={filters.provider} options={dist ? Object.keys(dist.byProvider) : []} onChange={v => setFilter('provider', v)} />
+          <FilterSelect label="Reason" value={filters.routingReason} options={['forced', 'ceiling', 'economy', 'fallback']} onChange={v => setFilter('routingReason', v)} />
+          <FilterSelect label="Tier" value={filters.capabilityTier} options={['frontier', 'economy']} onChange={v => setFilter('capabilityTier', v)} />
+          <FilterSelect label="Phase" value={filters.executionPhase} options={['planning', 'execution', 'synthesis']} onChange={v => setFilter('executionPhase', v)} />
+          <FilterSelect label="Status" value={filters.status} options={dist ? Object.keys(dist.byStatus) : []} onChange={v => setFilter('status', v)} />
+          <FilterSelect label="Downgraded" value={filters.wasDowngraded} options={['true', 'false']} onChange={v => setFilter('wasDowngraded', v)} />
+          <FilterSelect label="Escalated" value={filters.wasEscalated} options={['true', 'false']} onChange={v => setFilter('wasEscalated', v)} />
+          <FilterText label="Agent" value={filters.agentName} onChange={v => setFilter('agentName', v)} />
+          <FilterText label="Run ID" value={filters.runId} onChange={v => setFilter('runId', v)} />
+          {Object.keys(filters).length > 0 && (
+            <button onClick={() => onFilterChange({})} className="text-[11px] text-indigo-600 hover:text-indigo-800 bg-transparent border-0 cursor-pointer font-semibold [font-family:inherit]">
+              Clear all
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Request log table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50/50">
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Time</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Agent</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Provider / Model</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Phase</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tier</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Reason</th>
+              <th className="text-left px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
+              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Model Time</th>
+              <th className="text-right px-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cost</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {tabLoading && log.length === 0 ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i}>
+                  {[...Array(9)].map((_, j) => (
+                    <td key={j} className="px-4 py-3"><div className={`h-4 rounded ${shimmer}`} style={{ width: j === 2 ? '140px' : '60px' }} /></td>
+                  ))}
+                </tr>
+              ))
+            ) : log.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-5 py-12 text-center">
+                  <div className="text-slate-400 text-sm">No routing data for this period.</div>
+                  <div className="text-slate-400 text-[12px] mt-1">Try expanding the date range or removing filters.</div>
+                </td>
+              </tr>
+            ) : (
+              log.map(row => {
+                const hadFallback = row.requestedProvider && row.requestedModel && (row.requestedProvider !== row.provider || row.requestedModel !== row.model);
+                const fallbackChainParsed = parseFallbackChain(row.fallbackChain);
+                const failedAfterN = row.status !== 'success' && fallbackChainParsed && !fallbackChainParsed.some(a => a.success);
+                return (
+                  <tr
+                    key={row.id}
+                    onClick={() => onSelectRequest(selectedRequest?.id === row.id ? null : row)}
+                    className="hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-4 py-2.5 text-[12px] text-slate-500 whitespace-nowrap">
+                      {new Date(row.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td className="px-4 py-2.5 text-[12px] text-slate-700 font-medium max-w-[120px] truncate">{row.agentName ?? '—'}</td>
+                    <td className="px-4 py-2.5">
+                      {hadFallback ? (
+                        <div className="text-[12px]">
+                          <span className="text-slate-400">{row.requestedProvider}/{row.requestedModel}</span>
+                          <span className="text-slate-300 mx-1">&rarr;</span>
+                          <span className="text-slate-900 font-medium">{row.provider}/{row.model}</span>
+                        </div>
+                      ) : (
+                        <div className="text-[12px] text-slate-900 font-medium">{row.provider}/{row.model}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5"><Badge label={row.executionPhase} colorMap={{ planning: 'bg-blue-100 text-blue-700', execution: 'bg-emerald-100 text-emerald-700', synthesis: 'bg-violet-100 text-violet-700' }} /></td>
+                    <td className="px-4 py-2.5"><Badge label={row.capabilityTier} colorMap={TIER_COLORS} /></td>
+                    <td className="px-4 py-2.5"><Badge label={row.routingReason} colorMap={REASON_COLORS} /></td>
+                    <td className="px-4 py-2.5">
+                      {failedAfterN
+                        ? <span className="text-[11px] font-semibold text-red-600">Failed after {fallbackChainParsed!.length} attempts</span>
+                        : <Badge label={row.status} colorMap={STATUS_COLORS} />
+                      }
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-[12px] text-slate-500">
+                      {row.providerLatencyMs ? `${(row.providerLatencyMs / 1000).toFixed(1)}s` : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-[12px] font-semibold text-slate-900">{formatCents(row.costWithMarginCents)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        {nextCursor && (
+          <div className="px-5 py-3 border-t border-slate-100 text-center">
+            <button
+              onClick={onLoadMore}
+              disabled={loadingMore}
+              className="text-[13px] font-semibold text-indigo-600 hover:text-indigo-800 bg-transparent border-0 cursor-pointer disabled:opacity-50 [font-family:inherit]"
+            >
+              {loadingMore ? 'Loading...' : 'Load more'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Request detail drawer */}
+      {selectedRequest && (
+        <RequestDetailDrawer request={selectedRequest} onClose={() => onSelectRequest(null)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Filter controls ──────────────────────────────────────────────────────────
+
+function FilterSelect({ label, value, options, onChange }: { label: string; value?: string; options: string[]; onChange: (v: string) => void }) {
+  return (
+    <select
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      className="text-[12px] border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700 [font-family:inherit] cursor-pointer"
+    >
+      <option value="">{label}: Any</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
+function FilterText({ label, value, onChange }: { label: string; value?: string; onChange: (v: string) => void }) {
+  return (
+    <input
+      type="text"
+      placeholder={label}
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      className="text-[12px] border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 w-[110px] [font-family:inherit] placeholder:text-slate-400"
+    />
+  );
+}
+
+// ─── Request detail drawer ────────────────────────────────────────────────────
+
+function RequestDetailDrawer({ request: r, onClose }: { request: RoutingLogItem; onClose: () => void }) {
+  const fallbackChain = parseFallbackChain(r.fallbackChain);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 animate-[fadeIn_0.15s_ease-out_both]">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[14px] font-bold text-slate-900 m-0">Request Detail</h3>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-700 bg-transparent border-0 cursor-pointer text-[18px] leading-none">&times;</button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-[12px]">
+        <DetailField label="ID" value={r.id} mono />
+        <DetailField label="Idempotency Key" value={r.idempotencyKey} mono />
+        <DetailField label="Run ID" value={r.runId} mono />
+        <DetailField label="Execution ID" value={r.executionId} mono />
+        <DetailField label="Task Type" value={r.taskType} />
+        <DetailField label="Agent" value={r.agentName} />
+        <DetailField label="Created At" value={new Date(r.createdAt).toLocaleString()} />
+        <DetailField label="Status" value={r.status} />
+        <DetailField label="Execution Phase" value={r.executionPhase} />
+        <DetailField label="Capability Tier" value={r.capabilityTier} />
+        <DetailField label="Routing Reason" value={r.routingReason} />
+        <DetailField label="Was Downgraded" value={String(r.wasDowngraded)} />
+        <DetailField label="Was Escalated" value={String(r.wasEscalated)} />
+        {r.escalationReason && <DetailField label="Escalation Reason" value={r.escalationReason} />}
+      </div>
+
+      {/* Provider routing */}
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <h4 className="text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2">Provider Routing</h4>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-[12px]">
+          <DetailField label="Requested" value={r.requestedProvider && r.requestedModel ? `${r.requestedProvider}/${r.requestedModel}` : '—'} />
+          <DetailField label="Actual" value={`${r.provider}/${r.model}`} />
+          <DetailField label="Model Time" value={r.providerLatencyMs ? `${(r.providerLatencyMs / 1000).toFixed(2)}s` : '—'} />
+          <DetailField label="Routing Time" value={r.routerOverheadMs ? `${r.routerOverheadMs}ms` : '—'} />
+        </div>
+      </div>
+
+      {/* Fallback chain timeline */}
+      {fallbackChain && fallbackChain.length > 0 && (
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <h4 className="text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2">Fallback Chain</h4>
+          <div className="space-y-1.5">
+            {fallbackChain.map((attempt, i) => (
+              <div key={i} className="flex items-center gap-2 text-[12px]">
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${attempt.success ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                <span className="font-medium text-slate-700">{attempt.provider}/{attempt.model}</span>
+                {attempt.error && <span className="text-red-500 truncate">{attempt.error}</span>}
+                {attempt.success && <span className="text-emerald-600 font-semibold">Success</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tokens & cost */}
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <h4 className="text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tokens & Cost</h4>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 text-[12px]">
+          <DetailField label="Tokens In" value={formatTokens(r.tokensIn)} />
+          <DetailField label="Tokens Out" value={formatTokens(r.tokensOut)} />
+          <DetailField label="Cached Tokens" value={formatTokens(r.cachedPromptTokens)} />
+          <DetailField label="Raw Cost" value={`$${Number(r.costRaw).toFixed(6)}`} />
+          <DetailField label="Cost w/ Margin" value={`$${Number(r.costWithMargin).toFixed(6)}`} />
+          <DetailField label="Margin" value={`${r.marginMultiplier}x`} />
+          <DetailField label="Final Cost" value={formatCents(r.costWithMarginCents)} />
+        </div>
+      </div>
+
+      {/* Hashes */}
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <h4 className="text-[12px] font-bold text-slate-500 uppercase tracking-wider mb-2">Audit Hashes</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 text-[12px]">
+          <DetailField label="Request Hash" value={r.requestPayloadHash} mono />
+          <DetailField label="Response Hash" value={r.responsePayloadHash} mono />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailField({ label, value, mono }: { label: string; value: string | null | undefined; mono?: boolean }) {
+  return (
+    <div>
+      <div className="text-slate-400 font-semibold mb-0.5">{label}</div>
+      <div className={`text-slate-900 ${mono ? 'font-mono text-[11px] break-all' : ''}`}>{value ?? '—'}</div>
     </div>
   );
 }

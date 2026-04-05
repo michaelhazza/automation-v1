@@ -993,6 +993,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           context: {
             ...routerCtx, taskType: 'development', executionPhase: phase,
             provider: agent.modelProvider, model: agent.modelId, routingMode: 'forced' as const,
+            wasEscalated: true,
+            escalationReason: `economy_invalid_tool_calls: ${validation.failureReason}`,
           },
         });
         // Replace response with escalated version
@@ -1000,8 +1002,6 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         totalTokensUsed += (escalatedResponse.tokensIn ?? 0) + (escalatedResponse.tokensOut ?? 0);
         lastTextContent = escalatedResponse.content;
         previousResponseHadToolCalls = !!(escalatedResponse.toolCalls && escalatedResponse.toolCalls.length > 0);
-        // TODO: Write wasEscalated + escalationReason to the ledger row
-        // (The escalated routeCall creates its own ledger entry; the original economy entry remains.)
       }
     }
 
