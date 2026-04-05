@@ -117,7 +117,7 @@ function TreeNode({
           <div className="text-xs text-slate-500 flex gap-2">
             <span>{formatDuration(run.durationMs)}</span>
             <span>{formatTokens(run.totalTokens)}t</span>
-            {run.costCents ? <span>{formatCost(run.costCents)}</span> : null}
+            {run.costCents !== null && run.costCents > 0 ? <span>{formatCost(run.costCents)}</span> : null}
           </div>
           {run.errorMessage && (
             <div className="text-xs text-red-500 truncate mt-0.5">{run.errorMessage}</div>
@@ -140,14 +140,16 @@ function TreeNode({
 export default function TraceChainSidebar({ runId, onSelectRun }: Props) {
   const [chain, setChain] = useState<ChainResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setFetchError(false);
     api.get(`/api/agent-runs/${runId}/chain`)
       .then(res => { if (!cancelled) setChain(res.data); })
-      .catch(() => { if (!cancelled) setChain(null); })
+      .catch(() => { if (!cancelled) { setChain(null); setFetchError(true); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [runId]);
@@ -164,6 +166,7 @@ export default function TraceChainSidebar({ runId, onSelectRun }: Props) {
     );
   }
 
+  if (fetchError) return null; // Silent: chain fetch failed, don't show broken sidebar
   if (!chain || chain.runs.length <= 1) return null;
 
   const tree = buildTree(chain.runs);

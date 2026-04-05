@@ -8,6 +8,8 @@ interface ChainRun {
   completedAt: string | null;
   durationMs: number | null;
   totalTokens: number | null;
+  errorMessage?: string | null;
+  costCents?: number | null;
 }
 
 interface Props {
@@ -105,7 +107,7 @@ export default function TraceChainTimeline({ runs, selectedRunId, onSelectRun }:
               )}
 
               {/* Hover tooltip via title */}
-              <title>{`${run.agentName}\nStatus: ${run.status}\nDuration: ${run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : '—'}\nTokens: ${run.totalTokens ?? '—'}`}</title>
+              <title>{`${run.agentName}\nStatus: ${run.status}${run.errorMessage ? `\nError: ${run.errorMessage}` : ''}\nDuration: ${run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : '—'}\nTokens: ${run.totalTokens ?? '—'}${run.costCents ? `\nCost: $${(run.costCents / 100).toFixed(2)}` : ''}`}</title>
             </g>
           );
         })}
