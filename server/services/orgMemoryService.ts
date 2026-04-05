@@ -1,9 +1,9 @@
-import { eq, and, desc, sql, isNull } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { orgMemories, orgMemoryEntries } from '../db/schema/index.js';
 import {
   RRF_K, RRF_MIN_SCORE, MAX_MEMORY_SCAN, MAX_QUERY_TEXT_CHARS,
-  VECTOR_SEARCH_RECENCY_DAYS, RRF_WEIGHTS, MAX_EMBEDDING_INPUT_CHARS,
+  VECTOR_SEARCH_RECENCY_DAYS, RRF_WEIGHTS,
 } from '../config/limits.js';
 
 // Re-use scoring from workspace memory

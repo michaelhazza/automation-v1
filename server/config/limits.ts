@@ -204,9 +204,6 @@ export const RERANKER_MAX_CALLS_PER_RUN = 3;
 /** Queries shorter than this (chars) trigger HyDE */
 export const HYDE_THRESHOLD = 100;
 
-/** Model for HyDE generation */
-export const HYDE_MODEL = 'claude-haiku-4-5-20251001';
-
 /** Max tokens for HyDE response */
 export const HYDE_MAX_TOKENS = 200;
 

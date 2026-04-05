@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import crypto from 'crypto';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';

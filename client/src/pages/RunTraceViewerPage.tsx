@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import TraceChainSidebar from '../components/TraceChainSidebar';
+import TraceChainTimeline from '../components/TraceChainTimeline';
 
 interface ToolCallEntry {
   tool?: string;
@@ -182,6 +183,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [chainRuns, setChainRuns] = useState<Array<{ id: string; agentName: string; isSubAgent: boolean; runSource: string; status: string; startedAt: string | null; completedAt: string | null; durationMs: number | null; totalTokens: number | null }>>([]);
 
   // Keep activeRunId in sync with route
   useEffect(() => { if (routeRunId) setActiveRunId(routeRunId); }, [routeRunId]);
@@ -195,6 +197,10 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       .then(({ data }) => setRun(data))
       .catch((err) => setError(err.response?.data?.error ?? 'Failed to load run'))
       .finally(() => setLoading(false));
+    // Fetch chain for timeline (non-blocking)
+    api.get(`/api/agent-runs/${runId}/chain`)
+      .then(({ data }) => setChainRuns(data.runs ?? []))
+      .catch(() => setChainRuns([]));
   }, [runId]);
 
   const handleSelectRun = useCallback((id: string) => {
@@ -237,6 +243,13 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
         <span>/</span>
         <span>Run Trace</span>
       </div>
+
+      {chainRuns.length > 1 && (
+        <div className="bg-white rounded-xl border border-slate-200 px-5 py-4 mb-4">
+          <h3 className="text-[13px] font-semibold text-slate-500 uppercase tracking-wider mb-3 mt-0">Chain Timeline</h3>
+          <TraceChainTimeline runs={chainRuns} selectedRunId={runId!} onSelectRun={handleSelectRun} />
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 px-6 py-5 mb-4">
         <div className="flex justify-between items-start flex-wrap gap-3">
