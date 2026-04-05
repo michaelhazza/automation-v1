@@ -599,6 +599,12 @@ export default function Layout({ user, children }: LayoutProps) {
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/page-projects`} icon={<Icons.portal />} label="Sites" />
               )}
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/triggers`} icon={<Icons.scheduled />} label="Triggers" />
+              )}
+              {hasOrgPerm('org.agents.edit') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/tags`} icon={<Icons.settings />} label="Tags" />
+              )}
             </>
           )}
 
@@ -669,6 +675,10 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
               {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/org-memory" icon={<Icons.activity />} label="Org Memory" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/org-agent-configs" icon={<Icons.agents />} label="Org Agents" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/hierarchy-templates" icon={<Icons.agents />} label="Templates" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/connectors" icon={<Icons.connections />} label="Connectors" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
           )}

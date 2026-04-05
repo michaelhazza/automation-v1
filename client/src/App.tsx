@@ -59,6 +59,12 @@ const UsagePage = lazy(() => import('./pages/UsagePage'));
 const PageProjectsPage = lazy(() => import('./pages/PageProjectsPage'));
 const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage'));
 const JobQueueDashboardPage = lazy(() => import('./pages/JobQueueDashboardPage'));
+const OrgMemoryPage = lazy(() => import('./pages/OrgMemoryPage'));
+const AgentTriggersPage = lazy(() => import('./pages/AgentTriggersPage'));
+const OrgAgentConfigsPage = lazy(() => import('./pages/OrgAgentConfigsPage'));
+const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
+const HierarchyTemplatesPage = lazy(() => import('./pages/HierarchyTemplatesPage'));
+const ConnectorConfigsPage = lazy(() => import('./pages/ConnectorConfigsPage'));
 
 function PageLoader() {
   return (
@@ -181,7 +187,13 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects" element={<PageProjectsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects/:projectId" element={<PageProjectDetailPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/triggers" element={<AgentTriggersPage />} />
+            <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
+            <Route path="/admin/org-memory" element={<OrgMemoryPage />} />
+            <Route path="/admin/org-agent-configs" element={<OrgAgentConfigsPage />} />
+            <Route path="/admin/hierarchy-templates" element={<HierarchyTemplatesPage />} />
+            <Route path="/admin/connectors" element={<ConnectorConfigsPage />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
