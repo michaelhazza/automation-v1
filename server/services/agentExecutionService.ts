@@ -635,28 +635,71 @@ export const agentExecutionService = {
           subaccountId:  request.subaccountId ?? undefined,
           agentId:       request.agentId ?? undefined,
           executionMode: 'api',
-        }, () => runAgenticLoop({
-          runId: run.id,
-          agent,
-          routerCtx: {
-            organisationId:    request.organisationId,
-            subaccountId:      request.subaccountId,
-            runId:             run.id,
-            subaccountAgentId: request.subaccountAgentId,
-            agentName:         agent.name,
-            sourceType:        'agent_run',
-          },
-          systemPrompt: fullSystemPrompt,
-          tools: enhancedTools,
-          tokenBudget,
-          maxToolCalls,
-          timeoutMs,
-          startTime,
-          request,
-          orgProcesses,
-          saLink,
-          pipeline,
-        }));
+        }, async () => {
+          const result = await runAgenticLoop({
+            runId: run.id,
+            agent,
+            routerCtx: {
+              organisationId:    request.organisationId,
+              subaccountId:      request.subaccountId,
+              runId:             run.id,
+              subaccountAgentId: request.subaccountAgentId,
+              agentName:         agent.name,
+              sourceType:        'agent_run',
+            },
+            systemPrompt: fullSystemPrompt,
+            tools: enhancedTools,
+            tokenBudget,
+            maxToolCalls,
+            timeoutMs,
+            startTime,
+            request,
+            orgProcesses,
+            saLink,
+            pipeline,
+          });
+
+          // ── Finalize Langfuse trace (inside withTrace so context is available) ──
+          const loopDurationMs = Date.now() - startTime;
+          const loopFinalStatus = (result.finalStatus ?? 'completed') as string;
+
+          const traceFinalStatus: FinalStatus =
+            loopFinalStatus === 'timeout' ? 'timeout'
+            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+            : loopFinalStatus === 'failed' ? 'failed'
+            : 'completed';
+
+          const traceErrorType: ErrorType | null =
+            loopFinalStatus === 'timeout' ? 'timeout'
+            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+            : loopFinalStatus === 'failed' ? 'internal_error'
+            : null;
+
+          const finalizationSpan = createSpan('agent.finalization.run');
+          createEvent('run.status.changed', {
+            fromStatus: 'running', toStatus: traceFinalStatus,
+          });
+          finalizationSpan.end();
+
+          finalizeTrace({
+            finalStatus: traceFinalStatus,
+            totalTokensIn: result.inputTokens,
+            totalTokensOut: result.outputTokens,
+            iterationCount: result.toolCallsLog.length > 0
+              ? Math.max(...result.toolCallsLog.map(t => (t as { iteration: number }).iteration)) + 1
+              : 0,
+            toolCallCount: result.totalToolCalls,
+            durationMs: loopDurationMs,
+            errorType: traceErrorType,
+            startedAt: new Date(startTime).toISOString(),
+          });
+
+          langfuse.flushAsync().catch(() => {});
+
+          return result;
+        });
       }
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
@@ -711,44 +754,6 @@ export const agentExecutionService = {
         emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: finalStatus,
         });
-      }
-
-      // ── 9b. Finalize Langfuse trace ────────────────────────────────────
-      {
-        const traceFinalStatus: FinalStatus =
-          finalStatus === 'timeout' ? 'timeout'
-          : finalStatus === 'budget_exceeded' ? 'budget_exceeded'
-          : finalStatus === 'loop_detected' ? 'loop_detected'
-          : finalStatus === 'failed' ? 'failed'
-          : 'completed';
-
-        const traceErrorType: ErrorType | null =
-          finalStatus === 'timeout' ? 'timeout'
-          : finalStatus === 'budget_exceeded' ? 'budget_exceeded'
-          : finalStatus === 'loop_detected' ? 'loop_detected'
-          : finalStatus === 'failed' ? 'internal_error'
-          : null;
-
-        const finalizationSpan = createSpan('agent.finalization.run');
-        createEvent('run.status.changed', {
-          fromStatus: 'running', toStatus: traceFinalStatus,
-        });
-        finalizationSpan.end();
-
-        finalizeTrace({
-          finalStatus: traceFinalStatus,
-          totalTokensIn: loopResult.inputTokens,
-          totalTokensOut: loopResult.outputTokens,
-          iterationCount: loopResult.toolCallsLog.length > 0
-            ? Math.max(...loopResult.toolCallsLog.map(t => (t as { iteration: number }).iteration)) + 1
-            : 0,
-          toolCallCount: loopResult.totalToolCalls,
-          durationMs,
-          errorType: traceErrorType,
-          startedAt: new Date(startTime).toISOString(),
-        });
-
-        langfuse.flushAsync().catch(() => {});
       }
 
       // ── 10. Extract insights for workspace memory + entities ─────────────
