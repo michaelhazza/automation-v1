@@ -73,3 +73,5 @@ export * from './canonicalAccounts';
 export * from './canonicalEntities';
 export * from './subaccountTags';
 export * from './orgMemories';
+export * from './mcpServerConfigs';
+export * from './mcpServerAgentLinks';

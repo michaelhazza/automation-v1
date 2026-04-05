@@ -61,6 +61,7 @@ import actionsRouter from './routes/actions.js';
 import systemProcessesRouter from './routes/systemProcesses.js';
 import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
+import orgConnectionsRouter from './routes/orgConnections.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
@@ -75,8 +76,11 @@ import agentInboxRouter from './routes/agentInbox.js';
 import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
 import connectorConfigsRouter from './routes/connectorConfigs.js';
 import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
+import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
+import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import orgMemoryRouter from './routes/orgMemory.js';
+import mcpServersRouter from './routes/mcpServers.js';
 import pageProjectsRouter from './routes/pageProjects.js';
 import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
@@ -138,6 +142,8 @@ app.use(cors({
 
 // Webhook routes that need raw body must be mounted BEFORE json body parsing
 app.use(ghlWebhookRouter);
+app.use(teamworkWebhookRouter);
+app.use(slackWebhookRouter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -185,6 +191,7 @@ app.use(actionsRouter);
 app.use(systemProcessesRouter);
 app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
+app.use(orgConnectionsRouter);
 app.use(processConnectionMappingsRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
@@ -198,9 +205,10 @@ app.use(mcpRouter);
 app.use(agentInboxRouter);
 app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
-// ghlWebhookRouter mounted before body parsing (needs raw body for HMAC)
+// ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
 app.use(subaccountTagsRouter);
 app.use(orgMemoryRouter);
+app.use(mcpServersRouter);
 app.use(pageProjectsRouter);
 app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);

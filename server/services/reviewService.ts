@@ -143,7 +143,7 @@ export const reviewService = {
     await db.insert(actionResumeEvents).values({
       actionId: item.actionId,
       organisationId,
-      subaccountId: action.subaccountId,
+      subaccountId: action.subaccountId!,
       eventType: edits ? 'edited' : 'approved',
       resolvedBy: userId,
       payload: { result: execResult, edits: edits ?? null },
@@ -216,7 +216,7 @@ export const reviewService = {
     await db.insert(actionResumeEvents).values({
       actionId: item.actionId,
       organisationId,
-      subaccountId: action.subaccountId,
+      subaccountId: action.subaccountId!,
       eventType: 'rejected',
       resolvedBy: userId,
       payload: { comment: rejectionComment },

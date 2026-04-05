@@ -17,7 +17,7 @@ import { logger } from './logger.js';
  *   }));
  */
 export function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 ) {
   return (req: Request, res: Response, next: NextFunction): void => {
     fn(req, res, next).catch((err: unknown) => {

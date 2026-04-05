@@ -52,6 +52,11 @@ import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate } from '../webs
 import { orgAgentConfigService } from './orgAgentConfigService.js';
 import { organisations } from '../db/schema/index.js';
 import { langfuse, withTrace } from '../instrumentation.js';
+import {
+  createSpan, createEvent, finalizeTrace, emitLoopTermination,
+  generateRunFingerprint,
+  type FinalStatus, type ErrorType,
+} from '../lib/tracing.js';
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 
 // ---------------------------------------------------------------------------
@@ -349,7 +354,7 @@ export const agentExecutionService = {
             .from(agentRuns)
             .where(and(
               eq(agentRuns.taskId, request.taskId),
-              eq(agentRuns.subaccountId, request.subaccountId),
+              eq(agentRuns.subaccountId, request.subaccountId!),
             ));
           // Subtract 1 because current run is already inserted
           iteration = Math.max(0, Number(total) - 1);
@@ -421,6 +426,32 @@ export const agentExecutionService = {
         }
         return tool;
       });
+
+      // ── 5b. MCP tool resolution ────────────────────────────────────────
+      let mcpClients: Map<string, import('./mcpClientManager.js').McpClientInstance> | null = null;
+      let mcpLazyRegistry: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null = null;
+
+      try {
+        const { mcpClientManager } = await import('./mcpClientManager.js');
+        const mcp = await mcpClientManager.connectForRun({
+          runId,
+          organisationId: request.organisationId,
+          agentId: request.agentId,
+          subaccountId: request.subaccountId ?? null,
+        });
+        mcpClients = mcp.clients;
+        mcpLazyRegistry = mcp.lazyRegistry;
+        if (mcp.tools.length > 0) {
+          // Defense in depth: cap is also enforced in connectForRun
+          const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
+          const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
+          enhancedTools.push(...cappedTools);
+          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
+        }
+      } catch (err) {
+        logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        // Non-fatal — agent runs without MCP tools
+      }
 
       // ── 6. Build task context (with smart offloading) ───────────────────
       let workspaceContext = '';
@@ -541,7 +572,7 @@ export const agentExecutionService = {
         // will transfer to Docker-based execution later.
         let projectRoot = '.';
         try {
-          const { context: dec } = await devContextService.getContext(request.subaccountId);
+          const { context: dec } = await devContextService.getContext(request.subaccountId!);
           projectRoot = dec.projectRoot;
         } catch {
           // DEC not configured — use current directory
@@ -586,39 +617,117 @@ export const agentExecutionService = {
         // ── 8b. Standard API agentic loop ──────────────────────────────
         const pipeline = createDefaultPipeline();
 
+        // Session linking (Section WS2): group related runs
+        let traceSessionId: string;
+        if (request.runSource === 'handoff' && request.parentRunId) {
+          traceSessionId = `handoff-chain-${request.parentRunId}`;
+        } else if (request.runType === 'scheduled') {
+          const dateStr = new Date().toISOString().slice(0, 10);
+          traceSessionId = `schedule-${request.agentId}-${dateStr}`;
+        } else if (request.runSource === 'sub_agent' && request.parentSpawnRunId) {
+          traceSessionId = `spawn-${request.parentSpawnRunId}`;
+        } else {
+          traceSessionId = run.id;
+        }
+
+        // Run fingerprint (Section 8.3)
+        const skillSlugs = enhancedTools.map(t => t.name);
+        const runFingerprint = generateRunFingerprint(request.agentId, 'development', skillSlugs);
+
         const trace = langfuse.trace({
           name:      'agent-run',
           userId:    request.subaccountId,
-          sessionId: run.id,
+          sessionId: traceSessionId,
           metadata: {
-            agentId:    request.agentId,
-            runType:    request.runType,
-            orgId:      request.organisationId,
+            agentId:       request.agentId,
+            runType:       request.runType,
+            orgId:         request.organisationId,
+            subaccountId:  request.subaccountId,
+            executionMode: 'api',
+            traceSchemaVersion: 'v1',
+            instrumentationVersion: '1.0',
+            startedAt:     new Date().toISOString(),
+            runFingerprint,
+            handoffDepth:     request.handoffDepth ?? 0,
+            parentRunId:      request.parentRunId ?? null,
+            isSubAgent:       request.isSubAgent ?? false,
+            parentSpawnRunId: request.parentSpawnRunId ?? null,
           },
         });
 
-        loopResult = await withTrace(trace, () => runAgenticLoop({
-          runId: run.id,
-          agent,
-          routerCtx: {
-            organisationId:    request.organisationId,
-            subaccountId:      request.subaccountId,
-            runId:             run.id,
-            subaccountAgentId: request.subaccountAgentId,
-            agentName:         agent.name,
-            sourceType:        'agent_run',
-          },
-          systemPrompt: fullSystemPrompt,
-          tools: enhancedTools,
-          tokenBudget,
-          maxToolCalls,
-          timeoutMs,
-          startTime,
-          request,
-          orgProcesses,
-          saLink,
-          pipeline,
-        }));
+        loopResult = await withTrace(trace, {
+          runId:         run.id,
+          orgId:         request.organisationId,
+          subaccountId:  request.subaccountId ?? undefined,
+          agentId:       request.agentId ?? undefined,
+          executionMode: 'api',
+        }, async () => {
+          const result = await runAgenticLoop({
+            runId: run.id,
+            agent,
+            routerCtx: {
+              organisationId:    request.organisationId,
+              subaccountId:      request.subaccountId ?? undefined,
+              runId:             run.id,
+              subaccountAgentId: request.subaccountAgentId ?? undefined,
+              agentName:         agent.name,
+              sourceType:        'agent_run',
+            },
+            systemPrompt: fullSystemPrompt,
+            tools: enhancedTools,
+            tokenBudget,
+            maxToolCalls,
+            timeoutMs,
+            startTime,
+            request,
+            orgProcesses,
+            saLink: saLink!,
+            pipeline,
+            mcpClients,
+            mcpLazyRegistry,
+          });
+
+          // ── Finalize Langfuse trace (inside withTrace so context is available) ──
+          const loopDurationMs = Date.now() - startTime;
+          const loopFinalStatus = (result.finalStatus ?? 'completed') as string;
+
+          const traceFinalStatus: FinalStatus =
+            loopFinalStatus === 'timeout' ? 'timeout'
+            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+            : loopFinalStatus === 'failed' ? 'failed'
+            : 'completed';
+
+          const traceErrorType: ErrorType | null =
+            loopFinalStatus === 'timeout' ? 'timeout'
+            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+            : loopFinalStatus === 'failed' ? 'internal_error'
+            : null;
+
+          const finalizationSpan = createSpan('agent.finalization.run');
+          createEvent('run.status.changed', {
+            fromStatus: 'running', toStatus: traceFinalStatus,
+          });
+          finalizationSpan.end();
+
+          finalizeTrace({
+            finalStatus: traceFinalStatus,
+            totalTokensIn: result.inputTokens,
+            totalTokensOut: result.outputTokens,
+            iterationCount: result.toolCallsLog.length > 0
+              ? Math.max(...result.toolCallsLog.map(t => (t as { iteration: number }).iteration)) + 1
+              : 0,
+            toolCallCount: result.totalToolCalls,
+            durationMs: loopDurationMs,
+            errorType: traceErrorType,
+            startedAt: new Date(startTime).toISOString(),
+          });
+
+          langfuse.flushAsync().catch(() => {});
+
+          return result;
+        });
       }
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
@@ -723,6 +832,14 @@ export const agentExecutionService = {
         });
       }
 
+      // ── 12. MCP cleanup (guaranteed) ────────────────────────────────────
+      if (mcpClients?.size) {
+        const { mcpClientManager } = await import('./mcpClientManager.js');
+        await mcpClientManager.disconnectAll(mcpClients).catch((e) => {
+          logger.error('mcp.disconnect_failed', { runId: run.id, error: e instanceof Error ? e.message : String(e) });
+        });
+      }
+
       return {
         runId: run.id,
         status: finalStatus as AgentRunResult['status'],
@@ -794,6 +911,8 @@ interface LoopParams {
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   saLink: typeof subaccountAgents.$inferSelect;
   pipeline: MiddlewarePipeline;
+  mcpClients?: Map<string, import('./mcpClientManager.js').McpClientInstance> | null;
+  mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null;
 }
 
 interface LoopResult {
@@ -856,7 +975,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
-    saLink, pipeline,
+    saLink, pipeline, mcpClients, mcpLazyRegistry,
   } = params;
 
   const toolCallsLog: object[] = [];
@@ -912,6 +1031,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     for (const mw of pipeline.preCall) {
       const result = mw.execute(mwCtx);
       if (result.action === 'stop') {
+        createEvent('agent.middleware.decision', {
+          middlewareName: mw.name, decision: 'stop', reason: result.reason, iteration,
+        });
         messages.push({ role: 'user', content: result.reason });
         const maskedWrapUp = maskObservations(messages, iteration);
         const wrapUp = await routeCall({
@@ -927,9 +1049,15 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         lastTextContent = wrapUp.content;
         totalTokensUsed += (wrapUp.tokensIn ?? 0) + (wrapUp.tokensOut ?? 0);
         finalStatus = result.status;
+        emitLoopTermination('middleware_stop', {
+          iteration, middlewareName: mw.name, reason: result.reason, totalToolCalls,
+        });
         break outerLoop;
       }
       if (result.action === 'inject_message') {
+        createEvent('agent.middleware.decision', {
+          middlewareName: mw.name, decision: 'inject_message', iteration,
+        });
         messages.push({ role: 'user', content: result.message });
         logger.debug('middleware.inject_message', {
           runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
@@ -955,6 +1083,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     } else {
       phase = 'planning';
     }
+
+    const iterationSpan = createSpan('agent.loop.iteration', {
+      iteration, phase, totalToolCalls, tokensUsed: totalTokensUsed,
+    });
 
     // ── Call LLM (with observation masking) ─────────────────────────────
     const maskedMessages = maskObservations(messages, iteration);
@@ -1006,6 +1138,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     }
 
     if (!response.toolCalls || response.toolCalls.length === 0) {
+      iterationSpan.end({ output: { phase, noToolCalls: true } });
+      emitLoopTermination('no_tool_calls', { iteration, totalToolCalls });
       break;
     }
 
@@ -1034,6 +1168,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           break;
         }
         if (result.action === 'stop') {
+          createEvent('agent.middleware.decision', {
+            middlewareName: mw.name, decision: 'stop', reason: result.reason, iteration,
+          });
           messages.push({
             role: 'user',
             content: toolResults.map(tr => ({
@@ -1056,6 +1193,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           });
           lastTextContent = wrapUp.content;
           finalStatus = result.status;
+          iterationSpan.end({ output: { phase, middlewareStop: true } });
+          emitLoopTermination('middleware_stop', {
+            iteration, middlewareName: mw.name, reason: result.reason, totalToolCalls,
+          });
           break outerLoop;
         }
       }
@@ -1093,6 +1234,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             startTime,
             timeoutMs,
             taskId: request.taskId,
+            _mcpClients: mcpClients ?? undefined,
+            _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
           },
         });
       }, { actionType: toolCall.name });
@@ -1127,6 +1270,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         );
         if (postResult.action === 'stop') {
           finalStatus = postResult.status;
+          iterationSpan.end({ output: { phase, postToolStop: true } });
+          emitLoopTermination('middleware_stop', {
+            iteration, middlewareName: mw.name, totalToolCalls,
+          });
           break outerLoop;
         }
         if (postResult.content) {
@@ -1163,6 +1310,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         content: tr.content,
       })),
     }, iteration));
+
+    iterationSpan.end({ output: { phase, toolCallsThisIteration: response.toolCalls?.length ?? 0 } });
+
+    // Check if we've hit the max iteration limit
+    if (iteration >= MAX_LOOP_ITERATIONS - 1) {
+      emitLoopTermination('max_iterations', { iteration, totalToolCalls });
+    }
   }
 
   // Flush any pending throttled trace events before returning

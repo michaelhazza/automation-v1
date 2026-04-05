@@ -11,7 +11,8 @@ import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { db } from '../db/index.js';
 import { subaccounts } from '../db/schema/index.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, checkOrgPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId, getProviderClientSecret } from '../config/oauthProviders.js';
 import { integrationConnectionService } from '../services/integrationConnectionService.js';
@@ -29,10 +30,26 @@ router.get(
   '/api/integrations/oauth2/auth-url',
   authenticate,
   asyncHandler(async (req, res) => {
-    const { provider, subaccountId } = req.query as { provider: string; subaccountId: string };
+    const { provider, subaccountId, scope: connectionScope } = req.query as {
+      provider: string;
+      subaccountId?: string;
+      scope?: string;
+    };
 
-    if (!provider || !subaccountId) {
-      throw Object.assign(new Error('provider and subaccountId are required'), { statusCode: 400 });
+    const isOrgLevel = connectionScope === 'org';
+
+    if (!provider || (!subaccountId && !isOrgLevel)) {
+      throw Object.assign(new Error('provider and either subaccountId or scope=org are required'), { statusCode: 400 });
+    }
+
+    // Org-level OAuth requires org.connections.manage permission
+    if (isOrgLevel) {
+      const hasPermission = await checkOrgPermission(
+        req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.CONNECTIONS_MANAGE,
+      );
+      if (!hasPermission) {
+        throw Object.assign(new Error('Forbidden: org.connections.manage permission required'), { statusCode: 403 });
+      }
     }
 
     const config = OAUTH_PROVIDERS[provider];
@@ -48,28 +65,31 @@ router.get(
       );
     }
 
-    // Verify the subaccount belongs to the authenticated org
-    const [subaccount] = await db
-      .select({ id: subaccounts.id })
-      .from(subaccounts)
-      .where(
-        and(
-          eq(subaccounts.id, subaccountId),
-          eq(subaccounts.organisationId, req.orgId!),
-        ),
-      )
-      .limit(1);
+    // For subaccount-scoped connections, verify the subaccount belongs to the org
+    if (subaccountId && !isOrgLevel) {
+      const [subaccount] = await db
+        .select({ id: subaccounts.id })
+        .from(subaccounts)
+        .where(
+          and(
+            eq(subaccounts.id, subaccountId),
+            eq(subaccounts.organisationId, req.orgId!),
+          ),
+        )
+        .limit(1);
 
-    if (!subaccount) {
-      throw Object.assign(new Error('Subaccount not found'), { statusCode: 404 });
+      if (!subaccount) {
+        throw Object.assign(new Error('Subaccount not found'), { statusCode: 404 });
+      }
     }
 
-    // State JWT: signed nonce binding provider + subaccountId + orgId for CSRF protection
+    // State JWT: signed nonce binding provider + scope + orgId for CSRF protection
     const state = jwt.sign(
       {
         provider,
-        subaccountId,
+        subaccountId: isOrgLevel ? null : subaccountId,
         organisationId: req.orgId!,
+        connectionScope: isOrgLevel ? 'org' : 'subaccount',
         nonce: crypto.randomUUID(),
       },
       env.JWT_SECRET,
@@ -118,7 +138,7 @@ router.get(
       return res.redirect(`${appBase}/settings/integrations?error=missing_params`);
     }
 
-    let payload: { provider: string; subaccountId: string; organisationId: string };
+    let payload: { provider: string; subaccountId: string | null; organisationId: string; connectionScope?: string };
     try {
       payload = jwt.verify(state, env.JWT_SECRET) as typeof payload;
     } catch {
@@ -126,6 +146,7 @@ router.get(
     }
 
     const { provider, subaccountId, organisationId } = payload;
+    const isOrgLevel = payload.connectionScope === 'org';
     const config = OAUTH_PROVIDERS[provider];
     if (!config) {
       return res.redirect(`${appBase}/settings/integrations?error=unknown_provider`);
@@ -184,7 +205,7 @@ router.get(
 
     try {
       await integrationConnectionService.upsertFromOAuth({
-        subaccountId,
+        subaccountId: isOrgLevel ? null : subaccountId,
         organisationId,
         providerType: provider as IntegrationConnection['providerType'],
         accessToken: tokenData.access_token,
@@ -198,10 +219,12 @@ router.get(
       });
     } catch (err) {
       console.error(`[OAuth] Failed to store ${provider} connection:`, err);
-      return res.redirect(`${appBase}/settings/integrations?error=storage_failed`);
+      const redirectBase = isOrgLevel ? '/settings/org-connections' : '/settings/integrations';
+      return res.redirect(`${appBase}${redirectBase}?error=storage_failed`);
     }
 
-    return res.redirect(`${appBase}/settings/integrations?connected=${provider}`);
+    const redirectBase = isOrgLevel ? '/settings/org-connections' : '/settings/integrations';
+    return res.redirect(`${appBase}${redirectBase}?connected=${provider}`);
   }),
 );
 

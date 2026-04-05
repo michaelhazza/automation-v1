@@ -88,7 +88,7 @@ router.post(
     reviewAuditService.record({
       actionId: action.id,
       organisationId: req.orgId!,
-      subaccountId: action.subaccountId,
+      subaccountId: action.subaccountId!,
       agentRunId: action.agentRunId,
       toolSlug: action.actionType,
       agentOutput: action.payloadJson as Record<string, unknown>,
@@ -107,7 +107,7 @@ router.post(
         workflowRunId,
         approvedActionId: action.id,
         organisationId: req.orgId!,
-        subaccountId: action.subaccountId,
+        subaccountId: action.subaccountId!,
         agentId: action.agentId,
         agentRunId: action.agentRunId ?? undefined,
       }).catch((err) => console.error('[ReviewItems] Workflow resume enqueue failed:', err));
@@ -145,7 +145,7 @@ router.post(
     reviewAuditService.record({
       actionId: action.id,
       organisationId: req.orgId!,
-      subaccountId: action.subaccountId,
+      subaccountId: action.subaccountId!,
       agentRunId: action.agentRunId,
       toolSlug: action.actionType,
       agentOutput: action.payloadJson as Record<string, unknown>,

@@ -5,7 +5,7 @@ import { glob } from 'glob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { env } from '../lib/env.js';
-import { getActiveTrace } from '../instrumentation.js';
+import { createSpan, createEvent } from '../lib/tracing.js';
 import { TripWire } from '../lib/tripwire.js';
 import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
@@ -66,6 +66,12 @@ export interface SkillExecutionContext {
   timeoutMs?: number;
   /** The task this agent run is working on, if any. Used for gate escalation. */
   taskId?: string;
+  /** MCP client instances for this run. Set by agentExecutionService. */
+  _mcpClients?: Map<string, import('./mcpClientManager.js').McpClientInstance>;
+  /** MCP lazy server registry for deferred connection. */
+  _mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig>;
+  /** MCP call counter for budget enforcement. */
+  mcpCallCount?: number;
 }
 
 interface SkillExecutionParams {
@@ -185,15 +191,34 @@ export const skillExecutor = {
   async execute(params: SkillExecutionParams): Promise<unknown> {
     const { skillName, input, context } = params;
 
+    // MCP tool dispatch — tool slugs start with "mcp."
+    if (skillName.startsWith('mcp.') && context._mcpClients) {
+      const { mcpClientManager } = await import('./mcpClientManager.js');
+      return mcpClientManager.callTool(
+        context._mcpClients,
+        context._mcpLazyRegistry ?? new Map(),
+        skillName,
+        input,
+        {
+          runId: context.runId,
+          organisationId: context.organisationId,
+          agentId: context.agentId,
+          subaccountId: context.subaccountId,
+          taskId: context.taskId,
+          mcpCallCount: context.mcpCallCount,
+        },
+      );
+    }
+
     switch (skillName) {
       // ── Meta tools — BM25 tool discovery (no action record) ─────────────
       case 'search_tools': {
         const { executeSearchTools } = await import('../tools/meta/searchTools.js');
-        return executeSearchTools(input, context);
+        return executeSearchTools(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
       }
       case 'load_tool': {
         const { executeLoadTool } = await import('../tools/meta/searchTools.js');
-        return executeLoadTool(input, context);
+        return executeLoadTool(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
       }
 
       // ── Direct skills (no action record) ──────────────────────────────
@@ -370,7 +395,7 @@ export const skillExecutor = {
       case 'assign_task': {
         const { executeAssignTask } = await import('../tools/internal/assignTask.js');
         return executeWithActionAudit('assign_task', input, context, () =>
-          executeAssignTask(input, context),
+          executeAssignTask(input, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
         );
       }
 
@@ -437,7 +462,7 @@ async function executeWithActionAudit(
   executor: () => Promise<unknown>
 ): Promise<unknown> {
   const idempotencyKey = `${actionType}:${context.runId}:${Date.now()}`;
-  const span = getActiveTrace()?.span({ name: actionType, input });
+  const pipelineSpan = createSpan('skill.pipeline.run', { skillName: actionType, gateLevel: 'auto' }, { input });
 
   try {
     const proposed = await actionService.proposeAction({
@@ -451,22 +476,32 @@ async function executeWithActionAudit(
       taskId: context.taskId,
     });
 
+    createEvent('skill.action.proposed', {
+      skillName: actionType, actionId: proposed.actionId, status: proposed.status,
+    }, { parentSpan: pipelineSpan });
+
     // Duplicate detected — return existing status
     if (!proposed.isNew) {
       const dupeResult = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Duplicate action detected' };
-      span?.end({ output: dupeResult });
+      pipelineSpan.end({ output: dupeResult });
       return dupeResult;
     }
 
     // Policy engine escalated to block — return denial immediately
     if (proposed.status === 'blocked') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'block', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
-      span?.end({ output: denial });
+      pipelineSpan.end({ output: denial });
       return denial;
     }
 
     // Policy engine escalated to review — block and await human decision
     if (proposed.status === 'pending_approval') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'review', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       const action = await actionService.getAction(proposed.actionId, context.organisationId);
       await reviewService.createReviewItem(action, {
         actionType,
@@ -474,17 +509,22 @@ async function executeWithActionAudit(
         proposedPayload: input,
       });
       const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
-      span?.end({ output: reviewResult });
+      pipelineSpan.end({ output: reviewResult });
       return reviewResult;
     }
+
+    createEvent('skill.gate.decision', {
+      gateLevel: 'auto', skillName: actionType, actionId: proposed.actionId,
+    }, { parentSpan: pipelineSpan });
 
     // Auto-approved — execute inline with processor pipeline
     const locked = await actionService.lockForExecution(proposed.actionId, context.organisationId);
     if (!locked) {
-      span?.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
+      pipelineSpan.end({ output: { success: false, error: 'Failed to acquire execution lock' } });
       return { success: false, error: 'Failed to acquire execution lock' };
     }
 
+    const executeSpan = createSpan('skill.phase.execute', { skillName: actionType }, { parentSpan: pipelineSpan });
     const result = await runWithProcessors(
       actionType,
       input,
@@ -492,6 +532,8 @@ async function executeWithActionAudit(
       (_processedInput) => executor(),
       proposed.actionId,
     );
+    executeSpan.end({ output: result });
+
     const resultObj = result as Record<string, unknown>;
     if (resultObj?.success) {
       await actionService.markCompleted(proposed.actionId, context.organisationId, result);
@@ -499,17 +541,21 @@ async function executeWithActionAudit(
       await actionService.markFailed(proposed.actionId, context.organisationId, String(resultObj?.error ?? 'Unknown error'));
     }
 
-    span?.end({ output: result });
+    pipelineSpan.end({ output: result });
     return result;
   } catch (err) {
     if (err instanceof TripWire && !err.options.retry) {
-      // Fatal TripWire — surface as denied result so the loop halts gracefully
-      span?.end({ output: { success: false, error: err.reason } });
+      createEvent('skill.tripwire.triggered', {
+        skillName: actionType, fatal: true, reason: err.reason, code: err.options.code,
+      }, { parentSpan: pipelineSpan, level: 'ERROR' });
+      pipelineSpan.end({ output: { success: false, error: err.reason } });
       return { success: false, error: `Action halted: ${err.reason}`, code: err.options.code };
     }
-    // If action tracking fails, execute directly to preserve existing behaviour
+    createEvent('skill.action.failed', {
+      skillName: actionType, error: String(err).slice(0, 200),
+    }, { parentSpan: pipelineSpan, level: 'ERROR' });
     console.error(`[ActionAudit] Failed to track ${actionType}, executing directly:`, err);
-    span?.end({ output: { error: String(err) } });
+    pipelineSpan.end({ output: { error: String(err) } });
     return executor();
   }
 }
@@ -533,7 +579,7 @@ async function proposeReviewGatedAction(
     return { success: false, error: `Unknown action type: ${actionType}` };
   }
 
-  const span = getActiveTrace()?.span({ name: actionType, input, metadata: { gated: true } });
+  const pipelineSpan = createSpan('skill.pipeline.run', { skillName: actionType, gateLevel: 'review' }, { input });
 
   const keyParts = [actionType, context.subaccountId ?? `org:${context.organisationId}`];
   if (input.thread_id) keyParts.push(String(input.thread_id));
@@ -554,28 +600,42 @@ async function proposeReviewGatedAction(
       taskId: context.taskId,
     });
 
+    createEvent('skill.action.proposed', {
+      skillName: actionType, actionId: proposed.actionId, status: proposed.status,
+    }, { parentSpan: pipelineSpan });
+
     // Duplicate — return its current status
     if (!proposed.isNew) {
       const result = { success: true, action_id: proposed.actionId, status: proposed.status, message: 'Action already exists (duplicate detected)' };
-      span?.end({ output: result });
+      pipelineSpan.end({ output: result });
       return result;
     }
 
     // Policy engine blocked it — return denial immediately, no review queue entry
     if (proposed.status === 'blocked') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'block', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       const denial = buildDenialMessage(actionType, 'This action is blocked by policy for this account.');
-      span?.end({ output: denial });
+      pipelineSpan.end({ output: denial });
       return denial;
     }
 
     // Policy engine auto-approved it — should not happen for review-gated skills,
     // but handle it gracefully by dispatching immediately
     if (proposed.status === 'approved') {
+      createEvent('skill.gate.decision', {
+        gateLevel: 'auto', skillName: actionType, actionId: proposed.actionId,
+      }, { parentSpan: pipelineSpan });
       await executionLayerService.executeAction(proposed.actionId, context.organisationId);
       const result = { success: true, action_id: proposed.actionId, status: 'completed', message: 'Action auto-approved and executed.' };
-      span?.end({ output: result });
+      pipelineSpan.end({ output: result });
       return result;
     }
+
+    createEvent('skill.gate.decision', {
+      gateLevel: 'review', skillName: actionType, actionId: proposed.actionId,
+    }, { parentSpan: pipelineSpan });
 
     // pending_approval — create review item, then block until decision
     const action = await actionService.getAction(proposed.actionId, context.organisationId);
@@ -585,12 +645,27 @@ async function proposeReviewGatedAction(
       proposedPayload: input,
     });
 
+    const reviewStartTime = Date.now();
+    const reviewSpan = createSpan('skill.review.wait', {
+      skillName: actionType, actionId: proposed.actionId, criticalPath: true,
+    }, { parentSpan: pipelineSpan });
+
     const reviewResult = await awaitReviewDecision(proposed.actionId, actionType, context);
-    span?.end({ output: reviewResult });
+
+    reviewSpan.end({
+      output: {
+        approved: !!(reviewResult && typeof reviewResult === 'object' && (reviewResult as Record<string, unknown>).success),
+        waitDurationMs: Date.now() - reviewStartTime,
+      },
+    });
+    pipelineSpan.end({ output: reviewResult });
     return reviewResult;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    span?.end({ output: { success: false, error: errMsg } });
+    createEvent('skill.action.failed', {
+      skillName: actionType, error: errMsg.slice(0, 200),
+    }, { parentSpan: pipelineSpan, level: 'ERROR' });
+    pipelineSpan.end({ output: { success: false, error: errMsg } });
     return { success: false, error: `Failed to propose ${actionType}: ${errMsg}` };
   }
 }
@@ -732,7 +807,7 @@ async function executeReadWorkspace(
     // Subtask listing by parent
     if (input.parent_task_id) {
       const parentId = String(input.parent_task_id);
-      const allItems = await taskService.listTasks(context.organisationId, context.subaccountId, {});
+      const allItems = await taskService.listTasks(context.organisationId, context.subaccountId!, {});
       const subtasks = allItems.filter(t => (t as { parentTaskId?: string | null }).parentTaskId === parentId);
       return {
         success: true,
@@ -748,7 +823,7 @@ async function executeReadWorkspace(
     if (input.status) filters.status = String(input.status);
     if (input.assigned_to_me) filters.assignedAgentId = context.agentId;
 
-    const items = await taskService.listTasks(context.organisationId, context.subaccountId, filters);
+    const items = await taskService.listTasks(context.organisationId, context.subaccountId!, filters);
     const sliced = items.slice(0, limit);
 
     if (includeActivities) {
@@ -847,7 +922,7 @@ async function executeTriggerProcess(
       context.agentId,
       inputData,
       {
-        subaccountId: context.subaccountId,
+        subaccountId: context.subaccountId ?? undefined,
         triggerType: 'agent',
         triggerSourceId: context.runId,
         configOverrides,
@@ -911,7 +986,7 @@ async function executeCreateTask(
   try {
     const item = await taskService.createTask(
       context.organisationId,
-      context.subaccountId,
+      context.subaccountId!,
       {
         title,
         description,
@@ -932,7 +1007,7 @@ async function executeCreateTask(
         enqueueHandoff({
           taskId: item.id,
           agentId,
-          subaccountId: context.subaccountId,
+          subaccountId: context.subaccountId!,
           organisationId: context.organisationId,
           sourceRunId: context.runId,
           handoffDepth: currentDepth + 1,
@@ -974,7 +1049,7 @@ async function executeMoveTask(
   try {
     // Get current item to find subaccount
     const item = await taskService.getTask(taskId, context.organisationId);
-    const position = await taskService._nextPosition(item.subaccountId, status);
+    const position = await taskService._nextPosition(item.subaccountId!, status);
 
     const updated = await taskService.moveTask(
       taskId,
@@ -1112,6 +1187,12 @@ async function enqueueHandoff(req: HandoffRequest): Promise<boolean> {
       handoffDepth: req.handoffDepth,
       handoffContext: req.handoffContext,
     });
+    createEvent('agent.handoff.enqueued', {
+      targetAgentId: req.agentId,
+      sourceRunId: req.sourceRunId,
+      handoffDepth: req.handoffDepth,
+      taskId: req.taskId,
+    });
     return true;
   } catch (err) {
     console.error('[Handoff] Failed to enqueue handoff job:', err);
@@ -1232,7 +1313,7 @@ async function executeReassignTask(
         enqueueHandoff({
           taskId,
           agentId,
-          subaccountId: context.subaccountId,
+          subaccountId: context.subaccountId!,
           organisationId: context.organisationId,
           sourceRunId: context.runId,
           handoffDepth: currentDepth + 1,
@@ -1306,7 +1387,7 @@ async function executeSpawnSubAgents(
     for (const st of subTasks) {
       const task = await taskService.createTask(
         context.organisationId,
-        context.subaccountId,
+        context.subaccountId!,
         {
           title: st.title.slice(0, MAX_TASK_TITLE_LENGTH),
           brief: st.brief.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
@@ -1325,7 +1406,7 @@ async function executeSpawnSubAgents(
         .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
         .where(
           and(
-            eq(subaccountAgents.subaccountId, context.subaccountId),
+            eq(subaccountAgents.subaccountId, context.subaccountId!),
             eq(subaccountAgents.agentId, st.assigned_agent_id),
             eq(subaccountAgents.isActive, true),
             eq(agents.status, 'active'),
@@ -1341,6 +1422,11 @@ async function executeSpawnSubAgents(
     }
 
     // Execute all children in parallel
+    createEvent('agent.spawn.fanout', {
+      fanOutCount: childJobs.length,
+      perChildBudget,
+      perChildTimeoutMs: perChildTimeout,
+    });
     const childResults = await Promise.all(
       childJobs.map(async (job) => {
         try {
@@ -1482,7 +1568,7 @@ async function proposeDevopsAction(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -1578,7 +1664,7 @@ async function executeReadCodebase(
   if (!filePath) return { success: false, error: 'file_path is required' };
 
   try {
-    const { context: devCtx } = await devContextService.getContext(context.subaccountId);
+    const { context: devCtx } = await devContextService.getContext(context.subaccountId!);
     const absolutePath = resolve(devCtx.projectRoot, filePath);
 
     assertPathInRoot(absolutePath, devCtx.projectRoot);
@@ -1621,7 +1707,7 @@ async function executeSearchCodebase(
   if (!query) return { success: false, error: 'query is required' };
 
   try {
-    const { context: devCtx } = await devContextService.getContext(context.subaccountId);
+    const { context: devCtx } = await devContextService.getContext(context.subaccountId!);
     const root = devCtx.projectRoot;
 
     if (searchType === 'filename') {
@@ -1689,7 +1775,7 @@ async function executeRunTests(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -1872,7 +1958,7 @@ async function executeReportBug(
   try {
     const task = await taskService.createTask(
       context.organisationId,
-      context.subaccountId,
+      context.subaccountId!,
       {
         title: `[BUG] ${title}`,
         description,
@@ -1913,7 +1999,7 @@ async function executeCaptureScreenshot(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -2018,7 +2104,7 @@ async function executeRunPlaywrightTest(
 ): Promise<unknown> {
   let devCtxResult;
   try {
-    devCtxResult = await devContextService.getContext(context.subaccountId);
+    devCtxResult = await devContextService.getContext(context.subaccountId!);
   } catch (err) {
     const msg = (err as { message?: string }).message ?? String(err);
     return { success: false, error: `Cannot load dev execution context: ${msg}` };
@@ -2133,7 +2219,7 @@ async function executeCreatePage(
   const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
 
-  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  const project = await pageProjectService.getById(projectId, context.subaccountId!, context.organisationId);
   if (!project) return { success: false, error: 'Page project not found' };
 
   const page = await pageService.create(
@@ -2164,7 +2250,7 @@ async function executeUpdatePage(
   const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
 
-  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  const project = await pageProjectService.getById(projectId, context.subaccountId!, context.organisationId);
   if (!project) return { success: false, error: 'Page project not found' };
 
   const result = await pageService.update(
@@ -2193,7 +2279,7 @@ async function executePublishPage(
   const { pageProjectService } = await import('./pageProjectService.js');
   const { pageService } = await import('./pageService.js');
 
-  const project = await pageProjectService.getById(projectId, context.subaccountId, context.organisationId);
+  const project = await pageProjectService.getById(projectId, context.subaccountId!, context.organisationId);
   if (!project) return { success: false, error: 'Page project not found or access denied' };
 
   const page = await pageService.publish(pageId, projectId);

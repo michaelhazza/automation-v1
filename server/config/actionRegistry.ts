@@ -35,7 +35,7 @@ export interface ParameterSchema {
 export interface ActionDefinition {
   actionType: string;
   description: string;
-  actionCategory: 'api' | 'worker' | 'browser' | 'devops';
+  actionCategory: 'api' | 'worker' | 'browser' | 'devops' | 'mcp';
   isExternal: boolean;
   defaultGateLevel: 'auto' | 'review' | 'block';
   createsBoardTask: boolean;

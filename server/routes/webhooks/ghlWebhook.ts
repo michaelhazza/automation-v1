@@ -5,6 +5,7 @@ import { connectorConfigs, canonicalAccounts } from '../../db/schema/index.js';
 import { eq, and } from 'drizzle-orm';
 import { adapters } from '../../adapters/index.js';
 import { canonicalDataService } from '../../services/canonicalDataService.js';
+import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 
 const router = Router();
 
@@ -95,6 +96,12 @@ router.post('/api/webhooks/ghl', raw({ type: 'application/json' }), async (req, 
     const normalised = adapter.webhook.normaliseEvent(event);
     if (!normalised) {
       // Unrecognised event type — silently skip
+      return;
+    }
+
+    // Deduplicate — skip if already processed
+    if (normalised.externalEventId && webhookDedupeStore.isDuplicate(normalised.externalEventId)) {
+      console.log(`[GHL Webhook] Skipping duplicate event ${normalised.externalEventId}`);
       return;
     }
 

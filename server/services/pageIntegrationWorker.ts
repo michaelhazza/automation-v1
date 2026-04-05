@@ -57,7 +57,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
     .set({ integrationStatus: 'processing' })
     .where(eq(formSubmissions.id, submissionId));
 
-  let result: { success: boolean; error?: string; data?: unknown } = { success: false };
+  let result: { success: boolean; error?: unknown; data?: unknown } = { success: false };
 
   try {
     // 2. Look up connection
@@ -78,7 +78,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
 
     // 4–5. Execute the integration action
     if (purpose === 'crm' && action === 'create_contact' && adapter.crm) {
-      const contactResult = await adapter.crm.createContact(connection, fields);
+      const contactResult = await adapter.crm.createContact(connection, fields as import('../adapters/integrationAdapter.js').CrmCreateContactInput);
       result = { success: contactResult.success, data: contactResult, error: contactResult.error };
 
       if (contactResult.success) {
@@ -90,7 +90,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
         });
       }
     } else if (purpose === 'payments' && action === 'create_checkout' && adapter.payments) {
-      const checkoutResult = await adapter.payments.createCheckout(connection, fields);
+      const checkoutResult = await adapter.payments.createCheckout(connection, fields as unknown as import('../adapters/integrationAdapter.js').PaymentsCreateCheckoutInput);
       result = { success: checkoutResult.success, data: checkoutResult, error: checkoutResult.error };
 
       if (checkoutResult.success) {

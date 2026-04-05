@@ -163,3 +163,49 @@ export const HITL_REVIEW_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Max triggered agent runs per minute per workspace before suppression */
 export const MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
+
+// ── Tracing limits (Section 7.7) ───────────────────────────────────────────
+
+/** Max spans emitted per agent run before helpers return no-ops */
+export const MAX_SPANS_PER_RUN = 500;
+
+/** Max total observations (spans + events) per agent run */
+export const MAX_EVENTS_PER_RUN = 1000;
+
+/** Max nesting depth from trace root — flatten if exceeded */
+export const MAX_NESTING_DEPTH = 10;
+
+/** Max JSON-serialised metadata size per span (bytes) */
+export const MAX_METADATA_SIZE_BYTES = 4096;
+
+/** Max events emitted within a single loop iteration */
+export const MAX_EVENTS_PER_ITERATION = 20;
+
+// ── MCP Client limits ──────────────────────────────────────────────────────
+
+/** Max MCP tools merged into an agent's tool set per run */
+export const MAX_MCP_TOOLS_PER_RUN = 30;
+
+/** Max MCP tool calls per agent run (separate from total tool call limit) */
+export const MAX_MCP_CALLS_PER_RUN = 10;
+
+/** Connection timeout (ms) per MCP server */
+export const MCP_CONNECT_TIMEOUT_MS = 10_000;
+
+/** Per-call timeout (ms) for MCP tool invocations */
+export const MCP_CALL_TIMEOUT_MS = 30_000;
+
+/** Max response size (bytes) from an MCP tool before truncation */
+export const MAX_MCP_RESPONSE_SIZE = 100_000;
+
+/** Consecutive failures before circuit breaker opens */
+export const MCP_CIRCUIT_BREAKER_THRESHOLD = 3;
+
+/** Circuit breaker open duration (ms) */
+export const MCP_CIRCUIT_BREAKER_DURATION_MS = 5 * 60 * 1000;
+
+/** Warm cache TTL (ms) for discovered tools */
+export const MCP_TOOLS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Allowed commands for stdio MCP servers */
+export const MCP_ALLOWED_COMMANDS = new Set(['npx', 'node', 'docker', 'uvx', 'python3']);

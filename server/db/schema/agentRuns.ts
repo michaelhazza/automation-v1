@@ -28,7 +28,7 @@ export const agentRuns = pgTable(
 
     // How this run was initiated
     runType: text('run_type').notNull().$type<'scheduled' | 'manual' | 'triggered'>(),
-    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless'>(),
+    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code'>(),
 
     // Org vs subaccount execution scope (never inferred from nullable fields)
     executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),

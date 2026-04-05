@@ -1,5 +1,21 @@
-import { pgTable, uuid, text, integer, real, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, boolean, jsonb, timestamp, uniqueIndex, index, customType } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+
+// pgvector custom type — stores embedding as vector(1536) in Postgres
+const vector = customType<{ data: number[] | null }>({
+  dataType() { return 'vector(1536)'; },
+  toDriver(val: number[] | null): string | null {
+    if (val === null) return null;
+    return `[${val.join(',')}]`;
+  },
+  fromDriver(val: unknown): number[] | null {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'string') {
+      return val.replace(/^\[|\]$/g, '').split(',').map(Number);
+    }
+    return null;
+  },
+});
 import { organisations } from './organisations.js';
 import { agentRuns } from './agentRuns.js';
 import { agents } from './agents.js';
@@ -43,7 +59,7 @@ export const orgMemoryEntries = pgTable(
     entryType: text('entry_type').notNull().default('observation').$type<'observation' | 'decision' | 'preference' | 'issue' | 'pattern'>(),
     scopeTags: jsonb('scope_tags').$type<Record<string, string>>(),
     qualityScore: real('quality_score').notNull().default(0.5),
-    embedding: sql`vector(1536)`.$type<number[]>(),
+    embedding: vector('embedding'),
     evidenceCount: integer('evidence_count').notNull().default(1),
     includedInSummary: boolean('included_in_summary').notNull().default(false),
     accessCount: integer('access_count').notNull().default(0),
