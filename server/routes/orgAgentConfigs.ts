@@ -149,6 +149,7 @@ router.patch('/api/org/settings/execution-enabled', authenticate, requireOrgPerm
     await auditService.log({
       organisationId: req.orgId!,
       actorId: req.user!.id,
+      actorType: 'user',
       action: enabled ? 'org_execution_enabled' : 'org_execution_disabled',
       entityType: 'organisation',
       entityId: req.orgId!,

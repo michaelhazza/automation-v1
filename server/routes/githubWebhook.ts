@@ -63,7 +63,7 @@ async function resolveSubaccountFromInstallation(
   for (const conn of connections) {
     const cfg = conn.configJson as { installationId?: number } | null;
     if (cfg?.installationId === installationId) {
-      return { subaccountId: conn.subaccountId, organisationId: conn.organisationId };
+      return { subaccountId: conn.subaccountId!, organisationId: conn.organisationId };
     }
   }
   return null;
