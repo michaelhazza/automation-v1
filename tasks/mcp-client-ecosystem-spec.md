@@ -232,6 +232,11 @@ export const mcpServerConfigs = pgTable(
     // Max concurrent tool calls to this server (default 1 for single-threaded servers)
     maxConcurrency: integer('max_concurrency').notNull().default(1),
 
+    // Connection mode: eager (connect at run start) or lazy (connect on first tool use)
+    // Lazy mode avoids wasting startup time for agents that may not use this server.
+    connectionMode: text('connection_mode').notNull().default('eager')
+      .$type<'eager' | 'lazy'>(),
+
     // Status
     status: text('status').notNull().default('active')
       .$type<'active' | 'disabled' | 'error'>(),
@@ -336,6 +341,7 @@ CREATE TABLE mcp_server_configs (
   tool_gate_overrides JSONB,
   priority INTEGER NOT NULL DEFAULT 0,
   max_concurrency INTEGER NOT NULL DEFAULT 1,
+  connection_mode TEXT NOT NULL DEFAULT 'eager',
   status TEXT NOT NULL DEFAULT 'active',
   last_connected_at TIMESTAMPTZ,
   last_error TEXT,
@@ -489,22 +495,47 @@ export const mcpClientManager = {
 
 1. Load active `mcp_server_configs` for the org
 2. Filter by agent links (if any exist for this agent; otherwise all active servers)
-3. **Connect to servers in parallel** (bounded concurrency = 3):
+3. Split servers by connection mode:
+   - **Eager servers** (`connectionMode: 'eager'`): connect now
+   - **Lazy servers** (`connectionMode: 'lazy'`): register tool definitions from `discoveredToolsJson` cache but don't spawn the process yet
+4. **Connect eager servers in parallel** (bounded concurrency = 3):
    ```typescript
-   const results = await pMap(serverConfigs, async (config) => {
-     // a. Resolve environment variables — decrypt envEncrypted, inject OAuth tokens
+   const eagerConfigs = serverConfigs.filter(c => c.connectionMode === 'eager');
+   const lazyConfigs = serverConfigs.filter(c => c.connectionMode === 'lazy');
+
+   const results = await pMap(eagerConfigs, async (config) => {
+     // a. Resolve credentials (subaccount → org fallback)
      // b. Create StdioClientTransport with command + args + resolved env
      // c. Create Client, call client.connect(transport)
-     // d. Call client.listTools() (or use warm cache — see below)
+     // d. Call client.listTools() (or use warm cache)
      // e. Apply allowedTools / blockedTools filters
-     // f. Validate tool schemas (see Schema Validation section)
+     // f. Validate tool schemas
      // g. Namespace tool names: mcp.<server_slug>.<tool_name>
      // h. Convert to Anthropic tool format
    }, { concurrency: 3 });
    ```
    Bounded at 3 to prevent CPU spikes from too many subprocess spawns. With 5-10 servers at ~300-800ms each, parallel connect reduces startup from 3-8s to ~1-2s.
-4. Merge all MCP tools into a single array
-5. Return tools + client map (keyed by server slug)
+5. **Register lazy server tools from cache** (no process spawned):
+   ```typescript
+   for (const config of lazyConfigs) {
+     // Use discoveredToolsJson from DB — requires at least one prior "Test Connection" or "Refresh Tools"
+     if (!config.discoveredToolsJson?.length) continue; // no cached tools, skip
+     // Namespace and convert to Anthropic tool format (same as eager)
+     // Store config in lazyRegistry for deferred connection
+   }
+   ```
+6. Merge all tools (eager + lazy) into a single array
+7. Return tools + client map (eager) + lazy registry (deferred)
+
+**Lazy connection on first use:** When `callTool()` receives a call for a lazy server, it connects on demand:
+```typescript
+if (!clients.has(serverSlug) && lazyRegistry.has(serverSlug)) {
+  const config = lazyRegistry.get(serverSlug);
+  const instance = await connectSingleServer(config, ctx);
+  clients.set(serverSlug, instance);
+}
+```
+This means lightweight agents (e.g. "just check health scores") don't pay the cost of spawning Gmail/Slack/HubSpot servers they'll never use in that run. The first MCP tool call for a lazy server adds ~300-800ms latency, but only if the agent actually needs it.
 
 **Timeout:** 10s per server connection. If a server fails to connect, log the error, mark server status as `error`, and continue with remaining servers. One flaky server should not block the entire run.
 
@@ -574,6 +605,14 @@ try {
   const classified = classifyMcpError(err);
 
   if (classified.retryable && retryCount < 1) {
+    // On process crash: reconnect before retrying — don't reuse broken instance
+    if (classified.reason === 'process_crash') {
+      const config = lazyRegistry.get(serverSlug) ?? serverConfigs.get(serverSlug);
+      if (config) {
+        const freshInstance = await connectSingleServer(config, ctx);
+        clients.set(serverSlug, freshInstance);
+      }
+    }
     // One retry max — same philosophy as LLM router
     return callTool(clients, toolSlug, args, ctx, retryCount + 1);
   }
@@ -586,7 +625,7 @@ try {
 
 Classification rules:
 - `timeout`: AbortError or deadline exceeded → retryable once
-- `process_crash`: child process exit code !== 0 or SIGTERM → not retryable
+- `process_crash`: child process exit code !== 0 or SIGTERM → retryable once (with reconnect — see above)
 - `auth_error`: error message contains "auth", "401", "403", or "token" → not retryable (stale creds)
 - `rate_limited`: error message contains "rate" or "429" → retryable once
 - `invalid_response`: JSON parse failure or schema mismatch → not retryable
@@ -1541,6 +1580,7 @@ Stdio MCP servers run as child processes. Security measures:
 3. **Environment scoping** — only pass explicitly configured env vars to the child process, not `process.env`. Prevent leaking server secrets.
 4. **Timeout enforcement** — kill child process if it exceeds connection timeout (10s) or per-call timeout (30s).
 5. **Resource limits** — consider `ulimit` or cgroup constraints for stdio processes in production. Phase 2 concern.
+6. **Version pinning** — npm packages installed via `npx -y` pull the latest version by default. For production stability and supply chain safety, recommend pinning versions in args: `["-y", "@anthropic/gmail-mcp-server@1.2.3"]`. The UI should show a hint: "Pin package versions for production use (e.g. `@package/name@1.2.3`)." Not enforced in Phase 1 but surfaced as a best practice.
 
 ### Credential Security
 
