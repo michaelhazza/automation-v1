@@ -119,7 +119,7 @@ export const triggerService = {
         const [saLink] = await db
           .select({ agentId: subaccountAgents.agentId })
           .from(subaccountAgents)
-          .where(eq(subaccountAgents.id, trigger.subaccountAgentId))
+          .where(eq(subaccountAgents.id, trigger.subaccountAgentId!))
           .limit(1);
 
         if (saLink?.agentId === triggeringAgentId) continue;
@@ -179,7 +179,7 @@ export const triggerService = {
       const [saLink] = await db
         .select({ agentId: subaccountAgents.agentId })
         .from(subaccountAgents)
-        .where(eq(subaccountAgents.id, trigger.subaccountAgentId))
+        .where(eq(subaccountAgents.id, trigger.subaccountAgentId!))
         .limit(1);
 
       const agentId = saLink?.agentId ?? null;

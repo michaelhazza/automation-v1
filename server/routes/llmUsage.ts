@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -585,7 +585,7 @@ router.get(
   '/api/subaccounts/:subaccountId/agents/:agentId/budget',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res, _next: NextFunction) => {
     const { subaccountId, agentId } = req.params;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
@@ -651,7 +651,7 @@ router.put(
   '/api/subaccounts/:subaccountId/agents/:agentId/budget',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res, _next: NextFunction) => {
     const { subaccountId, agentId } = req.params;
     const { maxCostPerRunCents, maxLlmCallsPerRun, tokenBudgetPerRun } = req.body as {
       maxCostPerRunCents?: number | null;

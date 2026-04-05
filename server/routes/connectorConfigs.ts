@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
 import { connectorPollingService } from '../services/connectorPollingService.js';
@@ -10,14 +10,14 @@ const router = Router();
 
 // ── List connector configs ────────────────────────────────────────────────
 
-router.get('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
+router.get('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res, _next: NextFunction) => {
   const configs = await connectorConfigService.listByOrg(req.orgId!);
   res.json(configs);
 }));
 
 // ── Create connector config ───────────────────────────────────────────────
 
-router.post('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res) => {
+router.post('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res, _next: NextFunction) => {
   const { connectorType, connectionId, configJson, pollIntervalMinutes, webhookSecret } = req.body;
 
   if (!connectorType) {
@@ -41,14 +41,14 @@ router.post('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMIS
 
 // ── Get single connector config ───────────────────────────────────────────
 
-router.get('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
+router.get('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res, _next: NextFunction) => {
   const config = await connectorConfigService.get(req.params.id, req.orgId!);
   res.json(config);
 }));
 
 // ── Update connector config ──────────────────────────────────────────────
 
-router.patch('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.patch('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res, _next: NextFunction) => {
   const { connectionId, configJson, pollIntervalMinutes, webhookSecret } = req.body;
   const config = await connectorConfigService.update(req.params.id, req.orgId!, {
     connectionId,
@@ -61,14 +61,14 @@ router.patch('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_P
 
 // ── Delete connector config ──────────────────────────────────────────────
 
-router.delete('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_DELETE), asyncHandler(async (req, res) => {
+router.delete('/api/org/connectors/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_DELETE), asyncHandler(async (req, res, _next: NextFunction) => {
   await connectorConfigService.delete(req.params.id, req.orgId!);
   res.json({ success: true });
 }));
 
 // ── Trigger manual sync ──────────────────────────────────────────────────
 
-router.post('/api/org/connectors/:id/sync', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.post('/api/org/connectors/:id/sync', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res, _next: NextFunction) => {
   const config = await connectorConfigService.get(req.params.id, req.orgId!);
   const result = await connectorPollingService.syncConnector(config.id);
   res.json(result);
@@ -76,7 +76,7 @@ router.post('/api/org/connectors/:id/sync', authenticate, requireOrgPermission(O
 
 // ── Validate credentials ─────────────────────────────────────────────────
 
-router.post('/api/org/connectors/:id/validate', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
+router.post('/api/org/connectors/:id/validate', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res, _next: NextFunction) => {
   const config = await connectorConfigService.get(req.params.id, req.orgId!);
   const adapter = adapters[config.connectorType];
 

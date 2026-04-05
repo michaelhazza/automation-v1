@@ -1,10 +1,12 @@
-import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, unique, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
 // ---------------------------------------------------------------------------
-// Integration Connections — stored external service credentials per subaccount
+// Integration Connections — stored external service credentials per org or subaccount
 // Supports multiple connections per provider via label differentiation.
+// Org-level connections (subaccountId IS NULL) are shared across all subaccounts.
 // ---------------------------------------------------------------------------
 
 export const integrationConnections = pgTable(
@@ -16,7 +18,7 @@ export const integrationConnections = pgTable(
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
       .references(() => subaccounts.id),
-    providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'custom'>(),
+    providerType: text('provider_type').notNull().$type<'gmail' | 'github' | 'hubspot' | 'slack' | 'ghl' | 'stripe' | 'teamwork' | 'custom'>(),
     authType: text('auth_type').notNull().$type<'oauth2' | 'api_key' | 'service_account' | 'github_app'>(),
     connectionStatus: text('connection_status').notNull().default('active').$type<'active' | 'revoked' | 'error'>(),
     // Label to distinguish multiple connections of the same provider (e.g. "Support Gmail", "Personal Gmail")
@@ -44,9 +46,14 @@ export const integrationConnections = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    subaccountProviderLabelUnique: unique('integration_connections_subaccount_provider_label').on(
-      table.subaccountId, table.providerType, table.label
-    ),
+    // Subaccount-scoped: one connection per (subaccount, provider, label)
+    subaccountProviderLabelUnique: uniqueIndex('ic_subaccount_provider_label_unique')
+      .on(table.subaccountId, table.providerType, table.label)
+      .where(sql`${table.subaccountId} IS NOT NULL`),
+    // Org-scoped: one connection per (org, provider, label) when subaccountId IS NULL
+    orgProviderLabelUnique: uniqueIndex('ic_org_provider_label_unique')
+      .on(table.organisationId, table.providerType, table.label)
+      .where(sql`${table.subaccountId} IS NULL`),
     subaccountIdx: index('integration_connections_subaccount_idx').on(table.subaccountId),
     orgIdx: index('integration_connections_org_idx').on(table.organisationId),
   })

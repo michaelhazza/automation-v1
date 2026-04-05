@@ -6,6 +6,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { asyncHandler } from '../../lib/asyncHandler.js';
 import { formSubmissionService } from '../../services/formSubmissionService.js';
+import { validateBody } from '../../middleware/validate.js';
+import { formSubmissionBody } from '../../schemas/public.js';
 
 // ---------------------------------------------------------------------------
 // TODO(PROD-RATE-LIMIT): Replace with Redis-backed sliding window counters
@@ -71,6 +73,7 @@ const router = Router();
 router.post(
   '/api/public/pages/:pageId/submit',
   rateLimitMiddleware,
+  validateBody(formSubmissionBody),
   asyncHandler(async (req, res) => {
     const { pageId } = req.params;
     const data = req.body as Record<string, unknown>;

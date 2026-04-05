@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { orgAgentConfigService } from '../services/orgAgentConfigService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -13,7 +13,7 @@ router.get('/api/org/agent-configs', authenticate, requireOrgPermission(ORG_PERM
   res.json(configs);
 }));
 
-router.post('/api/org/agent-configs', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res) => {
+router.post('/api/org/agent-configs', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res, _next: NextFunction) => {
   const {
     agentId,
     isActive,
@@ -128,7 +128,7 @@ router.get('/api/org/settings/execution-enabled', authenticate, requireOrgPermis
   res.json({ enabled: org?.orgExecutionEnabled ?? true });
 }));
 
-router.patch('/api/org/settings/execution-enabled', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res) => {
+router.patch('/api/org/settings/execution-enabled', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT), asyncHandler(async (req, res, _next: NextFunction) => {
   const { enabled, reason } = req.body as { enabled: boolean; reason?: string };
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ message: 'enabled (boolean) is required' });
@@ -149,9 +149,10 @@ router.patch('/api/org/settings/execution-enabled', authenticate, requireOrgPerm
     await auditService.log({
       organisationId: req.orgId!,
       actorId: req.user!.id,
+      actorType: 'user',
       action: enabled ? 'org_execution_enabled' : 'org_execution_disabled',
-      resourceType: 'organisation',
-      resourceId: req.orgId!,
+      entityType: 'organisation',
+      entityId: req.orgId!,
       metadata: { reason: reason ?? null },
     });
   } catch (err) {

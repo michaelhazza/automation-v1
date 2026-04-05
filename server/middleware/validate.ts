@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { ZodTypeAny } from 'zod';
+import { logger } from '../lib/logger.js';
 
 /**
  * Safely parse a query string value as a positive integer.
@@ -18,23 +19,50 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB absolute ceiling; configurable limit enforced in file route
 });
 
-export const validateBody = <T extends ZodTypeAny>(schema: T) => {
+type ValidationMode = 'enforce' | 'warn';
+
+export const validateBody = <T extends ZodTypeAny>(schema: T, mode: ValidationMode = 'enforce') => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+      if (mode === 'warn') {
+        logger.warn('validation_warn', {
+          path: req.path,
+          method: req.method,
+          errors: result.error.flatten(),
+        });
+        next(); // pass through — log only, don't reject
+        return;
+      }
+      res.status(400).json({
+        error: 'Validation failed',
+        details: result.error.flatten().fieldErrors,
+      });
       return;
     }
+    // Always assign parsed data — even in warn mode, valid input gets coerced types
     req.body = result.data;
     next();
   };
 };
 
-export const validateQuery = <T extends ZodTypeAny>(schema: T) => {
+export const validateQuery = <T extends ZodTypeAny>(schema: T, mode: ValidationMode = 'enforce') => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.query);
     if (!result.success) {
-      res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+      if (mode === 'warn') {
+        logger.warn('validation_warn', {
+          path: req.path,
+          method: req.method,
+          errors: result.error.flatten(),
+        });
+        next();
+        return;
+      }
+      res.status(400).json({
+        error: 'Validation failed',
+        details: result.error.flatten().fieldErrors,
+      });
       return;
     }
     req.query = result.data as Request['query'];

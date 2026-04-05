@@ -5,7 +5,7 @@ import { adapters } from '../adapters/index.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
-import { ghlRateLimiter } from '../lib/rateLimiter.js';
+import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 
 // ---------------------------------------------------------------------------
 // Connector Polling Service — scheduled data ingestion from external platforms
@@ -61,7 +61,7 @@ export const connectorPollingService = {
 
     try {
       // 1. Sync accounts list
-      await ghlRateLimiter.acquire(config.id);
+      await getProviderRateLimiter(config.connectorType).acquire(config.id);
       const accounts = await adapter.ingestion.listAccounts(connection as never, connConfig);
 
       for (const account of accounts) {
@@ -83,25 +83,25 @@ export const connectorPollingService = {
 
       for (const dbAccount of dbAccounts) {
         try {
-          await ghlRateLimiter.acquire(config.id);
+          await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const contacts = await adapter.ingestion.fetchContacts(connection as never, dbAccount.externalId);
           for (const c of contacts) {
             await canonicalDataService.upsertContact(config.organisationId, dbAccount.id, c as never);
           }
 
-          await ghlRateLimiter.acquire(config.id);
+          await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const opportunities = await adapter.ingestion.fetchOpportunities(connection as never, dbAccount.externalId);
           for (const o of opportunities) {
             await canonicalDataService.upsertOpportunity(config.organisationId, dbAccount.id, o as never);
           }
 
-          await ghlRateLimiter.acquire(config.id);
+          await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const conversations = await adapter.ingestion.fetchConversations(connection as never, dbAccount.externalId);
           for (const c of conversations) {
             await canonicalDataService.upsertConversation(config.organisationId, dbAccount.id, c as never);
           }
 
-          await ghlRateLimiter.acquire(config.id);
+          await getProviderRateLimiter(config.connectorType).acquire(config.id);
           const revenue = await adapter.ingestion.fetchRevenue(connection as never, dbAccount.externalId);
           for (const r of revenue) {
             await canonicalDataService.upsertRevenue(config.organisationId, dbAccount.id, {

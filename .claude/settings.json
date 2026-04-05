@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "agent",
+            "if": "Bash(gh pr create:*)",
+            "prompt": "A pull request was just created. Run the full PR quality gate:\n\n1. **Review the PR diff** — run `git diff main...HEAD` to see all changes included in this PR. Review for bugs, logic errors, security issues, and violations of project conventions in CLAUDE.md (especially architecture rules).\n\n2. **Run lint** — `npm run lint`. Fix any failures. Max 3 fix attempts.\n\n3. **Run typecheck** — `npm run typecheck`. Fix any type errors. Max 3 fix attempts.\n\n4. **Run tests** — `npm test`. For each failure:\n   - If the failure is a real bug in the changed code, fix the code.\n   - If the test is wrong or outdated due to intentional changes, update the test.\n   - Max 2 fix-and-rerun cycles.\n\n5. **Re-verify** — after all fixes, re-run lint, typecheck, and tests to confirm everything passes.\n\n6. **Report** — summarize what was found and fixed. If anything couldn't be fixed, explain what and why.\n\nIMPORTANT:\n- Do NOT commit or push changes. Leave them as unstaged modifications for the user to review.\n- Do NOT amend or modify git history.\n- If all checks pass on the first try with no issues found, just report that the PR is clean.",
+            "model": "claude-sonnet-4-6",
+            "timeout": 600,
+            "statusMessage": "Running PR quality gate..."
+          }
+        ]
+      }
+    ]
+  }
+}

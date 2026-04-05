@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { llmRequests, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES } from '../db/schema/index.js';
-import { getActiveTrace } from '../instrumentation.js';
+import { createGeneration, createEvent } from '../lib/tracing.js';
 import type { TaskType, SourceType, ExecutionPhase, RoutingMode } from '../db/schema/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -281,6 +281,11 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
   });
 
   if (idempotencyResult.cached) {
+    createEvent('llm.router.cache_hit', {
+      idempotencyKey,
+      model: effectiveModel,
+      provider: effectiveProvider,
+    });
     return idempotencyResult.response;
   }
 
@@ -301,6 +306,10 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     if (err instanceof BudgetExceededError) {
       budgetBlockedStatus = 'budget_blocked';
       budgetErrorMessage = err.message;
+      createEvent('llm.router.budget_exceeded', {
+        estimatedCostCents,
+        reason: 'insufficient_budget',
+      });
     } else if (err instanceof RateLimitError) {
       budgetBlockedStatus = 'rate_limited';
       budgetErrorMessage = err.message;
@@ -436,6 +445,13 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
           if (reservationId) await budgetService.releaseReservation(reservationId);
           throw err;
         }
+
+        createEvent('llm.router.fallback', {
+          failedProvider: provider,
+          failedModel: mappedModel,
+          error: String(err).slice(0, 200),
+          attemptIndex: attempt,
+        });
 
         if (attempt <= PROVIDER_MAX_RETRIES) {
           const backoff = PROVIDER_BACKOFF_MS[attempt - 1] ?? PROVIDER_BACKOFF_MS[PROVIDER_BACKOFF_MS.length - 1];
@@ -642,21 +658,27 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
     });
 
   // ── 13. Emit Langfuse generation span (dual-write — does not replace ledger) ──
-  getActiveTrace()?.generation({
-    name:            'llm-call',
-    model:           actualModel,
-    input:           params.messages,
+  createGeneration('llm.router.call', {
+    model: actualModel,
+    input: params.messages,
+    output: providerResponse.content,
     modelParameters: params.maxTokens ? { maxTokens: params.maxTokens } : undefined,
-    output:          providerResponse.content,
     usage: {
-      input:  providerResponse.tokensIn,
+      input: providerResponse.tokensIn,
       output: providerResponse.tokensOut,
     },
     metadata: {
-      provider:  actualProvider,
-      runId:     ctx.runId,
+      provider: actualProvider,
       agentName: ctx.agentName,
-      taskType:  ctx.taskType,
+      taskType: ctx.taskType,
+      executionPhase: ctx.executionPhase,
+      routingTier,
+      wasDowngraded,
+      routingReason,
+      wasEscalated: ctx.wasEscalated ?? false,
+      escalationReason: ctx.escalationReason ?? null,
+      attemptNumber,
+      criticalPath: true,
     },
   });
 
