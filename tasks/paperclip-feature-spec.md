@@ -517,6 +517,8 @@ Read state: JOIN with `inbox_read_states` on `(entityType, entityId, userId)`.
 - Delete `inbox_items` where `isArchived = true` AND `updatedAt < now() - 30 days`
 - Delete corresponding `inbox_read_states` matching on `(entityType, entityId)` — ensure no orphaned read states remain after cleanup
 
+**Phase 2 source of truth rule:** Once `inbox_items` materialised table is enabled, it becomes the sole source of truth. Live aggregation queries are disabled entirely, not merged. This avoids duplicate items, inconsistent counts, and debugging complexity during migration.
+
 **Inbox priority ordering (from review feedback):**
 Default sort order:
 1. Unread items first
@@ -821,6 +823,7 @@ Don't infer projectId from the task at cost-recording time — this is fragile f
 - Add `projectId` column to `agent_runs` table (nullable, FK → projects.id)
 - Cost aggregation then reads projectId from the run, not inferred from the task
 - This survives task reassignment, retries, and multi-task scenarios
+- **Edge case:** Runs triggered by heartbeat, manual trigger, or webhook with no originating task → `projectId = NULL`. Never infer or backfill projectId from downstream task updates after run creation.
 
 ### Migration
 
@@ -898,6 +901,7 @@ interface WebhookHeartbeatPayload {
     subaccountName: string;
     organisationId: string;
   };
+  idempotencyKey: string;    // set to runId — external systems SHOULD use this to deduplicate repeated webhook deliveries on retry
   callbackUrl: string;      // URL to POST results back to
   callbackToken: string;    // one-time token for authenticating callback
   timestamp: string;
