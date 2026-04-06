@@ -103,6 +103,7 @@ type AgentRunStatus =
   | 'running'              // actively executing
   | 'waiting_callback'     // webhook adapter: sent request, awaiting async response
   | 'completed'            // finished successfully
+  | 'completed_with_errors' // finished but with partial failures (e.g. webhook multi-step, some tasks succeeded)
   | 'failed'               // execution error
   | 'failed_timeout'       // exceeded timeout
   | 'failed_retry_exhausted' // all retries consumed
@@ -126,6 +127,45 @@ These are the non-negotiable architectural rules for all features:
 ### CC-9: WebSocket Event Deduplication
 
 All WebSocket events already include `eventId` (UUID) in the envelope (see `server/websocket/emitters.ts`). Clients MUST deduplicate using `eventId` to handle reconnection replays and duplicate deliveries. Frontend should maintain a small in-memory set of recent eventIds (last 100) and skip events already seen.
+
+### CC-10: Audit Event Correlation
+
+All audit events SHOULD include an optional `correlationId` field. Propagate from the originating context:
+- Agent runs: use `runId` as correlationId for all audit events during execution
+- Webhook flows: use `runId` for the outbound call, callback receipt, and any task updates
+- Inbox actions: use a request-scoped UUID for bulk operations (mark-read, archive)
+
+This enables end-to-end flow tracing across features. Add `correlation_id TEXT` column to `auditEvents` table (nullable, indexed).
+
+### CC-11: Storage Abstraction
+
+All file storage operations (attachments, logos) go through a `storageService` interface:
+
+```ts
+interface StorageService {
+  put(key: string, data: Buffer, contentType: string): Promise<void>;
+  get(key: string): Promise<Buffer>;
+  delete(key: string): Promise<void>;
+  getSignedUrl(key: string, expiresInSeconds: number): Promise<string>;
+}
+```
+
+Two implementations: `LocalStorageService` (filesystem) and `S3StorageService`. Selected by env config. This prevents refactor pain when adding R2, GCS, or encrypted storage later.
+
+### CC-12: System Architecture Layers
+
+The system is composed of three layers. Features should not leak across boundaries.
+
+| Layer | Responsibility | Entities |
+|-------|---------------|----------|
+| **Control** | Agent orchestration, scheduling, execution | Agents, runs, heartbeats, webhook adapters, concurrency policies |
+| **Work** | Task management, project organisation, goal alignment | Tasks, projects, goals, attachments, deliverables |
+| **Signal** | Operational visibility, quality feedback, governance | Inbox, feedback votes, audit events, review gates, budget alerts |
+
+Rules:
+- Control layer writes to Work layer (agents create/update tasks)
+- Work layer emits to Signal layer (task changes trigger inbox items, audit events)
+- Signal layer NEVER writes to Control or Work layers directly (humans act on signals via explicit API calls)
 
 ---
 
@@ -465,6 +505,11 @@ Phase 2 trigger definitions (define now, implement later):
 
 Deduplication: unique on `(entityType, entityId)`. On conflict, update `updatedAt`.
 Read state: JOIN with `inbox_read_states` on `(entityType, entityId, userId)`.
+
+**TTL / cleanup:** Resolved + archived items accumulate indefinitely. Add a scheduled cleanup job (daily, via pg-boss):
+- Delete `inbox_items` where `status = 'resolved'` AND `updatedAt < now() - 90 days`
+- Delete `inbox_items` where `isArchived = true` AND `updatedAt < now() - 30 days`
+- Delete corresponding `inbox_read_states` for cleaned-up items
 
 **Inbox priority ordering (from review feedback):**
 Default sort order:
@@ -915,6 +960,13 @@ queued → running (webhook POST sent)
 ```
 
 **Callback SLA enforcement:** Schedule a pg-boss delayed job at webhook send time with 15-minute delay. Job checks if run is still `waiting_callback` — if so, transition to `failed_timeout`. If run is already completed/failed, no-op.
+
+**Circuit breaker:** Protect against permanently failing or slow external endpoints.
+- Track failure count per agent in a rolling window (last 10 minutes)
+- If failures >= 5 in window: trip the circuit — skip further webhook calls, set run status to `failed` with reason `circuit_breaker_open`
+- Surface in inbox alerts tab: "Agent X webhook endpoint failing — 5 consecutive failures"
+- Auto-reset: after 5 minutes with no attempts, allow one probe request. If it succeeds, close the circuit.
+- State is in-memory (not persisted) — resets on server restart, which is acceptable.
 
 ### Frontend Changes
 
