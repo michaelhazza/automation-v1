@@ -160,15 +160,16 @@ router.post(
     }
     const token = authHeader.slice(7);
 
-    // Validate X-Timestamp header — reject drift > 5 minutes
+    // Validate X-Timestamp header — REQUIRED, reject drift > 5 minutes
     const timestamp = req.headers['x-timestamp'] as string | undefined;
-    if (timestamp) {
-      const requestTime = new Date(timestamp).getTime();
-      const drift = Math.abs(Date.now() - requestTime);
-      if (isNaN(requestTime) || drift > 5 * 60 * 1000) {
-        logger.warn('webhook_callback_timestamp_drift', { runId, timestamp, drift });
-        throw { statusCode: 400, message: 'Request timestamp is too far from server time' };
-      }
+    if (!timestamp) {
+      throw { statusCode: 400, message: 'X-Timestamp header is required' };
+    }
+    const requestTime = new Date(timestamp).getTime();
+    const drift = Math.abs(Date.now() - requestTime);
+    if (isNaN(requestTime) || drift > 5 * 60 * 1000) {
+      logger.warn('webhook_callback_timestamp_drift', { runId, timestamp, drift });
+      throw { statusCode: 400, message: 'Request timestamp is too far from server time' };
     }
 
     // Parse response body

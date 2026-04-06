@@ -51,7 +51,7 @@ router.post(
       throw { statusCode: 400, message: 'items array is required and must not be empty' };
     }
 
-    await inboxService.markRead(userId, items);
+    await inboxService.markRead(userId, req.orgId!, items);
     res.json({ success: true });
   })
 );
@@ -74,7 +74,7 @@ router.post(
       throw { statusCode: 400, message: 'items array is required and must not be empty' };
     }
 
-    await inboxService.markUnread(userId, items);
+    await inboxService.markUnread(userId, req.orgId!, items);
     res.json({ success: true });
   })
 );
@@ -97,7 +97,7 @@ router.post(
       throw { statusCode: 400, message: 'items array is required and must not be empty' };
     }
 
-    await inboxService.archiveItems(userId, items);
+    await inboxService.archiveItems(userId, req.orgId!, items);
     res.json({ success: true });
   })
 );

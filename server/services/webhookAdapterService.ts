@@ -101,12 +101,16 @@ function recordSuccess(agentId: string): void {
 
 const CALLBACK_TOKEN_EXPIRY = '15m';
 
+// Use a distinct secret for callback tokens to prevent confusion with user auth JWTs
+const CALLBACK_SECRET = env.WEBHOOK_CALLBACK_SECRET || (env.JWT_SECRET + ':webhook-callback');
+
 function generateCallbackToken(payload: CallbackTokenPayload): string {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: CALLBACK_TOKEN_EXPIRY });
+  return jwt.sign({ ...payload, aud: 'webhook-callback' }, CALLBACK_SECRET, { expiresIn: CALLBACK_TOKEN_EXPIRY });
 }
 
 function verifyCallbackToken(token: string): CallbackTokenPayload {
-  return jwt.verify(token, env.JWT_SECRET) as CallbackTokenPayload & { exp: number };
+  const decoded = jwt.verify(token, CALLBACK_SECRET, { audience: 'webhook-callback' }) as CallbackTokenPayload & { exp: number; aud: string };
+  return decoded;
 }
 
 function buildCallbackUrl(runId: string): string {
@@ -180,7 +184,12 @@ async function postWithRetry(
         return { ok: true, status: response.status, data };
       }
 
-      // 4xx/5xx — retry
+      // 4xx = client error, don't retry (except 429 rate limit)
+      if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+        return { ok: false, status: response.status, data };
+      }
+
+      // 5xx or 429 — retry
       lastError = { status: response.status, data };
     } catch (err) {
       lastError = err;

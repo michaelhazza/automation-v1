@@ -53,7 +53,11 @@ export const inboxService = {
     filters: InboxFilters
   ): Promise<UnifiedInboxItem[]> {
     const items: UnifiedInboxItem[] = [];
-    const { tab = 'all', search } = filters;
+    const { tab = 'all' } = filters;
+    // Sanitize search: escape SQL LIKE wildcards, limit length
+    const search = filters.search
+      ? filters.search.slice(0, 200).replace(/%/g, '\\%').replace(/_/g, '\\_')
+      : undefined;
 
     // ── Tasks with status='inbox' ────────────────────────────────────────
     if (tab === 'all' || tab === 'tasks') {
@@ -231,7 +235,7 @@ export const inboxService = {
   /**
    * Mark items as read — upserts into inboxReadStates.
    */
-  async markRead(userId: string, items: InboxItemRef[]): Promise<void> {
+  async markRead(userId: string, orgId: string, items: InboxItemRef[]): Promise<void> {
     if (items.length === 0) return;
 
     await db.transaction(async (tx) => {
@@ -257,6 +261,7 @@ export const inboxService = {
       actorId: userId,
       actorType: 'user',
       action: 'inbox.item.read',
+      organisationId: orgId,
       entityType: 'inbox',
       metadata: { items, count: items.length },
     });
@@ -265,7 +270,7 @@ export const inboxService = {
   /**
    * Mark items as unread — upserts into inboxReadStates.
    */
-  async markUnread(userId: string, items: InboxItemRef[]): Promise<void> {
+  async markUnread(userId: string, orgId: string, items: InboxItemRef[]): Promise<void> {
     if (items.length === 0) return;
 
     await db.transaction(async (tx) => {
@@ -290,7 +295,7 @@ export const inboxService = {
   /**
    * Archive items — sets isArchived=true in inboxReadStates.
    */
-  async archiveItems(userId: string, items: InboxItemRef[]): Promise<void> {
+  async archiveItems(userId: string, orgId: string, items: InboxItemRef[]): Promise<void> {
     if (items.length === 0) return;
 
     await db.transaction(async (tx) => {
@@ -316,6 +321,7 @@ export const inboxService = {
       actorId: userId,
       actorType: 'user',
       action: 'inbox.item.archived',
+      organisationId: orgId,
       entityType: 'inbox',
       metadata: { items, count: items.length },
     });
