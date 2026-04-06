@@ -276,6 +276,14 @@ The retry boundary is enforced at the service layer. `agentExecutionService.exec
 - **Scheduled runs:** pg-boss worker checks before executing. Disabled jobs are silently dropped with operator-visible log.
 - **Audit trail:** Every toggle logged with actor, timestamp, reason.
 
+### Run-level cost attribution
+
+Each `agent_runs` record tracks cost for future pricing and margin analysis:
+- `estimatedCostCents` (integer, nullable) — estimated before run starts, based on token budget and model pricing
+- `actualCostCents` (integer, nullable) — actual cost, computed from `llmRequests` after run completes
+
+This enables per-org, per-account, and per-run cost reporting. The existing `budgetService` and `costAggregates` infrastructure already tracks costs — this adds attribution at the run level so operators can answer "what does monitoring client X cost me per month?"
+
 ### What this phase does NOT include
 
 - Org-level memory (Phase 3)
@@ -784,6 +792,33 @@ This agent is **conditionally loaded.** Only present when a configuration templa
 
 **Baseline management.** Maintains rolling baselines per account per metric in `canonical_metric_history`. Baselines are account-specific and metric-specific — what "normal" looks like for each account's metrics.
 
+#### Cold start behaviour (first 7–14 days)
+
+When a connector is first activated or a new account is added, there is insufficient data for meaningful intelligence. The system enters cold start mode per account:
+
+- **Health score:** returns `null` (not 0, not 50). UI shows "Building baseline..." instead of a score.
+- **Anomaly detection:** disabled for the account. No alerts generated.
+- **Churn risk:** disabled for the account. No risk scores computed.
+- **Portfolio report:** includes the account in "baseline building" section, not in scored accounts.
+
+Cold start ends when the account has accumulated `minimumDataPoints` (configurable, default: 14) metric history entries. The transition is per-account, per-metric — some metrics may exit cold start before others.
+
+Configurable in template:
+```json
+"coldStartConfig": {
+  "minimumDataPoints": 14,
+  "allowHeuristicScoring": false
+}
+```
+
+If `allowHeuristicScoring` is `true`, the system may compute a preliminary score with very low confidence (< 0.3) during cold start, displayed with an explicit "preliminary" warning. Default is `false` — no scoring until baseline is established.
+
+#### Backfill contamination guard
+
+During baseline computation, metric history entries where the source data was ingested during the backfill phase (`is_backfill: true` on the underlying entities) are excluded by default. Backfilled data represents historical state that was batch-imported, not organically observed — including it in baselines can distort what "normal" looks like for live operations.
+
+If the template's `coldStartConfig.includeBackfillInBaseline` is explicitly set to `true`, backfilled data is included but at reduced confidence (0.5x weight). This is useful for verticals where historical data is reliable and representative.
+
 #### Baseline storage and computation
 
 Baselines are computed from `canonical_metric_history`, not stored as a separate table (v2.0 simplification from v1.0). The intelligence skills query metric history directly and compute rolling statistics (mean, median, variance) on the fly.
@@ -1073,6 +1108,44 @@ The template defines which intervention types are available and which gate level
 - `executed` — cooldown starts only when an intervention was actually executed (default — allows retry after rejection)
 - `any_outcome` — cooldown starts on any outcome (proposed, approved, rejected, timed out)
 
+#### Alert fatigue guard (portfolio-level)
+
+Beyond per-account intervention cooldowns, portfolio-level alert limits prevent operator fatigue:
+
+```json
+"alertLimits": {
+  "maxAlertsPerRun": 20,
+  "maxAlertsPerAccountPerDay": 3,
+  "batchLowPriority": true
+}
+```
+
+- **`maxAlertsPerRun`** — if a scan cycle produces more alerts than this, lower-severity alerts are batched into a single digest rather than individual notifications.
+- **`maxAlertsPerAccountPerDay`** — per-account daily cap. Once reached, additional alerts for that account are logged but not delivered until the next day.
+- **`batchLowPriority`** — when `true`, alerts with severity `low` are never delivered individually. They are batched into the next portfolio report.
+
+Configurable in template `operationalDefaults`.
+
+#### Output explainability
+
+Every intelligence skill output must include an `explanation` object for operator trust and HITL decision support:
+
+```json
+{
+  "score": 42,
+  "explanation": {
+    "topFactors": [
+      { "factor": "Pipeline Velocity", "contribution": 18, "direction": "negative" },
+      { "factor": "Contact Growth", "contribution": 12, "direction": "negative" }
+    ],
+    "confidenceReasoning": "4 of 5 configured factors had data. Revenue trend excluded (data missing).",
+    "dataQuality": "fresh"
+  }
+}
+```
+
+This is required on: `compute_health_score`, `detect_anomaly`, `compute_churn_risk`, and `trigger_account_intervention`. It reduces HITL friction (operators see why the system is recommending an action) and is critical for enterprise trust.
+
 ### Data isolation
 
 When an org agent reads across subaccounts:
@@ -1220,7 +1293,14 @@ Before applying, preflight checks validate:
 - Connector type is registered in the adapter registry
 - Skills referenced in enablement map exist in the skill library
 - Operational parameters conform to expected schema
+- Metric slug validation against `metric_definitions` (mode determined by `metricAvailabilityMode`)
 - `dryRun: true` flag runs checks without making changes
+
+**Metric availability mode.** Templates declare `metricAvailabilityMode`:
+- `strict` — all metric slugs referenced in healthScoreFactors, anomalyConfig, and churnRiskSignals must exist in `metric_definitions` for the template's connector type. Activation fails if any are missing.
+- `lenient` (default) — missing metrics produce warnings but activation proceeds. Runtime scoring degrades gracefully (missing factors excluded with data-missing warning).
+
+Enterprise deployments will want `strict`. Early-stage templates and development use `lenient`.
 
 Partial application is never allowed.
 
@@ -1256,6 +1336,32 @@ Updates to system-level templates don't auto-propagate. Operators get update not
 ### Config version linkage
 
 `config_version` on intelligence outputs is a SHA-256 hash of: `appliedTemplateVersion` + operator overrides + connector config version. Enables full traceability.
+
+### Template migration safety
+
+When a system-level template is updated and an org applies the new version, the update may change metric slugs, factor weights, or signal definitions. This creates inconsistency between historical outputs (computed with old config) and future outputs (computed with new config).
+
+Template updates declare a `migrationMode`:
+- `gradual` (default) — new config applies immediately. Historical baselines naturally evolve as new metric history accumulates. Old config_version hash preserved on historical outputs for comparison.
+- `hard_reset` — wipe baselines and health snapshot history for the org. Re-enter cold start mode. Use when metric computation logic changed fundamentally.
+- `dual_run` — for one cycle, compute scores using both old and new config. Produce a comparison report showing differences. Then switch to new config. Useful for high-stakes orgs that need to validate the impact before committing.
+
+### Data retention policy
+
+Configurable per template in `operationalDefaults`:
+
+```json
+"dataRetention": {
+  "metricHistoryDays": 180,
+  "healthSnapshotDays": 365,
+  "anomalyEventDays": 90,
+  "orgMemoryDays": 365,
+  "syncAuditLogDays": 30,
+  "canonicalEntityDays": null
+}
+```
+
+`null` means no automatic purge (retain indefinitely). A scheduled cleanup job enforces these retention windows. Without explicit retention policy, database size grows indefinitely and query performance degrades over time.
 
 ---
 
