@@ -1477,3 +1477,59 @@ const FEATURE_FLAGS = {
 ```
 
 This enables: incremental shipping within phases, rollback safety, and early testing with real users. Routes and UI pages check the flag before rendering.
+
+### BR-6: Retry Ownership (No Double-Retry)
+
+Retries exist at multiple layers. Each layer owns exactly one concern:
+
+| Layer | Responsibility | Example |
+|-------|---------------|---------|
+| Queue (pg-boss) | Delivery retry — ensures the job is delivered to a worker | Job fails to dequeue → pg-boss retries |
+| Service (webhook/agent) | Business retry — handles transient external failures | Webhook 503 → service retries with backoff |
+| Controller/API | NO retries — returns error to caller | Never |
+
+**Rule:** Retries must decrement a single logical counter. Never double-retry across layers (e.g., pg-boss retrying a job that already retried its webhook call internally). If the service exhausts its retries, it marks the job as failed — pg-boss does NOT retry it again.
+
+### BR-7: Time Consistency
+
+All internal time handling follows these rules:
+- **All timestamps are UTC** — stored, compared, and transmitted in UTC
+- **All DB comparisons use `now()`** (database time), not application `new Date()` — prevents clock drift between app instances
+- **Frontend only** converts to local timezone for display
+- **All TTLs, expiry checks, and retry delays** use UTC-based arithmetic
+
+Applies to: webhook callback expiry, inbox TTL cleanup, heartbeat scheduling, audit event timestamps.
+
+### BR-8: System Health Surface
+
+Add a lightweight internal health view (not a full observability stack):
+
+**Route:** `GET /api/admin/system-health` (system admin only)
+
+Returns:
+```ts
+{
+  failedRunsLast24h: number;
+  webhookFailureRate: { agentId: string; failures: number; total: number }[];
+  retryExhaustedLast24h: number;
+  circuitBreakers: { agentId: string; state: 'closed' | 'open' | 'half_open' }[];
+  queueDepth: { queueName: string; size: number }[];
+  oldestPendingReview: string | null;  // ISO timestamp
+}
+```
+
+This is queried on-demand (not real-time). Gives operators a single view of system health without digging through logs. Surface in the admin dashboard as a "System Health" card.
+
+### BR-9: Backpressure Rule
+
+When system load exceeds safe thresholds, degrade gracefully:
+
+**Trigger:** pg-boss queue depth > 100 pending jobs OR failed job rate > 20% in last 10 minutes.
+
+**Action:**
+- Pause non-critical queues: heartbeat runs, catch-up enqueues, routine triggers
+- Allow only: manual runs, webhook callbacks, inbox actions, review approvals
+- Emit `system.backpressure.activated` audit event
+- Surface alert in inbox
+
+**Recovery:** Auto-resume paused queues when queue depth < 50 AND failure rate < 5% for 5 consecutive minutes.
