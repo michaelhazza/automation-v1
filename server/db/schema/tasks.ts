@@ -4,6 +4,7 @@ import { subaccounts } from './subaccounts';
 import { agents } from './agents';
 import { processes } from './processes';
 import { projects } from './projects';
+import { goals } from './goals';
 
 export const tasks = pgTable(
   'tasks',
@@ -29,6 +30,8 @@ export const tasks = pgTable(
       .references(() => processes.id),
     projectId: uuid('project_id')
       .references(() => projects.id),
+    goalId: uuid('goal_id')
+      .references(() => goals.id),
     position: integer('position').notNull().default(0),
     dueDate: timestamp('due_date', { withTimezone: true }),
 
@@ -57,6 +60,7 @@ export const tasks = pgTable(
     assignedAgentIdx: index('tasks_assigned_agent_idx').on(table.assignedAgentId),
     statusIdx: index('tasks_status_idx').on(table.status),
     projectIdx: index('tasks_project_idx').on(table.projectId),
+    goalIdx: index('tasks_goal_idx').on(table.goalId),
     // M-4: index for sub-task queries
     parentTaskIdx: index('tasks_parent_task_id_idx').on(table.parentTaskId),
   })

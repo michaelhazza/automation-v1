@@ -78,7 +78,11 @@ router.patch(
   validateBody(updateLinkBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { isActive, parentSubaccountAgentId, agentRole, agentTitle, heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours } = req.body as {
+    const {
+      isActive, parentSubaccountAgentId, agentRole, agentTitle,
+      heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours,
+      concurrencyPolicy, catchUpPolicy, catchUpCap, maxConcurrentRuns,
+    } = req.body as {
       isActive?: boolean;
       parentSubaccountAgentId?: string | null;
       agentRole?: string | null;
@@ -86,6 +90,10 @@ router.patch(
       heartbeatEnabled?: boolean;
       heartbeatIntervalHours?: number | null;
       heartbeatOffsetHours?: number;
+      concurrencyPolicy?: 'skip_if_active' | 'coalesce_if_active' | 'always_enqueue';
+      catchUpPolicy?: 'skip_missed' | 'enqueue_missed_with_cap';
+      catchUpCap?: number;
+      maxConcurrentRuns?: number;
     };
     const updated = await subaccountAgentService.updateLink(req.orgId!, req.params.linkId, {
       isActive,
@@ -95,6 +103,10 @@ router.patch(
       heartbeatEnabled,
       heartbeatIntervalHours,
       heartbeatOffsetHours,
+      concurrencyPolicy,
+      catchUpPolicy,
+      catchUpCap,
+      maxConcurrentRuns,
     });
     res.json(updated);
   })

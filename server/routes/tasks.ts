@@ -17,9 +17,9 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { status, priority, assignedAgentId, search } = req.query as Record<string, string>;
+    const { status, priority, assignedAgentId, search, projectId } = req.query as Record<string, string>;
     const items = await taskService.listTasks(req.orgId!, req.params.subaccountId, {
-      status, priority, assignedAgentId, search,
+      status, priority, assignedAgentId, search, projectId,
     });
     res.json(items);
   })

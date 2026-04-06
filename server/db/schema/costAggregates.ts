@@ -28,6 +28,9 @@ export const costAggregates = pgTable(
     requestCount:            integer('request_count').notNull().default(0),
     errorCount:              integer('error_count').notNull().default(0),
 
+    // Project-level cost attribution
+    projectId:               uuid('project_id'),
+
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
