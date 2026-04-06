@@ -14,6 +14,9 @@ export const interventionOutcomes = pgTable(
     interventionId: uuid('intervention_id').notNull(), // references actions or review_items
     accountId: uuid('account_id').notNull().references(() => canonicalAccounts.id, { onDelete: 'cascade' }),
     interventionTypeSlug: text('intervention_type_slug').notNull(),
+    triggerEventId: uuid('trigger_event_id'), // anomaly or alert that triggered this
+    runId: uuid('run_id'), // agent run that generated the decision
+    configVersion: text('config_version'), // config version at decision time
     healthScoreBefore: integer('health_score_before'),
     healthScoreAfter: integer('health_score_after'),
     outcome: text('outcome').$type<'improved' | 'unchanged' | 'worsened'>(),

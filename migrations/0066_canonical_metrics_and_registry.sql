@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS canonical_metrics (
   computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   computation_trigger TEXT NOT NULL,
   connector_type TEXT NOT NULL,
+  metric_version INTEGER NOT NULL DEFAULT 1,
   metadata JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -46,6 +47,8 @@ CREATE INDEX IF NOT EXISTS canonical_metric_history_baseline_idx
   ON canonical_metric_history (account_id, metric_slug, period_type, computed_at DESC);
 CREATE INDEX IF NOT EXISTS canonical_metric_history_org_idx
   ON canonical_metric_history (organisation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS canonical_metric_history_dedup_idx
+  ON canonical_metric_history (account_id, metric_slug, period_type, period_start, period_end);
 
 -- Metric Definitions: soft registry for adapter-defined metrics
 CREATE TABLE IF NOT EXISTS metric_definitions (

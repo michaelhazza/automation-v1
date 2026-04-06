@@ -3,8 +3,10 @@ import { organisations } from './organisations.js';
 import { canonicalAccounts } from './canonicalAccounts.js';
 
 // ---------------------------------------------------------------------------
-// Canonical Metrics — derived metrics computed by adapters from raw entities
-// Intelligence skills read from this table, never from raw entity tables.
+// Canonical Metrics — "latest snapshot" per metric per account
+// This table holds the MOST RECENT value only (upsert on unique key).
+// Full history is in canonical_metric_history (append-only).
+// Intelligence skills read from this table for current state.
 // ---------------------------------------------------------------------------
 
 export const canonicalMetrics = pgTable(
@@ -18,12 +20,13 @@ export const canonicalMetrics = pgTable(
     previousValue: numeric('previous_value'),
     periodStart: timestamp('period_start', { withTimezone: true }),
     periodEnd: timestamp('period_end', { withTimezone: true }),
-    periodType: text('period_type').notNull(), // "rolling_7d", "rolling_30d", "daily", "hourly"
-    aggregationType: text('aggregation_type').notNull(), // "rate", "ratio", "count", "avg", "sum"
-    unit: text('unit'), // "percent", "count", "currency", "seconds"
+    periodType: text('period_type').notNull(),
+    aggregationType: text('aggregation_type').notNull(),
+    unit: text('unit'),
     computedAt: timestamp('computed_at', { withTimezone: true }).defaultNow().notNull(),
     computationTrigger: text('computation_trigger').notNull().$type<'poll' | 'webhook' | 'manual' | 'scheduled'>(),
     connectorType: text('connector_type').notNull(),
+    metricVersion: integer('metric_version').notNull().default(1),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -62,6 +65,10 @@ export const canonicalMetricHistory = pgTable(
       table.accountId, table.metricSlug, table.periodType, table.computedAt
     ),
     orgIdx: index('canonical_metric_history_org_idx').on(table.organisationId),
+    // Idempotency: prevent duplicate history entries from polling+webhook races
+    dedupIdx: uniqueIndex('canonical_metric_history_dedup_idx').on(
+      table.accountId, table.metricSlug, table.periodType, table.periodStart, table.periodEnd
+    ),
   })
 );
 

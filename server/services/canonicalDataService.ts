@@ -384,11 +384,13 @@ export const canonicalDataService = {
   },
 
   async appendMetricHistory(data: NewCanonicalMetricHistoryEntry) {
+    // Idempotent: skip duplicate entries (same account+metric+period window)
     const [result] = await db
       .insert(canonicalMetricHistory)
       .values(data)
+      .onConflictDoNothing()
       .returning();
-    return result;
+    return result ?? null;
   },
 
   async getMetricValue(

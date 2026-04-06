@@ -5,6 +5,7 @@ import { adapters } from '../adapters/index.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
+import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,14 @@ export const connectorPollingService = {
 
               const isBackfill = config.syncPhase === 'backfill';
               for (const m of metrics) {
+                // Lifecycle enforcement: only write metrics with active status
+                const metricDef = await metricRegistryService.getBySlug(config.connectorType, m.metricSlug);
+                if (metricDef && metricDef.status !== 'active') {
+                  console.warn(`[ConnectorPolling] Skipping ${metricDef.status} metric: ${m.metricSlug}`);
+                  continue;
+                }
+                const metricVersion = metricDef?.version ?? 1;
+
                 await canonicalDataService.upsertMetric({
                   organisationId: config.organisationId,
                   accountId: dbAccount.id,
@@ -143,6 +152,7 @@ export const connectorPollingService = {
                   computedAt: new Date(),
                   computationTrigger: 'poll',
                   connectorType: config.connectorType,
+                  metricVersion,
                   metadata: m.metadata ?? null,
                 });
 
@@ -156,7 +166,7 @@ export const connectorPollingService = {
                   periodStart: m.periodStart ?? null,
                   periodEnd: m.periodEnd ?? null,
                   computedAt: new Date(),
-                  metricVersion: 1,
+                  metricVersion,
                   isBackfill,
                 });
               }
