@@ -1,135 +1,24 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents } from '../db/schema/index.js';
+import { subaccountAgents, agents, orgAgentConfigs, organisations } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
-import { isNull } from 'drizzle-orm';
+import { setContextEnrichmentJobSender } from './workspaceMemoryService.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { getJobConfig } from '../config/jobConfig.js';
+import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
+import { logger } from '../lib/logger.js';
+import { env } from '../lib/env.js';
 
 // ---------------------------------------------------------------------------
 // Agent Schedule Service — manages cron-based agent scheduling via pg-boss
 // ---------------------------------------------------------------------------
 
-// pg-boss instance — lazy-loaded
-let boss: PgBoss | null = null;
-
-// Type for pg-boss (imported dynamically)
-type PgBoss = {
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  send(name: string, data?: object, options?: object): Promise<string | null>;
-  schedule(name: string, cron: string, data?: object, options?: object): Promise<void>;
-  unschedule(name: string): Promise<void>;
-  work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
-  getSchedules(): Promise<Array<{ name: string; cron: string }>>;
-};
-
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
+const AGENT_ORG_RUN_QUEUE = 'agent-org-scheduled-run';
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 const AGENT_TRIGGERED_QUEUE = 'agent-triggered-run';
-
-async function getBoss(): Promise<PgBoss> {
-  if (boss) return boss;
-
-  try {
-    const PgBossModule = await import('pg-boss');
-    const PgBossClass = PgBossModule.default ?? PgBossModule;
-    const { env } = await import('../lib/env.js');
-
-    boss = new (PgBossClass as unknown as new (config: { connectionString: string; noScheduling?: boolean }) => PgBoss)({
-      connectionString: env.DATABASE_URL,
-    });
-
-    await boss.start();
-    return boss;
-  } catch (err) {
-    // pg-boss not available — fall back to simple interval-based scheduling
-    console.warn('[AgentScheduler] pg-boss not available, using fallback scheduler:', err instanceof Error ? err.message : String(err));
-    return createFallbackScheduler();
-  }
-}
-
-// Simple fallback scheduler for environments where pg-boss isn't installed
-const activeIntervals = new Map<string, NodeJS.Timeout>();
-
-function createFallbackScheduler(): PgBoss {
-  return {
-    async start() {},
-    async stop() {
-      for (const interval of activeIntervals.values()) clearInterval(interval);
-      activeIntervals.clear();
-    },
-    async send(name: string, data?: object) {
-      // Execute immediately for fallback
-      const handler = fallbackHandlers.get(name);
-      if (handler && data) {
-        handler({ data: data as Record<string, unknown> }).catch(err => {
-          console.error(`[FallbackScheduler] Error in ${name}:`, err);
-        });
-      }
-      return 'fallback-job';
-    },
-    async schedule(name: string, cron: string, data?: object) {
-      // Parse simple cron patterns for the fallback
-      const intervalMs = parseCronToMs(cron);
-      if (activeIntervals.has(name)) clearInterval(activeIntervals.get(name)!);
-
-      const handler = fallbackHandlers.get(AGENT_RUN_QUEUE);
-      if (handler && data) {
-        const interval = setInterval(() => {
-          handler({ data: data as Record<string, unknown> }).catch(err => {
-            console.error(`[FallbackScheduler] Error in ${name}:`, err);
-          });
-        }, intervalMs);
-        activeIntervals.set(name, interval);
-      }
-    },
-    async unschedule(name: string) {
-      const interval = activeIntervals.get(name);
-      if (interval) {
-        clearInterval(interval);
-        activeIntervals.delete(name);
-      }
-    },
-    async work(_name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>) {
-      fallbackHandlers.set(_name, handler);
-      return 'fallback-worker';
-    },
-    async getSchedules() {
-      return Array.from(activeIntervals.keys()).map(name => ({ name, cron: '' }));
-    },
-  };
-}
-
-const fallbackHandlers = new Map<string, (job: { data: Record<string, unknown> }) => Promise<void>>();
-
-function parseCronToMs(cron: string): number {
-  // Simple parser for common patterns
-  const parts = cron.trim().split(/\s+/);
-  if (parts.length < 5) return 3600000; // default 1 hour
-
-  const [min, hour] = parts;
-
-  // Every N minutes: */N * * * *
-  if (min.startsWith('*/')) {
-    const n = parseInt(min.slice(2), 10);
-    return n * 60 * 1000;
-  }
-
-  // Every N hours: 0 */N * * *
-  if (min === '0' && hour.startsWith('*/')) {
-    const n = parseInt(hour.slice(2), 10);
-    return n * 60 * 60 * 1000;
-  }
-
-  // Specific time daily: M H * * *
-  if (!min.includes('*') && !hour.includes('*') && parts[2] === '*') {
-    return 24 * 60 * 60 * 1000; // once daily
-  }
-
-  // Default: every hour
-  return 3600000;
-}
 
 export const agentScheduleService = {
   /**
@@ -137,117 +26,251 @@ export const agentScheduleService = {
    * Called once on server startup.
    */
   async initialize() {
-    const pgboss = await getBoss();
+    const pgboss = await getPgBoss() as any;
 
     // Wire up the handoff job sender so skillExecutor can enqueue handoffs
     setHandoffJobSender(async (name: string, data: object) => {
-      return pgboss.send(name, data);
+      return pgboss.send(name, data, getJobConfig(name as any));
     });
 
     // Wire up the trigger job sender so triggerService can enqueue triggered runs
     setTriggerJobSender(async (name: string, data: object) => {
-      return pgboss.send(name, data);
+      return pgboss.send(name, data, getJobConfig(name as any));
+    });
+
+    // Wire up context enrichment job sender for workspace memory (Phase B1)
+    setContextEnrichmentJobSender(async (name: string, data: unknown, options?: Record<string, unknown>) => {
+      return pgboss.send(name, data, { ...getJobConfig(name as any), ...options });
     });
 
     // Register the worker that processes scheduled agent runs
-    await pgboss.work(AGENT_RUN_QUEUE, async (job) => {
-      const data = job.data as {
-        subaccountAgentId: string;
-        agentId: string;
-        subaccountId: string;
-        organisationId: string;
-      };
-
-      console.log(`[AgentScheduler] Running scheduled agent: ${data.agentId} for subaccount ${data.subaccountId}`);
-
+    await pgboss.work(AGENT_RUN_QUEUE, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+      const retryCount = getRetryCount(job);
+      if (retryCount > 0) {
+        logger.warn('job_retry', { queue: AGENT_RUN_QUEUE, jobId: job.id, retryCount });
+      }
       try {
-        await agentExecutionService.executeRun({
-          agentId: data.agentId,
-          subaccountId: data.subaccountId,
-          subaccountAgentId: data.subaccountAgentId,
-          organisationId: data.organisationId,
-          runType: 'scheduled',
-          executionMode: 'api',
-          triggerContext: { source: 'schedule' },
-        });
+        await withTimeout((async () => {
+          const data = job.data as {
+            subaccountAgentId: string;
+            agentId: string;
+            subaccountId: string;
+            organisationId: string;
+          };
+
+          logger.info(`[AgentScheduler] Running scheduled agent: ${data.agentId} for subaccount ${data.subaccountId}`);
+
+          await agentExecutionService.executeRun({
+            agentId: data.agentId,
+            subaccountId: data.subaccountId,
+            subaccountAgentId: data.subaccountAgentId,
+            organisationId: data.organisationId,
+            executionScope: 'subaccount',
+            runType: 'scheduled',
+            runSource: 'scheduler',
+            executionMode: 'api',
+            idempotencyKey: `scheduled:${data.subaccountAgentId}:${job.id}`,
+            triggerContext: { source: 'schedule' },
+          });
+        })(), 270_000);
       } catch (err) {
-        console.error(`[AgentScheduler] Scheduled run failed:`, err);
+        if (isNonRetryable(err)) {
+          logger.error('job_non_retryable_failure', { queue: AGENT_RUN_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          logger.error('job_timeout', { queue: AGENT_RUN_QUEUE, jobId: job.id, retryCount });
+        }
+        throw err;
+      }
+    });
+
+    // Register the worker that processes org-level scheduled agent runs
+    await pgboss.work(AGENT_ORG_RUN_QUEUE, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+      const retryCount = getRetryCount(job);
+      if (retryCount > 0) {
+        logger.warn('job_retry', { queue: AGENT_ORG_RUN_QUEUE, jobId: job.id, retryCount });
+      }
+      try {
+        await withTimeout((async () => {
+          const jobId = job.id;
+          const data = job.data as {
+            orgAgentConfigId: string;
+            agentId: string;
+            organisationId: string;
+          };
+
+          // Check kill switch before executing
+          const [org] = await db
+            .select({ orgExecutionEnabled: organisations.orgExecutionEnabled })
+            .from(organisations)
+            .where(eq(organisations.id, data.organisationId));
+          if (org && !org.orgExecutionEnabled) {
+            logger.info(`[AgentScheduler] Org execution disabled, dropping org scheduled run for agent ${data.agentId}`);
+            return; // Drop silently, don't retry
+          }
+
+          logger.info(`[AgentScheduler] Running org-level scheduled agent: ${data.agentId} for org ${data.organisationId}`);
+
+          // Deterministic idempotency key: use pg-boss job ID (unique per cron tick)
+          const scheduleTickKey = `org-scheduled:${data.agentId}:${data.organisationId}:${jobId}`;
+
+          await agentExecutionService.executeRun({
+            agentId: data.agentId,
+            organisationId: data.organisationId,
+            executionScope: 'org',
+            orgAgentConfigId: data.orgAgentConfigId,
+            runType: 'scheduled',
+            runSource: 'scheduler',
+            executionMode: 'api',
+            idempotencyKey: scheduleTickKey,
+            triggerContext: { source: 'org-schedule' },
+          });
+        })(), 270_000);
+      } catch (err) {
+        if (isNonRetryable(err)) {
+          logger.error('job_non_retryable_failure', { queue: AGENT_ORG_RUN_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          logger.error('job_timeout', { queue: AGENT_ORG_RUN_QUEUE, jobId: job.id, retryCount });
+        }
+        throw err;
       }
     });
 
     // Register the worker that processes agent handoff runs
-    await pgboss.work(AGENT_HANDOFF_QUEUE, async (job) => {
-      const data = job.data as {
-        taskId: string;
-        agentId: string;
-        subaccountAgentId: string;
-        subaccountId: string;
-        organisationId: string;
-        sourceRunId: string;
-        handoffDepth: number;
-        handoffContext?: string;
-      };
-
-      console.log(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
-
+    await pgboss.work(AGENT_HANDOFF_QUEUE, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+      const retryCount = getRetryCount(job);
+      if (retryCount > 0) {
+        logger.warn('job_retry', { queue: AGENT_HANDOFF_QUEUE, jobId: job.id, retryCount });
+      }
       try {
-        await agentExecutionService.executeRun({
-          agentId: data.agentId,
-          subaccountId: data.subaccountId,
-          subaccountAgentId: data.subaccountAgentId,
-          organisationId: data.organisationId,
-          runType: 'triggered',
-          executionMode: 'api',
-          taskId: data.taskId,
-          handoffDepth: data.handoffDepth,
-          parentRunId: data.sourceRunId,
-          triggerContext: {
-            type: 'handoff',
-            sourceRunId: data.sourceRunId,
+        await withTimeout((async () => {
+          const data = job.data as {
+            taskId: string;
+            agentId: string;
+            subaccountAgentId: string;
+            subaccountId: string;
+            organisationId: string;
+            sourceRunId: string;
+            handoffDepth: number;
+            handoffContext?: string;
+          };
+
+          logger.info(`[AgentScheduler] Running handoff agent: ${data.agentId} for task ${data.taskId} (depth: ${data.handoffDepth})`);
+
+          await agentExecutionService.executeRun({
+            agentId: data.agentId,
+            subaccountId: data.subaccountId,
+            subaccountAgentId: data.subaccountAgentId,
+            organisationId: data.organisationId,
+            executionScope: 'subaccount',
+            runType: 'triggered',
+            runSource: 'handoff',
+            executionMode: 'api',
+            idempotencyKey: `handoff:${data.agentId}:${job.id}`,
+            taskId: data.taskId,
             handoffDepth: data.handoffDepth,
-            handoffContext: data.handoffContext,
-          },
-        });
+            parentRunId: data.sourceRunId,
+            triggerContext: {
+              type: 'handoff',
+              sourceRunId: data.sourceRunId,
+              handoffDepth: data.handoffDepth,
+              handoffContext: data.handoffContext,
+            },
+          });
+        })(), 150_000);
       } catch (err) {
-        console.error(`[AgentScheduler] Handoff run failed:`, err);
+        if (isNonRetryable(err)) {
+          logger.error('job_non_retryable_failure', { queue: AGENT_HANDOFF_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          logger.error('job_timeout', { queue: AGENT_HANDOFF_QUEUE, jobId: job.id, retryCount });
+        }
+        throw err;
       }
     });
 
     // Register the worker that processes event-triggered agent runs
-    await pgboss.work(AGENT_TRIGGERED_QUEUE, async (job) => {
-      const data = job.data as {
-        subaccountAgentId: string;
-        subaccountId: string;
-        organisationId: string;
-        triggerContext: Record<string, unknown>;
-      };
-
-      // Look up agentId from the subaccountAgentId
-      const { db } = await import('../db/index.js');
-      const { subaccountAgents } = await import('../db/schema/index.js');
-      const { eq } = await import('drizzle-orm');
-      const [saLink] = await db.select().from(subaccountAgents).where(eq(subaccountAgents.id, data.subaccountAgentId)).limit(1);
-      if (!saLink) {
-        console.error(`[AgentScheduler] Triggered run: subaccountAgent ${data.subaccountAgentId} not found`);
-        return;
+    await pgboss.work(AGENT_TRIGGERED_QUEUE, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+      const retryCount = getRetryCount(job);
+      if (retryCount > 0) {
+        logger.warn('job_retry', { queue: AGENT_TRIGGERED_QUEUE, jobId: job.id, retryCount });
       }
-
-      console.log(`[AgentScheduler] Running triggered agent: ${saLink.agentId} for subaccount ${data.subaccountId}`);
-
       try {
-        await agentExecutionService.executeRun({
-          agentId: saLink.agentId,
-          subaccountId: data.subaccountId,
-          subaccountAgentId: data.subaccountAgentId,
-          organisationId: data.organisationId,
-          runType: 'triggered',
-          executionMode: 'api',
-          triggerContext: data.triggerContext,
-        });
+        await withTimeout((async () => {
+          const data = job.data as {
+            subaccountAgentId: string;
+            subaccountId: string;
+            organisationId: string;
+            triggerContext: Record<string, unknown>;
+          };
+
+          // Look up agentId from the subaccountAgentId
+          const [saLink] = await db.select().from(subaccountAgents).where(eq(subaccountAgents.id, data.subaccountAgentId)).limit(1);
+          if (!saLink) {
+            logger.error(`[AgentScheduler] Triggered run: subaccountAgent ${data.subaccountAgentId} not found`);
+            return;
+          }
+
+          logger.info(`[AgentScheduler] Running triggered agent: ${saLink.agentId} for subaccount ${data.subaccountId}`);
+
+          await agentExecutionService.executeRun({
+            agentId: saLink.agentId,
+            subaccountId: data.subaccountId,
+            subaccountAgentId: data.subaccountAgentId,
+            organisationId: data.organisationId,
+            executionScope: 'subaccount',
+            runType: 'triggered',
+            runSource: 'trigger',
+            executionMode: 'api',
+            idempotencyKey: `triggered:${data.subaccountAgentId}:${job.id}`,
+            triggerContext: data.triggerContext,
+          });
+        })(), 270_000);
       } catch (err) {
-        console.error(`[AgentScheduler] Triggered run failed:`, err);
+        if (isNonRetryable(err)) {
+          logger.error('job_non_retryable_failure', { queue: AGENT_TRIGGERED_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          logger.error('job_timeout', { queue: AGENT_TRIGGERED_QUEUE, jobId: job.id, retryCount });
+        }
+        throw err;
       }
     });
+
+    // ── Stale run cleanup — runs every 5 minutes ────────────────────────
+    const STALE_CLEANUP_QUEUE = 'stale-run-cleanup';
+    await pgboss.work(STALE_CLEANUP_QUEUE, { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      const retryCount = getRetryCount(job);
+      if (retryCount > 0) {
+        logger.warn('job_retry', { queue: STALE_CLEANUP_QUEUE, jobId: job.id, retryCount });
+      }
+      try {
+        await withTimeout((async () => {
+          const { staleRunCleanupService } = await import('./staleRunCleanupService.js');
+          await staleRunCleanupService.cleanupStaleRuns();
+        })(), 210_000);
+      } catch (err) {
+        if (isNonRetryable(err)) {
+          logger.error('job_non_retryable_failure', { queue: STALE_CLEANUP_QUEUE, jobId: job.id, error: String(err) });
+          await pgboss.fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          logger.error('job_timeout', { queue: STALE_CLEANUP_QUEUE, jobId: job.id, retryCount });
+        }
+        throw err;
+      }
+    });
+    await pgboss.schedule(STALE_CLEANUP_QUEUE, '*/5 * * * *');
 
     // Register all active schedules
     await this.registerAllActiveSchedules();
@@ -287,11 +310,47 @@ export const agentScheduleService = {
         });
         registered++;
       } catch (err) {
-        console.error(`[AgentScheduler] Failed to register schedule for ${sa.id}:`, err);
+        logger.error(`[AgentScheduler] Failed to register schedule for ${sa.id}`, { error: String(err) });
       }
     }
 
-    console.log(`[AgentScheduler] Registered ${registered} active schedules`);
+    logger.info(`[AgentScheduler] Registered ${registered} active subaccount schedules`);
+
+    // Also register org-level agent schedules
+    const orgRows = await db
+      .select({
+        config: orgAgentConfigs,
+        agentStatus: agents.status,
+      })
+      .from(orgAgentConfigs)
+      .innerJoin(agents, eq(agents.id, orgAgentConfigs.agentId))
+      .where(
+        and(
+          eq(orgAgentConfigs.scheduleEnabled, true),
+          eq(orgAgentConfigs.isActive, true),
+          eq(agents.status, 'active'),
+          isNull(agents.deletedAt)
+        )
+      );
+
+    let orgRegistered = 0;
+    for (const row of orgRows) {
+      const config = row.config;
+      if (!config.scheduleCron) continue;
+
+      try {
+        await this.registerOrgSchedule(config.id, config.scheduleCron, {
+          orgAgentConfigId: config.id,
+          agentId: config.agentId,
+          organisationId: config.organisationId,
+        });
+        orgRegistered++;
+      } catch (err) {
+        logger.error(`[AgentScheduler] Failed to register org schedule for ${config.id}`, { error: String(err) });
+      }
+    }
+
+    logger.info(`[AgentScheduler] Registered ${orgRegistered} active org schedules`);
   },
 
   /**
@@ -302,7 +361,7 @@ export const agentScheduleService = {
     cron: string,
     data: { subaccountAgentId: string; agentId: string; subaccountId: string; organisationId: string }
   ) {
-    const pgboss = await getBoss();
+    const pgboss = await getPgBoss() as any;
     const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
 
     await pgboss.schedule(scheduleName, cron, data, {
@@ -314,8 +373,30 @@ export const agentScheduleService = {
    * Remove a schedule.
    */
   async unregisterSchedule(subaccountAgentId: string) {
-    const pgboss = await getBoss();
+    const pgboss = await getPgBoss() as any;
     const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
+    await pgboss.unschedule(scheduleName);
+  },
+
+  /**
+   * Register or update an org-level agent schedule.
+   */
+  async registerOrgSchedule(
+    orgAgentConfigId: string,
+    cron: string,
+    data: { orgAgentConfigId: string; agentId: string; organisationId: string }
+  ) {
+    const pgboss = await getPgBoss() as any;
+    const scheduleName = `${AGENT_ORG_RUN_QUEUE}:${orgAgentConfigId}`;
+    await pgboss.schedule(scheduleName, cron, data, { tz: 'UTC' });
+  },
+
+  /**
+   * Remove an org-level schedule.
+   */
+  async unregisterOrgSchedule(orgAgentConfigId: string) {
+    const pgboss = await getPgBoss() as any;
+    const scheduleName = `${AGENT_ORG_RUN_QUEUE}:${orgAgentConfigId}`;
     await pgboss.unschedule(scheduleName);
   },
 
@@ -360,12 +441,9 @@ export const agentScheduleService = {
   },
 
   /**
-   * Clean shutdown — stop pg-boss.
+   * Clean shutdown — lifecycle managed by pgBossInstance.
    */
   async shutdown() {
-    if (boss) {
-      await boss.stop();
-      boss = null;
-    }
+    // Lifecycle managed by pgBossInstance — see stopPgBoss()
   },
 };

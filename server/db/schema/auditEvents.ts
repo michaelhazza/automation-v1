@@ -17,6 +17,7 @@ export const auditEvents = pgTable(
     entityType: text('entity_type'),
     entityId: uuid('entity_id'),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    correlationId: text('correlation_id'), // end-to-end flow tracing (runId, requestId, etc.)
     ipAddress: text('ip_address'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

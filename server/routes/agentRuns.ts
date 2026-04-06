@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import crypto from 'crypto';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
 import { subaccountAgents, agentRuns } from '../db/schema/index.js';
@@ -21,6 +21,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { taskId, idempotencyKey, executionMode } = req.body as {
       taskId?: string;
       idempotencyKey?: string;
@@ -53,14 +54,87 @@ router.post(
       subaccountId,
       subaccountAgentId: saLink.id,
       organisationId: req.orgId!,
+      executionScope: 'subaccount',
       runType: 'manual',
       executionMode: executionMode ?? 'api',
+      runSource: 'manual',
       taskId,
       idempotencyKey: effectiveIdempotencyKey,
       triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
     });
 
     res.json(result);
+  })
+);
+
+// ─── Manual trigger: Run an org-level agent ─────────────────────────────────
+
+router.post(
+  '/api/org/agents/:agentId/run',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+    const { taskId, idempotencyKey } = req.body as {
+      taskId?: string;
+      idempotencyKey?: string;
+    };
+
+    // Find the org agent config
+    const { orgAgentConfigs } = await import('../db/schema/index.js');
+    const [orgConfig] = await db
+      .select()
+      .from(orgAgentConfigs)
+      .where(
+        and(
+          eq(orgAgentConfigs.agentId, agentId),
+          eq(orgAgentConfigs.organisationId, req.orgId!)
+        )
+      );
+
+    if (!orgConfig) {
+      res.status(404).json({ error: 'No org-level config found for this agent' });
+      return;
+    }
+
+    const effectiveIdempotencyKey = idempotencyKey ??
+      `manual:org:${agentId}:${req.user!.id}:${taskId ?? 'heartbeat'}:${Math.floor(Date.now() / 10000)}`;
+
+    const result = await agentExecutionService.executeRun({
+      agentId,
+      organisationId: req.orgId!,
+      executionScope: 'org',
+      orgAgentConfigId: orgConfig.id,
+      runType: 'manual',
+      executionMode: 'api',
+      runSource: 'manual',
+      taskId,
+      idempotencyKey: effectiveIdempotencyKey,
+      triggerContext: { triggeredBy: req.user!.id, source: 'manual-org' },
+    });
+
+    res.json(result);
+  })
+);
+
+// ─── Get org-level agent run history ─────────────────────────────────────────
+
+router.get(
+  '/api/org/agents/:agentId/runs',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+    const { limit, offset } = req.query;
+
+    const runs = await agentActivityService.listRuns({
+      organisationId: req.orgId!,
+      agentId,
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
+
+    res.json(runs);
   })
 );
 
@@ -72,6 +146,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { limit, offset } = req.query;
 
     const runs = await agentActivityService.listRuns({
@@ -97,6 +172,17 @@ router.get(
   })
 );
 
+// ─── Get trace chain for a run (A1) ──────────────────────────────────────────
+
+router.get(
+  '/api/agent-runs/:id/chain',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const chain = await agentActivityService.getRunChain(req.params.id, req.orgId!);
+    res.json(chain);
+  })
+);
+
 // ─── Configure subaccount agent (schedule, skills, limits) ───────────────────
 
 router.patch(
@@ -105,6 +191,7 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     const [saLink] = await db
       .select()
@@ -164,6 +251,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     const [saLink] = await db
       .select()

@@ -14,7 +14,8 @@ import { policyEngineService } from './policyEngineService.js';
 
 export interface ProposeActionInput {
   organisationId: string;
-  subaccountId: string;
+  /** Null for org-level agent runs */
+  subaccountId: string | null;
   agentId: string;
   agentRunId?: string;
   parentActionId?: string;
@@ -45,15 +46,22 @@ export const actionService = {
     }
 
     // Check idempotency — return existing action if key matches
+    const actionScope = input.subaccountId ? 'subaccount' : 'org';
+    const idempotencyCondition = actionScope === 'org'
+      ? and(
+          eq(actions.organisationId, input.organisationId),
+          eq(actions.actionScope, 'org'),
+          eq(actions.idempotencyKey, input.idempotencyKey)
+        )
+      : and(
+          eq(actions.subaccountId, input.subaccountId!),
+          eq(actions.idempotencyKey, input.idempotencyKey)
+        );
+
     const [existing] = await db
       .select({ id: actions.id, status: actions.status })
       .from(actions)
-      .where(
-        and(
-          eq(actions.subaccountId, input.subaccountId),
-          eq(actions.idempotencyKey, input.idempotencyKey)
-        )
-      );
+      .where(idempotencyCondition);
 
     if (existing) {
       return { actionId: existing.id, status: existing.status as ActionStatus, isNew: false };
@@ -67,6 +75,7 @@ export const actionService = {
       .values({
         organisationId: input.organisationId,
         subaccountId: input.subaccountId,
+        actionScope,
         agentId: input.agentId,
         agentRunId: input.agentRunId ?? null,
         parentActionId: input.parentActionId ?? null,
@@ -339,7 +348,7 @@ async function resolveGateLevel(
   // 1. Policy engine — first-match, with registry default as fallback
   const policyDecision = await policyEngineService.evaluatePolicy({
     toolSlug: input.actionType,
-    subaccountId: input.subaccountId,
+    subaccountId: input.subaccountId!,
     organisationId: input.organisationId,
     input: input.payload,
   });

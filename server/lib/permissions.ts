@@ -29,8 +29,9 @@ export const ORG_PERMISSIONS = {
   // System process visibility
   PROCESSES_VIEW_SYSTEM: 'org.processes.view_system',
   PROCESSES_CLONE: 'org.processes.clone',
-  // Cross-subaccount connection overview
+  // Org-level connections
   CONNECTIONS_VIEW: 'org.connections.view',
+  CONNECTIONS_MANAGE: 'org.connections.manage',
   // Process categories
   CATEGORIES_VIEW: 'org.categories.view',
   CATEGORIES_MANAGE: 'org.categories.manage',
@@ -56,6 +57,9 @@ export const ORG_PERMISSIONS = {
   // Review
   REVIEW_VIEW: 'org.review.view',
   REVIEW_APPROVE: 'org.review.approve',
+  // MCP Servers
+  MCP_SERVERS_VIEW: 'org.mcp_servers.view',
+  MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -111,7 +115,8 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.PROCESSES_VIEW_SYSTEM, description: 'View system processes available to this org', groupName: 'org.processes' },
   { key: ORG_PERMISSIONS.PROCESSES_CLONE,       description: 'Clone a system process into the org',        groupName: 'org.processes' },
   // org.connections
-  { key: ORG_PERMISSIONS.CONNECTIONS_VIEW, description: 'View connection status across subaccounts', groupName: 'org.connections' },
+  { key: ORG_PERMISSIONS.CONNECTIONS_VIEW,   description: 'View connection status across subaccounts', groupName: 'org.connections' },
+  { key: ORG_PERMISSIONS.CONNECTIONS_MANAGE, description: 'Create/edit/revoke org-level connections', groupName: 'org.connections' },
   // org.executions
   { key: ORG_PERMISSIONS.EXECUTIONS_VIEW, description: 'View all org executions',    groupName: 'org.executions' },
   // org.users
@@ -177,6 +182,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // subaccount.review
   { key: SUBACCOUNT_PERMISSIONS.REVIEW_VIEW,    description: 'View review queue in portal',              groupName: 'subaccount.review' },
   { key: SUBACCOUNT_PERMISSIONS.REVIEW_APPROVE, description: 'Approve or reject review items in portal', groupName: 'subaccount.review' },
+  // org.mcp_servers
+  { key: ORG_PERMISSIONS.MCP_SERVERS_VIEW,   description: 'View MCP server configurations',              groupName: 'org.mcp_servers' },
+  { key: ORG_PERMISSIONS.MCP_SERVERS_MANAGE, description: 'Create/edit/delete MCP server configurations', groupName: 'org.mcp_servers' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

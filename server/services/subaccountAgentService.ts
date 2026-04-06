@@ -135,6 +135,10 @@ export const subaccountAgentService = {
     heartbeatEnabled?: boolean;
     heartbeatIntervalHours?: number | null;
     heartbeatOffsetHours?: number;
+    concurrencyPolicy?: 'skip_if_active' | 'coalesce_if_active' | 'always_enqueue';
+    catchUpPolicy?: 'skip_missed' | 'enqueue_missed_with_cap';
+    catchUpCap?: number;
+    maxConcurrentRuns?: number;
   }) {
     const [link] = await db
       .select()
@@ -150,6 +154,11 @@ export const subaccountAgentService = {
     if (data.heartbeatEnabled !== undefined) update.heartbeatEnabled = data.heartbeatEnabled;
     if (data.heartbeatIntervalHours !== undefined) update.heartbeatIntervalHours = data.heartbeatIntervalHours;
     if (data.heartbeatOffsetHours !== undefined) update.heartbeatOffsetHours = data.heartbeatOffsetHours;
+    // Concurrency policies
+    if (data.concurrencyPolicy !== undefined) update.concurrencyPolicy = data.concurrencyPolicy;
+    if (data.catchUpPolicy !== undefined) update.catchUpPolicy = data.catchUpPolicy;
+    if (data.catchUpCap !== undefined) update.catchUpCap = data.catchUpCap;
+    if (data.maxConcurrentRuns !== undefined) update.maxConcurrentRuns = data.maxConcurrentRuns;
 
     if ('parentSubaccountAgentId' in data) {
       const parentId = data.parentSubaccountAgentId;

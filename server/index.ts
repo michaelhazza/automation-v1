@@ -20,6 +20,8 @@ import { initializePageIntegrationWorker } from './services/pageIntegrationWorke
 import { initializePaymentReconciliationJob } from './services/paymentReconciliationJob.js';
 import { client as dbClient } from './db/index.js';
 import { getIO } from './websocket/index.js';
+import { getPgBoss, stopPgBoss } from './lib/pgBossInstance.js';
+import { startDlqMonitor } from './services/dlqMonitorService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +44,7 @@ import subaccountsRouter from './routes/subaccounts.js';
 import permissionSetsRouter from './routes/permissionSets.js';
 import portalRouter from './routes/portal.js';
 import agentsRouter from './routes/agents.js';
+import agentPromptRevisionsRouter from './routes/agentPromptRevisions.js';
 import boardTemplatesRouter from './routes/boardTemplates.js';
 import boardConfigRouter from './routes/boardConfig.js';
 import tasksRouter from './routes/tasks.js';
@@ -59,6 +62,7 @@ import actionsRouter from './routes/actions.js';
 import systemProcessesRouter from './routes/systemProcesses.js';
 import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
+import orgConnectionsRouter from './routes/orgConnections.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
@@ -70,6 +74,21 @@ import githubAppRouter from './routes/githubApp.js';
 import githubWebhookRouter from './routes/githubWebhook.js';
 import mcpRouter from './routes/mcp.js';
 import agentInboxRouter from './routes/agentInbox.js';
+import orgAgentConfigsRouter from './routes/orgAgentConfigs.js';
+import connectorConfigsRouter from './routes/connectorConfigs.js';
+import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
+import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
+import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
+import subaccountTagsRouter from './routes/subaccountTags.js';
+import orgMemoryRouter from './routes/orgMemory.js';
+import orgWorkspaceRouter from './routes/orgWorkspace.js';
+import mcpServersRouter from './routes/mcpServers.js';
+import goalsRouter from './routes/goals.js';
+import webhookAdapterRouter from './routes/webhookAdapter.js';
+import inboxRouter from './routes/inbox.js';
+import feedbackRouter from './routes/feedback.js';
+import jobQueueRouter from './routes/jobQueue.js';
+import attachmentsRouter from './routes/attachments.js';
 import pageProjectsRouter from './routes/pageProjects.js';
 import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
@@ -114,18 +133,25 @@ app.use(helmet({
     : false,
 }));
 
+if (isProduction && env.CORS_ORIGINS === '*') {
+  console.error('[SERVER] FATAL: CORS_ORIGINS=* is not allowed in production. Set explicit origins.');
+  process.exit(1);
+}
+
 const corsOrigin = (() => {
   if (!isProduction) return '*';
-  if (env.CORS_ORIGINS === '*') {
-    console.warn('[SERVER] CORS_ORIGINS is wildcard in production. Set explicit origins via CORS_ORIGINS env var.');
-  }
-  return env.CORS_ORIGINS === '*' ? false as const : env.CORS_ORIGINS.split(',').map(o => o.trim());
+  return env.CORS_ORIGINS.split(',').map(o => o.trim());
 })();
 
 app.use(cors({
   origin: corsOrigin,
   credentials: true,
 }));
+
+// Webhook routes that need raw body must be mounted BEFORE json body parsing
+app.use(ghlWebhookRouter);
+app.use(teamworkWebhookRouter);
+app.use(slackWebhookRouter);
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -156,6 +182,7 @@ app.use(subaccountsRouter);
 app.use(permissionSetsRouter);
 app.use(portalRouter);
 app.use(agentsRouter);
+app.use(agentPromptRevisionsRouter);
 app.use(boardTemplatesRouter);
 app.use(boardConfigRouter);
 app.use(tasksRouter);
@@ -173,6 +200,7 @@ app.use(actionsRouter);
 app.use(systemProcessesRouter);
 app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
+app.use(orgConnectionsRouter);
 app.use(processConnectionMappingsRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
@@ -184,6 +212,19 @@ app.use(githubAppRouter);
 app.use(githubWebhookRouter);
 app.use(mcpRouter);
 app.use(agentInboxRouter);
+app.use(orgAgentConfigsRouter);
+app.use(connectorConfigsRouter);
+// ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
+app.use(subaccountTagsRouter);
+app.use(orgMemoryRouter);
+app.use(orgWorkspaceRouter);
+app.use(mcpServersRouter);
+app.use(goalsRouter);
+app.use(webhookAdapterRouter);
+app.use(inboxRouter);
+app.use(feedbackRouter);
+app.use(jobQueueRouter);
+app.use(attachmentsRouter);
 app.use(pageProjectsRouter);
 app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);
@@ -255,6 +296,11 @@ async function start() {
   await boardService.seedDefaultTemplate();
   await skillService.seedBuiltInSkills();
   // System skills are file-based (server/skills/*.md) — no seeding needed.
+  // Initialize shared pg-boss instance + DLQ monitor before registering workers
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    const boss = await getPgBoss();
+    await startDlqMonitor(boss);
+  }
   await agentScheduleService.initialize();
   await routerJobService.initializeRouterJobs();
   await queueService.startMaintenanceJobs();
@@ -307,12 +353,12 @@ async function gracefulShutdown(signal: string) {
       console.log('[SHUTDOWN] Socket.IO server closed');
     }
 
-    // 3. Stop agent schedule service (pg-boss instance)
+    // 3. Stop shared pg-boss instance (covers all queue workers)
     try {
-      await agentScheduleService.shutdown();
-      console.log('[SHUTDOWN] Agent schedule service stopped');
+      await stopPgBoss();
+      console.log('[SHUTDOWN] pg-boss stopped');
     } catch (err) {
-      console.error('[SHUTDOWN] Error stopping agent schedule service', err);
+      console.error('[SHUTDOWN] Error stopping pg-boss', err);
     }
 
     // 4. Close database connection pool

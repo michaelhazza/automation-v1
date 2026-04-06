@@ -13,7 +13,7 @@ export const costAggregates = pgTable(
   {
     id:                      uuid('id').defaultRandom().primaryKey(),
     entityType:              text('entity_type').notNull(),
-    // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider'
+    // 'organisation' | 'subaccount' | 'run' | 'agent' | 'task_type' | 'provider' | 'platform' | 'execution_phase'
     entityId:                text('entity_id').notNull(),
     periodType:              text('period_type').notNull(),
     // 'daily' | 'monthly' | 'run' | 'minute' | 'hour'
@@ -27,6 +27,9 @@ export const costAggregates = pgTable(
     totalTokensOut:          integer('total_tokens_out').notNull().default(0),
     requestCount:            integer('request_count').notNull().default(0),
     errorCount:              integer('error_count').notNull().default(0),
+
+    // Project-level cost attribution
+    projectId:               uuid('project_id'),
 
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

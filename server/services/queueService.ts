@@ -7,6 +7,10 @@ import { processResolutionService } from './processResolutionService.js';
 import { env } from '../lib/env.js';
 import { buildEngineAuthHeaders } from '../lib/engineAuth.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { getPgBoss } from '../lib/pgBossInstance.js';
+import { getJobConfig } from '../config/jobConfig.js';
+import { isNonRetryable, isTimeoutError, getRetryCount, withTimeout } from '../lib/jobErrors.js';
+import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // Simple in-memory queue
@@ -45,11 +49,6 @@ class SimpleQueue {
 
 const simpleQueue = new SimpleQueue();
 let queueWorkerReady = false;
-let pgBossQueue: {
-  send(name: string, data?: object): Promise<string | null>;
-  work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
-  start(): Promise<void>;
-} | null = null;
 const EXECUTION_QUEUE_NAME = 'execution-run';
 const WORKFLOW_RESUME_QUEUE = 'workflow-resume';
 
@@ -92,32 +91,39 @@ async function getQueueBackend() {
     };
   }
 
-  if (!pgBossQueue) {
-    const PgBossModule = await import('pg-boss');
-    const PgBossClass = (PgBossModule.default ?? PgBossModule) as unknown as new (connectionString: string) => {
-      send(name: string, data?: object): Promise<string | null>;
-      work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
-      start(): Promise<void>;
-    };
-    pgBossQueue = new PgBossClass(env.DATABASE_URL);
-    await pgBossQueue.start();
-  }
+  const boss = await getPgBoss();
 
   if (!queueWorkerReady) {
-    await pgBossQueue.work(EXECUTION_QUEUE_NAME, async (job) => {
-      const executionId = String(job.data.executionId ?? '');
-      if (!executionId) return;
-      await processExecution(executionId);
+    await (boss as any).work(EXECUTION_QUEUE_NAME, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+      const retryCount = getRetryCount(job);
+      if (retryCount > 0) {
+        logger.warn('job_retry', { queue: EXECUTION_QUEUE_NAME, jobId: job.id, retryCount });
+      }
+      try {
+        const executionId = String(job.data.executionId ?? '');
+        if (!executionId) return;
+        await withTimeout(processExecution(executionId), 570_000); // 600 - 30
+      } catch (err) {
+        if (isNonRetryable(err)) {
+          logger.error('job_non_retryable_failure', { queue: EXECUTION_QUEUE_NAME, jobId: job.id, error: String(err) });
+          await (boss as any).fail(job.id);
+          return;
+        }
+        if (isTimeoutError(err)) {
+          logger.error('job_timeout', { queue: EXECUTION_QUEUE_NAME, jobId: job.id, retryCount });
+        }
+        throw err;
+      }
     });
     queueWorkerReady = true;
   }
 
   return {
     enqueue: async (executionId: string) => {
-      await pgBossQueue!.send(EXECUTION_QUEUE_NAME, { executionId });
+      await boss.send(EXECUTION_QUEUE_NAME, { executionId }, getJobConfig('execution-run'));
     },
     send: async (queue: string, data: object) => {
-      return pgBossQueue!.send(queue, data);
+      return boss.send(queue, data);
     },
     kind: 'pg-boss' as const,
   };
@@ -448,11 +454,9 @@ export const queueService = {
     agentRunId?: string;
   }): Promise<void> {
     if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
-      const backend = await getQueueBackend();
-      if (backend.kind === 'pg-boss' && pgBossQueue) {
-        await pgBossQueue.send(WORKFLOW_RESUME_QUEUE, params);
-        return;
-      }
+      const boss = await getPgBoss();
+      await boss.send(WORKFLOW_RESUME_QUEUE, params, getJobConfig('workflow-resume'));
+      return;
     }
 
     // Synchronous fallback — resume inline (no restart resilience, but functional)
@@ -476,37 +480,103 @@ export const queueService = {
   async startMaintenanceJobs(): Promise<void> {
     const backend = await getQueueBackend();
 
-    if (backend.kind === 'pg-boss' && pgBossQueue) {
+    if (backend.kind === 'pg-boss') {
+      const boss = await getPgBoss();
+
       // pg-boss deduplicates across instances natively — no advisory lock needed
-      const boss = pgBossQueue as unknown as {
-        schedule(name: string, cron: string, data: object, opts?: object): Promise<void>;
-        work(name: string, handler: (job: { data: Record<string, unknown> }) => Promise<void>): Promise<string>;
-      };
-      await boss.work('maintenance:cleanup-execution-files', async () => {
-        await queueService.cleanupExpiredExecutionFiles();
+      await (boss as any).work('maintenance:cleanup-execution-files', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          await withTimeout(
+            queueService.cleanupExpiredExecutionFiles().then(() => undefined),
+            270_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:cleanup-execution-files', jobId: job.id });
+          }
+          throw err;
+        }
       });
-      await boss.work('maintenance:cleanup-budget-reservations', async () => {
-        await queueService.cleanupExpiredBudgetReservations();
+      await (boss as any).work('maintenance:cleanup-budget-reservations', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          await withTimeout(
+            queueService.cleanupExpiredBudgetReservations().then(() => undefined),
+            90_000,
+          );
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:cleanup-budget-reservations', jobId: job.id });
+          }
+          throw err;
+        }
       });
-      await boss.work('maintenance:memory-decay', async () => {
-        const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
-        await runMemoryDecay();
+      await (boss as any).work('maintenance:memory-decay', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
+          await withTimeout(runMemoryDecay(), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-decay', jobId: job.id });
+          }
+          throw err;
+        }
       });
 
       // Workflow resume worker — DB-backed, survives process restarts
-      await pgBossQueue!.work(WORKFLOW_RESUME_QUEUE, async (job) => {
-        const { workflowRunId, approvedActionId, organisationId, subaccountId, agentId, agentRunId } =
-          job.data as {
-            workflowRunId: string;
-            approvedActionId?: string;
-            organisationId: string;
-            subaccountId: string;
-            agentId: string;
-            agentRunId?: string;
-          };
+      await (boss as any).work(WORKFLOW_RESUME_QUEUE, { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        const retryCount = getRetryCount(job);
+        if (retryCount > 0) {
+          logger.warn('job_retry', { queue: WORKFLOW_RESUME_QUEUE, jobId: job.id, retryCount });
+        }
+        try {
+          const { workflowRunId, approvedActionId, organisationId, subaccountId, agentId, agentRunId } =
+            job.data as {
+              workflowRunId: string;
+              approvedActionId?: string;
+              organisationId: string;
+              subaccountId: string;
+              agentId: string;
+              agentRunId?: string;
+            };
 
-        const { resumeWorkflow } = await import('./workflowExecutorService.js');
-        await resumeWorkflow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId);
+          const { resumeWorkflow } = await import('./workflowExecutorService.js');
+          await withTimeout(
+            resumeWorkflow(workflowRunId, { organisationId, subaccountId, agentId, agentRunId }, approvedActionId),
+            270_000, // 300 - 30
+          );
+        } catch (err) {
+          if (isNonRetryable(err)) {
+            logger.error('job_non_retryable_failure', { queue: WORKFLOW_RESUME_QUEUE, jobId: job.id, error: String(err) });
+            await (boss as any).fail(job.id);
+            return;
+          }
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: WORKFLOW_RESUME_QUEUE, jobId: job.id, retryCount });
+          }
+          throw err;
+        }
+      });
+
+      // Context enrichment worker (Phase B1) — async embedding context generation
+      await (boss as any).work('memory-context-enrichment', { teamSize: 3, teamConcurrency: 1 }, async (job: any) => {
+        const retryCount = getRetryCount(job);
+        if (retryCount > 0) {
+          logger.warn('job_retry', { queue: 'memory-context-enrichment', jobId: job.id, retryCount });
+        }
+        try {
+          const { processContextEnrichment } = await import('./workspaceMemoryService.js');
+          await withTimeout(
+            processContextEnrichment(job.data),
+            90_000,
+          );
+        } catch (err) {
+          if (isNonRetryable(err)) {
+            logger.error('job_non_retryable_failure', { queue: 'memory-context-enrichment', jobId: job.id, error: String(err) });
+            await (boss as any).fail(job.id);
+            return;
+          }
+          throw err;
+        }
       });
 
       await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});

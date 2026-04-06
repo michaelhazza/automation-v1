@@ -63,7 +63,7 @@ export class CategoryService {
     const [updated] = await db
       .update(processCategories)
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(processCategories.id, id))
+      .where(and(eq(processCategories.id, id), eq(processCategories.organisationId, organisationId)))
       .returning();
 
     return {
@@ -84,7 +84,7 @@ export class CategoryService {
     }
 
     const now = new Date();
-    await db.update(processCategories).set({ deletedAt: now, updatedAt: now }).where(eq(processCategories.id, id));
+    await db.update(processCategories).set({ deletedAt: now, updatedAt: now }).where(and(eq(processCategories.id, id), eq(processCategories.organisationId, organisationId)));
 
     return { message: 'Category deleted successfully' };
   }

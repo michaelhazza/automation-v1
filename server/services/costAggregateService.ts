@@ -66,6 +66,16 @@ export async function upsertAggregates(request: LlmRequest): Promise<void> {
   // Platform-level (monthly)
   dimensions.push({ entityType: 'platform', entityId: 'global', periodType: 'monthly', periodKey: request.billingMonth });
 
+  // Execution phase (monthly — enables cost-per-phase analytics)
+  if (request.executionPhase) {
+    dimensions.push({
+      entityType: 'execution_phase',
+      entityId:   `${request.organisationId}:${request.executionPhase}`,
+      periodType: 'monthly',
+      periodKey:  request.billingMonth,
+    });
+  }
+
   // Rate-limit windows (minute + hour) — only for subaccount
   if (request.subaccountId) {
     // minute key: 'YYYY-MM-DDTHH:mm'

@@ -16,13 +16,11 @@ export const agentRuns = pgTable(
       .notNull()
       .references(() => organisations.id),
     subaccountId: uuid('subaccount_id')
-      .notNull()
       .references(() => subaccounts.id),
     agentId: uuid('agent_id')
       .notNull()
       .references(() => agents.id),
     subaccountAgentId: uuid('subaccount_agent_id')
-      .notNull()
       .references(() => subaccountAgents.id),
 
     // Idempotency — prevents duplicate runs on retry
@@ -30,7 +28,22 @@ export const agentRuns = pgTable(
 
     // How this run was initiated
     runType: text('run_type').notNull().$type<'scheduled' | 'manual' | 'triggered'>(),
-    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless'>(),
+    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code'>(),
+
+    // Org vs subaccount execution scope (never inferred from nullable fields)
+    executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),
+
+    // How the run was sourced — explicit for observability and segmentation
+    runSource: text('run_source').$type<'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system'>(),
+
+    // Run result classification (success/partial/failed)
+    runResultStatus: text('run_result_status').$type<'success' | 'partial' | 'failed'>(),
+
+    // Config snapshot for reproducibility and drift detection
+    configSnapshot: jsonb('config_snapshot'),
+    configHash: text('config_hash'),
+    resolvedSkillSlugs: jsonb('resolved_skill_slugs').$type<string[]>(),
+    resolvedLimits: jsonb('resolved_limits'),
 
     // Status tracking
     status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded'>(),
@@ -38,6 +51,7 @@ export const agentRuns = pgTable(
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
     taskId: uuid('task_id'), // if working on a specific board task
+    projectId: uuid('project_id'), // cost attribution — set at run creation, never backfilled
     // systemPromptSnapshot and toolCallsLog moved to agent_run_snapshots (H-5 blob extraction)
     skillsUsed: jsonb('skills_used'), // array of skill slugs available for this run
 
@@ -75,6 +89,10 @@ export const agentRuns = pgTable(
     isSubAgent: boolean('is_sub_agent').notNull().default(false),
     parentSpawnRunId: uuid('parent_spawn_run_id'),
 
+    // Heartbeat — stale run detection (GSD-2 adoption)
+    lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
+    lastToolStartedAt: timestamp('last_tool_started_at', { withTimezone: true }),
+
     // Timing
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
@@ -97,6 +115,8 @@ export const agentRuns = pgTable(
     parentRunIdIdx: index('agent_runs_parent_run_id_idx').on(table.parentRunId),
     parentSpawnRunIdIdx: index('agent_runs_parent_spawn_run_id_idx').on(table.parentSpawnRunId),
     idempotencyKeyIdx: uniqueIndex('agent_runs_idempotency_key_idx').on(table.idempotencyKey),
+    // Stale run cleanup query
+    staleRunIdx: index('agent_runs_stale_run_idx').on(table.status, table.lastActivityAt),
   })
 );
 

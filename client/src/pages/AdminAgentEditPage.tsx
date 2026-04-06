@@ -39,6 +39,10 @@ interface AgentForm {
   heartbeatIntervalHours: number | null;
   heartbeatOffsetHours: number;
   heartbeatOffsetMinutes: number;
+  concurrencyPolicy: 'skip_if_active' | 'coalesce_if_active' | 'always_enqueue';
+  catchUpPolicy: 'skip_missed' | 'enqueue_missed_with_cap';
+  catchUpCap: number;
+  maxConcurrentRuns: number;
   parentAgentId: string;
   agentRole: string;
   agentTitle: string;
@@ -172,6 +176,10 @@ const EMPTY_AGENT_FORM: AgentForm = {
   heartbeatIntervalHours: null,
   heartbeatOffsetHours: 9,
   heartbeatOffsetMinutes: 0,
+  concurrencyPolicy: 'skip_if_active',
+  catchUpPolicy: 'skip_missed',
+  catchUpCap: 3,
+  maxConcurrentRuns: 1,
   parentAgentId: '',
   agentRole: '',
   agentTitle: '',
@@ -289,7 +297,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const [saveError, setSaveError] = useState('');
 
   // Tab
-  const [agentTab, setAgentTab] = useState<'config' | 'runs' | 'budget'>('config');
+  const [agentTab, setAgentTab] = useState<'config' | 'runs' | 'budget' | 'prompt-history'>('config');
 
   // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
@@ -341,6 +349,10 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         heartbeatIntervalHours: data.heartbeatIntervalHours ?? null,
         heartbeatOffsetHours: data.heartbeatOffsetHours ?? 9,
         heartbeatOffsetMinutes: data.heartbeatOffsetMinutes ?? 0,
+        concurrencyPolicy: data.concurrencyPolicy ?? 'skip_if_active',
+        catchUpPolicy: data.catchUpPolicy ?? 'skip_missed',
+        catchUpCap: data.catchUpCap ?? 3,
+        maxConcurrentRuns: data.maxConcurrentRuns ?? 1,
         parentAgentId: data.parentAgentId ?? '',
         agentRole: data.agentRole ?? '',
         agentTitle: data.agentTitle ?? '',
@@ -947,7 +959,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Tab bar ────────────────────────────────────────────────────── */}
       {!isNew && (
         <div className="flex gap-0 border-b border-slate-200 mt-5 mb-6">
-          {(['config', 'runs', 'budget'] as const).map(t => (
+          {(['config', 'runs', 'budget', 'prompt-history'] as const).map(t => (
             <button
               key={t}
               onClick={() => setAgentTab(t)}
@@ -957,7 +969,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                   : 'text-slate-500 border-transparent hover:text-slate-800'
               }`}
             >
-              {t === 'config' ? 'Configuration' : t === 'runs' ? 'Runs' : 'Budget'}
+              {t === 'config' ? 'Configuration' : t === 'runs' ? 'Runs' : t === 'budget' ? 'Budget' : 'Prompt History'}
             </button>
           ))}
         </div>
@@ -1510,6 +1522,77 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         )}
       </SectionCard>}
 
+      {/* ── Section 7: Concurrency Policies ── */}
+      {!isNew && <SectionCard title="Concurrency Policies" subtitle="Control how overlapping and missed runs are handled.">
+        <div className="flex flex-wrap gap-5">
+          {/* Concurrency Policy */}
+          <div className="min-w-[220px]">
+            <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Concurrency Policy</div>
+            <select
+              value={form.concurrencyPolicy}
+              onChange={(e) => setForm({ ...form, concurrencyPolicy: e.target.value as AgentForm['concurrencyPolicy'] })}
+              className={`${inputCls} w-full`}
+            >
+              <option value="skip_if_active">Skip if active</option>
+              <option value="coalesce_if_active">Queue one (coalesce)</option>
+              <option value="always_enqueue">Queue all</option>
+            </select>
+            <div className="text-xs text-slate-400 mt-1">
+              {form.concurrencyPolicy === 'skip_if_active' && 'New runs are dropped while the agent is already running.'}
+              {form.concurrencyPolicy === 'coalesce_if_active' && 'At most one run is queued while the agent is active.'}
+              {form.concurrencyPolicy === 'always_enqueue' && 'Every triggered run is queued and executed in order.'}
+            </div>
+          </div>
+
+          {/* Catch-up Policy */}
+          <div className="min-w-[220px]">
+            <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Catch-up Policy</div>
+            <select
+              value={form.catchUpPolicy}
+              onChange={(e) => setForm({ ...form, catchUpPolicy: e.target.value as AgentForm['catchUpPolicy'] })}
+              className={`${inputCls} w-full`}
+            >
+              <option value="skip_missed">Skip missed</option>
+              <option value="enqueue_missed_with_cap">Catch up with cap</option>
+            </select>
+            <div className="text-xs text-slate-400 mt-1">
+              {form.catchUpPolicy === 'skip_missed' && 'Missed heartbeats are skipped — the next run starts at the next scheduled time.'}
+              {form.catchUpPolicy === 'enqueue_missed_with_cap' && `Up to ${form.catchUpCap} missed runs will be queued and executed.`}
+            </div>
+          </div>
+
+          {/* Catch-up Cap (only shown when catch-up policy is enqueue_missed_with_cap) */}
+          {form.catchUpPolicy === 'enqueue_missed_with_cap' && (
+            <div className="min-w-[140px]">
+              <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Catch-up Cap</div>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={form.catchUpCap}
+                onChange={(e) => setForm({ ...form, catchUpCap: Math.max(1, Math.min(100, Number(e.target.value) || 1)) })}
+                className={`${inputCls} w-[100px]`}
+              />
+              <div className="text-xs text-slate-400 mt-1">Max missed runs to catch up on.</div>
+            </div>
+          )}
+
+          {/* Max Concurrent Runs */}
+          <div className="min-w-[140px]">
+            <div className="text-[13px] font-semibold text-gray-700 mb-1.5">Max Concurrent Runs</div>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={form.maxConcurrentRuns}
+              onChange={(e) => setForm({ ...form, maxConcurrentRuns: Math.max(1, Math.min(10, Number(e.target.value) || 1)) })}
+              className={`${inputCls} w-[100px]`}
+            />
+            <div className="text-xs text-slate-400 mt-1">How many runs can execute simultaneously (1–10).</div>
+          </div>
+        </div>
+      </SectionCard>}
+
       {/* Save button */}
       <div className="flex gap-3 mb-7">
         <button
@@ -1535,6 +1618,9 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
 
       {/* ── Budget tab ──────────────────────────────────────────────────── */}
       {!isNew && agentTab === 'budget' && id && <AgentBudgetTab agentId={id} />}
+
+      {/* ── Prompt History tab ─────────────────────────────────────────── */}
+      {!isNew && agentTab === 'prompt-history' && id && <PromptHistoryTab agentId={id} onRollback={() => loadAgent(id)} />}
 
     </>
   );
@@ -1982,6 +2068,154 @@ function AgentBudgetTab({ agentId }: { agentId: string }) {
             </p>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+// ─── Prompt History Tab ──────────────────────────────────────────────────────
+
+interface PromptRevision {
+  id: string;
+  revisionNumber: number;
+  masterPrompt: string;
+  additionalPrompt: string;
+  changeDescription: string | null;
+  changedBy: string | null;
+  createdAt: string;
+}
+
+function PromptHistoryTab({ agentId, onRollback }: { agentId: string; onRollback: () => void }) {
+  const [revisions, setRevisions] = useState<PromptRevision[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get(`/api/agents/${agentId}/prompt-revisions`, { params: { limit: 50 } });
+      setRevisions(data);
+    } catch {
+      setError('Failed to load prompt revisions.');
+    } finally {
+      setLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleRollback = async (revisionId: string, revisionNumber: number) => {
+    if (!confirm(`Roll back to revision #${revisionNumber}? This will update the agent's prompts and create a new revision.`)) return;
+    setRollingBack(revisionId);
+    setError('');
+    setSuccess('');
+    try {
+      await api.post(`/api/agents/${agentId}/prompt-revisions/${revisionId}/rollback`);
+      setSuccess(`Rolled back to revision #${revisionNumber}.`);
+      load();
+      onRollback();
+    } catch {
+      setError('Failed to rollback.');
+    } finally {
+      setRollingBack(null);
+    }
+  };
+
+  const shimmer = 'bg-[linear-gradient(90deg,#f1f5f9_25%,#e2e8f0_50%,#f1f5f9_75%)] bg-[length:400%_100%] animate-[shimmer_1.4s_ease-in-out_infinite] rounded';
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(4)].map((_, i) => <div key={i} className={`h-14 ${shimmer}`} />)}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 mb-4 text-red-700 text-[13px] flex justify-between items-center">
+          {error}
+          <button onClick={() => setError('')} className="bg-transparent border-0 cursor-pointer text-red-700 text-lg">&times;</button>
+        </div>
+      )}
+      {success && (
+        <div className="bg-green-50 border border-green-200 rounded-lg px-3.5 py-2.5 mb-4 text-green-700 text-[13px]">
+          {success}
+        </div>
+      )}
+
+      {revisions.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-400 text-[13px]">
+          No prompt revisions recorded yet. Revisions are created automatically when the agent's prompts are updated.
+        </div>
+      ) : (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full border-collapse text-[13px]">
+            <thead>
+              <tr className="border-b border-slate-100">
+                <th className="text-left px-4 py-3 text-[11px] text-slate-500 uppercase tracking-wider font-semibold">#</th>
+                <th className="text-left px-4 py-3 text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Timestamp</th>
+                <th className="text-left px-4 py-3 text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Description</th>
+                <th className="text-right px-4 py-3 text-[11px] text-slate-500 uppercase tracking-wider font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {revisions.map((rev) => (
+                <tr key={rev.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3 font-mono text-slate-600">{rev.revisionNumber}</td>
+                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                    {new Date(rev.createdAt).toLocaleString(undefined, {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                    })}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700">
+                    <div>{rev.changeDescription || '—'}</div>
+                    <button
+                      onClick={() => setExpandedId(expandedId === rev.id ? null : rev.id)}
+                      className="text-[11px] text-indigo-500 bg-transparent border-0 cursor-pointer p-0 mt-1 hover:underline [font-family:inherit]"
+                    >
+                      {expandedId === rev.id ? 'Hide prompts' : 'Show prompts'}
+                    </button>
+                    {expandedId === rev.id && (
+                      <div className="mt-2 space-y-2">
+                        {rev.masterPrompt && (
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-500 mb-0.5">Master Prompt</div>
+                            <pre className="bg-slate-50 border border-slate-200 rounded-md p-2.5 text-[12px] text-slate-700 whitespace-pre-wrap m-0 max-h-[200px] overflow-auto">{rev.masterPrompt}</pre>
+                          </div>
+                        )}
+                        {rev.additionalPrompt && (
+                          <div>
+                            <div className="text-[11px] font-semibold text-slate-500 mb-0.5">Additional Prompt</div>
+                            <pre className="bg-slate-50 border border-slate-200 rounded-md p-2.5 text-[12px] text-slate-700 whitespace-pre-wrap m-0 max-h-[200px] overflow-auto">{rev.additionalPrompt}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => handleRollback(rev.id, rev.revisionNumber)}
+                      disabled={rollingBack === rev.id}
+                      className={`px-3 py-1.5 rounded-md text-[12px] font-medium border transition-colors [font-family:inherit] ${
+                        rollingBack === rev.id
+                          ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                          : 'bg-white text-indigo-600 border-indigo-200 cursor-pointer hover:bg-indigo-50'
+                      }`}
+                    >
+                      {rollingBack === rev.id ? 'Rolling back...' : 'Rollback'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

@@ -16,7 +16,7 @@
 export interface ProcessorContext {
   toolSlug: string;
   input: unknown;
-  subaccountId: string;
+  subaccountId: string | null;
   organisationId: string;
   agentRunId: string;
   actionId?: string;

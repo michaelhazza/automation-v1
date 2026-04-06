@@ -33,8 +33,8 @@ export const TOKEN_OUTPUT_RATIO = 0.3;
 
 // ── Model defaults ──────────────────────────────────────────────────────────
 
-/** Model used for internal extraction / summarisation (not the agent's model) */
-export const EXTRACTION_MODEL = 'claude-sonnet-4-6';
+// EXTRACTION_MODEL removed — internal extraction calls now use executionPhase: 'execution'
+// and the resolver picks the cheapest economy model dynamically.
 
 // ── Pagination & list limits ────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ export const PROVIDER_MAX_RETRIES = 2;
 export const PROVIDER_BACKOFF_MS = [1000, 3000] as const;
 
 /** Ordered fallback chain of provider names */
-export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini'] as const;
+export const PROVIDER_FALLBACK_CHAIN = ['anthropic', 'openai', 'gemini', 'openrouter'] as const;
 
 /** Timeout (ms) for a single provider call before it's treated as a failure */
 export const PROVIDER_CALL_TIMEOUT_MS = 30000;
@@ -138,7 +138,7 @@ export const PROVIDER_COOLDOWN_MS = 60000;
 /** Max memory entries returned by vector search */
 export const VECTOR_SEARCH_LIMIT = 5;
 
-/** Minimum cosine similarity for a result to be included */
+/** Minimum cosine similarity for a result to be included (legacy, used as fallback) */
 export const VECTOR_SIMILARITY_THRESHOLD = 0.75;
 
 /** Only search entries created within this many days */
@@ -149,6 +149,63 @@ export const ABBREVIATED_SUMMARY_LENGTH = 500;
 
 /** Minimum task context length (chars) required to run vector search */
 export const MIN_QUERY_CONTEXT_LENGTH = 20;
+
+// ── Hybrid Search / RRF (Phase B2) ────────────────────────────────────────
+
+/** Retrieve N * multiplier from each source for RRF fusion */
+export const RRF_OVER_RETRIEVE_MULTIPLIER = 4;
+
+/** RRF constant k (higher = more weight to lower-ranked results) */
+export const RRF_K = 60;
+
+/** Minimum RRF score to include in results (drops low-quality tail) */
+export const RRF_MIN_SCORE = 0.005;
+
+/** Hard cap on candidate pool for hybrid search */
+export const MAX_MEMORY_SCAN = 1000;
+
+/** Max chars for embedding input (context + content) */
+export const MAX_EMBEDDING_INPUT_CHARS = 2000;
+
+/** Max chars for query text passed to plainto_tsquery */
+export const MAX_QUERY_TEXT_CHARS = 500;
+
+/** Scoring weights per retrieval profile */
+export const RRF_WEIGHTS = {
+  general:  { rrf: 0.70, quality: 0.15, recency: 0.15 },
+  factual:  { rrf: 0.80, quality: 0.15, recency: 0.05 },
+  temporal: { rrf: 0.50, quality: 0.10, recency: 0.40 },
+} as const;
+
+export type RetrievalProfile = keyof typeof RRF_WEIGHTS;
+
+// ── Reranking (Phase B3) ──────────────────────────────────────────────────
+
+/** Reranker provider: 'cohere' | 'none' */
+export const RERANKER_PROVIDER = (process.env.RERANKER_PROVIDER ?? 'none') as 'cohere' | 'none';
+
+/** Reranker model name */
+export const RERANKER_MODEL = process.env.RERANKER_MODEL ?? 'rerank-v3.5';
+
+/** Final result count after reranking */
+export const RERANKER_TOP_N = 5;
+
+/** Over-retrieve this many from hybrid search before reranking */
+export const RERANKER_CANDIDATE_COUNT = 20;
+
+/** Abort reranker if slower than this (ms) */
+export const RERANKER_TIMEOUT_MS = 500;
+
+/** Max rerank API calls per agent run */
+export const RERANKER_MAX_CALLS_PER_RUN = 3;
+
+// ── Query Expansion / HyDE (Phase B4) ─────────────────────────────────────
+
+/** Queries shorter than this (chars) trigger HyDE */
+export const HYDE_THRESHOLD = 100;
+
+/** Max tokens for HyDE response */
+export const HYDE_MAX_TOKENS = 200;
 
 // ── Phase 1A: HITL review gate ───────────────────────────────────────────────
 
@@ -163,3 +220,49 @@ export const HITL_REVIEW_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Max triggered agent runs per minute per workspace before suppression */
 export const MAX_TRIGGERED_RUNS_PER_MINUTE = 10;
+
+// ── Tracing limits (Section 7.7) ───────────────────────────────────────────
+
+/** Max spans emitted per agent run before helpers return no-ops */
+export const MAX_SPANS_PER_RUN = 500;
+
+/** Max total observations (spans + events) per agent run */
+export const MAX_EVENTS_PER_RUN = 1000;
+
+/** Max nesting depth from trace root — flatten if exceeded */
+export const MAX_NESTING_DEPTH = 10;
+
+/** Max JSON-serialised metadata size per span (bytes) */
+export const MAX_METADATA_SIZE_BYTES = 4096;
+
+/** Max events emitted within a single loop iteration */
+export const MAX_EVENTS_PER_ITERATION = 20;
+
+// ── MCP Client limits ──────────────────────────────────────────────────────
+
+/** Max MCP tools merged into an agent's tool set per run */
+export const MAX_MCP_TOOLS_PER_RUN = 30;
+
+/** Max MCP tool calls per agent run (separate from total tool call limit) */
+export const MAX_MCP_CALLS_PER_RUN = 10;
+
+/** Connection timeout (ms) per MCP server */
+export const MCP_CONNECT_TIMEOUT_MS = 10_000;
+
+/** Per-call timeout (ms) for MCP tool invocations */
+export const MCP_CALL_TIMEOUT_MS = 30_000;
+
+/** Max response size (bytes) from an MCP tool before truncation */
+export const MAX_MCP_RESPONSE_SIZE = 100_000;
+
+/** Consecutive failures before circuit breaker opens */
+export const MCP_CIRCUIT_BREAKER_THRESHOLD = 3;
+
+/** Circuit breaker open duration (ms) */
+export const MCP_CIRCUIT_BREAKER_DURATION_MS = 5 * 60 * 1000;
+
+/** Warm cache TTL (ms) for discovered tools */
+export const MCP_TOOLS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Allowed commands for stdio MCP servers */
+export const MCP_ALLOWED_COMMANDS = new Set(['npx', 'node', 'docker', 'uvx', 'python3']);

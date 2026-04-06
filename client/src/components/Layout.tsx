@@ -56,6 +56,7 @@ const Icons = {
   orgs:        () => <Ico><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Ico>,
   skills:      () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></Ico>,
   connections: () => <Ico><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><circle cx="18" cy="6" r="4"/><path d="M18 4v4"/><path d="M16 6h4"/></Ico>,
+  goals:       () => <Ico><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></Ico>,
   diagnostic:  () => <Ico><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></Ico>,
   boardTpl:    () => <Ico><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Ico>,
   logout:      () => <Ico><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Ico>,
@@ -73,11 +74,12 @@ const SEG: Record<string, string | null> = {
   portal: 'Portal', settings: 'Settings', organisations: 'Organisations',
   users: 'Team', skills: 'Skills', activity: 'Activity',
   'task-queue': 'Diagnostics', 'board-templates': 'Board Templates',
-  'review-queue': 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace',
+  'review-queue': 'Inbox', inbox: 'Inbox', 'scheduled-tasks': 'Scheduled', runs: 'Run Trace', goals: 'Goals',
   'org-settings': 'Manage Org', connections: 'Connections', projects: 'Projects',
   'agent-templates': 'Team Templates',
   'admin-settings': 'Settings',
   usage: 'Usage & Costs',
+  'mcp-servers': 'Integrations',
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -572,7 +574,7 @@ export default function Layout({ user, children }: LayoutProps) {
               </button>
               <NavItem to="/" exact icon={<Icons.dashboard />} label="Dashboard" badge={liveAgentCount > 0 ? liveAgentCount : undefined} badgeLabel={liveAgentCount > 0 ? `${liveAgentCount} live` : undefined} />
               {(hasClientPerm('subaccount.review.view') || hasOrgPerm('org.review.view')) && (
-                <NavItem to={`/admin/subaccounts/${activeClientId}/review-queue`} icon={<Icons.inbox />} label="Inbox" badge={reviewCount} />
+                <NavItem to={`/admin/subaccounts/${activeClientId}/inbox`} icon={<Icons.inbox />} label="Inbox" badge={reviewCount} />
               )}
             </>
           )}
@@ -597,6 +599,15 @@ export default function Layout({ user, children }: LayoutProps) {
               )}
               {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/page-projects`} icon={<Icons.portal />} label="Sites" />
+              )}
+              {hasOrgPerm('org.agents.view') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/triggers`} icon={<Icons.scheduled />} label="Triggers" />
+              )}
+              {hasOrgPerm('org.agents.edit') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/tags`} icon={<Icons.settings />} label="Tags" />
+              )}
+              {(hasClientPerm('subaccount.workspace.view') || hasOrgPerm('org.workspace.view')) && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/goals`} icon={<Icons.goals />} label="Goals" />
               )}
             </>
           )}
@@ -666,7 +677,12 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
+              {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/org-memory" icon={<Icons.activity />} label="Org Memory" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/org-agent-configs" icon={<Icons.agents />} label="Org Agents" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/hierarchy-templates" icon={<Icons.agents />} label="Templates" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/connectors" icon={<Icons.connections />} label="Connectors" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
           )}
@@ -681,6 +697,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
+              <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}

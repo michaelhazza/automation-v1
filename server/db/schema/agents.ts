@@ -51,6 +51,11 @@ export const agents = pgTable(
     heartbeatIntervalHours: integer('heartbeat_interval_hours'),
     heartbeatOffsetHours: integer('heartbeat_offset_hours').notNull().default(0),
     heartbeatOffsetMinutes: integer('heartbeat_offset_minutes').notNull().default(0),
+    // Concurrency policies (defaults inherited by subaccount agents on link)
+    concurrencyPolicy: text('concurrency_policy').notNull().default('skip_if_active').$type<'skip_if_active' | 'coalesce_if_active' | 'always_enqueue'>(),
+    catchUpPolicy: text('catch_up_policy').notNull().default('skip_missed').$type<'skip_missed' | 'enqueue_missed_with_cap'>(),
+    catchUpCap: integer('catch_up_cap').notNull().default(3),
+    maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(1),
     // Lifecycle
     status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

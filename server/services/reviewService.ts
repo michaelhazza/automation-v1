@@ -1,11 +1,11 @@
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { actions, reviewItems, actionEvents, actionResumeEvents } from '../db/schema/index.js';
 import { actionService } from './actionService.js';
 import { executionLayerService } from './executionLayerService.js';
 import { hitlService } from './hitlService.js';
 import { auditService } from './auditService.js';
-import { emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,10 @@ export const reviewService = {
     // Emit real-time update so the review queue badge increments
     if (action.subaccountId) {
       emitSubaccountUpdate(action.subaccountId, 'review:item_created', {
+        reviewItemId: item.id, actionType: reviewPayload.actionType,
+      });
+    } else {
+      emitOrgUpdate(action.organisationId, 'review:item_created', {
         reviewItemId: item.id, actionType: reviewPayload.actionType,
       });
     }
@@ -139,7 +143,7 @@ export const reviewService = {
     await db.insert(actionResumeEvents).values({
       actionId: item.actionId,
       organisationId,
-      subaccountId: action.subaccountId,
+      subaccountId: action.subaccountId!,
       eventType: edits ? 'edited' : 'approved',
       resolvedBy: userId,
       payload: { result: execResult, edits: edits ?? null },
@@ -212,7 +216,7 @@ export const reviewService = {
     await db.insert(actionResumeEvents).values({
       actionId: item.actionId,
       organisationId,
-      subaccountId: action.subaccountId,
+      subaccountId: action.subaccountId!,
       eventType: 'rejected',
       resolvedBy: userId,
       payload: { comment: rejectionComment },
@@ -299,6 +303,41 @@ export const reviewService = {
         )
       );
 
+    return result?.count ?? 0;
+  },
+
+  /**
+   * Get org-level review queue (items where subaccountId IS NULL).
+   */
+  async getOrgReviewQueue(organisationId: string) {
+    return db
+      .select()
+      .from(reviewItems)
+      .where(
+        and(
+          eq(reviewItems.organisationId, organisationId),
+          isNull(reviewItems.subaccountId),
+          sql`${reviewItems.reviewStatus} IN ('pending', 'edited_pending')`
+        )
+      )
+      .orderBy(reviewItems.createdAt)
+      .limit(100);
+  },
+
+  /**
+   * Org-level review queue count.
+   */
+  async getOrgReviewQueueCount(organisationId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(reviewItems)
+      .where(
+        and(
+          eq(reviewItems.organisationId, organisationId),
+          isNull(reviewItems.subaccountId),
+          sql`${reviewItems.reviewStatus} IN ('pending', 'edited_pending')`
+        )
+      );
     return result?.count ?? 0;
   },
 

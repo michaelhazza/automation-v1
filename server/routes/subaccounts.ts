@@ -54,6 +54,7 @@ router.get(
         slug: sa.slug,
         status: sa.status,
         settings: sa.settings,
+        includeInOrgInbox: sa.includeInOrgInbox,
         createdAt: sa.createdAt,
         updatedAt: sa.updatedAt,
       }))
@@ -138,11 +139,12 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { name, slug, status, settings } = req.body as {
+    const { name, slug, status, settings, includeInOrgInbox } = req.body as {
       name?: string;
       slug?: string;
       status?: string;
       settings?: Record<string, unknown>;
+      includeInOrgInbox?: boolean;
     };
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -150,6 +152,10 @@ router.patch(
     if (slug !== undefined) update.slug = slug;
     if (status !== undefined) update.status = status;
     if (settings !== undefined) update.settings = settings;
+    if (includeInOrgInbox !== undefined) {
+      if (typeof includeInOrgInbox !== 'boolean') throw { statusCode: 400, message: 'includeInOrgInbox must be a boolean' };
+      update.includeInOrgInbox = includeInOrgInbox;
+    }
 
     const [updated] = await db
       .update(subaccounts)

@@ -1,5 +1,7 @@
+import { createHash } from 'crypto';
 import { eq, and, desc, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { logger } from '../lib/logger.js';
 import {
   agents,
   subaccountAgents,
@@ -24,6 +26,8 @@ import {
 } from './llmService.js';
 import { routeCall } from './llmRouter.js';
 import type { LLMCallContext } from './llmRouter.js';
+import { env } from '../lib/env.js';
+import type { ProviderTool } from './providers/types.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import { triggerService } from './triggerService.js';
@@ -35,6 +39,7 @@ import {
   type MiddlewareContext,
   type MiddlewarePipeline,
 } from './middleware/index.js';
+import { maskObservations, tagIteration } from './middleware/observationMasking.js';
 import {
   MAX_LOOP_ITERATIONS,
   WRAP_UP_MAX_TOKENS,
@@ -43,8 +48,15 @@ import {
   MAX_CROSS_AGENT_TASKS,
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
-import { emitAgentRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
+import { orgAgentConfigService } from './orgAgentConfigService.js';
+import { organisations } from '../db/schema/index.js';
 import { langfuse, withTrace } from '../instrumentation.js';
+import {
+  createSpan, createEvent, finalizeTrace, emitLoopTermination,
+  generateRunFingerprint,
+  type FinalStatus, type ErrorType,
+} from '../lib/tracing.js';
 import { claudeCodeRunner } from './claudeCodeRunner.js';
 
 // ---------------------------------------------------------------------------
@@ -93,9 +105,13 @@ class TraceThrottle {
 
 export interface AgentRunRequest {
   agentId: string;
-  subaccountId: string;
-  subaccountAgentId: string;
+  /** Null for org-level runs */
+  subaccountId?: string | null;
+  /** Null for org-level runs */
+  subaccountAgentId?: string | null;
   organisationId: string;
+  /** Explicit execution scope — never inferred from nullable fields */
+  executionScope: 'subaccount' | 'org';
   runType: 'scheduled' | 'manual' | 'triggered';
   executionMode?: 'api' | 'headless' | 'claude-code';
   taskId?: string;
@@ -106,6 +122,10 @@ export interface AgentRunRequest {
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
   idempotencyKey?: string;
+  /** For org-level runs, the org agent config ID */
+  orgAgentConfigId?: string;
+  /** How this run was sourced — for observability */
+  runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
 }
 
 export interface AgentRunResult {
@@ -145,7 +165,26 @@ export const agentExecutionService = {
   async executeRun(request: AgentRunRequest): Promise<AgentRunResult> {
     const startTime = Date.now();
 
-    // ── 0. Idempotency check — return existing run if key already used ───
+    // ── 0a. Execution scope validation ─────────────────────────────────
+    if (request.executionScope === 'org' && request.subaccountId) {
+      throw new Error('Org-level run must not have a subaccountId');
+    }
+    if (request.executionScope === 'subaccount' && !request.subaccountId) {
+      throw new Error('Subaccount-level run requires a subaccountId');
+    }
+
+    // ── 0b. Org execution kill switch ────────────────────────────────────
+    if (request.executionScope === 'org') {
+      const [org] = await db
+        .select({ orgExecutionEnabled: organisations.orgExecutionEnabled })
+        .from(organisations)
+        .where(eq(organisations.id, request.organisationId));
+      if (org && !org.orgExecutionEnabled) {
+        throw new Error('Org-level execution is disabled for this organisation');
+      }
+    }
+
+    // ── 0c. Idempotency check — return existing run if key already used ───
     if (request.idempotencyKey) {
       const [existing] = await db
         .select()
@@ -169,16 +208,19 @@ export const agentExecutionService = {
     }
 
     // ── 1. Create the run record ──────────────────────────────────────────
+    const isOrgRun = request.executionScope === 'org';
     const [run] = await db
       .insert(agentRuns)
       .values({
         organisationId: request.organisationId,
-        subaccountId: request.subaccountId,
+        subaccountId: request.subaccountId ?? null,
         agentId: request.agentId,
-        subaccountAgentId: request.subaccountAgentId,
+        subaccountAgentId: request.subaccountAgentId ?? null,
         idempotencyKey: request.idempotencyKey ?? null,
         runType: request.runType,
         executionMode: request.executionMode ?? 'api',
+        executionScope: request.executionScope,
+        runSource: request.runSource ?? null,
         status: 'running',
         triggerContext: request.triggerContext ?? null,
         taskId: request.taskId ?? null,
@@ -186,6 +228,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
+        lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -194,32 +237,81 @@ export const agentExecutionService = {
 
     // Emit run started event
     emitAgentRunUpdate(run.id, 'agent:run:started', {
-      agentId: request.agentId, subaccountId: request.subaccountId,
+      agentId: request.agentId, subaccountId: request.subaccountId ?? null,
       runType: request.runType, status: 'running',
     });
-    emitSubaccountUpdate(request.subaccountId, 'live:agent_started', {
-      runId: run.id, agentId: request.agentId,
-    });
+    if (isOrgRun) {
+      emitOrgUpdate(request.organisationId, 'live:agent_started', {
+        runId: run.id, agentId: request.agentId,
+      });
+    } else {
+      emitSubaccountUpdate(request.subaccountId!, 'live:agent_started', {
+        runId: run.id, agentId: request.agentId,
+      });
+    }
 
     try {
       // ── 2. Load agent config ────────────────────────────────────────────
       const agent = await agentService.getAgent(request.agentId, request.organisationId);
 
-      const [saLink] = await db
-        .select()
-        .from(subaccountAgents)
-        .where(eq(subaccountAgents.id, request.subaccountAgentId));
+      let tokenBudget: number;
+      let maxToolCalls: number;
+      let timeoutMs: number;
+      let configSkillSlugs: string[];
+      let configCustomInstructions: string | null = null;
 
-      if (!saLink) throw new Error('Subaccount agent link not found');
+      // Branch config loading by execution scope
+      let saLink: typeof subaccountAgents.$inferSelect | null = null;
 
-      const tokenBudget = saLink.tokenBudgetPerRun;
-      const maxToolCalls = saLink.maxToolCallsPerRun;
-      const timeoutMs = saLink.timeoutSeconds * 1000;
+      if (isOrgRun) {
+        // Org-level: load from orgAgentConfigs
+        const orgConfig = await orgAgentConfigService.getByAgentId(request.organisationId, request.agentId);
+        tokenBudget = orgConfig.tokenBudgetPerRun;
+        maxToolCalls = orgConfig.maxToolCallsPerRun;
+        timeoutMs = orgConfig.timeoutSeconds * 1000;
+        configSkillSlugs = (orgConfig.skillSlugs ?? []) as string[];
+        configCustomInstructions = orgConfig.customInstructions;
+      } else {
+        // Subaccount-level: load from subaccountAgents (existing path)
+        const [link] = await db
+          .select()
+          .from(subaccountAgents)
+          .where(eq(subaccountAgents.id, request.subaccountAgentId!));
 
-      await db.update(agentRuns).set({ tokenBudget }).where(eq(agentRuns.id, run.id));
+        if (!link) throw new Error('Subaccount agent link not found');
+        saLink = link;
+
+        tokenBudget = link.tokenBudgetPerRun;
+        maxToolCalls = link.maxToolCallsPerRun;
+        timeoutMs = link.timeoutSeconds * 1000;
+        configSkillSlugs = (link.skillSlugs ?? []) as string[];
+        configCustomInstructions = link.customInstructions;
+      }
+
+      // ── 2a. Snapshot resolved config for reproducibility ──────────────
+      const resolvedConfig = {
+        tokenBudget,
+        maxToolCalls,
+        timeoutMs,
+        skillSlugs: configSkillSlugs,
+        customInstructions: configCustomInstructions,
+        executionScope: request.executionScope,
+      };
+      const configHashValue = createHash('sha256').update(JSON.stringify(resolvedConfig)).digest('hex');
+
+      await db.update(agentRuns).set({
+        tokenBudget,
+        configSnapshot: resolvedConfig,
+        configHash: configHashValue,
+        resolvedSkillSlugs: configSkillSlugs,
+        resolvedLimits: { tokenBudget, maxToolCalls, timeoutMs },
+      }).where(eq(agentRuns.id, run.id));
 
       // ── 2b. Workspace limit check (pre-run guard) ─────────────────────
-      const limitCheck = await checkWorkspaceLimits(request.subaccountId, tokenBudget);
+      // Skip subaccount limits for org runs; org+global limits still apply via budgetService
+      const limitCheck = isOrgRun
+        ? { allowed: true as const }
+        : await checkWorkspaceLimits(request.subaccountId!, tokenBudget);
       if (!limitCheck.allowed) {
         const durationMs = Date.now() - startTime;
         await db.update(agentRuns).set({
@@ -250,8 +342,9 @@ export const agentExecutionService = {
       }
 
       // ── 2c. Snapshot DEC hash + iteration count into triggerContext ──
-      try {
-        const { hash: decHash } = await devContextService.getContext(request.subaccountId);
+      // Skip for org-level runs (no subaccount dev context)
+      if (!isOrgRun) try {
+        const { hash: decHash } = await devContextService.getContext(request.subaccountId!);
 
         // Count prior runs for this task to determine current iteration
         let iteration = 0;
@@ -261,7 +354,7 @@ export const agentExecutionService = {
             .from(agentRuns)
             .where(and(
               eq(agentRuns.taskId, request.taskId),
-              eq(agentRuns.subaccountId, request.subaccountId),
+              eq(agentRuns.subaccountId, request.subaccountId!),
             ));
           // Subtract 1 because current run is already inserted
           iteration = Math.max(0, Number(total) - 1);
@@ -306,8 +399,8 @@ export const agentExecutionService = {
         }
       }
 
-      // Layer 2+3: Org skills + sub-account skills
-      const skillSlugs = (saLink.skillSlugs ?? []) as string[];
+      // Layer 2+3: Org skills + sub-account/org skills
+      const skillSlugs = configSkillSlugs;
       const { tools: skillTools, instructions: skillInstructions } = await skillService.resolveSkillsForAgent(
         skillSlugs,
         request.organisationId
@@ -334,6 +427,32 @@ export const agentExecutionService = {
         return tool;
       });
 
+      // ── 5b. MCP tool resolution ────────────────────────────────────────
+      let mcpClients: Map<string, import('./mcpClientManager.js').McpClientInstance> | null = null;
+      let mcpLazyRegistry: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null = null;
+
+      try {
+        const { mcpClientManager } = await import('./mcpClientManager.js');
+        const mcp = await mcpClientManager.connectForRun({
+          runId,
+          organisationId: request.organisationId,
+          agentId: request.agentId,
+          subaccountId: request.subaccountId ?? null,
+        });
+        mcpClients = mcp.clients;
+        mcpLazyRegistry = mcp.lazyRegistry;
+        if (mcp.tools.length > 0) {
+          // Defense in depth: cap is also enforced in connectForRun
+          const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
+          const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
+          enhancedTools.push(...cappedTools);
+          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
+        }
+      } catch (err) {
+        logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        // Non-fatal — agent runs without MCP tools
+      }
+
       // ── 6. Build task context (with smart offloading) ───────────────────
       let workspaceContext = '';
       let targetItem: typeof tasks.$inferSelect | null = null;
@@ -342,10 +461,11 @@ export const agentExecutionService = {
         const item = await taskService.getTask(request.taskId, request.organisationId);
         targetItem = item;
         workspaceContext = buildTaskContext(item);
-      } else {
+      } else if (!isOrgRun) {
+        // Only build board context for subaccount runs (org board comes in Phase 5)
         workspaceContext = await buildSmartBoardContext(
           request.organisationId,
-          request.subaccountId,
+          request.subaccountId!,
           request.agentId
         );
       }
@@ -379,13 +499,15 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Your Capabilities\n${skillInstructions.join('\n\n')}`);
       }
 
-      // Layer 3: Sub-account custom instructions
-      if (saLink.customInstructions) {
-        systemPromptParts.push(`\n\n---\n## Additional Instructions\n${saLink.customInstructions}`);
+      // Layer 3: Custom instructions (from subaccount link or org config)
+      if (configCustomInstructions) {
+        systemPromptParts.push(`\n\n---\n## Additional Instructions\n${configCustomInstructions}`);
       }
 
       // Add team roster (loaded fresh from DB every run)
-      const teamRoster = await buildTeamRoster(request.subaccountId, request.agentId);
+      const teamRoster = isOrgRun
+        ? await buildOrgTeamRoster(request.organisationId, request.agentId)
+        : await buildTeamRoster(request.subaccountId!, request.agentId);
       if (teamRoster) {
         systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
       }
@@ -396,17 +518,21 @@ export const agentExecutionService = {
         ? `${targetItem.title ?? ''}${targetItem.description ? ' ' + targetItem.description : ''}`
         : undefined;
 
-      const memory = await workspaceMemoryService.getMemoryForPrompt(
-        request.organisationId,
-        request.subaccountId,
-        taskContextForMemory
-      );
-      if (memory) {
-        systemPromptParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
+      // Skip subaccount memory for org runs (org memory comes in Phase 3)
+      let memory: string | null = null;
+      if (!isOrgRun) {
+        memory = await workspaceMemoryService.getMemoryForPrompt(
+          request.organisationId,
+          request.subaccountId!,
+          taskContextForMemory
+        );
+        if (memory) {
+          systemPromptParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
+        }
       }
 
-      // Add workspace entities
-      const entities = await workspaceMemoryService.getEntitiesForPrompt(request.subaccountId);
+      // Add workspace entities (subaccount-scoped only)
+      const entities = isOrgRun ? null : await workspaceMemoryService.getEntitiesForPrompt(request.subaccountId!);
       if (entities) {
         systemPromptParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
       }
@@ -446,7 +572,7 @@ export const agentExecutionService = {
         // will transfer to Docker-based execution later.
         let projectRoot = '.';
         try {
-          const { context: dec } = await devContextService.getContext(request.subaccountId);
+          const { context: dec } = await devContextService.getContext(request.subaccountId!);
           projectRoot = dec.projectRoot;
         } catch {
           // DEC not configured — use current directory
@@ -491,39 +617,117 @@ export const agentExecutionService = {
         // ── 8b. Standard API agentic loop ──────────────────────────────
         const pipeline = createDefaultPipeline();
 
+        // Session linking (Section WS2): group related runs
+        let traceSessionId: string;
+        if (request.runSource === 'handoff' && request.parentRunId) {
+          traceSessionId = `handoff-chain-${request.parentRunId}`;
+        } else if (request.runType === 'scheduled') {
+          const dateStr = new Date().toISOString().slice(0, 10);
+          traceSessionId = `schedule-${request.agentId}-${dateStr}`;
+        } else if (request.runSource === 'sub_agent' && request.parentSpawnRunId) {
+          traceSessionId = `spawn-${request.parentSpawnRunId}`;
+        } else {
+          traceSessionId = run.id;
+        }
+
+        // Run fingerprint (Section 8.3)
+        const skillSlugs = enhancedTools.map(t => t.name);
+        const runFingerprint = generateRunFingerprint(request.agentId, 'development', skillSlugs);
+
         const trace = langfuse.trace({
           name:      'agent-run',
           userId:    request.subaccountId,
-          sessionId: run.id,
+          sessionId: traceSessionId,
           metadata: {
-            agentId:    request.agentId,
-            runType:    request.runType,
-            orgId:      request.organisationId,
+            agentId:       request.agentId,
+            runType:       request.runType,
+            orgId:         request.organisationId,
+            subaccountId:  request.subaccountId,
+            executionMode: 'api',
+            traceSchemaVersion: 'v1',
+            instrumentationVersion: '1.0',
+            startedAt:     new Date().toISOString(),
+            runFingerprint,
+            handoffDepth:     request.handoffDepth ?? 0,
+            parentRunId:      request.parentRunId ?? null,
+            isSubAgent:       request.isSubAgent ?? false,
+            parentSpawnRunId: request.parentSpawnRunId ?? null,
           },
         });
 
-        loopResult = await withTrace(trace, () => runAgenticLoop({
-          runId: run.id,
-          agent,
-          routerCtx: {
-            organisationId:    request.organisationId,
-            subaccountId:      request.subaccountId,
-            runId:             run.id,
-            subaccountAgentId: request.subaccountAgentId,
-            agentName:         agent.name,
-            sourceType:        'agent_run',
-          },
-          systemPrompt: fullSystemPrompt,
-          tools: enhancedTools,
-          tokenBudget,
-          maxToolCalls,
-          timeoutMs,
-          startTime,
-          request,
-          orgProcesses,
-          saLink,
-          pipeline,
-        }));
+        loopResult = await withTrace(trace, {
+          runId:         run.id,
+          orgId:         request.organisationId,
+          subaccountId:  request.subaccountId ?? undefined,
+          agentId:       request.agentId ?? undefined,
+          executionMode: 'api',
+        }, async () => {
+          const result = await runAgenticLoop({
+            runId: run.id,
+            agent,
+            routerCtx: {
+              organisationId:    request.organisationId,
+              subaccountId:      request.subaccountId ?? undefined,
+              runId:             run.id,
+              subaccountAgentId: request.subaccountAgentId ?? undefined,
+              agentName:         agent.name,
+              sourceType:        'agent_run',
+            },
+            systemPrompt: fullSystemPrompt,
+            tools: enhancedTools,
+            tokenBudget,
+            maxToolCalls,
+            timeoutMs,
+            startTime,
+            request,
+            orgProcesses,
+            saLink: saLink!,
+            pipeline,
+            mcpClients,
+            mcpLazyRegistry,
+          });
+
+          // ── Finalize Langfuse trace (inside withTrace so context is available) ──
+          const loopDurationMs = Date.now() - startTime;
+          const loopFinalStatus = (result.finalStatus ?? 'completed') as string;
+
+          const traceFinalStatus: FinalStatus =
+            loopFinalStatus === 'timeout' ? 'timeout'
+            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+            : loopFinalStatus === 'failed' ? 'failed'
+            : 'completed';
+
+          const traceErrorType: ErrorType | null =
+            loopFinalStatus === 'timeout' ? 'timeout'
+            : loopFinalStatus === 'budget_exceeded' ? 'budget_exceeded'
+            : loopFinalStatus === 'loop_detected' ? 'loop_detected'
+            : loopFinalStatus === 'failed' ? 'internal_error'
+            : null;
+
+          const finalizationSpan = createSpan('agent.finalization.run');
+          createEvent('run.status.changed', {
+            fromStatus: 'running', toStatus: traceFinalStatus,
+          });
+          finalizationSpan.end();
+
+          finalizeTrace({
+            finalStatus: traceFinalStatus,
+            totalTokensIn: result.inputTokens,
+            totalTokensOut: result.outputTokens,
+            iterationCount: result.toolCallsLog.length > 0
+              ? Math.max(...result.toolCallsLog.map(t => (t as { iteration: number }).iteration)) + 1
+              : 0,
+            toolCallCount: result.totalToolCalls,
+            durationMs: loopDurationMs,
+            errorType: traceErrorType,
+            startedAt: new Date(startTime).toISOString(),
+          });
+
+          langfuse.flushAsync().catch(() => {});
+
+          return result;
+        });
       }
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
@@ -540,6 +744,7 @@ export const agentExecutionService = {
         tasksCreated: loopResult.tasksCreated,
         tasksUpdated: loopResult.tasksUpdated,
         deliverablesCreated: loopResult.deliverablesCreated,
+        lastActivityAt: new Date(),
         completedAt: new Date(),
         durationMs,
         updatedAt: new Date(),
@@ -553,10 +758,15 @@ export const agentExecutionService = {
           set: { toolCallsLog: loopResult.toolCallsLog },
         });
 
-      await db.update(subaccountAgents).set({
-        lastRunAt: new Date(),
-        updatedAt: new Date(),
-      }).where(eq(subaccountAgents.id, request.subaccountAgentId));
+      // Update lastRunAt on the correct config table
+      if (isOrgRun && request.orgAgentConfigId) {
+        await orgAgentConfigService.updateLastRunAt(request.orgAgentConfigId, request.organisationId);
+      } else if (request.subaccountAgentId) {
+        await db.update(subaccountAgents).set({
+          lastRunAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(subaccountAgents.id, request.subaccountAgentId));
+      }
 
       // Emit run completed event
       emitAgentRunUpdate(run.id, 'agent:run:completed', {
@@ -564,18 +774,25 @@ export const agentExecutionService = {
         totalToolCalls: loopResult.totalToolCalls, totalTokens: loopResult.totalTokens,
         tasksCreated: loopResult.tasksCreated, durationMs,
       });
-      emitSubaccountUpdate(request.subaccountId, 'live:agent_completed', {
-        runId: run.id, agentId: request.agentId, status: finalStatus,
-      });
+      if (isOrgRun) {
+        emitOrgUpdate(request.organisationId, 'live:agent_completed', {
+          runId: run.id, agentId: request.agentId, status: finalStatus,
+        });
+      } else {
+        emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
+          runId: run.id, agentId: request.agentId, status: finalStatus,
+        });
+      }
 
       // ── 10. Extract insights for workspace memory + entities ─────────────
-      if (loopResult.summary) {
+      // Skip for org runs — org memory extraction comes in Phase 3
+      if (loopResult.summary && !isOrgRun) {
         try {
           await workspaceMemoryService.extractRunInsights(
             run.id,
             request.agentId,
             request.organisationId,
-            request.subaccountId,
+            request.subaccountId!,
             loopResult.summary
           );
         } catch (err) {
@@ -586,7 +803,7 @@ export const agentExecutionService = {
         workspaceMemoryService.extractEntities(
           run.id,
           request.organisationId,
-          request.subaccountId,
+          request.subaccountId!,
           loopResult.summary
         ).catch(err => {
           console.error(`[AgentExecution] Entity extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
@@ -594,23 +811,34 @@ export const agentExecutionService = {
       }
 
       // ── 11. Fire agent_completed triggers (non-blocking) ─────────────────
-      triggerService.checkAndFire(
-        request.subaccountId,
-        request.organisationId,
-        'agent_completed',
-        {
-          runId: run.id,
-          agentId: request.agentId,
-          subaccountAgentId: request.subaccountAgentId,
-          status: finalStatus,
-        }
-      ).catch((err: unknown) => {
-        console.error('[AgentExecution] agent_completed trigger failed', {
-          subaccountId: request.subaccountId,
-          eventType: 'agent_completed',
-          error: err instanceof Error ? err.message : String(err),
+      // Skip for org runs — org triggers come in Phase 5
+      if (!isOrgRun) {
+        triggerService.checkAndFire(
+          request.subaccountId!,
+          request.organisationId,
+          'agent_completed',
+          {
+            runId: run.id,
+            agentId: request.agentId,
+            subaccountAgentId: request.subaccountAgentId,
+            status: finalStatus,
+          }
+        ).catch((err: unknown) => {
+          console.error('[AgentExecution] agent_completed trigger failed', {
+            subaccountId: request.subaccountId,
+            eventType: 'agent_completed',
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
+      }
+
+      // ── 12. MCP cleanup (guaranteed) ────────────────────────────────────
+      if (mcpClients?.size) {
+        const { mcpClientManager } = await import('./mcpClientManager.js');
+        await mcpClientManager.disconnectAll(mcpClients).catch((e) => {
+          logger.error('mcp.disconnect_failed', { runId: run.id, error: e instanceof Error ? e.message : String(e) });
+        });
+      }
 
       return {
         runId: run.id,
@@ -640,9 +868,15 @@ export const agentExecutionService = {
       emitAgentRunUpdate(run.id, 'agent:run:failed', {
         status: 'failed', errorMessage, durationMs,
       });
-      emitSubaccountUpdate(request.subaccountId, 'live:agent_completed', {
-        runId: run.id, agentId: request.agentId, status: 'failed',
-      });
+      if (isOrgRun) {
+        emitOrgUpdate(request.organisationId, 'live:agent_completed', {
+          runId: run.id, agentId: request.agentId, status: 'failed',
+        });
+      } else {
+        emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
+          runId: run.id, agentId: request.agentId, status: 'failed',
+        });
+      }
 
       return {
         runId: run.id,
@@ -666,7 +900,7 @@ export const agentExecutionService = {
 interface LoopParams {
   runId: string;
   agent: { modelId: string; modelProvider: string; temperature: number; maxTokens: number };
-  routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model'>;
+  routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model' | 'executionPhase' | 'routingMode'>;
   systemPrompt: string;
   tools: AnthropicTool[];
   tokenBudget: number;
@@ -677,6 +911,8 @@ interface LoopParams {
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   saLink: typeof subaccountAgents.$inferSelect;
   pipeline: MiddlewarePipeline;
+  mcpClients?: Map<string, import('./mcpClientManager.js').McpClientInstance> | null;
+  mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null;
 }
 
 interface LoopResult {
@@ -692,11 +928,54 @@ interface LoopResult {
   finalStatus?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Tool call validation — lightweight checks before execution.
+// Used for cascade escalation: if economy model produces invalid tool calls,
+// we retry with the frontier (ceiling) model.
+// ---------------------------------------------------------------------------
+
+function validateToolCalls(
+  toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
+  activeTools: ProviderTool[],
+): { valid: boolean; failureReason?: string } {
+  const toolNames = new Set(activeTools.map(t => t.name));
+
+  for (const tc of toolCalls) {
+    if (!toolNames.has(tc.name)) {
+      return { valid: false, failureReason: `unknown_tool:${tc.name}` };
+    }
+
+    if (tc.input === null || typeof tc.input !== 'object') {
+      return { valid: false, failureReason: `invalid_input:${tc.name}` };
+    }
+
+    const toolDef = activeTools.find(t => t.name === tc.name);
+    if (toolDef?.input_schema?.required) {
+      for (const field of toolDef.input_schema.required) {
+        if (!(field in tc.input)) {
+          return { valid: false, failureReason: `missing_field:${tc.name}.${field}` };
+        }
+      }
+    }
+
+    // Log-only: unexpected fields (common hallucination, usually harmless)
+    if (toolDef?.input_schema?.properties) {
+      const knownFields = new Set(Object.keys(toolDef.input_schema.properties));
+      const extraFields = Object.keys(tc.input).filter(k => !knownFields.has(k));
+      if (extraFields.length > 0) {
+        console.warn(`[toolCallValidator] unexpected fields in ${tc.name}: ${extraFields.join(', ')}`);
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
-    saLink, pipeline,
+    saLink, pipeline, mcpClients, mcpLazyRegistry,
   } = params;
 
   const toolCallsLog: object[] = [];
@@ -729,6 +1008,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const messages: LLMMessage[] = [{ role: 'user', content: initialMessage }];
 
   let lastTextContent = '';
+  let previousResponseHadToolCalls = false;
 
   outerLoop:
   for (let iteration = 0; iteration < MAX_LOOP_ITERATIONS; iteration++) {
@@ -736,22 +1016,52 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     mwCtx.tokensUsed = totalTokensUsed;
     mwCtx.toolCallsCount = totalToolCalls;
 
+    // ── Heartbeat: update lastActivityAt for stale run detection ──────
+    // Throttle to every 3rd iteration to avoid DB write pressure
+    if (iteration % 3 === 0) {
+      db.update(agentRuns)
+        .set({ lastActivityAt: new Date() })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')))
+        .catch((err) => {
+          logger.warn('heartbeat_update_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        });
+    }
+
     // ── Pre-call middleware ────────────────────────────────────────────
     for (const mw of pipeline.preCall) {
       const result = mw.execute(mwCtx);
       if (result.action === 'stop') {
+        createEvent('agent.middleware.decision', {
+          middlewareName: mw.name, decision: 'stop', reason: result.reason, iteration,
+        });
         messages.push({ role: 'user', content: result.reason });
+        const maskedWrapUp = maskObservations(messages, iteration);
         const wrapUp = await routeCall({
-          messages,
+          messages: maskedWrapUp,
           system: systemPrompt,
           temperature: agent.temperature,
           maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
-          context: { ...routerCtx, taskType: 'general', provider: agent.modelProvider, model: agent.modelId },
+          context: {
+            ...routerCtx, taskType: 'general', executionPhase: 'synthesis' as const,
+            provider: agent.modelProvider, model: agent.modelId, routingMode: 'ceiling' as const,
+          },
         });
         lastTextContent = wrapUp.content;
         totalTokensUsed += (wrapUp.tokensIn ?? 0) + (wrapUp.tokensOut ?? 0);
         finalStatus = result.status;
+        emitLoopTermination('middleware_stop', {
+          iteration, middlewareName: mw.name, reason: result.reason, totalToolCalls,
+        });
         break outerLoop;
+      }
+      if (result.action === 'inject_message') {
+        createEvent('agent.middleware.decision', {
+          middlewareName: mw.name, decision: 'inject_message', iteration,
+        });
+        messages.push({ role: 'user', content: result.message });
+        logger.debug('middleware.inject_message', {
+          runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
+        });
       }
     }
 
@@ -760,21 +1070,76 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       iteration, tokensUsed: totalTokensUsed, toolCallsCount: totalToolCalls,
     });
 
-    // ── Call LLM ──────────────────────────────────────────────────────
+    // ── Determine execution phase for this iteration ─────────────────
+    let phase: 'planning' | 'execution' | 'synthesis';
+    if (iteration === 0) {
+      phase = 'planning';
+    } else if (previousResponseHadToolCalls) {
+      phase = 'execution';
+    } else if (totalToolCalls > 0 && !previousResponseHadToolCalls) {
+      phase = 'synthesis';
+    } else if (iteration > 0 && totalToolCalls === 0) {
+      phase = 'synthesis';
+    } else {
+      phase = 'planning';
+    }
+
+    const iterationSpan = createSpan('agent.loop.iteration', {
+      iteration, phase, totalToolCalls, tokensUsed: totalTokensUsed,
+    });
+
+    // ── Call LLM (with observation masking) ─────────────────────────────
+    const maskedMessages = maskObservations(messages, iteration);
     const response = await routeCall({
-      messages,
+      messages: maskedMessages,
       system: systemPrompt,
       tools: tools.length > 0 ? tools : undefined,
       temperature: agent.temperature,
       maxTokens: agent.maxTokens,
-      context: { ...routerCtx, taskType: 'development', provider: agent.modelProvider, model: agent.modelId },
+      estimatedContextTokens: totalTokensUsed,
+      context: {
+        ...routerCtx, taskType: 'development', executionPhase: phase,
+        provider: agent.modelProvider, model: agent.modelId, routingMode: 'ceiling' as const,
+      },
     });
 
     totalTokensUsed += (response.tokensIn ?? 0) + (response.tokensOut ?? 0);
 
     lastTextContent = response.content;
+    previousResponseHadToolCalls = !!(response.toolCalls && response.toolCalls.length > 0);
+
+    // ── Cascade escalation: validate economy model tool calls ────────
+    let escalationAttempted = false;
+    if (!env.ROUTER_FORCE_FRONTIER && response.routing?.wasDowngraded && response.toolCalls?.length) {
+      const validation = validateToolCalls(response.toolCalls, tools as unknown as ProviderTool[]);
+      if (!validation.valid && !escalationAttempted) {
+        escalationAttempted = true;
+        console.warn(`[agentLoop] escalating: ${validation.failureReason} — retrying with frontier model`);
+        const escalatedResponse = await routeCall({
+          messages: maskedMessages,
+          system: systemPrompt,
+          tools: tools.length > 0 ? tools : undefined,
+          temperature: agent.temperature,
+          maxTokens: agent.maxTokens,
+          estimatedContextTokens: totalTokensUsed,
+          context: {
+            ...routerCtx, taskType: 'development', executionPhase: phase,
+            provider: agent.modelProvider, model: agent.modelId, routingMode: 'forced' as const,
+            wasEscalated: true,
+            escalationReason: `economy_invalid_tool_calls: ${validation.failureReason}`,
+          },
+        });
+        // Replace response with escalated version
+        Object.assign(response, escalatedResponse);
+        totalTokensUsed += (escalatedResponse.tokensIn ?? 0) + (escalatedResponse.tokensOut ?? 0);
+        lastTextContent = escalatedResponse.content;
+        previousResponseHadToolCalls = !!(escalatedResponse.toolCalls && escalatedResponse.toolCalls.length > 0);
+      }
+    }
 
     if (!response.toolCalls || response.toolCalls.length === 0) {
+      iterationSpan.end({ output: { phase, noToolCalls: true } });
+      emitLoopTermination('no_tool_calls', { iteration, totalToolCalls });
       break;
     }
 
@@ -803,6 +1168,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           break;
         }
         if (result.action === 'stop') {
+          createEvent('agent.middleware.decision', {
+            middlewareName: mw.name, decision: 'stop', reason: result.reason, iteration,
+          });
           messages.push({
             role: 'user',
             content: toolResults.map(tr => ({
@@ -812,15 +1180,23 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             })),
           });
           messages.push({ role: 'user', content: result.reason });
+          const maskedStopMessages = maskObservations(messages, iteration);
           const wrapUp = await routeCall({
-            messages,
+            messages: maskedStopMessages,
             system: systemPrompt,
             temperature: agent.temperature,
             maxTokens: Math.min(agent.maxTokens, WRAP_UP_MAX_TOKENS),
-            context: { ...routerCtx, taskType: 'general', provider: agent.modelProvider, model: agent.modelId },
+            context: {
+              ...routerCtx, taskType: 'general', executionPhase: 'synthesis' as const,
+              provider: agent.modelProvider, model: agent.modelId, routingMode: 'ceiling' as const,
+            },
           });
           lastTextContent = wrapUp.content;
           finalStatus = result.status;
+          iterationSpan.end({ output: { phase, middlewareStop: true } });
+          emitLoopTermination('middleware_stop', {
+            iteration, middlewareName: mw.name, reason: result.reason, totalToolCalls,
+          });
           break outerLoop;
         }
       }
@@ -829,6 +1205,14 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
       totalToolCalls++;
       const toolStart = Date.now();
+
+      // Mark tool start for stale run grace period
+      db.update(agentRuns)
+        .set({ lastToolStartedAt: new Date() })
+        .where(and(eq(agentRuns.id, runId), eq(agentRuns.status, 'running')))
+        .catch((err) => {
+          logger.warn('tool_start_update_failed', { runId, tool: toolCall.name, error: err instanceof Error ? err.message : String(err) });
+        });
 
       const inputHash = hashToolCall(toolCall.name, toolCall.input);
       mwCtx.toolCallHistory.push({ name: toolCall.name, inputHash, iteration });
@@ -841,7 +1225,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           context: {
             runId,
             organisationId: request.organisationId,
-            subaccountId: request.subaccountId,
+            subaccountId: request.subaccountId ?? null,
             agentId: request.agentId,
             orgProcesses,
             handoffDepth: request.handoffDepth,
@@ -850,6 +1234,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             startTime,
             timeoutMs,
             taskId: request.taskId,
+            _mcpClients: mcpClients ?? undefined,
+            _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
           },
         });
       }, { actionType: toolCall.name });
@@ -884,6 +1270,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         );
         if (postResult.action === 'stop') {
           finalStatus = postResult.status;
+          iterationSpan.end({ output: { phase, postToolStop: true } });
+          emitLoopTermination('middleware_stop', {
+            iteration, middlewareName: mw.name, totalToolCalls,
+          });
           break outerLoop;
         }
         if (postResult.content) {
@@ -912,14 +1302,21 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
     }
 
-    messages.push({
+    messages.push(tagIteration({
       role: 'user',
       content: toolResults.map(tr => ({
         type: 'tool_result' as const,
         tool_use_id: tr.tool_use_id,
         content: tr.content,
       })),
-    });
+    }, iteration));
+
+    iterationSpan.end({ output: { phase, toolCallsThisIteration: response.toolCalls?.length ?? 0 } });
+
+    // Check if we've hit the max iteration limit
+    if (iteration >= MAX_LOOP_ITERATIONS - 1) {
+      emitLoopTermination('max_iterations', { iteration, totalToolCalls });
+    }
   }
 
   // Flush any pending throttled trace events before returning
@@ -956,6 +1353,35 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
       and(
         eq(subaccountAgents.subaccountId, subaccountId),
         eq(subaccountAgents.isActive, true),
+        eq(agents.status, 'active'),
+        isNull(agents.deletedAt)
+      )
+    );
+
+  if (roster.length === 0) return null;
+
+  const lines = roster.map(r => {
+    const marker = r.agentId === currentAgentId ? ' ← (you)' : '';
+    return `- ${r.agentName} (${r.agentId}) — ${r.agentDescription ?? 'No description'}${marker}`;
+  });
+
+  return lines.join('\n');
+}
+
+async function buildOrgTeamRoster(organisationId: string, currentAgentId: string): Promise<string | null> {
+  const { orgAgentConfigs } = await import('../db/schema/index.js');
+  const roster = await db
+    .select({
+      agentId: agents.id,
+      agentName: agents.name,
+      agentDescription: agents.description,
+    })
+    .from(orgAgentConfigs)
+    .innerJoin(agents, eq(agents.id, orgAgentConfigs.agentId))
+    .where(
+      and(
+        eq(orgAgentConfigs.organisationId, organisationId),
+        eq(orgAgentConfigs.isActive, true),
         eq(agents.status, 'active'),
         isNull(agents.deletedAt)
       )

@@ -1,7 +1,8 @@
-import { Router } from 'express';
+import { Router, NextFunction } from 'express';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { db } from '../db/index.js';
 import {
   costAggregates,
@@ -12,6 +13,8 @@ import {
   workspaceLimits,
 } from '../db/schema/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
+import { getRoutingLog, getRoutingDistribution, getRequestDetail } from '../services/llmUsageService.js';
+import type { RoutingLogFilters } from '../services/llmUsageService.js';
 
 const router = Router();
 
@@ -312,6 +315,108 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
+// Routing debug: subaccount-scoped routing log
+// ---------------------------------------------------------------------------
+
+function parseRoutingLogQuery(query: Record<string, unknown>, orgId: string, subaccountId?: string): RoutingLogFilters {
+  return {
+    organisationId: orgId,
+    subaccountId,
+    billingMonth:   (query.month as string) || undefined,
+    provider:       (query.provider as string) || undefined,
+    model:          (query.model as string) || undefined,
+    routingReason:  (query.routingReason as string) || undefined,
+    capabilityTier: (query.capabilityTier as string) || undefined,
+    executionPhase: (query.executionPhase as string) || undefined,
+    status:         (query.status as string) || undefined,
+    agentName:      (query.agentName as string) || undefined,
+    runId:          (query.runId as string) || undefined,
+    wasDowngraded:  query.wasDowngraded === 'true' ? true : query.wasDowngraded === 'false' ? false : undefined,
+    wasEscalated:   query.wasEscalated === 'true' ? true : query.wasEscalated === 'false' ? false : undefined,
+  };
+}
+
+router.get(
+  '/api/subaccounts/:subaccountId/usage/routing-log',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const filters = parseRoutingLogQuery(req.query as Record<string, unknown>, req.orgId!, subaccountId);
+    const result = await getRoutingLog(filters, {
+      cursor:   (req.query.cursor as string) || undefined,
+      cursorId: (req.query.cursorId as string) || undefined,
+      limit:    req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+    });
+    res.json(result);
+  }),
+);
+
+router.get(
+  '/api/subaccounts/:subaccountId/usage/routing-distribution',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const result = await getRoutingDistribution({
+      organisationId: req.orgId!,
+      subaccountId,
+      billingMonth: (req.query.month as string) || undefined,
+    });
+    res.json(result);
+  }),
+);
+
+router.get(
+  '/api/subaccounts/:subaccountId/usage/requests/:requestId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, requestId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const detail = await getRequestDetail(requestId, req.orgId!);
+    if (!detail || detail.subaccountId !== subaccountId) {
+      throw { statusCode: 404, message: 'Request not found' };
+    }
+    res.json(detail);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Routing debug: org-scoped routing log
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/orgs/:orgId/usage/routing-log',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const filters = parseRoutingLogQuery(req.query as Record<string, unknown>, req.orgId!);
+    const result = await getRoutingLog(filters, {
+      cursor:   (req.query.cursor as string) || undefined,
+      cursorId: (req.query.cursorId as string) || undefined,
+      limit:    req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
+    });
+    res.json(result);
+  }),
+);
+
+router.get(
+  '/api/orgs/:orgId/usage/routing-distribution',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
+  asyncHandler(async (req, res) => {
+    const result = await getRoutingDistribution({
+      organisationId: req.orgId!,
+      billingMonth: (req.query.month as string) || undefined,
+    });
+    res.json(result);
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Admin: platform-wide overview
 // ---------------------------------------------------------------------------
 
@@ -480,7 +585,7 @@ router.get(
   '/api/subaccounts/:subaccountId/agents/:agentId/budget',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res, _next: NextFunction) => {
     const { subaccountId, agentId } = req.params;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
@@ -546,7 +651,7 @@ router.put(
   '/api/subaccounts/:subaccountId/agents/:agentId/budget',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req, res, _next: NextFunction) => {
     const { subaccountId, agentId } = req.params;
     const { maxCostPerRunCents, maxLlmCallsPerRun, tokenBudgetPerRun } = req.body as {
       maxCostPerRunCents?: number | null;

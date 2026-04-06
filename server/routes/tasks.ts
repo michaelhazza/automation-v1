@@ -4,6 +4,8 @@ import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { taskService } from '../services/taskService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { validateBody } from '../middleware/validate.js';
+import { createTaskBody, updateTaskBody, moveTaskBody, createActivityBody, createDeliverableBody } from '../schemas/tasks.js';
 
 const router = Router();
 
@@ -15,9 +17,9 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { status, priority, assignedAgentId, search } = req.query as Record<string, string>;
+    const { status, priority, assignedAgentId, search, projectId } = req.query as Record<string, string>;
     const items = await taskService.listTasks(req.orgId!, req.params.subaccountId, {
-      status, priority, assignedAgentId, search,
+      status, priority, assignedAgentId, search, projectId,
     });
     res.json(items);
   })
@@ -27,6 +29,7 @@ router.post(
   '/api/subaccounts/:subaccountId/tasks',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  validateBody(createTaskBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, createdByAgentId, processId, dueDate } = req.body as {
@@ -62,6 +65,7 @@ router.patch(
   '/api/subaccounts/:subaccountId/tasks/:itemId',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  validateBody(updateTaskBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { title, description, brief, status, priority, assignedAgentId, assignedAgentIds, processId, dueDate } = req.body as Record<string, unknown>;
@@ -86,6 +90,7 @@ router.patch(
   '/api/subaccounts/:subaccountId/tasks/:itemId/move',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  validateBody(moveTaskBody, 'warn'),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { status, position } = req.body as { status?: string; position?: number };
@@ -125,6 +130,7 @@ router.post(
   '/api/subaccounts/:subaccountId/tasks/:itemId/activities',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  validateBody(createActivityBody, 'warn'),
   asyncHandler(async (req, res) => {
     const { activityType, message, agentId, metadata } = req.body as {
       activityType?: string; message?: string; agentId?: string; metadata?: Record<string, unknown>;
@@ -154,6 +160,7 @@ router.post(
   '/api/subaccounts/:subaccountId/tasks/:itemId/deliverables',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
+  validateBody(createDeliverableBody, 'warn'),
   asyncHandler(async (req, res) => {
     const { deliverableType, title, path, description } = req.body as {
       deliverableType?: string; title?: string; path?: string; description?: string;

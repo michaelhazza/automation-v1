@@ -133,7 +133,7 @@ router.get(
         signal: AbortSignal.timeout(15_000),
       });
       if (metaRes.ok) {
-        installationMeta = await metaRes.json() as typeof installationMeta;
+        installationMeta = await metaRes.json() as { account: { login: string; type: string }; repository_selection: string };
       }
     } catch {
       // Non-fatal — we can still store the installation

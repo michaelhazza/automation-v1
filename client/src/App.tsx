@@ -27,14 +27,12 @@ const PortalLandingPage = lazy(() => import('./pages/PortalLandingPage'));
 const PortalPage = lazy(() => import('./pages/PortalPage'));
 const PortalExecutionPage = lazy(() => import('./pages/PortalExecutionPage'));
 const PortalExecutionHistoryPage = lazy(() => import('./pages/PortalExecutionHistoryPage'));
-const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 const AgentChatPage = lazy(() => import('./pages/AgentChatPage'));
 const AdminAgentsPage = lazy(() => import('./pages/AdminAgentsPage'));
 const AdminAgentTemplatesPage = lazy(() => import('./pages/AdminAgentTemplatesPage'));
-const SubaccountAgentsPage = lazy(() => import('./pages/SubaccountAgentsPage'));
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
-const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
+const McpServersPage = lazy(() => import('./pages/McpServersPage'));
 const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
@@ -51,12 +49,21 @@ const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
+const InboxPage = lazy(() => import('./pages/InboxPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
 const UsagePage = lazy(() => import('./pages/UsagePage'));
 const PageProjectsPage = lazy(() => import('./pages/PageProjectsPage'));
 const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage'));
+const JobQueueDashboardPage = lazy(() => import('./pages/JobQueueDashboardPage'));
+const OrgMemoryPage = lazy(() => import('./pages/OrgMemoryPage'));
+const AgentTriggersPage = lazy(() => import('./pages/AgentTriggersPage'));
+const OrgAgentConfigsPage = lazy(() => import('./pages/OrgAgentConfigsPage'));
+const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
+const HierarchyTemplatesPage = lazy(() => import('./pages/HierarchyTemplatesPage'));
+const ConnectorConfigsPage = lazy(() => import('./pages/ConnectorConfigsPage'));
+const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 
 function PageLoader() {
   return (
@@ -150,6 +157,7 @@ export default function App() {
           <Route path="/executions" element={<ExecutionHistoryPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
+          <Route path="/inbox" element={<InboxPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
@@ -167,6 +175,7 @@ export default function App() {
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
+            <Route path="/admin/mcp-servers" element={<McpServersPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
@@ -174,11 +183,19 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/inbox" element={<InboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects" element={<PageProjectsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects/:projectId" element={<PageProjectDetailPage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/triggers" element={<AgentTriggersPage />} />
+            <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
+            <Route path="/admin/subaccounts/:subaccountId/goals" element={<GoalsPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
+            <Route path="/admin/org-memory" element={<OrgMemoryPage />} />
+            <Route path="/admin/org-agent-configs" element={<OrgAgentConfigsPage />} />
+            <Route path="/admin/hierarchy-templates" element={<HierarchyTemplatesPage />} />
+            <Route path="/admin/connectors" element={<ConnectorConfigsPage />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
@@ -186,6 +203,7 @@ export default function App() {
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
+            <Route path="/system/job-queues" element={<JobQueueDashboardPage />} />
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />

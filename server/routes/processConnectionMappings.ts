@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, or, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { processConnectionMappings, integrationConnections, processes } from '../db/schema/index.js';
 import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
@@ -47,16 +47,20 @@ router.put(
       throw { statusCode: 400, message: 'mappings must be an array of { connectionKey, connectionId }' };
     }
 
-    // Validate all connections belong to this subaccount
+    // Validate all connections belong to this subaccount or are org-level
     for (const m of mappings) {
       const [conn] = await db.select()
         .from(integrationConnections)
         .where(and(
           eq(integrationConnections.id, m.connectionId),
-          eq(integrationConnections.subaccountId, subaccount.id)
+          eq(integrationConnections.organisationId, req.orgId!),
+          or(
+            eq(integrationConnections.subaccountId, subaccount.id),
+            isNull(integrationConnections.subaccountId),
+          ),
         ));
       if (!conn) {
-        throw { statusCode: 400, message: `Connection ${m.connectionId} not found in this subaccount` };
+        throw { statusCode: 400, message: `Connection ${m.connectionId} not found in this subaccount or organisation` };
       }
       if (conn.connectionStatus !== 'active') {
         throw { statusCode: 400, message: `Connection ${m.connectionId} is not active (status: ${conn.connectionStatus})` };
