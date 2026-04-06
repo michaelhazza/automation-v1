@@ -187,6 +187,20 @@ The following tables require `subaccountId` to become nullable:
 
 **Failure reason classification.** The `reason` field uses a standardised enum: `connector_timeout`, `rate_limited`, `auth_error`, `data_incomplete`, `internal_error`, `unknown`. The `retryable` flag is derived from the reason, not set manually. `unknown` is high-severity and produces an operator-visible log entry.
 
+**Partial run downstream behaviour.** When `resultStatus` is `'partial'`, downstream systems must handle it explicitly:
+
+| Downstream system | Behaviour on partial run |
+|-------------------|------------------------|
+| Health scoring | Compute for successful accounts only. Failed accounts retain previous snapshot. |
+| Anomaly detection | Run for successful accounts. Skip failed (stale data → false positives). |
+| Churn risk | Run only if confidence > 0.3 for the account. |
+| Portfolio report | Generate with "partial data" warning. List failed accounts explicitly. |
+| Intervention proposals | Allowed only for accounts with fresh data and confidence above floor. |
+| Baseline updates | Update only for successful accounts. Failed accounts retain existing baseline. |
+| Alerts | Fire for successful accounts. Do not fire alerts based on absence of data from failed accounts. |
+
+This matrix prevents false positives from missing data and ensures operators know which accounts are affected.
+
 **`actionScope` on actions.** An explicit `actionScope` column is included in all idempotency checks to prevent cross-scope dedupe bugs. Partial unique index: `UNIQUE (organisation_id, idempotency_key) WHERE action_scope = 'org'`.
 
 ### Org agent execution config
@@ -385,21 +399,26 @@ canonical_metrics table
 ├── previous_value    (numeric, nullable — value from prior computation period)
 ├── period_start      (timestamptz — start of computation window)
 ├── period_end        (timestamptz — end of computation window)
+├── period_type       (text NOT NULL — e.g. "rolling_7d", "rolling_30d", "daily", "hourly")
+├── aggregation_type  (text NOT NULL — e.g. "rate", "ratio", "count", "avg", "sum")
 ├── unit              (text, nullable — e.g. "percent", "count", "currency", "seconds")
 ├── computed_at       (timestamptz NOT NULL)
+├── computation_trigger (text NOT NULL — "poll", "webhook", "manual", "scheduled")
 ├── connector_type    (text NOT NULL — which adapter computed this)
 ├── metadata          (jsonb, nullable — adapter-specific context)
 └── created_at
 
-Unique: (account_id, metric_slug)
+Unique: (account_id, metric_slug, period_type, aggregation_type)
 Index: (organisation_id, metric_slug)
 Index: (account_id, computed_at DESC) — for baseline history
 ```
 
+**Metric dimensionality.** The unique constraint includes `period_type` and `aggregation_type` so that the same metric can exist at multiple granularities (e.g. `contact_growth_rate` as both `rolling_7d` and `rolling_30d`). Templates reference the specific dimension they want in their factor definitions.
+
 **Design principles:**
 - **Metric slugs are adapter-defined, not platform-defined.** There is no enum of allowed metrics. Each adapter writes whatever metrics it can compute from its raw data. A CRM adapter writes `contact_growth_rate`, `pipeline_velocity`, `conversation_engagement`. A Shopify adapter writes `order_volume_trend`, `cart_abandonment_rate`, `customer_ltv`. The platform doesn't need to know the difference.
 - **Templates declare which metrics to score.** The configuration template (Phase 4) lists the metric slugs that feed into health scoring, anomaly detection, and churn risk for that vertical. If a metric slug doesn't exist in the data, the scoring pipeline skips it with a data-missing warning.
-- **History for baselines.** The `canonical_metrics` table is upserted on each computation (unique on `account_id, metric_slug`). A companion `canonical_metric_history` table (append-only) stores every computed value for baseline and trend analysis.
+- **History for baselines.** The `canonical_metrics` table is upserted on each computation (unique on `account_id, metric_slug, period_type, aggregation_type`). A companion `canonical_metric_history` table (append-only) stores every computed value for baseline and trend analysis.
 
 ```
 canonical_metric_history table
@@ -407,22 +426,65 @@ canonical_metric_history table
 ├── organisation_id (FK)
 ├── account_id (FK → canonical_accounts)
 ├── metric_slug       (text NOT NULL)
+├── period_type       (text NOT NULL)
+├── aggregation_type  (text NOT NULL)
 ├── value             (numeric NOT NULL)
 ├── period_start      (timestamptz)
 ├── period_end        (timestamptz)
 ├── computed_at       (timestamptz NOT NULL)
 └── created_at
 
-Index: (account_id, metric_slug, computed_at DESC) — for baseline queries
+Index: (account_id, metric_slug, period_type, computed_at DESC) — for baseline queries
 ```
+
+#### Metric registry (soft validation layer)
+
+Adapters self-register the metrics they produce. This is a **soft registry** — it does not enforce what adapters can write, but it enables validation and drift detection.
+
+```
+metric_definitions table
+├── id (uuid PK)
+├── metric_slug       (text NOT NULL)
+├── connector_type    (text NOT NULL — which adapter defines this metric)
+├── label             (text — human-readable name)
+├── unit              (text — "percent", "count", "currency", "seconds")
+├── value_type        (text — "ratio", "count", "currency", "duration", "score")
+├── default_period_type (text — "rolling_7d", "rolling_30d", etc.)
+├── default_aggregation_type (text — "rate", "ratio", "avg", etc.)
+├── version           (integer, default 1 — bumped when computation logic changes)
+├── description       (text, nullable)
+├── created_at
+└── updated_at
+
+Unique: (connector_type, metric_slug)
+```
+
+**Registry usage:**
+- **On template activation:** validate that every metric slug referenced in `healthScoreFactors`, `anomalyConfig`, and `churnRiskSignals` has a corresponding `metric_definitions` entry for the template's `requiredConnectorType`. Reject activation with clear error if a referenced metric doesn't exist.
+- **On adapter update:** when metric computation logic changes, bump `version`. Intelligence outputs reference this version via `algorithm_version`, surfacing drift in reports.
+- **On metric write:** no enforcement (adapters write freely). The registry is for validation and documentation, not for gating writes.
+
+This prevents the primary risk: templates silently referencing metrics that an adapter no longer computes.
+
+#### Metric computation contract
+
+Adapters must follow explicit timing rules for metric computation:
+
+**Computation triggers:**
+1. **After every polling cycle** — mandatory. All metrics recomputed from fresh data.
+2. **After webhook-triggered deltas** — optional per metric. If a webhook updates entities that affect a metric, the adapter may recompute that metric immediately. The `computation_trigger` field records which trigger produced the value.
+3. **Manual** — operator can trigger recomputation via API.
+
+**Minimum computation interval:** Configurable per metric in `metric_definitions`. Prevents excessive recomputation under high webhook volume. Default: 5 minutes. If a recomputation is requested within the minimum interval, it is silently skipped (the current value is fresh enough).
 
 **Adapter metric computation step.** After each polling cycle or webhook batch, the adapter:
 1. Syncs raw entities to canonical entity tables (existing flow)
-2. Computes derived metrics from the synced data
+2. Computes derived metrics from the synced data (respecting minimum intervals)
 3. Upserts to `canonical_metrics` (current values)
 4. Appends to `canonical_metric_history` (historical record)
+5. Records `computation_trigger` on each metric written
 
-This step is part of the adapter's responsibility, not a separate service. Each adapter knows what metrics it can compute from its data. The platform provides the table; the adapter provides the values.
+This step is part of the adapter's responsibility, not a separate service. Each adapter knows what metrics it can compute from its data. The platform provides the tables; the adapter provides the values.
 
 **Example metrics by adapter type:**
 
@@ -543,6 +605,13 @@ Derived `healthStatus` per connector: `'healthy'` | `'degraded'` | `'failed'`.
 | `failed` | Health scoring suppressed. Anomaly detection suspended. Accounts flagged as data missing. Operator alert. |
 
 Enforced at `canonicalDataService` layer. Skills receive `connectorHealthStatus` and handle accordingly.
+
+**Connector recovery.** State transitions are not one-way:
+- `healthy` → `degraded`: when error rate exceeds 5% or sync delay exceeds 2x interval
+- `degraded` → `failed`: when 3+ consecutive syncs fail or no success in 24h
+- `failed` → `degraded`: when a sync succeeds after failure (auto-recovery, single success)
+- `degraded` → `healthy`: when error rate returns below 5% AND sync delays normalise over a 1-hour window
+- Recovery transitions are logged as connector state events. Health scoring automatically resumes when connector recovers to `degraded` or `healthy` — no operator intervention required for recovery (only for initial failure investigation).
 
 ### Query scope guards
 
@@ -746,6 +815,17 @@ Retry semantics per state:
 | `alerting` | Retry per destination | 3 | → `idle` + failed deliveries queued |
 | `executing` | Retry intervention | 1 | → `idle` + operator alert |
 
+#### Execution scaling controls
+
+At scale (100+ subaccounts), the Portfolio Health Agent must not attempt to process every account in a single sequential pass. Configurable execution controls:
+
+- **`maxAccountsPerRun`** (default: 50) — maximum accounts processed in a single scan cycle. If the org has more, the agent processes in batches across multiple scheduled runs (round-robin or priority-based).
+- **`maxConcurrentEvaluations`** (default: 5) — maximum accounts being scored in parallel within a single run. Prevents cost spikes and rate limit pressure on connectors.
+- **`maxRunDurationMs`** (default: 300000 / 5 minutes) — hard time budget per run. If exceeded, the run completes with `resultStatus: 'partial'` and logs which accounts were not reached. Remaining accounts are prioritised in the next cycle.
+- **`accountPriorityMode`** (default: `round_robin`) — how accounts are ordered for processing. Options: `round_robin` (even coverage), `worst_first` (lowest health score first), `stalest_first` (oldest `last_scored_at` first).
+
+These values are configurable in the template's `operationalDefaults` and overridable per org. They prevent production instability while ensuring all accounts are eventually covered.
+
 #### What this agent does NOT do
 
 - Deep analytical reasoning on why a subaccount is struggling
@@ -798,6 +878,8 @@ Accepts an account identifier, reads configured factor definitions from the org'
 
 **Outputs:** Composite score (0-100), factor breakdown, trend (improving/stable/declining), confidence level.
 
+**Idempotency.** Health snapshots are deduplicated by `(account_id, DATE_TRUNC('hour', computed_at))`. If a snapshot already exists for the same account in the same hour, the write is skipped. This prevents duplicate snapshots from retries or overlapping scan cycles.
+
 **Normalisation types supported:**
 - `linear` — linear mapping from `[minValue, maxValue]` to `[0, 100]`
 - `threshold` — below threshold = 0, above = 100
@@ -839,6 +921,8 @@ Compares a current metric value against that account's historical baseline and i
 7. If deviation exceeds threshold: write `anomaly_events` record
 
 **Outputs:** Anomaly flag, deviation magnitude, direction, severity (low/medium/high/critical), description.
+
+**Idempotency.** Anomaly events are deduplicated by `(account_id, metric_slug, DATE_TRUNC('hour', created_at))`. If an anomaly event already exists for the same account + metric in the same hour, the write is skipped. This prevents duplicate anomaly alerts from retries.
 
 #### Skill: `compute_churn_risk`
 
@@ -975,6 +1059,8 @@ The action skill — bridge between detection and execution.
 The template defines which intervention types are available and which gate level applies. The platform routes the execution. Connector-specific actions (like "pause a campaign") are implemented in the adapter — the platform just dispatches to the adapter.
 
 **Critical design note:** Every intervention path goes through the HITL gate first. The skill submits the proposal and returns pending status. Only on human approval does execution proceed.
+
+**Intervention cooldown.** To prevent the same issue repeatedly triggering the same intervention (operator fatigue), a cooldown window is enforced per `(account_id, intervention_type_slug)`. If an intervention of the same type was proposed for the same account within the cooldown window, the proposal is suppressed and logged as `intervention_suppressed_cooldown`. The cooldown duration is configurable per intervention type in the template (default: 24 hours). This applies regardless of whether the previous proposal was approved, rejected, or timed out.
 
 ### Data isolation
 
