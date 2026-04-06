@@ -994,3 +994,336 @@ Phase 3 is complete when:
 - The Portfolio Health Agent runs a scan cycle and produces HealthSnapshot records
 - End-to-end: metric changes → anomaly detected → HITL proposal → approval → intervention
 
+---
+
+## Phase 4: Configuration Template System Extension
+
+### What this phase delivers
+
+An extension to the existing hierarchy template system that makes the full intelligence layer deployable via a single template load. A configuration template is a complete, loadable specification: which agents are active, which skills are enabled, which connector is required, which metrics to score, how to weight them, which anomaly thresholds to use, which risk signals to evaluate, which interventions are available, and what the operational parameters are.
+
+This is the delivery mechanism for everything built in Phases 1-3. Without it, each organisation requires manual setup. With it, any vertical configuration can be applied in minutes.
+
+### Building on what exists
+
+The existing template system provides agent roster + hierarchy. This extension adds:
+
+**Connector specification**
+- Required connector type (e.g. `ghl`, `hubspot`, `shopify`)
+- Required operator inputs during activation (OAuth credentials, account mapping)
+
+**Skill enablement map**
+- Per-agent skill permissions
+
+**Operational parameters (the v2.0 addition)**
+- `healthScoreFactors` — array of factor definitions (metric slug, weight, label, normalisation rules)
+- `anomalyConfig` — default threshold, window, per-metric overrides, seasonality mode, minimum data points
+- `churnRiskSignals` — array of signal definitions (slug, weight, type, metric reference, condition)
+- `interventionTypes` — array of intervention definitions (slug, label, gate level, action type, connector action)
+- `scanFrequencyHours` — how often the Portfolio Health Agent runs
+- `reportSchedule` — when portfolio briefings are generated
+- `alertDestinations` — operator configures during activation
+
+**Workspace memory seeds**
+- Pre-populated org memory entries for initial agent context
+
+### Template structure (full example — GHL Agency)
+
+This is an example of a **completed template configuration** for one vertical. The same template structure works for any vertical — only the values change.
+
+```json
+{
+  "name": "GHL Agency Intelligence",
+  "requiredConnectorType": "ghl",
+  "requiredOperatorInputs": [
+    { "key": "ghl_oauth", "label": "GHL OAuth Credentials", "type": "oauth", "required": true },
+    { "key": "alert_email", "label": "Alert Email", "type": "email", "required": true },
+    { "key": "slack_webhook", "label": "Slack Webhook URL", "type": "url", "required": false }
+  ],
+  "operationalDefaults": {
+    "healthScoreFactors": [
+      { "metricSlug": "pipeline_velocity", "weight": 0.30, "label": "Pipeline Velocity", "normalisation": { "type": "inverse_linear", "minValue": 0, "maxValue": 100 } },
+      { "metricSlug": "conversation_engagement", "weight": 0.25, "label": "Conversation Engagement", "normalisation": { "type": "linear", "minValue": 0, "maxValue": 100 } },
+      { "metricSlug": "contact_growth_rate", "weight": 0.20, "label": "Contact Growth", "normalisation": { "type": "linear", "minValue": -50, "maxValue": 50 } },
+      { "metricSlug": "revenue_trend", "weight": 0.15, "label": "Revenue Trend", "normalisation": { "type": "linear", "minValue": -100, "maxValue": 100 } },
+      { "metricSlug": "platform_activity", "weight": 0.10, "label": "Platform Activity", "normalisation": { "type": "linear", "minValue": 0, "maxValue": 100 } }
+    ],
+    "anomalyConfig": {
+      "defaultThreshold": 2.0,
+      "defaultWindowDays": 30,
+      "seasonality": "day_of_week",
+      "minimumDataPoints": 14,
+      "metricOverrides": {}
+    },
+    "churnRiskSignals": [
+      { "signalSlug": "health_trajectory_decline", "weight": 0.30, "type": "metric_trend", "metricSlug": "health_score", "condition": "declining_over_periods", "periods": 3 },
+      { "signalSlug": "pipeline_stagnation", "weight": 0.25, "type": "metric_threshold", "metricSlug": "pipeline_velocity", "condition": "above_value", "thresholdValue": 60 },
+      { "signalSlug": "engagement_decline", "weight": 0.25, "type": "metric_threshold", "metricSlug": "conversation_engagement", "condition": "below_value", "thresholdValue": 30 },
+      { "signalSlug": "low_health", "weight": 0.20, "type": "health_score_level", "thresholdValue": 40 }
+    ],
+    "interventionTypes": [
+      { "slug": "notify_operator", "label": "Notify Operator", "gateLevel": "auto", "action": "internal_notification" },
+      { "slug": "pause_campaign", "label": "Pause Campaign", "gateLevel": "review", "action": "connector_action", "connectorAction": "pause_campaign" },
+      { "slug": "escalate_to_am", "label": "Escalate to Account Manager", "gateLevel": "review", "action": "create_task" },
+      { "slug": "send_checkin", "label": "Send Check-in Email", "gateLevel": "review", "action": "send_email" }
+    ],
+    "scanFrequencyHours": 4,
+    "reportSchedule": { "dayOfWeek": 1, "hour": 8 },
+    "alertDestinations": []
+  },
+  "memorySeedsJson": [
+    { "content": "This organisation manages a portfolio of client accounts. Monitor for pipeline stagnation, lead volume drops, and conversation engagement decline.", "entryType": "preference" }
+  ],
+  "slots": [
+    { "agentSlug": "orchestrator", "executionScope": "subaccount", "skills": ["standard"] },
+    { "agentSlug": "ba-agent", "executionScope": "subaccount", "skills": ["intake"] },
+    { "agentSlug": "portfolio-health-agent", "executionScope": "org", "skills": ["compute_health_score", "detect_anomaly", "compute_churn_risk", "generate_portfolio_report", "trigger_account_intervention", "query_subaccount_cohort", "read_org_insights", "write_org_insight"] }
+  ]
+}
+```
+
+**A second template example (Shopify — same structure, different config):**
+
+```json
+{
+  "name": "Shopify Store Intelligence",
+  "requiredConnectorType": "shopify",
+  "operationalDefaults": {
+    "healthScoreFactors": [
+      { "metricSlug": "order_volume_trend", "weight": 0.30, "label": "Order Volume", "normalisation": { "type": "linear", "minValue": -50, "maxValue": 50 } },
+      { "metricSlug": "cart_abandonment_rate", "weight": 0.25, "label": "Cart Abandonment", "normalisation": { "type": "inverse_linear", "minValue": 0, "maxValue": 100 } },
+      { "metricSlug": "avg_order_value", "weight": 0.25, "label": "Avg Order Value", "normalisation": { "type": "linear", "minValue": 0, "maxValue": 200 } },
+      { "metricSlug": "return_rate", "weight": 0.20, "label": "Return Rate", "normalisation": { "type": "inverse_linear", "minValue": 0, "maxValue": 50 } }
+    ],
+    "anomalyConfig": {
+      "defaultThreshold": 2.0,
+      "defaultWindowDays": 14,
+      "seasonality": "day_of_week",
+      "minimumDataPoints": 14
+    },
+    "churnRiskSignals": [
+      { "signalSlug": "order_decline", "weight": 0.35, "type": "metric_trend", "metricSlug": "order_volume_trend", "condition": "declining_over_periods", "periods": 3 },
+      { "signalSlug": "high_returns", "weight": 0.30, "type": "metric_threshold", "metricSlug": "return_rate", "condition": "above_value", "thresholdValue": 20 },
+      { "signalSlug": "revenue_drop", "weight": 0.35, "type": "metric_trend", "metricSlug": "avg_order_value", "condition": "declining_over_periods", "periods": 2 }
+    ],
+    "interventionTypes": [
+      { "slug": "notify_operator", "label": "Notify Operator", "gateLevel": "auto", "action": "internal_notification" },
+      { "slug": "restock_alert", "label": "Restock Alert", "gateLevel": "review", "action": "create_task" },
+      { "slug": "promo_trigger", "label": "Trigger Promotion", "gateLevel": "review", "action": "connector_action", "connectorAction": "create_discount" }
+    ]
+  }
+}
+```
+
+**Same platform code. Different template. Different vertical.**
+
+### Template dependency validation
+
+Before applying, preflight checks validate:
+- Connector type is registered in the adapter registry
+- Skills referenced in enablement map exist in the skill library
+- Operational parameters conform to expected schema
+- `dryRun: true` flag runs checks without making changes
+
+Partial application is never allowed.
+
+### Loading a template
+
+1. Provision agents into the organisation
+2. Apply skill enablement maps per agent
+3. Create connector config and prompt operator for authentication
+4. Write `operationalDefaults` to org configuration
+5. Seed org memory with template-defined initial context
+6. Configure org agent execution configs
+7. Schedule Portfolio Health Agent's first scan
+8. Confirm activation to operator
+
+### Operator customisation after template load
+
+Templates are starting points, not constraints. After loading, operators can:
+- Adjust health score factor weights
+- Change anomaly thresholds (globally or per metric)
+- Modify churn risk signal weights
+- Add/remove intervention types
+- Change scan frequency and report schedule
+- Add/remove alert destinations
+- Enable/disable skills per agent
+- Adjust HITL gate behaviour per intervention
+
+All through configuration — database values, not code changes. The UI renders controls dynamically from the factor/signal/intervention definitions.
+
+### Template versioning
+
+Updates to system-level templates don't auto-propagate. Operators get update notifications and can preview + apply changes.
+
+### Config version linkage
+
+`config_version` on intelligence outputs is a SHA-256 hash of: `appliedTemplateVersion` + operator overrides + connector config version. Enables full traceability.
+
+---
+
+## Phase 5: Org-Level Workspace
+
+### What this phase delivers
+
+A workspace at the organisation level for work that doesn't belong to any single subaccount. Same capabilities as subaccount workspaces — board, tasks, scheduling, triggers, connections — but scoped to the organisation.
+
+Independent of the intelligence layer (Phases 2-4). Built based on demand.
+
+### Schema changes
+
+| Table | Change |
+|-------|--------|
+| `tasks` | `subaccountId` nullable — org-level tasks have `subaccountId = NULL` |
+| `scheduled_tasks` | `subaccountId` nullable |
+| `agent_triggers` | `subaccountId` and `subaccountAgentId` nullable; org-level trigger support |
+| `integration_connections` | Support org-level connections (nullable `subaccountId`) |
+
+### Org-level board
+
+- `boardConfigs` already supports nullable `subaccountId`
+- Tasks with `subaccountId = NULL` appear on org board
+- UI: org-level board page
+- Org agents use existing task skills on org board
+
+### Org-level scheduled tasks, triggers, connections
+
+- Scheduled tasks with null `subaccountId` assigned to org agents
+- Triggers with null `subaccountId` fire on org-level events (`org_task_created`, `org_task_moved`, `org_agent_completed`)
+- OAuth connections at org level, available to org agents
+
+### Cross-boundary writes
+
+An org agent can create a task on a subaccount's board:
+- Task creation skills accept optional `targetSubaccountId` from org context
+- Validates target belongs to same organisation
+- Checks `allowedSubaccountIds` on org agent config
+- **HITL-gated** when writing from org to subaccount context
+
+### Cross-boundary permission model
+
+- **Target validation** — target subaccount must belong to same org. Hard check in skill layer.
+- **Allowed subaccounts list** — optional `allowedSubaccountIds` on org agent config restricts scope.
+- **Audit enrichment** — every cross-boundary action logged with `source_agent_id`, `source_context`, and `reasoning_summary`.
+
+### Gate condition
+
+Phase 5 is complete when:
+- Org-level tasks, scheduled tasks, triggers, and connections work
+- Cross-boundary task creation with HITL gate works
+- Zero regression on subaccount flows
+
+---
+
+## What to Build vs What to Configure (Consolidated)
+
+### Build (generic platform code — applies to every vertical)
+
+**Phase 1:**
+- Org-level agent execution pipeline
+- Org agent config mechanism
+- Authority rules and kill switch
+
+**Phase 2:**
+- Extended connector interface (ingestion + metric computation)
+- `canonical_metrics` and `canonical_metric_history` tables
+- Rate limiter, webhook framework, scheduled polling
+- Canonical entity tables (accounts, contacts, opportunities, conversations, revenue)
+- Data confidence layer and connector health computation
+- Sync event audit logging
+
+**Phase 3:**
+- Subaccount tags infrastructure
+- Org-level memory table and service
+- Cross-subaccount query skills
+- Config-driven intelligence skill algorithms:
+  - Health score: reads factor array from config, fetches metrics by slug, normalises, weights
+  - Anomaly detection: reads thresholds/windows from config, compares metric history
+  - Churn risk: reads signal definitions from config, evaluates against metrics
+  - Portfolio report: compiles from health snapshots + anomalies + org memory
+  - Intervention: reads intervention types from config, routes through HITL gate
+- Normalisation functions (linear, inverse_linear, threshold, percentile)
+- Signal evaluation functions (metric_trend, metric_threshold, staleness, anomaly_count, health_score_level)
+- Intervention action dispatchers (internal_notification, connector_action, create_task, generate_draft, send_email, send_slack)
+- Portfolio Health Agent scheduling/coordination/state machine
+
+**Phase 4:**
+- Template schema extensions (operationalDefaults with full factor/signal/intervention config)
+- Template activation flow (loadToOrg, preflight validation, operator input collection)
+- Template versioning
+- Dynamic operator customisation UI (renders controls from config definitions)
+
+**Phase 5:**
+- Org-level board, tasks, triggers, connections
+- Cross-boundary writes with HITL gate
+
+### Build (adapter-specific — one per external platform, not platform code)
+
+- GHL adapter: ingestion methods + metric computation + webhook normalisation
+- Future: HubSpot adapter, Shopify adapter, etc. (~300 lines each)
+
+### Configure (lives in database — different per template/organisation)
+
+- Health score factor definitions (metric slugs, weights, normalisation rules)
+- Anomaly thresholds, windows, seasonality mode, per-metric overrides
+- Churn risk signal definitions (slugs, weights, types, conditions)
+- Intervention type definitions (slugs, labels, gate levels, action types)
+- Alert destinations
+- Scan frequency and report schedule
+- OAuth credentials per organisation
+- Account mappings (external IDs → subaccounts)
+- Subaccount tags (user-defined dimensions)
+- Workspace memory seeds
+- Report format and verbosity preferences
+- Which connector type to use
+- Skill enablement per agent per organisation
+
+---
+
+## Principles for Implementation
+
+**Phase 1 is the hidden prerequisite.** Highest-risk foundational work. Must be solid before proceeding.
+
+**The metrics abstraction is the key boundary.** Intelligence skills must never read from raw entity tables directly. They read from `canonical_metrics` using slugs defined in the template config. If an intelligence skill imports a canonical entity schema file, the abstraction has failed.
+
+**No metric slugs in platform code.** Metric slugs (`contact_growth_rate`, `pipeline_velocity`, etc.) exist only in two places: adapter code (which computes them) and template configuration (which references them). The platform layer uses generic `metric_slug: string` — never an enum or union type.
+
+**No domain-specific logic in platform code.** The platform provides generic primitives: weighted scoring, threshold comparison, trend detection, baseline computation, normalisation functions. Templates configure which primitives to use and with what parameters. If you're writing an `if` statement that checks for a specific vertical or connector type in a skill executor, you're doing it wrong.
+
+**Configuration over code.** If a decision requires a code change to alter behaviour for a specific organisation or vertical, that decision is in the wrong place.
+
+**The HITL gate is not optional for execution.** Any path that modifies external data or initiates communication must go through the gate.
+
+**Baselines are account-specific and metric-specific.** Anomaly detection compares each account to its own history for each metric. No portfolio averages.
+
+**Fail loudly on integration errors.** Surface connector failures to operators. A missed scan is as dangerous as a detected anomaly.
+
+**Data isolation between subaccounts.** Org agents reading across subaccounts get aggregated summaries, never raw records.
+
+---
+
+## Out of Scope
+
+- Second connector implementation (architecture must support; code deferred)
+- ML-based prediction models (heuristic first; architecture supports replacement)
+- Client-facing portals (operator-facing only)
+- Billing/pricing tied to connector usage
+- Multi-connector per organisation (one at MVP)
+- Org-level agent chat UI
+
+---
+
+## Success Criteria
+
+The feature is complete when:
+
+1. A new organisation can be provisioned by applying a configuration template
+2. The operator provides connector credentials and alert destinations
+3. Within one scan cycle, all accounts are enumerated, metrics computed, and health scores generated
+4. Within one week, the operator receives their first portfolio intelligence briefing
+5. When a real anomaly occurs, the operator receives a push alert and a HITL gate proposal
+6. All of this happens without any action beyond the initial template activation
+7. **The entire system works through generic infrastructure — adding a new vertical requires only a new adapter (~300 lines) and a new configuration template (database rows). Zero changes to agents, skills, the intelligence pipeline, or the UI.**
+8. **No intelligence skill contains hardcoded metric slugs, factor names, signal definitions, or intervention types — all read from configuration**
+9. **The template includes two working examples (GHL Agency, Shopify Store concept) demonstrating the same platform code serving completely different verticals**
+
