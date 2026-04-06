@@ -61,8 +61,8 @@ async function evaluateSignal(
       const recent = history.slice(0, periods);
       const older = history.slice(periods, periods * 2);
       if (older.length === 0) return 50;
-      const recentAvg = recent.reduce((s, h) => s + Number(h.value), 0) / recent.length;
-      const olderAvg = older.reduce((s, h) => s + Number(h.value), 0) / older.length;
+      const recentAvg = recent.reduce((s: number, h: { value: string | number }) => s + Number(h.value), 0) / recent.length;
+      const olderAvg = older.reduce((s: number, h: { value: string | number }) => s + Number(h.value), 0) / older.length;
       if (signal.condition === 'declining_over_periods') {
         const decline = olderAvg - recentAvg;
         return Math.min(100, Math.max(0, decline > 0 ? decline * 5 : 0));
