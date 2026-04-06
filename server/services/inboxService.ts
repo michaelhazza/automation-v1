@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { tasks, reviewItems, agentRuns, inboxReadStates, subaccounts } from '../db/schema/index.js';
-import { eq, and, or, isNull, desc, asc, gte, ilike, inArray } from 'drizzle-orm';
+import { eq, and, or, isNull, desc, asc, gte, ilike, inArray, sql } from 'drizzle-orm';
 import { auditService } from './auditService.js';
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,17 @@ export const inboxService = {
       allowedSubaccountIds = saRows.map(r => r.id);
       if (allowedSubaccountIds.length === 0) return []; // No subaccounts opted in
     } else if (filters.subaccountIds && filters.subaccountIds.length > 0) {
-      allowedSubaccountIds = filters.subaccountIds;
+      // Validate subaccountIds belong to this org (prevent IDOR)
+      const saRows = await db
+        .select({ id: subaccounts.id })
+        .from(subaccounts)
+        .where(and(
+          eq(subaccounts.organisationId, orgId),
+          inArray(subaccounts.id, filters.subaccountIds),
+          isNull(subaccounts.deletedAt),
+        ));
+      allowedSubaccountIds = saRows.map(r => r.id);
+      if (allowedSubaccountIds.length === 0) return [];
     }
 
     // Helper to add subaccount filter condition
@@ -280,7 +290,11 @@ export const inboxService = {
       const saRows = await db
         .select({ id: subaccounts.id, name: subaccounts.name })
         .from(subaccounts)
-        .where(inArray(subaccounts.id, uniqueSaIds));
+        .where(and(
+          inArray(subaccounts.id, uniqueSaIds),
+          eq(subaccounts.organisationId, orgId),
+          isNull(subaccounts.deletedAt),
+        ));
       const saMap = new Map(saRows.map(r => [r.id, r.name]));
       for (const item of items) {
         const saId = item.meta.subaccountId as string;

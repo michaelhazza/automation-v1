@@ -151,7 +151,10 @@ router.patch(
     if (slug !== undefined) update.slug = slug;
     if (status !== undefined) update.status = status;
     if (settings !== undefined) update.settings = settings;
-    if (includeInOrgInbox !== undefined) update.includeInOrgInbox = includeInOrgInbox;
+    if (includeInOrgInbox !== undefined) {
+      if (typeof includeInOrgInbox !== 'boolean') throw { statusCode: 400, message: 'includeInOrgInbox must be a boolean' };
+      update.includeInOrgInbox = includeInOrgInbox;
+    }
 
     const [updated] = await db
       .update(subaccounts)
