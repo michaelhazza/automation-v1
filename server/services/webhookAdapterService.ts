@@ -156,9 +156,16 @@ async function postWithRetry(
   retryCount: number,
   retryBackoffMs: number,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
+  // Global execution cap: prevent zombie runs from retries + long timeouts
+  const maxExecutionMs = timeoutMs * (retryCount + 1) + retryBackoffMs * (Math.pow(2, retryCount + 1) - 1);
+  const executionStart = Date.now();
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= retryCount; attempt++) {
+    // Hard stop if global execution cap exceeded
+    if (Date.now() - executionStart > maxExecutionMs) {
+      return { ok: false, status: 0, data: { error: 'Global execution cap exceeded' } };
+    }
     if (attempt > 0) {
       // Exponential backoff with jitter: base * 2^attempt + random(0, base/2)
       const delay = retryBackoffMs * Math.pow(2, attempt) + Math.random() * (retryBackoffMs / 2);

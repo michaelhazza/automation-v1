@@ -17,7 +17,12 @@ interface InboxItemRef {
 interface InboxFilters {
   tab?: 'all' | 'tasks' | 'reviews' | 'failed_runs';
   search?: string;
+  limit?: number;
 }
+
+// Hard upper bounds to prevent expensive queries
+const MAX_ITEMS_PER_SOURCE = 50;
+const MAX_TOTAL_ITEMS = 100;
 
 interface UnifiedInboxItem {
   entityType: EntityType;
@@ -93,7 +98,7 @@ export const inboxService = {
         )
         .where(and(...taskConditions))
         .orderBy(desc(tasks.updatedAt))
-        .limit(50);
+        .limit(MAX_ITEMS_PER_SOURCE);
 
       for (const row of taskRows) {
         if (row.isArchived) continue;
@@ -143,7 +148,7 @@ export const inboxService = {
         )
         .where(and(...reviewConditions))
         .orderBy(desc(reviewItems.createdAt))
-        .limit(50);
+        .limit(MAX_ITEMS_PER_SOURCE);
 
       for (const row of reviewRows) {
         if (row.isArchived) continue;
@@ -205,7 +210,7 @@ export const inboxService = {
         )
         .where(and(...runConditions))
         .orderBy(desc(agentRuns.updatedAt))
-        .limit(20);
+        .limit(MAX_ITEMS_PER_SOURCE);
 
       for (const row of runRows) {
         if (row.isArchived) continue;
@@ -229,7 +234,8 @@ export const inboxService = {
       return b.updatedAt.getTime() - a.updatedAt.getTime();
     });
 
-    return items;
+    // Hard cap total items returned to prevent oversized responses
+    return items.slice(0, MAX_TOTAL_ITEMS);
   },
 
   /**

@@ -5,6 +5,8 @@ import { agents } from './agents';
 
 // ---------------------------------------------------------------------------
 // Feedback Votes — thumbs up/down on agent-generated outputs
+// NOTE: Intentionally hard-delete (not soft-delete). Votes are ephemeral
+// user preferences, not audit-worthy records. See CC-3 exception in spec.
 // ---------------------------------------------------------------------------
 
 export const feedbackVotes = pgTable(

@@ -111,21 +111,29 @@ export const attachmentService = {
     await storageService.put(storageKey, fileData, file.mimetype);
     await fs.unlink(file.path).catch(() => {});
 
-    // Create DB record
-    const [attachment] = await db
-      .insert(taskAttachments)
-      .values({
-        taskId: task.id,
-        organisationId: orgId,
-        fileName: file.originalname,
-        fileType: file.mimetype,
-        fileSizeBytes: file.size,
-        storageKey,
-        storageProvider: 'local',
-        uploadedBy,
-        idempotencyKey: idempotencyKey || null,
-      })
-      .returning();
+    // Create DB record — if insert fails, clean up the stored file to prevent orphans
+    let attachment;
+    try {
+      const [row] = await db
+        .insert(taskAttachments)
+        .values({
+          taskId: task.id,
+          organisationId: orgId,
+          fileName: file.originalname,
+          fileType: file.mimetype,
+          fileSizeBytes: file.size,
+          storageKey,
+          storageProvider: 'local',
+          uploadedBy,
+          idempotencyKey: idempotencyKey || null,
+        })
+        .returning();
+      attachment = row;
+    } catch (err) {
+      // Clean up orphaned file on DB failure
+      await storageService.delete(storageKey).catch(() => {});
+      throw err;
+    }
 
     return { attachment, created: true };
   },
