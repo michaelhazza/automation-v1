@@ -1,4 +1,4 @@
-import { eq, and, gte, sql, count, desc } from 'drizzle-orm';
+import { eq, and, gte, sql, count, desc, lt } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   canonicalAccounts,
@@ -8,7 +8,10 @@ import {
   canonicalRevenue,
   healthSnapshots,
   anomalyEvents,
+  canonicalMetrics,
+  canonicalMetricHistory,
 } from '../db/schema/index.js';
+import type { NewCanonicalMetric, NewCanonicalMetricHistoryEntry } from '../db/schema/canonicalMetrics.js';
 
 // ---------------------------------------------------------------------------
 // Canonical Data Service — unified read interface for normalised entities
@@ -350,5 +353,117 @@ export const canonicalDataService = {
         target: [canonicalRevenue.accountId, canonicalRevenue.externalId],
         set: { ...data, updatedAt: new Date() } as typeof canonicalRevenue.$inferInsert,
       });
+  },
+
+  // ── Canonical Metrics ───────────────────────────────────────────────────
+
+  async upsertMetric(data: NewCanonicalMetric) {
+    const [result] = await db
+      .insert(canonicalMetrics)
+      .values(data)
+      .onConflictDoUpdate({
+        target: [
+          canonicalMetrics.accountId,
+          canonicalMetrics.metricSlug,
+          canonicalMetrics.periodType,
+          canonicalMetrics.aggregationType,
+        ],
+        set: {
+          currentValue: data.currentValue,
+          previousValue: data.previousValue,
+          periodStart: data.periodStart,
+          periodEnd: data.periodEnd,
+          computedAt: new Date(),
+          computationTrigger: data.computationTrigger,
+          metadata: data.metadata,
+        },
+      })
+      .returning();
+    return result;
+  },
+
+  async appendMetricHistory(data: NewCanonicalMetricHistoryEntry) {
+    const [result] = await db
+      .insert(canonicalMetricHistory)
+      .values(data)
+      .returning();
+    return result;
+  },
+
+  async getMetricValue(
+    accountId: string,
+    metricSlug: string,
+    periodType: string,
+    organisationId?: string
+  ) {
+    const conditions = [
+      eq(canonicalMetrics.accountId, accountId),
+      eq(canonicalMetrics.metricSlug, metricSlug),
+      eq(canonicalMetrics.periodType, periodType),
+    ];
+    if (organisationId) conditions.push(eq(canonicalMetrics.organisationId, organisationId));
+
+    const [result] = await db
+      .select()
+      .from(canonicalMetrics)
+      .where(and(...conditions))
+      .limit(1);
+    return result ?? null;
+  },
+
+  async getMetricsByAccount(accountId: string, organisationId?: string) {
+    const conditions = [eq(canonicalMetrics.accountId, accountId)];
+    if (organisationId) conditions.push(eq(canonicalMetrics.organisationId, organisationId));
+
+    return db
+      .select()
+      .from(canonicalMetrics)
+      .where(and(...conditions));
+  },
+
+  async getMetricHistoryBySlug(
+    accountId: string,
+    metricSlug: string,
+    periodType: string,
+    limit = 30,
+    excludeBackfill = true
+  ) {
+    const conditions = [
+      eq(canonicalMetricHistory.accountId, accountId),
+      eq(canonicalMetricHistory.metricSlug, metricSlug),
+      eq(canonicalMetricHistory.periodType, periodType),
+    ];
+    if (excludeBackfill) {
+      conditions.push(eq(canonicalMetricHistory.isBackfill, false));
+    }
+
+    return db
+      .select()
+      .from(canonicalMetricHistory)
+      .where(and(...conditions))
+      .orderBy(desc(canonicalMetricHistory.computedAt))
+      .limit(limit);
+  },
+
+  async getMetricHistoryCount(
+    accountId: string,
+    metricSlug: string,
+    periodType: string,
+    excludeBackfill = true
+  ): Promise<number> {
+    const conditions = [
+      eq(canonicalMetricHistory.accountId, accountId),
+      eq(canonicalMetricHistory.metricSlug, metricSlug),
+      eq(canonicalMetricHistory.periodType, periodType),
+    ];
+    if (excludeBackfill) {
+      conditions.push(eq(canonicalMetricHistory.isBackfill, false));
+    }
+
+    const [result] = await db
+      .select({ count: count() })
+      .from(canonicalMetricHistory)
+      .where(and(...conditions));
+    return Number(result?.count ?? 0);
   },
 };
