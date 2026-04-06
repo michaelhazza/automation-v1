@@ -5,6 +5,7 @@ import { adapters } from '../adapters/index.js';
 import { integrationConnectionService } from './integrationConnectionService.js';
 import { connectorConfigService } from './connectorConfigService.js';
 import { canonicalDataService } from './canonicalDataService.js';
+import { metricRegistryService } from './metricRegistryService.js';
 import { getProviderRateLimiter } from '../lib/rateLimiter.js';
 
 // ---------------------------------------------------------------------------
@@ -77,7 +78,10 @@ export const connectorPollingService = {
       const dbAccounts = await db
         .select()
         .from(canonicalAccounts)
-        .where(and(eq(canonicalAccounts.connectorConfigId, config.id)));
+        .where(and(
+          eq(canonicalAccounts.connectorConfigId, config.id),
+          eq(canonicalAccounts.organisationId, config.organisationId),
+        ));
 
       let accountsSynced = 0;
 
@@ -108,6 +112,73 @@ export const connectorPollingService = {
               ...r,
               amount: String(r.amount),
             } as never);
+          }
+
+          // 3. Compute derived metrics from raw entity counts
+          if (adapter.ingestion.computeMetrics) {
+            try {
+              const metrics = await adapter.ingestion.computeMetrics(
+                connection as never,
+                dbAccount.externalId,
+                {
+                  contacts: contacts.length,
+                  opportunities: opportunities.length,
+                  conversations: conversations.length,
+                  revenue: revenue.length,
+                }
+              );
+
+              // Preload metric definitions once per account (avoid N+1)
+              const allDefs = await metricRegistryService.getByConnectorType(config.connectorType);
+              const defMap = new Map(allDefs.map(d => [d.metricSlug, d]));
+
+              const isBackfill = config.syncPhase === 'backfill';
+              for (const m of metrics) {
+                // Lifecycle enforcement: only write metrics with active status
+                const metricDef = defMap.get(m.metricSlug);
+                if (metricDef && metricDef.status !== 'active') {
+                  console.warn(`[ConnectorPolling] Skipping ${metricDef.status} metric: ${m.metricSlug}`);
+                  continue;
+                }
+                const metricVersion = metricDef?.version ?? 1;
+
+                await canonicalDataService.upsertMetric({
+                  organisationId: config.organisationId,
+                  accountId: dbAccount.id,
+                  metricSlug: m.metricSlug,
+                  currentValue: String(m.currentValue),
+                  previousValue: m.previousValue != null ? String(m.previousValue) : null,
+                  periodStart: m.periodStart ?? null,
+                  periodEnd: m.periodEnd ?? null,
+                  periodType: m.periodType,
+                  aggregationType: m.aggregationType,
+                  unit: m.unit ?? null,
+                  computedAt: new Date(),
+                  computationTrigger: 'poll',
+                  connectorType: config.connectorType,
+                  metricVersion,
+                  metadata: m.metadata ?? null,
+                });
+
+                await canonicalDataService.appendMetricHistory({
+                  organisationId: config.organisationId,
+                  accountId: dbAccount.id,
+                  metricSlug: m.metricSlug,
+                  periodType: m.periodType,
+                  aggregationType: m.aggregationType,
+                  value: String(m.currentValue),
+                  periodStart: m.periodStart ?? null,
+                  periodEnd: m.periodEnd ?? null,
+                  computedAt: new Date(),
+                  metricVersion,
+                  isBackfill,
+                });
+              }
+            } catch (metricErr) {
+              // Metric computation failure should not fail the sync
+              console.error(`[ConnectorPolling] Metric computation failed for ${dbAccount.externalId}:`,
+                metricErr instanceof Error ? metricErr.message : String(metricErr));
+            }
           }
 
           accountsSynced++;

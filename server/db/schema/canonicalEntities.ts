@@ -128,6 +128,7 @@ export const healthSnapshots = pgTable(
     trend: text('trend').notNull().default('stable').$type<'improving' | 'stable' | 'declining'>(),
     confidence: real('confidence').notNull().default(0.5),
     configVersion: text('config_version'),
+    algorithmVersion: text('algorithm_version'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
@@ -153,6 +154,8 @@ export const anomalyEvents = pgTable(
     direction: text('direction').notNull().default('below').$type<'above' | 'below'>(),
     severity: text('severity').notNull().default('low').$type<'low' | 'medium' | 'high' | 'critical'>(),
     description: text('description'),
+    algorithmVersion: text('algorithm_version'),
+    configVersion: text('config_version'),
     acknowledged: boolean('acknowledged').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -1,27 +1,111 @@
 import { canonicalDataService } from './canonicalDataService.js';
 import { orgMemoryService } from './orgMemoryService.js';
 import { subaccountTagService } from './subaccountTagService.js';
-import { workspaceMemoryService } from './workspaceMemoryService.js';
-import { taskService } from './taskService.js';
+import { orgConfigService, type NormalisationConfig, type ChurnRiskSignal } from './orgConfigService.js';
 import type { SkillExecutionContext } from './skillExecutor.js';
 
 // ---------------------------------------------------------------------------
-// Intelligence Skill Executors
-// Called by skillExecutor.ts for Phase 3 intelligence and cross-subaccount skills
+// Intelligence Skill Executors (v2.0 — config-driven)
+//
+// All intelligence skills read their factor/signal/intervention definitions
+// from the org's template configuration via orgConfigService.
+// No hardcoded metric slugs or domain-specific logic.
 // ---------------------------------------------------------------------------
 
-// Default health score weights (overridable via org config in Phase 4)
-const DEFAULT_WEIGHTS = {
-  pipelineVelocity: 0.30,
-  conversationEngagement: 0.25,
-  contactGrowth: 0.20,
-  revenueTrend: 0.15,
-  platformActivity: 0.10,
-};
+const ALGORITHM_VERSION = '2.0.0';
 
-const DEFAULT_ANOMALY_THRESHOLD = 2.0; // standard deviations
+// ── Normalisation Utilities ───────────────────────────────────────────────
 
-// ── Cross-Subaccount Skills ────────────────────────────────────────────────
+function normaliseValue(raw: number, config: NormalisationConfig): number {
+  const { type, minValue, maxValue } = config;
+  const range = maxValue - minValue;
+  if (range === 0) return 50; // neutral on zero range
+
+  switch (type) {
+    case 'linear': {
+      const clamped = Math.max(minValue, Math.min(maxValue, raw));
+      return Math.round(((clamped - minValue) / range) * 100);
+    }
+    case 'inverse_linear': {
+      const clamped = Math.max(minValue, Math.min(maxValue, raw));
+      return Math.round((1 - (clamped - minValue) / range) * 100);
+    }
+    case 'threshold': {
+      return raw >= maxValue ? 100 : raw <= minValue ? 0 : 50;
+    }
+    case 'percentile': {
+      // Simplified: linear mapping as percentile proxy (full impl needs historical distribution)
+      const clamped = Math.max(minValue, Math.min(maxValue, raw));
+      return Math.round(((clamped - minValue) / range) * 100);
+    }
+    default:
+      return 50;
+  }
+}
+
+// ── Signal Evaluation Functions ───────────────────────────────────────────
+
+async function evaluateSignal(
+  signal: ChurnRiskSignal,
+  accountId: string,
+  organisationId: string
+): Promise<number> {
+  switch (signal.type) {
+    case 'metric_trend': {
+      if (!signal.metricSlug) return 50;
+      const history = await canonicalDataService.getMetricHistoryBySlug(
+        accountId, signal.metricSlug, 'rolling_30d', (signal.periods ?? 3) * 2
+      );
+      if (history.length < (signal.periods ?? 3)) return 50; // insufficient data
+      const periods = signal.periods ?? 3;
+      const recent = history.slice(0, periods);
+      const older = history.slice(periods, periods * 2);
+      if (older.length === 0) return 50;
+      const recentAvg = recent.reduce((s: number, h: { value: string | number }) => s + Number(h.value), 0) / recent.length;
+      const olderAvg = older.reduce((s: number, h: { value: string | number }) => s + Number(h.value), 0) / older.length;
+      if (signal.condition === 'declining_over_periods') {
+        const decline = olderAvg - recentAvg;
+        return Math.min(100, Math.max(0, decline > 0 ? decline * 5 : 0));
+      }
+      return 50;
+    }
+    case 'metric_threshold': {
+      if (!signal.metricSlug) return 50;
+      const metric = await canonicalDataService.getMetricValue(accountId, signal.metricSlug, 'rolling_30d', organisationId);
+      if (!metric) return 50;
+      const val = Number(metric.currentValue);
+      if (signal.condition === 'below_value') {
+        return val < (signal.thresholdValue ?? 50) ? Math.min(100, ((signal.thresholdValue ?? 50) - val) * 2) : 0;
+      }
+      if (signal.condition === 'above_value') {
+        return val > (signal.thresholdValue ?? 50) ? Math.min(100, (val - (signal.thresholdValue ?? 50)) * 2) : 0;
+      }
+      return 50;
+    }
+    case 'staleness': {
+      const account = await canonicalDataService.getAccountById(accountId, organisationId);
+      if (!account?.lastSyncAt) return 100; // no data = max staleness
+      const daysSince = (Date.now() - account.lastSyncAt.getTime()) / (1000 * 60 * 60 * 24);
+      const max = signal.maxDaysInactive ?? 14;
+      return Math.min(100, Math.max(0, (daysSince / max) * 100));
+    }
+    case 'anomaly_count': {
+      const anomalies = await canonicalDataService.getRecentAnomalies(organisationId, 100);
+      const accountAnomalies = anomalies.filter(a => a.accountId === accountId);
+      return Math.min(100, accountAnomalies.length * 20);
+    }
+    case 'health_score_level': {
+      const snapshot = await canonicalDataService.getLatestHealthSnapshot(accountId, organisationId);
+      if (!snapshot) return 50;
+      const threshold = signal.thresholdValue ?? 40;
+      return snapshot.score < threshold ? Math.min(100, (threshold - snapshot.score) * 2) : 0;
+    }
+    default:
+      return 50;
+  }
+}
+
+// ── Cross-Subaccount Skills ───────────────────────────────────────────────
 
 export async function executeQuerySubaccountCohort(
   input: Record<string, unknown>,
@@ -34,7 +118,6 @@ export async function executeQuerySubaccountCohort(
   const tagFilters = (input.tag_filters ?? []) as Array<{ key: string; value: string }>;
   const explicitIds = input.subaccount_ids as string[] | undefined;
 
-  // Resolve matching subaccounts
   let subaccountIds: string[];
   if (explicitIds?.length) {
     subaccountIds = explicitIds;
@@ -46,15 +129,13 @@ export async function executeQuerySubaccountCohort(
     return { accounts: [], summary: 'No subaccounts match the specified filters.' };
   }
 
-  // Get canonical accounts for these subaccounts
   const allAccounts = await canonicalDataService.getAccountsByOrg(context.organisationId);
   const matchingAccounts = allAccounts.filter(a => a.subaccountId && subaccountIds.includes(a.subaccountId));
 
   const results = [];
   for (const account of matchingAccounts) {
     const healthSnapshot = await canonicalDataService.getLatestHealthSnapshot(account.id, context.organisationId);
-    const contactMetrics = await canonicalDataService.getContactMetrics(account.id, undefined, context.organisationId);
-    const oppMetrics = await canonicalDataService.getOpportunityMetrics(account.id, context.organisationId);
+    const metrics = await canonicalDataService.getMetricsByAccount(account.id, context.organisationId);
 
     results.push({
       accountId: account.id,
@@ -62,10 +143,7 @@ export async function executeQuerySubaccountCohort(
       subaccountId: account.subaccountId,
       healthScore: healthSnapshot?.score ?? null,
       healthTrend: healthSnapshot?.trend ?? null,
-      contactGrowthRate: contactMetrics.growthRate,
-      pipelineValue: oppMetrics.pipelineValue,
-      openDeals: oppMetrics.open,
-      staleDeals: oppMetrics.staleDeals,
+      metrics: metrics.map(m => ({ slug: m.metricSlug, value: Number(m.currentValue), unit: m.unit })),
       lastSyncAt: account.lastSyncAt?.toISOString() ?? null,
     });
   }
@@ -90,7 +168,6 @@ export async function executeReadOrgInsights(
   const limit = (input.limit as number) ?? 10;
 
   if (semanticQuery) {
-    // Semantic search
     try {
       const { generateEmbedding } = await import('../lib/embeddings.js');
       const embedding = await generateEmbedding(semanticQuery);
@@ -108,11 +185,10 @@ export async function executeReadOrgInsights(
         return { insights: results, searchType: 'semantic', query: semanticQuery };
       }
     } catch (err) {
-      console.error('[IntelligenceSkills] Semantic search failed, falling back to list retrieval:', err instanceof Error ? err.message : err);
+      console.error('[IntelligenceSkills] Semantic search failed:', err instanceof Error ? err.message : err);
     }
   }
 
-  // List-based retrieval
   const entries = await orgMemoryService.listEntries(context.organisationId, {
     entryType: input.entry_type as string | undefined,
     scopeTagKey: input.scope_tag_key as string | undefined,
@@ -151,7 +227,7 @@ export async function executeWriteOrgInsight(
   return { success: true, entryId: entry.id, qualityScore: entry.qualityScore };
 }
 
-// ── Intelligence Skills ────────────────────────────────────────────────────
+// ── Intelligence Skills (config-driven) ───────────────────────────────────
 
 export async function executeComputeHealthScore(
   input: Record<string, unknown>,
@@ -163,46 +239,68 @@ export async function executeComputeHealthScore(
   const account = await canonicalDataService.getAccountById(accountId, context.organisationId);
   if (!account) return { error: `Account ${accountId} not found` };
 
-  // Gather metrics
-  const contactMetrics = await canonicalDataService.getContactMetrics(accountId, undefined, context.organisationId);
-  const oppMetrics = await canonicalDataService.getOpportunityMetrics(accountId, context.organisationId);
-  const convoMetrics = await canonicalDataService.getConversationMetrics(accountId, context.organisationId);
-  const revenueMetrics = await canonicalDataService.getRevenueMetrics(accountId, undefined, context.organisationId);
+  // Load factor definitions from org config
+  const factors = await orgConfigService.getHealthScoreFactors(context.organisationId);
+  const configVersion = await orgConfigService.computeConfigVersion(context.organisationId);
 
-  // Compute factor scores (0-100 each)
-  const factors = [];
+  // Cold start check
+  const coldStartConfig = await orgConfigService.getColdStartConfig(context.organisationId);
+  const sampleMetric = factors[0];
+  if (sampleMetric) {
+    const historyCount = await canonicalDataService.getMetricHistoryCount(
+      accountId, sampleMetric.metricSlug, sampleMetric.periodType ?? 'rolling_30d'
+    );
+    if (historyCount < coldStartConfig.minimumDataPoints && !coldStartConfig.allowHeuristicScoring) {
+      return {
+        accountId,
+        score: null,
+        status: 'cold_start',
+        message: `Building baseline... (${historyCount}/${coldStartConfig.minimumDataPoints} data points)`,
+        confidence: 0,
+      };
+    }
+  }
 
-  // Pipeline velocity: based on open deals and stale deal ratio
-  const pipelineScore = oppMetrics.open > 0
-    ? Math.max(0, 100 - (oppMetrics.staleDeals / oppMetrics.open) * 100)
-    : 50; // neutral if no pipeline
-  factors.push({ factor: 'pipeline_velocity', score: Math.round(pipelineScore), weight: DEFAULT_WEIGHTS.pipelineVelocity });
+  // Compute each factor from canonical_metrics
+  const factorResults: Array<{ factor: string; score: number; weight: number; metricSlug: string; rawValue: number | null; direction: 'positive' | 'negative' | 'neutral' }> = [];
+  let missingFactors: string[] = [];
+  let factorsWithData = 0;
 
-  // Conversation engagement: based on active conversation ratio
-  const convoScore = convoMetrics.total > 0
-    ? (convoMetrics.active / convoMetrics.total) * 100
-    : 50;
-  factors.push({ factor: 'conversation_engagement', score: Math.round(convoScore), weight: DEFAULT_WEIGHTS.conversationEngagement });
+  for (const factor of factors) {
+    const periodType = factor.periodType ?? 'rolling_30d';
+    const metric = await canonicalDataService.getMetricValue(accountId, factor.metricSlug, periodType, context.organisationId);
 
-  // Contact growth: based on growth rate
-  const contactScore = Math.min(100, Math.max(0, 50 + contactMetrics.growthRate));
-  factors.push({ factor: 'contact_growth', score: Math.round(contactScore), weight: DEFAULT_WEIGHTS.contactGrowth });
+    if (!metric) {
+      missingFactors.push(factor.label);
+      console.warn(`[IntelligenceSkills] metric_missing_runtime: ${factor.metricSlug} for account ${accountId}`);
+      continue;
+    }
 
-  // Revenue trend: simplified — positive revenue = healthy
-  const revenueScore = revenueMetrics.totalRevenue > 0 ? 70 : 30;
-  factors.push({ factor: 'revenue_trend', score: revenueScore, weight: DEFAULT_WEIGHTS.revenueTrend });
+    const rawValue = Number(metric.currentValue);
+    const normalisedScore = normaliseValue(rawValue, factor.normalisation);
+    factorsWithData++;
 
-  // Platform activity: based on data freshness
-  const daysSinceSync = account.lastSyncAt
-    ? (Date.now() - account.lastSyncAt.getTime()) / (1000 * 60 * 60 * 24)
-    : 999;
-  const activityScore = daysSinceSync < 1 ? 100 : daysSinceSync < 7 ? 70 : daysSinceSync < 30 ? 40 : 10;
-  factors.push({ factor: 'platform_activity', score: activityScore, weight: DEFAULT_WEIGHTS.platformActivity });
+    factorResults.push({
+      factor: factor.label,
+      score: normalisedScore,
+      weight: factor.weight,
+      metricSlug: factor.metricSlug,
+      rawValue,
+      direction: normalisedScore >= 60 ? 'positive' : normalisedScore <= 40 ? 'negative' : 'neutral',
+    });
+  }
 
-  // Compute weighted composite
-  const compositeScore = Math.round(factors.reduce((sum, f) => sum + f.score * f.weight, 0));
+  if (factorResults.length === 0) {
+    return { accountId, score: null, status: 'no_data', message: 'No metrics available for scoring', confidence: 0 };
+  }
 
-  // Determine trend from history
+  // Re-normalise weights to sum to 1.0 (accounting for missing factors)
+  const totalWeight = factorResults.reduce((s, f) => s + f.weight, 0);
+  const compositeScore = totalWeight > 0
+    ? Math.round(factorResults.reduce((sum, f) => sum + f.score * (f.weight / totalWeight), 0))
+    : 0;
+
+  // Trend from health snapshot history
   const history = await canonicalDataService.getHealthHistory(accountId, 5, context.organisationId);
   let trend: 'improving' | 'stable' | 'declining' = 'stable';
   if (history.length >= 2) {
@@ -212,32 +310,40 @@ export async function executeComputeHealthScore(
     else if (avgRecent < avgOlder - 5) trend = 'declining';
   }
 
-  // Compute confidence based on data completeness
-  let dataPoints = 0;
-  if (contactMetrics.total > 0) dataPoints++;
-  if (oppMetrics.total > 0) dataPoints++;
-  if (convoMetrics.total > 0) dataPoints++;
-  if (revenueMetrics.transactionCount > 0) dataPoints++;
-  if (daysSinceSync < 7) dataPoints++;
-  const confidence = Math.min(1.0, dataPoints / 5);
+  // Confidence: ratio of factors with data
+  const confidence = Math.min(1.0, factorsWithData / factors.length);
 
   // Write snapshot
   const snapshot = await canonicalDataService.writeHealthSnapshot({
     organisationId: context.organisationId,
     accountId,
     score: compositeScore,
-    factorBreakdown: factors,
+    factorBreakdown: factorResults.map(f => ({ factor: f.factor, score: f.score, weight: f.weight })),
     trend,
     confidence,
+    configVersion,
+    algorithmVersion: ALGORITHM_VERSION,
   });
+
+  // Top factors for explanation
+  const topFactors = [...factorResults]
+    .sort((a, b) => Math.abs(b.score * b.weight - 50 * b.weight) - Math.abs(a.score * a.weight - 50 * a.weight))
+    .slice(0, 3);
 
   return {
     accountId,
     score: compositeScore,
     trend,
     confidence,
-    factors,
+    factors: factorResults.map(f => ({ factor: f.factor, score: f.score, weight: f.weight })),
     snapshotId: snapshot.id,
+    explanation: {
+      topFactors: topFactors.map(f => ({ factor: f.factor, contribution: Math.round(f.score * f.weight), direction: f.direction })),
+      confidenceReasoning: missingFactors.length > 0
+        ? `${factorsWithData} of ${factors.length} configured factors had data. Missing: ${missingFactors.join(', ')}.`
+        : `All ${factors.length} configured factors had data.`,
+      dataQuality: 'fresh' as const,
+    },
   };
 }
 
@@ -246,48 +352,88 @@ export async function executeDetectAnomaly(
   context: SkillExecutionContext
 ): Promise<unknown> {
   const accountId = input.account_id as string;
-  const metricName = input.metric_name as string;
-  const currentValue = Number(input.current_value);
+  const metricSlug = input.metric_slug as string ?? input.metric_name as string;
 
-  if (!accountId || !metricName || isNaN(currentValue)) {
-    return { error: 'account_id, metric_name, and current_value are required' };
+  if (!accountId || !metricSlug) {
+    return { error: 'account_id and metric_slug are required' };
   }
 
-  // Get historical baseline from health snapshots
-  const history = await canonicalDataService.getHealthHistory(accountId, 30, context.organisationId);
-  if (history.length < 3) {
+  // Load anomaly config from org config
+  const anomalyConfig = await orgConfigService.getAnomalyConfig(context.organisationId);
+  const configVersion = await orgConfigService.computeConfigVersion(context.organisationId);
+
+  const metricOverride = anomalyConfig.metricOverrides[metricSlug];
+  const threshold = metricOverride?.threshold ?? anomalyConfig.defaultThreshold;
+  const windowDays = metricOverride?.windowDays ?? anomalyConfig.defaultWindowDays;
+
+  // Get current metric value
+  const currentMetric = await canonicalDataService.getMetricValue(accountId, metricSlug, 'rolling_30d', context.organisationId);
+  if (!currentMetric) {
+    return { anomalyDetected: false, reason: `Metric ${metricSlug} not found for account`, currentValue: null };
+  }
+  const currentValue = Number(currentMetric.currentValue);
+
+  // Get metric history for baseline
+  const history = await canonicalDataService.getMetricHistoryBySlug(
+    accountId, metricSlug, 'rolling_30d',
+    Math.max(windowDays, anomalyConfig.minimumDataPoints)
+  );
+
+  if (history.length < anomalyConfig.minimumDataPoints) {
     return {
       anomalyDetected: false,
-      reason: 'Insufficient history for baseline (need at least 3 snapshots)',
+      reason: `Insufficient history (${history.length}/${anomalyConfig.minimumDataPoints} data points)`,
       currentValue,
       baselineValue: null,
     };
   }
 
-  // Compute baseline mean and standard deviation
-  const values = history.map(h => h.score);
+  // Compute baseline
+  const values = history.map(h => Number(h.value));
   const mean = values.reduce((s, v) => s + v, 0) / values.length;
   const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
   const stdDev = Math.sqrt(variance);
 
   const deviation = stdDev > 0 ? Math.abs(currentValue - mean) / stdDev : 0;
   const deviationPercent = mean > 0 ? ((currentValue - mean) / mean) * 100 : 0;
-  const direction = currentValue > mean ? 'above' : 'below';
+  const direction: 'above' | 'below' = currentValue > mean ? 'above' : 'below';
 
-  const anomalyDetected = deviation >= DEFAULT_ANOMALY_THRESHOLD;
+  const anomalyDetected = deviation >= threshold;
 
   let severity: 'low' | 'medium' | 'high' | 'critical' = 'low';
-  if (deviation >= 4) severity = 'critical';
-  else if (deviation >= 3) severity = 'high';
-  else if (deviation >= 2) severity = 'medium';
+  if (deviation >= threshold * 2) severity = 'critical';
+  else if (deviation >= threshold * 1.5) severity = 'high';
+  else if (deviation >= threshold) severity = 'medium';
 
   if (anomalyDetected) {
-    const description = `${metricName} is ${Math.abs(deviationPercent).toFixed(1)}% ${direction} baseline (${currentValue} vs baseline ${mean.toFixed(1)})`;
+    const description = `${metricSlug} is ${Math.abs(deviationPercent).toFixed(1)}% ${direction} baseline (${currentValue} vs baseline ${mean.toFixed(1)})`;
+
+    // Dedup: check for existing unacknowledged anomaly within dedup window
+    const dedupWindowMinutes = anomalyConfig.dedupWindowMinutes ?? 60;
+    const dedupCutoff = new Date(Date.now() - dedupWindowMinutes * 60 * 1000);
+    const recentAnomalies = await canonicalDataService.getRecentAnomalies(context.organisationId, 100);
+    const isDuplicate = recentAnomalies.some(a =>
+      a.accountId === accountId &&
+      a.metricName === metricSlug &&
+      !a.acknowledged &&
+      a.createdAt >= dedupCutoff
+    );
+
+    if (isDuplicate) {
+      return {
+        anomalyDetected: true,
+        deduplicated: true,
+        severity,
+        currentValue,
+        baselineValue: Math.round(mean * 10) / 10,
+        message: `Anomaly already recorded within ${dedupWindowMinutes}m window`,
+      };
+    }
 
     await canonicalDataService.writeAnomalyEvent({
       organisationId: context.organisationId,
       accountId,
-      metricName,
+      metricName: metricSlug,
       currentValue,
       baselineValue: mean,
       deviationPercent: Math.round(deviationPercent * 10) / 10,
@@ -305,6 +451,11 @@ export async function executeDetectAnomaly(
       currentValue,
       baselineValue: Math.round(mean * 10) / 10,
       description,
+      explanation: {
+        topFactors: [{ factor: metricSlug, contribution: Math.round(deviation * 10), direction: direction === 'above' ? 'positive' : 'negative' }],
+        confidenceReasoning: `Baseline computed from ${history.length} data points over ${windowDays} days. Threshold: ${threshold}σ.`,
+        dataQuality: 'fresh' as const,
+      },
     };
   }
 
@@ -323,59 +474,56 @@ export async function executeComputeChurnRisk(
   const accountId = input.account_id as string;
   if (!accountId) return { error: 'account_id is required' };
 
-  // Get recent health snapshot history
-  const history = await canonicalDataService.getHealthHistory(accountId, 10, context.organisationId);
-  const oppMetrics = await canonicalDataService.getOpportunityMetrics(accountId, context.organisationId);
-  const convoMetrics = await canonicalDataService.getConversationMetrics(accountId, context.organisationId);
+  // Load signal definitions from org config
+  const signalDefs = await orgConfigService.getChurnRiskSignals(context.organisationId);
+  const configVersion = await orgConfigService.computeConfigVersion(context.organisationId);
 
-  const signals: Array<{ signal: string; score: number; weight: number }> = [];
+  const signalResults: Array<{ signal: string; score: number; weight: number; contribution: number }> = [];
 
-  // Signal 1: Declining health trajectory (compare last 3 to previous 3)
-  if (history.length >= 6) {
-    const recentAvg = history.slice(0, 3).reduce((s, h) => s + h.score, 0) / 3;
-    const olderAvg = history.slice(3, 6).reduce((s, h) => s + h.score, 0) / 3;
-    const decline = olderAvg - recentAvg;
-    signals.push({ signal: 'health_trajectory', score: Math.min(100, Math.max(0, decline * 5)), weight: 0.30 });
-  } else {
-    signals.push({ signal: 'health_trajectory', score: 50, weight: 0.30 }); // neutral with insufficient data
+  for (const signal of signalDefs) {
+    const score = await evaluateSignal(signal, accountId, context.organisationId);
+    const contribution = Math.round(score * signal.weight);
+    signalResults.push({ signal: signal.signalSlug, score, weight: signal.weight, contribution });
   }
 
-  // Signal 2: Pipeline stagnation
-  const stagnationScore = oppMetrics.open > 0
-    ? Math.min(100, (oppMetrics.staleDeals / oppMetrics.open) * 100)
-    : 30;
-  signals.push({ signal: 'pipeline_stagnation', score: Math.round(stagnationScore), weight: 0.25 });
+  const riskScore = Math.round(signalResults.reduce((sum, s) => sum + s.score * s.weight, 0));
 
-  // Signal 3: Conversation engagement decline
-  const engagementScore = convoMetrics.total > 0
-    ? Math.min(100, Math.max(0, 100 - (convoMetrics.active / convoMetrics.total) * 100))
-    : 50;
-  signals.push({ signal: 'engagement_decline', score: Math.round(engagementScore), weight: 0.25 });
+  // Map risk score to intervention types from config (ordered by severity)
+  const interventionTypes = await orgConfigService.getInterventionTypes(context.organisationId);
+  let interventionType = 'none';
+  if (interventionTypes.length > 0) {
+    // Use config-defined intervention types: highest gate-level first for high risk
+    const reviewGated = interventionTypes.filter(t => t.gateLevel === 'review');
+    const autoGated = interventionTypes.filter(t => t.gateLevel === 'auto');
+    if (riskScore >= 76 && reviewGated.length > 0) interventionType = reviewGated[0].slug;
+    else if (riskScore >= 51 && reviewGated.length > 0) interventionType = reviewGated[Math.min(1, reviewGated.length - 1)].slug;
+    else if (riskScore >= 26 && autoGated.length > 0) interventionType = autoGated[0].slug;
+  } else {
+    // Fallback when no config
+    if (riskScore >= 76) interventionType = 'urgent_escalation';
+    else if (riskScore >= 51) interventionType = 'active_intervention';
+    else if (riskScore >= 26) interventionType = 'early_warning';
+  }
 
-  // Signal 4: Low health score
-  const latestHealth = history[0]?.score ?? 50;
-  const lowHealthScore = Math.min(100, Math.max(0, 100 - latestHealth));
-  signals.push({ signal: 'low_health', score: lowHealthScore, weight: 0.20 });
+  const topDrivers = [...signalResults].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
 
-  // Compute weighted risk score
-  const riskScore = Math.round(signals.reduce((sum, s) => sum + s.score * s.weight, 0));
-
-  // Determine intervention type
-  let interventionType: string;
-  if (riskScore >= 76) interventionType = 'urgent_escalation';
-  else if (riskScore >= 51) interventionType = 'active_intervention';
-  else if (riskScore >= 26) interventionType = 'early_warning';
-  else interventionType = 'none';
-
-  // Top risk drivers
-  const topDrivers = [...signals].sort((a, b) => b.score * b.weight - a.score * a.weight).slice(0, 3);
+  const latestSnapshot = await canonicalDataService.getLatestHealthSnapshot(accountId, context.organisationId);
 
   return {
     accountId,
     riskScore,
     interventionType,
-    drivers: topDrivers.map(d => ({ signal: d.signal, contribution: Math.round(d.score * d.weight) })),
-    latestHealthScore: latestHealth,
+    drivers: topDrivers.map(d => ({ signal: d.signal, contribution: d.contribution })),
+    latestHealthScore: latestSnapshot?.score ?? null,
+    explanation: {
+      topFactors: topDrivers.map(d => ({
+        factor: d.signal,
+        contribution: d.contribution,
+        direction: d.score > 50 ? 'negative' as const : 'positive' as const,
+      })),
+      confidenceReasoning: `Evaluated ${signalResults.length} risk signals. Risk score: ${riskScore}/100.`,
+      dataQuality: 'fresh' as const,
+    },
   };
 }
 
@@ -390,12 +538,10 @@ export async function executeGeneratePortfolioReport(
   const reportingPeriodDays = (input.reporting_period_days as number) ?? 7;
   const format = (input.format as string) ?? 'structured';
 
-  // Gather portfolio data
   const accounts = await canonicalDataService.getAccountsByOrg(context.organisationId);
   const anomalies = await canonicalDataService.getRecentAnomalies(context.organisationId, 50);
   const orgInsights = await orgMemoryService.getInsightsForPrompt(context.organisationId);
 
-  // Get health snapshots for all accounts
   const accountHealthData = [];
   for (const account of accounts) {
     const snapshot = await canonicalDataService.getLatestHealthSnapshot(account.id, context.organisationId);
@@ -408,7 +554,6 @@ export async function executeGeneratePortfolioReport(
     });
   }
 
-  // Compute portfolio summary metrics
   const scoredAccounts = accountHealthData.filter(a => a.healthScore !== null);
   const avgHealth = scoredAccounts.length > 0
     ? Math.round(scoredAccounts.reduce((s, a) => s + (a.healthScore ?? 0), 0) / scoredAccounts.length)
@@ -416,6 +561,7 @@ export async function executeGeneratePortfolioReport(
 
   const declining = accountHealthData.filter(a => a.trend === 'declining');
   const improving = accountHealthData.filter(a => a.trend === 'improving');
+  const coldStart = accountHealthData.filter(a => a.healthScore === null);
   const criticalAnomalies = anomalies.filter(a => a.severity === 'critical' || a.severity === 'high');
 
   return {
@@ -426,6 +572,7 @@ export async function executeGeneratePortfolioReport(
     portfolioOverview: {
       totalAccounts: accounts.length,
       scoredAccounts: scoredAccounts.length,
+      coldStartAccounts: coldStart.length,
       averageHealthScore: avgHealth,
       improvingCount: improving.length,
       decliningCount: declining.length,
@@ -448,7 +595,18 @@ export async function executeGeneratePortfolioReport(
       accountId: a.accountId,
       healthScore: a.healthScore,
     })),
+    baselineBuilding: coldStart.map(a => ({
+      displayName: a.displayName,
+      accountId: a.accountId,
+    })),
     orgInsights: orgInsights ?? 'No org-level insights accumulated yet.',
+    explanation: {
+      topFactors: declining.length > 0
+        ? [{ factor: 'Declining accounts', contribution: declining.length, direction: 'negative' as const }]
+        : [{ factor: 'Portfolio stable', contribution: 0, direction: 'positive' as const }],
+      confidenceReasoning: `${scoredAccounts.length} of ${accounts.length} accounts scored. ${coldStart.length} building baseline.`,
+      dataQuality: 'fresh' as const,
+    },
   };
 }
 
@@ -456,30 +614,45 @@ export async function executeTriggerAccountIntervention(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  // This skill is HITL-gated (gate level 'review' in actionRegistry)
-  // The gate enforcement happens in proposeReviewGatedAction before this executor runs
-  // By the time we're here, approval has been granted
-
   const accountId = input.account_id as string;
-  const interventionType = input.intervention_type as string;
+  const interventionTypeSlug = input.intervention_type as string;
   const evidenceSummary = input.evidence_summary as string;
   const recommendedAction = input.recommended_action as string | undefined;
   const urgency = input.urgency as string | undefined;
 
-  if (!accountId || !interventionType || !evidenceSummary) {
+  if (!accountId || !interventionTypeSlug || !evidenceSummary) {
     return { error: 'account_id, intervention_type, and evidence_summary are required' };
   }
 
-  // Record the intervention
+  // Validate intervention type exists in org config
+  const interventionTypes = await orgConfigService.getInterventionTypes(context.organisationId);
+  const interventionDef = interventionTypes.find(t => t.slug === interventionTypeSlug);
+
+  if (!interventionDef && interventionTypes.length > 0) {
+    return { error: `Unknown intervention type: ${interventionTypeSlug}. Available: ${interventionTypes.map(t => t.slug).join(', ')}` };
+  }
+
+  const actionType = interventionDef?.action ?? 'internal_notification';
+
+  // Only internal_notification is auto-executed; all others are pending implementation
+  const isImplemented = actionType === 'internal_notification';
+  const status = isImplemented ? 'executed' : 'pending_implementation';
+
   return {
-    success: true,
-    interventionType,
+    success: isImplemented,
+    interventionType: interventionTypeSlug,
     accountId,
-    status: 'executed',
-    executedAt: new Date().toISOString(),
+    status,
+    executedAt: isImplemented ? new Date().toISOString() : null,
     evidence: evidenceSummary,
     recommendedAction: recommendedAction ?? null,
     urgency: urgency ?? 'medium',
-    note: 'Intervention executed after HITL approval. The specific execution logic depends on the connector and intervention type — this will be extended in Phase 4 with connector-specific execution paths.',
+    actionType,
+    implementationNote: isImplemented ? null : `Action type '${actionType}' requires connector-specific implementation. Intervention recorded but not dispatched.`,
+    explanation: {
+      topFactors: [{ factor: `Intervention: ${interventionDef?.label ?? interventionTypeSlug}`, contribution: 1, direction: 'negative' as const }],
+      confidenceReasoning: evidenceSummary,
+      dataQuality: 'fresh' as const,
+    },
   };
 }
