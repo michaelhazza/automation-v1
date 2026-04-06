@@ -79,6 +79,54 @@ Apply per-user rate limits to prevent spam:
 
 Use existing rate-limiting middleware or add `express-rate-limit` scoped per route group.
 
+Additionally, define org-level caps as a shared abuse prevention layer. Per-user limits protect against individual misuse; per-org caps protect against compromised API keys or runaway automation flooding a single tenant's resources.
+
+### CC-6: Transaction Boundaries
+
+**All multi-step writes MUST run inside a DB transaction.** This applies to:
+- Goal deletion cascade (delete goal + cascade to children)
+- Inbox bulk operations (mark-read across multiple entities)
+- Attachment upload (file storage + DB row — if DB insert fails, clean up file)
+- Webhook callback processing (run status update + task updates)
+- Agent prompt rollback (create new revision + update agent)
+- Feedback upsert with any side-effect aggregation
+
+Pattern: use Drizzle's `db.transaction()` wrapper. If any step fails, the entire operation rolls back. For file operations (attachments), use a cleanup-on-failure pattern since files can't be transactionally rolled back.
+
+### CC-7: Agent Run State Enum (Canonical)
+
+All features that reference agent run status MUST use this canonical enum. No ad-hoc status strings.
+
+```ts
+type AgentRunStatus =
+  | 'queued'               // waiting to execute
+  | 'running'              // actively executing
+  | 'waiting_callback'     // webhook adapter: sent request, awaiting async response
+  | 'completed'            // finished successfully
+  | 'failed'               // execution error
+  | 'failed_timeout'       // exceeded timeout
+  | 'failed_retry_exhausted' // all retries consumed
+  | 'budget_exceeded'      // stopped by budget enforcement
+  | 'cancelled';           // manually cancelled by operator
+```
+
+Define this as a shared constant in `server/config/enums.ts` or similar. All services, routes, and frontend must reference this single source of truth.
+
+### CC-8: System Invariants
+
+These are the non-negotiable architectural rules for all features:
+
+1. **All writes are transactional** — multi-step mutations use `db.transaction()`
+2. **All reads are tenant-scoped** — every query includes `organisationId` (and `subaccountId` where applicable)
+3. **All external calls are idempotent** — webhook invocations, callbacks, and retries are safe to replay
+4. **All async flows are retry-safe** — failed jobs can be re-queued without side effects
+5. **Every async system defines failure modes before success path** — timeout, retry exhaustion, and callback SLA breach must have explicit handling
+6. **No audit events for read operations** — only log writes. Batch low-value events if volume becomes a concern later.
+
+### CC-9: WebSocket Event Deduplication
+
+All WebSocket events already include `eventId` (UUID) in the envelope (see `server/websocket/emitters.ts`). Clients MUST deduplicate using `eventId` to handle reconnection replays and duplicate deliveries. Frontend should maintain a small in-memory set of recent eventIds (last 100) and skip events already seen.
+
 ---
 
 ## Feature 1: Goal Hierarchy System
@@ -400,7 +448,23 @@ Aggregating across 4 tables live will degrade as data grows. Two-phase approach:
 
 **Phase 1 (launch):** Live queries with strict limits. Each source query is capped: max 50 tasks, 50 reviews, 20 failed runs, 10 alerts. Combined, sorted by updatedAt DESC, paginated (cursor-based). This is acceptable for moderate scale.
 
-**Phase 2 (when needed):** Materialised `inbox_items` table populated by write-time triggers. When a task enters inbox status, a review item is created, or a run fails, insert/upsert a row into `inbox_items`. This gives O(1) reads. Migrate when query latency exceeds 200ms p95.
+**Phase 2 (when needed):** Materialised `inbox_items` table populated by write-time triggers. Migrate when query latency exceeds 200ms p95.
+
+Phase 2 trigger definitions (define now, implement later):
+
+| Source Event | Action on `inbox_items` |
+|-------------|------------------------|
+| Task status → 'inbox' | INSERT row (type=task, entityId=taskId) |
+| Review item created | INSERT row (type=review_item, entityId=reviewItemId) |
+| Agent run → failed/timeout/budget_exceeded | INSERT row (type=failed_run, entityId=runId) |
+| Cost aggregate > 75% budget | INSERT row (type=budget_alert, entityId=orgId, dedup on org+month) |
+| Task status leaves 'inbox' | UPDATE row status → 'resolved' |
+| Review item approved/rejected | UPDATE row status → 'resolved' |
+| Failed run retried | UPDATE row status → 'resolved' |
+| User archives item | UPDATE row isArchived = true |
+
+Deduplication: unique on `(entityType, entityId)`. On conflict, update `updatedAt`.
+Read state: JOIN with `inbox_read_states` on `(entityType, entityId, userId)`.
 
 **Inbox priority ordering (from review feedback):**
 Default sort order:
@@ -835,6 +899,23 @@ Callback endpoint validates `callbackToken` from request header, updates run sta
 - If `expectCallback` is true, set run status to `waiting_callback` and return
 - If sync response, process immediately
 
+**Webhook failure state machine (explicit):**
+
+```
+queued → running (webhook POST sent)
+  ├─ sync response 2xx → completed
+  ├─ sync response 4xx/5xx → retry (up to retryCount with exponential backoff + jitter)
+  │   └─ retries exhausted → failed_retry_exhausted
+  ├─ timeout (no response within timeoutMs) → retry
+  │   └─ retries exhausted → failed_timeout
+  └─ expectCallback = true:
+      └─ running → waiting_callback
+          ├─ callback received within 15 min → completed/failed (per callback payload)
+          └─ no callback within 15 min → failed_timeout (SLA breach)
+```
+
+**Callback SLA enforcement:** Schedule a pg-boss delayed job at webhook send time with 15-minute delay. Job checks if run is still `waiting_callback` — if so, transition to `failed_timeout`. If run is already completed/failed, no-op.
+
 ### Frontend Changes
 
 **Modify agent create/edit — when modelProvider = 'http_webhook':**
@@ -962,8 +1043,10 @@ CREATE TABLE task_attachments (
   thumbnail_key TEXT,
   uploaded_by UUID REFERENCES users(id),
   uploaded_by_agent_id UUID REFERENCES agents(id),
+  idempotency_key TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at TIMESTAMPTZ
+  deleted_at TIMESTAMPTZ,
+  UNIQUE(task_id, idempotency_key)
 );
 
 CREATE INDEX task_attach_task_idx ON task_attachments(task_id);
@@ -1151,7 +1234,7 @@ Allow organisations to set a logo and brand colour that appears in the nav bar a
 
 **Modify org settings page:**
 - "Branding" section with:
-  - Logo upload with preview (accept PNG, JPEG, SVG, max 2MB)
+  - Logo upload with preview (accept PNG, JPEG, WebP, GIF — max 2MB, no SVG)
   - Brand colour picker (hex input + colour swatch)
   - "Remove logo" button
   - Preview of how the nav will look
