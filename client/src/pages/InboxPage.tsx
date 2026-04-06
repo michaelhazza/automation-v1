@@ -1,10 +1,18 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type InboxTab = 'all' | 'tasks' | 'reviews' | 'failed_runs';
+
+type SortOption = 'recent' | 'oldest' | 'priority' | 'type' | 'subaccount';
+
+interface SortConfig {
+  label: string;
+  sortBy: string;
+  sortDirection?: string;
+}
 
 interface InboxItem {
   id: string;
@@ -19,6 +27,7 @@ interface InboxItem {
   subaccountId: string;
   subaccountName?: string;
   agentRunId?: string | null;
+  priority?: string | null;
 }
 
 interface InboxCounts {
@@ -26,6 +35,13 @@ interface InboxCounts {
   tasks: number;
   reviews: number;
   failed_runs: number;
+}
+
+interface Subaccount {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -67,6 +83,51 @@ const TAB_CONFIG: { key: InboxTab; label: string }[] = [
   { key: 'failed_runs', label: 'Failed Runs' },
 ];
 
+const SORT_OPTIONS: Record<SortOption, SortConfig> = {
+  recent: { label: 'Most Recent', sortBy: 'updatedAt', sortDirection: 'desc' },
+  oldest: { label: 'Oldest First', sortBy: 'updatedAt', sortDirection: 'asc' },
+  priority: { label: 'Priority', sortBy: 'priority', sortDirection: 'asc' },
+  type: { label: 'Type', sortBy: 'type', sortDirection: undefined },
+  subaccount: { label: 'Subaccount', sortBy: 'subaccount', sortDirection: undefined },
+};
+
+const SORT_KEYS: SortOption[] = ['recent', 'oldest', 'priority', 'type', 'subaccount'];
+
+// ── Colour from name hash ───────────────────────────────────────────────────
+
+const SUBACCOUNT_PALETTE = [
+  { dot: 'bg-indigo-500', badge: 'bg-indigo-50 text-indigo-700 ring-indigo-200' },
+  { dot: 'bg-emerald-500', badge: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+  { dot: 'bg-amber-500', badge: 'bg-amber-50 text-amber-700 ring-amber-200' },
+  { dot: 'bg-rose-500', badge: 'bg-rose-50 text-rose-700 ring-rose-200' },
+  { dot: 'bg-cyan-500', badge: 'bg-cyan-50 text-cyan-700 ring-cyan-200' },
+  { dot: 'bg-violet-500', badge: 'bg-violet-50 text-violet-700 ring-violet-200' },
+  { dot: 'bg-orange-500', badge: 'bg-orange-50 text-orange-700 ring-orange-200' },
+  { dot: 'bg-teal-500', badge: 'bg-teal-50 text-teal-700 ring-teal-200' },
+  { dot: 'bg-pink-500', badge: 'bg-pink-50 text-pink-700 ring-pink-200' },
+  { dot: 'bg-sky-500', badge: 'bg-sky-50 text-sky-700 ring-sky-200' },
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function getSubaccountColour(name: string) {
+  return SUBACCOUNT_PALETTE[hashString(name) % SUBACCOUNT_PALETTE.length];
+}
+
+// ── Unread left-border colour by type ───────────────────────────────────────
+
+const UNREAD_BORDER: Record<string, string> = {
+  task: 'border-l-indigo-500',
+  review: 'border-l-amber-500',
+  failed_run: 'border-l-red-500',
+};
+
 // ── Shimmer loading skeleton ─────────────────────────────────────────────────
 
 function LoadingSkeleton() {
@@ -102,6 +163,31 @@ function EmptyState({ tab }: { tab: InboxTab }) {
   );
 }
 
+// ── Subaccount group header ─────────────────────────────────────────────────
+
+function SubaccountGroupHeader({ name }: { name: string }) {
+  const colour = getSubaccountColour(name);
+  return (
+    <div className="flex items-center gap-2 py-2 px-1 mt-3 first:mt-0">
+      <span className={`w-2.5 h-2.5 rounded-full ${colour.dot} shrink-0`} />
+      <span className="text-[12px] font-semibold text-slate-500 uppercase tracking-wider">{name}</span>
+      <div className="flex-1 h-px bg-slate-100" />
+    </div>
+  );
+}
+
+// ── Subaccount badge pill ───────────────────────────────────────────────────
+
+function SubaccountBadge({ name }: { name: string }) {
+  const colour = getSubaccountColour(name);
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium ring-1 ${colour.badge}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${colour.dot}`} />
+      {name}
+    </span>
+  );
+}
+
 // ── Main component ───────────────────────────────────────────────────────────
 
 export default function InboxPage({ user: _user }: { user: { id: string; role: string } }) {
@@ -120,8 +206,22 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
   const [markAllLoading, setMarkAllLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // New filter/sort state
+  const [subaccounts, setSubaccounts] = useState<Subaccount[]>([]);
+  const [selectedSubaccountId, setSelectedSubaccountId] = useState<string>('');
+  const [sortOption, setSortOption] = useState<SortOption>('recent');
+
   // Whether this is org-wide or per-subaccount
   const isOrgWide = !subaccountId;
+
+  // ── Fetch subaccounts for filter (org-wide only) ─────────────────────────
+
+  useEffect(() => {
+    if (!isOrgWide) return;
+    api.get('/api/subaccounts')
+      .then(({ data }) => setSubaccounts(data))
+      .catch(() => setSubaccounts([]));
+  }, [isOrgWide]);
 
   // ── Debounced search ─────────────────────────────────────────────────────
 
@@ -146,6 +246,17 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
     try {
       const params: Record<string, string> = { tab };
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+
+      // Subaccount filter (org-wide only)
+      if (isOrgWide && selectedSubaccountId) {
+        params.subaccountIds = selectedSubaccountId;
+      }
+
+      // Sort params
+      const sortCfg = SORT_OPTIONS[sortOption];
+      params.sortBy = sortCfg.sortBy;
+      if (sortCfg.sortDirection) params.sortDirection = sortCfg.sortDirection;
+
       const res = await api.get(buildUrl('/inbox/unified'), { params });
       setItems(res.data as InboxItem[]);
     } catch {
@@ -153,19 +264,23 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
     } finally {
       setLoading(false);
     }
-  }, [tab, debouncedSearch, buildUrl]);
+  }, [tab, debouncedSearch, buildUrl, isOrgWide, selectedSubaccountId, sortOption]);
 
   const loadCounts = useCallback(async () => {
     setCountsLoading(true);
     try {
-      const res = await api.get(buildUrl('/inbox/counts'));
+      const params: Record<string, string> = {};
+      if (isOrgWide && selectedSubaccountId) {
+        params.subaccountIds = selectedSubaccountId;
+      }
+      const res = await api.get(buildUrl('/inbox/counts'), { params });
       setCounts(res.data as InboxCounts);
     } catch {
       // Silently fail — counts are supplementary
     } finally {
       setCountsLoading(false);
     }
-  }, [buildUrl]);
+  }, [buildUrl, isOrgWide, selectedSubaccountId]);
 
   useEffect(() => {
     loadItems();
@@ -269,6 +384,106 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
 
   const unreadCount = items.filter((i) => !i.isRead).length;
 
+  // ── Grouped items when sorted by subaccount ──────────────────────────────
+
+  const isSortedBySubaccount = sortOption === 'subaccount';
+
+  const groupedItems = useMemo(() => {
+    if (!isSortedBySubaccount || !isOrgWide) return null;
+
+    const groups: { name: string; items: InboxItem[] }[] = [];
+    let currentName = '';
+    for (const item of items) {
+      const name = item.subaccountName || 'Unknown';
+      if (name !== currentName) {
+        groups.push({ name, items: [item] });
+        currentName = name;
+      } else {
+        groups[groups.length - 1].items.push(item);
+      }
+    }
+    return groups;
+  }, [items, isSortedBySubaccount, isOrgWide]);
+
+  // ── Render a single inbox item row ───────────────────────────────────────
+
+  const renderItem = (item: InboxItem, showSubaccountBadge: boolean) => {
+    const isItemLoading = actionLoading.has(item.id);
+    const badgeCls = STATUS_BADGE[item.status] ?? 'bg-slate-100 text-slate-600';
+    const borderCls = !item.isRead ? UNREAD_BORDER[item.type] || 'border-l-indigo-500' : '';
+
+    return (
+      <div
+        key={item.id}
+        className={`flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-lg hover:border-slate-300 transition-colors group ${
+          isItemLoading ? 'opacity-60 pointer-events-none' : ''
+        } ${!item.isRead ? `border-l-[3px] ${borderCls}` : ''}`}
+      >
+        {/* Unread dot */}
+        <div className="w-2.5 shrink-0 flex justify-center">
+          {!item.isRead && (
+            <span className="w-2 h-2 rounded-full bg-indigo-500" />
+          )}
+        </div>
+
+        {/* Type icon */}
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-50 border border-slate-100 shrink-0">
+          {TYPE_ICON[item.type] ?? TYPE_ICON.task}
+        </div>
+
+        {/* Content — clickable */}
+        <button
+          onClick={() => handleNavigate(item)}
+          className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0 [font-family:inherit]"
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-[14px] text-slate-900 truncate">{item.title}</span>
+            <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${badgeCls}`}>
+              {item.status.replace(/_/g, ' ')}
+            </span>
+            {showSubaccountBadge && item.subaccountName && (
+              <SubaccountBadge name={item.subaccountName} />
+            )}
+          </div>
+          {item.subtitle && (
+            <p className="text-[13px] text-slate-500 m-0 mt-0.5 truncate">{item.subtitle}</p>
+          )}
+        </button>
+
+        {/* Timestamp */}
+        <span className="text-[12px] text-slate-400 whitespace-nowrap shrink-0">
+          {formatRelativeTime(item.timestamp)}
+        </span>
+
+        {/* Actions */}
+        <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {!item.isRead && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleMarkRead(item.id); }}
+              title="Mark as read"
+              disabled={isItemLoading}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-transparent hover:bg-slate-100 border-0 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleArchive(item.id); }}
+            title="Archive"
+            disabled={isItemLoading}
+            className="w-8 h-8 flex items-center justify-center rounded-lg bg-transparent hover:bg-slate-100 border-0 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -312,9 +527,10 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
         </div>
       )}
 
-      {/* Search */}
-      <div className="mb-4">
-        <div className="relative">
+      {/* Search + Filters row */}
+      <div className="mb-4 flex gap-3 items-center">
+        {/* Search */}
+        <div className="relative flex-1">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -329,7 +545,69 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
             className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
           />
         </div>
+
+        {/* Subaccount filter (org-wide only) */}
+        {isOrgWide && (
+          <div className="relative shrink-0">
+            <select
+              value={selectedSubaccountId}
+              onChange={(e) => setSelectedSubaccountId(e.target.value)}
+              className="appearance-none pl-3 pr-8 py-2.5 border border-slate-200 rounded-lg text-[13px] text-slate-700 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+            >
+              <option value="">All Subaccounts</option>
+              {subaccounts.map((sa) => (
+                <option key={sa.id} value={sa.id}>
+                  {sa.name}
+                </option>
+              ))}
+            </select>
+            <svg
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+              width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+        )}
+
+        {/* Sort dropdown */}
+        <div className="relative shrink-0">
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value as SortOption)}
+            className="appearance-none pl-3 pr-8 py-2.5 border border-slate-200 rounded-lg text-[13px] text-slate-700 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+          >
+            {SORT_KEYS.map((key) => (
+              <option key={key} value={key}>
+                {SORT_OPTIONS[key].label}
+              </option>
+            ))}
+          </select>
+          <svg
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </div>
       </div>
+
+      {/* Active filter indicator */}
+      {isOrgWide && selectedSubaccountId && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-[12px] text-slate-500">Filtered by:</span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[12px] font-medium ring-1 ring-indigo-200">
+            <span className={`w-2 h-2 rounded-full ${getSubaccountColour(subaccounts.find((s) => s.id === selectedSubaccountId)?.name || '').dot}`} />
+            {subaccounts.find((s) => s.id === selectedSubaccountId)?.name || 'Subaccount'}
+            <button
+              onClick={() => setSelectedSubaccountId('')}
+              className="ml-0.5 bg-transparent border-0 cursor-pointer text-indigo-400 hover:text-indigo-700 text-[14px] leading-none p-0"
+            >
+              &times;
+            </button>
+          </span>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6 w-fit">
@@ -363,83 +641,22 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
         <LoadingSkeleton />
       ) : items.length === 0 ? (
         <EmptyState tab={tab} />
-      ) : (
-        <div className="flex flex-col gap-2">
-          {items.map((item) => {
-            const isItemLoading = actionLoading.has(item.id);
-            const badgeCls = STATUS_BADGE[item.status] ?? 'bg-slate-100 text-slate-600';
-
-            return (
-              <div
-                key={item.id}
-                className={`flex items-center gap-3 p-4 bg-white border border-slate-200 rounded-lg hover:border-slate-300 transition-colors group ${
-                  isItemLoading ? 'opacity-60 pointer-events-none' : ''
-                } ${!item.isRead ? 'border-l-[3px] border-l-indigo-500' : ''}`}
-              >
-                {/* Unread dot */}
-                <div className="w-2.5 shrink-0 flex justify-center">
-                  {!item.isRead && (
-                    <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                  )}
-                </div>
-
-                {/* Type icon */}
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-50 border border-slate-100 shrink-0">
-                  {TYPE_ICON[item.type] ?? TYPE_ICON.task}
-                </div>
-
-                {/* Content — clickable */}
-                <button
-                  onClick={() => handleNavigate(item)}
-                  className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0 [font-family:inherit]"
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-[14px] text-slate-900 truncate">{item.title}</span>
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${badgeCls}`}>
-                      {item.status.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                  {item.subtitle && (
-                    <p className="text-[13px] text-slate-500 m-0 mt-0.5 truncate">{item.subtitle}</p>
-                  )}
-                  {isOrgWide && item.subaccountName && (
-                    <p className="text-[12px] text-slate-400 m-0 mt-0.5">{item.subaccountName}</p>
-                  )}
-                </button>
-
-                {/* Timestamp */}
-                <span className="text-[12px] text-slate-400 whitespace-nowrap shrink-0">
-                  {formatRelativeTime(item.timestamp)}
-                </span>
-
-                {/* Actions */}
-                <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {!item.isRead && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleMarkRead(item.id); }}
-                      title="Mark as read"
-                      disabled={isItemLoading}
-                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-transparent hover:bg-slate-100 border-0 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    </button>
-                  )}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleArchive(item.id); }}
-                    title="Archive"
-                    disabled={isItemLoading}
-                    className="w-8 h-8 flex items-center justify-center rounded-lg bg-transparent hover:bg-slate-100 border-0 cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" />
-                    </svg>
-                  </button>
-                </div>
+      ) : isSortedBySubaccount && isOrgWide && groupedItems ? (
+        /* Grouped by subaccount view */
+        <div className="flex flex-col gap-1">
+          {groupedItems.map((group) => (
+            <div key={group.name}>
+              <SubaccountGroupHeader name={group.name} />
+              <div className="flex flex-col gap-2">
+                {group.items.map((item) => renderItem(item, false))}
               </div>
-            );
-          })}
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Default flat list */
+        <div className="flex flex-col gap-2">
+          {items.map((item) => renderItem(item, isOrgWide))}
         </div>
       )}
     </div>

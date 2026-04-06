@@ -19,14 +19,29 @@ router.get(
 
     const tab = (req.query.tab as string) || 'all';
     const search = (req.query.search as string) || undefined;
+    const subaccountId = (req.query.subaccountId as string) || undefined;
+    const subaccountIds = req.query.subaccountIds ? (req.query.subaccountIds as string).split(',') : undefined;
+    const sortBy = (req.query.sortBy as string) || undefined;
+    const sortDirection = (req.query.sortDirection as string) || undefined;
 
     if (!['all', 'tasks', 'reviews', 'failed_runs'].includes(tab)) {
       throw { statusCode: 400, message: 'Invalid tab. Must be one of: all, tasks, reviews, failed_runs' };
+    }
+    if (sortBy && !['updatedAt', 'priority', 'type', 'subaccount'].includes(sortBy)) {
+      throw { statusCode: 400, message: 'Invalid sortBy. Must be one of: updatedAt, priority, type, subaccount' };
+    }
+    if (sortDirection && !['asc', 'desc'].includes(sortDirection)) {
+      throw { statusCode: 400, message: 'Invalid sortDirection. Must be asc or desc' };
     }
 
     const items = await inboxService.getUnifiedInbox(userId, orgId, {
       tab: tab as 'all' | 'tasks' | 'reviews' | 'failed_runs',
       search,
+      subaccountId,
+      subaccountIds,
+      sortBy: sortBy as any,
+      sortDirection: sortDirection as any,
+      orgWide: !subaccountId && !subaccountIds, // org-wide when no subaccount filter
     });
 
     res.json(items);

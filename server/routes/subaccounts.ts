@@ -138,11 +138,12 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
     const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const { name, slug, status, settings } = req.body as {
+    const { name, slug, status, settings, includeInOrgInbox } = req.body as {
       name?: string;
       slug?: string;
       status?: string;
       settings?: Record<string, unknown>;
+      includeInOrgInbox?: boolean;
     };
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
@@ -150,6 +151,7 @@ router.patch(
     if (slug !== undefined) update.slug = slug;
     if (status !== undefined) update.status = status;
     if (settings !== undefined) update.settings = settings;
+    if (includeInOrgInbox !== undefined) update.includeInOrgInbox = includeInOrgInbox;
 
     const [updated] = await db
       .update(subaccounts)

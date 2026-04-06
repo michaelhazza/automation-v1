@@ -91,6 +91,21 @@ check "inbox route registered in server/index.ts" "grep -q 'inboxRouter' server/
 check "inbox migration exists" "[ -f migrations/0060_inbox_feedback_attachments.sql ]"
 check "inbox migration creates table" "grep -q 'CREATE TABLE inbox_read_states' migrations/0060_inbox_feedback_attachments.sql"
 
+# Inbox filtering enhancements
+check "subaccounts schema has includeInOrgInbox" "grep -q 'include_in_org_inbox\|includeInOrgInbox' server/db/schema/subaccounts.ts"
+check "inbox service supports orgWide filter" "grep -q 'orgWide\|includeInOrgInbox' server/services/inboxService.ts"
+check "inbox service supports sortBy" "grep -q 'sortBy' server/services/inboxService.ts"
+check "inbox service supports subaccountIds filter" "grep -q 'subaccountIds' server/services/inboxService.ts"
+check "inbox service enriches subaccount names" "grep -q 'subaccountName' server/services/inboxService.ts"
+check "inbox route accepts sortBy param" "grep -q 'sortBy' server/routes/inbox.ts"
+check "inbox route accepts subaccountId param" "grep -q 'subaccountId' server/routes/inbox.ts"
+check "subaccounts route accepts includeInOrgInbox" "grep -q 'includeInOrgInbox' server/routes/subaccounts.ts"
+check "org inbox visibility migration exists" "[ -f migrations/0064_inbox_org_visibility.sql ]"
+check "org inbox visibility migration adds column" "grep -q 'include_in_org_inbox' migrations/0064_inbox_org_visibility.sql"
+check "inbox page has subaccount filter" "grep -q 'subaccount\|Subaccount\|subaccountFilter\|filterSubaccount' client/src/pages/InboxPage.tsx"
+check "inbox page has sort controls" "grep -q 'sortBy\|sortDirection\|Sort\|sort' client/src/pages/InboxPage.tsx"
+check "subaccount detail has org inbox toggle" "grep -q 'includeInOrgInbox\|include_in_org_inbox\|Org Inbox\|org inbox\|Organisation Inbox' client/src/pages/AdminSubaccountDetailPage.tsx"
+
 echo ""
 
 # ──────────────────────────────────────────────────────────────────────────────

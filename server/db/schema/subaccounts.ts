@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 
@@ -13,6 +13,12 @@ export const subaccounts = pgTable(
     slug: text('slug').notNull(),
     status: text('status').notNull().default('active').$type<'active' | 'suspended' | 'inactive'>(),
     settings: jsonb('settings'),
+
+    // ── Org-level inbox visibility ────────────────────────────────────
+    // When true, inbox items from this subaccount appear in the org-wide inbox.
+    // Configurable per subaccount by org admins.
+    includeInOrgInbox: boolean('include_in_org_inbox').notNull().default(true),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

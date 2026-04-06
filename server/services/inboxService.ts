@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
-import { tasks, reviewItems, agentRuns, inboxReadStates } from '../db/schema/index.js';
-import { eq, and, or, isNull, desc, sql, gte, ilike } from 'drizzle-orm';
+import { tasks, reviewItems, agentRuns, inboxReadStates, subaccounts } from '../db/schema/index.js';
+import { eq, and, or, isNull, desc, asc, gte, ilike, inArray } from 'drizzle-orm';
 import { auditService } from './auditService.js';
 
 // ---------------------------------------------------------------------------
@@ -14,10 +14,21 @@ interface InboxItemRef {
   entityId: string;
 }
 
+type SortField = 'updatedAt' | 'priority' | 'type' | 'subaccount';
+type SortDirection = 'asc' | 'desc';
+
 interface InboxFilters {
   tab?: 'all' | 'tasks' | 'reviews' | 'failed_runs';
   search?: string;
   limit?: number;
+  // Subaccount filtering
+  subaccountId?: string;          // filter to specific subaccount (subaccount-level view)
+  subaccountIds?: string[];       // filter to multiple subaccounts
+  // Sorting
+  sortBy?: SortField;
+  sortDirection?: SortDirection;
+  // Only include subaccounts that opted in to org inbox (for org-wide view)
+  orgWide?: boolean;
 }
 
 // Hard upper bounds to prevent expensive queries
@@ -43,6 +54,10 @@ interface InboxCounts {
   total: number;
 }
 
+// Priority ordering for sort
+const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+const TYPE_ORDER: Record<string, number> = { review_item: 0, task: 1, agent_run: 2 };
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -64,13 +79,40 @@ export const inboxService = {
       ? filters.search.slice(0, 200).replace(/%/g, '\\%').replace(/_/g, '\\_')
       : undefined;
 
+    // ── Resolve allowed subaccount IDs for org-wide view ────────────────
+    // If org-wide, only include subaccounts that have opted in to org inbox
+    let allowedSubaccountIds: string[] | null = null;
+    if (filters.orgWide) {
+      const saRows = await db
+        .select({ id: subaccounts.id })
+        .from(subaccounts)
+        .where(and(
+          eq(subaccounts.organisationId, orgId),
+          eq(subaccounts.includeInOrgInbox, true),
+          isNull(subaccounts.deletedAt),
+        ));
+      allowedSubaccountIds = saRows.map(r => r.id);
+      if (allowedSubaccountIds.length === 0) return []; // No subaccounts opted in
+    } else if (filters.subaccountIds && filters.subaccountIds.length > 0) {
+      allowedSubaccountIds = filters.subaccountIds;
+    }
+
+    // Helper to add subaccount filter condition
+    const subaccountFilter = (subaccountIdCol: any) => {
+      if (filters.subaccountId) return eq(subaccountIdCol, filters.subaccountId);
+      if (allowedSubaccountIds) return inArray(subaccountIdCol, allowedSubaccountIds);
+      return undefined;
+    };
+
     // ── Tasks with status='inbox' ────────────────────────────────────────
     if (tab === 'all' || tab === 'tasks') {
-      const taskConditions = [
+      const taskConditions: any[] = [
         eq(tasks.organisationId, orgId),
         eq(tasks.status, 'inbox'),
         isNull(tasks.deletedAt),
       ];
+      const saFilter = subaccountFilter(tasks.subaccountId);
+      if (saFilter) taskConditions.push(saFilter);
       if (search) {
         taskConditions.push(ilike(tasks.title, `%${search}%`));
       }
@@ -118,13 +160,15 @@ export const inboxService = {
 
     // ── Review items (pending / edited_pending) ──────────────────────────
     if (tab === 'all' || tab === 'reviews') {
-      const reviewConditions = [
+      const reviewConditions: any[] = [
         eq(reviewItems.organisationId, orgId),
         or(
           eq(reviewItems.reviewStatus, 'pending'),
           eq(reviewItems.reviewStatus, 'edited_pending')
         ),
       ];
+      const saFilterReview = subaccountFilter(reviewItems.subaccountId);
+      if (saFilterReview) reviewConditions.push(saFilterReview);
 
       const reviewRows = await db
         .select({
@@ -173,7 +217,7 @@ export const inboxService = {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      const runConditions = [
+      const runConditions: any[] = [
         eq(agentRuns.organisationId, orgId),
         or(
           eq(agentRuns.status, 'failed'),
@@ -182,6 +226,8 @@ export const inboxService = {
         ),
         gte(agentRuns.createdAt, sevenDaysAgo),
       ];
+      const saFilterRuns = subaccountFilter(agentRuns.subaccountId);
+      if (saFilterRuns) runConditions.push(saFilterRuns);
 
       if (search) {
         runConditions.push(ilike(agentRuns.errorMessage, `%${search}%`));
@@ -228,10 +274,55 @@ export const inboxService = {
       }
     }
 
-    // ── Sort: unread first, then by updatedAt DESC ───────────────────────
+    // ── Enrich with subaccount names ──────────────────────────────────────
+    const uniqueSaIds = [...new Set(items.map(i => i.meta.subaccountId as string).filter(Boolean))];
+    if (uniqueSaIds.length > 0) {
+      const saRows = await db
+        .select({ id: subaccounts.id, name: subaccounts.name })
+        .from(subaccounts)
+        .where(inArray(subaccounts.id, uniqueSaIds));
+      const saMap = new Map(saRows.map(r => [r.id, r.name]));
+      for (const item of items) {
+        const saId = item.meta.subaccountId as string;
+        if (saId && saMap.has(saId)) {
+          item.meta.subaccountName = saMap.get(saId);
+        }
+      }
+    }
+
+    // ── Sort ──────────────────────────────────────────────────────────────
+    const sortBy = filters.sortBy || 'updatedAt';
+    const sortDir = filters.sortDirection || 'desc';
+    const dirMul = sortDir === 'asc' ? 1 : -1;
+
     items.sort((a, b) => {
+      // Unread always first regardless of sort field
       if (a.isRead !== b.isRead) return a.isRead ? 1 : -1;
-      return b.updatedAt.getTime() - a.updatedAt.getTime();
+
+      switch (sortBy) {
+        case 'priority': {
+          const pa = PRIORITY_ORDER[(a.meta.priority as string) ?? 'normal'] ?? 2;
+          const pb = PRIORITY_ORDER[(b.meta.priority as string) ?? 'normal'] ?? 2;
+          if (pa !== pb) return (pa - pb) * dirMul;
+          return b.updatedAt.getTime() - a.updatedAt.getTime(); // tiebreak by recency
+        }
+        case 'type': {
+          const ta = TYPE_ORDER[a.entityType] ?? 9;
+          const tb = TYPE_ORDER[b.entityType] ?? 9;
+          if (ta !== tb) return (ta - tb) * dirMul;
+          return b.updatedAt.getTime() - a.updatedAt.getTime();
+        }
+        case 'subaccount': {
+          const sa = ((a.meta.subaccountName as string) ?? '').toLowerCase();
+          const sb = ((b.meta.subaccountName as string) ?? '').toLowerCase();
+          const cmp = sa.localeCompare(sb);
+          if (cmp !== 0) return cmp * dirMul;
+          return b.updatedAt.getTime() - a.updatedAt.getTime();
+        }
+        case 'updatedAt':
+        default:
+          return (b.updatedAt.getTime() - a.updatedAt.getTime()) * dirMul;
+      }
     });
 
     // Hard cap total items returned to prevent oversized responses
