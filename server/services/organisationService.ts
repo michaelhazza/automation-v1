@@ -114,7 +114,10 @@ export class OrganisationService {
     };
   }
 
-  async updateOrganisation(id: string, data: { name?: string; plan?: string; status?: string; settings?: unknown }) {
+  async updateOrganisation(id: string, data: {
+    name?: string; plan?: string; status?: string; settings?: unknown;
+    logoUrl?: string | null; brandColor?: string | null; requireAgentApproval?: boolean;
+  }) {
     const [org] = await db
       .select()
       .from(organisations)
@@ -129,6 +132,17 @@ export class OrganisationService {
     if (data.plan !== undefined) update.plan = data.plan;
     if (data.status !== undefined) update.status = data.status;
     if (data.settings !== undefined) update.settings = data.settings;
+    // Branding
+    if (data.logoUrl !== undefined) update.logoUrl = data.logoUrl;
+    if (data.brandColor !== undefined) {
+      // Strict hex validation
+      if (data.brandColor !== null && !/^#[0-9a-fA-F]{6}$/.test(data.brandColor)) {
+        throw { statusCode: 400, message: 'brandColor must be a valid hex colour (e.g. #6366f1)' };
+      }
+      update.brandColor = data.brandColor;
+    }
+    // Governance
+    if (data.requireAgentApproval !== undefined) update.requireAgentApproval = data.requireAgentApproval;
 
     const [updated] = await db
       .update(organisations)

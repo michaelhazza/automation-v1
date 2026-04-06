@@ -40,7 +40,7 @@ export const taskService = {
   async listTasks(
     organisationId: string,
     subaccountId: string,
-    filters?: { status?: string; priority?: string; assignedAgentId?: string; search?: string }
+    filters?: { status?: string; priority?: string; assignedAgentId?: string; search?: string; projectId?: string }
   ) {
     const conditions = [
       eq(tasks.organisationId, organisationId),
@@ -52,6 +52,7 @@ export const taskService = {
     if (filters?.priority) conditions.push(eq(tasks.priority, filters.priority as 'low' | 'normal' | 'high' | 'urgent'));
     if (filters?.assignedAgentId) conditions.push(eq(tasks.assignedAgentId, filters.assignedAgentId));
     if (filters?.search) conditions.push(ilike(tasks.title, `%${filters.search}%`));
+    if (filters?.projectId) conditions.push(eq(tasks.projectId, filters.projectId));
 
     const rows = await db
       .select({ item: tasks })

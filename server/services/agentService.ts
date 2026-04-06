@@ -1,6 +1,8 @@
-import { eq, and, isNull, asc } from 'drizzle-orm';
+import { eq, and, isNull, asc, max, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agents, agentDataSources, users } from '../db/schema/index.js';
+import { agents, agentDataSources, users, agentPromptRevisions } from '../db/schema/index.js';
+import crypto from 'crypto';
+import { auditService } from './auditService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
@@ -589,6 +591,10 @@ export const agentService = {
       heartbeatEnabled: boolean;
       heartbeatIntervalHours: number | null;
       heartbeatOffsetHours: number;
+      concurrencyPolicy: 'skip_if_active' | 'coalesce_if_active' | 'always_enqueue';
+      catchUpPolicy: 'skip_missed' | 'enqueue_missed_with_cap';
+      catchUpCap: number;
+      maxConcurrentRuns: number;
     }>
   ) {
     const [existing] = await db
@@ -620,6 +626,10 @@ export const agentService = {
     if (data.heartbeatEnabled !== undefined) update.heartbeatEnabled = data.heartbeatEnabled;
     if (data.heartbeatIntervalHours !== undefined) update.heartbeatIntervalHours = data.heartbeatIntervalHours;
     if (data.heartbeatOffsetHours !== undefined) update.heartbeatOffsetHours = data.heartbeatOffsetHours;
+    if (data.concurrencyPolicy !== undefined) update.concurrencyPolicy = data.concurrencyPolicy;
+    if (data.catchUpPolicy !== undefined) update.catchUpPolicy = data.catchUpPolicy;
+    if (data.catchUpCap !== undefined) update.catchUpCap = data.catchUpCap;
+    if (data.maxConcurrentRuns !== undefined) update.maxConcurrentRuns = data.maxConcurrentRuns;
     if (data.agentRole !== undefined) update.agentRole = data.agentRole;
     if (data.agentTitle !== undefined) update.agentTitle = data.agentTitle;
 
@@ -631,6 +641,65 @@ export const agentService = {
         if (!validation.valid) throw { statusCode: 400, message: validation.error };
       }
       update.parentAgentId = parentId ?? null;
+    }
+
+    // ── Prompt revision tracking ────────────────────────────────────────
+    const promptChanged =
+      (data.masterPrompt !== undefined && data.masterPrompt !== existing.masterPrompt) ||
+      (data.additionalPrompt !== undefined && data.additionalPrompt !== existing.additionalPrompt);
+
+    if (promptChanged) {
+      const newMasterPrompt = data.masterPrompt !== undefined ? data.masterPrompt : existing.masterPrompt;
+      const newAdditionalPrompt = data.additionalPrompt !== undefined ? data.additionalPrompt : existing.additionalPrompt;
+      const hash = crypto.createHash('sha256').update(newMasterPrompt + '\0' + newAdditionalPrompt).digest('hex');
+
+      // Check if hash matches latest revision — skip if identical (dedup)
+      const [latestRevision] = await db
+        .select({ promptHash: agentPromptRevisions.promptHash })
+        .from(agentPromptRevisions)
+        .where(eq(agentPromptRevisions.agentId, id))
+        .orderBy(desc(agentPromptRevisions.revisionNumber))
+        .limit(1);
+
+      if (!latestRevision || latestRevision.promptHash !== hash) {
+        const [maxRow] = await db
+          .select({ maxNum: max(agentPromptRevisions.revisionNumber) })
+          .from(agentPromptRevisions)
+          .where(eq(agentPromptRevisions.agentId, id));
+
+        const nextRevisionNumber = (maxRow?.maxNum ?? 0) + 1;
+
+        // Auto-generate change description
+        const changes: string[] = [];
+        if (data.masterPrompt !== undefined && data.masterPrompt !== existing.masterPrompt) {
+          const diff = (data.masterPrompt?.length ?? 0) - (existing.masterPrompt?.length ?? 0);
+          changes.push(`masterPrompt changed (${diff >= 0 ? '+' : ''}${diff} chars)`);
+        }
+        if (data.additionalPrompt !== undefined && data.additionalPrompt !== existing.additionalPrompt) {
+          const diff = (data.additionalPrompt?.length ?? 0) - (existing.additionalPrompt?.length ?? 0);
+          changes.push(`additionalPrompt changed (${diff >= 0 ? '+' : ''}${diff} chars)`);
+        }
+
+        await db.insert(agentPromptRevisions).values({
+          agentId: id,
+          organisationId,
+          revisionNumber: nextRevisionNumber,
+          masterPrompt: newMasterPrompt,
+          additionalPrompt: newAdditionalPrompt,
+          promptHash: hash,
+          changeDescription: changes.join('; '),
+        });
+
+        // Emit audit event for prompt change
+        await auditService.log({
+          organisationId,
+          actorType: 'user',
+          action: 'agent.prompt.updated',
+          entityType: 'agent',
+          entityId: id,
+          metadata: { revisionNumber: nextRevisionNumber, changeDescription: changes.join('; ') },
+        });
+      }
     }
 
     const [updated] = await db

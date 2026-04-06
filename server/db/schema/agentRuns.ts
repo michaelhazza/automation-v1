@@ -51,6 +51,7 @@ export const agentRuns = pgTable(
     // Context & config
     triggerContext: jsonb('trigger_context'), // what initiated the run
     taskId: uuid('task_id'), // if working on a specific board task
+    projectId: uuid('project_id'), // cost attribution — set at run creation, never backfilled
     // systemPromptSnapshot and toolCallsLog moved to agent_run_snapshots (H-5 blob extraction)
     skillsUsed: jsonb('skills_used'), // array of skill slugs available for this run
 
