@@ -280,3 +280,316 @@ Phase 1 is complete when:
 - A HITL-gated action from an org agent appears in the org review queue and can be approved
 - No existing subaccount agent flows are affected (zero regression)
 
+---
+
+## Phase 2: Integration Layer + Canonical Data + Metrics
+
+### What this phase delivers
+
+A platform-level service that connects to external platforms, ingests their data, normalises it to a canonical schema, computes derived metrics, and makes both the normalised data and computed metrics available to agents and skills through a clean internal interface. Agents and skills never call external APIs directly. They consume normalised entities and metrics from this layer.
+
+This phase also delivers the first full implementation: the GHL connector, extending the existing `server/adapters/ghlAdapter.ts` pattern into a complete data ingestion system.
+
+### Building on what exists
+
+The codebase already has:
+- **Adapter interface** (`server/adapters/integrationAdapter.ts`) — defines `IntegrationAdapter` with `crm`, `payments`, `ingestion`, and `webhook` namespaces
+- **GHL adapter** (`server/adapters/ghlAdapter.ts`) — `crm.createContact` implemented with OAuth token handling, `listAccounts()` method exists
+- **Slack adapter** (`server/adapters/slackAdapter.ts`) — send messages, list channels, webhook events
+- **Teamwork adapter** (`server/adapters/teamworkAdapter.ts`) — ticket CRUD, replies, webhook events
+- **Stripe adapter** (`server/adapters/stripeAdapter.ts`) — payments implemented
+- **OAuth lifecycle** (`integrationConnectionService.ts`) — advisory-lock token refresh, AES-256-GCM encryption
+- **Adapter registry** (`server/adapters/index.ts`) — `Record<string, IntegrationAdapter>` keyed by provider name
+- **Connector polling** (`connectorPollingService.ts`) — polling with sync phase state machine
+- **Canonical data service** (`canonicalDataService.ts`) — query methods and upsert helpers
+
+What's missing is: complete GHL ingestion methods (pagination + normalisation for all entity types), webhook event normalisation, the `canonical_metrics` table that sits between raw entity data and the intelligence layer, and the adapter metric computation step.
+
+### Why a platform layer and not skills
+
+Skills are agent-invoked, synchronous, and stateless. They are not suited to managing OAuth sessions across polling cycles, enforcing rate limits across a shared quota, ingesting webhook streams, or computing derived metrics on schedule. The integration layer handles this complexity centrally.
+
+### The canonical schema
+
+The canonical schema has two tiers:
+
+1. **Raw entity tables** — normalised records from external platforms (contacts, opportunities, conversations, revenue, accounts). These serve as the data warehouse — useful for display, querying, and agent context.
+2. **`canonical_metrics` table** — derived, named metrics computed by each adapter from the raw entities. This is the universal abstraction that the intelligence layer consumes.
+
+**Why two tiers?** Raw entities are useful for browsing ("show me this client's contacts") but they are vertical-specific in structure. A CRM has "opportunities with pipeline stages" — an e-commerce platform has "orders with fulfilment status." The intelligence layer should not read raw entities directly because that creates vertical-specific scoring logic. Instead, each adapter computes named metrics from whatever raw data it has, and the intelligence layer reads only from `canonical_metrics`.
+
+#### Entity identity and uniqueness
+
+Every entity from an external platform is identified by:
+- `external_id` — the ID in the source system
+- `source_connector` — which connector type produced it
+- `source_account_id` — which external account it belongs to
+
+This composite key is the global identity for deduplication and updates.
+
+#### State vs event separation
+
+- **State tables** hold the latest known state. Upserted on every sync.
+- **Event tables** record discrete changes over time. Append-only. These power baseline computation and trend analysis.
+
+#### Upsert and ordering rules
+
+- **Last-write-wins with timestamp ordering.** An incoming record only overwrites stored state if its `source_updated_at` is newer.
+- **Soft delete handling.** Entities deleted in the source are marked with `deleted_at`. All queries filter on `deleted_at IS NULL` by default.
+
+#### Event enrichment fields
+
+Every event table entry includes:
+- `event_group_id` (required, auto-generated if not provided) — groups related events from the same real-world change. **Group boundary rules:** new group starts when event type differs or change direction reverses within a 5-second window. **Max group size:** 20 events (configurable).
+- `event_source_type` — `webhook`, `poll`, or `derived`
+- `event_ingested_at` — when the platform received the event
+
+#### Data freshness metadata
+
+Every state table includes:
+- `last_synced_at` — when last written by the ingestion layer
+- `source_updated_at` — the last-modified timestamp from the external platform
+- `sync_source` — whether last update came from `webhook` or `poll`
+
+#### Raw entity types (Tier 1)
+
+The schema defines at minimum:
+
+**Account** — one subaccount mapped to an external platform account. The central entity everything else hangs off.
+
+**Contact** — a person or entity record within an account.
+
+**Opportunity** — a deal, order, pipeline item, or transactional entity within an account. The semantics depend on the vertical: for CRMs this is a sales deal; for e-commerce this could be an order; for property management this could be a lease. The field set is generic (name, stage, value, status, stage history).
+
+**Conversation** — a communication thread, support ticket, or interaction record.
+
+**Revenue** — a transaction, payment, or recurring revenue record.
+
+**HealthSnapshot** — a point-in-time computed health summary. Written by the platform (Phase 3), not ingested. Includes `algorithm_version` and `config_version`.
+
+**AnomalyEvent** — a detected deviation from baseline. Written by intelligence skills (Phase 3). Not ingested. Includes `algorithm_version` and `config_version`.
+
+The raw entity schema is v1. It will be extended when new connectors are built. The key principle: agents consuming data operate through the metrics layer, not directly on raw entities.
+
+#### Canonical Metrics (Tier 2) — NEW in v2.0
+
+The `canonical_metrics` table is the universal abstraction between adapters and the intelligence layer. Every adapter, after syncing raw entities, computes derived metrics and writes them here. Intelligence skills read only from this table — never from raw entities directly.
+
+```
+canonical_metrics table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── account_id (FK → canonical_accounts)
+├── metric_slug       (text NOT NULL — e.g. "contact_growth_rate", "order_volume_trend")
+├── current_value     (numeric NOT NULL)
+├── previous_value    (numeric, nullable — value from prior computation period)
+├── period_start      (timestamptz — start of computation window)
+├── period_end        (timestamptz — end of computation window)
+├── unit              (text, nullable — e.g. "percent", "count", "currency", "seconds")
+├── computed_at       (timestamptz NOT NULL)
+├── connector_type    (text NOT NULL — which adapter computed this)
+├── metadata          (jsonb, nullable — adapter-specific context)
+└── created_at
+
+Unique: (account_id, metric_slug)
+Index: (organisation_id, metric_slug)
+Index: (account_id, computed_at DESC) — for baseline history
+```
+
+**Design principles:**
+- **Metric slugs are adapter-defined, not platform-defined.** There is no enum of allowed metrics. Each adapter writes whatever metrics it can compute from its raw data. A CRM adapter writes `contact_growth_rate`, `pipeline_velocity`, `conversation_engagement`. A Shopify adapter writes `order_volume_trend`, `cart_abandonment_rate`, `customer_ltv`. The platform doesn't need to know the difference.
+- **Templates declare which metrics to score.** The configuration template (Phase 4) lists the metric slugs that feed into health scoring, anomaly detection, and churn risk for that vertical. If a metric slug doesn't exist in the data, the scoring pipeline skips it with a data-missing warning.
+- **History for baselines.** The `canonical_metrics` table is upserted on each computation (unique on `account_id, metric_slug`). A companion `canonical_metric_history` table (append-only) stores every computed value for baseline and trend analysis.
+
+```
+canonical_metric_history table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── account_id (FK → canonical_accounts)
+├── metric_slug       (text NOT NULL)
+├── value             (numeric NOT NULL)
+├── period_start      (timestamptz)
+├── period_end        (timestamptz)
+├── computed_at       (timestamptz NOT NULL)
+└── created_at
+
+Index: (account_id, metric_slug, computed_at DESC) — for baseline queries
+```
+
+**Adapter metric computation step.** After each polling cycle or webhook batch, the adapter:
+1. Syncs raw entities to canonical entity tables (existing flow)
+2. Computes derived metrics from the synced data
+3. Upserts to `canonical_metrics` (current values)
+4. Appends to `canonical_metric_history` (historical record)
+
+This step is part of the adapter's responsibility, not a separate service. Each adapter knows what metrics it can compute from its data. The platform provides the table; the adapter provides the values.
+
+**Example metrics by adapter type:**
+
+| Adapter | Example metric slugs |
+|---------|---------------------|
+| CRM (GHL, HubSpot) | `contact_growth_rate`, `pipeline_velocity`, `stale_deal_ratio`, `conversation_engagement`, `avg_response_time`, `revenue_trend` |
+| E-commerce (Shopify) | `order_volume_trend`, `cart_abandonment_rate`, `avg_order_value`, `customer_ltv`, `return_rate`, `inventory_turnover` |
+| Property Management | `occupancy_rate`, `maintenance_response_time`, `rent_collection_rate`, `lease_renewal_rate`, `tenant_satisfaction` |
+| SaaS | `mrr_trend`, `churn_rate`, `feature_adoption_rate`, `support_ticket_volume`, `nps_score` |
+| Helpdesk (Teamwork) | `ticket_volume_trend`, `avg_resolution_time`, `sla_compliance_rate`, `customer_satisfaction`, `backlog_size` |
+
+None of these slugs exist in platform code. They exist only in adapter implementations and template configurations.
+
+### The connector interface
+
+The existing `IntegrationAdapter` interface defines outbound actions and ingestion methods. Every connector must implement:
+
+- Fetch all accounts for an organisation (the sub-account/location list)
+- Fetch raw entities for a given account (contacts, opportunities, conversations, revenue — whichever apply)
+- Compute derived metrics from raw data and write to `canonical_metrics`
+- Validate credentials for a given connector config
+- Handle incoming webhook events and normalise them to internal event types
+
+The adapter pattern separates concerns cleanly:
+- **Outbound actions** (existing) — `crm.createContact`, `payments.createCheckout`, etc.
+- **Ingestion** (Phase 2) — fetch, normalise, upsert raw entities
+- **Metric computation** (Phase 2, new) — derive named metrics from raw entities, write to `canonical_metrics`
+- **Webhook handling** (Phase 2) — verify signatures, normalise events
+
+All four share the same credential store and OAuth lifecycle.
+
+### The first connector: GHL (implementation detail, not platform architecture)
+
+The GHL connector extends the existing `ghlAdapter.ts`. This section describes GHL-specific implementation — none of this is in generic platform code.
+
+**Sub-account enumeration.** Enumerates all GHL locations and maps to internal subaccounts. Mapping stored in connector config.
+
+**Data ingestion.** Fetches contacts, opportunities (deals), conversations, and revenue (payments) per location. Normalises to canonical entities.
+
+**Metric computation.** After syncing raw entities, computes and writes:
+- `contact_growth_rate` — 30-day vs prior 30-day contact creation comparison
+- `pipeline_velocity` — ratio of stale deals (>14 days in stage) to open deals
+- `conversation_engagement` — ratio of active to total conversations
+- `avg_response_time` — average response time across conversations
+- `revenue_trend` — current period vs prior period revenue
+- `platform_activity` — sync freshness score
+
+These metric slugs are defined in the GHL adapter code and referenced in the GHL Agency Template (Phase 4). They do not exist anywhere in the platform layer.
+
+**Rate limit management.** GHL allows 100 requests per 10 seconds and 200,000 per day per location. The connector implements a token-bucket rate limiter.
+
+**Webhook ingestion.** Receives GHL webhook events, validates HMAC-SHA256 signatures, and normalises to internal event types. Key events: ContactCreate, OpportunityStageUpdate, ConversationCreated, ConversationInactive, AppointmentBooked. After normalising, triggers metric recomputation for the affected account.
+
+**Scheduled polling.** Polling frequency configurable per-organisation via `connector_configs.pollIntervalMinutes`.
+
+### Ingestion consistency model
+
+Webhooks and polling serve different purposes and must be reconciled:
+
+- **Webhooks = near real-time events.** Deliver changes as they happen but can be missed.
+- **Polling = source of truth reconciliation.** Periodically fetches full current state and reconciles.
+
+**Idempotency.** Every ingested event carries an idempotency key: `(source_connector, external_id, event_type, source_timestamp)`. Duplicates silently dropped.
+
+**Event sequencing.** `source_updated_at` determines which update is authoritative. Fallback to arrival order.
+
+**Reconciliation job.** Scheduled job (default: daily) compares stored state against source. Detects missing entities, stale data, and unsynced deletions. Drift report per account. Significant drift triggers operator warning.
+
+**Reconciliation authority:** Polling always wins for state. Webhooks are advisory. Repairs logged with before/after values. Max repair scope: 30% of records per account per run (configurable safety cap). Exceeding halts repair + alerts operator.
+
+**Last seen cursor.** Tracks `last_seen_cursor` per entity type per account. Polling resumes from cursor.
+
+### Initial backfill strategy
+
+1. **Staged ingestion.** Batched, rate-limit-respecting historical fetch.
+2. **Priority order.** Accounts first, then raw entities, then metric computation.
+3. **Backfill flag.** Entities tagged `is_backfill: true`. Intelligence layer ignores backfill data for baselines.
+4. **Completion signal.** `backfill_complete` event per account. Portfolio Health Agent waits for this before first scoring.
+5. **Webhook queueing.** Webhooks during backfill are queued (not dropped), replayed in order after backfill completes. Per-entity ordering by `source_timestamp`.
+6. **Replay deduplication.** Replayed webhooks checked against existing idempotency keys. Duplicates skipped.
+
+**Sync phase state machine:** `backfill` → `transition` (queued webhooks replaying) → `live` (normal operation). Explicit state field on `connector_configs`.
+
+### Connector configuration
+
+Each connected organisation has one or more `connector_config` records storing:
+
+- Connector type (which adapter to use)
+- Authentication credentials reference (via `integrationConnections`)
+- Account mapping (external IDs → internal subaccounts)
+- Polling schedule
+- Sync phase and status
+- `configVersion` — SHA-256 hash, recomputed on config change, referenced by intelligence outputs
+
+### Data confidence layer
+
+The canonical data service exposes confidence metadata alongside query results:
+
+- **`dataFreshnessScore`** (0.0–1.0) — derived from `last_synced_at` vs expected polling interval. Decays linearly.
+- **`dataCompletenessScore`** (0.0–1.0) — derived from reconciliation drift reports.
+
+**Confidence propagation.** When a skill consumes multiple data sources, output confidence = `MIN(all contributing confidences)`. Conservative default for v1.
+
+**Confidence floor.** Below 0.3 = unreliable. May display with warning, must not drive automated decisions.
+
+**No-data vs zero-data.** Every query returns `dataStatus`: `'fresh'` | `'stale'` | `'missing'`. Missing data is excluded from scoring (not treated as zero). Skills must surface which accounts have missing data.
+
+**Hard staleness cutoff.** If `last_synced_at` exceeds 2x polling interval, data marked `stale` with `staleness_warning`.
+
+### Connector health state
+
+Derived `healthStatus` per connector: `'healthy'` | `'degraded'` | `'failed'`.
+
+| Health state | Behaviour |
+|-------------|-----------|
+| `healthy` | Normal operation. All scoring proceeds. |
+| `degraded` | Confidence scores reduced proportionally. Operator warning. |
+| `failed` | Health scoring suppressed. Anomaly detection suspended. Accounts flagged as data missing. Operator alert. |
+
+Enforced at `canonicalDataService` layer. Skills receive `connectorHealthStatus` and handle accordingly.
+
+### Query scope guards
+
+- Max accounts per query: 100 (configurable)
+- Max time range: 90 days (configurable)
+- Max rows per entity type: 10,000 (configurable, truncate with warning)
+
+### Sync event audit log
+
+- Sync events: every polling cycle start/completion with entity counts and duration
+- Webhook events: every webhook with normalisation outcome
+- Reconciliation repairs: before/after values
+- Connector state transitions: every `syncPhase` change
+- Metric computation events: which metrics computed per account per cycle
+
+### What to build vs what to configure (Phase 2)
+
+**Build (generic platform code):**
+- Extended connector interface with ingestion + metric computation methods
+- `canonical_metrics` and `canonical_metric_history` tables
+- Rate limiter service
+- Webhook endpoint pattern and event normalisation framework
+- Canonical schema entity tables
+- Scheduled polling via pg-boss
+- Data confidence layer
+- Connector health state computation
+
+**Build (adapter-specific, not platform):**
+- GHL adapter ingestion methods (fetch contacts, opportunities, conversations, revenue)
+- GHL adapter metric computation (compute named metrics from raw entities)
+- GHL webhook event normalisation
+- GHL rate limit configuration
+
+**Configure (per-organisation):**
+- Which connector type to use
+- OAuth credentials
+- Account mapping (external IDs → subaccounts)
+- Polling frequency
+- Which webhook events to process
+
+### Gate condition for Phase 3
+
+Phase 2 is complete when:
+- A connector can enumerate accounts and produce normalised entities
+- The adapter computes derived metrics and writes to `canonical_metrics`
+- Webhook ingestion is operational
+- A developer writing Phase 3 intelligence skills can read metrics by slug from `canonical_metrics` without touching any adapter-specific code
+- Rate limiting is functional
+- The `canonical_metrics` table contains real data for at least one connected organisation
+
