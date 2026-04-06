@@ -36,8 +36,15 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: '', slug: '', plan: 'starter', adminEmail: '', adminFirstName: '', adminLastName: '' });
+  const [createForm, setCreateForm] = useState({ name: '', slug: '', plan: 'starter', adminEmail: '', adminFirstName: '', adminLastName: '', configTemplateId: '' });
   const [createError, setCreateError] = useState('');
+  const [configTemplates, setConfigTemplates] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
+
+  useEffect(() => {
+    api.get('/api/system/company-templates').then(({ data }) => {
+      setConfigTemplates(data.filter((t: { isPublished: boolean }) => t.isPublished));
+    }).catch(() => {});
+  }, []);
 
   const [editOrg, setEditOrg] = useState<Organisation | null>(null);
   const [editForm, setEditForm] = useState({ name: '', description: '' });
@@ -65,9 +72,23 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
   const handleCreate = async () => {
     setCreateError('');
     try {
-      await api.post('/api/organisations', createForm);
+      const { configTemplateId, ...orgData } = createForm;
+      const { data: org } = await api.post('/api/organisations', orgData);
+      // Apply configuration template if selected
+      if (configTemplateId) {
+        try {
+          await api.post(`/api/system/company-templates/${configTemplateId}/load-to-org`, {
+            organisationId: org.id,
+          });
+        } catch {
+          // Org created but template failed — don't block, just warn
+          setCreateError('Organisation created but configuration template failed to apply. You can apply it manually later.');
+          loadOrgs();
+          return;
+        }
+      }
       setShowCreateForm(false);
-      setCreateForm({ name: '', slug: '', plan: 'starter', adminEmail: '', adminFirstName: '', adminLastName: '' });
+      setCreateForm({ name: '', slug: '', plan: 'starter', adminEmail: '', adminFirstName: '', adminLastName: '', configTemplateId: '' });
       loadOrgs();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -265,6 +286,16 @@ export default function SystemOrganisationsPage({ user: _user }: { user: User })
             <div><label className={labelCls}>Admin first name *</label><input value={createForm.adminFirstName} onChange={(e) => setCreateForm({ ...createForm, adminFirstName: e.target.value })} className={inputCls} /></div>
             <div><label className={labelCls}>Admin last name *</label><input value={createForm.adminLastName} onChange={(e) => setCreateForm({ ...createForm, adminLastName: e.target.value })} className={inputCls} /></div>
           </div>
+          {configTemplates.length > 0 && (
+            <div className="mb-6">
+              <label className={labelCls}>Configuration Template</label>
+              <select value={createForm.configTemplateId} onChange={(e) => setCreateForm({ ...createForm, configTemplateId: e.target.value })} className={inputCls}>
+                <option value="">None</option>
+                {configTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <p className="text-[12px] text-slate-400 mt-1 m-0">Pre-configures the organisation with agents, skills, and operational settings.</p>
+            </div>
+          )}
           <div className="flex gap-3">
             <button onClick={handleCreate} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer transition-colors">Create</button>
             <button onClick={() => setShowCreateForm(false)} className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border-0 rounded-lg text-[13px] cursor-pointer transition-colors">Cancel</button>

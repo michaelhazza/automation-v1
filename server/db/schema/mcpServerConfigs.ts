@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
+import { subaccounts } from './subaccounts';
 import { integrationConnections } from './integrationConnections';
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,7 @@ export const mcpServerConfigs = pgTable(
     organisationId: uuid('organisation_id')
       .notNull()
       .references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
 
     // Preset reference — links to MCP_PRESETS config for upgrade path
     presetSlug: text('preset_slug'),
@@ -93,6 +95,8 @@ export const mcpServerConfigs = pgTable(
       .on(table.organisationId, table.slug),
     orgIdx: index('mcp_server_configs_org_idx')
       .on(table.organisationId),
+    subaccountIdx: index('mcp_server_configs_subaccount_idx')
+      .on(table.subaccountId),
     statusIdx: index('mcp_server_configs_status_idx')
       .on(table.status),
   })

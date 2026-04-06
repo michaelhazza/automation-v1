@@ -113,6 +113,26 @@ router.post(
   })
 );
 
+// Load a configuration template into an organisation
+router.post(
+  '/api/system/company-templates/:id/load-to-org',
+  authenticate,
+  requireSystemAdmin,
+  asyncHandler(async (req, res) => {
+    const { organisationId, operatorInputs } = req.body;
+    if (!organisationId) {
+      res.status(400).json({ error: 'organisationId is required' });
+      return;
+    }
+    const result = await systemTemplateService.loadToOrg(
+      req.params.id,
+      organisationId,
+      operatorInputs ?? undefined
+    );
+    res.json(result);
+  })
+);
+
 // Load selected system agents into a subaccount
 router.post(
   '/api/system-agents/load',

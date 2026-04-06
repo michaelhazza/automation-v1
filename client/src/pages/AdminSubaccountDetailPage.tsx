@@ -9,16 +9,17 @@ import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEd
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
 const ConnectionsPage = lazy(() => import('./ConnectionsPage'));
+const McpServersPage = lazy(() => import('./McpServersPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
 
 interface Subaccount { id: string; name: string; slug: string; status: string; includeInOrgInbox: boolean; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'connections' | 'engines' | 'workflows' | 'agents' | 'categories' | 'board' | 'memory' | 'usage' | 'admin';
+type ActiveTab = 'integrations' | 'engines' | 'workflows' | 'agents' | 'categories' | 'board' | 'memory' | 'usage' | 'admin';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
-  connections: 'Connections', engines: 'Engines', workflows: 'Workflows', agents: 'Agents',
+  integrations: 'Integrations', engines: 'Engines', workflows: 'Workflows', agents: 'Agents',
   categories: 'Categories', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
 };
 
@@ -35,8 +36,8 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [loading, setLoading] = useState(true);
 
   const visibleTabs: ActiveTab[] = mode === 'client'
-    ? ['connections', 'board', 'categories']
-    : ['connections', 'engines', 'workflows', 'agents', 'categories', 'board', 'memory', 'usage', 'admin'];
+    ? ['integrations', 'board', 'categories']
+    : ['integrations', 'engines', 'workflows', 'agents', 'categories', 'board', 'memory', 'usage', 'admin'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
@@ -399,10 +400,10 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         </>
       )}
 
-      {/* Connections */}
-      {activeTab === 'connections' && (
-        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading connections...</div>}>
-          <ConnectionsPage user={_user as any} embedded />
+      {/* Integrations */}
+      {activeTab === 'integrations' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading integrations...</div>}>
+          <McpServersPage user={_user as any} subaccountId={subaccountId} embedded />
         </Suspense>
       )}
 

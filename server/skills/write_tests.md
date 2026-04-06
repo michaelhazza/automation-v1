@@ -2,7 +2,7 @@
 name: Write Tests
 description: Write or update test files for a module, feature, or bug fix.
 isActive: true
-isVisible: true
+isVisible: false
 ---
 
 ```json

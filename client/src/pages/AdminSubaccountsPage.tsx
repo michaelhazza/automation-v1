@@ -23,7 +23,7 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
   const [subaccounts, setSubaccounts] = useState<Subaccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', slug: '', status: 'active' });
+  const [form, setForm] = useState({ name: '', slug: '' });
   const [error, setError] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -44,10 +44,9 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
       await api.post('/api/subaccounts', {
         name: form.name,
         slug: form.slug || undefined,
-        status: form.status,
       });
       setShowForm(false);
-      setForm({ name: '', slug: '', status: 'active' });
+      setForm({ name: '', slug: '' });
       load();
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: { error?: string } } };
@@ -107,18 +106,6 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
                 placeholder="e.g. my-client"
                 className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-            </div>
-            <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Status</label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
-              </select>
             </div>
           </div>
           <div className="flex gap-3">

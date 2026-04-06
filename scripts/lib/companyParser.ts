@@ -37,6 +37,8 @@ export interface AgentDefinition {
   name: string;
   title?: string;
   description?: string;
+  role?: string;
+  executionScope?: 'subaccount' | 'org';
   reportsTo: string | null;
   model?: string;
   temperature?: number;
@@ -153,6 +155,8 @@ export async function parseCompanyFolder(companyDir: string): Promise<ParsedComp
         name: String(fm.name ?? folder),
         title: fm.title as string | undefined,
         description: fm.description as string | undefined,
+        role: fm.role as string | undefined,
+        executionScope: fm.executionScope as 'subaccount' | 'org' | undefined,
         reportsTo: fm.reportsTo === null || fm.reportsTo === 'null' ? null : String(fm.reportsTo ?? ''),
         model: fm.model as string | undefined,
         temperature: fm.temperature as number | undefined,
@@ -256,6 +260,8 @@ export interface SystemAgentSeedRow {
   name: string;
   description: string | null;
   icon: string | null;
+  agentRole: string | null;
+  agentTitle: string | null;
   masterPrompt: string;
   modelProvider: string;
   modelId: string;
@@ -266,12 +272,14 @@ export interface SystemAgentSeedRow {
   defaultTokenBudget: number;
   defaultMaxToolCalls: number;
   executionMode: 'api' | 'headless';
+  executionScope: 'subaccount' | 'org';
   isPublished: boolean;
   status: 'draft' | 'active' | 'inactive';
   defaultScheduleCron: string | null;
   heartbeatEnabled: boolean;
   heartbeatIntervalHours: number | null;
   heartbeatOffsetHours: number;
+  heartbeatOffsetMinutes: number;
 }
 
 /**
@@ -328,6 +336,8 @@ export function toSystemAgentRows(parsed: ParsedCompany): SystemAgentSeedRow[] {
       name: a.name,
       description: a.description ?? a.title ?? null,
       icon: a.icon ?? null,
+      agentRole: a.role ?? null,
+      agentTitle: a.title ?? null,
       masterPrompt: a.systemPrompt,
       modelProvider: 'anthropic',
       modelId: a.model ?? 'claude-sonnet-4-6',
@@ -338,10 +348,12 @@ export function toSystemAgentRows(parsed: ParsedCompany): SystemAgentSeedRow[] {
       defaultTokenBudget: a.tokenBudget ?? 30000,
       defaultMaxToolCalls: a.maxToolCalls ?? 20,
       executionMode: 'api' as const,
+      executionScope: a.executionScope ?? 'subaccount',
       isPublished: true,
       status: 'active' as const,
       defaultScheduleCron: cron,
       ...heartbeat,
+      heartbeatOffsetMinutes: 0,
     };
   });
 }

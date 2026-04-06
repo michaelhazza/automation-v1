@@ -15,11 +15,35 @@ router.get('/api/skills/all', authenticate, asyncHandler(async (req, res) => {
     skillService.listSkills(req.orgId!),
     systemSkillService.listVisibleSkills(),
   ]);
+
+  // Start with custom (non-built-in) skills from the DB
+  const customSkills = skills.filter((s: { skillType: string }) => s.skillType !== 'built_in');
+
+  // Map visible system skills into the shape the frontend expects,
+  // preferring the DB row if one exists (so org-level overrides are preserved)
+  const dbSlugSet = new Set(skills.map((s: { slug: string }) => s.slug));
+  const systemAsBuiltIn = visibleSystemSkills
+    .filter(ss => !dbSlugSet.has(ss.slug))
+    .map(ss => ({
+      id: ss.id,
+      slug: ss.slug,
+      name: ss.name,
+      description: ss.description,
+      skillType: 'built_in' as const,
+      isActive: ss.isActive,
+      organisationId: null,
+      methodology: ss.methodology,
+      createdAt: null,
+      updatedAt: null,
+    }));
+
+  // Also include DB built-in skills that are visible
   const visibleSlugs = new Set(visibleSystemSkills.map(s => s.slug));
-  const filtered = skills.filter((s: { skillType: string; slug: string }) =>
-    s.skillType !== 'built_in' || visibleSlugs.has(s.slug)
+  const dbBuiltIn = skills.filter((s: { skillType: string; slug: string }) =>
+    s.skillType === 'built_in' && visibleSlugs.has(s.slug)
   );
-  res.json(filtered);
+
+  res.json([...customSkills, ...dbBuiltIn, ...systemAsBuiltIn]);
 }));
 
 // ─── List skills (org-specific custom skills only; built-in skills are now system-level) ──

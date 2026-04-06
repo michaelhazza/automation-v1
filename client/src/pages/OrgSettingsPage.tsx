@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User, getActiveOrgId, getActiveOrgName } from '../lib/auth';
 import Modal from '../components/Modal';
@@ -6,6 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import AdminBoardConfigPage from './AdminBoardConfigPage';
 import AdminCategoriesPage from './AdminCategoriesPage';
 import AdminEnginesPage from './AdminEnginesPage';
+import OrgMemoryPage from './OrgMemoryPage';
 
 interface OrgData {
   id: string;
@@ -19,12 +21,13 @@ interface OrgData {
   requireAgentApproval: boolean;
 }
 
-type ActiveTab = 'board' | 'categories' | 'engines' | 'general' | 'permissions';
+type ActiveTab = 'board' | 'categories' | 'engines' | 'memory' | 'general' | 'permissions';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   board: 'Board Config',
   categories: 'Categories',
   engines: 'Engines',
+  memory: 'Org Memory',
   general: 'General',
   permissions: 'Permissions',
 };
@@ -32,7 +35,11 @@ const TAB_LABELS: Record<ActiveTab, string> = {
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 export default function OrgSettingsPage({ user }: { user: User }) {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('board');
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const initialTab: ActiveTab = tabParam && ['board', 'categories', 'engines', 'memory', 'general', 'permissions'].includes(tabParam)
+    ? tabParam as ActiveTab : 'board';
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
 
   const orgId = getActiveOrgId();
   const orgName = getActiveOrgName();
@@ -41,8 +48,8 @@ export default function OrgSettingsPage({ user }: { user: User }) {
   // Non-system-admins see: board, categories, engines
   // System admins additionally see: general, permissions
   const visibleTabs: ActiveTab[] = isSystemAdmin
-    ? ['board', 'categories', 'engines', 'general', 'permissions']
-    : ['board', 'categories', 'engines'];
+    ? ['board', 'categories', 'engines', 'memory', 'general', 'permissions']
+    : ['board', 'categories', 'engines', 'memory'];
 
   if (!orgId) {
     return (
@@ -75,6 +82,7 @@ export default function OrgSettingsPage({ user }: { user: User }) {
       {activeTab === 'board' && <AdminBoardConfigPage user={user} embedded />}
       {activeTab === 'categories' && <AdminCategoriesPage user={user} embedded />}
       {activeTab === 'engines' && <AdminEnginesPage user={user} embedded />}
+      {activeTab === 'memory' && <OrgMemoryPage embedded />}
       {activeTab === 'general' && <GeneralTab orgId={orgId} orgName={orgName} />}
       {activeTab === 'permissions' && <PermissionsTab />}
     </div>

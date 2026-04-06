@@ -14,7 +14,7 @@ interface OrgAgentConfig {
   createdAt: string;
 }
 
-export default function OrgAgentConfigsPage() {
+export default function OrgAgentConfigsPage({ embedded }: { embedded?: boolean } = {}) {
   const [configs, setConfigs] = useState<OrgAgentConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -67,12 +67,14 @@ export default function OrgAgentConfigsPage() {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-[24px] font-bold text-slate-900 mt-0 mb-1">Org Agent Configs</h1>
-          <p className="text-[14px] text-slate-500 m-0">Organisation-level agent execution settings and schedules.</p>
+      {!embedded && (
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-[24px] font-bold text-slate-900 mt-0 mb-1">Org Agent Configs</h1>
+            <p className="text-[14px] text-slate-500 m-0">Organisation-level agent execution settings and schedules.</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {error && (
         <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg mb-4 text-[14px] flex justify-between items-center">

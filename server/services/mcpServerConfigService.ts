@@ -17,6 +17,19 @@ export const mcpServerConfigService = {
       .orderBy(mcpServerConfigs.createdAt);
   },
 
+  async listBySubaccount(organisationId: string, subaccountId: string): Promise<McpServerConfig[]> {
+    return db
+      .select()
+      .from(mcpServerConfigs)
+      .where(
+        and(
+          eq(mcpServerConfigs.organisationId, organisationId),
+          eq(mcpServerConfigs.subaccountId, subaccountId),
+        )
+      )
+      .orderBy(mcpServerConfigs.createdAt);
+  },
+
   async getById(id: string, organisationId: string): Promise<McpServerConfig> {
     const [config] = await db
       .select()
@@ -56,6 +69,46 @@ export const mcpServerConfigService = {
       .values({
         ...input,
         organisationId,
+        envEncrypted,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    return config;
+  },
+
+  async createForSubaccount(
+    organisationId: string,
+    subaccountId: string,
+    input: Omit<NewMcpServerConfig, 'id' | 'organisationId' | 'subaccountId' | 'createdAt' | 'updatedAt'>,
+  ): Promise<McpServerConfig> {
+    // Check slug uniqueness scoped to the subaccount
+    const [existing] = await db
+      .select()
+      .from(mcpServerConfigs)
+      .where(
+        and(
+          eq(mcpServerConfigs.slug, input.slug!),
+          eq(mcpServerConfigs.organisationId, organisationId),
+          eq(mcpServerConfigs.subaccountId, subaccountId),
+        )
+      );
+    if (existing) {
+      throw Object.assign(new Error(`MCP server with slug "${input.slug}" already exists in this subaccount`), { statusCode: 409 });
+    }
+
+    // Encrypt env vars if provided
+    let envEncrypted: string | null = null;
+    if (input.envEncrypted) {
+      envEncrypted = connectionTokenService.encryptToken(input.envEncrypted);
+    }
+
+    const [config] = await db
+      .insert(mcpServerConfigs)
+      .values({
+        ...input,
+        organisationId,
+        subaccountId,
         envEncrypted,
         createdAt: new Date(),
         updatedAt: new Date(),

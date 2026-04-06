@@ -5,6 +5,8 @@ import { mcpClientManager } from '../services/mcpClientManager.js';
 import { MCP_PRESETS, MCP_PRESET_CATEGORY_LABELS } from '../config/mcpPresets.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
+import { connectorConfigService } from '../services/connectorConfigService.js';
 
 const router = Router();
 
@@ -141,14 +143,53 @@ router.get('/api/mcp-presets', authenticate, asyncHandler(async (req, res, _next
   if (category) presets = presets.filter(p => p.category === category);
 
   // Check which presets are already added for this org
-  const existing = await mcpServerConfigService.list(req.orgId!);
-  const existingSlugs = new Set(existing.map(c => c.presetSlug));
+  const [existing, existingConnectors] = await Promise.all([
+    mcpServerConfigService.list(req.orgId!),
+    connectorConfigService.listByOrg(req.orgId!),
+  ]);
+  const existingSlugs = new Set(existing.map(c => c.presetSlug).filter(Boolean));
+  const existingConnectorSlugs = new Set(existingConnectors.map((c: { connectorType: string }) => `connector-${c.connectorType}`));
+  const allSlugs = new Set([...existingSlugs, ...existingConnectorSlugs]);
 
   const result = presets.map(p => ({
     ...p,
-    isAdded: existingSlugs.has(p.slug),
+    isAdded: allSlugs.has(p.slug),
   }));
 
+  res.json({ presets: result, categories: MCP_PRESET_CATEGORY_LABELS });
+}));
+
+// ── Subaccount-scoped MCP servers ────────────────────────────────────────
+
+router.get('/api/subaccounts/:subaccountId/mcp-servers', authenticate, asyncHandler(async (req, res) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  const configs = await mcpServerConfigService.listBySubaccount(req.orgId!, req.params.subaccountId);
+  res.json(configs);
+}));
+
+router.post('/api/subaccounts/:subaccountId/mcp-servers', authenticate, asyncHandler(async (req, res) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  const config = await mcpServerConfigService.createForSubaccount(req.orgId!, req.params.subaccountId, req.body);
+  res.status(201).json(config);
+}));
+
+router.delete('/api/subaccounts/:subaccountId/mcp-servers/:id', authenticate, asyncHandler(async (req, res) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  await mcpServerConfigService.delete(req.params.id, req.orgId!);
+  res.json({ ok: true });
+}));
+
+router.get('/api/subaccounts/:subaccountId/mcp-presets', authenticate, asyncHandler(async (req, res) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  const existing = await mcpServerConfigService.listBySubaccount(req.orgId!, req.params.subaccountId);
+  const existingSlugs = new Set(existing.map(c => c.presetSlug).filter(Boolean));
+  const existingConnectors = await connectorConfigService.listBySubaccount(req.orgId!, req.params.subaccountId);
+  const existingConnectorSlugs = new Set(existingConnectors.map(c => `connector-${c.connectorType}`));
+  const allSlugs = new Set([...existingSlugs, ...existingConnectorSlugs]);
+  const presets = req.query.category
+    ? MCP_PRESETS.filter(p => p.category === req.query.category)
+    : MCP_PRESETS;
+  const result = presets.map(p => ({ ...p, isAdded: allSlugs.has(p.slug) }));
   res.json({ presets: result, categories: MCP_PRESET_CATEGORY_LABELS });
 }));
 

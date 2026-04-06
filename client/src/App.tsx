@@ -57,13 +57,11 @@ const UsagePage = lazy(() => import('./pages/UsagePage'));
 const PageProjectsPage = lazy(() => import('./pages/PageProjectsPage'));
 const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage'));
 const JobQueueDashboardPage = lazy(() => import('./pages/JobQueueDashboardPage'));
-const OrgMemoryPage = lazy(() => import('./pages/OrgMemoryPage'));
 const AgentTriggersPage = lazy(() => import('./pages/AgentTriggersPage'));
-const OrgAgentConfigsPage = lazy(() => import('./pages/OrgAgentConfigsPage'));
 const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
-const HierarchyTemplatesPage = lazy(() => import('./pages/HierarchyTemplatesPage'));
-const ConnectorConfigsPage = lazy(() => import('./pages/ConnectorConfigsPage'));
+
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
+const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
 
 function PageLoader() {
   return (
@@ -192,10 +190,10 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
             <Route path="/admin/subaccounts/:subaccountId/goals" element={<GoalsPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
-            <Route path="/admin/org-memory" element={<OrgMemoryPage />} />
-            <Route path="/admin/org-agent-configs" element={<OrgAgentConfigsPage />} />
-            <Route path="/admin/hierarchy-templates" element={<HierarchyTemplatesPage />} />
-            <Route path="/admin/connectors" element={<ConnectorConfigsPage />} />
+            <Route path="/admin/org-memory" element={<Navigate to="/admin/org-settings?tab=memory" replace />} />
+            <Route path="/admin/org-agent-configs" element={<Navigate to="/admin/agents?tab=org-execution" replace />} />
+            <Route path="/admin/hierarchy-templates" element={<Navigate to="/admin/agents?tab=team-templates" replace />} />
+            <Route path="/admin/connectors" element={<Navigate to="/admin/mcp-servers" replace />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
@@ -210,6 +208,7 @@ export default function App() {
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
+            <Route path="/system/config-templates" element={<SystemCompanyTemplatesPage user={user!} />} />
           </Route>
 
           {/* Subaccount connections */}

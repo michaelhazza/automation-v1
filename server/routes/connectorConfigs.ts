@@ -5,6 +5,7 @@ import { connectorPollingService } from '../services/connectorPollingService.js'
 import { adapters } from '../adapters/index.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 
 const router = Router();
 
@@ -99,6 +100,35 @@ router.post('/api/org/connectors/:id/validate', authenticate, requireOrgPermissi
 
   const result = await adapter.ingestion.validateCredentials(connection as never);
   res.json(result);
+}));
+
+// ── Subaccount-scoped connectors ─────────────────────────────────────────
+
+router.get('/api/subaccounts/:subaccountId/connectors', authenticate, asyncHandler(async (req, res, _next: NextFunction) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  const configs = await connectorConfigService.listBySubaccount(req.orgId!, req.params.subaccountId);
+  res.json(configs);
+}));
+
+router.post('/api/subaccounts/:subaccountId/connectors', authenticate, asyncHandler(async (req, res, _next: NextFunction) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  const { connectorType, pollIntervalMinutes } = req.body;
+  if (!connectorType) return res.status(400).json({ message: 'connectorType is required' });
+  const config = await connectorConfigService.createForSubaccount(req.orgId!, req.params.subaccountId, { connectorType, pollIntervalMinutes });
+  res.status(201).json(config);
+}));
+
+router.delete('/api/subaccounts/:subaccountId/connectors/:id', authenticate, asyncHandler(async (req, res, _next: NextFunction) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  await connectorConfigService.delete(req.params.id, req.orgId!);
+  res.json({ ok: true });
+}));
+
+router.post('/api/subaccounts/:subaccountId/connectors/:id/sync', authenticate, asyncHandler(async (req, res, _next: NextFunction) => {
+  await resolveSubaccount(req.params.subaccountId, req.orgId!);
+  const config = await connectorConfigService.get(req.params.id, req.orgId!);
+  await connectorPollingService.syncConnector(config.id);
+  res.json({ ok: true });
 }));
 
 export default router;
