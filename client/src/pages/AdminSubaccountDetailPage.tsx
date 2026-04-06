@@ -11,7 +11,7 @@ const UsagePage = lazy(() => import('./UsagePage'));
 const ConnectionsPage = lazy(() => import('./ConnectionsPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
 
-interface Subaccount { id: string; name: string; slug: string; status: string; }
+interface Subaccount { id: string; name: string; slug: string; status: string; includeInOrgInbox: boolean; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
@@ -49,7 +49,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [linkForm, setLinkForm] = useState({ processId: '', subaccountCategoryId: '' });
   const [deleteLinkId, setDeleteLinkId] = useState<string | null>(null);
 
-  const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active', timezone: 'UTC' });
+  const [settingsForm, setSettingsForm] = useState({ name: '', slug: '', status: 'active', timezone: 'UTC', includeInOrgInbox: true });
   const [settingsSaved, setSettingsSaved] = useState('');
 
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
@@ -69,7 +69,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       setSa(saRes.data);
       setCategories(catRes.data);
       setLinkedProcesses(processRes.data.linkedProcesses ?? []);
-      setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status, timezone: saRes.data.settings?.timezone ?? 'UTC' });
+      setSettingsForm({ name: saRes.data.name, slug: saRes.data.slug, status: saRes.data.status, timezone: saRes.data.settings?.timezone ?? 'UTC', includeInOrgInbox: saRes.data.includeInOrgInbox ?? true });
       if (boardRes?.data?.columns) setBoardColumns(boardRes.data.columns);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -135,8 +135,8 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const handleSaveSettings = async () => {
     setError(''); setSettingsSaved('');
     try {
-      const { timezone, ...rest } = settingsForm;
-      await api.patch(`/api/subaccounts/${subaccountId}`, { ...rest, settings: { timezone } });
+      const { timezone, includeInOrgInbox, ...rest } = settingsForm;
+      await api.patch(`/api/subaccounts/${subaccountId}`, { ...rest, includeInOrgInbox, settings: { timezone } });
       setSettingsSaved('Saved successfully'); load();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -459,6 +459,21 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
                     <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={settingsForm.includeInOrgInbox}
+                    onClick={() => setSettingsForm({ ...settingsForm, includeInOrgInbox: !settingsForm.includeInOrgInbox })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${settingsForm.includeInOrgInbox ? 'bg-indigo-600' : 'bg-slate-200'}`}
+                  >
+                    <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${settingsForm.includeInOrgInbox ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                  <span className="text-[13px] font-medium text-slate-700">Include in Organisation Inbox</span>
+                </label>
+                <p className="text-[12px] text-slate-400 mt-1.5 ml-14">When enabled, inbox items from this subaccount (tasks, reviews, failed runs) will appear in the org-wide inbox. When disabled, they are only visible in this subaccount's inbox.</p>
               </div>
             </div>
             <button onClick={handleSaveSettings} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors">

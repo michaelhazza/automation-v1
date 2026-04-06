@@ -195,6 +195,11 @@ export default function DashboardPage({ user }: { user: User }) {
         />
       </div>
 
+      {/* ── System admin: Queue health summary ───────────────────────────── */}
+      {user.role === 'system_admin' && (
+        <QueueHealthSummary />
+      )}
+
       {/* ── Run activity chart ─────────────────────────────────────────────── */}
       {daily.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8">
@@ -298,5 +303,43 @@ export default function DashboardPage({ user }: { user: User }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Queue Health Summary (system admin only) ──────────────────────────────
+
+function QueueHealthSummary() {
+  const [data, setData] = useState<{ pending: number; dlq: number; failed: number } | null>(null);
+
+  useEffect(() => {
+    api.get('/api/system/job-queues')
+      .then(res => {
+        const queues = res.data as Array<{ pending: number; dlqDepth: number; failed: number }>;
+        setData({
+          pending: queues.reduce((s, q) => s + q.pending, 0),
+          dlq: queues.reduce((s, q) => s + q.dlqDepth, 0),
+          failed: queues.reduce((s, q) => s + q.failed, 0),
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  if (!data) return null;
+
+  const color = data.dlq > 0 || data.failed > 10
+    ? 'border-amber-200 bg-amber-50'
+    : 'border-green-200 bg-green-50';
+
+  return (
+    <Link to="/system/job-queues" className="no-underline block mb-4">
+      <div className={`border rounded-xl px-5 py-3 flex items-center gap-6 ${color}`}>
+        <div className="text-[13px] font-semibold text-slate-700">Queue Health</div>
+        <div className="flex gap-4 text-[12px]">
+          <span className="text-slate-500">Pending: <span className="font-semibold text-slate-700">{data.pending}</span></span>
+          <span className={data.dlq > 0 ? 'text-amber-600' : 'text-slate-500'}>DLQ: <span className="font-semibold">{data.dlq}</span></span>
+          <span className={data.failed > 10 ? 'text-red-600' : 'text-slate-500'}>Failed (24h): <span className="font-semibold">{data.failed}</span></span>
+        </div>
+      </div>
+    </Link>
   );
 }

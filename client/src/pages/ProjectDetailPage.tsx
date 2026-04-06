@@ -10,6 +10,9 @@ interface Project {
   description: string | null;
   status: string;
   color: string;
+  targetDate: string | null;
+  budgetCents: number | null;
+  budgetWarningPercent: number | null;
   createdAt: string;
 }
 
@@ -33,6 +36,8 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editTargetDate, setEditTargetDate] = useState('');
+  const [editBudget, setEditBudget] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -46,6 +51,8 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
       setTasks(tRes.data);
       setEditName(pRes.data.name);
       setEditDescription(pRes.data.description ?? '');
+      setEditTargetDate(pRes.data.targetDate ? pRes.data.targetDate.split('T')[0] : '');
+      setEditBudget(pRes.data.budgetCents != null ? String(pRes.data.budgetCents / 100) : '');
     }).catch((err) => {
       console.error('[ProjectDetail] Failed to load project:', err);
       navigate('/');
@@ -65,6 +72,8 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
       const { data } = await api.patch(`/api/subaccounts/${activeClientId}/projects/${id}`, {
         name: editName.trim(),
         description: editDescription.trim() || null,
+        targetDate: editTargetDate || null,
+        budgetCents: editBudget ? Math.round(parseFloat(editBudget) * 100) : null,
       });
       setProject(data);
       setEditing(false);
@@ -102,7 +111,17 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
                 rows={2}
                 className="text-[14px] text-slate-600 border border-slate-200 rounded-lg px-2 py-1.5 resize-vertical focus:outline-none focus:ring-2 focus:ring-indigo-500 w-[400px]"
               />
-              <div className="flex gap-2">
+              <div className="flex gap-3 mt-1">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-slate-500 font-medium">Target Date</label>
+                  <input type="date" value={editTargetDate} onChange={(e) => setEditTargetDate(e.target.value)} className="text-[13px] border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-slate-500 font-medium">Budget ($/mo)</label>
+                  <input type="number" step="0.01" min="0" value={editBudget} onChange={(e) => setEditBudget(e.target.value)} placeholder="No limit" className="text-[13px] border border-slate-200 rounded-lg px-2 py-1.5 w-[120px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-2">
                 <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] font-medium cursor-pointer">{saving ? 'Saving...' : 'Save'}</button>
                 <button onClick={() => setEditing(false)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg text-[13px] font-medium cursor-pointer">Cancel</button>
               </div>
@@ -125,6 +144,16 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
             </>
           )}
         </div>
+      </div>
+
+      {/* Project metadata */}
+      <div className="flex gap-4 mb-4 text-[13px] text-slate-500">
+        {project.targetDate && (
+          <span>Target: {new Date(project.targetDate).toLocaleDateString()}</span>
+        )}
+        {project.budgetCents != null && (
+          <span>Budget: ${(project.budgetCents / 100).toFixed(2)}/mo</span>
+        )}
       </div>
 
       {/* Tasks in this project */}

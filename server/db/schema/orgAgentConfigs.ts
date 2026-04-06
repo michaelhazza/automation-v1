@@ -28,6 +28,12 @@ export const orgAgentConfigs = pgTable(
     heartbeatIntervalHours: integer('heartbeat_interval_hours').notNull().default(24),
     heartbeatOffsetMinutes: integer('heartbeat_offset_minutes').notNull().default(0),
 
+    // Concurrency policies
+    concurrencyPolicy: text('concurrency_policy').notNull().default('skip_if_active').$type<'skip_if_active' | 'coalesce_if_active' | 'always_enqueue'>(),
+    catchUpPolicy: text('catch_up_policy').notNull().default('skip_missed').$type<'skip_missed' | 'enqueue_missed_with_cap'>(),
+    catchUpCap: integer('catch_up_cap').notNull().default(3),
+    maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(1),
+
     // Cron scheduling
     scheduleCron: text('schedule_cron'),
     scheduleEnabled: boolean('schedule_enabled').notNull().default(false),

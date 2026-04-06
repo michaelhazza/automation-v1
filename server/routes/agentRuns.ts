@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import crypto from 'crypto';
 import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
@@ -170,6 +169,17 @@ router.get(
   asyncHandler(async (req, res) => {
     const run = await agentActivityService.getRunDetail(req.params.id, req.orgId!);
     res.json(run);
+  })
+);
+
+// ─── Get trace chain for a run (A1) ──────────────────────────────────────────
+
+router.get(
+  '/api/agent-runs/:id/chain',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const chain = await agentActivityService.getRunChain(req.params.id, req.orgId!);
+    res.json(chain);
   })
 );
 

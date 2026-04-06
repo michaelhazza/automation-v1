@@ -14,6 +14,10 @@ export const createAgentBody = z.object({
   allowModelOverride: z.boolean().optional(),
   defaultSkillSlugs: z.array(z.string()).optional(),
   icon: z.string().max(255).optional(),
+  concurrencyPolicy: z.enum(['skip_if_active', 'coalesce_if_active', 'always_enqueue']).optional(),
+  catchUpPolicy: z.enum(['skip_missed', 'enqueue_missed_with_cap']).optional(),
+  catchUpCap: z.number().int().min(1).max(100).optional(),
+  maxConcurrentRuns: z.number().int().min(1).max(10).optional(),
 });
 export type CreateAgentInput = z.infer<typeof createAgentBody>;
 

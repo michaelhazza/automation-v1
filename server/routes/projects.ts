@@ -43,12 +43,16 @@ router.post(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const { name, description, color, repoUrl, githubConnectionId } = req.body as {
+    const { name, description, color, repoUrl, githubConnectionId, targetDate, budgetCents, budgetWarningPercent, goalId } = req.body as {
       name?: string;
       description?: string;
       color?: string;
       repoUrl?: string;
       githubConnectionId?: string;
+      targetDate?: string;
+      budgetCents?: number;
+      budgetWarningPercent?: number;
+      goalId?: string;
     };
 
     if (!name?.trim()) throw { statusCode: 400, message: 'name is required' };
@@ -61,6 +65,10 @@ router.post(
       color: color || '#6366f1',
       repoUrl: repoUrl?.trim() || null,
       githubConnectionId: githubConnectionId || null,
+      targetDate: targetDate ? new Date(targetDate) : null,
+      budgetCents: budgetCents ?? null,
+      budgetWarningPercent: budgetWarningPercent ?? 75,
+      goalId: goalId || null,
       createdBy: req.user?.id ?? null,
     }).returning();
 
@@ -86,13 +94,17 @@ router.patch(
 
     if (!existing) throw { statusCode: 404, message: 'Project not found' };
 
-    const { name, description, status, color, repoUrl, githubConnectionId } = req.body as {
+    const { name, description, status, color, repoUrl, githubConnectionId, targetDate, budgetCents, budgetWarningPercent, goalId } = req.body as {
       name?: string;
       description?: string;
       status?: 'active' | 'completed' | 'archived';
       color?: string;
       repoUrl?: string;
       githubConnectionId?: string | null;
+      targetDate?: string | null;
+      budgetCents?: number | null;
+      budgetWarningPercent?: number | null;
+      goalId?: string | null;
     };
 
     const updates: Partial<typeof projects.$inferInsert> = { updatedAt: new Date() };
@@ -102,6 +114,10 @@ router.patch(
     if (color !== undefined) updates.color = color;
     if (repoUrl !== undefined) updates.repoUrl = repoUrl?.trim() || null;
     if (githubConnectionId !== undefined) updates.githubConnectionId = githubConnectionId || null;
+    if (targetDate !== undefined) updates.targetDate = targetDate ? new Date(targetDate) : null;
+    if (budgetCents !== undefined) updates.budgetCents = budgetCents;
+    if (budgetWarningPercent !== undefined) updates.budgetWarningPercent = budgetWarningPercent;
+    if (goalId !== undefined) updates.goalId = goalId || null;
 
     const [updated] = await db
       .update(projects)

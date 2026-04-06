@@ -32,6 +32,12 @@ export const subaccountAgents = pgTable(
     scheduleEnabled: boolean('schedule_enabled').notNull().default(false),
     scheduleTimezone: text('schedule_timezone').notNull().default('UTC'),
 
+    // ── Concurrency policies ──────────────────────────────────────────
+    concurrencyPolicy: text('concurrency_policy').notNull().default('skip_if_active').$type<'skip_if_active' | 'coalesce_if_active' | 'always_enqueue'>(),
+    catchUpPolicy: text('catch_up_policy').notNull().default('skip_missed').$type<'skip_missed' | 'enqueue_missed_with_cap'>(),
+    catchUpCap: integer('catch_up_cap').notNull().default(3),
+    maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(1),
+
     // ── Heartbeat (inherited from org agent, overridable per subaccount) ─
     heartbeatEnabled: boolean('heartbeat_enabled').notNull().default(false),
     heartbeatIntervalHours: integer('heartbeat_interval_hours'),

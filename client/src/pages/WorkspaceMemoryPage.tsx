@@ -31,7 +31,13 @@ const ENTRY_TYPE_CLS: Record<string, string> = {
   pattern:     'bg-indigo-100 text-indigo-800',
 };
 
-type ActiveTab = 'summary' | 'entries' | 'board';
+interface SearchResult {
+  content: string;
+  similarity: number;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+type ActiveTab = 'summary' | 'entries' | 'board' | 'search';
 
 export default function WorkspaceMemoryPage({ user: _user, embedded = false }: { user: { id: string; role: string }; embedded?: boolean }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
@@ -44,6 +50,10 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('summary');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchLatency, setSearchLatency] = useState<number | null>(null);
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -73,6 +83,19 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
       await load();
     } catch { setError('Failed to regenerate memory'); }
     finally { setRegenerating(false); }
+  }
+
+  async function handleSearch() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setSearchLatency(null);
+    const start = Date.now();
+    try {
+      const res = await api.post(`/api/subaccounts/${subaccountId}/workspace-memory/search-test`, { query: searchQuery });
+      setSearchResults(res.data);
+      setSearchLatency(Date.now() - start);
+    } catch { setError('Search failed'); }
+    finally { setSearching(false); }
   }
 
   async function handleDeleteEntry(entryId: string) {
@@ -124,13 +147,13 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
       </div>
 
       <div className="flex gap-0 border-b border-slate-200 mb-6">
-        {(['summary', 'entries', 'board'] as const).map((tab) => (
+        {(['summary', 'entries', 'board', 'search'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-5 py-2.5 bg-transparent border-b-2 -mb-px text-[14px] cursor-pointer transition-colors capitalize ${activeTab === tab ? 'border-indigo-600 text-indigo-600 font-semibold' : 'border-transparent text-slate-500 font-normal hover:text-slate-700'}`}
           >
-            {tab === 'board' ? 'Board Summary' : tab}
+            {tab === 'board' ? 'Board Summary' : tab === 'search' ? 'Search Diagnostics' : tab}
           </button>
         ))}
       </div>
@@ -204,6 +227,64 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
           <div className={`px-5 py-5 bg-slate-50 border border-slate-200 rounded-xl whitespace-pre-wrap text-[14px] leading-relaxed min-h-[100px] ${memory?.boardSummary ? 'text-slate-800' : 'text-slate-400'}`}>
             {memory?.boardSummary || 'No board summary generated yet. This will be created when memory is regenerated.'}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'search' && (
+        <div>
+          <h2 className="text-[16px] font-semibold text-slate-800 mb-2">Search Diagnostics</h2>
+          <p className="text-[13px] text-slate-500 mb-4">
+            Test memory retrieval quality. Enter a query to see what memory entries would be surfaced to an agent.
+          </p>
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+              placeholder="Enter a test query..."
+              className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={handleSearch}
+              disabled={searching || !searchQuery.trim()}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer transition-colors font-semibold"
+            >
+              {searching ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+
+          {searchLatency !== null && (
+            <div className="text-[12px] text-slate-400 mb-4">
+              {searchResults.length} results · {searchLatency}ms
+            </div>
+          )}
+
+          {searchResults.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {searchResults.map((result, idx) => {
+                const confidenceCls = result.confidence === 'high' ? 'bg-green-100 text-green-700' :
+                  result.confidence === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600';
+                return (
+                  <div key={idx} className="px-4 py-4 bg-white border border-slate-200 rounded-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[13px] font-semibold text-slate-700">Score: {result.similarity?.toFixed(3) ?? '—'}</span>
+                      <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${confidenceCls}`}>
+                        {result.confidence}
+                      </span>
+                    </div>
+                    <p className="m-0 text-[14px] text-slate-800 leading-relaxed">{result.content}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {searchLatency !== null && searchResults.length === 0 && (
+            <div className="py-10 text-center text-[14px] text-slate-400">
+              No results found. Try a different query or check that entries have embeddings.
+            </div>
+          )}
         </div>
       )}
     </div>

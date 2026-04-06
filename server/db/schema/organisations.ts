@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const organisations = pgTable(
   'organisations',
@@ -10,6 +11,11 @@ export const organisations = pgTable(
     status: text('status').notNull().default('active').$type<'active' | 'suspended'>(),
     settings: jsonb('settings'),
     orgExecutionEnabled: boolean('org_execution_enabled').notNull().default(true),
+    // ── Branding ──────────────────────────────────────────────────────
+    logoUrl: text('logo_url'),
+    brandColor: text('brand_color'), // hex colour e.g. '#6366f1'
+    // ── Governance ────────────────────────────────────────────────────
+    requireAgentApproval: boolean('require_agent_approval').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -25,8 +31,6 @@ export const organisations = pgTable(
     statusIdx: index('organisations_status_idx').on(table.status),
   })
 );
-
-import { sql } from 'drizzle-orm';
 
 export type Organisation = typeof organisations.$inferSelect;
 export type NewOrganisation = typeof organisations.$inferInsert;
