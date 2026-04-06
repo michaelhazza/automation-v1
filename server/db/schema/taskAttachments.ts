@@ -35,7 +35,8 @@ export const taskAttachments = pgTable(
   (table) => ({
     taskIdx: index('task_attach_task_idx').on(table.taskId),
     orgIdx: index('task_attach_org_idx').on(table.organisationId),
-    idempotencyUniq: unique('task_attach_idempotency').on(table.taskId, table.idempotencyKey),
+    // NOTE: Partial unique index created in migration 0065 (WHERE idempotency_key IS NOT NULL)
+    // Drizzle can't express partial unique indexes, so the constraint lives in SQL only
   })
 );
 
