@@ -1406,3 +1406,74 @@ HTTP Adapter, File Attachments, Feedback Voting. These extend platform capabilit
 Mobile, Branding, Hiring Gate. These are incremental improvements.
 
 Each phase can be shipped independently. Within phases, features have no dependencies on each other.
+
+---
+
+## Build Rules (Enforce During Implementation)
+
+These are not design decisions — they are execution discipline rules that prevent the spec from degrading during build.
+
+### BR-1: Strict Validation at API Boundary
+
+Every route MUST validate inputs with Zod before passing to service layer:
+- Reject unknown fields (`z.object().strict()`)
+- Enforce enum constraints centrally (import from shared enums, don't inline strings)
+- Validate UUIDs, hex colours, URLs, MIME types at the boundary — services should never receive malformed input
+
+Critical for: `concurrencyPolicy`, `catchUpPolicy`, `webhook payloads`, `inbox filters`, `goal level/status enums`.
+
+### BR-2: Single Writer Per Concern
+
+No two services may write to the same concern. Ownership is exclusive:
+
+| Concern | Single Writer |
+|---------|--------------|
+| Agent run state | `agentExecutionService` ONLY |
+| Inbox items/state | `inboxService` ONLY |
+| Cost aggregation | `costAggregateService` ONLY |
+| Webhook lifecycle | `webhookAdapterService` ONLY |
+| Review items | `reviewService` ONLY |
+| Goal hierarchy | `goalService` ONLY |
+
+If another service needs to trigger a state change, it calls the owning service — never writes directly.
+
+### BR-3: Structured Operational Logging
+
+Every service log MUST include structured context:
+
+```ts
+logger.info('webhook_invoked', {
+  correlationId,
+  organisationId,
+  subaccountId,
+  entityId,
+  action: 'webhook.invoke',
+  status: 'success',
+});
+```
+
+Minimum fields: `correlationId`, `organisationId`, `action`, `status`. Add `subaccountId` and `entityId` where applicable. This is separate from audit events — audit events are for compliance, operational logs are for debugging.
+
+### BR-4: Migration Ordering
+
+Schema changes with interdependencies must follow this deploy order:
+1. **Schema first** — deploy new tables and columns (nullable, with defaults)
+2. **Write paths second** — deploy services that populate new columns
+3. **Read paths last** — deploy UI and queries that depend on new data
+
+Never deploy a read path before the write path that populates it — this causes empty/broken UI states.
+
+### BR-5: Feature Flags (Recommended)
+
+Gate new features behind simple boolean flags in org settings or env config:
+
+```ts
+const FEATURE_FLAGS = {
+  goalsEnabled: process.env.FF_GOALS === 'true',
+  inboxV2Enabled: process.env.FF_INBOX_V2 === 'true',
+  webhookAgentsEnabled: process.env.FF_WEBHOOK_AGENTS === 'true',
+  attachmentsEnabled: process.env.FF_ATTACHMENTS === 'true',
+};
+```
+
+This enables: incremental shipping within phases, rollback safety, and early testing with real users. Routes and UI pages check the flag before rendering.
