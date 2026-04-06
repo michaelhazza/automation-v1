@@ -110,6 +110,60 @@ export const connectorPollingService = {
             } as never);
           }
 
+          // 3. Compute derived metrics from raw entity counts
+          if (adapter.ingestion.computeMetrics) {
+            try {
+              const metrics = await adapter.ingestion.computeMetrics(
+                connection as never,
+                dbAccount.externalId,
+                {
+                  contacts: contacts.length,
+                  opportunities: opportunities.length,
+                  conversations: conversations.length,
+                  revenue: revenue.length,
+                }
+              );
+
+              const isBackfill = config.syncPhase === 'backfill';
+              for (const m of metrics) {
+                await canonicalDataService.upsertMetric({
+                  organisationId: config.organisationId,
+                  accountId: dbAccount.id,
+                  metricSlug: m.metricSlug,
+                  currentValue: String(m.currentValue),
+                  previousValue: m.previousValue != null ? String(m.previousValue) : null,
+                  periodStart: m.periodStart ?? null,
+                  periodEnd: m.periodEnd ?? null,
+                  periodType: m.periodType,
+                  aggregationType: m.aggregationType,
+                  unit: m.unit ?? null,
+                  computedAt: new Date(),
+                  computationTrigger: 'poll',
+                  connectorType: config.connectorType,
+                  metadata: m.metadata ?? null,
+                });
+
+                await canonicalDataService.appendMetricHistory({
+                  organisationId: config.organisationId,
+                  accountId: dbAccount.id,
+                  metricSlug: m.metricSlug,
+                  periodType: m.periodType,
+                  aggregationType: m.aggregationType,
+                  value: String(m.currentValue),
+                  periodStart: m.periodStart ?? null,
+                  periodEnd: m.periodEnd ?? null,
+                  computedAt: new Date(),
+                  metricVersion: 1,
+                  isBackfill,
+                });
+              }
+            } catch (metricErr) {
+              // Metric computation failure should not fail the sync
+              console.error(`[ConnectorPolling] Metric computation failed for ${dbAccount.externalId}:`,
+                metricErr instanceof Error ? metricErr.message : String(metricErr));
+            }
+          }
+
           accountsSynced++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

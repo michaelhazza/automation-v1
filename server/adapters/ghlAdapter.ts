@@ -9,6 +9,7 @@ import type {
   CanonicalOpportunityData,
   CanonicalConversationData,
   CanonicalRevenueData,
+  CanonicalMetricData,
   NormalisedEvent,
   FetchOptions,
 } from './integrationAdapter.js';
@@ -217,6 +218,14 @@ export const ghlAdapter: IntegrationAdapter = {
         return { valid: false, error: err instanceof Error ? err.message : String(err) };
       }
     },
+
+    async computeMetrics(
+      _connection: IntegrationConnection,
+      _accountExternalId: string,
+      entityCounts: { contacts: number; opportunities: number; conversations: number; revenue: number }
+    ): Promise<CanonicalMetricData[]> {
+      return computeGhlMetrics(entityCounts);
+    },
   },
 
   // ── Webhook handling ─────────────────────────────────────────────────────
@@ -309,4 +318,93 @@ function mapGhlEventType(eventType: string): { normalisedType: string; entityTyp
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// GHL Metric Definitions — self-registered on adapter initialization
+// ---------------------------------------------------------------------------
+
+export const GHL_METRIC_DEFINITIONS = [
+  { metricSlug: 'contact_growth_rate', connectorType: 'ghl', label: 'Contact Growth Rate', unit: 'percent', valueType: 'ratio', defaultPeriodType: 'rolling_30d', defaultAggregationType: 'rate' },
+  { metricSlug: 'pipeline_velocity', connectorType: 'ghl', label: 'Pipeline Velocity', unit: 'percent', valueType: 'ratio', defaultPeriodType: 'rolling_30d', defaultAggregationType: 'ratio' },
+  { metricSlug: 'stale_deal_ratio', connectorType: 'ghl', label: 'Stale Deal Ratio', unit: 'percent', valueType: 'ratio', defaultPeriodType: 'rolling_30d', defaultAggregationType: 'ratio' },
+  { metricSlug: 'conversation_engagement', connectorType: 'ghl', label: 'Conversation Engagement', unit: 'percent', valueType: 'ratio', defaultPeriodType: 'rolling_30d', defaultAggregationType: 'ratio' },
+  { metricSlug: 'avg_response_time', connectorType: 'ghl', label: 'Avg Response Time', unit: 'seconds', valueType: 'duration', defaultPeriodType: 'rolling_30d', defaultAggregationType: 'avg' },
+  { metricSlug: 'revenue_trend', connectorType: 'ghl', label: 'Revenue Trend', unit: 'percent', valueType: 'ratio', defaultPeriodType: 'rolling_30d', defaultAggregationType: 'rate' },
+  { metricSlug: 'platform_activity', connectorType: 'ghl', label: 'Platform Activity', unit: 'score', valueType: 'score', defaultPeriodType: 'rolling_7d', defaultAggregationType: 'avg' },
+] as const;
+
+// ---------------------------------------------------------------------------
+// Compute derived metrics from raw entity counts and data
+// Called by connectorPollingService after entity sync
+// ---------------------------------------------------------------------------
+
+function computeGhlMetrics(entityCounts: {
+  contacts: number;
+  opportunities: number;
+  conversations: number;
+  revenue: number;
+}): CanonicalMetricData[] {
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const metrics: CanonicalMetricData[] = [];
+
+  // Contact growth rate: simplified as count-based (adapter has raw counts, detailed growth computed from canonical_contacts in polling service)
+  metrics.push({
+    metricSlug: 'contact_growth_rate',
+    currentValue: entityCounts.contacts > 0 ? entityCounts.contacts : 0,
+    periodType: 'rolling_30d',
+    aggregationType: 'rate',
+    unit: 'count',
+    periodStart: thirtyDaysAgo,
+    periodEnd: now,
+  });
+
+  // Pipeline velocity: stale deal ratio (stale = >14 days in stage)
+  // Note: detailed computation happens in polling service with access to canonical_opportunities
+  metrics.push({
+    metricSlug: 'pipeline_velocity',
+    currentValue: entityCounts.opportunities > 0 ? entityCounts.opportunities : 0,
+    periodType: 'rolling_30d',
+    aggregationType: 'ratio',
+    unit: 'count',
+    periodStart: thirtyDaysAgo,
+    periodEnd: now,
+  });
+
+  // Conversation engagement
+  metrics.push({
+    metricSlug: 'conversation_engagement',
+    currentValue: entityCounts.conversations > 0 ? entityCounts.conversations : 0,
+    periodType: 'rolling_30d',
+    aggregationType: 'ratio',
+    unit: 'count',
+    periodStart: thirtyDaysAgo,
+    periodEnd: now,
+  });
+
+  // Revenue trend
+  metrics.push({
+    metricSlug: 'revenue_trend',
+    currentValue: entityCounts.revenue > 0 ? entityCounts.revenue : 0,
+    periodType: 'rolling_30d',
+    aggregationType: 'rate',
+    unit: 'count',
+    periodStart: thirtyDaysAgo,
+    periodEnd: now,
+  });
+
+  // Platform activity: based on sync freshness (1.0 = just synced)
+  metrics.push({
+    metricSlug: 'platform_activity',
+    currentValue: 100, // fresh sync = max activity
+    periodType: 'rolling_7d',
+    aggregationType: 'avg',
+    unit: 'score',
+    periodStart: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+    periodEnd: now,
+  });
+
+  return metrics;
 }

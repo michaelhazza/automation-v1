@@ -230,6 +230,22 @@ export interface CanonicalRevenueData {
 }
 
 // ---------------------------------------------------------------------------
+// Canonical Metric Data — returned by adapter computeMetrics()
+// ---------------------------------------------------------------------------
+
+export interface CanonicalMetricData {
+  metricSlug: string;
+  currentValue: number;
+  previousValue?: number;
+  periodStart?: Date;
+  periodEnd?: Date;
+  periodType: string;       // "rolling_7d", "rolling_30d", "daily"
+  aggregationType: string;  // "rate", "ratio", "count", "avg", "sum"
+  unit?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Normalised webhook event
 // ---------------------------------------------------------------------------
 
@@ -295,7 +311,7 @@ export interface IntegrationAdapter {
     listChannels(connection: IntegrationConnection): Promise<MessageChannelData[]>;
   };
 
-  /** Inbound data ingestion — fetch normalised entities from external platform (e.g. GHL) */
+  /** Inbound data ingestion — fetch normalised entities from external platform */
   ingestion?: {
     listAccounts(connection: IntegrationConnection, config: Record<string, unknown>): Promise<CanonicalAccountData[]>;
     fetchContacts(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalContactData[]>;
@@ -303,6 +319,12 @@ export interface IntegrationAdapter {
     fetchConversations(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalConversationData[]>;
     fetchRevenue(connection: IntegrationConnection, accountExternalId: string, opts?: FetchOptions): Promise<CanonicalRevenueData[]>;
     validateCredentials(connection: IntegrationConnection): Promise<{ valid: boolean; error?: string }>;
+    /** Compute derived metrics from raw entities. Called after entity sync. */
+    computeMetrics?(
+      connection: IntegrationConnection,
+      accountExternalId: string,
+      entityCounts: { contacts: number; opportunities: number; conversations: number; revenue: number }
+    ): Promise<CanonicalMetricData[]>;
   };
 
   /** Webhook handling — verify and normalise inbound webhook events */
