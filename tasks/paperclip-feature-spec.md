@@ -81,6 +81,12 @@ Use existing rate-limiting middleware or add `express-rate-limit` scoped per rou
 
 Additionally, define org-level caps as a shared abuse prevention layer. Per-user limits protect against individual misuse; per-org caps protect against compromised API keys or runaway automation flooding a single tenant's resources.
 
+### Naming Convention
+
+- **TypeScript (Drizzle schema + services):** camelCase — `retryBackoffMs`, `heartbeatIntervalHours`
+- **Database (migrations):** snake_case — `retry_backoff_ms`, `heartbeat_interval_hours`
+- Drizzle maps between them automatically. This is already the pattern in the codebase. New features must follow it.
+
 ### CC-6: Transaction Boundaries
 
 **All multi-step writes MUST run inside a DB transaction.** This applies to:
@@ -509,7 +515,7 @@ Read state: JOIN with `inbox_read_states` on `(entityType, entityId, userId)`.
 **TTL / cleanup:** Resolved + archived items accumulate indefinitely. Add a scheduled cleanup job (daily, via pg-boss):
 - Delete `inbox_items` where `status = 'resolved'` AND `updatedAt < now() - 90 days`
 - Delete `inbox_items` where `isArchived = true` AND `updatedAt < now() - 30 days`
-- Delete corresponding `inbox_read_states` for cleaned-up items
+- Delete corresponding `inbox_read_states` matching on `(entityType, entityId)` — ensure no orphaned read states remain after cleanup
 
 **Inbox priority ordering (from review feedback):**
 Default sort order:
@@ -672,6 +678,8 @@ A naive `countActiveRuns()` check is not safe — two triggers can pass simultan
 async function enqueueRunWithPolicy(subaccountAgentId: string): Promise<boolean> {
   // Use pg-boss to atomically check + enqueue
   const config = await getSubaccountAgent(subaccountAgentId);
+  // Queue naming invariant: deterministic and unique per execution scope.
+  // Pattern: `agent-run:{subaccountAgentId}` — ensures concurrency is scoped per agent-subaccount pair.
   const queueName = `agent-run:${subaccountAgentId}`;
 
   // pg-boss getQueueSize returns active + queued count atomically
@@ -922,7 +930,7 @@ Callback endpoint validates `callbackToken` from request header, updates run sta
 **Webhook security hardening (from review feedback):**
 - `callbackToken` MUST be a signed JWT containing: `{ runId, agentId, orgId, exp }` with 15-minute expiry
 - Reject tokens where `runId` doesn't match the URL parameter
-- Reject tokens that have already been used (track in a `used_callback_tokens` set or check run status — if already completed/failed, reject)
+- Enforce at DB level: `UPDATE agent_runs SET status = :newStatus WHERE id = :runId AND status = 'waiting_callback'` — if zero rows affected, reject (prevents race on duplicate callbacks)
 - Require `X-Timestamp` header, reject requests with drift > 5 minutes
 - Log all callback attempts (success and failure) to audit events
 
@@ -967,6 +975,7 @@ queued → running (webhook POST sent)
 - Surface in inbox alerts tab: "Agent X webhook endpoint failing — 5 consecutive failures"
 - Auto-reset: after 5 minutes with no attempts, allow one probe request. If it succeeds, close the circuit.
 - State is in-memory (not persisted) — resets on server restart, which is acceptable.
+- In multi-instance deployments, circuit breaker state is per-instance and not globally coordinated (acceptable for MVP). If needed later, move state to Redis.
 
 ### Frontend Changes
 
@@ -1098,7 +1107,7 @@ CREATE TABLE task_attachments (
   idempotency_key TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   deleted_at TIMESTAMPTZ,
-  UNIQUE(task_id, idempotency_key)
+  CONSTRAINT task_attach_idempotency UNIQUE(task_id, idempotency_key)  -- NULLs bypass: idempotency only enforced when key is provided
 );
 
 CREATE INDEX task_attach_task_idx ON task_attachments(task_id);
@@ -1139,7 +1148,7 @@ Thumbs up/down on agent-generated comments, deliverables, and task activities. C
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/feedback` | Create or update vote: `{ entityType, entityId, vote, comment? }` |
-| DELETE | `/api/feedback/:feedbackId` | Remove vote |
+| DELETE | `/api/feedback/:feedbackId` | Remove vote (hard delete — exception to CC-3, feedback votes are ephemeral user actions not audit-worthy records) |
 | GET | `/api/feedback/agent/:agentId/summary` | Aggregate: total up/down per agent |
 
 POST is an upsert — if user already voted on this entity, update the vote.
