@@ -465,12 +465,21 @@ metric_definitions table
 ├── default_period_type (text — "rolling_7d", "rolling_30d", etc.)
 ├── default_aggregation_type (text — "rate", "ratio", "avg", etc.)
 ├── version           (integer, default 1 — bumped when computation logic changes)
+├── status            (text, default 'active' — "active", "deprecated", "removed")
+├── depends_on        (jsonb, nullable — array of metric slugs this metric requires)
 ├── description       (text, nullable)
 ├── created_at
 └── updated_at
 
 Unique: (connector_type, metric_slug)
 ```
+
+**Metric lifecycle states:**
+- `active` — normal operation. Templates can reference freely.
+- `deprecated` — still computed, but produces a warning on template activation and in runtime logs. Signals that the adapter will remove this metric in a future version. Operators should migrate to the replacement metric.
+- `removed` — no longer computed. Blocked in `strict` validation mode. `lenient` mode degrades gracefully with warning.
+
+**Metric dependency graph.** The `depends_on` field declares which other metrics a derived metric requires (e.g. `health_score` depends on `["contact_growth_rate", "pipeline_velocity"]`). This enables: debugging broken metrics (trace which upstream metric failed), preventing circular dependencies (validated on registration), and future optimisation (recompute only affected downstream metrics when an upstream changes).
 
 **Registry usage:**
 - **On template activation:** validate that every metric slug referenced in `healthScoreFactors`, `anomalyConfig`, and `churnRiskSignals` has a corresponding `metric_definitions` entry for the template's `requiredConnectorType`. Reject activation with clear error if a referenced metric doesn't exist.
@@ -1107,6 +1116,48 @@ The template defines which intervention types are available and which gate level
 - `proposed` — cooldown starts when the intervention is proposed (strictest — blocks even if previous was rejected)
 - `executed` — cooldown starts only when an intervention was actually executed (default — allows retry after rejection)
 - `any_outcome` — cooldown starts on any outcome (proposed, approved, rejected, timed out)
+
+#### Intervention effectiveness tracking
+
+Triggering interventions is only half the loop — measuring whether they worked closes it. After an intervention is executed, the system schedules a follow-up health check:
+
+```
+intervention_outcomes table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── intervention_id (FK → actions or review_items)
+├── account_id (FK → canonical_accounts)
+├── intervention_type_slug (text)
+├── health_score_before (integer, nullable)
+├── health_score_after (integer, nullable)
+├── outcome            (text — "improved", "unchanged", "worsened")
+├── measured_after_hours (integer — how long after intervention)
+├── delta_health_score (integer, nullable)
+├── created_at
+```
+
+**Measurement timing:** configurable per intervention type (default: 24 hours after execution). The Portfolio Health Agent checks the account's health score at that point and records the delta.
+
+**Usage:** enables ranking intervention types by effectiveness, building operator confidence in automation, and future optimisation of which interventions to propose for which conditions.
+
+#### Operator account overrides (temporary suppressions)
+
+Operators need the ability to say "ignore this account for now" without modifying the template or connector config. Per-account overrides:
+
+```json
+{
+  "accountOverrides": {
+    "suppressScoring": true,
+    "suppressAlerts": true,
+    "reason": "Client is migrating platforms, data unreliable for 2 weeks",
+    "expiresAt": "2026-05-01T00:00:00Z"
+  }
+}
+```
+
+Stored per `(organisation_id, account_id)`. When `suppressScoring` is true, the Portfolio Health Agent skips the account entirely. When `suppressAlerts` is true, scoring still occurs but no alerts or interventions are generated. `expiresAt` auto-removes the override — prevents forgotten suppressions.
+
+Overrides are logged to the audit trail (who suppressed, when, why, expiry).
 
 #### Alert fatigue guard (portfolio-level)
 
