@@ -128,10 +128,14 @@ export const connectorPollingService = {
                 }
               );
 
+              // Preload metric definitions once per account (avoid N+1)
+              const allDefs = await metricRegistryService.getByConnectorType(config.connectorType);
+              const defMap = new Map(allDefs.map(d => [d.metricSlug, d]));
+
               const isBackfill = config.syncPhase === 'backfill';
               for (const m of metrics) {
                 // Lifecycle enforcement: only write metrics with active status
-                const metricDef = await metricRegistryService.getBySlug(config.connectorType, m.metricSlug);
+                const metricDef = defMap.get(m.metricSlug);
                 if (metricDef && metricDef.status !== 'active') {
                   console.warn(`[ConnectorPolling] Skipping ${metricDef.status} metric: ${m.metricSlug}`);
                   continue;

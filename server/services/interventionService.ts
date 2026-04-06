@@ -58,6 +58,9 @@ export const interventionService = {
     healthScoreBefore?: number;
     healthScoreAfter?: number;
     measuredAfterHours?: number;
+    triggerEventId?: string;
+    runId?: string;
+    configVersion?: string;
   }): Promise<void> {
     const delta = data.healthScoreAfter != null && data.healthScoreBefore != null
       ? data.healthScoreAfter - data.healthScoreBefore
@@ -75,6 +78,9 @@ export const interventionService = {
       interventionId: data.interventionId,
       accountId: data.accountId,
       interventionTypeSlug: data.interventionTypeSlug,
+      triggerEventId: data.triggerEventId,
+      runId: data.runId,
+      configVersion: data.configVersion,
       healthScoreBefore: data.healthScoreBefore,
       healthScoreAfter: data.healthScoreAfter,
       outcome,

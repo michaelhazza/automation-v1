@@ -357,6 +357,11 @@ export const canonicalDataService = {
   },
 
   // ── Canonical Metrics ───────────────────────────────────────────────────
+  // INVARIANT: canonical_metrics is a "latest snapshot" table.
+  // It always represents the most recently computed window for each metric.
+  // period_start/period_end are NOT part of the uniqueness constraint —
+  // they shift as the rolling window moves. Full history with fixed
+  // windows is in canonical_metric_history (append-only).
 
   async upsertMetric(data: NewCanonicalMetric) {
     const [result] = await db
@@ -376,6 +381,7 @@ export const canonicalDataService = {
           periodEnd: data.periodEnd,
           computedAt: new Date(),
           computationTrigger: data.computationTrigger,
+          metricVersion: data.metricVersion,
           metadata: data.metadata,
         },
       })
