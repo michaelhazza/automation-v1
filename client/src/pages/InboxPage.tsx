@@ -295,7 +295,9 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
   const handleMarkRead = async (itemId: string) => {
     setActionLoading((prev) => new Set(prev).add(itemId));
     try {
-      await api.post(buildUrl('/inbox/mark-read'), { ids: [itemId] });
+      const item = items.find((i) => i.id === itemId);
+      if (!item) return;
+      await api.post(buildUrl('/inbox/mark-read'), { items: [{ entityType: item.type === 'review' ? 'review_item' : item.type === 'failed_run' ? 'agent_run' : 'task', entityId: item.entityId }] });
       setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, isRead: true } : i)));
       setCounts((prev) => ({
         ...prev,
@@ -316,7 +318,9 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
   const handleArchive = async (itemId: string) => {
     setActionLoading((prev) => new Set(prev).add(itemId));
     try {
-      await api.post(buildUrl('/inbox/archive'), { ids: [itemId] });
+      const archiveItem = items.find((i) => i.id === itemId);
+      if (!archiveItem) return;
+      await api.post(buildUrl('/inbox/archive'), { items: [{ entityType: archiveItem.type === 'review' ? 'review_item' : archiveItem.type === 'failed_run' ? 'agent_run' : 'task', entityId: archiveItem.entityId }] });
       setItems((prev) => prev.filter((i) => i.id !== itemId));
       loadCounts();
     } catch {
@@ -335,7 +339,12 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
     try {
       const unreadIds = items.filter((i) => !i.isRead).map((i) => i.id);
       if (unreadIds.length === 0) return;
-      await api.post(buildUrl('/inbox/mark-read'), { ids: unreadIds });
+      const unreadItems = items.filter((i) => !i.isRead).map((i) => ({
+        entityType: i.type === 'review' ? 'review_item' as const : i.type === 'failed_run' ? 'agent_run' as const : 'task' as const,
+        entityId: i.entityId,
+      }));
+      if (unreadItems.length === 0) return;
+      await api.post(buildUrl('/inbox/mark-read'), { items: unreadItems });
       setItems((prev) => prev.map((i) => ({ ...i, isRead: true })));
       loadCounts();
     } catch {

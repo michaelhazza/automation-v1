@@ -54,6 +54,7 @@ router.get(
         slug: sa.slug,
         status: sa.status,
         settings: sa.settings,
+        includeInOrgInbox: sa.includeInOrgInbox,
         createdAt: sa.createdAt,
         updatedAt: sa.updatedAt,
       }))

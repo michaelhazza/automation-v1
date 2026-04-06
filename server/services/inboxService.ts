@@ -20,7 +20,6 @@ type SortDirection = 'asc' | 'desc';
 interface InboxFilters {
   tab?: 'all' | 'tasks' | 'reviews' | 'failed_runs';
   search?: string;
-  limit?: number;
   // Subaccount filtering
   subaccountId?: string;          // filter to specific subaccount (subaccount-level view)
   subaccountIds?: string[];       // filter to multiple subaccounts
@@ -450,94 +449,66 @@ export const inboxService = {
   /**
    * Unread counts per category for the current user and org.
    */
-  async getCounts(userId: string, orgId: string): Promise<InboxCounts> {
-    // Run the three count queries in parallel
+  async getCounts(userId: string, orgId: string, filters?: { subaccountId?: string; subaccountIds?: string[]; orgWide?: boolean }): Promise<InboxCounts> {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+    // Resolve allowed subaccount IDs (same logic as getUnifiedInbox)
+    let allowedSaIds: string[] | null = null;
+    if (filters?.orgWide) {
+      const saRows = await db.select({ id: subaccounts.id }).from(subaccounts)
+        .where(and(eq(subaccounts.organisationId, orgId), eq(subaccounts.includeInOrgInbox, true), isNull(subaccounts.deletedAt)));
+      allowedSaIds = saRows.map(r => r.id);
+      if (allowedSaIds.length === 0) return { tasks: 0, reviews: 0, failedRuns: 0, total: 0 };
+    } else if (filters?.subaccountIds && filters.subaccountIds.length > 0) {
+      const saRows = await db.select({ id: subaccounts.id }).from(subaccounts)
+        .where(and(eq(subaccounts.organisationId, orgId), inArray(subaccounts.id, filters.subaccountIds), isNull(subaccounts.deletedAt)));
+      allowedSaIds = saRows.map(r => r.id);
+      if (allowedSaIds.length === 0) return { tasks: 0, reviews: 0, failedRuns: 0, total: 0 };
+    } else if (filters?.subaccountId) {
+      allowedSaIds = [filters.subaccountId];
+    }
+
+    const saFilterTask = allowedSaIds ? inArray(tasks.subaccountId, allowedSaIds) : undefined;
+    const saFilterReview = allowedSaIds ? inArray(reviewItems.subaccountId, allowedSaIds) : undefined;
+    const saFilterRun = allowedSaIds ? inArray(agentRuns.subaccountId, allowedSaIds) : undefined;
+
     const [taskCount, reviewCount, runCount] = await Promise.all([
-      // Tasks with status='inbox'
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(tasks)
-        .leftJoin(
-          inboxReadStates,
-          and(
-            eq(inboxReadStates.entityType, 'task'),
-            eq(inboxReadStates.entityId, tasks.id),
-            eq(inboxReadStates.userId, userId)
-          )
-        )
-        .where(
-          and(
-            eq(tasks.organisationId, orgId),
-            eq(tasks.status, 'inbox'),
-            isNull(tasks.deletedAt),
-            or(isNull(inboxReadStates.isRead), eq(inboxReadStates.isRead, false)),
-            or(isNull(inboxReadStates.isArchived), eq(inboxReadStates.isArchived, false))
-          )
-        ),
+      db.select({ count: sql<number>`count(*)::int` }).from(tasks)
+        .leftJoin(inboxReadStates, and(eq(inboxReadStates.entityType, 'task'), eq(inboxReadStates.entityId, tasks.id), eq(inboxReadStates.userId, userId)))
+        .where(and(
+          eq(tasks.organisationId, orgId), eq(tasks.status, 'inbox'), isNull(tasks.deletedAt),
+          or(isNull(inboxReadStates.isRead), eq(inboxReadStates.isRead, false)),
+          or(isNull(inboxReadStates.isArchived), eq(inboxReadStates.isArchived, false)),
+          ...(saFilterTask ? [saFilterTask] : []),
+        )),
 
-      // Pending review items
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(reviewItems)
-        .leftJoin(
-          inboxReadStates,
-          and(
-            eq(inboxReadStates.entityType, 'review_item'),
-            eq(inboxReadStates.entityId, reviewItems.id),
-            eq(inboxReadStates.userId, userId)
-          )
-        )
-        .where(
-          and(
-            eq(reviewItems.organisationId, orgId),
-            or(
-              eq(reviewItems.reviewStatus, 'pending'),
-              eq(reviewItems.reviewStatus, 'edited_pending')
-            ),
-            or(isNull(inboxReadStates.isRead), eq(inboxReadStates.isRead, false)),
-            or(isNull(inboxReadStates.isArchived), eq(inboxReadStates.isArchived, false))
-          )
-        ),
+      db.select({ count: sql<number>`count(*)::int` }).from(reviewItems)
+        .leftJoin(inboxReadStates, and(eq(inboxReadStates.entityType, 'review_item'), eq(inboxReadStates.entityId, reviewItems.id), eq(inboxReadStates.userId, userId)))
+        .where(and(
+          eq(reviewItems.organisationId, orgId),
+          or(eq(reviewItems.reviewStatus, 'pending'), eq(reviewItems.reviewStatus, 'edited_pending')),
+          or(isNull(inboxReadStates.isRead), eq(inboxReadStates.isRead, false)),
+          or(isNull(inboxReadStates.isArchived), eq(inboxReadStates.isArchived, false)),
+          ...(saFilterReview ? [saFilterReview] : []),
+        )),
 
-      // Failed agent runs (last 7 days)
-      db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(agentRuns)
-        .leftJoin(
-          inboxReadStates,
-          and(
-            eq(inboxReadStates.entityType, 'agent_run'),
-            eq(inboxReadStates.entityId, agentRuns.id),
-            eq(inboxReadStates.userId, userId)
-          )
-        )
-        .where(
-          and(
-            eq(agentRuns.organisationId, orgId),
-            or(
-              eq(agentRuns.status, 'failed'),
-              eq(agentRuns.status, 'timeout'),
-              eq(agentRuns.status, 'budget_exceeded')
-            ),
-            gte(agentRuns.createdAt, sevenDaysAgo),
-            or(isNull(inboxReadStates.isRead), eq(inboxReadStates.isRead, false)),
-            or(isNull(inboxReadStates.isArchived), eq(inboxReadStates.isArchived, false))
-          )
-        ),
+      db.select({ count: sql<number>`count(*)::int` }).from(agentRuns)
+        .leftJoin(inboxReadStates, and(eq(inboxReadStates.entityType, 'agent_run'), eq(inboxReadStates.entityId, agentRuns.id), eq(inboxReadStates.userId, userId)))
+        .where(and(
+          eq(agentRuns.organisationId, orgId),
+          or(eq(agentRuns.status, 'failed'), eq(agentRuns.status, 'timeout'), eq(agentRuns.status, 'budget_exceeded')),
+          gte(agentRuns.createdAt, sevenDaysAgo),
+          or(isNull(inboxReadStates.isRead), eq(inboxReadStates.isRead, false)),
+          or(isNull(inboxReadStates.isArchived), eq(inboxReadStates.isArchived, false)),
+          ...(saFilterRun ? [saFilterRun] : []),
+        )),
     ]);
 
     const t = taskCount[0]?.count ?? 0;
     const r = reviewCount[0]?.count ?? 0;
     const f = runCount[0]?.count ?? 0;
 
-    return {
-      tasks: t,
-      reviews: r,
-      failedRuns: f,
-      total: t + r + f,
-    };
+    return { tasks: t, reviews: r, failedRuns: f, total: t + r + f };
   },
 };

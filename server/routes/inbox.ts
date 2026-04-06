@@ -128,7 +128,13 @@ router.get(
     const userId = req.user!.id;
     const orgId = req.orgId!;
 
-    const counts = await inboxService.getCounts(userId, orgId);
+    const subaccountId = (req.query.subaccountId as string) || undefined;
+    const subaccountIds = req.query.subaccountIds ? (req.query.subaccountIds as string).split(',') : undefined;
+    const counts = await inboxService.getCounts(userId, orgId, {
+      subaccountId,
+      subaccountIds,
+      orgWide: !subaccountId && !subaccountIds,
+    });
     res.json(counts);
   })
 );
