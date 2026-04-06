@@ -77,7 +77,10 @@ export const connectorPollingService = {
       const dbAccounts = await db
         .select()
         .from(canonicalAccounts)
-        .where(and(eq(canonicalAccounts.connectorConfigId, config.id)));
+        .where(and(
+          eq(canonicalAccounts.connectorConfigId, config.id),
+          eq(canonicalAccounts.organisationId, config.organisationId),
+        ));
 
       let accountsSynced = 0;
 

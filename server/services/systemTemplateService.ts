@@ -703,14 +703,18 @@ export const systemTemplateService = {
     const warnings: string[] = [];
     const errors: string[] = [];
 
-    // 1. Load template + slots
+    // 1. Load template + slots (must be published and not deleted)
     const [template] = await db
       .select()
       .from(systemHierarchyTemplates)
-      .where(eq(systemHierarchyTemplates.id, systemTemplateId));
+      .where(and(
+        eq(systemHierarchyTemplates.id, systemTemplateId),
+        eq(systemHierarchyTemplates.isPublished, true),
+        isNull(systemHierarchyTemplates.deletedAt),
+      ));
 
     if (!template) {
-      return { success: false, agentsProvisioned: 0, orgAgentConfigsCreated: 0, memorySeedsInserted: 0, warnings, errors: ['Template not found'] };
+      return { success: false, agentsProvisioned: 0, orgAgentConfigsCreated: 0, memorySeedsInserted: 0, warnings, errors: ['Template not found or not published'] };
     }
 
     const slots = await db
@@ -747,18 +751,43 @@ export const systemTemplateService = {
     }
 
     // 3. Create org hierarchy template record
-    const [orgTemplate] = await db
-      .insert(hierarchyTemplates)
-      .values({
-        organisationId,
-        name: template.name,
-        description: template.description,
-        systemTemplateId: template.id,
-        operationalConfig: operationalDefaults ?? null,
-        status: 'published' as const,
-      } as typeof hierarchyTemplates.$inferInsert)
-      .onConflictDoNothing()
-      .returning();
+    // Upsert org template — refresh config if template was already loaded
+    const existingTemplates = await db
+      .select()
+      .from(hierarchyTemplates)
+      .where(and(
+        eq(hierarchyTemplates.organisationId, organisationId),
+        eq(hierarchyTemplates.systemTemplateId, template.id),
+      ))
+      .limit(1);
+
+    let orgTemplateId: string;
+    if (existingTemplates.length > 0) {
+      // Update existing with fresh config
+      await db
+        .update(hierarchyTemplates)
+        .set({
+          operationalConfig: operationalDefaults ?? null,
+          name: template.name,
+          description: template.description,
+          updatedAt: new Date(),
+        } as Record<string, unknown>)
+        .where(eq(hierarchyTemplates.id, existingTemplates[0].id));
+      orgTemplateId = existingTemplates[0].id;
+    } else {
+      const [newOrgTemplate] = await db
+        .insert(hierarchyTemplates)
+        .values({
+          organisationId,
+          name: template.name,
+          description: template.description,
+          systemTemplateId: template.id,
+          operationalConfig: operationalDefaults ?? null,
+          status: 'published' as const,
+        } as typeof hierarchyTemplates.$inferInsert)
+        .returning();
+      orgTemplateId = newOrgTemplate.id;
+    }
 
     let agentsProvisioned = 0;
     let orgAgentConfigsCreated = 0;

@@ -408,6 +408,28 @@ export async function executeDetectAnomaly(
   if (anomalyDetected) {
     const description = `${metricSlug} is ${Math.abs(deviationPercent).toFixed(1)}% ${direction} baseline (${currentValue} vs baseline ${mean.toFixed(1)})`;
 
+    // Dedup: check for existing unacknowledged anomaly within dedup window
+    const dedupWindowMinutes = anomalyConfig.dedupWindowMinutes ?? 60;
+    const dedupCutoff = new Date(Date.now() - dedupWindowMinutes * 60 * 1000);
+    const recentAnomalies = await canonicalDataService.getRecentAnomalies(context.organisationId, 100);
+    const isDuplicate = recentAnomalies.some(a =>
+      a.accountId === accountId &&
+      a.metricName === metricSlug &&
+      !a.acknowledged &&
+      a.createdAt >= dedupCutoff
+    );
+
+    if (isDuplicate) {
+      return {
+        anomalyDetected: true,
+        deduplicated: true,
+        severity,
+        currentValue,
+        baselineValue: Math.round(mean * 10) / 10,
+        message: `Anomaly already recorded within ${dedupWindowMinutes}m window`,
+      };
+    }
+
     await canonicalDataService.writeAnomalyEvent({
       organisationId: context.organisationId,
       accountId,
@@ -466,11 +488,22 @@ export async function executeComputeChurnRisk(
 
   const riskScore = Math.round(signalResults.reduce((sum, s) => sum + s.score * s.weight, 0));
 
-  let interventionType: string;
-  if (riskScore >= 76) interventionType = 'urgent_escalation';
-  else if (riskScore >= 51) interventionType = 'active_intervention';
-  else if (riskScore >= 26) interventionType = 'early_warning';
-  else interventionType = 'none';
+  // Map risk score to intervention types from config (ordered by severity)
+  const interventionTypes = await orgConfigService.getInterventionTypes(context.organisationId);
+  let interventionType = 'none';
+  if (interventionTypes.length > 0) {
+    // Use config-defined intervention types: highest gate-level first for high risk
+    const reviewGated = interventionTypes.filter(t => t.gateLevel === 'review');
+    const autoGated = interventionTypes.filter(t => t.gateLevel === 'auto');
+    if (riskScore >= 76 && reviewGated.length > 0) interventionType = reviewGated[0].slug;
+    else if (riskScore >= 51 && reviewGated.length > 0) interventionType = reviewGated[Math.min(1, reviewGated.length - 1)].slug;
+    else if (riskScore >= 26 && autoGated.length > 0) interventionType = autoGated[0].slug;
+  } else {
+    // Fallback when no config
+    if (riskScore >= 76) interventionType = 'urgent_escalation';
+    else if (riskScore >= 51) interventionType = 'active_intervention';
+    else if (riskScore >= 26) interventionType = 'early_warning';
+  }
 
   const topDrivers = [...signalResults].sort((a, b) => b.contribution - a.contribution).slice(0, 3);
 
@@ -599,16 +632,23 @@ export async function executeTriggerAccountIntervention(
     return { error: `Unknown intervention type: ${interventionTypeSlug}. Available: ${interventionTypes.map(t => t.slug).join(', ')}` };
   }
 
+  const actionType = interventionDef?.action ?? 'internal_notification';
+
+  // Only internal_notification is auto-executed; all others are pending implementation
+  const isImplemented = actionType === 'internal_notification';
+  const status = isImplemented ? 'executed' : 'pending_implementation';
+
   return {
-    success: true,
+    success: isImplemented,
     interventionType: interventionTypeSlug,
     accountId,
-    status: 'executed',
-    executedAt: new Date().toISOString(),
+    status,
+    executedAt: isImplemented ? new Date().toISOString() : null,
     evidence: evidenceSummary,
     recommendedAction: recommendedAction ?? null,
     urgency: urgency ?? 'medium',
-    actionType: interventionDef?.action ?? 'internal_notification',
+    actionType,
+    implementationNote: isImplemented ? null : `Action type '${actionType}' requires connector-specific implementation. Intervention recorded but not dispatched.`,
     explanation: {
       topFactors: [{ factor: `Intervention: ${interventionDef?.label ?? interventionTypeSlug}`, contribution: 1, direction: 'negative' as const }],
       confidenceReasoning: evidenceSummary,

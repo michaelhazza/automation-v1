@@ -1,4 +1,5 @@
 import { eq, and, isNull, isNotNull } from 'drizzle-orm';
+// isNull used for deletedAt filter on hierarchyTemplates
 import { db } from '../db/index.js';
 import {
   hierarchyTemplates,
@@ -155,6 +156,7 @@ export const orgConfigService = {
       .where(and(
         eq(hierarchyTemplates.organisationId, orgId),
         isNotNull(hierarchyTemplates.systemTemplateId),
+        isNull(hierarchyTemplates.deletedAt),
       ))
       .limit(1);
 
@@ -173,9 +175,9 @@ export const orgConfigService = {
       }
     }
 
-    // Merge: org overrides take precedence over system defaults
+    // Deep merge: org overrides take precedence, nested objects merged (not replaced)
     const orgOverrides = (orgTemplate.operationalConfig as Record<string, unknown>) ?? {};
-    return { ...systemDefaults, ...orgOverrides } as OperationalConfig;
+    return deepMerge(systemDefaults, orgOverrides) as OperationalConfig;
   },
 
   async getHealthScoreFactors(orgId: string): Promise<HealthScoreFactor[]> {
@@ -213,6 +215,17 @@ export const orgConfigService = {
     return config?.dataRetention ?? null;
   },
 
+  async getExecutionScalingConfig(orgId: string) {
+    const config = await this.getOperationalConfig(orgId);
+    return {
+      maxAccountsPerRun: config?.maxAccountsPerRun ?? 50,
+      maxConcurrentEvaluations: config?.maxConcurrentEvaluations ?? 5,
+      maxRunDurationMs: config?.maxRunDurationMs ?? 300000,
+      accountPriorityMode: config?.accountPriorityMode ?? 'round_robin',
+      maxSkipCyclesPerAccount: config?.maxSkipCyclesPerAccount ?? 3,
+    };
+  },
+
   async computeConfigVersion(orgId: string): Promise<string> {
     const config = await this.getOperationalConfig(orgId);
     if (!config) return 'no-config';
@@ -220,3 +233,22 @@ export const orgConfigService = {
     return hash.substring(0, 16);
   },
 };
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    const sourceVal = source[key];
+    const targetVal = result[key];
+    if (
+      sourceVal && typeof sourceVal === 'object' && !Array.isArray(sourceVal) &&
+      targetVal && typeof targetVal === 'object' && !Array.isArray(targetVal)
+    ) {
+      result[key] = deepMerge(targetVal as Record<string, unknown>, sourceVal as Record<string, unknown>);
+    } else {
+      result[key] = sourceVal;
+    }
+  }
+  return result;
+}

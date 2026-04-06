@@ -1,4 +1,4 @@
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { metricDefinitions, type NewMetricDefinition, type MetricDefinition } from '../db/schema/index.js';
 
@@ -93,11 +93,9 @@ export const metricRegistryService = {
     await db
       .update(metricDefinitions)
       .set({
-        version: (await this.getBySlug(connectorType, metricSlug))?.version
-          ? (await this.getBySlug(connectorType, metricSlug))!.version + 1
-          : 1,
+        version: sql`${metricDefinitions.version} + 1`,
         updatedAt: new Date(),
-      })
+      } as Record<string, unknown>)
       .where(and(
         eq(metricDefinitions.connectorType, connectorType),
         eq(metricDefinitions.metricSlug, metricSlug),
