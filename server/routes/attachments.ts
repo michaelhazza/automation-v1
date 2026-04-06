@@ -97,6 +97,13 @@ router.get(
     res.setHeader('Content-Length', String(attachment.fileSizeBytes));
 
     const stream = storageService.getStream(attachment.storageKey);
+    stream.on('error', (err: Error) => {
+      if (!res.headersSent) {
+        res.status(404).json({ error: 'File not found on storage' });
+      } else {
+        res.destroy(err);
+      }
+    });
     stream.pipe(res);
   }),
 );

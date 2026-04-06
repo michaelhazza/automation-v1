@@ -290,6 +290,15 @@ export const inboxService = {
           });
       }
     });
+
+    await auditService.log({
+      actorId: userId,
+      actorType: 'user',
+      action: 'inbox.item.unread',
+      organisationId: orgId,
+      entityType: 'inbox',
+      metadata: { items, count: items.length },
+    });
   },
 
   /**

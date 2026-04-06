@@ -268,6 +268,16 @@ export const goalService = {
       SELECT * FROM ancestry ORDER BY depth DESC
     `);
 
-    return result.rows;
+    // Map snake_case columns from raw SQL to camelCase for API consistency
+    return (result.rows as Array<Record<string, unknown>>).map((row) => ({
+      id: row.id,
+      parentGoalId: row.parent_goal_id,
+      title: row.title,
+      description: row.description,
+      status: row.status,
+      level: row.level,
+      position: row.position,
+      depth: row.depth,
+    }));
   },
 };

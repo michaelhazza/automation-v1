@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const organisations = pgTable(
   'organisations',
@@ -30,8 +31,6 @@ export const organisations = pgTable(
     statusIdx: index('organisations_status_idx').on(table.status),
   })
 );
-
-import { sql } from 'drizzle-orm';
 
 export type Organisation = typeof organisations.$inferSelect;
 export type NewOrganisation = typeof organisations.$inferInsert;
