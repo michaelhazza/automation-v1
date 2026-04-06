@@ -434,8 +434,13 @@ canonical_metric_history table
 ├── computed_at       (timestamptz NOT NULL)
 └── created_at
 
+├── metric_version    (integer, default 1 — from metric_definitions.version at computation time)
+└── created_at
+
 Index: (account_id, metric_slug, period_type, computed_at DESC) — for baseline queries
 ```
+
+**Metric version tracking.** `canonical_metric_history` includes the `metric_version` from `metric_definitions` at the time of computation. When computing baselines, the intelligence skills should prefer values from the same metric version. If the version changed mid-window, the baseline computation includes a `version_mixed: true` flag in its output and logs a warning. This prevents invisible scoring distortion when adapter metric logic changes.
 
 #### Metric registry (soft validation layer)
 
@@ -463,8 +468,9 @@ Unique: (connector_type, metric_slug)
 - **On template activation:** validate that every metric slug referenced in `healthScoreFactors`, `anomalyConfig`, and `churnRiskSignals` has a corresponding `metric_definitions` entry for the template's `requiredConnectorType`. Reject activation with clear error if a referenced metric doesn't exist.
 - **On adapter update:** when metric computation logic changes, bump `version`. Intelligence outputs reference this version via `algorithm_version`, surfacing drift in reports.
 - **On metric write:** no enforcement (adapters write freely). The registry is for validation and documentation, not for gating writes.
+- **Runtime validation:** if a metric slug referenced in the template config is missing from `canonical_metrics` at scoring time, the skill logs a `metric_missing_runtime` warning and surfaces it in the operator dashboard. This catches drift that occurs after template activation (e.g. adapter update removes a metric).
 
-This prevents the primary risk: templates silently referencing metrics that an adapter no longer computes.
+This prevents both pre-activation breakage and post-activation silent drift.
 
 #### Metric computation contract
 
@@ -609,8 +615,8 @@ Enforced at `canonicalDataService` layer. Skills receive `connectorHealthStatus`
 **Connector recovery.** State transitions are not one-way:
 - `healthy` → `degraded`: when error rate exceeds 5% or sync delay exceeds 2x interval
 - `degraded` → `failed`: when 3+ consecutive syncs fail or no success in 24h
-- `failed` → `degraded`: when a sync succeeds after failure (auto-recovery, single success)
-- `degraded` → `healthy`: when error rate returns below 5% AND sync delays normalise over a 1-hour window
+- `failed` → `degraded`: when 2 consecutive syncs succeed after failure (prevents flapping from transient successes)
+- `degraded` → `healthy`: when error rate returns below 5% AND sync delays normalise, sustained over 3 consecutive successful syncs
 - Recovery transitions are logged as connector state events. Health scoring automatically resumes when connector recovers to `degraded` or `healthy` — no operator intervention required for recovery (only for initial failure investigation).
 
 ### Query scope guards
@@ -824,6 +830,8 @@ At scale (100+ subaccounts), the Portfolio Health Agent must not attempt to proc
 - **`maxRunDurationMs`** (default: 300000 / 5 minutes) — hard time budget per run. If exceeded, the run completes with `resultStatus: 'partial'` and logs which accounts were not reached. Remaining accounts are prioritised in the next cycle.
 - **`accountPriorityMode`** (default: `round_robin`) — how accounts are ordered for processing. Options: `round_robin` (even coverage), `worst_first` (lowest health score first), `stalest_first` (oldest `last_scored_at` first).
 
+- **`maxSkipCyclesPerAccount`** (default: 3) — forced rotation guard. If an account has been skipped for N consecutive scan cycles (due to priority ordering), it is promoted to the front of the next batch regardless of priority mode. This prevents healthy accounts from being starved indefinitely by `worst_first` or `stalest_first` ordering.
+
 These values are configurable in the template's `operationalDefaults` and overridable per org. They prevent production instability while ensuring all accounts are eventually covered.
 
 #### What this agent does NOT do
@@ -878,7 +886,7 @@ Accepts an account identifier, reads configured factor definitions from the org'
 
 **Outputs:** Composite score (0-100), factor breakdown, trend (improving/stable/declining), confidence level.
 
-**Idempotency.** Health snapshots are deduplicated by `(account_id, DATE_TRUNC('hour', computed_at))`. If a snapshot already exists for the same account in the same hour, the write is skipped. This prevents duplicate snapshots from retries or overlapping scan cycles.
+**Idempotency.** Health snapshots are deduplicated by `(account_id, time_window)` where the window is configurable via `dedupWindowMinutes` in `operationalDefaults` (default: 60). If a snapshot already exists for the same account within the window, the write is skipped. This prevents duplicates from retries while allowing multiple real computations in fast-moving environments.
 
 **Normalisation types supported:**
 - `linear` — linear mapping from `[minValue, maxValue]` to `[0, 100]`
@@ -922,7 +930,7 @@ Compares a current metric value against that account's historical baseline and i
 
 **Outputs:** Anomaly flag, deviation magnitude, direction, severity (low/medium/high/critical), description.
 
-**Idempotency.** Anomaly events are deduplicated by `(account_id, metric_slug, DATE_TRUNC('hour', created_at))`. If an anomaly event already exists for the same account + metric in the same hour, the write is skipped. This prevents duplicate anomaly alerts from retries.
+**Idempotency.** Anomaly events are deduplicated by `(account_id, metric_slug, time_window)` using the same configurable `dedupWindowMinutes` (default: 60). If an anomaly event already exists for the same account + metric within the window, the write is skipped. This prevents duplicate alerts while preserving signal for fast-moving metrics if the window is reduced.
 
 #### Skill: `compute_churn_risk`
 
@@ -1060,7 +1068,10 @@ The template defines which intervention types are available and which gate level
 
 **Critical design note:** Every intervention path goes through the HITL gate first. The skill submits the proposal and returns pending status. Only on human approval does execution proceed.
 
-**Intervention cooldown.** To prevent the same issue repeatedly triggering the same intervention (operator fatigue), a cooldown window is enforced per `(account_id, intervention_type_slug)`. If an intervention of the same type was proposed for the same account within the cooldown window, the proposal is suppressed and logged as `intervention_suppressed_cooldown`. The cooldown duration is configurable per intervention type in the template (default: 24 hours). This applies regardless of whether the previous proposal was approved, rejected, or timed out.
+**Intervention cooldown.** To prevent the same issue repeatedly triggering the same intervention (operator fatigue), a cooldown window is enforced per `(account_id, intervention_type_slug)`. If an intervention of the same type was proposed for the same account within the cooldown window, the proposal is suppressed and logged as `intervention_suppressed_cooldown`. The cooldown duration is configurable per intervention type in the template (default: 24 hours). The cooldown applies based on `cooldownScope` (configurable per intervention type, default: `executed`):
+- `proposed` — cooldown starts when the intervention is proposed (strictest — blocks even if previous was rejected)
+- `executed` — cooldown starts only when an intervention was actually executed (default — allows retry after rejection)
+- `any_outcome` — cooldown starts on any outcome (proposed, approved, rejected, timed out)
 
 ### Data isolation
 
