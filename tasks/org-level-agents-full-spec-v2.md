@@ -593,3 +593,404 @@ Phase 2 is complete when:
 - Rate limiting is functional
 - The `canonical_metrics` table contains real data for at least one connected organisation
 
+---
+
+## Phase 3: Cross-Subaccount Intelligence + Portfolio Health Agent
+
+### What this phase delivers
+
+Two tightly coupled components:
+
+1. **Generic cross-subaccount capabilities** — subaccount tags, org-level memory, and skills that let org-level agents read across subaccounts. These are platform primitives usable by any org-level agent for any purpose.
+
+2. **The Portfolio Health Agent and its config-driven intelligence skills** — a new system agent that consumes metrics from `canonical_metrics` (Phase 2), computes health scores, detects anomalies, flags churn risk, generates portfolio reports, and escalates interventions through the HITL gate. **All intelligence skills read their factor/signal/intervention definitions from the org's template configuration — no hardcoded metrics, factors, or domain-specific logic.**
+
+### Part A: Generic cross-subaccount capabilities
+
+#### Subaccount tags
+
+User-defined key-value tags on subaccounts. This is the grouping primitive for cohort analysis. Organisations define whatever dimensions matter to them — the platform provides the tagging infrastructure, not the categories.
+
+```
+subaccount_tags table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── subaccount_id (FK)
+├── key          (e.g. "vertical", "region", "plan", "building_type", "store_category")
+├── value        (e.g. "dental", "northeast", "premium", "residential", "electronics")
+└── created_at
+
+Unique: (subaccount_id, key)
+```
+
+The platform has no opinion on what tags mean. A CRM agency tags by vertical and region. A property manager tags by building type and location. An e-commerce operator tags by store category and market. Same table, same API, same skills — different data.
+
+UI: tag management on subaccount settings. Key-value editor. Bulk tagging across multiple subaccounts.
+
+#### Org-level memory
+
+A new memory layer scoped to the organisation, not any single subaccount. Cross-subaccount insights and patterns are stored here.
+
+```
+org_memory_entries table
+├── id (uuid PK)
+├── organisation_id (FK)
+├── source_subaccount_ids  (jsonb array — which subaccounts contributed)
+├── agent_run_id (FK)
+├── content
+├── entry_type             (observation, decision, preference, issue, pattern)
+├── scope_tags             (jsonb — matches subaccount tag dimensions)
+├── quality_score          (0.0–1.0)
+├── embedding              (vector(1536))
+├── evidence_count         (how many subaccounts support this insight)
+├── access_count
+├── created_at
+└── last_accessed_at
+```
+
+Design decisions:
+- **Separate table.** Org insights are a different concept than subaccount memory. Mixing muddies permissions and queries.
+- **`scope_tags`** links insights to subaccount tag dimensions. Generic, not hardcoded.
+- **`evidence_count`** tracks supporting subaccount count. Agents weight by evidence strength.
+- **`source_subaccount_ids`** for traceability without leaking data into insight content.
+
+Service mirrors `workspaceMemoryService` — CRUD, semantic search, quality scoring, dedup.
+
+**Org ↔ subaccount memory interaction rules:**
+
+- **Promotion.** Subaccount insight promoted to org memory when same pattern observed across 3+ subaccounts (configurable). Original entries preserved.
+- **Decay.** Entries not revalidated within configurable window (default: 30 days) have quality decayed by 20% per missed window. Below 0.2 flagged for review.
+- **Conflict resolution.** Higher evidence count wins (2x+ gap). Tie: more recent wins. Unclear: both kept, agent prompted to resolve.
+- **No downward propagation.** Org insights never auto-written to subaccount memory. Influence goes through explicit agent actions (may be HITL-gated).
+
+#### Cross-subaccount skills
+
+Three new skills available to org-level agents:
+
+**`query_subaccount_cohort`**
+- Reads health summaries + metrics across subaccounts, filtered by tags
+- Input: tag filters, explicit subaccount IDs, optional metric focus
+- Output: aggregated/anonymised data per matching subaccount — health score, trend, key metrics, last activity
+- Does NOT return raw subaccount data — returns summaries and metrics
+- Scope guards: max 50 subaccounts per query (configurable), paginated
+- Gate level: `auto` (read-only)
+
+**`read_org_insights`**
+- Queries org-level memory entries
+- Input: optional tag scope filter, semantic query, entry type filter
+- Output: matching org memory entries with content, scope tags, evidence count
+- Gate level: `auto`
+
+**`write_org_insight`**
+- Stores a cross-subaccount pattern in org memory
+- Input: content, entry_type, scope_tags, source_subaccount_ids, evidence_count
+- Triggers quality scoring and embedding pipeline
+- Gate level: `auto`
+
+### Part B: Portfolio Health Agent
+
+#### Agent definition
+
+A new system agent — the Portfolio Health Agent — that operates at the organisation level. Responsible for monitoring the portfolio, coordinating health scoring runs, detecting anomalies, managing alerts, and escalating through HITL.
+
+This agent is **conditionally loaded.** Only present when a configuration template that requires it is applied (Phase 4).
+
+#### Agent responsibilities
+
+**Scheduled portfolio scans.** Runs on a configurable schedule (default from template). Each run reads metrics from `canonical_metrics` for all active accounts, invokes intelligence skills, and flags accounts crossing thresholds.
+
+**Anomaly detection coordination.** Invokes detection skills, receives outputs, decides what to do (log, alert, escalate).
+
+**Alert delivery.** Formats and delivers alerts to configured destinations (Slack, email, in-platform). Alert formatting and destination are configuration, not code.
+
+**HITL gate escalation.** Interventions requiring human approval go through the existing HITL gate system.
+
+**Portfolio report generation.** On configurable schedule, coordinates generation of a portfolio intelligence briefing.
+
+**Baseline management.** Maintains rolling baselines per account per metric in `canonical_metric_history`. Baselines are account-specific and metric-specific — what "normal" looks like for each account's metrics.
+
+#### Baseline storage and computation
+
+Baselines are computed from `canonical_metric_history`, not stored as a separate table (v2.0 simplification from v1.0). The intelligence skills query metric history directly and compute rolling statistics (mean, median, variance) on the fly.
+
+**Baseline computation rules (all configurable per template):**
+- **Window size:** Configurable per metric slug in the template. No platform defaults for specific metrics — the template must declare them.
+- **Seasonality handling:** Configurable per template. Options: `none`, `day_of_week`, `day_of_month`, `monthly`. The platform provides the computation methods; the template selects which to apply.
+- **Minimum data threshold:** Configurable. Default: 14 data points. Below threshold, scoring skipped with "insufficient data" warning.
+- **Adaptive windows:** High-variance accounts auto-expand window (up to configurable max). Low-variance auto-contract (to configurable min). Variance threshold configurable.
+- **Recomputation trigger:** Batch, default hourly. Not per-event.
+
+#### Agent state machine
+
+```
+idle → scanning → analysing → alerting → awaiting_hitl → executing → idle
+                                    ↓
+                                  idle (no alerts needed)
+```
+
+| State | Description | Transitions |
+|-------|------------|-------------|
+| `idle` | Waiting for next scheduled scan | → `scanning` |
+| `scanning` | Reading metrics from `canonical_metrics` for all active accounts | → `analysing` |
+| `analysing` | Running intelligence skills (health scoring, anomaly detection, churn risk) | → `alerting` if findings, → `idle` if none |
+| `alerting` | Delivering alerts to configured destinations | → `awaiting_hitl` if interventions proposed, → `idle` if alerts only |
+| `awaiting_hitl` | Intervention proposals in review queue | → `executing` on approval, → `idle` on rejection/timeout |
+| `executing` | Approved interventions carried out | → `idle` |
+
+Retry semantics per state:
+
+| State | On failure | Max retries | Fallback |
+|-------|-----------|-------------|----------|
+| `scanning` | Retry with backoff | 3 | → `idle` + operator warning |
+| `analysing` | Retry failed skill | 2 | → `idle` + partial results logged |
+| `alerting` | Retry per destination | 3 | → `idle` + failed deliveries queued |
+| `executing` | Retry intervention | 1 | → `idle` + operator alert |
+
+#### What this agent does NOT do
+
+- Deep analytical reasoning on why a subaccount is struggling
+- Directly modify external platform data — goes through HITL
+- Manage individual subaccount configurations
+- It monitors. It detects. It alerts. It escalates. Execution is separate.
+
+### Part C: Intelligence skills (config-driven)
+
+The analytical capabilities that the Portfolio Health Agent invokes. These are skills in the existing Automation OS sense: registered in the skill library, invokable by any agent with the right permissions.
+
+**Critical v2.0 design change:** In v1.0, intelligence skills had hardcoded metric references (e.g. `pipeline_velocity`, `conversation_engagement`). In v2.0, **every intelligence skill reads its configuration from the org's template `operationalDefaults`**. The skill code is a generic algorithm; the configuration tells it which metrics to use.
+
+#### Skill: `compute_health_score`
+
+Accepts an account identifier, reads configured factor definitions from the org's template config, fetches the corresponding metrics from `canonical_metrics`, normalises each to 0-100, and computes a weighted composite score.
+
+**Inputs:** Account identifier. All other configuration is read from the org's `operationalDefaults.healthScoreFactors`.
+
+**Factor configuration shape (read from org config, not hardcoded):**
+
+```json
+{
+  "healthScoreFactors": [
+    {
+      "metricSlug": "contact_growth_rate",
+      "weight": 0.25,
+      "label": "Contact Growth",
+      "normalisation": { "type": "linear", "minValue": -50, "maxValue": 50, "invertDirection": false }
+    },
+    {
+      "metricSlug": "pipeline_velocity",
+      "weight": 0.30,
+      "label": "Pipeline Velocity",
+      "normalisation": { "type": "linear", "minValue": 0, "maxValue": 100, "invertDirection": true }
+    }
+  ]
+}
+```
+
+**Algorithm (generic — same code for every vertical):**
+1. Read `healthScoreFactors` array from org config
+2. For each factor: fetch `current_value` from `canonical_metrics` where `metric_slug` matches
+3. If metric is missing (`dataStatus: 'missing'`): exclude from scoring, log warning
+4. Normalise raw value to 0-100 using the factor's `normalisation` rules
+5. Compute weighted average of normalised scores
+6. Determine trend from `canonical_metric_history` (last N snapshots)
+7. Compute confidence from data completeness (how many factors had data)
+8. Write `health_snapshots` record with `algorithm_version` and `config_version`
+
+**Outputs:** Composite score (0-100), factor breakdown, trend (improving/stable/declining), confidence level.
+
+**Normalisation types supported:**
+- `linear` — linear mapping from `[minValue, maxValue]` to `[0, 100]`
+- `threshold` — below threshold = 0, above = 100
+- `percentile` — value's position in historical distribution
+- `inverse_linear` — higher raw value = lower score (e.g. response time)
+
+The platform implements these normalisation functions. The template selects which to use per factor.
+
+#### Skill: `detect_anomaly`
+
+Compares a current metric value against that account's historical baseline and identifies statistically significant deviations.
+
+**Inputs:** Account identifier, metric slug. Configuration read from org's `operationalDefaults.anomalyConfig`.
+
+**Anomaly configuration shape (read from org config):**
+
+```json
+{
+  "anomalyConfig": {
+    "defaultThreshold": 2.0,
+    "defaultWindowDays": 30,
+    "metricOverrides": {
+      "order_volume_trend": { "threshold": 1.5, "windowDays": 14 },
+      "occupancy_rate": { "threshold": 3.0, "windowDays": 60 }
+    },
+    "seasonality": "day_of_week",
+    "minimumDataPoints": 14
+  }
+}
+```
+
+**Algorithm (generic):**
+1. Read threshold and window from config (metric-specific override or default)
+2. Fetch metric history from `canonical_metric_history`
+3. If fewer than `minimumDataPoints`: return "insufficient data"
+4. Compute rolling mean and standard deviation
+5. Apply seasonality adjustment if configured
+6. Compare current value against baseline
+7. If deviation exceeds threshold: write `anomaly_events` record
+
+**Outputs:** Anomaly flag, deviation magnitude, direction, severity (low/medium/high/critical), description.
+
+#### Skill: `compute_churn_risk`
+
+Evaluates configurable risk signals for an account and produces a churn risk score.
+
+**Inputs:** Account identifier. Signal definitions read from org's `operationalDefaults.churnRiskSignals`.
+
+**Signal configuration shape (read from org config):**
+
+```json
+{
+  "churnRiskSignals": [
+    {
+      "signalSlug": "health_trajectory_decline",
+      "weight": 0.30,
+      "type": "metric_trend",
+      "metricSlug": "health_score",
+      "condition": "declining_over_periods",
+      "periods": 3
+    },
+    {
+      "signalSlug": "engagement_drop",
+      "weight": 0.25,
+      "type": "metric_threshold",
+      "metricSlug": "conversation_engagement",
+      "condition": "below_value",
+      "thresholdValue": 30
+    },
+    {
+      "signalSlug": "no_recent_activity",
+      "weight": 0.25,
+      "type": "staleness",
+      "maxDaysInactive": 14
+    },
+    {
+      "signalSlug": "revenue_anomaly",
+      "weight": 0.20,
+      "type": "metric_trend",
+      "metricSlug": "revenue_trend",
+      "condition": "declining_over_periods",
+      "periods": 2
+    }
+  ]
+}
+```
+
+**Signal types (generic, platform-provided):**
+- `metric_trend` — is the metric improving or declining over N periods?
+- `metric_threshold` — is the metric above or below a value?
+- `staleness` — has the account had no activity for N days?
+- `anomaly_count` — how many anomalies in the last N days?
+- `health_score_level` — is the health score below a threshold?
+
+The platform implements these signal evaluation functions. The template defines which signals to use, which metrics they reference, and how to weight them.
+
+**Algorithm (generic):**
+1. Read signal definitions from config
+2. Evaluate each signal (fetch metric, compare against condition)
+3. Compute weighted risk score (0-100)
+4. Determine intervention type from configurable threshold bands
+
+**Outputs:** Risk score (0-100), primary risk drivers, recommended intervention type, suggested next action.
+
+#### Skill: `generate_portfolio_report`
+
+Accepts a portfolio-level dataset and generates a structured intelligence briefing.
+
+**Inputs:** Reporting period, operator preferences (from config). All data gathered internally.
+
+**Algorithm (generic):**
+1. Fetch all accounts with latest health snapshots
+2. Fetch recent anomaly events
+3. Fetch org memory insights
+4. Compile structured data: portfolio overview, accounts requiring attention, anomalies, positive signals
+5. Optionally use LLM to generate natural language briefing (format configurable)
+
+**Outputs:** Structured report. Format, tone, and delivery method are configured per-org.
+
+#### Skill: `trigger_account_intervention`
+
+The action skill — bridge between detection and execution.
+
+**Inputs:** Account identifier, intervention type slug, supporting evidence, HITL gate reference.
+
+**Intervention type configuration (read from org config):**
+
+```json
+{
+  "interventionTypes": [
+    {
+      "slug": "notify_operator",
+      "label": "Notify Operator",
+      "gateLevel": "auto",
+      "action": "internal_notification"
+    },
+    {
+      "slug": "pause_activity",
+      "label": "Pause External Activity",
+      "gateLevel": "review",
+      "action": "connector_action",
+      "connectorAction": "pause_campaign"
+    },
+    {
+      "slug": "escalate_issue",
+      "label": "Escalate to Account Manager",
+      "gateLevel": "review",
+      "action": "create_task"
+    },
+    {
+      "slug": "trigger_workflow",
+      "label": "Trigger Follow-up Workflow",
+      "gateLevel": "review",
+      "action": "connector_action",
+      "connectorAction": "start_sequence"
+    },
+    {
+      "slug": "generate_communication",
+      "label": "Draft Client Communication",
+      "gateLevel": "review",
+      "action": "generate_draft"
+    }
+  ]
+}
+```
+
+**Intervention action types (generic, platform-provided):**
+- `internal_notification` — in-platform alert to operator
+- `connector_action` — call a specific adapter method (adapter implements the action)
+- `create_task` — create a task on the account's board
+- `generate_draft` — use LLM to draft a communication
+- `send_email` — send via email service
+- `send_slack` — send via Slack adapter
+
+The template defines which intervention types are available and which gate level applies. The platform routes the execution. Connector-specific actions (like "pause a campaign") are implemented in the adapter — the platform just dispatches to the adapter.
+
+**Critical design note:** Every intervention path goes through the HITL gate first. The skill submits the proposal and returns pending status. Only on human approval does execution proceed.
+
+### Data isolation
+
+When an org agent reads across subaccounts:
+- `query_subaccount_cohort` returns aggregated summaries, not raw data
+- Org memory contains insights, not copies of subaccount data
+- Health scores and anomaly events are per-account, attributed to source
+
+### Gate condition for Phase 4
+
+Phase 3 is complete when:
+- Subaccount tags work (create, query, filter)
+- Org memory works (create, semantic search, dedup)
+- All three cross-subaccount skills are operational
+- All five intelligence skills read their configuration from `operationalDefaults` (no hardcoded factors/signals/interventions)
+- Intelligence skills read metrics from `canonical_metrics` by slug (not from raw entity tables directly)
+- The Portfolio Health Agent runs a scan cycle and produces HealthSnapshot records
+- End-to-end: metric changes → anomaly detected → HITL proposal → approval → intervention
+
