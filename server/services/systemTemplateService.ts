@@ -7,7 +7,11 @@ import {
   systemAgents,
   agents,
   subaccountAgents,
+  hierarchyTemplates,
+  orgAgentConfigs,
 } from '../db/schema/index.js';
+import { metricRegistryService } from './metricRegistryService.js';
+import { orgMemoryService } from './orgMemoryService.js';
 import { buildTree, getMaxDepth } from './hierarchyService.js';
 
 const PARSER_VERSION = '1.0.0';
@@ -681,4 +685,190 @@ export const systemTemplateService = {
 
     return result;
   },
+
+  // ── Template Activation: Load to Organisation ─────────────────────────
+
+  async loadToOrg(
+    systemTemplateId: string,
+    organisationId: string,
+    operatorInputs?: Record<string, unknown>
+  ): Promise<{
+    success: boolean;
+    agentsProvisioned: number;
+    orgAgentConfigsCreated: number;
+    memorySeedsInserted: number;
+    warnings: string[];
+    errors: string[];
+  }> {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    // 1. Load template + slots
+    const [template] = await db
+      .select()
+      .from(systemHierarchyTemplates)
+      .where(eq(systemHierarchyTemplates.id, systemTemplateId));
+
+    if (!template) {
+      return { success: false, agentsProvisioned: 0, orgAgentConfigsCreated: 0, memorySeedsInserted: 0, warnings, errors: ['Template not found'] };
+    }
+
+    const slots = await db
+      .select()
+      .from(systemHierarchyTemplateSlots)
+      .where(eq(systemHierarchyTemplateSlots.templateId, systemTemplateId));
+
+    // 2. Validate metric slugs if connector type is specified
+    const connectorType = (template as unknown as Record<string, unknown>).requiredConnectorType as string | undefined;
+    const operationalDefaults = (template as unknown as Record<string, unknown>).operationalDefaults as Record<string, unknown> | undefined;
+    const metricAvailabilityMode = ((operationalDefaults as Record<string, unknown> | undefined)?.metricAvailabilityMode as string) ?? 'lenient';
+
+    if (connectorType && operationalDefaults) {
+      const metricSlugs = extractMetricSlugsFromConfig(operationalDefaults);
+      if (metricSlugs.length > 0) {
+        const validation = await metricRegistryService.validateMetricSlugs(connectorType, metricSlugs);
+        if (validation.deprecated.length > 0) {
+          warnings.push(`Deprecated metrics referenced: ${validation.deprecated.join(', ')}`);
+        }
+        if (validation.missing.length > 0) {
+          if (metricAvailabilityMode === 'strict') {
+            return {
+              success: false,
+              agentsProvisioned: 0,
+              orgAgentConfigsCreated: 0,
+              memorySeedsInserted: 0,
+              warnings,
+              errors: [`Missing metrics in strict mode: ${validation.missing.join(', ')}`],
+            };
+          }
+          warnings.push(`Missing metrics (lenient mode): ${validation.missing.join(', ')}`);
+        }
+      }
+    }
+
+    // 3. Create org hierarchy template record
+    const [orgTemplate] = await db
+      .insert(hierarchyTemplates)
+      .values({
+        organisationId,
+        name: template.name,
+        description: template.description,
+        systemTemplateId: template.id,
+        operationalConfig: operationalDefaults ?? null,
+        status: 'published' as const,
+      } as typeof hierarchyTemplates.$inferInsert)
+      .onConflictDoNothing()
+      .returning();
+
+    let agentsProvisioned = 0;
+    let orgAgentConfigsCreated = 0;
+
+    // 4. Provision agents from slots
+    for (const slot of slots) {
+      if (!slot.systemAgentId) continue;
+
+      const [sysAgent] = await db
+        .select()
+        .from(systemAgents)
+        .where(eq(systemAgents.id, slot.systemAgentId));
+      if (!sysAgent) continue;
+
+      const executionScope = (slot as unknown as Record<string, unknown>).executionScope as string ?? 'subaccount';
+
+      // Create or reuse agent
+      const [existingAgent] = await db
+        .select()
+        .from(agents)
+        .where(and(
+          eq(agents.organisationId, organisationId),
+          eq(agents.systemAgentId, sysAgent.id),
+          isNull(agents.deletedAt),
+        ))
+        .limit(1);
+
+      let agentId: string;
+      if (existingAgent) {
+        agentId = existingAgent.id;
+      } else {
+        const [newAgent] = await db
+          .insert(agents)
+          .values({
+            organisationId,
+            systemAgentId: sysAgent.id,
+            name: sysAgent.name,
+            masterPrompt: sysAgent.masterPrompt,
+            isSystemManaged: true,
+            agentRole: sysAgent.agentRole,
+            agentTitle: sysAgent.agentTitle,
+          } as typeof agents.$inferInsert)
+          .returning();
+        agentId = newAgent.id;
+        agentsProvisioned++;
+      }
+
+      // For org-scoped agents, create orgAgentConfigs entry
+      if (executionScope === 'org') {
+        const skillEnablementMap = (slot as unknown as Record<string, unknown>).skillEnablementMap as Record<string, boolean> | undefined;
+        const enabledSlugs = skillEnablementMap
+          ? Object.entries(skillEnablementMap).filter(([_, v]) => v).map(([k]) => k)
+          : null;
+
+        await db
+          .insert(orgAgentConfigs)
+          .values({
+            organisationId,
+            agentId,
+            isActive: true,
+            skillSlugs: enabledSlugs,
+            heartbeatEnabled: sysAgent.heartbeatEnabled ?? false,
+            heartbeatIntervalHours: sysAgent.heartbeatIntervalHours ?? 4,
+          } as typeof orgAgentConfigs.$inferInsert)
+          .onConflictDoNothing();
+        orgAgentConfigsCreated++;
+      }
+    }
+
+    // 5. Seed org memory
+    let memorySeedsInserted = 0;
+    const memorySeedsJson = (template as unknown as Record<string, unknown>).memorySeedsJson as Array<{ content: string; entryType: string }> | undefined;
+    if (memorySeedsJson?.length) {
+      for (const seed of memorySeedsJson) {
+        try {
+          await orgMemoryService.createEntry(organisationId, {
+            content: seed.content,
+            entryType: seed.entryType,
+          });
+          memorySeedsInserted++;
+        } catch (err) {
+          warnings.push(`Failed to seed memory entry: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    return {
+      success: errors.length === 0,
+      agentsProvisioned,
+      orgAgentConfigsCreated,
+      memorySeedsInserted,
+      warnings,
+      errors,
+    };
+  },
 };
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function extractMetricSlugsFromConfig(config: Record<string, unknown>): string[] {
+  const slugs = new Set<string>();
+
+  const factors = config.healthScoreFactors as Array<{ metricSlug: string }> | undefined;
+  if (factors) factors.forEach(f => slugs.add(f.metricSlug));
+
+  const anomaly = config.anomalyConfig as { metricOverrides?: Record<string, unknown> } | undefined;
+  if (anomaly?.metricOverrides) Object.keys(anomaly.metricOverrides).forEach(k => slugs.add(k));
+
+  const signals = config.churnRiskSignals as Array<{ metricSlug?: string }> | undefined;
+  if (signals) signals.forEach(s => { if (s.metricSlug) slugs.add(s.metricSlug); });
+
+  return [...slugs];
+}
