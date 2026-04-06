@@ -1,4 +1,4 @@
-import { eq, and, count, desc, sql } from 'drizzle-orm';
+import { eq, and, count, desc, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { feedbackVotes } from '../db/schema/index.js';
 
@@ -78,6 +78,33 @@ export const feedbackService = {
     await db.delete(feedbackVotes).where(eq(feedbackVotes.id, feedbackId));
 
     return { success: true };
+  },
+
+  /**
+   * Fetch the current user's votes for a set of entity IDs of a given type.
+   * Returns an array of { entityId, vote, id } objects.
+   */
+  async getMyVotes(userId: string, orgId: string, entityType: string, entityIds: string[]) {
+    if (!entityType || !VALID_ENTITY_TYPES.includes(entityType as EntityType)) {
+      throw { statusCode: 400, message: 'entityType must be one of: task_activity, task_deliverable, agent_message' };
+    }
+    if (!entityIds.length) return [];
+
+    const rows = await db
+      .select({
+        id: feedbackVotes.id,
+        entityId: feedbackVotes.entityId,
+        vote: feedbackVotes.vote,
+      })
+      .from(feedbackVotes)
+      .where(and(
+        eq(feedbackVotes.userId, userId),
+        eq(feedbackVotes.organisationId, orgId),
+        eq(feedbackVotes.entityType, entityType as EntityType),
+        inArray(feedbackVotes.entityId, entityIds),
+      ));
+
+    return rows;
   },
 
   /**

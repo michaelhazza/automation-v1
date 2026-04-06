@@ -49,6 +49,7 @@ const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
 const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
+const InboxPage = lazy(() => import('./pages/InboxPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
@@ -62,6 +63,7 @@ const OrgAgentConfigsPage = lazy(() => import('./pages/OrgAgentConfigsPage'));
 const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const HierarchyTemplatesPage = lazy(() => import('./pages/HierarchyTemplatesPage'));
 const ConnectorConfigsPage = lazy(() => import('./pages/ConnectorConfigsPage'));
+const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 
 function PageLoader() {
   return (
@@ -155,6 +157,7 @@ export default function App() {
           <Route path="/executions" element={<ExecutionHistoryPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
+          <Route path="/inbox" element={<InboxPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
@@ -180,12 +183,14 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />
+            <Route path="/admin/subaccounts/:subaccountId/inbox" element={<InboxPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/runs/:runId" element={<RunTraceViewerPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/usage" element={<UsagePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects" element={<PageProjectsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/page-projects/:projectId" element={<PageProjectDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/triggers" element={<AgentTriggersPage />} />
             <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
+            <Route path="/admin/subaccounts/:subaccountId/goals" element={<GoalsPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
             <Route path="/admin/org-memory" element={<OrgMemoryPage />} />
             <Route path="/admin/org-agent-configs" element={<OrgAgentConfigsPage />} />

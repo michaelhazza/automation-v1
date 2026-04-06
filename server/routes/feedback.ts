@@ -21,6 +21,26 @@ router.post(
 );
 
 /**
+ * GET /api/feedback/my-votes
+ * Fetch the current user's votes for a given entity type and set of entity IDs.
+ * Query params: entityType, entityIds (comma-separated)
+ */
+router.get(
+  '/api/feedback/my-votes',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { entityType, entityIds } = req.query as { entityType?: string; entityIds?: string };
+    if (!entityType || !entityIds) {
+      res.json([]);
+      return;
+    }
+    const ids = entityIds.split(',').filter(Boolean);
+    const rows = await feedbackService.getMyVotes(req.user!.id, req.orgId!, entityType, ids);
+    res.json(rows);
+  })
+);
+
+/**
  * DELETE /api/feedback/:feedbackId
  * Hard delete a feedback vote.
  */
