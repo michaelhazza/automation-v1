@@ -198,6 +198,7 @@ export const canonicalDataService = {
     trend: 'improving' | 'stable' | 'declining';
     confidence: number;
     configVersion?: string;
+    algorithmVersion?: string;
   }) {
     const [snapshot] = await db
       .insert(healthSnapshots)
