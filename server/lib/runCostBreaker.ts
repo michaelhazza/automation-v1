@@ -25,7 +25,7 @@
 
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { costAggregates, subaccountAgents } from '../db/schema/index.js';
+import { costAggregates, subaccountAgents, agentRuns } from '../db/schema/index.js';
 import { failure, FailureError } from '../../shared/iee/failure.js';
 import { logger } from './logger.js';
 
@@ -40,22 +40,33 @@ export interface RunCostBreakerContext {
 
 /**
  * Resolve the per-run cost ceiling. Precedence:
- *   1. subaccount_agents.maxCostPerRunCents for the run's subaccount agent
- *   2. SYSTEM_DEFAULT_MAX_COST_CENTS (100 cents)
+ *   1. ctx.subaccountAgentId (if caller passed it)
+ *   2. agent_runs.subaccountAgentId resolved from ctx.runId
+ *   3. SYSTEM_DEFAULT_MAX_COST_CENTS (100 cents)
  *
- * Returns null if no ceiling applies (e.g. the run has no subaccount agent
- * link and the caller does not pass an override). The breaker treats null
- * as "no ceiling" — the system default only applies when an explicit
- * subaccount agent is in scope.
+ * Per pr-reviewer B5: callers like transcribeAudioService /
+ * sendToSlackService do not have a `subaccountAgentId` in their context,
+ * so we resolve it from agent_runs at the breaker boundary. Without this
+ * fallback the breaker would hard-code the system default for those
+ * callers, ignoring the per-subaccount-agent maxCostPerRunCents config.
  */
 export async function resolveRunCostCeiling(
   ctx: RunCostBreakerContext,
-): Promise<number | null> {
-  if (!ctx.subaccountAgentId) return SYSTEM_DEFAULT_MAX_COST_CENTS;
+): Promise<number> {
+  let subaccountAgentId = ctx.subaccountAgentId ?? null;
+  if (!subaccountAgentId) {
+    const [runRow] = await db
+      .select({ subaccountAgentId: agentRuns.subaccountAgentId })
+      .from(agentRuns)
+      .where(eq(agentRuns.id, ctx.runId))
+      .limit(1);
+    subaccountAgentId = runRow?.subaccountAgentId ?? null;
+  }
+  if (!subaccountAgentId) return SYSTEM_DEFAULT_MAX_COST_CENTS;
   const [row] = await db
     .select({ maxCostPerRunCents: subaccountAgents.maxCostPerRunCents })
     .from(subaccountAgents)
-    .where(eq(subaccountAgents.id, ctx.subaccountAgentId))
+    .where(eq(subaccountAgents.id, subaccountAgentId))
     .limit(1);
   if (!row) return SYSTEM_DEFAULT_MAX_COST_CENTS;
   return row.maxCostPerRunCents ?? SYSTEM_DEFAULT_MAX_COST_CENTS;
@@ -101,7 +112,6 @@ export async function assertWithinRunBudget(
   ctx: RunCostBreakerContext,
 ): Promise<void> {
   const limit = await resolveRunCostCeiling(ctx);
-  if (limit === null) return;
   const spent = await getRunCostCents(ctx.runId);
   if (spent > limit) {
     logger.error('costBreaker.exceeded', {

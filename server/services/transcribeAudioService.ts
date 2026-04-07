@@ -24,6 +24,7 @@ import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { ieeArtifacts } from '../db/schema/index.js';
 import { withBackoff } from '../lib/withBackoff.js';
+import { mergeReportingAgentRunMeta } from '../lib/reportingAgentRunHook.js';
 import { writeWithLimit, INLINE_TEXT_LIMITS } from '../lib/inlineTextWriter.js';
 import { failure, FailureError } from '../../shared/iee/failure.js';
 import { logger } from '../lib/logger.js';
@@ -67,6 +68,14 @@ export async function transcribeAudio(
   input: TranscribeAudioInput,
   ctx: TranscribeAudioContext,
 ): Promise<TranscribeAudioResult> {
+  // T23 — assert run is within budget BEFORE Whisper call. Spec v3.4 §8.4.1.
+  const { assertWithinRunBudget } = await import('../lib/runCostBreaker.js');
+  await assertWithinRunBudget({
+    runId: ctx.runId,
+    organisationId: ctx.organisationId,
+    correlationId: ctx.correlationId,
+  });
+
   if (!input.executionArtifactId && !input.audioUrl) {
     throw new FailureError(
       failure('data_incomplete', 'transcribe_input_missing', {
@@ -193,6 +202,12 @@ export async function transcribeAudio(
         },
       })
       .returning();
+
+    // T25 — mark Reporting Agent run state so the end-of-run invariant can
+    // confirm a transcript landed. Spec v3.4 §8.4.2.
+    await mergeReportingAgentRunMeta(ctx.runId, {
+      transcriptArtifactId: created.id,
+    });
 
     return {
       transcript,

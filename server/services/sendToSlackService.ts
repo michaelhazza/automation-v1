@@ -31,6 +31,7 @@ import {
 import { connectionTokenService } from './connectionTokenService.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { writeWithLimit, INLINE_TEXT_LIMITS } from '../lib/inlineTextWriter.js';
+import { mergeReportingAgentRunMeta } from '../lib/reportingAgentRunHook.js';
 import { failure, FailureError } from '../../shared/iee/failure.js';
 import { logger } from '../lib/logger.js';
 
@@ -88,6 +89,15 @@ export async function sendToSlack(
   input: SendToSlackInput,
   ctx: SendToSlackContext,
 ): Promise<SendToSlackResult> {
+  // T23 — assert run is within budget BEFORE issuing the external call.
+  // Spec v3.4 §8.4.1. Routes overage through the unified failure taxonomy.
+  const { assertWithinRunBudget } = await import('../lib/runCostBreaker.js');
+  await assertWithinRunBudget({
+    runId: ctx.runId,
+    organisationId: ctx.organisationId,
+    correlationId: ctx.correlationId,
+  });
+
   // 1. Resolve the Slack connection (subaccount → org fallback)
   const conn = await resolveSlackConnection(ctx.organisationId, ctx.subaccountId);
   if (!conn) {
@@ -204,6 +214,12 @@ export async function sendToSlack(
     postedAt: new Date().toISOString(),
     runId: ctx.runId,
     correlationId: ctx.correlationId,
+  });
+
+  // T25 — mark Reporting Agent run state so the end-of-run invariant
+  // can confirm a slack post landed. Spec v3.4 §8.4.2.
+  await mergeReportingAgentRunMeta(ctx.runId, {
+    slackPost: { messageTs: post.ts, permalink },
   });
 
   return {
