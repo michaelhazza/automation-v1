@@ -16,29 +16,10 @@
 
 services:
 
-  postgres:
-    # pgvector/pgvector ships pgvector preinstalled — required because the
-    # schema uses `vector` columns (see server/db/schema/*). Stock postgres:15
-    # fails drizzle-kit push with: type "vector" does not exist.
-    image: pgvector/pgvector:pg15
-    environment:
-      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB:       ${POSTGRES_DB:-automation_os}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      # Init scripts run once on first boot of an empty volume. See
-      # db-init/01-extensions.sql for the pgvector extension required by
-      # the schema.
-      - ./db-init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
+  # NOTE: The bundled `postgres` service is disabled. We connect to the host
+  # Windows Postgres (which holds the real, populated database) via
+  # `host.docker.internal`. To re-enable a containerised Postgres, restore the
+  # service block and revert the DATABASE_URL overrides below.
 
   app:
     build:
@@ -49,12 +30,11 @@ services:
       - "5000:5000"   # Vite dev server (the frontend — open this in your browser)
     env_file: .env
     environment:
-      # Override the placeholder DATABASE_URL from .env so the in-Docker
-      # service hostname (`postgres`) is used inside the Compose network.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-automation_os}
-    depends_on:
-      postgres:
-        condition: service_healthy
+      # Connect to the host Windows Postgres. Inside the container `localhost`
+      # means the container itself, so we override the .env value.
+      DATABASE_URL: postgresql://postgres:Tyeahzilly!32@host.docker.internal:5432/automation_os
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - .:/app
       - /app/node_modules
@@ -66,11 +46,9 @@ services:
       dockerfile: worker/Dockerfile
     env_file: .env
     environment:
-      # Same override — worker shares Postgres with the app
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-automation_os}
-    depends_on:
-      postgres:
-        condition: service_healthy
+      DATABASE_URL: postgresql://postgres:Tyeahzilly!32@host.docker.internal:5432/automation_os
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Persistent browser sessions survive container restarts.
       # Spec §6.2 / §13.6.
@@ -87,5 +65,4 @@ services:
     pids_limit: 256
 
 volumes:
-  postgres_data:
   worker_sessions:
