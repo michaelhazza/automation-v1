@@ -2,6 +2,11 @@ import { eq, and, or, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
 import type { AnthropicTool } from './llmService.js';
+import {
+  canViewContents as canViewContentsHelper,
+  canManageSkill as canManageSkillHelper,
+  type SkillTier,
+} from '../lib/skillVisibility.js';
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -130,6 +135,7 @@ export const skillService = {
     instructions: string;
     methodology: string;
     isActive: boolean;
+    contentsVisible: boolean;
   }>) {
     const [existing] = await db
       .select()
@@ -146,9 +152,52 @@ export const skillService = {
     if (data.instructions !== undefined) update.instructions = data.instructions;
     if (data.methodology !== undefined) update.methodology = data.methodology;
     if (data.isActive !== undefined) update.isActive = data.isActive;
+    if (data.contentsVisible !== undefined) update.contentsVisible = data.contentsVisible;
 
     const [updated] = await db.update(skills).set(update).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId))).returning();
     return updated;
+  },
+
+  /**
+   * Decorate a skill row for an API response, applying the contents-visible
+   * gate. Lower-tier viewers receive only name + description + the
+   * `canViewContents` / `canManageSkill` predicates; the body fields
+   * (definition, instructions, methodology) are stripped.
+   *
+   * Owner-tier viewers receive the full row.
+   *
+   * Spec v3.4 §3.4 / T6.
+   */
+  decorateSkillForViewer(
+    row: typeof skills.$inferSelect,
+    viewer: { tier: SkillTier; hasManagePermission: boolean },
+  ) {
+    const ownerTier: SkillTier = row.organisationId === null ? 'system' : 'organisation';
+    const visibility = { ownerTier, contentsVisible: row.contentsVisible };
+    const view = canViewContentsHelper(visibility, viewer);
+    const manage = canManageSkillHelper(visibility, viewer);
+    if (view) {
+      return {
+        ...row,
+        canViewContents: true,
+        canManageSkill: manage,
+      };
+    }
+    // Strip body for lower-tier viewers without contents access.
+    return {
+      id: row.id,
+      organisationId: row.organisationId,
+      name: row.name,
+      slug: row.slug,
+      description: row.description,
+      skillType: row.skillType,
+      isActive: row.isActive,
+      contentsVisible: row.contentsVisible,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      canViewContents: false,
+      canManageSkill: false,
+    };
   },
 
   async deleteSkill(id: string, organisationId: string) {
