@@ -1,6 +1,6 @@
 # Playbooks — Detailed Dev Specification
 
-**Status:** Final review draft
+**Status:** Build-ready — further refinement is premature optimisation. The next 10x of value comes from running 2 real playbooks in production, not from another spec round. Highest-leverage next action: hand this to the `feature-coordinator` agent and start §12 implementation order step 1.
 **Owner:** TBD
 **Related:** `architecture.md` § Playbooks (Multi-Step Automation)
 **Target migration:** `0074_playbooks.sql`
@@ -68,6 +68,9 @@ This spec covers **Phase 1**: the engine, schema, services, routes, and run-exec
 - Loop / iteration steps (`for each item in list, run subgraph`). Defer.
 - Per-org parameterization layer (`paramsSchema`) — column reserved in 0074, behaviour ships in Phase 1.5.
 - Per-step context projection (passing only required fields to LLM instead of full context). Phase 1 passes the full context; Phase 1.5 adds opt-in projection.
+- **Cross-run resource locking** (e.g. `resourceLockKey: 'cms:page:homepage'` to prevent two runs writing to the same external entity simultaneously). Real concern but external to the engine. Phase 2+ if real demand surfaces.
+- **HITL fatigue mitigations** — `autoApproveIfConfidenceAbove`, batch approvals, "trust this step type" — product-side enhancements for after we have telemetry on actual approval friction. Phase 2+.
+- **Hierarchical `FailureReason` grouping** (e.g. `playbook.schema.*`, `playbook.execution.*`). The current flat enum is fine until we exceed ~30 reasons. Revisit if it becomes unwieldy.
 
 ### 1.4 Out-of-scope rejected alternatives
 
@@ -900,6 +903,8 @@ For DAGs with thousands of steps the path enumeration would be expensive, so the
 
 ### 5.4 Mid-run output editing
 
+> **Canonical source.** This section is the authoritative behavioural spec for mid-run editing. The route contract in §7 and the UI flow in §9.6 reference these rules and must not redefine them. Any future change to mid-run editing semantics happens here first.
+
 `POST /api/playbook-runs/:runId/steps/:stepRunId/output` accepts a new output payload. This is the dirty-flag-propagation pattern from build systems (Make, Bazel, Gradle), with side-effect safety bolted on.
 
 **Pre-edit safety check (must run before invalidation):**
@@ -920,8 +925,8 @@ For DAGs with thousands of steps the path enumeration would be expensive, so the
 4. For each transitively dependent step run:
    - Mark current row `invalidated` (audit; not deleted).
    - Insert a new `pending` row with `attempt = previous + 1`, carrying forward `humanReviewRequired` user responses where present (pre-fill, not restart).
-   - Steps marked "skip and reuse" copy their previous output forward to the new attempt with status `completed`.
-5. **Cancel any in-flight downstream steps:** for step runs currently in `running` status within the invalidation set, fire an `AbortController` signal to the agent run / job worker. If the step completes before cancellation lands, discard its result (the step run row is already `invalidated`).
+   - Steps marked "skip and reuse" copy their previous output forward to the new attempt with status `completed`. The reused row carries explicit reuse metadata in its `_meta` envelope: `{ reusedFromStepRunId, reusedWithInputHash, reusedAt, isStaleRelativeToInputs }`. `isStaleRelativeToInputs` is `true` whenever the new attempt's resolved `input_hash` differs from `reusedWithInputHash` — i.e. the upstream context that fed the original output has actually changed. The UI surfaces this as a yellow "reused from previous context" warning on the step row, and downstream consumers can detect it via the `_meta` envelope. Audit events for skip-and-reuse always include both hashes.
+5. **Cancel any in-flight downstream steps:** for step runs currently in `running` status within the invalidation set, fire an `AbortController` signal to the agent run / job worker. **Hard discard rule** — when an agent run completes via the existing `onAgentRunCompleted` hook, the engine first reads the linked `playbook_step_runs.status`. If the status is `invalidated` (or anything other than `running`), the result is **discarded without merging into context**, and the engine emits a `step.result_discarded_invalidated` log line with `runId`, `stepRunId`, and `reason`. This rule applies to every termination path (mid-run edit cancel, kill switch, run cancel, parent invalidation) — not just mid-run editing.
 6. Re-merge context from scratch using only currently-completed step outputs (the new edited one + all unaffected siblings).
 7. Enqueue tick.
 
@@ -1070,6 +1075,25 @@ After every step output merge, the engine recomputes `context_size_bytes` (cheap
 - **Soft limit (`MAX_CONTEXT_BYTES_SOFT`)**: log warning, emit `playbook.context.soft_limit_hit` metric, run continues.
 - **Hard limit (`MAX_CONTEXT_BYTES_HARD`)**: mark run `failed` via `failure('playbook_context_overflow', 'hard_limit_exceeded', ...)`. Audit + alert.
 - Per-step output overage triggers automatic spillover via `inlineTextWriter` (§3.6) before the merge ever runs, so the soft/hard limit only fires on **inline pointer accumulation** (which is rare — pointers are tiny).
+
+### 5.13 Engine invariants (consolidated)
+
+Single-source list of properties the engine must always preserve. Every PR touching engine code must verify it does not break these. Tests in §11 cover each one explicitly.
+
+1. **Step attempt uniqueness** — at most one live (non-`invalidated`, non-`failed`) step run exists per `(run_id, step_id)` at any time.
+2. **Context derivability** — `run.context_json` is always derivable from the union of `output_json` (or hydrated `output_inline_ref_id`) of currently-`completed` step runs plus `run.input`. After any state mutation, this property holds.
+3. **Invalidated rows are inert** — invalidated step runs never contribute to context, never satisfy a `dependsOn` check, and their late-arriving outputs are discarded (§5.4 hard discard rule).
+4. **Version monotonicity** — `playbook_step_runs.version` is strictly increasing per row; transitions only happen via the optimistic-guard SQL pattern.
+5. **Run version lock** — `playbook_runs.template_version_id` never changes after run start. Templates can be republished freely without affecting in-flight runs.
+6. **Side-effect safety** — irreversible step runs are dispatched at most once per run, regardless of policy, retries, or invalidation.
+7. **Cost ceiling** — every dispatch path goes through `runCostBreaker`. No code path bypasses the breaker.
+8. **Failure-helper monopoly** — every failure persisted to `playbook_runs.error` or `playbook_step_runs.error` is constructed via `failure()`. No inline literals.
+9. **Tick idempotence** — calling `tick(runId)` twice in succession is a no-op if no state changed in between. Any tick handler that mutates state must enqueue a follow-up tick in the same transaction.
+10. **Watchdog liveness** — every non-terminal run advances within `WATCHDOG_INTERVAL_SECONDS` of any reachable state change, even if no explicit tick is enqueued.
+11. **Transactional state changes** — step status transitions and tick enqueues happen in the same DB transaction.
+12. **DAG immutability post-publish** — the `definition_json` of a published `playbook_template_versions` row is read-only forever.
+
+If any invariant is violated in production, treat it as a P1 bug.
 
 ## 6. Services
 
@@ -1414,7 +1438,7 @@ Every tick, dispatch, and step transition emits a structured log via the existin
 
 ### 8.5 Metrics
 
-Emitted via the existing metrics pipeline:
+Emitted via the existing metrics pipeline. **Every metric below carries an `is_replay: true|false` tag** so analytics can filter replay runs out of production dashboards. Replay runs still emit the full event stream for parity with live runs.
 
 | Metric | Type | Tags |
 |--------|------|------|
