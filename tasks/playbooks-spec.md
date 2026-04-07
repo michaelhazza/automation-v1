@@ -163,7 +163,9 @@ Immutable once published. New edits create a new version row.
 | `subaccount_id` | uuid fk | |
 | `template_version_id` | fk → playbook_template_versions | Locks run to a specific version |
 | `status` | enum | `pending`, `running`, `awaiting_input`, `awaiting_approval`, `completed`, `failed`, `cancelled` |
-| `context_json` | jsonb | Growing run context (initial input + step outputs keyed by step id) |
+| `context_json` | jsonb | Growing run context (initial input + step outputs keyed by step id). Hard-bounded by `MAX_CONTEXT_BYTES_HARD` (§3.6). |
+| `context_size_bytes` | int default 0 | Tracked for fast soft/hard limit checks without re-serialising on every tick |
+| `replay_mode` | bool default false | When true, engine reads stored outputs instead of re-executing external calls (§5.10) |
 | `started_by_user_id` | uuid fk | |
 | `started_at` | timestamp | |
 | `completed_at` | timestamp nullable | |
@@ -185,6 +187,9 @@ Append-only — no soft delete. Cancelled runs stay for audit.
 | `input_json` | jsonb nullable | Resolved inputs (post-templating) |
 | `output_json` | jsonb nullable | Validated against step's outputSchema |
 | `output_hash` | text nullable | SHA256 of canonical JSON output; powers the firewall pattern in invalidation |
+| `output_inline_ref_id` | uuid nullable | Set when output exceeds `MAX_STEP_OUTPUT_BYTES` and was spilled via `inlineTextWriter` |
+| `quality_score` | smallint nullable | Optional 0–100 quality signal written by the step (§3.8) |
+| `evaluation_meta` | jsonb nullable | For `conditional` steps: `{ result, evaluatedAt, inputsHash }` (§5.9) |
 | `version` | int default 0 | Optimistic concurrency guard for state transitions |
 | `side_effect_type` | enum | Snapshot from definition: `none`, `idempotent`, `reversible`, `irreversible` |
 | `agent_run_id` | uuid fk nullable | Links to `agentRuns` for `agent_call` and `prompt` types |
@@ -229,7 +234,7 @@ Unique index on `(run_id, step_id, attempt)`.
 ```sql
 CREATE TYPE playbook_run_status AS ENUM (
   'pending', 'running', 'awaiting_input', 'awaiting_approval',
-  'completed', 'failed', 'cancelling', 'cancelled'
+  'completed', 'completed_with_errors', 'failed', 'cancelling', 'cancelled'
 );
 
 CREATE TYPE playbook_step_run_status AS ENUM (
@@ -299,6 +304,7 @@ export interface PlaybookStep {
   dependsOn: string[];              // ids of prior steps; empty for entry steps
   humanReviewRequired?: boolean;    // pause after completion until user approves/edits
   sideEffectType: SideEffectType;   // REQUIRED — drives invalidation safety on mid-run editing
+  failurePolicy?: 'fail_run' | 'continue';  // default 'fail_run'. 'continue' allows the run to finish in completed_with_errors if this step fails AND no downstream depends on its output (or all downstream also have continue policy).
 
   // type: prompt
   prompt?: string;                  // template string with {{ expressions }}
@@ -395,7 +401,73 @@ Every step declares an `outputSchema` (Zod). On step completion:
 3. Engine parses output through `outputSchema.safeParse()`. On failure, retry via `withBackoff` up to N times (configurable per step, default 2) with the parse error appended to the prompt context. After max retries, the step is marked `failed` via `failure('schema_violation', 'output_parse_failed', { stepId, attempts, lastError })`.
 4. On success, the validated output is canonicalised (key sort + JSON.stringify), hashed (SHA256 → `output_hash`), and merged into `run.context_json` at `steps.<id>.output`.
 
-### 3.6 Worked example: a real 15-step playbook (abridged to 6 for readability)
+### 3.6 Context size limits and spillover
+
+`run.context_json` is a single growing JSON blob, but it is **bounded**. Without limits, a 30-step playbook with rich outputs produces multi-MB rows, blows up token budgets on every downstream prompt, and bloats WebSocket payloads.
+
+| Limit | Value | Behaviour on overage |
+|-------|-------|---------------------|
+| `MAX_STEP_OUTPUT_BYTES` | 100 KB (canonical JSON) | Step output is **automatically spilled** to `inlineTextWriter`; the context stores a pointer instead. |
+| `MAX_CONTEXT_BYTES_SOFT` | 512 KB | Warning logged; alert if sustained across many runs. |
+| `MAX_CONTEXT_BYTES_HARD` | 1 MB | Run fails via `failure('playbook_context_overflow', 'hard_limit_exceeded', { runId, sizeBytes })`. |
+
+**Spillover format.** When a step output exceeds `MAX_STEP_OUTPUT_BYTES`, the engine writes the canonical JSON via `inlineTextWriter` and stores this pointer in `context.steps[id].output`:
+
+```jsonc
+{
+  "type": "inline_ref",
+  "id": "inline-text-uuid",
+  "byteSize": 184320,
+  "schemaPath": "steps.research.output",
+  "preview": "..."   // first 200 chars for human-readable inspection
+}
+```
+
+The templating resolver detects `inline_ref` values transparently — when a downstream step references `{{ steps.research.output.summary }}`, the resolver hydrates the inline text into memory just-in-time and reads the path. **Hydration is per-step, not per-run** so peak memory stays bounded.
+
+**Per-step context projection (Phase 1.5 enhancement, deferred).** Today every dispatched step receives the full context. In 1.5 we'll add a per-step `contextProjection: string[]` field listing which step outputs the prompt actually needs, so the engine can pass a minimal subset to the LLM. The data path is in place from Phase 1; only the prompt construction changes.
+
+**Hash and dedup.** `output_hash` is computed on the canonical JSON of the **full output** (pre-spillover), so the firewall pattern still works: a re-execution that produces a byte-identical large output is caught and propagation stops without re-hydrating downstream.
+
+### 3.7 Per-step retry policy
+
+Steps can override the engine-default retry behaviour:
+
+```typescript
+retryPolicy?: {
+  maxAttempts?: number;                      // default depends on step type (see §5.8)
+  backoffStrategy?: 'exponential' | 'linear';// default 'exponential'
+  retryOn?: FailureReason[];                 // default depends on step type
+};
+```
+
+Defaults per step type:
+
+| Step type | maxAttempts | retryOn (default) |
+|-----------|-------------|-------------------|
+| `prompt` | 3 | `playbook_schema_violation`, transient LLM errors |
+| `agent_call` | 2 | transient LLM/network errors only |
+| `user_input` | n/a | n/a |
+| `approval` | n/a | n/a |
+| `conditional` | 1 | none — fails fast on evaluation error |
+
+A step that calls a non-idempotent external API should set `maxAttempts: 1` to disable retries. Schema parse retries (engine-level) are independent of `retryPolicy` and always run up to the parse-retry limit (default 2). All retries flow through `withBackoff`.
+
+### 3.8 Optional quality score on step outputs
+
+Steps can optionally write a `qualityScore` (0–100) into the engine's output envelope when they complete:
+
+```jsonc
+{
+  "output": { /* schema-validated payload */ },
+  "qualityScore": 87,
+  "qualityNotes": "model self-rated against rubric"
+}
+```
+
+The score is stored in a new `quality_score` column on `playbook_step_runs` (nullable smallint). Phase 1 surfaces it in the run detail UI as a small badge but doesn't act on it. Phase 1.5+ may use it to drive auto-retry, ranking, or analytics. Sources can include LLM self-evaluation, heuristic checks against the schema, or future feedback loops — the engine treats it as opaque metadata.
+
+### 3.9 Worked example: a real 15-step playbook (abridged to 6 for readability)
 
 ```typescript
 // server/playbooks/event-creation.playbook.ts
@@ -643,7 +715,14 @@ pending → running ──┬─→ awaiting_input ──→ running
                           cancelled
 ```
 
-A run is `running` whenever the engine has work it can dispatch. It transitions to `awaiting_*` when **all** ready steps are blocked on human action. It transitions to `completed` when every step is `completed` or `skipped`, `failed` when any step fails non-recoverably and no alternative path exists, `cancelled` only on explicit user action.
+A run is `running` whenever the engine has work it can dispatch. It transitions to `awaiting_*` when **all** ready steps are blocked on human action. Terminal states:
+
+| State | When |
+|-------|------|
+| `completed` | Every step ended in `completed` or `skipped`. No failures. |
+| `completed_with_errors` | At least one step failed AND its `failurePolicy === 'continue'` AND the engine reached a terminal state with the rest of the DAG. The run is considered a partial success — surfaced as a yellow badge in UI and tagged in metrics. |
+| `failed` | At least one step failed with `failurePolicy === 'fail_run'` (the default), OR a `continue` failure blocked all remaining downstream paths. |
+| `cancelled` | Explicit user cancellation, parent run cancellation, or kill switch (§5.11). Transitions through `cancelling` first to allow in-flight steps to settle. |
 
 ### 5.2 Tick algorithm (pseudocode)
 
@@ -673,8 +752,13 @@ function tick(runId):
       updateRunStatus(runId, computeAggregateStatus(stepRuns))
     return
 
-  // 3. Dispatch ready steps in parallel
-  for step in ready:
+  // 3. Dispatch ready steps in parallel — capped to MAX_PARALLEL_STEPS
+  currentlyRunning = stepRuns.filter(s => s.status === 'running').length
+  capacity = MAX_PARALLEL_STEPS - currentlyRunning  // default 8
+  toDispatch = ready.slice(0, max(0, capacity))
+  // Remaining ready steps stay 'pending'; next tick (fired by step completion) will pick them up
+
+  for step in toDispatch:
     sr = upsertStepRun(runId, step.id, status='running', attempt=1)
     try:
       resolvedInputs = templatingService.resolve(step, run.contextJson)
@@ -716,8 +800,21 @@ function dispatch(step, stepRun, run):
       websocket.emit(`playbook-run:${run.id}`, 'step:awaiting_approval', stepRun)
 
     case 'conditional':
-      result = jsonLogic.evaluate(step.condition, run.contextJson)
+      try:
+        inputsHash = hash(resolveInputs(step.condition, run.contextJson))
+        result = jsonLogic.evaluate(step.condition, run.contextJson)
+      catch err:
+        markStepRunFailed(stepRun, failure('playbook_dag_invalid', 'conditional_eval_failed', { stepId, error }))
+        enqueueTick(run.id)
+        return
       stepRun.outputJson = result ? step.trueOutput : step.falseOutput
+      // Validate the chosen output against outputSchema (catches typos in trueOutput/falseOutput)
+      parseResult = step.outputSchema.safeParse(stepRun.outputJson)
+      if not parseResult.success:
+        markStepRunFailed(stepRun, failure('playbook_schema_violation', 'conditional_output_invalid', ...))
+        enqueueTick(run.id)
+        return
+      stepRun.evaluationMeta = { result, evaluatedAt: now(), inputsHash }
       stepRun.status = 'completed'
       mergeContext(run, step.id, stepRun.outputJson)
       enqueueTick(run.id)
@@ -829,11 +926,60 @@ Catches the "step completed but tick enqueue failed mid-transaction" race and an
 - pg-boss expired jobs surface to a poison handler that marks the step `failed` and re-ticks the run for failure-policy evaluation.
 - `retryLimit` per step type with exponential backoff at the queue level; engine-level retries (output schema parse failures) are tracked via the `attempt` column.
 
-### 5.7 Budget and policy integration
+### 5.9 Budget and policy integration
 
 - `agent_call` and `prompt` steps go through the existing agent run path → budget reservations apply automatically.
-- Run start can optionally pre-reserve a budget envelope based on summed step estimates (future enhancement).
+- `runCostBreaker` is called immediately before every dispatch — failing fast prevents an in-flight invalidation cascade from blowing the ceiling.
+- Run start can optionally pre-reserve a budget envelope based on summed step estimates (`playbookCostEstimatorService.estimateRun`).
 - Policy engine evaluated per agent run as today — no engine-level bypass.
+
+### 5.10 Replay mode
+
+`playbook_runs.replay_mode = true` puts a run in a deterministic replay state for debugging, demos, and audit reconstruction.
+
+When set:
+
+- The engine reads stored `output_json` (or hydrates `output_inline_ref_id`) for every step from a source run and writes them to the replay run's step rows directly, marking each `completed`, **without dispatching any external work** (no LLM calls, no agent runs, no skill executions, no webhooks).
+- `agent_call` and `prompt` steps skip the agent run path entirely.
+- `user_input` and `approval` steps replay the recorded user response.
+- `conditional` steps re-evaluate against the replayed context and assert the same `evaluationMeta.result` as the original — divergence emits `failure('playbook_replay_drift', 'conditional_diverged', { stepId })`.
+- WebSocket events still fire so the UI can play back the run timeline.
+
+Replay mode is created via `POST /api/playbook-runs/:runId/replay` which clones the source run's metadata and step outputs into a fresh `playbook_runs` row with `replay_mode = true`. The original run is untouched.
+
+Use cases: reproducing a customer-reported issue without re-incurring side effects, demoing a workflow without burning credits, validating a refactor of a downstream consumer service against historical run shapes.
+
+### 5.11 Kill switch enforcement
+
+Every tick begins with a kill switch check before any other work:
+
+```
+function tick(runId):
+  run = loadRun(runId)
+  if run.status in [completed, completed_with_errors, failed, cancelled]: return
+
+  // KILL SWITCH CHECK — runs first, before any dispatch
+  org = loadOrganisation(run.organisationId)
+  subaccount = loadSubaccount(run.subaccountId)
+  if org.status === 'suspended' or subaccount.killSwitch === true:
+    cancelRun(run, failure('playbook_cancelled', 'policy_kill_switch', {
+      orgStatus: org.status,
+      killSwitch: subaccount.killSwitch
+    }))
+    emit websocket 'playbook:run:status' { status: 'cancelled' }
+    return
+  ...
+```
+
+This honours the existing org-level suspension and subaccount-level kill switch flags. The watchdog sweep also checks the kill switch on every cycle so a run already running when the switch trips is killed within 60 seconds even if no other tick fires. **Mid-step abort:** when the kill switch trips, in-flight steps receive an `AbortController` signal via the same path used by mid-run editing.
+
+### 5.12 Context size enforcement
+
+After every step output merge, the engine recomputes `context_size_bytes` (cheaply via `Buffer.byteLength` of canonical JSON of new output, added to running total). On overage:
+
+- **Soft limit (`MAX_CONTEXT_BYTES_SOFT`)**: log warning, emit `playbook.context.soft_limit_hit` metric, run continues.
+- **Hard limit (`MAX_CONTEXT_BYTES_HARD`)**: mark run `failed` via `failure('playbook_context_overflow', 'hard_limit_exceeded', ...)`. Audit + alert.
+- Per-step output overage triggers automatic spillover via `inlineTextWriter` (§3.6) before the merge ever runs, so the soft/hard limit only fires on **inline pointer accumulation** (which is rare — pointers are tiny).
 
 ## 6. Services
 
