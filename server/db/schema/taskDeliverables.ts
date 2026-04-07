@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { tasks } from './tasks';
 
@@ -13,6 +13,11 @@ export const taskDeliverables = pgTable(
     title: text('title').notNull(),
     path: text('path'),
     description: text('description'),
+    // Inline body for text deliverables (≤2 MB after UTF-8-safe truncation).
+    // Source of truth for the deliverable; the path field can become stale
+    // if the file is later deleted from worker disk. T12 / spec v3.4 §6.7.3.
+    bodyText: text('body_text'),
+    bodyTextTruncated: boolean('body_text_truncated').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
