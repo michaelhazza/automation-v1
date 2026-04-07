@@ -1,0 +1,1200 @@
+# AutomationOS – Integrated Execution Environment (IEE)
+## Detailed Development Specification
+
+**Status:** Draft v1 — for review before implementation
+**Source brief:** `AutomationOS IEE Development Brief` (2026-04)
+**Branch:** `claude/automate-video-transcript-workflow-NXXVf`
+**Related docs:**
+- `docs/execution-contracts.md` (existing action/execution contracts)
+- `docs/pgboss-zod-hardening-spec.md` (pg-boss payload validation conventions)
+- `tasks/windows-iee-setup-guide.md` (local Windows setup, companion to this spec)
+
+---
+
+## 0. Reading Order
+
+This spec is organised into ten parts. Each part is self-contained enough that it can be read on its own, but they are listed in the order they should be implemented.
+
+| Part | Scope | Depends on |
+|---|---|---|
+| 1 | Architecture, codebase audit, integration points | — |
+| 2 | Data model, migrations, idempotency rules | 1 |
+| 3 | Job contracts (pg-boss), payload validation, enqueue path | 1, 2 |
+| 4 | Worker service skeleton, bootstrap, tsconfig, Docker | 3 |
+| 5 | Execution loop, observation & action schemas, LLM integration | 4 |
+| 6 | Browser execution handler (Playwright) | 5 |
+| 7 | Dev execution handler (workspace, git, shell) | 5 |
+| 8 | Tracing, logging, failure classification | 4–7 |
+| 9 | AgentExecutionService routing, action registry integration | 2, 3 |
+| 10 | Verification, MVP acceptance, rollout to DigitalOcean | all |
+
+---
+
+## Part 1 — Architecture & Codebase Integration
+
+### 1.1 Guiding principles
+
+1. **Database is the only integration point between app and worker.** No HTTP calls between services. Ever.
+2. **Reuse existing infrastructure.** pg-boss, llmRouter, tracing, Drizzle schema conventions, correlationId middleware — all already exist and must be used as-is.
+3. **Multi-tenant isolation at the database layer.** Every row, every session, every workspace is scoped by `organisationId`.
+4. **Configuration over code.** No hardcoded paths, credentials, or connection strings.
+5. **Worker is stateless except for controlled persistence** (browser session volume, ephemeral workspace dir).
+6. **Identical code in local and production.** Only env var values change.
+
+### 1.2 Deployment topology
+
+| Component | Local dev | Production |
+|---|---|---|
+| Main app | Docker Compose (`app` service) | Replit |
+| Postgres + pg-boss | Docker Compose (`postgres` service) | Neon (managed) |
+| IEE worker | Docker Compose (`worker` service) | DigitalOcean VPS (Docker) |
+
+The main app and worker share **no filesystem** and make **no direct HTTP calls**. They communicate exclusively via pg-boss jobs and shared Postgres tables.
+
+### 1.3 Flow diagram
+
+```
+┌─────────────────────────┐              ┌─────────────────────────┐
+│ AgentExecutionService   │              │       IEE Worker        │
+│ (main app on Replit)    │              │ (DigitalOcean VPS)      │
+├─────────────────────────┤              ├─────────────────────────┤
+│ routeCall()             │              │ createWorker({          │
+│   → detects IEE route   │              │   queue: 'iee-browser'  │
+│   → boss.send(          │              │   queue: 'iee-dev'      │
+│       'iee-browser',    │              │ })                      │
+│       payload)          │              │   → executionLoop()     │
+└────────────┬────────────┘              └────────────┬────────────┘
+             │                                        │
+             │          ┌──────────────────┐          │
+             └─────────▶│  Postgres +      │◀─────────┘
+                        │  pg-boss queue   │
+                        │                  │
+                        │  execution_runs  │
+                        │  execution_steps │
+                        └──────────────────┘
+```
+
+### 1.4 Audit findings — existing conventions the IEE must follow
+
+Audited against `/home/user/automation-v1` on the current branch. These are the real paths and patterns the new code must match.
+
+**pg-boss**
+- Singleton at `server/lib/pgBossInstance.ts` (`getPgBoss()`, `stopPgBoss()`)
+- Job names kebab-case. Defined in `server/config/jobConfig.ts`. DLQ pattern: `queue-name__dlq`
+- Handlers registered via `createWorker({ queue, boss, handler, concurrency?, timeoutMs? })` from `server/lib/createWorker.ts`
+- Example enqueue: `await boss.send(JOB_AGGREGATE_UPDATE, { idempotencyKey }, getJobConfig('llm-aggregate-update'))` (`server/services/routerJobService.ts:37`)
+- **IEE implication:** Add two new entries to `jobConfig.ts`: `'iee-browser-task'` and `'iee-dev-task'`, with DLQ siblings. Worker uses its own pg-boss instance (separate process) but the same queue names.
+
+**LLM router**
+- Entry point: `server/services/llmRouter.ts::routeCall(params: RouterCallParams): Promise<ProviderResponse>`
+- `RouterCallParams = { messages, system?, tools?, maxTokens?, temperature?, estimatedContextTokens?, context: LLMCallContext }`
+- `LLMCallContext` includes `sourceType`, `taskType`, `executionPhase`, `organisationId`, `subaccountId`, `runId`, `agentId`, `correlationId`
+- Handles model selection, fallback chain, cost tracking, idempotency key generation, Langfuse generation creation
+- **IEE implication:** The worker calls `routeCall()` directly for every execution-loop iteration. **No new LLM abstraction.** A new `executionPhase` value (`'iee.loop.step'`) is added so the router can apply the correct model policy.
+
+**Tracing**
+- `server/lib/tracing.ts` — `createSpan(name, metadata)`, `createEvent(name, metadata)`, `finalizeTrace(status)`
+- Enforced `SPAN_NAMES` and `EVENT_NAMES` registries. New names must be added to the registry.
+- Context via `AsyncLocalStorage` in `server/instrumentation.ts` — `withTrace(trace, runContext, fn)`, `getTraceContext()`
+- Naming pattern: `component.operation.phase`
+- **IEE implication:** Register new span/event names:
+  - Spans: `iee.execution.run`, `iee.execution.step`
+  - Events: `iee.execution.start`, `iee.execution.step.complete`, `iee.execution.step.failed`, `iee.execution.complete`, `iee.execution.failed`
+
+**Correlation**
+- `server/middleware/correlation.ts` attaches `req.correlationId`. `generateCorrelationId()` produces a 12-char UUID in `server/lib/logger.ts`.
+- **IEE implication:** The worker is not an HTTP service. It receives `correlationId` on the job payload and calls `withTrace()` with it at the top of every job handler.
+
+**Schema conventions (Drizzle)**
+- Location: `server/db/schema/*.ts` — one file per table, re-exported from an index
+- Tables: camelCase in TS, snake_case in SQL, **plural** (`organisations`, `executions`, `actions`)
+- Every table has `organisationId: uuid(...).notNull().references(() => organisations.id)` plus an index starting with `organisationId`
+- Soft deletes: `deletedAt: timestamp(..., { withTimezone: true })`; unique indexes are filtered `WHERE deletedAt IS NULL`
+- Timestamps: `createdAt` / `updatedAt`, `withTimezone: true`, `.defaultNow().notNull()`
+- Enums: inline `$type<'a' | 'b'>()` on a `text()` column (not pg enums)
+- **IEE implication:** New tables are `executionRuns`, `executionSteps`, `executionArtifacts` (all camelCase TS / snake_case SQL). See Part 2.
+
+**Action registry**
+- `server/config/actionRegistry.ts` — `ACTION_REGISTRY: Record<string, ActionDefinition>`
+- Categories: `'api' | 'worker' | 'browser' | 'devops' | 'mcp'`
+- Each definition has `actionType`, `actionCategory`, `defaultGateLevel`, `parameterSchema`, `retryPolicy`, optional `mcp.annotations`
+- **IEE decision:** IEE actions (browser `navigate/click/type/extract/download`, dev `run_command/write_file/read_file/git_clone/git_commit`, terminal `done/failed`) are **internal to the worker** and **not** added to the registry in v1. The registry models tasks the app schedules *for* an agent; IEE actions are LLM-chosen sub-steps within a single execution run and should not be reviewable/gated individually. The unit of gating is the execution run itself (a future `iee_browser_task` / `iee_dev_task` registry entry can be added when gating becomes relevant). **This decision is documented inline in `worker/src/actions/schema.ts`.**
+
+**Directory layout**
+```
+/
+├── server/         (main app — existing)
+│   ├── config/
+│   ├── db/schema/
+│   ├── lib/
+│   ├── services/
+│   └── ...
+├── client/         (React — existing)
+├── migrations/     (Drizzle SQL — existing)
+├── worker/         (NEW — IEE worker)
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── src/
+│       ├── index.ts          (entry point)
+│       ├── bootstrap.ts      (pg-boss + tracing init)
+│       ├── handlers/
+│       │   ├── browserTask.ts
+│       │   └── devTask.ts
+│       ├── loop/
+│       │   ├── executionLoop.ts
+│       │   ├── observation.ts
+│       │   └── action.ts
+│       ├── browser/
+│       │   ├── playwrightContext.ts
+│       │   └── actions.ts
+│       ├── dev/
+│       │   ├── workspace.ts
+│       │   ├── git.ts
+│       │   └── shell.ts
+│       ├── persistence/
+│       │   ├── executionRuns.ts
+│       │   └── executionSteps.ts
+│       ├── llm/
+│       │   └── routerClient.ts
+│       ├── tracing/
+│       │   └── index.ts
+│       └── config/
+│           └── env.ts
+├── shared/         (NEW — cross-process types)
+│   └── iee/
+│       ├── jobPayload.ts     (zod schemas)
+│       ├── actionSchema.ts   (zod schemas)
+│       └── observation.ts    (types)
+├── docker-compose.yml (UPDATED)
+├── .env.example       (UPDATED)
+└── docs/iee-development-spec.md  (this document)
+```
+
+The `shared/iee/` folder contains **only** zod schemas and TypeScript types that must be imported by both `server/` and `worker/`. Runtime helpers stay inside their owning process. This is the minimum surface area that keeps the enqueue side (app) and the consume side (worker) in lockstep.
+
+**ESM + tsconfig**
+- Root `package.json` has `"type": "module"`
+- `server/tsconfig.json`: `"module": "ESNext"`, `"moduleResolution": "bundler"`, `"strict": true`, `"target": "ES2020"`, output to `../dist/server`
+- Server imports use relative paths (no `@/` alias on server side)
+- **IEE implication:** `worker/tsconfig.json` mirrors the server config. Output to `worker/dist`. Worker uses relative imports. The `shared/` folder is imported via relative paths (`../../shared/iee/jobPayload.js`) from both sides.
+
+### 1.5 Non-goals for v1 (from brief, unchanged)
+
+Not implementing: autonomous planning, multi-tab browsers, parallel execution within a job, workspace persistence across jobs, session pooling, multi-agent orchestration inside execution, Docker-in-Docker sandboxing.
+
+---
+
+## Part 2 — Data Model & Migrations
+
+### 2.1 Tables
+
+All three tables live in `server/db/schema/` as new files, following existing conventions (camelCase TS identifiers, snake_case SQL, plural table names, `organisationId` scoping, timezone-aware timestamps, soft delete where appropriate).
+
+#### 2.1.1 `executionRuns` — `server/db/schema/executionRuns.ts`
+
+One row per IEE job, end-to-end. The main app inserts the row at enqueue time; the worker updates status/result. The unit of idempotency.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK, `defaultRandom()` | |
+| `runId` | `uuid` not null | Correlates to the parent agent run |
+| `agentId` | `uuid` not null, FK → `agents.id` | |
+| `organisationId` | `uuid` not null, FK → `organisations.id` | Required; every query filters on this |
+| `subaccountId` | `uuid` nullable, FK → `subaccounts.id` | Validated via `resolveSubaccount` at enqueue time |
+| `type` | `text` not null, `$type<'browser' \| 'dev'>()` | Execution kind |
+| `mode` | `text` not null, `$type<'api' \| 'browser' \| 'dev'>()` | Forward-compat (v1 only uses `'browser'` / `'dev'`) |
+| `status` | `text` not null, `$type<'pending' \| 'running' \| 'completed' \| 'failed'>()`, default `'pending'` | |
+| `correlationId` | `text` not null | Propagated from the enqueuing agent run |
+| `idempotencyKey` | `text` not null | **Unique index** — see 2.2 |
+| `goal` | `text` not null | Human-readable task goal (also passed in payload) |
+| `startedAt` | `timestamp(tz)` nullable | Set by worker on loop start |
+| `completedAt` | `timestamp(tz)` nullable | Set by worker at terminal state |
+| `failureReason` | `text` nullable, `$type<FailureReason>()` | See Part 8 |
+| `resultSummary` | `jsonb` nullable | Shape matches `ResultSummary` in Part 5 |
+| `stepCount` | `integer` not null, default `0` | Denormalised for fast listing |
+| `createdAt` | `timestamp(tz)` not null, `defaultNow()` | |
+| `updatedAt` | `timestamp(tz)` not null, `defaultNow()` | |
+| `deletedAt` | `timestamp(tz)` nullable | Soft delete |
+
+Indexes:
+- `execution_runs_idempotency_key_unique_idx` — **unique**, on `idempotencyKey`, partial `WHERE deleted_at IS NULL`
+- `execution_runs_org_status_idx` — on `(organisationId, status)`
+- `execution_runs_run_id_idx` — on `runId` (for lookup by parent agent run)
+- `execution_runs_correlation_id_idx` — on `correlationId`
+
+#### 2.1.2 `executionSteps` — `server/db/schema/executionSteps.ts`
+
+One row per iteration of the execution loop. Append-only during the run.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK, `defaultRandom()` | |
+| `executionRunId` | `uuid` not null, FK → `executionRuns.id` ON DELETE CASCADE | |
+| `organisationId` | `uuid` not null | Denormalised for tenant-scoped queries |
+| `stepNumber` | `integer` not null | 1-indexed |
+| `actionType` | `text` not null | e.g. `'navigate'`, `'run_command'`, `'done'` |
+| `input` | `jsonb` not null | Action payload (validated against schema before execute) |
+| `output` | `jsonb` nullable | Truncated per Part 8 logging rules |
+| `success` | `boolean` not null | |
+| `failureReason` | `text` nullable, `$type<FailureReason>()` | Set when `success = false` |
+| `durationMs` | `integer` nullable | Wall-clock per step |
+| `createdAt` | `timestamp(tz)` not null, `defaultNow()` | Acts as `timestamp` from brief §7.2 |
+
+Indexes:
+- Unique `(executionRunId, stepNumber)` — prevents duplicate step writes on retry
+- `(organisationId, createdAt)` for tenant-scoped listing
+
+No soft delete: steps are owned by their run and removed by cascade.
+
+#### 2.1.3 `executionArtifacts` — `server/db/schema/executionArtifacts.ts`
+
+Optional per brief §7.3. **Included in v1** — small addition, avoids a follow-up migration. Records any file emitted by a run (browser download, written file, generated report).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` PK | |
+| `executionRunId` | `uuid` not null, FK → `executionRuns.id` ON DELETE CASCADE | |
+| `organisationId` | `uuid` not null | |
+| `kind` | `text` not null, `$type<'download' \| 'file' \| 'log'>()` | |
+| `path` | `text` not null | Path inside the worker container at capture time |
+| `sizeBytes` | `integer` nullable | |
+| `mimeType` | `text` nullable | |
+| `metadata` | `jsonb` nullable | Free-form (source selector, command, etc.) |
+| `createdAt` | `timestamp(tz)` not null, `defaultNow()` | |
+
+Indexes: `(executionRunId)`, `(organisationId, createdAt)`.
+
+> v1 scope: the artifact row records metadata only. We do **not** copy the file contents back to the app in v1. A later phase will add object-storage upload.
+
+### 2.2 Idempotency
+
+The brief (§9) defines the behaviour. Implementation rules:
+
+1. `execution_runs.idempotencyKey` has a **database-level unique index** (partial: `WHERE deleted_at IS NULL`). The app never checks-then-inserts in application code.
+2. Insertion uses `INSERT ... ON CONFLICT (idempotency_key) WHERE deleted_at IS NULL DO NOTHING RETURNING *`. If no row is returned, the row already existed — the caller reads it with a follow-up `SELECT`.
+3. Behaviour on collision (driven by the existing row's `status`):
+
+| Existing status | Behaviour |
+|---|---|
+| `completed` | Return existing `resultSummary` immediately. Do **not** enqueue a new pg-boss job. |
+| `running` | Return the existing run id. Do not enqueue. The in-flight worker will finish it. |
+| `pending` | Return the existing run id. The previously-enqueued job is still in the queue. |
+| `failed` | If retry policy allows: soft-delete the old row (set `deletedAt`), then insert a new one and enqueue. Otherwise return the failed row. |
+
+The "retry policy allows" check reuses the existing action retry conventions in `server/config/actionRegistry.ts` — the IEE introduces two retry profiles: `iee-browser-default` and `iee-dev-default`, added to `JOB_CONFIG`.
+
+4. The **worker** also re-checks the row before starting work: if `status !== 'pending'` when the job is received, it logs a warning and acks the job without re-running (defensive guard against pg-boss double-delivery edge cases).
+
+### 2.3 Migrations
+
+- Generated via `npm run db:generate` (Drizzle Kit).
+- Single migration file `migrations/NNNN_iee_execution_tables.sql` contains all three tables plus indexes.
+- Migration is reviewed manually before being checked in. Drizzle generates it; no hand-written SQL is acceptable outside review.
+- Down-migration is not auto-written; we rely on forward-only migrations per existing project practice (confirm with the existing `migrations/` folder — no existing down files).
+
+### 2.4 Shared types
+
+Zod schemas for `FailureReason`, `ResultSummary`, and row shapes live in `shared/iee/types.ts` so both the worker and the app can import them. The Drizzle `$inferSelect` / `$inferInsert` types are re-exported from `server/db/schema/index.ts` as usual.
+
+---
+
+## Part 3 — Job Contracts (pg-boss)
+
+### 3.1 Job names
+
+Added to `server/config/jobConfig.ts`:
+
+```ts
+export const JOB_IEE_BROWSER_TASK = 'iee-browser-task' as const;
+export const JOB_IEE_DEV_TASK     = 'iee-dev-task' as const;
+```
+
+Their DLQ siblings follow the existing pattern: `iee-browser-task__dlq`, `iee-dev-task__dlq`.
+
+`JOB_CONFIG` entries:
+
+```ts
+'iee-browser-task': {
+  retryLimit: 3,
+  retryBackoff: true,
+  expireInMinutes: 10,       // hard ceiling; worker enforces MAX_EXECUTION_TIME_MS inside
+  retentionDays: 7,
+  dlq: 'iee-browser-task__dlq',
+},
+'iee-dev-task': {
+  retryLimit: 2,
+  retryBackoff: true,
+  expireInMinutes: 10,
+  retentionDays: 7,
+  dlq: 'iee-dev-task__dlq',
+},
+```
+
+### 3.2 Payload (zod-validated)
+
+Defined once in `shared/iee/jobPayload.ts` and imported by both sides. Follows `docs/pgboss-zod-hardening-spec.md`.
+
+```ts
+import { z } from 'zod';
+
+export const BrowserTaskPayload = z.object({
+  type: z.literal('browser'),
+  goal: z.string().min(1).max(2000),
+  startUrl: z.string().url().optional(),
+  sessionKey: z.string().min(1).max(128).optional(), // org- or subaccount-scoped
+});
+
+export const DevTaskPayload = z.object({
+  type: z.literal('dev'),
+  goal: z.string().min(1).max(2000),
+  repoUrl: z.string().url().optional(),
+  branch: z.string().max(200).optional(),
+  commands: z.array(z.string().max(2000)).max(20).optional(),
+});
+
+export const IEEJobPayload = z.object({
+  organisationId: z.string().uuid(),
+  subaccountId: z.string().uuid().nullable(),
+  agentId: z.string().uuid(),
+  runId: z.string().uuid(),
+  executionRunId: z.string().uuid(),           // row already inserted by app
+  correlationId: z.string().min(1).max(64),
+  idempotencyKey: z.string().min(1).max(128),
+  task: z.discriminatedUnion('type', [BrowserTaskPayload, DevTaskPayload]),
+});
+export type IEEJobPayload = z.infer<typeof IEEJobPayload>;
+```
+
+The `executionRunId` field is critical: **the app inserts the `execution_runs` row before enqueueing the job**. The payload carries the id, and the worker updates that exact row. This keeps idempotency atomic at the database (not the queue) layer.
+
+### 3.3 Enqueue path
+
+A new service `server/services/ieeExecutionService.ts` owns enqueueing. It exposes:
+
+```ts
+enqueueIEETask(input: {
+  task: BrowserTask | DevTask;
+  organisationId: string;
+  subaccountId: string | null;
+  agentId: string;
+  runId: string;
+  correlationId: string;
+  idempotencyKey: string;
+}): Promise<{ executionRunId: string; deduplicated: boolean }>;
+```
+
+Flow:
+1. Validate `subaccountId` with existing `resolveSubaccount(subaccountId, organisationId)`.
+2. Attempt `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`.
+3. If nothing returned: `SELECT` the existing row and apply the table in §2.2.
+4. If a fresh row was inserted: call `boss.send(JOB_IEE_BROWSER_TASK | JOB_IEE_DEV_TASK, payload, getJobConfig(...))`.
+5. Emit `execution.start` event via tracing.
+6. Return `{ executionRunId, deduplicated }`.
+
+No retries, no ad-hoc retry policies — pg-boss handles that.
+
+### 3.4 Worker subscription
+
+Inside the worker, one `createWorker({ ... })` per job name. Concurrency is env-driven:
+
+- `IEE_BROWSER_CONCURRENCY` (default `1`) — Playwright is heavy; 1 per worker is safe for v1.
+- `IEE_DEV_CONCURRENCY` (default `2`).
+
+`createWorker` is copied/shared from `server/lib/createWorker.ts`. **Decision:** move `createWorker.ts` into `shared/queue/` and re-export from the server so both processes can use the same helper. This is the only runtime helper moved to `shared/`, and it has no dependency on Express or the server DB layer.
+
+---
+
+## Part 4 — Worker Service Skeleton
+
+### 4.1 Package layout
+
+`worker/package.json`:
+
+```jsonc
+{
+  "name": "automation-os-worker",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "pg-boss": "^10.x",          // match root version exactly
+    "pg": "^8.11.0",
+    "playwright": "^1.44.0",
+    "zod": "^3.23.0",
+    "drizzle-orm": "^0.x"        // match root
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0",
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.0.0"
+  }
+}
+```
+
+**Version-pinning rule:** `pg-boss`, `drizzle-orm`, and `zod` MUST match the versions in the root `package.json` exactly. A mismatch will cause runtime incompatibility on the shared database schema and payload parsing. The worker's install step verifies this via a startup check in `bootstrap.ts`.
+
+### 4.2 tsconfig
+
+`worker/tsconfig.json`:
+
+```jsonc
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": false,
+    "sourceMap": true,
+    "baseUrl": "."
+  },
+  "include": ["src/**/*", "../shared/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+### 4.3 Entry point
+
+`worker/src/index.ts`:
+
+```ts
+import { bootstrap } from './bootstrap.js';
+import { registerBrowserHandler } from './handlers/browserTask.js';
+import { registerDevHandler } from './handlers/devTask.js';
+
+async function main() {
+  const { boss, logger, shutdown } = await bootstrap();
+  await registerBrowserHandler(boss, logger);
+  await registerDevHandler(boss, logger);
+  logger.info('iee.worker.started', { pollIntervalMs: process.env.WORKER_POLL_INTERVAL_MS });
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+}
+
+main().catch((err) => {
+  console.error('iee.worker.fatal', err);
+  process.exit(1);
+});
+```
+
+### 4.4 Bootstrap responsibilities
+
+`worker/src/bootstrap.ts`:
+
+1. Load env via `config/env.ts` (zod-validated, see 4.5).
+2. Start pg-boss with `DATABASE_URL`, matching the main app's connection settings (SSL mode identical to `server/lib/pgBossInstance.ts`).
+3. Initialise the Drizzle client against the same `DATABASE_URL`.
+4. Initialise tracing (see Part 8).
+5. Run a **compat check**: query `SELECT version()` on Postgres and log; query `pgboss.schema_version()` and compare against root package version; fail fast on mismatch.
+6. Register SIGTERM/SIGINT handlers that call `boss.stop({ graceful: true })` and close the pool.
+7. Return `{ boss, db, logger, shutdown }`.
+
+### 4.5 Environment configuration
+
+`worker/src/config/env.ts`:
+
+```ts
+import { z } from 'zod';
+
+const EnvSchema = z.object({
+  DATABASE_URL: z.string().url(),
+  BROWSER_SESSION_DIR: z.string().default('/var/browser-sessions'),
+  WORKSPACE_BASE_DIR: z.string().default('/tmp/workspaces'),
+  MAX_STEPS_PER_EXECUTION: z.coerce.number().int().positive().default(25),
+  MAX_EXECUTION_TIME_MS: z.coerce.number().int().positive().default(300_000),
+  MAX_COMMAND_TIME_MS: z.coerce.number().int().positive().default(30_000),
+  MAX_RETRIES: z.coerce.number().int().nonnegative().default(3),
+  WORKER_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
+  IEE_BROWSER_CONCURRENCY: z.coerce.number().int().positive().default(1),
+  IEE_DEV_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  LLM_ROUTER_MODE: z.enum(['shared', 'http']).default('shared'),
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+});
+
+export const env = EnvSchema.parse(process.env);
+```
+
+**`LLM_ROUTER_MODE` decision:** `shared` (default) means the worker imports and calls `routeCall()` directly from the server codebase (worker bundles the relevant services). This keeps the rule "no HTTP between worker and app" intact — the router is a **library**, not a service. The worker is co-located with a build of the router that talks to Postgres and the LLM providers directly. The worker does not need the main app running to work. `http` is reserved for a future if we ever want the worker to delegate via a hypothetical router HTTP endpoint — not implemented in v1.
+
+### 4.6 Worker Dockerfile
+
+`worker/Dockerfile`:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/playwright:v1.44.0-jammy AS build
+
+WORKDIR /app
+
+# Install shared + worker deps
+COPY package*.json ./
+COPY worker/package*.json ./worker/
+COPY shared ./shared
+COPY server/lib ./server/lib
+COPY server/services/llmRouter.ts ./server/services/llmRouter.ts
+# (Build-time copy list is finalised once router dependencies are fully traced.)
+
+RUN cd worker && npm ci
+
+COPY worker/tsconfig.json ./worker/
+COPY worker/src ./worker/src
+
+RUN cd worker && npm run build
+
+# --- Runtime stage ---
+FROM mcr.microsoft.com/playwright:v1.44.0-jammy
+
+WORKDIR /app
+
+COPY --from=build /app/worker/dist ./dist
+COPY --from=build /app/worker/node_modules ./node_modules
+COPY --from=build /app/worker/package.json ./
+
+# Ensure only Chromium is available (reduces image size)
+RUN npx playwright install chromium --with-deps
+
+ENV NODE_ENV=production
+CMD ["node", "dist/index.js"]
+```
+
+> Build-time trace of `llmRouter.ts` transitive imports is a build chore called out in Part 10.2. If copying individual files becomes unwieldy, we fall back to a monorepo-style build that compiles the entire `server/` tree and tree-shakes the router.
+
+### 4.7 `.dockerignore`
+
+Identical content for `/.dockerignore` (app build) and `/worker/.dockerignore`:
+
+```
+node_modules
+.git
+.env
+.env.*
+dist
+coverage
+*.log
+.DS_Store
+.vscode
+.idea
+```
+
+---
+
+## Part 5 — Execution Loop, Observation & Action Schemas, LLM Integration
+
+### 5.1 Loop contract
+
+`worker/src/loop/executionLoop.ts` exports:
+
+```ts
+export async function runExecutionLoop(params: {
+  run: ExecutionRunRow;
+  payload: IEEJobPayload;
+  executor: StepExecutor;   // browser or dev
+  logger: Logger;
+}): Promise<ResultSummary>;
+```
+
+Loop pseudocode:
+
+```
+mark run as running (UPDATE execution_runs SET status='running', startedAt=now())
+emit trace event 'iee.execution.start'
+deadline = now() + MAX_EXECUTION_TIME_MS
+stepNumber = 0
+previousSteps = []
+
+while true:
+  stepNumber += 1
+  if stepNumber > MAX_STEPS_PER_EXECUTION: fail('step_limit_reached')
+  if now() > deadline: fail('timeout')
+
+  observation = await executor.observe()
+  action = await llm.decideNextAction({
+    goal, observation, previousSteps, stepBudgetRemaining, timeRemaining,
+    availableActions
+  })
+  validateAction(action)   // zod; failure → 'execution_error'
+
+  stepStart = now()
+  try:
+    result = await executor.execute(action)
+    writeStep({ success: true, input: action, output: result, durationMs: ... })
+    previousSteps.push(summarise(action, result))
+
+    if action.type === 'done':
+      return { success: true, output: action.summary, stepCount, durationMs, artifacts }
+    if action.type === 'failed':
+      return fail('execution_error', action.reason)
+  catch (err):
+    writeStep({ success: false, input: action, output: truncateError(err), ... })
+    failureReason = classifyError(err)
+    if isRetryableWithinLoop(failureReason) and stepBudget > 1: continue
+    return fail(failureReason, err.message)
+```
+
+Any early return writes the terminal row update (`status`, `completedAt`, `failureReason`, `resultSummary`, `stepCount`).
+
+### 5.2 StepExecutor interface
+
+```ts
+export interface StepExecutor {
+  mode: 'browser' | 'dev';
+  availableActions: readonly ExecutionAction['type'][];
+  observe(): Promise<Observation>;
+  execute(action: ExecutionAction): Promise<ActionResult>;
+  dispose(): Promise<void>;
+}
+```
+
+`BrowserStepExecutor` (Part 6) and `DevStepExecutor` (Part 7) both implement this. The loop does not know or care which it has.
+
+### 5.3 Observation schema
+
+Enforced exactly as in the brief §5.6. One zod schema in `shared/iee/observation.ts`:
+
+```ts
+export const Observation = z.object({
+  url: z.string().url().optional(),
+  pageText: z.string().max(8000).optional(),
+  clickableElements: z.array(z.string().max(300)).max(80).optional(),
+  inputs: z.array(z.string().max(300)).max(80).optional(),
+  files: z.array(z.string().max(500)).max(100).optional(),
+  lastCommandOutput: z.string().max(4000).optional(),
+  lastCommandExitCode: z.number().int().optional(),
+  lastActionResult: z.string().max(1000).optional(),
+});
+```
+
+**Hard caps are enforced on the executor side**, not the LLM prompt. `pageText` is truncated with a centre-ellipsis (`"<start>...<end>"`) so both the top and tail of the page survive. `clickableElements` is limited to the first 80 in DOM order; the LLM is told in the system prompt that the list may be truncated and it can ask the executor for a different page region via an extraction action.
+
+### 5.4 Action schema
+
+Exactly as in the brief §5.7, encoded in `shared/iee/actionSchema.ts` as a discriminated union:
+
+```ts
+export const ExecutionAction = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('navigate'),    url: z.string().url() }),
+  z.object({ type: z.literal('click'),       selector: z.string().min(1).max(500) }),
+  z.object({ type: z.literal('type'),        selector: z.string().min(1).max(500), text: z.string().max(4000) }),
+  z.object({ type: z.literal('extract'),     query: z.string().min(1).max(1000) }),
+  z.object({ type: z.literal('download'),    selector: z.string().min(1).max(500) }),
+  z.object({ type: z.literal('run_command'), command: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal('write_file'),  path: z.string().min(1).max(1000), content: z.string().max(200_000) }),
+  z.object({ type: z.literal('read_file'),   path: z.string().min(1).max(1000) }),
+  z.object({ type: z.literal('git_clone'),   repoUrl: z.string().url(), branch: z.string().max(200).optional() }),
+  z.object({ type: z.literal('git_commit'),  message: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal('done'),        summary: z.string().min(1).max(4000) }),
+  z.object({ type: z.literal('failed'),      reason: z.string().min(1).max(1000) }),
+]);
+```
+
+The `availableActions` set on each executor restricts this union per mode. If the LLM returns a `run_command` in a browser execution, the worker rejects it as `execution_error` without running it.
+
+**`done` and `failed` are the only terminal actions.** Every other path out is enforced externally (step limit, timeout).
+
+### 5.5 LLM integration
+
+`worker/src/llm/routerClient.ts` is a thin wrapper that:
+
+1. Imports `routeCall` from the bundled `server/services/llmRouter.js`.
+2. Builds a `RouterCallParams` object with:
+   - `system`: the IEE system prompt (see 5.6)
+   - `messages`: a single user message containing the structured state
+   - `tools`: **none** — the action is returned as strict JSON, not via tool calls, because we want a single uniform decoder for all providers the router may pick
+   - `context`: `{ sourceType: 'iee', taskType: run.type, executionPhase: 'iee.loop.step', organisationId, subaccountId, runId, agentId, correlationId }`
+3. Parses `response.content` as JSON, then validates against the `ExecutionAction` zod schema.
+4. On parse failure, retries **once** with a repair message appended ("Your previous response was not valid JSON matching the action schema. Error: …"). A second failure classifies as `execution_error`.
+5. All cost tracking, model selection, Langfuse generation creation — delegated entirely to the router.
+
+**Why strict JSON instead of tool calls?** Tool calls add a provider-specific surface and couple the worker to a specific model family's tool-use format. A single JSON shape is simpler and the router can still pick any provider underneath.
+
+### 5.6 System prompt (template)
+
+Stored in `worker/src/loop/systemPrompt.ts` as a constant template. Variables: `{goal}`, `{availableActions}`, `{stepBudget}`, `{timeBudgetMs}`.
+
+Key rules in the prompt (paraphrased for spec):
+
+1. You are executing a controlled loop. Return exactly one JSON object matching the action schema.
+2. Available action types are `{availableActions}`. Any other type is rejected.
+3. After every step you will see a new observation. Plan one step at a time.
+4. End the loop with `done` when the goal is complete, or `failed` with a reason if you cannot proceed.
+5. Do not reference actions you have already taken unless the observation shows they failed or their effect was undone.
+6. Hard budgets: `{stepBudget}` steps remaining, `{timeBudgetMs}`ms remaining.
+7. Return ONLY the JSON object. No prose, no markdown fences, no commentary.
+
+The full text lives in code and is version-controlled with the spec.
+
+---
+
+## Part 6 — Browser Execution Handler
+
+### 6.1 Files
+
+- `worker/src/handlers/browserTask.ts` — pg-boss subscription
+- `worker/src/browser/playwrightContext.ts` — persistent context lifecycle
+- `worker/src/browser/executor.ts` — `BrowserStepExecutor` implementation
+- `worker/src/browser/observe.ts` — DOM extraction → `Observation`
+
+### 6.2 Persistent context
+
+Playwright is launched via `chromium.launchPersistentContext(userDataDir, options)`. The `userDataDir` is computed deterministically:
+
+```
+${BROWSER_SESSION_DIR}/${organisationId}/${sessionKey ?? 'default'}
+```
+
+Rules:
+1. `sessionKey` is **scoped per organisation**. The directory layout guarantees no cross-tenant access — a path traversal attempt in `sessionKey` is rejected by a regex check (`/^[a-zA-Z0-9_-]{1,128}$/`).
+2. If a `subaccountId` is present, the effective key is `${subaccountId}:${sessionKey ?? 'default'}` so subaccounts get isolated sessions even within the same org.
+3. The directory is created with mode `0700` on first use.
+4. One context per job. Contexts are **not pooled** in v1 (concurrency = 1 per worker).
+5. Launch options: `headless: true`, `acceptDownloads: true`, `viewport: { width: 1280, height: 800 }`, `downloadsPath: ${WORKSPACE_BASE_DIR}/${runId}/downloads`.
+
+### 6.3 Action implementations
+
+| Action | Implementation |
+|---|---|
+| `navigate` | `page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })` |
+| `click` | `page.locator(selector).first().click({ timeout: 10000 })` |
+| `type` | `page.locator(selector).first().fill(text, { timeout: 10000 })` |
+| `extract` | LLM-assisted: capture observation, then return the relevant region. The `query` field is recorded; the executor returns the current observation slice matching the query. (Heavy extraction is the LLM's job at the next step.) |
+| `download` | Wrap click in `page.waitForEvent('download', { timeout: 30000 })`, save to downloads dir, write `executionArtifacts` row, return `{ path, sizeBytes }` |
+
+Selector convention: prefer Playwright's text/role selectors (`text=Sign in`, `role=button[name="Submit"]`) — the system prompt instructs the LLM to use them.
+
+### 6.4 Observation builder (`observe.ts`)
+
+```ts
+export async function buildObservation(page: Page, lastResult?: string): Promise<Observation> {
+  const url = page.url();
+  const pageText = await page.evaluate(() => document.body?.innerText ?? '');
+  const clickable = await page.$$eval(
+    'a, button, [role="button"], input[type="submit"]',
+    (els) => els.map((e) => (e as HTMLElement).innerText?.trim() || (e as HTMLElement).getAttribute('aria-label') || '').filter(Boolean).slice(0, 80)
+  );
+  const inputs = await page.$$eval(
+    'input, textarea, select',
+    (els) => els.map((e) => (e as HTMLInputElement).name || (e as HTMLInputElement).id || (e as HTMLInputElement).placeholder || '').filter(Boolean).slice(0, 80)
+  );
+  return Observation.parse({
+    url,
+    pageText: truncateMiddle(pageText, 8000),
+    clickableElements: clickable,
+    inputs,
+    lastActionResult: lastResult,
+  });
+}
+```
+
+### 6.5 Cleanup
+
+- On loop termination (success or failure), `executor.dispose()` closes the page and the context.
+- The `userDataDir` is **not** deleted — that's the persistent session.
+- The `downloads` subdirectory is preserved only if at least one `executionArtifacts` row references files in it; otherwise removed.
+
+### 6.6 Failure mapping (browser-specific)
+
+| Source | `failureReason` |
+|---|---|
+| `page.goto` timeout | `environment_error` |
+| Selector not found / click timeout | `execution_error` (LLM picked a wrong selector — recoverable next step) |
+| Login wall detected (heuristic: redirect to known login URL pattern) | `auth_failure` |
+| Browser crash | `environment_error` |
+| Schema validation failure on action | `execution_error` |
+
+---
+
+## Part 7 — Dev Execution Handler
+
+### 7.1 Files
+
+- `worker/src/handlers/devTask.ts` — pg-boss subscription
+- `worker/src/dev/workspace.ts` — workspace lifecycle
+- `worker/src/dev/git.ts` — clone, commit
+- `worker/src/dev/shell.ts` — `run_command`, `read_file`, `write_file`
+- `worker/src/dev/executor.ts` — `DevStepExecutor`
+
+### 7.2 Workspace
+
+```
+${WORKSPACE_BASE_DIR}/${runId}
+```
+
+- Created at the start of every job (`mkdir -p`, mode `0700`).
+- **Always destroyed** at the end of the job (success or failure) via `fs.rm(dir, { recursive: true, force: true })` in a `try/finally`.
+- The directory name is the `runId` (UUID), guaranteeing collision freedom.
+- A symlink `current` is **not** created — there is no shared state between jobs in v1.
+
+### 7.3 Path safety
+
+Every `read_file` / `write_file` path is normalised and validated:
+
+```ts
+function resolveSafePath(workspaceDir: string, candidate: string): string {
+  const resolved = path.resolve(workspaceDir, candidate);
+  const rel = path.relative(workspaceDir, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new SafetyError('path_outside_workspace');
+  }
+  return resolved;
+}
+```
+
+`SafetyError` maps to `failureReason = 'execution_error'`. The validation runs **before** any filesystem call. Symlinks inside the workspace are dereferenced and re-checked against the workspace root after each write to detect symlink-escape attempts.
+
+### 7.4 Command execution
+
+`run_command` is implemented with `child_process.spawn`, never `exec`/`execSync`:
+
+```ts
+const child = spawn('/bin/sh', ['-lc', command], {
+  cwd: workspaceDir,
+  env: sanitisedEnv,    // see 7.5
+  stdio: ['ignore', 'pipe', 'pipe'],
+  detached: false,
+});
+```
+
+Rules:
+1. `cwd` is **always** the workspace dir. Never inherits from the parent process.
+2. Wall-clock timeout per command = `MAX_COMMAND_TIME_MS` (default 30s). On timeout, the worker sends `SIGTERM`, waits 2s, then `SIGKILL`. Failure reason: `timeout`.
+3. stdout and stderr are captured into ring buffers capped at 64 KiB each. Anything beyond is discarded with a `[truncated]` marker.
+4. The exit code is returned with the result. Non-zero exit is recorded as `success: false` but does **not** auto-fail the loop — the LLM may decide to recover.
+5. Background processes are forbidden by command-string inspection: any command containing unquoted `&` (other than `&&`/`&>`), `nohup`, `disown`, `setsid` is rejected as `execution_error` before spawn.
+6. Denylist (rejected pre-spawn): commands starting with `sudo`, `su `, `rm -rf /`, `rm -rf /*`, `mkfs`, `dd if=`, `:(){`, `chown -R /`, `chmod -R / `, anything touching `/etc`, `/var`, `/root`, `/home/<other>`. The denylist is conservative and lives in `worker/src/dev/denylist.ts`.
+
+### 7.5 Sanitised environment
+
+The subprocess receives a minimal env:
+
+```ts
+const sanitisedEnv = {
+  PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+  HOME: workspaceDir,
+  LANG: 'C.UTF-8',
+  CI: 'true',
+  // Plus any allowlisted vars from a per-org config (deferred — empty in v1)
+};
+```
+
+`DATABASE_URL`, LLM API keys, and the worker's own secrets are **never** passed to subprocesses.
+
+### 7.6 Git
+
+- `git_clone`: `git clone --depth 1 [--branch <branch>] <repoUrl> <workspaceDir>/repo`. The repo URL must use `https://`. SSH URLs and `file://` are rejected.
+- `git_commit`: runs in `<workspaceDir>/repo`. Author/email come from env (`IEE_GIT_AUTHOR_NAME`, `IEE_GIT_AUTHOR_EMAIL`, both with sane defaults). Push is **not** in v1 — commits stay local and are surfaced via `executionArtifacts` (a patch file is captured).
+- Credentials for private repos are deferred to v2 (will use a per-org credential store).
+
+### 7.7 Observation builder (dev)
+
+```ts
+async function buildDevObservation(workspaceDir: string, last: { output?: string; exitCode?: number }): Promise<Observation> {
+  const files = await listFiles(workspaceDir, { maxDepth: 3, max: 100 });
+  return Observation.parse({
+    files,
+    lastCommandOutput: last.output ? truncateMiddle(last.output, 4000) : undefined,
+    lastCommandExitCode: last.exitCode,
+  });
+}
+```
+
+### 7.8 Failure mapping (dev-specific)
+
+| Source | `failureReason` |
+|---|---|
+| Path outside workspace | `execution_error` |
+| Denylisted command | `execution_error` |
+| Command timeout | `timeout` |
+| `git clone` network failure | `environment_error` |
+| Disk full | `environment_error` |
+| Unknown spawn error | `unknown` |
+
+---
+
+## Part 8 — Tracing, Logging & Failure Classification
+
+### 8.1 Trace registry additions
+
+Add to `server/lib/tracing.ts` (these names are imported by the worker via the shared module):
+
+```ts
+export const SPAN_NAMES = {
+  ...existing,
+  IEE_EXECUTION_RUN:  'iee.execution.run',
+  IEE_EXECUTION_STEP: 'iee.execution.step',
+} as const;
+
+export const EVENT_NAMES = {
+  ...existing,
+  IEE_EXECUTION_START:         'iee.execution.start',
+  IEE_EXECUTION_STEP_COMPLETE: 'iee.execution.step.complete',
+  IEE_EXECUTION_STEP_FAILED:   'iee.execution.step.failed',
+  IEE_EXECUTION_COMPLETE:      'iee.execution.complete',
+  IEE_EXECUTION_FAILED:        'iee.execution.failed',
+} as const;
+```
+
+### 8.2 Trace context propagation
+
+The worker job handler is wrapped in `withTrace()`:
+
+```ts
+await withTrace(
+  { correlationId: payload.correlationId },
+  { runId: payload.runId, orgId: payload.organisationId, subaccountId: payload.subaccountId, agentId: payload.agentId },
+  async () => runExecutionLoop(...)
+);
+```
+
+Inside `withTrace`, every `createSpan` and `createEvent` automatically picks up the correlation/run context. The LLM router receives the same context via `LLMCallContext`, so router calls inside the loop are linked back to the parent span without manual stitching.
+
+Span structure:
+
+```
+iee.execution.run                        (one per job)
+├── iee.execution.step  (step 1)
+│     └── llm.router.call               (router opens its own span)
+├── iee.execution.step  (step 2)
+│     └── llm.router.call
+└── ...
+```
+
+### 8.3 Structured logging
+
+Logger: a thin wrapper around `console` matching the existing `server/lib/logger.ts` shape (JSON one line per event, fields: `ts`, `level`, `msg`, `correlationId`, `runId`, `organisationId`, plus event-specific keys).
+
+Required log lines (mirrors brief §13):
+
+| Event | Log key | Fields |
+|---|---|---|
+| Job received | `iee.job.received` | `jobId`, `type`, `organisationId`, `runId`, `idempotencyKey` |
+| Step start | `iee.step.start` | `stepNumber`, `actionType`, `inputSummary` (≤200 char) |
+| Step complete | `iee.step.complete` | `stepNumber`, `success`, `outputSummary` (≤200 char), `durationMs` |
+| Step failure | `iee.step.failed` | `stepNumber`, `failureReason`, `errorMessage` (≤500 char) |
+| Execution complete | `iee.execution.complete` | `runId`, `stepCount`, `totalDurationMs`, `success` |
+| Execution failed | `iee.execution.failed` | `runId`, `failureReason`, `lastStepNumber` |
+| Worker start | `iee.worker.started` | `databaseHost` (host only, never full URL), `pollIntervalMs`, `concurrency` |
+
+**Banned from logs:** full Playwright HTML, full command stdout, secrets, full DATABASE_URL. Truncate via the existing `truncateMiddle()` helper at 500 characters where these would otherwise appear.
+
+### 8.4 Failure classification
+
+`worker/src/loop/failureClassification.ts`:
+
+```ts
+export type FailureReason =
+  | 'timeout'
+  | 'step_limit_reached'
+  | 'execution_error'
+  | 'environment_error'
+  | 'auth_failure'
+  | 'unknown';
+
+export function classifyError(err: unknown): FailureReason {
+  if (err instanceof TimeoutError) return 'timeout';
+  if (err instanceof StepLimitError) return 'step_limit_reached';
+  if (err instanceof SafetyError || err instanceof SchemaValidationError) return 'execution_error';
+  if (err instanceof AuthRedirectError) return 'auth_failure';
+  if (isEnvironmentError(err)) return 'environment_error';
+  return 'unknown';
+}
+```
+
+Rules:
+1. The classifier is the **only** place that maps error types to `FailureReason`. Handlers throw typed errors; they never set `failureReason` directly.
+2. Raw stack traces are **never** stored in the database. They are logged once at `iee.step.failed` and discarded.
+3. The `resultSummary.output` may include a single short string explaining the failure for downstream agents, capped at 500 characters.
+
+### 8.5 DLQ behaviour
+
+A job that exhausts pg-boss retries lands in `iee-browser-task__dlq` / `iee-dev-task__dlq`. The DLQ is monitored by the existing job-monitoring infrastructure (no new monitor in v1). When a job hits the DLQ, the worker has already written `status='failed'` to the corresponding `execution_runs` row, so the queue and the table stay consistent.
+
+---
+
+## Part 9 — AgentExecutionService Routing & Action Registry
+
+### 9.1 Routing detection
+
+`server/services/agentExecutionService.ts` is extended with a small detection step. It does **not** intercept the existing `routeCall` flow — the IEE is a parallel execution path triggered by an explicit signal on the agent's task definition.
+
+v1 detection rule (intentionally simple, explicit):
+
+1. The agent's task descriptor (already passed to `agentExecutionService`) gains an optional `executionMode: 'api' | 'browser' | 'dev'` field. Default `'api'` (existing behaviour).
+2. If `executionMode` is `'browser'` or `'dev'`, the service calls `ieeExecutionService.enqueueIEETask(...)` (Part 3.3) instead of running the standard tool/LLM dispatch loop.
+3. The agent run is parked in `pending_iee` state. When the worker writes the terminal `execution_runs` row, an existing post-processor (the same one that handles long-running async tools today — to be confirmed during implementation) resumes the agent lifecycle and feeds `resultSummary` back as the next observation.
+4. If no resume hook exists yet, a small `executionRunCompletionWatcher` is added — a pg-boss worker subscribed to `iee-execution-completed` job name, which the IEE worker fires after writing the terminal row. The main app handles that job and resumes the agent.
+
+> **Open question for review:** confirm whether an async-tool resume mechanism already exists in `agentExecutionService`. If yes, reuse it. If no, the `executionRunCompletionWatcher` above is the fallback. This is the only ambiguous architectural decision in the spec; flagged for confirmation before implementation.
+
+### 9.2 Idempotency key derivation
+
+The `idempotencyKey` for an IEE task is derived (not random) so that retries of the same agent step do not double-execute:
+
+```
+sha256(
+  organisationId + ':' +
+  runId + ':' +
+  agentId + ':' +
+  taskHash         // stable hash of {type, goal, startUrl|repoUrl, branch, sessionKey}
+)
+```
+
+This matches the pattern already used in `llmRouter.ts` for cost-record idempotency. The result is a 64-char hex string fitting the `idempotencyKey` column constraint.
+
+### 9.3 Action registry decision (formal)
+
+**Decision:** IEE execution-run sub-actions (`navigate`, `click`, `run_command`, etc.) are **not** registered in `server/config/actionRegistry.ts`.
+
+**Rationale:**
+- The action registry is the contract for tasks the platform schedules **on behalf of** an agent — the gating, parameter validation, and retry policy are applied at the registry level.
+- IEE sub-actions are LLM-chosen mid-execution and should not be individually gateable. The reviewable unit is the **execution run** (the goal), not each click.
+- v1 keeps the registry surface unchanged. A future addition of two registry entries — `iee_browser_task` and `iee_dev_task` — at the *task* level (not the sub-action level) is anticipated when gating becomes a requirement.
+
+**Where this is documented in code:**
+- `worker/src/actions/schema.ts` — top-of-file comment with rationale and a pointer back to this section.
+- `server/config/actionRegistry.ts` — short comment near the bottom noting that IEE actions are intentionally absent and explaining when to add them.
+
+### 9.4 Multi-tenant guard rails
+
+The `enqueueIEETask` service:
+1. Calls `resolveSubaccount(subaccountId, organisationId)` (existing helper) before insert. Mismatched subaccounts throw a `403`-equivalent service error.
+2. Sets `organisationId` on every row (`execution_runs`, `execution_steps`, `execution_artifacts`).
+3. The worker re-validates `organisationId` on every step write — a row whose `executionRunId` does not match the original `organisationId` is a hard error and aborts the job.
+
+### 9.5 Files modified
+
+| File | Change |
+|---|---|
+| `server/services/agentExecutionService.ts` | Add IEE routing branch |
+| `server/services/ieeExecutionService.ts` | NEW — enqueue + idempotent insert |
+| `server/config/jobConfig.ts` | Add `iee-browser-task`, `iee-dev-task` (+ DLQs) |
+| `server/config/actionRegistry.ts` | Comment-only change (doc pointer) |
+| `server/db/schema/executionRuns.ts` | NEW |
+| `server/db/schema/executionSteps.ts` | NEW |
+| `server/db/schema/executionArtifacts.ts` | NEW |
+| `server/db/schema/index.ts` | Re-export new tables |
+| `server/lib/tracing.ts` | Add new SPAN_NAMES / EVENT_NAMES |
+| `migrations/NNNN_iee_execution_tables.sql` | NEW (Drizzle-generated) |
+
+---
+
+## Part 10 — Verification, MVP Acceptance & DigitalOcean Rollout
+
+### 10.1 Verification commands
+
+Per `CLAUDE.md` verification table:
+
+| Trigger | Command | Where |
+|---|---|---|
+| Any TS change in worker | `cd worker && npm run typecheck` | worker/ |
+| Any TS change in server | `npm run typecheck` | repo root |
+| Schema change | `npm run db:generate` then review the migration file | repo root |
+| Any code change | `npm run lint` | repo root |
+| Logic change in server/ | `npm test` (or specific suite) | repo root |
+| Worker logic change | `cd worker && npm test` (vitest, added in v1) | worker/ |
+| Compose changes | `docker compose config` (validate) then `docker compose up --build` | repo root |
+
+### 10.2 Build chore: tracing router imports for the worker
+
+Before the worker Dockerfile copy list is finalised, run:
+
+```bash
+npx madge --extensions ts server/services/llmRouter.ts --json > /tmp/router-deps.json
+```
+
+The output is the exact set of files the worker must include in its build context. This is captured as a script `worker/scripts/trace-router-deps.mjs` that runs as part of `npm run build` and fails the build if a new transitive dependency appears outside an allowlist (so the Dockerfile copy list is kept honest).
+
+### 10.3 Smoke tests (first run)
+
+After `docker compose up --build -d`:
+
+1. **Postgres health** — `docker compose exec postgres pg_isready` returns OK.
+2. **Worker startup** — `docker compose logs worker | grep iee.worker.started` produces a single JSON line including `pollIntervalMs` and `concurrency`.
+3. **Schema present** — `docker compose exec postgres psql -U postgres -d automation_os -c '\d execution_runs'` shows the table.
+4. **End-to-end browser** — manual enqueue (via a small script `worker/scripts/enqueue-test-browser.mjs`) of a `goal: "open https://example.com and extract the page title"`. Expect: `execution_runs.status = 'completed'`, `resultSummary.success = true`, at least 2 steps written.
+5. **End-to-end dev** — manual enqueue of a `goal: "git_clone <public repo>; read README.md; done"`. Expect: workspace created, cloned, file read, workspace destroyed after.
+6. **Idempotency** — re-enqueue the same payload twice. Expect: only one row inserted, second call returns `deduplicated: true`.
+7. **Crash survival** — `docker compose kill worker` mid-run. `docker compose start worker`. The job is redelivered by pg-boss; the worker either resumes (if `pending`) or aborts cleanly (if previous attempt set `running`). No corruption.
+
+### 10.4 MVP acceptance checklist (mirrors brief §16)
+
+- [ ] Browser job navigates and extracts data, writes structured result
+- [ ] Dev job clones, modifies, runs a command, writes result
+- [ ] correlationId propagation visible in tracing for every execution
+- [ ] organisationId scoping enforced at the database (verified by a deliberate cross-tenant test that must fail)
+- [ ] idempotencyKey uniqueness enforced at the index level (verified by a duplicate-insert test)
+- [ ] Worker survives crash + restart (verified per 10.3 §7)
+- [ ] `docker compose up` brings all three services online cleanly
+- [ ] Same code base, only `DATABASE_URL` and path vars changed, runs against external Postgres
+
+### 10.5 DigitalOcean VPS rollout
+
+Once local acceptance passes:
+
+1. **Provision VPS** — Ubuntu 22.04 LTS, minimum 4 GB RAM (Playwright is hungry), 2 vCPU, 40 GB SSD.
+2. **Install Docker + Compose** — official `get-docker.sh` install. Add user to `docker` group. Verify `docker compose version` ≥ v2.
+3. **Create Neon project** — copy the connection string with `?sslmode=require`. Run the app's `db:push` once from a developer machine to apply migrations against Neon.
+4. **Deploy worker** — `git clone` the repo onto the VPS into `/opt/automation-os`. Create `/opt/automation-os/.env` with **only** the worker variables (the VPS does not run the app). Required:
+   ```
+   DATABASE_URL=postgresql://...neon...?sslmode=require
+   BROWSER_SESSION_DIR=/var/browser-sessions
+   WORKSPACE_BASE_DIR=/var/workspaces
+   MAX_STEPS_PER_EXECUTION=25
+   MAX_EXECUTION_TIME_MS=300000
+   MAX_COMMAND_TIME_MS=30000
+   MAX_RETRIES=3
+   WORKER_POLL_INTERVAL_MS=1000
+   IEE_BROWSER_CONCURRENCY=1
+   IEE_DEV_CONCURRENCY=2
+   ```
+5. **Compose file for VPS** — a slimmed `docker-compose.vps.yml` that defines **only** the `worker` service (no `app`, no `postgres`). Same `worker_sessions` named volume. `restart: unless-stopped`.
+6. **Boot** — `docker compose -f docker-compose.vps.yml up -d --build`. Tail `docker compose logs worker -f`.
+7. **Configure Replit** — set the same `DATABASE_URL` in Replit Secrets, point at the Neon connection. Replit's app enqueues; the VPS worker consumes. No Replit-side code changes.
+8. **Firewall** — VPS only needs **outbound** HTTPS (LLM providers, target sites, GitHub clones) and **outbound** Postgres (Neon). No inbound ports. Confirm `ufw` blocks all inbound.
+9. **Backups** — Neon handles Postgres snapshots. The VPS has no stateful data except the `worker_sessions` volume; back this up via a nightly `tar.gz` to S3 or DO Spaces if browser-session loss is unacceptable.
+10. **Monitoring** — log shipping is out of scope for v1; `docker compose logs --since 1h worker` is the v1 incident-response tool. Add a structured log shipper (e.g. Vector → Loki) in v2.
+
+### 10.6 Rollback plan
+
+If the IEE worker introduces issues in production:
+1. `docker compose -f docker-compose.vps.yml down` on the VPS — worker stops consuming, jobs queue up in pg-boss safely.
+2. Set a feature flag in the app (`IEE_ENABLED=false`) — `agentExecutionService` falls back to ignoring `executionMode='browser'|'dev'` and surfaces a clear "IEE disabled" error.
+3. The new tables are additive — no rollback migration needed. Dropping them is safe but unnecessary.
+
+---
+
+## Appendix A — Open questions for review
+
+1. **Async-tool resume hook** (Part 9.1): Does `agentExecutionService` already have a mechanism to resume an agent run from an external job-completion event? If yes, name and reuse it. If no, build the `executionRunCompletionWatcher` fallback.
+2. **Existing pg-boss version**: Confirm the worker pins the exact same `pg-boss` major version as the root `package.json`.
+3. **Tracing helper export shape**: Confirm `withTrace` and `createSpan` are exported in a way the worker can import without pulling in Express. May need a small `server/lib/tracing/core.ts` extraction.
+4. **Drizzle client init in the worker**: Confirm whether the worker should reuse the same `server/db/client.ts` factory or build its own minimal one. Recommendation: minimal own factory with the same connection options.
+
+## Appendix B — Out of scope (deferred)
+
+- Multi-tab browser sessions
+- Object-storage upload of artifacts (only metadata in v1)
+- Per-org credential vault for git/site auth
+- Sandbox isolation beyond denylist (Firejail / gVisor / DinD)
+- Workspace persistence across jobs
+- Parallel sub-steps within a single execution
+- HTTP-mode LLM router (`LLM_ROUTER_MODE=http`)
+- Action gating at the run-level (registry entries `iee_browser_task` / `iee_dev_task`)
+
+
+
+
+
