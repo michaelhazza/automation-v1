@@ -359,3 +359,25 @@ You're working on `/mnt/c/...` instead of `~/automation-os`. Move the repo into 
 
 **`docker compose exec app npm run db:push` fails with auth error.**
 Your `.env` `DATABASE_URL` doesn't match the `POSTGRES_USER` / `POSTGRES_PASSWORD` you set. They have to be consistent.
+
+---
+
+## Disk hygiene
+
+The IEE worker creates ephemeral workspaces under `WORKSPACE_BASE_DIR` and writes downloads under `${WORKSPACE_BASE_DIR}/${runId}/downloads`. Workspaces are deleted on job completion, but crashes can leave orphans.
+
+A scheduled cleanup job (`iee-cleanup-orphans`) runs every 6 hours inside the worker and removes orphaned workspaces older than 1 hour. You don't need to do anything for this — it ships with the worker. Spec reference: §12.3.
+
+If you want to manually purge everything between dev sessions:
+
+```bash
+docker compose exec worker rm -rf /tmp/workspaces/*
+```
+
+Browser sessions in the `worker_sessions` named volume are **not** auto-deleted (losing them logs you out of every authenticated site). To wipe them deliberately:
+
+```bash
+docker compose down
+docker volume rm automation-os_worker_sessions
+docker compose up -d
+```

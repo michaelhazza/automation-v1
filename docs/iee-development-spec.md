@@ -1194,6 +1194,432 @@ If the IEE worker introduces issues in production:
 - HTTP-mode LLM router (`LLM_ROUTER_MODE=http`)
 - Action gating at the run-level (registry entries `iee_browser_task` / `iee_dev_task`)
 
+---
+
+## Part 11 — Cost Attribution (LLM + Runtime)
+
+> Added in revision 2 in response to review feedback. Cost attribution is treated as a first-class concern, not a v2 afterthought, because the IEE is the first AutomationOS surface that meaningfully consumes infrastructure cost outside the LLM bill.
+
+### 11.1 Two cost streams
+
+| Stream | Source | Granularity | How it's captured |
+|---|---|---|---|
+| **LLM cost** | `routeCall()` per loop step | Per LLM call | Existing `llmRequests` table via the router (no IEE work needed) |
+| **Runtime cost** | Worker container wall-clock | Per execution run | New `executionRuns.runtimeCost` columns + a usage-rollup job |
+
+These are tracked separately and joined at reporting time. Runtime cost is the new piece.
+
+### 11.2 LLM cost (already solved by the router)
+
+The IEE introduces **zero new LLM cost-tracking code**. Because the worker calls `routeCall()` with full `LLMCallContext` (`organisationId`, `subaccountId`, `runId`, `agentId`, `correlationId`, `executionPhase: 'iee.loop.step'`), every loop step's LLM cost lands in the existing `llmRequests` table tagged with the IEE run.
+
+To produce a per-run LLM total:
+
+```sql
+SELECT execution_run_id, SUM(cost_usd) AS llm_cost_usd, COUNT(*) AS llm_call_count
+FROM llm_requests
+WHERE source_type = 'iee'
+GROUP BY execution_run_id;
+```
+
+(Schema column names will match the existing `llmRequests` shape — `source_type` and `execution_run_id` are added if not already present. Audit step in implementation: confirm `llmRequests` already carries a per-run correlation column. If not, add `executionRunId UUID NULL` to it as part of the IEE migration.)
+
+A cached `executionRuns.llmCostUsd` is **denormalised** at run completion so list views don't need a join.
+
+### 11.3 Runtime cost (new)
+
+The worker's CPU/RAM time is real money on the DigitalOcean VPS. We attribute it per run.
+
+#### 11.3.1 What we measure
+
+Two things, both cheap:
+
+1. **Wall-clock duration** — `completedAt - startedAt`, already on `executionRuns`.
+2. **CPU+RAM-seconds** — sampled from `/proc/self/stat` and `/proc/self/status` at run start and end. Difference gives `cpuSeconds` and peak `rssBytes`.
+
+For v1 we do **not** use cgroup-level accounting (it requires container-level access we'd rather not grant). The in-process numbers are accurate enough for charge-back at this stage.
+
+#### 11.3.2 New columns on `executionRuns`
+
+| Column | Type | Notes |
+|---|---|---|
+| `llmCostUsd` | `numeric(10,4)` nullable | Denormalised LLM total at completion |
+| `llmCallCount` | `integer` not null, default 0 | |
+| `runtimeWallMs` | `integer` nullable | Same as `completedAt - startedAt`, denormalised |
+| `runtimeCpuMs` | `integer` nullable | From `process.cpuUsage()` delta (user + system) |
+| `runtimePeakRssBytes` | `bigint` nullable | Peak RSS observed during run |
+| `runtimeCostUsd` | `numeric(10,4)` nullable | Computed at completion — see 11.3.4 |
+| `totalCostUsd` | `numeric(10,4)` nullable | `llmCostUsd + runtimeCostUsd` (generated column or app-computed) |
+
+These are written **once** at the terminal status update (success or failure) so the worker doesn't pay an UPDATE per step.
+
+#### 11.3.3 How the worker measures
+
+```ts
+// At run start
+const cpuStart = process.cpuUsage();
+const wallStart = Date.now();
+let peakRss = process.memoryUsage().rss;
+
+// Sampled cheaply at the end of every step
+peakRss = Math.max(peakRss, process.memoryUsage().rss);
+
+// At run completion
+const cpuEnd = process.cpuUsage(cpuStart); // delta
+const runtimeCpuMs = Math.round((cpuEnd.user + cpuEnd.system) / 1000);
+const runtimeWallMs = Date.now() - wallStart;
+```
+
+This is in-process and ignores the cost of other concurrent jobs in the same worker. With `IEE_BROWSER_CONCURRENCY=1` and `IEE_DEV_CONCURRENCY=2` the error is small. The number is "good enough for charge-back," not "good enough for billing customers per millisecond."
+
+#### 11.3.4 Pricing model (config-driven)
+
+A new config file `server/config/runtimeCostConfig.ts`:
+
+```ts
+export const RUNTIME_COST_CONFIG = {
+  // USD per CPU-second of worker time. Tunable per environment.
+  // Local dev defaults to 0 so test runs don't show fake cost.
+  cpuUsdPerSecond:    Number(process.env.IEE_COST_CPU_USD_PER_SEC    ?? '0'),
+  // USD per GB-hour of RSS (rolled forward from VPS plan)
+  memoryUsdPerGbHour: Number(process.env.IEE_COST_MEM_USD_PER_GB_HR  ?? '0'),
+  // Flat fee per run to amortise idle/baseline VPS cost
+  flatUsdPerRun:      Number(process.env.IEE_COST_FLAT_USD_PER_RUN   ?? '0'),
+} as const;
+
+export function computeRuntimeCostUsd(s: {
+  cpuMs: number; wallMs: number; peakRssBytes: number;
+}): number {
+  const cpuSec  = s.cpuMs / 1000;
+  const memGbHr = (s.peakRssBytes / 1024 ** 3) * (s.wallMs / 3_600_000);
+  return (
+    cpuSec  * RUNTIME_COST_CONFIG.cpuUsdPerSecond +
+    memGbHr * RUNTIME_COST_CONFIG.memoryUsdPerGbHour +
+    RUNTIME_COST_CONFIG.flatUsdPerRun
+  );
+}
+```
+
+Concrete defaults (production VPS):
+
+- DO Premium 4 GB / 2 vCPU droplet ≈ $24/month ≈ $0.000009/CPU-second amortised, but in practice we use a chargeable rate that **2× the raw infra cost** so the platform recovers headroom for idle, backups, monitoring.
+- Suggested production env values: `IEE_COST_CPU_USD_PER_SEC=0.00002`, `IEE_COST_MEM_USD_PER_GB_HR=0.04`, `IEE_COST_FLAT_USD_PER_RUN=0.001`.
+- Local dev: all three default to `0` — local runs should never pollute reporting with fake numbers.
+
+These rates are **not** baked into code. They live in env (so the VPS, Replit, and local dev each set their own) and in `runtimeCostConfig.ts` only as parsing logic.
+
+#### 11.3.5 Daily rollup
+
+A new pg-boss scheduled job `iee-cost-rollup-daily` (registered in `jobConfig.ts`, scheduled via existing scheduler infra) does:
+
+```sql
+INSERT INTO usage_rollups (organisation_id, day, source, llm_cost_usd, runtime_cost_usd, run_count)
+SELECT
+  organisation_id,
+  date_trunc('day', completed_at) AS day,
+  'iee',
+  SUM(llm_cost_usd),
+  SUM(runtime_cost_usd),
+  COUNT(*)
+FROM execution_runs
+WHERE completed_at >= now() - interval '2 days'
+  AND deleted_at IS NULL
+GROUP BY 1, 2
+ON CONFLICT (organisation_id, day, source) DO UPDATE
+SET llm_cost_usd     = EXCLUDED.llm_cost_usd,
+    runtime_cost_usd = EXCLUDED.runtime_cost_usd,
+    run_count        = EXCLUDED.run_count;
+```
+
+The `usage_rollups` table is created as part of the IEE migration (or reused if an equivalent already exists — audit step). Reporting/billing reads from this table, never from `execution_runs` directly, so the live row stays cheap to update.
+
+#### 11.3.6 Org-level budget guardrail
+
+The existing `budgetGuardrail` processor (referenced in `server/processors/`) gains an IEE branch:
+
+- Before `enqueueIEETask` accepts a job, it queries `usage_rollups` for the org's current-period cost (LLM + runtime, IEE only).
+- If the org is over its budget, the enqueue is rejected with `failureReason: 'environment_error'` (or a new `'budget_exceeded'` if we extend the enum — recommended).
+- The rejection writes a `pending` → `failed` row immediately so the agent run doesn't silently stall.
+
+This needs **one new `FailureReason`**: `'budget_exceeded'`. Added to the enum in §10/§8.4.
+
+### 11.4 What we deliberately do NOT track in v1
+
+- Per-step CPU breakdown (cost is run-level only)
+- Network egress bytes (DO charges flat-ish; not worth instrumenting)
+- Disk I/O (negligible)
+- LLM token-by-token live streaming attribution (router rolls up at request end)
+- Cross-run amortisation of base VPS cost in real-time (the `flatUsdPerRun` is the v1 stand-in)
+
+### 11.5 Integration with existing usage & billing
+
+> Added in revision 3. IEE cost is **not** a parallel system. It plugs into the existing usage/billing surfaces at the data, service, API, and UI layers. A new line item ("IEE execution") joins existing line items ("LLM", others) in every place the user already sees cost.
+
+#### 11.5.1 Audit (binding pre-implementation step)
+
+Before writing any cost code, the implementer audits the current usage/billing system and records findings inline in `server/services/billingService.ts` (or wherever the existing service lives). Specifically:
+
+- Existing usage table(s): name, columns, the `source` enum (or equivalent discriminator).
+- Existing rollup cadence and job name.
+- Existing per-org / per-subaccount budget enforcement entry point.
+- Existing UI components: org billing page, subaccount billing page, system admin billing page.
+- Existing API endpoints: `/api/billing/...`, `/api/orgs/:id/usage`, `/api/subaccounts/:id/usage`, etc.
+
+The IEE plugs into these. **No new parallel billing tables, services, endpoints, or UI components are created** unless the audit confirms an equivalent does not exist.
+
+#### 11.5.2 Data layer
+
+- The `source` enum on the existing usage/rollup table gains the value `'iee'`. If the table currently splits LLM cost from other costs, the IEE writes to **both** the LLM line (via the existing router path — already handled) and a new runtime line tagged `'iee_runtime'`.
+- If no `source` discriminator exists, one is added in the same migration as the IEE tables. The migration is reviewed before merge.
+- Per-row scoping fields on usage rows already exist: `organisationId` (required), `subaccountId` (nullable). The IEE rollup writes both.
+
+#### 11.5.3 Service layer
+
+A single service method is the contract for "give me IEE cost":
+
+```ts
+// server/services/ieeUsageService.ts (NEW)
+getIEECost(scope: {
+  level: 'system' | 'organisation' | 'subaccount';
+  organisationId?: string;       // required for 'organisation' and 'subaccount'
+  subaccountId?: string;         // required for 'subaccount'
+  from: Date;
+  to: Date;
+  groupBy?: 'day' | 'agent' | 'run';
+}): Promise<IEECostBreakdown[]>;
+```
+
+Returns rows shaped:
+
+```ts
+interface IEECostBreakdown {
+  bucket: string;             // ISO day, agent id, or run id depending on groupBy
+  llmCostUsd: number;
+  runtimeCostUsd: number;
+  totalCostUsd: number;
+  runCount: number;
+  llmCallCount: number;
+}
+```
+
+Permission rules (enforced at the service, not the route):
+
+| Caller role | Allowed `level` | Org filter |
+|---|---|---|
+| System admin | `system`, `organisation`, `subaccount` | any org / any subaccount |
+| Org admin | `organisation`, `subaccount` | their own org only; any subaccount within their org |
+| Subaccount admin | `subaccount` | their own subaccount only |
+| Other roles | none | — |
+
+The existing permission middleware (`/api/my-permissions` model) is reused. New permission keys: `billing.iee.view.system`, `billing.iee.view.org`, `billing.iee.view.subaccount`. These map cleanly into the existing permission registry — **no new permission system**.
+
+#### 11.5.4 API endpoints
+
+Additive endpoints, mounted alongside existing billing routes (audit confirms exact prefix during implementation — likely `/api/billing/...`):
+
+| Endpoint | Permission | Returns |
+|---|---|---|
+| `GET /api/billing/iee/system?from=&to=&groupBy=` | `billing.iee.view.system` | System-wide IEE cost |
+| `GET /api/orgs/:orgId/billing/iee?from=&to=&groupBy=` | `billing.iee.view.org` (org-scoped) | Org IEE cost |
+| `GET /api/subaccounts/:subaccountId/billing/iee?from=&to=&groupBy=` | `billing.iee.view.subaccount` (subaccount-scoped) | Subaccount IEE cost |
+| `GET /api/executions/:runId/cost` | existing run-view permission | Single-run breakdown (LLM + runtime) |
+
+All endpoints route through the existing `asyncHandler`, `authenticate`, and `resolveSubaccount(subaccountId, orgId)` patterns. Per-route org scoping is mandatory (CLAUDE.md rule).
+
+#### 11.5.5 UI layer — three admin levels
+
+The IEE cost is visible at every admin level the platform already exposes. **The same React components** that today render LLM cost are extended (not duplicated) to render IEE cost as an additional series/line/column.
+
+| Level | Existing page | Change |
+|---|---|---|
+| **System admin** | System billing dashboard | Add "IEE execution" series to the cost breakdown chart and an "IEE" column to the per-org table. Add a drill-down list of recent IEE runs across all orgs (link to existing run detail). |
+| **Org admin** | Org billing page (`/orgs/:id/billing`) | Add "IEE execution" series. Add a per-subaccount breakdown row showing IEE cost. Add a per-agent breakdown showing top IEE-spending agents. |
+| **Subaccount admin** | Subaccount billing page (`/subaccounts/:id/billing`) | Add "IEE execution" series. Add a per-agent breakdown showing IEE-spending agents inside this subaccount. |
+| **Run detail** | Existing execution / agent run detail page | New "Cost" panel showing `llmCostUsd`, `runtimeCostUsd`, `totalCostUsd`, step count, LLM call count. Visible to anyone who can see the run. |
+
+UI implementation rules:
+
+1. **No new top-level pages** for IEE billing. IEE is a *line item* on every existing billing surface, not a separate billing area. Users see the platform's total cost in one place, with IEE as one row.
+2. The existing chart component is extended to accept multiple cost series (`llm`, `iee_runtime`, etc.). If it already supports this via the `source` enum from §11.5.2, no component change is needed beyond passing the new source through.
+3. Date range, filtering, and CSV export already exist on these pages and automatically inherit IEE data.
+4. The run-detail "Cost" panel reads from `executionRuns.llmCostUsd` / `runtimeCostUsd` / `totalCostUsd` directly — no API call beyond the existing run fetch.
+5. Permissions gate visibility component-side via the existing `useMyPermissions()` hook (or equivalent) — the same hook that gates the existing billing pages.
+
+#### 11.5.6 Billing/invoicing
+
+If the existing billing system invoices customers monthly from the rollup table, IEE cost flows into invoices automatically once it's in the rollup with the right `source`. **No invoicing logic is duplicated.** Invoice line items render with the existing template; the new line label is "Integrated Execution Environment".
+
+If the platform uses a third-party billing provider (Stripe metered billing, etc.) the implementer audits how LLM usage is reported today and uses the same path for IEE (likely a new metric ID). This is a wiring task, not new code.
+
+#### 11.5.7 Real-time visibility
+
+Per-run cost is visible **immediately** at run completion because it's denormalised onto `executionRuns`. Org/subaccount totals update at the next `iee-cost-rollup-daily` run, with an additional "current period (live)" view that sums uncommitted runs from `executionRuns` directly for the current day. The live view is bounded to "today" so the query stays cheap.
+
+#### 11.5.8 Budget enforcement at all three levels
+
+The existing budget guardrail (Part 11.3.6) is extended to support thresholds at each level:
+
+- **System level:** a global IEE-cost ceiling per day (env-driven, prevents runaway across all orgs).
+- **Org level:** per-org monthly budget configured in the existing org settings.
+- **Subaccount level:** per-subaccount monthly budget configured in the existing subaccount settings.
+
+`enqueueIEETask` checks all three in order (subaccount → org → system) and rejects with `failureReason: 'budget_exceeded'` at the first breach. The rejected run is written to `executionRuns` with `status='failed'` so it surfaces in the same UI views and the same alerting that already exist for billing breaches.
+
+#### 11.5.9 Notifications
+
+The existing billing notification channels (email, in-app, webhook — whichever exist) are reused: when an org or subaccount crosses 80% / 100% of its IEE budget, the existing notifier fires with the new "IEE execution" source. No new notifier code; only a new source string passed in.
+
+### 11.6 v1 deferral list (cost-related)
+
+- Per-step cost breakdown in the UI (run-level only)
+- Per-LLM-call drill-down on the run cost panel (audit-only via `llm_requests` for now)
+- Real-time websocket push of cost as a run executes (rely on poll/refresh for v1)
+- Cost forecasting and anomaly detection
+
+---
+
+## Part 12 — Risk Tightening (review feedback)
+
+> Added in revision 2. Each subsection corresponds to a specific risk raised in review and lists the exact spec changes that mitigate it. Builders should treat these as binding.
+
+### 12.1 LLM JSON brittleness — never hang the loop
+
+Supersedes Part 5.5 §4. Final rules:
+
+1. The router response is JSON-parsed and zod-validated.
+2. **First failure** (parse or validation): one retry with a repair prompt appended.
+3. **Second failure**: the worker synthesises a `{ type: 'failed', reason: 'llm_invalid_json' }` action **on the LLM's behalf** and treats it as a normal terminal `failed` action. The loop terminates cleanly with `failureReason: 'execution_error'` and a `resultSummary.output` of `"LLM failed to produce a valid action after 2 attempts"`.
+4. The loop **must never** loop on parse errors. Two strikes and out.
+5. Hard rule, restated in code as a comment in `executionLoop.ts`: *"The execution loop has exactly four exit paths: `done`, `failed` (real or synthesised), step limit, timeout. There is no fifth."*
+
+### 12.2 Browser selector fallback
+
+Supersedes Part 6.3 (`click` and `type` rows). Final behaviour:
+
+```
+1. Try the LLM-supplied selector with a 5s timeout
+2. On failure, if the selector looks like a CSS/role/text selector,
+   try once more with the same selector wrapped in Playwright's
+   text-fallback heuristic:
+     - if selector starts with "text=" → unchanged
+     - else → also try `text="${innerTextOfTarget}"` if the LLM
+       provided a `fallbackText` field, OR
+     - try `:has-text("${selector}")` as a last resort
+3. If both fail, record the step as failed (recoverable next loop)
+   with an `output.hint` of "selector_not_found; LLM should retry
+   with text= or role= form"
+```
+
+The action schema is extended (additive, no breaking change) to allow an optional `fallbackText` on `click` and `type`:
+
+```ts
+{ type: 'click', selector: string, fallbackText?: string }
+{ type: 'type',  selector: string, text: string, fallbackText?: string }
+```
+
+The system prompt is updated to instruct the LLM to populate `fallbackText` whenever possible.
+
+### 12.3 Workspace + browser-session disk growth
+
+A new periodic job `iee-cleanup-orphans` (pg-boss scheduled, every 6 hours):
+
+1. Scans `${WORKSPACE_BASE_DIR}` for directories whose name (UUID) does not appear in `execution_runs` with `status IN ('pending','running')`. Deletes anything older than 1 hour.
+2. Scans `${BROWSER_SESSION_DIR}` and reports (does NOT delete) sessions older than `IEE_SESSION_TTL_DAYS` (default 30, env-driven). Deletion of stale sessions is **opt-in** via `IEE_SESSION_AUTO_PRUNE=true` (default `false` in v1) because losing an authenticated session has user-visible consequences.
+3. Logs every deletion with `iee.cleanup.orphan_removed` so we can audit.
+
+The cleanup job is registered alongside the cost rollup in `jobConfig.ts`.
+
+### 12.4 Browser session lifecycle (explicit deferral)
+
+Beyond the orphan-scan above, **active session lifecycle management** (TTL on healthy sessions, automatic re-auth, session pooling, multi-account session switching) is **explicitly deferred to v2**. Documented here so it isn't forgotten.
+
+### 12.5 Worker build dependency on `llmRouter.ts`
+
+Reinforces Part 4.6 / 10.2:
+
+1. `npx madge` runs as a **build-time check** in `worker/scripts/trace-router-deps.mjs`. The script writes the dep list to `worker/.router-deps.lock.json`. If the live dep set diverges from the lock file, the build fails with a clear message.
+2. **Escape hatch:** if the dep graph becomes unmanageable (rule of thumb: more than 30 transitive files outside `server/lib` and `server/services`), the worker switches to building the entire `server/` tree with `tsc` and importing the compiled router from `dist/server/services/llmRouter.js`. The Dockerfile gets a second build stage that runs the full server build. The rest of the worker is unaffected.
+3. The escape hatch is **a deliberate fallback, not a "later" item** — it's documented and the second-stage Dockerfile lives in the repo as `worker/Dockerfile.fullserver`, ungated. Switching is one line in `docker-compose.yml`.
+
+### 12.6 Implicit per-run LLM call cap
+
+Restated for clarity:
+
+> The execution loop calls the LLM at most once per step. Step count is hard-capped by `MAX_STEPS_PER_EXECUTION`. Therefore the maximum number of LLM calls per execution run is exactly `MAX_STEPS_PER_EXECUTION + 1` (the `+1` accounts for the single repair retry on a JSON failure). There is no path where the loop calls the LLM more than this.
+
+This guarantees a hard ceiling on per-run LLM cost regardless of LLM behaviour.
+
+### 12.7 Graceful degradation — no run is left in `running`
+
+Hard invariant added to Part 5.1:
+
+> Every execution loop is wrapped in `try { … } finally { … }`. The `finally` block guarantees a terminal status write to `execution_runs`. If the worker process is killed mid-step (SIGKILL, OOM), the `pending → running → completed/failed` state machine is reconciled by the worker's startup scan: any `running` row whose worker is no longer alive (detected via a `workerInstanceId` column with a heartbeat) is moved to `failed` with `failureReason: 'environment_error'` on next worker start.
+
+This adds two more columns to `executionRuns`:
+
+| Column | Type | Notes |
+|---|---|---|
+| `workerInstanceId` | `text` nullable | UUID per worker process; set on `running` |
+| `lastHeartbeatAt` | `timestamp(tz)` nullable | Updated by worker every 10s while a job runs |
+
+A worker startup scan on boot reconciles abandoned `running` rows whose `lastHeartbeatAt` is older than 60s and whose `workerInstanceId` is not the current worker.
+
+### 12.8 Result summary additions
+
+`ResultSummary` (Part 5) gains:
+
+```ts
+interface ResultSummary {
+  success: boolean
+  output?: any
+  artifacts?: string[]
+  stepCount: number
+  durationMs: number
+  confidence?: number       // 0..1, set by 'done' action when LLM provides one (optional)
+  llmCostUsd?: number       // copied from executionRuns at completion
+  runtimeCostUsd?: number
+}
+```
+
+The `done` action gains an optional `confidence` field:
+
+```ts
+{ type: 'done', summary: string, confidence?: number /* 0..1 */ }
+```
+
+Forward-compatible: agents that ignore the field continue to work.
+
+### 12.9 Step history compression
+
+The history passed to the LLM at each step is **summarised**, not raw:
+
+- For each previous step, the LLM sees `{ stepNumber, actionType, success, summary }` where `summary` is a ≤200-char string built by the executor (browser: "navigated to <url>", "clicked <selector>"; dev: "ran `<cmd>` exit=<code>").
+- Raw step inputs/outputs are **not** included in the LLM context — they are persisted to `execution_steps` for audit but not echoed back.
+- This keeps the prompt size O(stepNumber × 200 chars) instead of O(stepNumber × full payload).
+
+### 12.10 Failure-state invariants (single source of truth)
+
+A short list, treat as binding:
+
+1. No `execution_runs` row may be left in `running` after the worker that owned it dies.
+2. No execution may exit the loop without a `failureReason` set when `status = 'failed'`.
+3. No path inside a worker subprocess may write outside its workspace.
+4. No log line may contain a secret, full DATABASE_URL, or full Playwright HTML.
+5. No LLM call may occur without a valid `LLMCallContext` carrying `organisationId`.
+6. No new `execution_runs` row may be inserted with a duplicate `idempotencyKey` (enforced at index level — application code does not check first).
+7. The execution loop has exactly four exit paths (Part 12.1).
+
+---
+
+## Appendix C — Spec revisions
+
+| Rev | Date | Notes |
+|---|---|---|
+| 1 | 2026-04-07 | Initial draft from dev brief |
+| 2 | 2026-04-07 | Added Part 11 (cost attribution — LLM + runtime) and Part 12 (risk tightening from review feedback). Added `workerInstanceId` / `lastHeartbeatAt` / cost columns to `executionRuns`. Added `'budget_exceeded'` to FailureReason. Added `iee-cleanup-orphans` and `iee-cost-rollup-daily` scheduled jobs. |
+| 3 | 2026-04-07 | Replaced Part 11.5 with full integration into the existing usage/billing system: shared `source` enum on rollup table, `ieeUsageService` with system/org/subaccount scoping, additive API endpoints, IEE as a line item on existing system/org/subaccount billing UIs (not new pages), three-level budget enforcement, reuse of existing notification channels and invoicing path. |
+
+
 
 
 
