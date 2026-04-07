@@ -22,7 +22,7 @@ import path from 'path';
 import { tmpdir } from 'os';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { ieeArtifacts } from '../db/schema/index.js';
+import { ieeArtifacts, agentRuns } from '../db/schema/index.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { writeWithLimit, INLINE_TEXT_LIMITS } from '../lib/inlineTextWriter.js';
 import { failure, FailureError } from '../../shared/iee/failure.js';
@@ -67,6 +67,14 @@ export async function transcribeAudio(
   input: TranscribeAudioInput,
   ctx: TranscribeAudioContext,
 ): Promise<TranscribeAudioResult> {
+  // T23 — assert run is within budget BEFORE Whisper call. Spec v3.4 §8.4.1.
+  const { assertWithinRunBudget } = await import('../lib/runCostBreaker.js');
+  await assertWithinRunBudget({
+    runId: ctx.runId,
+    organisationId: ctx.organisationId,
+    correlationId: ctx.correlationId,
+  });
+
   if (!input.executionArtifactId && !input.audioUrl) {
     throw new FailureError(
       failure('data_incomplete', 'transcribe_input_missing', {
@@ -194,6 +202,12 @@ export async function transcribeAudio(
       })
       .returning();
 
+    // T25 — mark Reporting Agent run state so the end-of-run invariant can
+    // confirm a transcript landed. Spec v3.4 §8.4.2.
+    await mergeReportingAgentRunMeta(ctx.runId, {
+      transcriptArtifactId: created.id,
+    });
+
     return {
       transcript,
       transcriptArtifactId: created.id,
@@ -213,6 +227,30 @@ export async function transcribeAudio(
 }
 
 // ─── Internals ────────────────────────────────────────────────────────────────
+
+/**
+ * Merge a partial Reporting Agent state object into agent_runs.run_metadata.
+ * Mirror of the helper in sendToSlackService — used so the end-of-run
+ * invariant (T25) can confirm each step landed. Spec v3.4 §8.4.2.
+ */
+async function mergeReportingAgentRunMeta(
+  runId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const [row] = await db
+    .select({ runMetadata: agentRuns.runMetadata })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, runId))
+    .limit(1);
+  if (!row) return;
+  const meta = ((row.runMetadata as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+  const ra = ((meta.reportingAgent as Record<string, unknown> | undefined) ?? {});
+  meta.reportingAgent = { ...ra, ...patch };
+  await db
+    .update(agentRuns)
+    .set({ runMetadata: meta })
+    .where(eq(agentRuns.id, runId));
+}
 
 async function getArtifactById(id: string, organisationId: string) {
   const [row] = await db

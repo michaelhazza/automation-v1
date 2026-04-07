@@ -785,7 +785,35 @@ export const agentExecutionService = {
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
-      const finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+      let finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+
+      // T25 / T16 — Reporting Agent end-of-run hook. Runs the invariant
+      // and persists the content fingerprint. No-op for non-Reporting-Agent
+      // runs. Spec v3.4 §6.7.2 / §8.4.2.
+      if (finalStatus === 'completed') {
+        try {
+          const [runRow] = await db
+            .select({ runMetadata: agentRuns.runMetadata })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, run.id))
+            .limit(1);
+          const { finalizeReportingAgentRun } = await import('../lib/reportingAgentRunHook.js');
+          await finalizeReportingAgentRun({
+            runId: run.id,
+            subaccountAgentId: request.subaccountAgentId ?? null,
+            organisationId: request.organisationId,
+            runMetadata: (runRow?.runMetadata ?? null) as Record<string, unknown> | null,
+          });
+        } catch (err) {
+          // Invariant or persist failed — downgrade to failed so the run
+          // does not flip to completed in an inconsistent state.
+          logger.error('reportingAgent.finalize_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          finalStatus = 'failed';
+        }
+      }
 
       await db.update(agentRuns).set({
         status: finalStatus,

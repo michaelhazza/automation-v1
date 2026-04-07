@@ -13,6 +13,8 @@ import {
 } from '../../../shared/iee/actionSchema.js';
 import type { Observation } from '../../../shared/iee/observation.js';
 import { SafetyError, EnvironmentError } from '../../../shared/iee/failureReason.js';
+import { failure, FailureError } from '../../../shared/iee/failure.js';
+import type { BrowserTaskContract } from '../../../shared/iee/jobPayload.js';
 import type { StepExecutor, ActionResult } from '../loop/executionLoop.js';
 import { buildBrowserObservation } from './observe.js';
 import { openPersistentContext } from './playwrightContext.js';
@@ -20,6 +22,15 @@ import { db } from '../db.js';
 import { ieeArtifacts } from '../../../server/db/schema/ieeArtifacts.js';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
+import { performLogin, LoginFailedError } from './login.js';
+import { ContractEnforcedPage } from './contractEnforcedPage.js';
+import {
+  validateDownloadedArtifact,
+  createDownloadStallGuard,
+  DownloadStallError,
+  type ArtifactKind,
+} from './artifactValidator.js';
+import { getWebLoginConnectionForRun } from '../persistence/integrationConnections.js';
 
 const NAV_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 10_000;
@@ -31,6 +42,11 @@ export interface BuildBrowserExecutorInput {
   subaccountId: string | null;
   sessionKey: string | undefined;
   startUrl: string | undefined;
+  // Spec v3.4 §6 Code Change D7 — paywall workflow integration
+  webLoginConnectionId?: string;
+  browserTaskContract?: BrowserTaskContract;
+  mode?: 'standard' | 'login_test';
+  correlationId?: string;
 }
 
 export async function buildBrowserExecutor(
@@ -48,6 +64,84 @@ export async function buildBrowserExecutor(
 
   const page: Page = context.pages()[0] ?? (await context.newPage());
 
+  // ── D7: deterministic paywall login BEFORE entering the LLM loop ─────────
+  // Spec §6.4 / T20. The credentials object is fetched at this boundary,
+  // used by performLogin, then dropped before the executor is returned so
+  // it never enters the loop closure.
+  if (input.webLoginConnectionId) {
+    const correlationId = input.correlationId ?? input.ieeRunId;
+    const screenshotPath = path.join(
+      env.WORKSPACE_BASE_DIR,
+      input.ieeRunId,
+      'login-failure.png',
+    );
+    let creds: Awaited<ReturnType<typeof getWebLoginConnectionForRun>> | null = null;
+    try {
+      creds = await getWebLoginConnectionForRun(
+        {
+          organisationId: input.organisationId,
+          subaccountId: input.subaccountId,
+          runId: input.ieeRunId,
+        },
+        input.webLoginConnectionId,
+      );
+      await performLogin(page, creds, {
+        runId: input.ieeRunId,
+        correlationId,
+        screenshotPath,
+      });
+    } catch (err) {
+      // Surface as a structured failure so the run terminates with an
+      // auth_failure rather than a generic crash.
+      const detail =
+        err instanceof LoginFailedError
+          ? { reasons: err.detectionFailures, screenshotPath: err.screenshotPath }
+          : { message: err instanceof Error ? err.message.slice(0, 200) : String(err) };
+      try { await context.close(); } catch { /* swallow */ }
+      throw new FailureError(failure('auth_failure', 'login_failed', detail));
+    } finally {
+      // Drop the reference. (We can't truly wipe a JS string, but losing
+      // the only reference allows GC and prevents accidental capture in
+      // the executor closure below.)
+      creds = null;
+    }
+
+    // T2 — login_test mode short-circuits here. Optionally navigate to the
+    // contentUrl for proof-of-paywall, capture a screenshot, then return a
+    // no-op executor that immediately signals 'done' to the loop.
+    if (input.mode === 'login_test') {
+      const proofPath = path.join(env.WORKSPACE_BASE_DIR, input.ieeRunId, 'login-success.png');
+      try {
+        await page.screenshot({ path: proofPath, fullPage: false });
+      } catch (err) {
+        logger.warn('iee.browser.login_test.screenshot_failed', {
+          ieeRunId: input.ieeRunId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return buildLoginTestExecutor({
+        ieeRunId: input.ieeRunId,
+        context,
+        screenshotPath: proofPath,
+      });
+    }
+  }
+
+  // ── D7: install ContractEnforcedPage hooks (deny-by-default) ─────────────
+  // We attach the proxy purely for its event-driven side effects (domain
+  // allow-list, redirect checks, download kind prefilter). The raw `Page`
+  // is still passed to observe.ts / action handlers (which use a small
+  // surface compatible with the proxy), but every step we assert no
+  // violations were recorded by the proxy and terminate the run if any
+  // appear.
+  const contractGuard = input.browserTaskContract
+    ? new ContractEnforcedPage(page, {
+        contract: input.browserTaskContract,
+        runId: input.ieeRunId,
+        correlationId: input.correlationId ?? input.ieeRunId,
+      })
+    : null;
+
   if (input.startUrl) {
     try {
       await page.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
@@ -63,15 +157,33 @@ export async function buildBrowserExecutor(
   let lastResult: string | undefined;
   let downloadEmitted = false;
 
+  // Spec v3.4 §6.7.1 / T9 — assert no contract violations have accumulated.
+  // Called before/after every step. Throws via failure() if any are present.
+  function assertNoContractViolations(): void {
+    if (!contractGuard) return;
+    const violations = contractGuard.getViolations();
+    if (violations.length === 0) return;
+    const first = violations[0];
+    throw new FailureError(
+      failure('environment_error', `contract_violation:${first.kind}`, {
+        kind: first.kind,
+        detail: first.detail,
+        metadata: first.metadata,
+      }),
+    );
+  }
+
   return {
     mode: 'browser',
     availableActions: BROWSER_ACTION_TYPES,
 
     async observe(): Promise<Observation> {
+      assertNoContractViolations();
       return buildBrowserObservation(page, lastResult);
     },
 
     async execute(action: ExecutionAction): Promise<ActionResult> {
+      assertNoContractViolations();
       switch (action.type) {
         case 'navigate': {
           await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
@@ -100,24 +212,69 @@ export async function buildBrowserExecutor(
           const download = await downloadPromise;
           const suggestedName = download.suggestedFilename() || `download-${Date.now()}`;
           const savePath = path.join(downloadsDir, suggestedName);
-          await download.saveAs(savePath);
-          let sizeBytes: number | null = null;
+
+          // T24 — download stall guard
+          const wallClockMs = Math.min(
+            input.browserTaskContract?.timeoutMs ?? 600_000,
+            600_000,
+          );
+          const guard = createDownloadStallGuard({ wallClockMs });
           try {
-            const stat = await fs.stat(savePath);
-            sizeBytes = stat.size;
-          } catch { /* swallow */ }
+            await Promise.race([download.saveAs(savePath), guard.abortPromise]);
+            guard.finish();
+          } catch (err) {
+            guard.finish();
+            if (err instanceof DownloadStallError) {
+              throw new FailureError(
+                failure('connector_timeout', err.reason, {
+                  bytesReceived: err.bytesReceived,
+                }),
+              );
+            }
+            throw err;
+          }
+
+          // T17 — validate before computing the content hash
+          const expectedKind = input.browserTaskContract?.expectedArtifactKind as
+            | ArtifactKind
+            | undefined;
+          const validation = await validateDownloadedArtifact(savePath, {
+            expectedKind,
+            expectedMimeTypePrefix: input.browserTaskContract?.expectedMimeTypePrefix,
+          });
+          if (!validation.ok) {
+            throw new FailureError(
+              failure('data_incomplete', validation.reason, {
+                detail: validation.detail,
+                ...validation.metadata,
+              }),
+            );
+          }
+
           await db.insert(ieeArtifacts).values({
             ieeRunId: input.ieeRunId,
             organisationId: input.organisationId,
             kind: 'download',
             path: savePath,
-            sizeBytes: sizeBytes ?? undefined,
-            metadata: { selector: action.selector, suggestedName } as object,
+            sizeBytes: validation.sizeBytes,
+            mimeType: validation.detectedMime ?? undefined,
+            metadata: {
+              selector: action.selector,
+              suggestedName,
+              contentHash: validation.contentHash,
+              intent: input.browserTaskContract?.intent,
+            } as object,
           });
           downloadEmitted = true;
-          lastResult = `downloaded ${suggestedName} (${sizeBytes ?? '?'} bytes)`;
+          lastResult = `downloaded ${suggestedName} (${validation.sizeBytes} bytes, sha256=${validation.contentHash.slice(0, 12)}…)`;
+          assertNoContractViolations();
           return {
-            output: { path: savePath, sizeBytes },
+            output: {
+              path: savePath,
+              sizeBytes: validation.sizeBytes,
+              contentHash: validation.contentHash,
+              detectedMime: validation.detectedMime,
+            },
             summary: lastResult,
             artifacts: [savePath],
           };
@@ -146,6 +303,45 @@ export async function buildBrowserExecutor(
       if (!downloadEmitted) {
         await fs.rm(downloadsDir, { recursive: true, force: true }).catch(() => undefined);
       }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// login_test mode — no-op StepExecutor that immediately reports done.
+// Spec v3.4 §6.3.1 / T2.
+// ---------------------------------------------------------------------------
+
+function buildLoginTestExecutor(args: {
+  ieeRunId: string;
+  context: BrowserContext;
+  screenshotPath: string;
+}): StepExecutor {
+  let emitted = false;
+  return {
+    mode: 'browser',
+    availableActions: BROWSER_ACTION_TYPES,
+    async observe(): Promise<Observation> {
+      // Synthetic minimum-viable observation; the loop will not actually
+      // call the LLM because execute() returns 'done' on the first turn.
+      return {
+        url: 'about:blank',
+        pageText: 'login_test_mode_complete',
+        clickableElements: [],
+        inputs: [],
+        lastActionResult: emitted ? 'login_test_done' : undefined,
+      } as Observation;
+    },
+    async execute(): Promise<ActionResult> {
+      emitted = true;
+      return {
+        output: { mode: 'login_test', screenshotPath: args.screenshotPath },
+        summary: 'login_test completed — login succeeded; LLM loop skipped',
+        artifacts: [args.screenshotPath],
+      };
+    },
+    async dispose(): Promise<void> {
+      try { await args.context.close(); } catch { /* swallow */ }
     },
   };
 }
