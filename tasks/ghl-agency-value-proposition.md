@@ -408,5 +408,138 @@ After GHL agencies prove the model, the same platform expands into adjacent vert
 
 **Total cross-vertical TAM:** 5-10x the GHL beachhead, addressable with the same platform code via configuration templates.
 
+---
+
+## 6. The Demo Path & Agency Owner Conversation
+
+### 6.1 The 5-minute demo script
+
+This is what an agency owner sees when they're shown the working product. The goal is to make the value visceral, not abstract.
+
+**Scene 1 — Connect (30 seconds)**
+- Operator clicks "Activate GHL Agency Intelligence Template"
+- OAuth popup appears, operator authorises GHL access
+- Provides alert email + optional Slack webhook
+- Clicks confirm
+
+**Scene 2 — Auto-discovery (30 seconds)**
+- System enumerates all GHL locations
+- "30 client sub-accounts discovered"
+- Each appears as a row with status: "Building baseline... (0/14 data points)"
+- Operator sees: provisioning is complete, monitoring is live
+
+**Scene 3 — Wait or fast-forward to populated state (10 seconds)**
+- Show pre-populated demo data: 30 clients with health scores
+- Red/amber/green dots
+- Trend arrows (↑ ↓ →)
+- Sortable by health score, last updated, churn risk
+
+**Scene 4 — Drill into a problem client (1 minute)**
+- Click on a red client (e.g. "Smith Dental — health 38, declining")
+- Top factors panel: "Pipeline Velocity: 22/100 (negative). Conversation Engagement: 31/100 (negative)."
+- Recent anomalies: "Lead volume down 47% from baseline (3 days ago)"
+- Org memory: "This client typically has 80 leads/week. Current week: 42."
+- Operator instantly understands what's wrong
+
+**Scene 5 — Approve an intervention (1 minute)**
+- Review queue notification: "1 intervention proposed"
+- Card shows: "Smith Dental — Send check-in email — pipeline declining, last contact 12 days ago"
+- Evidence panel shows the data backing the recommendation
+- Operator clicks "Approve" → action queued for execution
+- Confidence reasoning: "5 of 5 configured factors had data. Health trajectory clearly declining."
+
+**Scene 6 — Cost view (45 seconds)**
+- Switch to cost dashboard
+- "AI cost this month: $47 across 30 clients"
+- Per-client breakdown: top 5 most expensive, average $1.50/client
+- Margin calculation: at $50/client/month service price, 96% gross margin
+
+**Scene 7 — The Monday briefing (45 seconds)**
+- Show the auto-generated portfolio briefing
+- "Portfolio overview: 28/30 clients scored. Average health 67. 4 declining, 3 improving."
+- "Accounts requiring attention: Smith Dental, ABC Corp, ..."
+- "Active anomalies: 2 critical, 4 high"
+- Operator sees: this replaces their Monday morning routine entirely
+
+**Total demo time:** ~5 minutes. The agency owner walks away understanding exactly what the product does and why it matters.
+
+### 6.2 The discovery conversation framework
+
+When you sit down with an agency owner, the conversation has 4 phases. Don't pitch — qualify.
+
+**Phase 1: Validate the pain (questions 1-4)**
+
+1. *"Walk me through your Monday morning. How do you check in on all your clients?"*
+   - Listening for: time spent, manual process, pain
+2. *"How many active client sub-accounts are you managing right now?"*
+   - Qualifier: <10 = not the right prospect; 10-50 = ideal; 50+ = premium tier
+3. *"When was the last time you missed something on a client account that you wish you'd caught earlier? What happened?"*
+   - The killer question. Emotional response = real pain. No examples = pain isn't acute.
+4. *"How many of your clients have GHL's AI features turned on — Conversation AI, Voice AI, AI Employee?"*
+   - <3 with AI = pain isn't there yet; 5+ = the gap is real
+
+**Phase 2: Validate the AI governance gap (questions 5-7)**
+
+5. *"How do you monitor what GHL's AI is saying across all your clients right now?"*
+   - Listening for: "we don't really," "we spot check," "we trust it" — all confirm the gap
+6. *"Have you had any incidents where AI said something wrong to a client's customer? What was the fallout?"*
+   - GHL Ideas Portal data suggests yes. Their answer tells you how severe.
+7. *"If you could set rules like 'never discuss pricing' or 'always escalate cancellation mentions to a human' and have those enforced across every client automatically — would that change how aggressively you'd deploy AI?"*
+   - Tests appetite for the policy engine value prop
+
+**Phase 3: Test the vision (questions 8-11)**
+
+8. *"If I showed you a single dashboard with a health score for every client — red/amber/green — and you could see at a glance who needs attention, would that change your Monday morning?"*
+   - Shows them the destination
+9. *"What metrics would matter most in that health score for your portfolio? Pipeline movement? Conversation rates? Lead volume? Revenue?"*
+   - Validates the configurable factor approach
+10. *"If the system detected 'Client X's lead volume dropped 40% from baseline this week' — and proposed an action like 'send a check-in email to the AM' — would you trust that workflow if you had to approve it?"*
+    - Tests HITL appetite
+11. *"If you could connect your GHL account once and have monitoring running across all your clients within an hour — no per-client setup — would that change how quickly you'd adopt this?"*
+    - Tests the template deployment value prop
+
+**Phase 4: Test commercial willingness (questions 12-14)**
+
+12. *"What are you currently spending per month on tools that touch this — analytics, dashboards, reporting, custom monitoring?"*
+    - Anchors against current spend
+13. *"If this existed today and worked exactly as described, what would it be worth to you monthly?"*
+    - Their number, not yours
+14. *"Would you be willing to connect your real GHL account to test this with real client data — knowing it's early — over the next few weeks?"*
+    - The qualifier for design partnership
+
+### 6.3 Qualification: red flags vs green flags
+
+**Red flags (this isn't the right prospect):**
+- Fewer than 5 clients with AI deployed → pain isn't acute enough
+- Says "GHL's AI works fine for us" → not feeling the governance gap
+- Can't describe a single AI incident or near-miss → not deploying AI seriously
+- Not willing to connect their real GHL account → trust barrier too high for design partnership
+- "We'd need to see it working in production for 6 months first" → too risk-averse for early stage
+
+**Green flags (ideal design partner):**
+- 10+ active sub-accounts, 5+ with AI features on
+- Can describe at least one AI incident or near-miss with emotion
+- Currently spending time/money on manual portfolio monitoring
+- Technical enough to understand "orchestration" vs "chatbot"
+- Willing to connect GHL and commit 30 minutes/week of feedback over 4-6 weeks
+- Asks "when can I start?" rather than "how long until it's perfect?"
+
+### 6.4 What you're NOT pitching
+
+To stay clear and avoid identity-based resistance:
+
+- **Not** a GHL replacement
+- **Not** a CRM
+- **Not** Voice AI or Conversation AI
+- **Not** a white-label platform (yet — that's later)
+- **Not** a marketplace (yet)
+
+### 6.5 What you ARE pitching
+
+- **The AI governance and orchestration layer GHL agencies are missing**
+- **Cross-client portfolio visibility that doesn't exist anywhere else**
+- **AI monitoring that works at scale without babysitting**
+- **Predictable AI costs with real margin certainty**
+
 
 
