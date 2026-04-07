@@ -28,7 +28,8 @@
     "../server/middleware/correlation.ts",
     "../server/types/workflow.ts",
     "../server/services/routerJobService.ts",
-    "../server/services/costAggregateService.ts"
+    "../server/services/costAggregateService.ts",
+    "../server/services/connectionTokenService.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }
