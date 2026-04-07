@@ -427,6 +427,14 @@ interface PlaybookDefinition {
 }
 ```
 
+### Side-effect classification (mandatory)
+
+Every step declares a `sideEffectType`: `none` | `idempotent` | `reversible` | `irreversible`. This drives mid-run editing safety — `none`/`idempotent` re-run automatically, `reversible` requires confirmation, `irreversible` is **default-blocked** with a "skip and reuse previous output" option. Snapshotted to `playbook_step_runs.side_effect_type` so it can't drift after the run starts.
+
+### Parameterization (Phase 1.5, column reserved in Phase 1)
+
+`playbook_templates.params_json` exists from migration 0042 but stays empty in Phase 1. Phase 1.5 introduces a layered distribution model: orgs configure system templates via parameters (`paramsSchema` declared on the definition) instead of forking, so they auto-upgrade when the platform ships new template versions. Forking is reserved as an escape hatch.
+
 ### Execution engine
 
 `playbookEngineService` is a state machine. Each run progresses through:
@@ -453,7 +461,19 @@ pending → running → (awaiting_input | awaiting_approval) → running → com
 
 **Resumability** — all state lives in the DB. Engine can crash and resume on next tick with no loss.
 
-**Editing mid-run** — when a user edits a completed step's output, engine invalidates all downstream step runs (sets them back to `pending`) and re-ticks. This is the "reusing information from previous prompts, but sometimes there is some new information" loop.
+**Editing mid-run** — when a user edits a completed step's output, engine computes the transitive downstream set, blocks on `irreversible` and `reversible` step types pending user confirmation, then invalidates and re-runs the safe set. **Output-hash firewall:** if a re-executed step produces a byte-identical output to the previous attempt, invalidation stops propagating — prevents cost explosions when an "edit" is actually a no-op save. In-flight downstream steps receive an `AbortController` cancel signal.
+
+### Concurrency: defense in depth
+
+Three layers, all required:
+
+1. **Queue deduplication** — every tick job uses pg-boss `singletonKey: runId` + `useSingletonQueue: true`. Ten parallel step completions collapse to one tick job in the queue, before any handler runs.
+2. **Non-blocking advisory lock** — tick handler runs `pg_try_advisory_xact_lock(hashtext('playbook-run:' || runId)::bigint)`. If contended, handler exits silently — never block waiting for the lock (would exhaust the connection pool).
+3. **Optimistic state guards** — step run status transitions check a `version` column to catch the rare case where two handlers both pass the lock.
+
+### Watchdog sweep
+
+`playbook-watchdog` cron job runs every 60 seconds. Finds runs whose dependencies are met but have no pending tick (catches the "step completed but tick enqueue failed" race) and re-enqueues. Also fails step runs that exceed their `expireInSeconds` timeout. Self-healing safety net.
 
 ### Reuse of existing systems
 
@@ -520,7 +540,12 @@ Phase 1 ships with templates seeded from code/JSON. Phase 2 is a separate featur
 - DAG validation must run on every template publish — reject cycles, unresolved `dependsOn`, or template expressions referencing nonexistent steps.
 - A run is locked to its `templateVersionId`. Editing the template never mutates in-flight runs.
 - Step output is validated against `outputSchema` before merging into run context.
-- Editing a completed step's output invalidates all transitively dependent downstream step runs.
+- **Every step declares a `sideEffectType`.** No defaults. CI fails if any seeded playbook has a step without one.
+- Mid-run editing **never auto-re-executes `irreversible` steps** — user must explicitly opt in per step or choose skip-and-reuse.
+- Templating resolver **must use `Object.create(null)` contexts** and blocklist `__proto__`/`constructor`/`prototype`. Whitelist allowed top-level prefixes (`run.input.`, `run.subaccount.`, `run.org.`, `steps.`).
+- Tick jobs **must be enqueued with `singletonKey: runId`** to prevent tick storms.
+- Tick handlers **must use the non-blocking advisory lock variant**. Blocking is forbidden.
+- Step completion + tick enqueue happen in a single DB transaction; the watchdog is the safety net, not the primary mechanism.
 - `agent_call` steps respect the full budget, handoff depth, and policy engine rules — the engine never bypasses existing guardrails.
 - Org scoping applies to templates (`organisationId`) and runs (`organisationId` via subaccount).
 
