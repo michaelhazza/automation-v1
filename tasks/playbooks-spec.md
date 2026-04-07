@@ -52,6 +52,7 @@ This spec covers **Phase 1**: the engine, schema, services, routes, and run-exec
 - Time-based step scheduling ("run step 5 at 9am Monday"). Defer.
 - Loop / iteration steps (`for each item in list, run subgraph`). Defer.
 - Per-org parameterization layer (`paramsSchema`) — column reserved in 0074, behaviour ships in Phase 1.5.
+- Per-step context projection (passing only required fields to LLM instead of full context). Phase 1 passes the full context; Phase 1.5 adds opt-in projection.
 
 ### 1.4 Out-of-scope rejected alternatives
 
@@ -198,6 +199,15 @@ Append-only — no soft delete. Cancelled runs stay for audit.
 | `error` | text nullable | |
 
 Unique index on `(run_id, step_id, attempt)`.
+
+### 2.6.1 `playbook_run_event_sequences`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `run_id` | uuid pk → playbook_runs | |
+| `last_sequence` | bigint default 0 | Allocated via `UPDATE ... RETURNING last_sequence + 1` in the same tx as the state change |
+
+Used by §8.2 WebSocket event envelope to give each emission a strictly monotonic per-run sequence number.
 
 ### 2.7 `playbook_step_reviews`
 
@@ -391,6 +401,8 @@ Resolution order:
 3. The resolved `agent_id` is **cached on the playbook run row** (not the template) so mid-run changes to agent slugs don't break in-flight runs.
 
 Resolved agent ids are stored in `playbook_runs.context_json` under `_meta.resolvedAgents` for traceability.
+
+**Re-verification on dispatch (mandatory).** The cached agent id is **revalidated immediately before each `agent_call` dispatch** — the engine checks that the agent still exists and hasn't been soft-deleted. If the agent vanished between run start and step dispatch (deleted, soft-deleted, or moved to another org), the step fails via `failure('playbook_template_drift', 'agent_deleted_mid_run', { stepId, agentId, slug })` and the run's `failurePolicy` for that step decides whether the whole run fails or finishes `completed_with_errors`. Without this check, the engine would dispatch into a dangling foreign key and surface an opaque DB error.
 
 ### 3.5 Output schema enforcement
 
@@ -1247,11 +1259,11 @@ System admin and org admin bypass as today.
 
 ### 8.2 WebSocket events
 
-New room: `playbook-run:{runId}`. Client joins on opening run detail page.
+New room: `playbook-run:{runId}`. Client joins on opening run detail page. Every event below is wrapped in the envelope shape described later in this section (eventId + sequence + emittedAt + type + payload).
 
 | Event | Payload | When |
 |-------|---------|------|
-| `playbook:run:status` | `{ runId, status, completedSteps, totalSteps }` | Run status transitions |
+| `playbook:run:status` | `{ runId, status, completedSteps, totalSteps }` | Run status transitions (including `completed_with_errors`, `cancelled` via kill switch) |
 | `playbook:step:dispatched` | `{ runId, stepRunId, stepId }` | Engine dispatches a step |
 | `playbook:step:completed` | `{ runId, stepRunId, stepId, output }` | Step finishes successfully |
 | `playbook:step:failed` | `{ runId, stepRunId, stepId, error }` | Step fails |
@@ -1260,6 +1272,23 @@ New room: `playbook-run:{runId}`. Client joins on opening run detail page.
 | `playbook:step:invalidated` | `{ runId, stepRunId, stepId }` | Downstream invalidation after edit |
 
 Subaccount-scoped room also receives a coarse `playbook:run:status` for dashboard updates.
+
+**Event envelope (all playbook WS events share this shape):**
+
+```jsonc
+{
+  "eventId": "uuid",        // unique per emission; client uses for dedup
+  "runId": "uuid",
+  "sequence": 47,           // monotonic per run, assigned at emit time
+  "emittedAt": "iso8601",
+  "type": "playbook:step:completed",
+  "payload": { ... }
+}
+```
+
+**Per-run sequence number** is allocated by a small `playbook_run_event_sequences` Postgres counter (incremented in the same transaction that mutates the step run row, so the sequence is always consistent with the underlying state). Clients buffer events and apply them in `sequence` order, dropping any duplicates by `eventId`. If a gap is detected (e.g. seq 45 received, then seq 47 with no 46), the client falls back to `GET /api/playbook-runs/:runId` to refetch full state — Phase 1 favours simplicity over a gap-fill protocol. The sequence counter survives reconnects: on reconnect, the client supplies the last seen sequence and the server replays any newer events (or, in Phase 1, the client just refetches).
+
+The `playbook_run_event_sequences` table is a single column `(run_id pk, last_sequence bigint)`. Allocated values are stored on the events themselves; the table is just the counter source.
 
 ### 8.3 Audit events
 
@@ -1537,6 +1566,19 @@ The PR description should explain the playbook's purpose in one paragraph and an
 - **Watchdog sweep** — kill the tick enqueue mid-transaction, verify the watchdog re-enqueues within 60s and the run progresses.
 - **Step timeout / poison message** — expired step transitions to failed and the run's failure policy executes.
 - **Cancellation** — in-flight steps receive AbortController signal; run marked cancelled.
+- **Parallelism cap** — DAG with 20 ready steps dispatches only `MAX_PARALLEL_STEPS` (default 8); remainder dispatch as siblings complete.
+- **Context spillover** — step output exceeding `MAX_STEP_OUTPUT_BYTES` is auto-spilled via `inlineTextWriter`; downstream step's templating hydrates the inline ref transparently.
+- **Hard context limit** — synthetic playbook accumulating > 1MB context fails with `playbook_context_overflow`.
+- **`completed_with_errors` lifecycle** — non-critical step (`failurePolicy: 'continue'`) fails; downstream that doesn't depend on it still completes; run terminates `completed_with_errors`.
+- **Conditional eval failure** — malformed condition expression fails with `playbook_dag_invalid:conditional_eval_failed`; run respects step failure policy.
+- **Conditional output schema mismatch** — `trueOutput` shape doesn't match `outputSchema` → fails with `playbook_schema_violation:conditional_output_invalid`.
+- **Kill switch (org suspended)** — running playbook is cancelled within 60s of org suspension via watchdog; in-flight steps get AbortController.
+- **Kill switch (subaccount)** — same as above for subaccount-level kill switch.
+- **Agent deleted mid-run** — system agent referenced by an `agent_call` step is soft-deleted between dispatches; next dispatch fails with `playbook_template_drift:agent_deleted_mid_run`.
+- **Replay mode** — replay run produces identical step outputs from source run; conditional re-evaluation matches; no external calls fired (verify via mock spies on agent run service).
+- **Replay drift detection** — modify a stored conditional input between source and replay → replay fails with `playbook_replay_drift:conditional_diverged`.
+- **WebSocket sequence ordering** — events emitted in order 45, 46, 47; client receives 47 then 45 then 46; reducer applies in correct order; duplicate `eventId` is dropped.
+- **Per-step retry policy override** — step with `retryPolicy.maxAttempts: 1` does not retry on transient error; step without override retries up to default.
 
 ### 11.4 Integration tests
 
@@ -1612,6 +1654,12 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 | R10 | Forked templates drift from upstream and orgs ignore upgrade banners | High | Low | Phase 1.5 parameterization layer reduces fork count for the 80% case; banner is a visible nag, not blocking | Product |
 | R11 | Engine throughput hits ~10k concurrent run ceiling | Very low (years away) | Medium | Monitor metrics; revisit Temporal/Inngest decision when 3+ adopt-threshold criteria are met (§1.4) | Eng leadership |
 | R12 | Migration 0074 conflicts with a parallel feature branch's schema work | Low | Low | Coordinate migration number assignment via the feature-coordinator pipeline before opening PR | Implementer |
+| R13 | Run context grows unbounded → multi-MB rows, token bloat, slow ticks | Medium | High | `MAX_STEP_OUTPUT_BYTES` auto-spills via `inlineTextWriter`; `MAX_CONTEXT_BYTES_HARD` fails the run; per-step context projection planned for 1.5 (§3.6, §5.12) | Engine owner |
+| R14 | Wide DAG (e.g. 20 parallel steps) launches 20 concurrent agent runs → rate limits + cost spike | Medium | High | `MAX_PARALLEL_STEPS` per-run cap (default 8); excess steps stay pending and dispatch as siblings complete (§5.2) | Engine owner |
+| R15 | Conditional step has malformed expression or wrong-shape output → silent corruption | Low | Medium | Tightened §5.2 conditional dispatch validates against `outputSchema`, catches eval errors, persists `evaluationMeta` for audit | Engine owner |
+| R16 | Run continues executing after org suspended or kill switch tripped | Low | High | Tick begins with kill switch check (§5.11); watchdog re-checks on every sweep cycle | Engine owner |
+| R17 | Resolved agent deleted mid-run → opaque DB error on dispatch | Low | Medium | Re-verify cached agent id immediately before each dispatch; fail with `playbook_template_drift` (§3.4) | Engine owner |
+| R18 | WebSocket events arrive out of order or duplicated, client UI shows stale state | Medium | Low | Per-run monotonic `sequence` + `eventId` envelope; client dedups and orders; gap → refetch (§8.2) | Client owner |
 
 ## 14. Final Review Checklist
 
@@ -1638,6 +1686,12 @@ Before this spec is approved for implementation, every reviewer should sign off 
 - [ ] Step completion + tick enqueue are transactional
 - [ ] Run state survives server restart (verified by integration test in §11)
 - [ ] Cancellation semantics are well-defined and tested
+- [ ] `MAX_PARALLEL_STEPS` cap prevents fan-out spikes
+- [ ] Context size limits + spillover via `inlineTextWriter` are wired and tested
+- [ ] Kill switch is checked at every tick start AND watchdog cycle
+- [ ] Resolved agent ids are re-verified immediately before each dispatch
+- [ ] WebSocket events carry monotonic sequence + eventId for client dedup
+- [ ] `completed_with_errors` lifecycle path is tested with `failurePolicy: 'continue'` steps
 
 ### Authoring
 - [ ] File-based authoring is the right Phase 1 choice (vs. DB-native or YAML)
