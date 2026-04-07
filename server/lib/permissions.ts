@@ -161,6 +161,11 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.AGENTS_EDIT,   description: 'Edit AI agents',             groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_DELETE, description: 'Delete AI agents',           groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_CHAT,   description: 'Chat with AI agents',        groupName: 'org.agents' },
+  // org.playbooks (multi-step automation; spec §8.1)
+  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_READ,    description: 'View Playbook templates',                       groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
@@ -200,6 +205,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.mcp_servers
   { key: ORG_PERMISSIONS.MCP_SERVERS_VIEW,   description: 'View MCP server configurations',              groupName: 'org.mcp_servers' },
   { key: ORG_PERMISSIONS.MCP_SERVERS_MANAGE, description: 'Create/edit/delete MCP server configurations', groupName: 'org.mcp_servers' },
+  // subaccount.playbooks (multi-step automation; spec §8.1)
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ,        description: 'View Playbook runs for this subaccount',     groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START,       description: 'Start Playbook runs and submit user input',  groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_CANCEL,      description: 'Cancel running Playbooks',                   groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_APPROVE,     description: 'Decide on Playbook approval gates',          groupName: 'subaccount.playbooks' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
