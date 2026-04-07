@@ -20,9 +20,10 @@ Read this **alongside** `docs/reporting-agent-paywall-workflow-spec.md` (v3.4) �
 | Code Change D6 — artifact validator + stall guard (T17/T24) | ✅ Done | `c85e931` | Magic-bytes MIME re-check, sha256 stream hash, 3-condition stall guard |
 | Code Change D7 — runHandler integration | ⏳ **Not yet wired** | — | See "Outstanding work" below |
 | Code Change D8 — smoke test script | ✅ Done | (this commit) | `worker/scripts/smoke-paywall.ts` |
-| Code Change B — `transcribe_audio` | ⏳ Pending | — | Server-side, independent of D7 |
-| Code Change C — `send_to_slack` | ⏳ Pending | — | Server-side, independent of D7 |
-| Wire-up — fingerprint, end-of-run invariant, cost breaker | ⏳ Pending | — | Depends on B + C + D7 |
+| Code Change B — `transcribe_audio` | ✅ Done | `42cbf36` | Whisper API client + content-hash cache (T22) + sanity floor (T27). End-to-end via skillExecutor case. |
+| Code Change C — `send_to_slack` | ✅ Done | `2cbb2e1` | Slack API client + persist-before-post (T18) + post-hash dedup (T11) + verification ping (T26). End-to-end via skillExecutor case. |
+| Wire-up helpers — T25 + T23 | ✅ Done | `fa3fec3` | reportingAgentInvariant + runCostBreaker. Standalone, unit-testable. Not yet imported by runHandler — that's part of the D7 follow-up integration. |
+| Fingerprint logic | ⏳ Pending | — | Read + compare + persist via canonicaliseUrl + sha256 of file bytes. Belongs in the D7 runHandler integration. |
 | pr-reviewer | ⏳ Pending | — | Final step |
 
 ---
