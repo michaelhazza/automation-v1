@@ -202,16 +202,22 @@ export const systemSkillService = {
     const filePath = join(SKILLS_DIR, `${slug}.md`);
     const raw = await readFile(filePath, 'utf-8');
 
+    // Preserve the file's existing line ending (CRLF on Windows-edited files,
+    // LF elsewhere). All regexes below are CRLF-tolerant via \r?\n so the
+    // injection does not silently no-op on Windows.
+    const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+
     let updated = raw;
     // Strip any legacy isVisible line so it can never override visibility.
     if (/^isVisible:/m.test(updated)) {
-      updated = updated.replace(/^isVisible:.*\n?/m, '');
+      updated = updated.replace(/^isVisible:.*\r?\n?/m, '');
     }
     if (/^visibility:/m.test(updated)) {
       updated = updated.replace(/^visibility:.*$/m, `visibility: ${visibility}`);
     } else {
-      // Inject after the last frontmatter key (before closing ---)
-      updated = updated.replace(/^(---\n[\s\S]*?)(^---)/m, `$1visibility: ${visibility}\n$2`);
+      // Inject after the last frontmatter key (before closing ---).
+      // Use \r?\n so this works on both LF and CRLF files.
+      updated = updated.replace(/^(---\r?\n[\s\S]*?)(^---)/m, `$1visibility: ${visibility}${eol}$2`);
     }
 
     const { writeFile } = await import('fs/promises');
