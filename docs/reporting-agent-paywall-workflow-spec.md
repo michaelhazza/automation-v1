@@ -1,7 +1,7 @@
 # Reporting Agent — Paywall → Video → Transcript → Slack Workflow
 ## Detailed Development Specification
 
-**Status:** Draft v1 — for review before implementation
+**Status:** Draft v2 — incorporates reviewer tightenings (see §10 Change Log)
 **Branch:** `claude/agent-paywall-video-workflow-OQTMA`
 **Related docs:**
 - `docs/iee-development-spec.md` — IEE worker, browser/dev handlers, execution_runs schema
@@ -45,7 +45,7 @@ The first concrete instance is the **Breakout Solutions** subaccount running aga
 
 - 2FA / captcha handling on paywall login (caller must use sites without it; long-lived session-cookie fallback is a v2 follow-up).
 - Multi-video selection logic ("the latest video that has not yet been processed" — v1 just takes the most recent and relies on idempotency keys to avoid duplicate Slack posts).
-- Object-storage upload of artifacts. Artifacts remain in `execution_artifacts` rows + worker container disk for the run lifetime, then are referenced by path only.
+- Object-storage upload of artifacts. Artifacts remain in `execution_artifacts` rows; the **report markdown is also persisted into the DB row body** (see §6.9, reviewer T5) so deliverables remain accessible after worker container cleanup.
 - Cross-subaccount sharing of subaccount-scoped skills.
 - Manual "run now" UI for the Reporting Agent (heartbeat-only in v1; ad-hoc runs use the existing agent run trigger).
 
@@ -99,7 +99,22 @@ Two migrations, both forward-only, generated via `npm run db:generate`:
 - `encrypt(plaintext: string): string` returns `iv:authTag:ciphertext` base64
 - `decrypt(ciphertext: string): string`
 - Used by **every** integration connection service — no per-integration encryption.
-- Boot-time check: if `ENCRYPTION_KEY` is missing, server refuses to start with a clear error.
+- **Mandatory and boot-time enforced** (per reviewer recommendation): if `ENCRYPTION_KEY` is missing or not 32 bytes after base64 decode, both `server` and `worker` processes refuse to start with a clear error message pointing at the env var.
+
+#### Why a separate `ENCRYPTION_KEY` rather than reusing `JWT_SECRET`
+
+`JWT_SECRET` and `ENCRYPTION_KEY` must be separate values, even though both are 32-byte secrets:
+
+1. **Different cryptographic purposes.** `JWT_SECRET` is an HMAC signing key (sign/verify tokens). `ENCRYPTION_KEY` is an AES-GCM encryption key (encrypt/decrypt at rest). Reusing one key across two purposes violates basic key-separation hygiene (NIST SP 800-57, OWASP Cryptographic Storage Cheat Sheet).
+2. **Different rotation cadences.** JWT secrets rotate when invalidating sessions (relatively often). Encryption keys rotate rarely because rotation requires re-encrypting every stored secret. Sharing forces both to a bad cadence.
+3. **Different blast radius.** Leaked JWT secret = forged sessions until rotation. Leaked encryption key = every stored credential decryptable forever. These should not share an exposure surface.
+4. **Different future custody.** `ENCRYPTION_KEY` should eventually move to a KMS/HSM. `JWT_SECRET` stays in process env. Separating now keeps that path open.
+
+Generation (one-time, per environment):
+```bash
+openssl rand -base64 32
+```
+Add to `.env` (local), Replit secrets (main app prod), and the worker container env (DigitalOcean). Never committed.
 
 ### 2.5 Audit
 
@@ -145,15 +160,31 @@ contentsVisible: boolean('contents_visible').notNull().default(false),
 
 ### 3.4 Service layer
 
-`systemSkillService.ts` and `skillService.ts` gain a helper:
+Per reviewer T6: visibility and edit rights are separate concerns. An owner-tier user may legitimately need read access to a skill body without edit rights. The helper is split into two distinct predicates:
 
 ```ts
 function canViewContents(skill, viewer): boolean {
-  // Owner tier always sees contents
-  if (viewer.tier === skill.ownerTier && hasManagePermission(viewer, skill)) return true;
+  // Owner tier always sees contents (no manage permission required for read)
+  if (viewer.tier === skill.ownerTier) return true;
   // Lower tiers gated by the flag
   return skill.contentsVisible === true;
 }
+
+function canManageSkill(skill, viewer): boolean {
+  // Edit/delete: must be owner tier AND have the skill-management permission
+  if (viewer.tier !== skill.ownerTier) return false;
+  return hasSkillManagePermission(viewer, skill);
+}
+```
+
+API responses include both booleans so the client can render read-only vs edit UI correctly:
+
+```ts
+type SkillDetail = {
+  // ...
+  canViewContents: boolean;
+  canManageSkill: boolean;
+};
 ```
 
 List endpoints return a stripped shape for callers who can't view contents:
@@ -431,6 +462,20 @@ case 'send_to_slack': {
 
 `slackApi` is a thin wrapper module (`server/lib/slackApi.ts`) using `node-fetch` — no SDK dependency, three methods total. Keeps the dependency surface small.
 
+### 5.5.1 Per-step Slack idempotency (reviewer T3)
+
+Slack itself is not idempotent. The parent agent run's idempotency key protects against heartbeat duplication, but does **not** protect against operator retries after a mid-run failure that occurred *after* the Slack post succeeded. Without a safeguard, an operator-triggered retry would post the same report twice.
+
+Mitigation:
+
+1. The `send_to_slack` skill writes its result (`messageTs`, `channel`, `permalink`) to the `execution_steps.output` jsonb of its own step row, **and** to a small denormalised lookup on `agent_runs.metadata.slackPosts: Array<{ channel, messageTs, permalink, postedAt }>`.
+2. Before posting, the skill checks `agent_runs.metadata.slackPosts` for an existing post in the same channel for this run. If one exists:
+   - Default behaviour: **skip** the post and return the cached `messageTs` + `permalink`. Log a warning.
+   - Alternative behaviour (configurable per skill input `onDuplicate: 'skip' | 'reply_in_thread' | 'force'`, default `'skip'`): post a follow-up reply in-thread referencing the prior post.
+3. The check is best-effort, not a database lock — race conditions between two simultaneous worker processes are tolerated (Slack will dedupe by content if we add a request hash header in v2, but v1 accepts the risk because parent-run idempotency makes simultaneous duplicate runs already impossible).
+
+This is a small safeguard, ~30 LOC, and closes the operator-retry loophole called out in the review.
+
 ### 5.6 Subaccount vs org connection resolution
 
 `getActiveSlack(orgId, subaccountId)`:
@@ -515,8 +560,54 @@ On `IntegrationsPage.tsx`, "Add Integration" dropdown gains a **Web Login** opti
 - Timeout ms (default 30000)
 
 **Buttons:**
-- **Test connection** — disabled until required fields are filled. POSTs to `/api/integration-connections/test-web-login` with the form values (without saving). Server enqueues a one-off `iee-browser-task` with `goal: 'login_test'`. Result polled and shown inline as success/failure with the screenshot artifact link if it failed.
+- **Test connection** — disabled until required fields are filled. POSTs to `/api/integration-connections/test-web-login` with the form values (without saving). Server enqueues a one-off `iee-browser-task` with `mode: 'login_test'` (see §6.3.1 — this is a deterministic, non-LLM path). Result polled and shown inline as success/failure with the screenshot artifact link if it failed.
 - **Save** — persists the row. Encrypts `password`. If "Test connection" was successful in this session, marks `status: 'active'`. Otherwise `status: 'untested'`.
+
+### 6.3.1 `login_test` mode — deterministic, no LLM loop
+
+Per reviewer T2: connection-test mode must not enter the LLM execution loop at all. This avoids accidental prompt/context exposure of credentials and keeps the test cheap and deterministic.
+
+Add a `mode` discriminator to `BrowserTaskPayloadSchema`:
+
+```ts
+mode: z.enum(['standard', 'login_test']).default('standard'),
+```
+
+Worker handler:
+
+```ts
+async function handle(payload: BrowserTaskPayload) {
+  const ctx = await openExecutionRun(payload);
+  const page = await playwrightContext.newPage(ctx);
+  const creds = await fetchAndDecryptWebLogin(payload);  // §6.6.1
+
+  if (payload.mode === 'login_test') {
+    // 1. performLogin
+    // 2. optionally navigate to contentUrl
+    // 3. verify successSelector / final URL
+    // 4. capture success or failure screenshot
+    // 5. close run as completed/failed
+    // NEVER enter executionLoop
+    try {
+      await performLogin(page, creds);
+      if (creds.contentUrl) await page.goto(creds.contentUrl, { waitUntil: 'networkidle' });
+      const screenshot = await captureSuccessScreenshot(page);
+      await ieeArtifactRepo.create({ executionRunId: ctx.id, kind: 'log', path: screenshot, mimeType: 'image/png', metadata: { kind: 'login_test_success' } });
+      await closeExecutionRun(ctx, { status: 'completed', resultSummary: { mode: 'login_test', success: true } });
+    } catch (err) {
+      await closeExecutionRun(ctx, { status: 'failed', failureReason: 'login_failed', resultSummary: { mode: 'login_test', success: false, error: err.message } });
+    }
+    return;
+  }
+
+  // Standard mode (production runs)
+  await performLogin(page, creds);
+  if (creds.contentUrl) await page.goto(creds.contentUrl, { waitUntil: 'networkidle' });
+  await executionLoop(ctx, page);
+}
+```
+
+The two modes share `performLogin` and the credential-fetch path but diverge cleanly afterwards. Test mode never instantiates the LLM client, never calls `routeCall`, and never writes a Whisper or report row.
 
 ### 6.3 Routes
 
@@ -599,49 +690,225 @@ export async function performLogin(page: Page, creds: WebLoginCredentials): Prom
 
 ### 6.5 Shared types
 
-`shared/iee/jobPayload.ts` extension:
+`shared/iee/jobPayload.ts` extension. **Note: no `password` ever appears in the payload schema.** The schema enforces this by construction.
 
 ```ts
-export const WebLoginCredentialsSchema = z.object({
-  loginUrl: z.string().url(),
-  contentUrl: z.string().url().optional(),
-  username: z.string(),
-  password: z.string(),
-  usernameSelector: z.string(),
-  passwordSelector: z.string(),
-  submitSelector: z.string(),
-  successSelector: z.string().optional(),
-  timeoutMs: z.number().int().positive().default(30000),
-});
+// Internal worker-only type (NOT in shared/) — never serialised to pg-boss
+export type WebLoginCredentials = {
+  loginUrl: string;
+  contentUrl?: string;
+  username: string;
+  password: string;            // plaintext, worker memory only
+  usernameSelector: string;
+  passwordSelector: string;
+  submitSelector: string;
+  successSelector?: string;
+  timeoutMs: number;
+};
 
+// Shared (enqueued) payload — reference only, no secrets
 export const BrowserTaskPayloadSchema = z.object({
   // ...existing fields...
-  credentials: WebLoginCredentialsSchema.optional(),
+  webLoginConnectionId: z.string().uuid().optional(),
+  // Optional explicit success criteria, see §6.10 (Tightening 7)
+  browserTaskContract: BrowserTaskContractSchema.optional(),
 });
 ```
 
 ### 6.6 Enqueue path (main app)
 
-`agentExecutionService.ts` (or wherever browser tasks are dispatched) gains a small helper:
+**Critical security rule (per reviewer T1):** the main app **never** puts decrypted secrets into the pg-boss job payload. It enqueues only a `connectionId` reference. The worker fetches and decrypts the secret just-in-time, holds it in process memory for the duration of `performLogin`, and discards it before the LLM execution loop begins.
+
+`agentExecutionService.ts` enqueues:
 
 ```ts
-async function resolveWebLoginCredentials(orgId: string, subaccountId: string | null, connectionName?: string) {
-  const conn = await integrationConnectionService.getActiveWebLogin(orgId, subaccountId, connectionName);
-  if (!conn) return undefined;
-  return {
-    ...conn.configJson,
-    password: await secretsCrypto.decrypt(conn.secretsJson.password),
-  };
+await boss.send('iee-browser-task', {
+  runId, organisationId, subaccountId, correlationId,
+  goal: '...',
+  webLoginConnectionId: connection.id,   // ← reference only
+  // NO `credentials` field. NO password. NO username here either —
+  // the entire web_login row is loaded by the worker.
+  idempotencyKey: '...',
+});
+```
+
+The shared payload schema (§6.5) is updated accordingly: `credentials` is removed; `webLoginConnectionId: z.string().uuid().optional()` replaces it.
+
+### 6.6.1 Worker-side fetch + decrypt
+
+`worker/src/handlers/browserTask.ts`:
+
+```ts
+async function handle(payload: BrowserTaskPayload) {
+  const ctx = await openExecutionRun(payload);
+  const page = await playwrightContext.newPage(ctx);
+
+  let creds: WebLoginCredentials | undefined;
+  if (payload.webLoginConnectionId) {
+    // Fetch the connection row scoped to the run's org/subaccount
+    const conn = await integrationConnectionRepo.getByIdScoped(
+      payload.webLoginConnectionId,
+      payload.organisationId,
+      payload.subaccountId,
+    );
+    if (!conn || conn.type !== 'web_login') {
+      throw { failureReason: 'web_login_connection_not_found' };
+    }
+    // Decrypt just-in-time
+    creds = {
+      ...conn.configJson,
+      password: secretsCrypto.decrypt(conn.secretsJson.password),
+    };
+    // Audit the read
+    await auditRepo.record({
+      organisationId: payload.organisationId,
+      actor: { type: 'worker', runId: payload.runId },
+      action: 'integration_connection.secret_read',
+      resourceId: conn.id,
+      purpose: 'iee-browser-task',
+      correlationId: payload.correlationId,
+    });
+  }
+
+  if (creds) {
+    await performLogin(page, creds);
+    if (creds.contentUrl) {
+      await page.goto(creds.contentUrl, { waitUntil: 'networkidle' });
+    }
+    // Discard plaintext credentials before handing to the LLM loop
+    creds = undefined;
+  }
+
+  await executionLoop(ctx, page);
 }
 ```
 
-The agent or skill that schedules a browser task indicates which connection to use (by name or by leaving it implicit if there's only one `web_login` for the subaccount). The decrypted password lives only in the pg-boss payload row in Postgres and in worker process memory — never on disk in the worker.
+The worker therefore needs **read access to `integration_connections` and `secretsCrypto`**. This means:
+- The worker process needs `ENCRYPTION_KEY` in its environment (added to `worker/Dockerfile` env passthrough and `docker-compose.yml`).
+- The worker needs DB access to `integration_connections` (already has it via the existing IEE schema sharing).
+- A small `worker/src/persistence/integrationConnections.ts` repo with a single scoped `getByIdScoped` query — strict org+subaccount filter, no list/search methods.
+
+This trades a tiny amount of additional worker code for a materially better security posture: plaintext secrets never enter pg-boss queue rows, never enter Postgres job payloads, and exist only in worker process memory for the seconds between fetch and `performLogin` completion.
 
 ### 6.7 Audit and rotation
 
 - Every credential read writes an audit row (see §2.5).
 - "Last rotated X days ago" surfaced in the IntegrationsPage row using `lastRotatedAt` (set on save when password changes).
 - Optional v2: scheduled re-test of `web_login` connections, marks `status: 'broken'` and emails the subaccount admin.
+
+### 6.7.1 Browser-task invocation contract (reviewer T7)
+
+Per the review, the boundary between "generic LLM instruction" and "deterministic browser handler" must be explicit, not emergent. The agent does not just hand the worker a free-text goal — it hands it a **contract** that pins down what the worker is allowed to do.
+
+New `BrowserTaskContractSchema` in `shared/iee/jobPayload.ts`:
+
+```ts
+export const BrowserTaskContractSchema = z.object({
+  // Which credential to use (resolved by ID, never plaintext — see §6.6)
+  webLoginConnectionId: z.string().uuid().optional(),
+
+  // What the agent is asking for, in structured form
+  intent: z.enum(['download_latest', 'download_by_url', 'extract_text', 'screenshot']),
+
+  // Domain allow-list — worker refuses to navigate outside these
+  allowedDomains: z.array(z.string()).min(1),
+
+  // Expected artifact type — worker refuses to write artifacts that don't match
+  expectedArtifactKind: z.enum(['video', 'audio', 'document', 'image', 'text']).optional(),
+  expectedMimeTypePrefix: z.string().optional(),  // e.g. "video/", "audio/"
+
+  // Success condition — at least one must be present
+  successCondition: z.object({
+    selectorPresent: z.string().optional(),
+    urlMatches: z.string().optional(),  // regex
+    artifactDownloaded: z.boolean().optional(),
+  }),
+
+  // Free-form context for the LLM loop — explanatory only, not authoritative
+  goal: z.string().min(1).max(1000),
+
+  // Hard limits
+  maxSteps: z.number().int().positive().max(50).default(20),
+  timeoutMs: z.number().int().positive().max(600_000).default(300_000),
+});
+```
+
+The agent's tool-call to the browser-task action **must** populate the contract. The LLM cannot bypass `allowedDomains`, the worker enforces it on every `page.goto()`. The LLM cannot bypass `expectedArtifactKind`, the worker rejects mismatched downloads. `goal` remains a free-text hint to the LLM loop but the contract bounds what that loop is allowed to do.
+
+For the Reporting Agent, the contract for the paywall step is:
+
+```ts
+{
+  webLoginConnectionId: '<42 macro paywall connection id>',
+  intent: 'download_latest',
+  allowedDomains: ['42macro.com', 'www.42macro.com'],
+  expectedArtifactKind: 'video',
+  expectedMimeTypePrefix: 'video/',
+  successCondition: { artifactDownloaded: true },
+  goal: 'Find and download the most recent weekly video on the members videos page.',
+  maxSteps: 15,
+  timeoutMs: 240_000,
+}
+```
+
+This contract is constructed by `agentExecutionService` based on the agent's tool-call arguments — it is **not** authored by the LLM directly. The LLM provides intent + connection name; the service fills in `allowedDomains` from the `web_login` connection's `loginUrl` host and the `contentUrl` host, and fills in `expectedArtifactKind` from the agent definition. This keeps the LLM in the role of "decide what to do" while the deterministic service enforces "what is permissible".
+
+### 6.7.2 Content fingerprint to skip duplicate downloads (reviewer T4)
+
+"Just take the most recent" will produce wrong behaviour when the newest item is pinned, not actually a video, the same asset reordered, or not downloadable. v1 adds a minimal persisted fingerprint so the agent can skip obvious duplicates without needing full multi-video history.
+
+New table column on `subaccount_agents` (small migration, no new table):
+
+```sql
+ALTER TABLE subaccount_agents
+  ADD COLUMN last_processed_content_fingerprint jsonb;
+```
+
+`last_processed_content_fingerprint` shape:
+```ts
+{
+  sourceUrl: string;          // canonical URL of the item
+  pageTitle: string;
+  publishedAt?: string;       // ISO if extractable
+  contentHash: string;        // sha256 of downloaded file
+  processedAt: string;        // ISO
+  agentRunId: string;
+}
+```
+
+The browser-task worker, on a `download_latest` intent, captures these four fields as part of the download step result. The agent's next step reads `subaccount_agents.last_processed_content_fingerprint` (via a small skill `read_last_fingerprint`, or as part of the agent run context) and compares:
+- If `sourceUrl` matches → skip, terminate the agent run gracefully with `result: 'no_new_content'`.
+- Else if `contentHash` matches → skip (same file re-uploaded under a new URL).
+- Else proceed.
+
+On successful Slack post the agent calls `update_last_fingerprint` (or the existing `add_deliverable` skill is extended to also write the fingerprint) to persist the new value.
+
+This is one column + one read + one write per run. Small operational addition, big robustness win against the failure modes the reviewer flagged.
+
+### 6.7.3 Artifact durability & deliverable contract (reviewer T5)
+
+The boundary between transient (worker disk) and durable (DB / object storage) artifacts must be explicit, especially because the report is attached to Slack **and** linked into a deliverable that survives the run.
+
+Rules for v1:
+
+| Artifact | Storage in v1 | Survives run end? | Notes |
+|---|---|---|---|
+| Downloaded video | `execution_artifacts` row + worker disk | **No** — disk wiped at run end | Used only as input to transcribe; never linked into a deliverable |
+| Transcript | `execution_artifacts` row + worker disk; **also** stored as text in `execution_artifacts.metadata.transcriptText` if < 1 MB | Yes (DB copy) | Falls back to "transcript truncated, original on worker disk during run" if > 1 MB. Whisper output is rarely > 1 MB even for hour-long videos. |
+| Report markdown | `execution_artifacts` row + worker disk; **and** the full markdown body stored in a new column `task_deliverables.bodyText` | Yes (DB copy) | Source of truth for the deliverable. Slack attachment is a convenience copy. |
+
+Schema addition (folded into the same migration as §2.3):
+
+```sql
+ALTER TABLE task_deliverables
+  ADD COLUMN body_text text;
+ALTER TABLE execution_artifacts
+  ADD COLUMN inline_text text;  -- nullable, used for small text artifacts
+```
+
+`add_deliverable` skill is updated so callers may pass either `{ artifactId }` or `{ bodyText, mimeType, filename }`. The Reporting Agent uses the latter form for the report.
+
+Result: even after worker container cleanup, the deliverable body is queryable from the main DB. Object storage upload (v2) will replace `body_text` for large deliverables but the schema is forward-compatible.
 
 ### 6.8 2FA / captcha — **out of scope**
 
@@ -906,16 +1173,17 @@ After every code change: run `npm run lint`, `npm run typecheck`, relevant test 
 
 ### 9.4 Open questions to resolve before/during build
 
-| # | Question | Owner | Blocking? |
+| # | Question | Owner | Status |
 |---|---|---|---|
-| 1 | Does `integration_connections.secretsJson` already use encryption? Is there a `secretsCrypto.ts` helper today? | Implementer (grep on first commit) | Decides whether D includes the encryption helper migration |
-| 2 | Does the 42 Macro paywall have 2FA, captcha, or Cloudflare bot detection? | User to confirm by manual login attempt | **Yes — blocks D end-to-end test** |
-| 3 | Is `ffmpeg` already in `worker/Dockerfile`? | Implementer (grep) | Decides whether B includes a Dockerfile change |
-| 4 | What Slack workspace + bot app should the test connection point at during dev? | User | Blocks C end-to-end test |
-| 5 | Does the existing skill executor already support generic "LLM prompt skills" with custom inputs/outputs (used by E for `process_42_macro_transcript`)? | Implementer (grep `draft_tech_spec`) | If not, E becomes a small code change too |
-| 6 | Is there an existing audit_events helper, or do we need to write one for the credential read path? | Implementer | Small impact |
+| 1 | Does `integration_connections.secretsJson` already use encryption? Is there a `secretsCrypto.ts` helper today? | Implementer (grep on first commit) | Open — answered in 5 min of grep |
+| 2 | Does the 42 Macro paywall have 2FA, captcha, or Cloudflare bot detection? | User | **Closed** — confirmed: simple email/password form, no captcha, no 2FA. Login screenshot reviewed. |
+| 3 | Is `ffmpeg` already in `worker/Dockerfile`? | Implementer (grep) | Open |
+| 4 | What Slack workspace for dev testing? | User | **Closed** — implementer uses a throwaway dev workspace + mocked Slack API in integration tests. Production Slack is configured by the org admin in the UI per §7.2 — not a build-time concern. |
+| 5 | Does the existing skill executor already support generic "LLM prompt skills" with custom inputs/outputs (used by E for `process_42_macro_transcript`)? | Implementer (grep `draft_tech_spec`) | Open |
+| 6 | Is there an existing audit_events helper for the credential read path? | Implementer | Open |
+| 7 | Should `ENCRYPTION_KEY` reuse `JWT_SECRET`? | User | **Closed** — no, must be a separate value. Reasons documented in §2.4. |
 
-Q1, Q3, Q5, Q6 are answered by 5 minutes of grep at the start of implementation. Q2 and Q4 need user input.
+All remaining open questions are implementer greps at the start of D — they cannot block planning, only minor scope.
 
 ### 9.5 v2 follow-ups (not in this spec)
 
@@ -929,12 +1197,35 @@ Q1, Q3, Q5, Q6 are answered by 5 minutes of grep at the start of implementation.
 
 ### 9.6 Approval needed before implementation
 
-- Confirm scope and ordering of A/B/C/D.
-- Answer open questions Q2 (paywall 2FA) and Q4 (Slack test workspace).
-- Approve `ENCRYPTION_KEY` introduction (and key generation/rotation policy).
+- Confirm scope and ordering of A/B/C/D after v2 tightenings.
 - Confirm pr-reviewer subagent will gate every merge.
 
 Once these are confirmed, implementation begins on D.
+
+---
+
+## 10. Change Log
+
+### v2 (current) — reviewer tightenings
+
+| # | Tightening | Section |
+|---|---|---|
+| T1 | Decrypted secrets never enter pg-boss payload. Worker fetches by `connectionId` and decrypts just-in-time. | §6.5, §6.6, §6.6.1 |
+| T2 | `login_test` mode is a deterministic, non-LLM path. Worker handler branches before `executionLoop`. | §6.3.1 |
+| T3 | Per-step Slack idempotency: cache `messageTs` on the run, skip duplicate posts on operator retry. | §5.5.1 |
+| T4 | Persisted content fingerprint on `subaccount_agents` to skip duplicate downloads (pinned, reordered, same hash). | §6.7.2 |
+| T5 | Artifact durability matrix: report markdown stored in `task_deliverables.body_text` so deliverables survive worker cleanup. | §6.7.3 |
+| T6 | Split `canViewContents` from `canManageSkill`. Owner-tier read no longer requires manage permission. | §3.4 |
+| T7 | Explicit `BrowserTaskContractSchema` (allowedDomains, expectedArtifactKind, successCondition, etc.) constructed by the service, not the LLM. | §6.7.1 |
+| Q2 | Paywall 2FA confirmed absent. | §9.4 |
+| Q4 | Slack workspace for dev: throwaway + mocked. | §9.4 |
+| Q7 | `ENCRYPTION_KEY` must be separate from `JWT_SECRET`. Rationale documented. | §2.4 |
+
+The only true blocker from the review (T1, plaintext secrets in payload) is closed. All others are hardening that has been folded into the relevant section rather than carried as TODOs.
+
+### v1 — original draft (superseded)
+
+Initial spec covering A/B/C/D code changes and the §7 configuration walkthrough.
 
 
 
