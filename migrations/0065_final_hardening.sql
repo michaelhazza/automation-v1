@@ -6,7 +6,7 @@ ALTER TABLE goals ADD CONSTRAINT goals_no_self_parent
   CHECK (id <> parent_goal_id);
 
 -- Attachment idempotency: partial unique index (NULL bypass fix)
-DROP CONSTRAINT IF EXISTS task_attach_idempotency;
+ALTER TABLE task_attachments DROP CONSTRAINT IF EXISTS task_attach_idempotency;
 CREATE UNIQUE INDEX task_attach_idempotency_partial
   ON task_attachments(task_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL;
