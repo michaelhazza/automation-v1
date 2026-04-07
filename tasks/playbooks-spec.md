@@ -2064,7 +2064,7 @@ Two new invariants extend the §5.13 list:
 - **Terminal-path failure** — diamond DAG (A → B / A → C / B+C → D); B fails with `fail_run`, run marked `failed` because D unreachable. Same DAG with B as `continue` and C succeeding → run finishes `completed_with_errors`.
 - **Approval version guard** — UI loads step at version=3, upstream edit pushes it to version=5, approve with `expectedVersion=3` returns 409.
 - **Output edit version guard** — same as above for the mid-run edit endpoint.
-- **Input hash dedup (forward-compat)** — verify `input_hash` is populated; behaviour assertion deferred to 1.5.
+- **Input hash population** — every dispatched step records a canonical `input_hash` matching the `playbookTemplatingService.hashOutput()` of its resolved inputs. (The behavioural reuse path is covered separately by the per-run input-hash reuse test below.)
 - **Cascade summary** — mid-run edit response includes correct `cascade.size` and `criticalPathLength` for a diamond invalidation.
 - **Stuck-awaiting alert** — synthetic step in `awaiting_input` for >24h is detected by watchdog and incremented in the gauge.
 - **MAX_DAG_DEPTH** — validator rejects a chain of 51 sequential steps.
@@ -2118,7 +2118,7 @@ Two new invariants extend the §5.13 list:
 8. **Phase 1 UI pages** — library, run detail, inbox.
 8.5. **Playbook Studio (§10.8)** — system-admin chat authoring UI. Order:
    a. Seed the `playbook-author` system agent + load master prompt from `server/agents/playbook-author/master-prompt.md`
-   b. Implement the four tools (`read_existing_playbook`, `validate_candidate`, `estimate_cost`, `propose_save`)
+   b. Implement the five tools (`read_existing_playbook`, `validate_candidate`, `simulate_run`, `estimate_cost`, `propose_save`)
    c. Implement `POST /api/system/playbook-studio/save-and-open-pr` (re-validates + calls GitHub MCP under human identity)
    d. Build the `/system/playbook-studio` page (reuse `AgentChatPage` component, swap right pane for read-only Monaco preview)
    e. Wire the Manage button (style preset, default `humanReviewRequired`, output mode, reference playbooks selector)
