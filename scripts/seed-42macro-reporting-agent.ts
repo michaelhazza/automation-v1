@@ -47,14 +47,24 @@ const db = drizzle(pool);
 
 const ORG_SLUG = 'breakout-solutions';
 const SUBACCOUNT_SLUG = '42macro-tracking';
-const AGENT_SLUG = '42macro-reporting-agent';
+const AGENT_SLUG = 'reporting-agent';
 const ANALYSIS_SKILL_SLUG = 'analyse_42macro_transcript';
 
+// Generic reporting-agent skill set + the one 42-Macro-specific analysis
+// skill that satisfies the current use case. Add or remove from this list
+// as the agent's reporting surface area expands. The first four are the
+// "typical reporting agent" baseline (fetch from a source → turn it into
+// text → analyse → publish); analyse_42macro_transcript is the
+// domain-specific lens layered on top.
 const SKILL_SLUGS = [
   'fetch_paywalled_content',
+  'fetch_url',
+  'web_search',
   'transcribe_audio',
   ANALYSIS_SKILL_SLUG,
   'send_to_slack',
+  'send_email',
+  'add_deliverable',
 ] as const;
 
 // ─── 42 Macro A-Player Brain prompt — pasted verbatim into the skill body ────
@@ -122,58 +132,89 @@ const ANALYSIS_SKILL_DEFINITION = {
   },
 };
 
-const AGENT_MASTER_PROMPT = `You are the 42 Macro Reporting Agent for Breakout Solutions.
+const AGENT_MASTER_PROMPT = `You are the Reporting Agent.
 
-Your job: every time you are triggered (manually or on a schedule), fetch the latest
-gated 42 Macro video, transcribe it, analyse it through the 42 Macro A-Player Brain
-framework, and post the resulting three-tier report to Slack.
+Your job: turn an external source (a paywalled video, a public webpage, a research note,
+a transcript, etc.) into a clear written report and publish it to the right channel
+(Slack, email, deliverable, task). You are domain-agnostic by default, but you have
+specialised lenses (skills) you can apply when the source matches their topic — see the
+"Specialised analysis lenses" section below.
 
-Available skills (use them in this exact order):
+GENERAL FLOW
 
-  1. fetch_paywalled_content
-       - webLoginConnectionId: <ID of the "42 Macro paywall login" connection>
-       - contentUrl:           the latest video page on 42macro.com (e.g.
-                               https://app.42macro.com/video/around_the_horn_weekly)
-       - intent:               "download_latest"
-       - allowedDomains:       ["42macro.com", "app.42macro.com"]
-       - expectedArtifactKind: "video"
-       - expectedMimeTypePrefix: "video/"
-       - captureMode:          "capture_video"   ← 42 Macro has NO download
-                               button. The worker snoops the page network for
-                               the actual mp4/m3u8 the player loads and
-                               refetches it with the session cookies
-                               (HLS via ffmpeg). Equivalent of the Chrome
-                               "Video Downloader" extension.
-       - playSelector:         omit (worker tries default HTML5 player
-                               selectors); only set if the default click
-                               doesn't trigger media load.
-     If the result is { noNewContent: true }, immediately emit \`done\` —
-     the dedup fingerprint matched and there is nothing new to process.
+You are usually given a source and a destination. Pick the right skills for each step:
 
-  2. transcribe_audio
-       - executionArtifactId:  the artifactId returned from step 1
+  1. ACQUIRE the source
+       - fetch_paywalled_content   → for sources behind a login (uses a stored
+                                     web_login connection; supports both download
+                                     buttons and snoop-the-network video capture)
+       - fetch_url                 → for public webpages and direct file URLs
+       - web_search                → when you need to discover the source
 
-  3. analyse_42macro_transcript
-       - transcript:           the transcript text from step 2
-       - sourceTitle:          the title of the source video (best guess from the page)
-       - sourceDate:           today's date in YYYY-MM-DD
+  2. CONVERT to text
+       - transcribe_audio          → for audio or video artifacts (Whisper)
+       - the result of fetch_url   → already text for HTML pages
 
-  4. send_to_slack
-       - message:              the rendered markdown body from step 3
-       - filename:             the YYYYMMDD_Report_Name.md filename from step 3
+  3. ANALYSE
+       - Pick a specialised lens skill if the source matches its topic (see below).
+       - Otherwise produce a plain-language summary in your own words: a one-line
+         dashboard, a three-paragraph executive summary, and a sectioned full
+         analysis.
+
+  4. PUBLISH
+       - send_to_slack             → channel post (most common)
+       - send_email                → email recipients
+       - add_deliverable           → attach to a task as a deliverable
 
 Hard rules:
-  - Always run the four skills in order. Do not skip steps. Do not call analyse before
-    transcribe.
+  - Run the steps in order. Do not analyse before you have text. Do not publish
+    before you have an analysis.
   - If any step returns a failure, stop and report the failure with the structured
     failureReason. Do not retry by hand.
-  - Plain language is the highest priority for the analysis output. Explain every term.
-  - Not financial advice — you explain and translate.
+  - If a fetch returns { noNewContent: true } the dedup fingerprint matched — emit
+    \`done\` immediately. Do not re-process.
+  - Plain language is the highest priority for written output. Explain every
+    technical term in everyday English.
+  - You explain and translate; you do not give personalised financial advice.
 
-Emit \`done\` once send_to_slack returns a permalink.`;
+SPECIALISED ANALYSIS LENSES
+
+  • analyse_42macro_transcript — for 42 Macro videos and research notes. Returns the
+    three-tier 42 Macro framework output (Dashboard / Executive Summary / Full
+    Analysis) using GRID regimes, Dr. Mo, KISS portfolio.
+
+(Add new lens skills here as the agent's reporting surface area grows.)
+
+EXAMPLE — 42 MACRO WEEKLY REPORT (current primary use case)
+
+  1. fetch_paywalled_content
+       webLoginConnectionId: <ID of the "42 Macro paywall login" integration>
+       contentUrl:           the latest video page on app.42macro.com
+       intent:               "download_latest"
+       allowedDomains:       ["42macro.com", "app.42macro.com"]
+       expectedArtifactKind: "video"
+       expectedMimeTypePrefix: "video/"
+       captureMode:          "capture_video"   ← 42 Macro has NO download button.
+                             The worker snoops the page network for the actual
+                             mp4/m3u8 the player loads and refetches it with the
+                             session cookies (HLS via ffmpeg).
+
+  2. transcribe_audio
+       executionArtifactId:  the artifactId from step 1
+
+  3. analyse_42macro_transcript
+       transcript:           the transcript text from step 2
+       sourceTitle:          the video title (best guess from the page)
+       sourceDate:           today's date in YYYY-MM-DD
+
+  4. send_to_slack
+       message:              the rendered markdown body from step 3
+       filename:             the YYYYMMDD_Report_Name.md filename from step 3
+
+Emit \`done\` once the publish step returns a permalink / message id / deliverable id.`;
 
 const AGENT_DESCRIPTION =
-  'Fetches the latest paywalled 42 Macro video, transcribes it via Whisper, runs it through the 42 Macro A-Player Brain analysis skill, and posts the three-tier report to Slack. Idempotent via the content-hash fingerprint.';
+  'Generic reporting agent: acquire a source (paywalled or public), convert to text, analyse it (with specialised lenses where available — currently 42 Macro), and publish to Slack / email / deliverable. Idempotent via content-hash fingerprint.';
 
 async function upsertRow<T extends { id: string }>(
   rows: T[],
@@ -227,12 +268,27 @@ async function seed() {
   console.log(`  subaccount       ${subaccount.id} ${subaccount.slug}`);
 
   // ── 3. Custom analysis skill ───────────────────────────────────────────
+  // Always upsert the skill body so re-running the seed picks up prompt edits.
   const existingSkills = await db
     .select()
     .from(skills)
     .where(and(eq(skills.organisationId, org.id), eq(skills.slug, ANALYSIS_SKILL_SLUG)))
     .limit(1);
-  const analysisSkill = await upsertRow(existingSkills, async () => {
+  let analysisSkill = existingSkills[0];
+  if (analysisSkill) {
+    await db
+      .update(skills)
+      .set({
+        name: '42 Macro A-Player Analysis',
+        description:
+          'Three-tier 42 Macro framework analysis (Dashboard / Executive Summary / Full Analysis) of any transcript or research note. Plain-language only.',
+        definition: ANALYSIS_SKILL_DEFINITION,
+        instructions: ANALYSIS_SKILL_INSTRUCTIONS,
+        isActive: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(skills.id, analysisSkill.id));
+  } else {
     const [row] = await db
       .insert(skills)
       .values({
@@ -248,22 +304,63 @@ async function seed() {
         contentsVisible: false,
       })
       .returning();
-    return row;
-  });
+    analysisSkill = row;
+  }
   console.log(`  skill            ${analysisSkill.id} ${analysisSkill.slug}`);
 
   // ── 4. Agent ───────────────────────────────────────────────────────────
-  const existingAgents = await db
+  // Migration: the legacy slug was '42macro-reporting-agent'. If we find a
+  // row with that slug AND no row at the new slug, rename it in place so
+  // the user's existing local DB gets the new generic identity without
+  // losing their manual tweaks (skills attachments, runs history, etc.).
+  const LEGACY_AGENT_SLUG = '42macro-reporting-agent';
+  let existingAgents = await db
     .select()
     .from(agents)
     .where(and(eq(agents.organisationId, org.id), eq(agents.slug, AGENT_SLUG)))
     .limit(1);
-  const agent = await upsertRow(existingAgents, async () => {
+  if (existingAgents.length === 0) {
+    const legacyAgents = await db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.organisationId, org.id), eq(agents.slug, LEGACY_AGENT_SLUG)))
+      .limit(1);
+    if (legacyAgents.length > 0) {
+      console.log(`  ↻ migrating legacy agent slug ${LEGACY_AGENT_SLUG} → ${AGENT_SLUG}`);
+      existingAgents = legacyAgents;
+    }
+  }
+  let agent: typeof agents.$inferSelect;
+  if (existingAgents[0]) {
+    // Always update existing agents to the latest desired state so the seed
+    // is the single source of truth for name / prompt / skill list.
+    await db
+      .update(agents)
+      .set({
+        name: 'Reporting Agent',
+        slug: AGENT_SLUG,
+        description: AGENT_DESCRIPTION,
+        icon: '📊',
+        masterPrompt: AGENT_MASTER_PROMPT,
+        modelProvider: 'anthropic',
+        modelId: 'claude-sonnet-4-6',
+        defaultSkillSlugs: [...SKILL_SLUGS],
+        status: 'active',
+        updatedAt: new Date(),
+      })
+      .where(eq(agents.id, existingAgents[0].id));
+    const [refreshed] = await db
+      .select()
+      .from(agents)
+      .where(eq(agents.id, existingAgents[0].id))
+      .limit(1);
+    agent = refreshed;
+  } else {
     const [row] = await db
       .insert(agents)
       .values({
         organisationId: org.id,
-        name: '42 Macro Reporting Agent',
+        name: 'Reporting Agent',
         slug: AGENT_SLUG,
         description: AGENT_DESCRIPTION,
         icon: '📊',
@@ -278,11 +375,14 @@ async function seed() {
         status: 'active',
       })
       .returning();
-    return row;
-  });
-  console.log(`  agent            ${agent.id} ${agent.slug}`);
+    agent = row;
+  }
+  console.log(`  agent            ${agent.id} ${agent.slug} (${agent.name})`);
 
   // ── 5. Subaccount agent link ───────────────────────────────────────────
+  // Always update the per-subaccount instance to match the desired skill
+  // list so newly added skills (e.g. fetch_url, web_search, send_email)
+  // become available without manual UI work.
   const existingSAA = await db
     .select()
     .from(subaccountAgents)
@@ -293,7 +393,27 @@ async function seed() {
       ),
     )
     .limit(1);
-  const subAgent = await upsertRow(existingSAA, async () => {
+  let subAgent: typeof subaccountAgents.$inferSelect;
+  if (existingSAA[0]) {
+    await db
+      .update(subaccountAgents)
+      .set({
+        isActive: true,
+        skillSlugs: [...SKILL_SLUGS],
+        maxCostPerRunCents: 500,
+        tokenBudgetPerRun: 60_000,
+        maxToolCallsPerRun: 12,
+        timeoutSeconds: 900,
+        updatedAt: new Date(),
+      })
+      .where(eq(subaccountAgents.id, existingSAA[0].id));
+    const [refreshed] = await db
+      .select()
+      .from(subaccountAgents)
+      .where(eq(subaccountAgents.id, existingSAA[0].id))
+      .limit(1);
+    subAgent = refreshed;
+  } else {
     const [row] = await db
       .insert(subaccountAgents)
       .values({
@@ -311,8 +431,8 @@ async function seed() {
         timeoutSeconds: 900,
       })
       .returning();
-    return row;
-  });
+    subAgent = row;
+  }
   console.log(`  subaccount_agent ${subAgent.id}`);
 
   // ── 6. Integration connection placeholders ─────────────────────────────
