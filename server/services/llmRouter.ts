@@ -1,8 +1,9 @@
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { llmRequests, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES } from '../db/schema/index.js';
+import { llmRequests, TASK_TYPES, SOURCE_TYPES, EXECUTION_PHASES, ROUTING_MODES, CALL_SITES } from '../db/schema/index.js';
 import { createGeneration, createEvent } from '../lib/tracing.js';
-import type { TaskType, SourceType, ExecutionPhase, RoutingMode } from '../db/schema/index.js';
+import type { TaskType, SourceType, ExecutionPhase, RoutingMode, CallSite } from '../db/schema/index.js';
+import { RouterContractError } from '../../shared/iee/index.js';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { getProviderAdapter } from './providers/registry.js';
@@ -47,6 +48,13 @@ const LLMCallContextSchema = z.object({
   // Escalation tracking — set by agentExecutionService when economy model fails validation
   wasEscalated:       z.boolean().optional(),
   escalationReason:   z.string().optional(),
+  // ── IEE attribution (rev 6 §11.7.1, §13.1) ──────────────────────────────
+  // `callSite` distinguishes app-side LLM calls from worker-side calls so the
+  // run-detail Cost panel can split LLM cost between the two for the same run.
+  callSite:           z.enum(CALL_SITES).optional(),
+  // `ieeRunId` MUST be set when sourceType='iee' or callSite='worker'.
+  // Enforced by the runtime guard below AND a database CHECK constraint.
+  ieeRunId:           z.string().uuid().optional(),
 });
 
 export type LLMCallContext = z.infer<typeof LLMCallContextSchema>;
@@ -178,6 +186,18 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
 
   // ── 1. Validate context ─────────────────────────────────────────────────
   const ctx = LLMCallContextSchema.parse(params.context);
+
+  // ── 1a. IEE contract guards (rev 6 §13.1) ───────────────────────────────
+  // Two layers protect cost-attribution integrity for IEE runs:
+  //   1. This runtime guard — fast feedback to the caller.
+  //   2. A database CHECK constraint (llm_requests_iee_requires_run_id) that
+  //      catches any future code path that bypasses the router.
+  if (ctx.sourceType === 'iee' && !ctx.ieeRunId) {
+    throw new RouterContractError('llmRouter: ieeRunId is required when sourceType="iee"');
+  }
+  if (ctx.callSite === 'worker' && !ctx.ieeRunId) {
+    throw new RouterContractError('llmRouter: ieeRunId is required when callSite="worker"');
+  }
 
   // ── 1b. Resolve provider + model from execution phase ─────────────────
   let effectiveProvider: string;
@@ -330,6 +350,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         sourceType:          ctx.sourceType,
         runId:               ctx.runId,
         executionId:         ctx.executionId,
+        ieeRunId:            ctx.ieeRunId,        // §11.7.1
+        callSite:            ctx.callSite ?? 'app',
         agentName:           ctx.agentName,
         taskType:            ctx.taskType,
         provider:            effectiveProvider,
@@ -505,6 +527,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
         sourceType:          ctx.sourceType,
         runId:               ctx.runId,
         executionId:         ctx.executionId,
+        ieeRunId:            ctx.ieeRunId,        // §11.7.1
+        callSite:            ctx.callSite ?? 'app',
         agentName:           ctx.agentName,
         taskType:            ctx.taskType,
         executionPhase:      ctx.executionPhase,
@@ -601,6 +625,8 @@ export async function routeCall(params: RouterCallParams): Promise<ProviderRespo
       sourceType:          ctx.sourceType,
       runId:               ctx.runId,
       executionId:         ctx.executionId,
+      ieeRunId:            ctx.ieeRunId,        // §11.7.1
+      callSite:            ctx.callSite ?? 'app',
       agentName:           ctx.agentName,
       taskType:            ctx.taskType,
       executionPhase:      ctx.executionPhase,
