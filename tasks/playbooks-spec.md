@@ -374,14 +374,159 @@ Resolver rules:
 
 > **Future (Phase 1.5+):** add **JSONata** as an optional power-user expression engine for transforms the dot-path resolver can't handle (filtering, aggregation, conditional expressions). Use a `{{= ... }}` prefix to distinguish JSONata expressions from simple path references. JSONata parses to an AST (enabling static dependency extraction) and runs sandboxed with no access to Node globals. **Handlebars is explicitly disqualified** — it has had multiple RCEs via prototype pollution and compiles templates to JavaScript functions, incompatible with our security model.
 
-### 3.4 Output schema enforcement
+### 3.4 Agent reference resolution
+
+`agent_call` steps reference an agent via `{ kind: 'system' | 'org', slug: string }`. Resolution happens at **run start**, not at definition time, so agents added or renamed after a template is published are picked up automatically.
+
+Resolution order:
+
+1. If `kind === 'system'`: look up `system_agents.slug = agentRef.slug`. The org's `subaccount_agents` linking record is used if one exists; otherwise the system agent is invoked directly under the org context.
+2. If `kind === 'org'`: look up `agents.slug = agentRef.slug AND organisation_id = run.organisation_id`. Must exist; otherwise the run fails to start with `failure('agent_not_found', 'org_agent_missing', { slug })`.
+3. The resolved `agent_id` is **cached on the playbook run row** (not the template) so mid-run changes to agent slugs don't break in-flight runs.
+
+Resolved agent ids are stored in `playbook_runs.context_json` under `_meta.resolvedAgents` for traceability.
+
+### 3.5 Output schema enforcement
 
 Every step declares an `outputSchema` (Zod). On step completion:
 
 1. Engine receives raw output (LLM response, form submission, conditional result).
-2. For LLM-based outputs (prompt, agent_call), the resolved prompt instructs the model to return JSON matching the schema. Schema is also passed to the model as a tool/structured output spec where the provider supports it.
-3. Engine parses output through `outputSchema.safeParse()`. On failure, retry up to N times (configurable per step, default 2) with the parse error appended to the prompt. After max retries, mark step `failed`.
-4. On success, merge into `run.context_json` at `steps.<id>.output`.
+2. For LLM-based outputs (`prompt`, `agent_call`), the resolved prompt instructs the model to return JSON matching the schema. The schema is also passed to the model as a tool / structured-output spec where the provider supports it (Anthropic tool use, OpenAI structured outputs).
+3. Engine parses output through `outputSchema.safeParse()`. On failure, retry via `withBackoff` up to N times (configurable per step, default 2) with the parse error appended to the prompt context. After max retries, the step is marked `failed` via `failure('schema_violation', 'output_parse_failed', { stepId, attempts, lastError })`.
+4. On success, the validated output is canonicalised (key sort + JSON.stringify), hashed (SHA256 → `output_hash`), and merged into `run.context_json` at `steps.<id>.output`.
+
+### 3.6 Worked example: a real 15-step playbook (abridged to 6 for readability)
+
+```typescript
+// server/playbooks/event-creation.playbook.ts
+import { definePlaybook } from '../lib/playbook/definePlaybook.js';
+import { z } from 'zod';
+
+export default definePlaybook({
+  slug: 'event-creation',
+  name: 'Create a New Event',
+  description: 'End-to-end content pack for launching a new event',
+  version: 1,
+
+  initialInputSchema: z.object({
+    eventName: z.string().min(3),
+    eventDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    audience: z.string(),
+  }),
+
+  steps: [
+    // 1 — gather extra basics (human form)
+    {
+      id: 'event_basics',
+      name: 'Confirm event basics',
+      type: 'user_input',
+      dependsOn: [],
+      sideEffectType: 'none',
+      formSchema: z.object({
+        venue: z.string(),
+        capacity: z.number().int().positive(),
+        ticketPriceCents: z.number().int().nonnegative(),
+      }),
+      outputSchema: z.object({
+        venue: z.string(),
+        capacity: z.number(),
+        ticketPriceCents: z.number(),
+      }),
+    },
+
+    // 2 — positioning statement (single LLM call)
+    {
+      id: 'positioning',
+      name: 'Draft positioning statement',
+      type: 'agent_call',
+      dependsOn: ['event_basics'],
+      sideEffectType: 'none',
+      agentRef: { kind: 'system', slug: 'copywriter' },
+      agentInputs: {
+        eventName: '{{ run.input.eventName }}',
+        venue: '{{ steps.event_basics.output.venue }}',
+        audience: '{{ run.input.audience }}',
+      },
+      prompt: 'Draft a one-paragraph positioning statement for {{ run.input.eventName }} at {{ steps.event_basics.output.venue }} for {{ run.input.audience }}.',
+      humanReviewRequired: true,
+      outputSchema: z.object({
+        positioning: z.string(),
+        tagline: z.string(),
+      }),
+    },
+
+    // 3 — landing page hero (parallel with email)
+    {
+      id: 'landing_page_hero',
+      name: 'Landing page hero copy',
+      type: 'agent_call',
+      dependsOn: ['positioning'],
+      sideEffectType: 'none',
+      agentRef: { kind: 'system', slug: 'copywriter' },
+      agentInputs: { tagline: '{{ steps.positioning.output.tagline }}' },
+      prompt: 'Write a hero section for the landing page using the tagline: {{ steps.positioning.output.tagline }}',
+      outputSchema: z.object({
+        headline: z.string(),
+        subheadline: z.string(),
+        ctaText: z.string(),
+      }),
+    },
+
+    // 4 — announcement email (parallel with hero — both only need positioning)
+    {
+      id: 'email_announcement',
+      name: 'Announcement email',
+      type: 'agent_call',
+      dependsOn: ['positioning'],
+      sideEffectType: 'none',
+      agentRef: { kind: 'system', slug: 'copywriter' },
+      agentInputs: { positioning: '{{ steps.positioning.output.positioning }}' },
+      prompt: 'Write an announcement email...',
+      outputSchema: z.object({
+        subject: z.string(),
+        body: z.string(),
+      }),
+    },
+
+    // 5 — approval gate before any content is published
+    {
+      id: 'content_review',
+      name: 'Marketing review',
+      type: 'approval',
+      dependsOn: ['landing_page_hero', 'email_announcement'],
+      sideEffectType: 'none',
+      approvalPrompt: 'Review the landing page hero and announcement email below. Approve to proceed to publishing.',
+      outputSchema: z.object({ approvedAt: z.string() }),
+    },
+
+    // 6 — actually publish (THIS IS WHY sideEffectType MATTERS)
+    {
+      id: 'publish_landing_page',
+      name: 'Publish landing page to CMS',
+      type: 'agent_call',
+      dependsOn: ['content_review'],
+      sideEffectType: 'irreversible',
+      agentRef: { kind: 'org', slug: 'cms_publisher' },
+      agentInputs: {
+        headline: '{{ steps.landing_page_hero.output.headline }}',
+        subheadline: '{{ steps.landing_page_hero.output.subheadline }}',
+        ctaText: '{{ steps.landing_page_hero.output.ctaText }}',
+      },
+      prompt: 'Publish a new landing page with this content.',
+      outputSchema: z.object({
+        pageId: z.string(),
+        url: z.string().url(),
+      }),
+    },
+  ],
+});
+```
+
+Three things to notice in this example:
+
+1. **Steps 3 and 4 run in parallel** because they both depend only on `positioning`. The engine dispatches them simultaneously.
+2. **Step 2 has `humanReviewRequired`** — after the agent generates positioning, the user can edit it before downstream steps consume it. This is the "tweak the AI output before next step" loop.
+3. **Step 6 is `irreversible`** — publishing to a CMS cannot be undone. If a user later edits step 2 (positioning), the engine will compute that step 6 is downstream and **block automatic re-execution**, returning a 409 with the affected list and a dry-run cost. The user must explicitly opt in or choose "skip and reuse the existing published page".
 
 ## 4. DAG Validator
 
