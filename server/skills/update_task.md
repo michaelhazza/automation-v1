@@ -2,7 +2,7 @@
 name: Update Task
 description: Update the content fields of an existing task — title, description, brief, or priority.
 isActive: true
-isVisible: false
+visibility: none
 ---
 
 ```json

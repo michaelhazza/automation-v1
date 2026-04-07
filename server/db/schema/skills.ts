@@ -1,4 +1,7 @@
 import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+// `text` is used for the visibility enum column (Drizzle has no native enum
+// helper that plays nicely with our migration style; check constraint lives
+// in the SQL migration).
 import { organisations } from './organisations';
 
 // ---------------------------------------------------------------------------
@@ -27,12 +30,12 @@ export const skills = pgTable(
     // quality criteria, and common mistakes. Injected after instructions for richer guidance.
     methodology: text('methodology'),
     isActive: boolean('is_active').notNull().default(true),
-    // Whether the full skill body (instructions, methodology, definition) is
-    // visible to lower tiers (subaccounts that link to an org agent using this
-    // skill). Name + description are ALWAYS visible — that's how the agent
-    // runtime knows the skill exists. This flag only gates the human-readable
-    // body and the "Manage Skill" page. Defaults to false. Spec v3.4 §3 / T6.
-    contentsVisible: boolean('contents_visible').notNull().default(false),
+    // Three-state cascade visibility for lower tiers (org→subaccount,
+    // system→org). 'none' = invisible; 'basic' = name + description only;
+    // 'full' = everything (instructions, methodology, definition).
+    // Defaults to 'none' so skills must be explicitly opted in.
+    // Migration 0074 / spec round 4.
+    visibility: text('visibility').notNull().default('none').$type<'none' | 'basic' | 'full'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

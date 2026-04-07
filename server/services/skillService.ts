@@ -5,7 +5,10 @@ import type { AnthropicTool } from './llmService.js';
 import {
   canViewContents as canViewContentsHelper,
   canManageSkill as canManageSkillHelper,
+  isSkillVisibleToViewer,
+  isSkillVisibility,
   type SkillTier,
+  type SkillVisibility,
 } from '../lib/skillVisibility.js';
 
 // ---------------------------------------------------------------------------
@@ -135,7 +138,7 @@ export const skillService = {
     instructions: string;
     methodology: string;
     isActive: boolean;
-    contentsVisible: boolean;
+    visibility: SkillVisibility;
   }>) {
     const [existing] = await db
       .select()
@@ -152,30 +155,64 @@ export const skillService = {
     if (data.instructions !== undefined) update.instructions = data.instructions;
     if (data.methodology !== undefined) update.methodology = data.methodology;
     if (data.isActive !== undefined) update.isActive = data.isActive;
-    if (data.contentsVisible !== undefined) update.contentsVisible = data.contentsVisible;
+    if (data.visibility !== undefined) {
+      if (!isSkillVisibility(data.visibility)) {
+        throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
+      }
+      update.visibility = data.visibility;
+    }
 
     const [updated] = await db.update(skills).set(update).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId))).returning();
     return updated;
   },
 
   /**
-   * Decorate a skill row for an API response, applying the contents-visible
-   * gate. Lower-tier viewers receive only name + description + the
-   * `canViewContents` / `canManageSkill` predicates; the body fields
-   * (definition, instructions, methodology) are stripped.
+   * Update only the visibility cascade flag — used by the inline segmented
+   * control on the skills list page. Separate from updateSkill so it can
+   * have its own permission requirement and audit signal.
+   */
+  async updateSkillVisibility(id: string, organisationId: string, visibility: SkillVisibility) {
+    if (!isSkillVisibility(visibility)) {
+      throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
+    }
+    const [existing] = await db
+      .select()
+      .from(skills)
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
+    if (!existing) throw { statusCode: 404, message: 'Skill not found' };
+    if (existing.skillType === 'built_in') {
+      throw { statusCode: 400, message: 'Built-in skill visibility is managed at the system tier' };
+    }
+    const [updated] = await db
+      .update(skills)
+      .set({ visibility, updatedAt: new Date() })
+      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId)))
+      .returning();
+    return updated;
+  },
+
+  /**
+   * Decorate a skill row for an API response, applying the cascade
+   * visibility gate. Returns null when the skill is invisible to the
+   * viewer's tier (caller must filter nulls out of list responses).
    *
-   * Owner-tier viewers receive the full row.
+   * Visibility states for lower-tier viewers:
+   *   none  → returns null (filtered)
+   *   basic → returns id + slug + name + description + visibility + flags
+   *   full  → returns the full row
    *
-   * Spec v3.4 §3.4 / T6.
+   * Owner-tier viewers always receive the full row regardless of visibility.
+   * Spec round 4.
    */
   decorateSkillForViewer(
     row: typeof skills.$inferSelect,
     viewer: { tier: SkillTier; hasManagePermission: boolean },
-  ) {
+  ): (Record<string, unknown> & { id: string }) | null {
     const ownerTier: SkillTier = row.organisationId === null ? 'system' : 'organisation';
-    const visibility = { ownerTier, contentsVisible: row.contentsVisible };
-    const view = canViewContentsHelper(visibility, viewer);
-    const manage = canManageSkillHelper(visibility, viewer);
+    const vis = { ownerTier, visibility: row.visibility };
+    if (!isSkillVisibleToViewer(vis, viewer)) return null;
+    const view = canViewContentsHelper(vis, viewer);
+    const manage = canManageSkillHelper(vis, viewer);
     if (view) {
       return {
         ...row,
@@ -183,7 +220,7 @@ export const skillService = {
         canManageSkill: manage,
       };
     }
-    // Strip body for lower-tier viewers without contents access.
+    // Basic mode — name + description only.
     return {
       id: row.id,
       organisationId: row.organisationId,
@@ -192,7 +229,7 @@ export const skillService = {
       description: row.description,
       skillType: row.skillType,
       isActive: row.isActive,
-      contentsVisible: row.contentsVisible,
+      visibility: row.visibility,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       canViewContents: false,

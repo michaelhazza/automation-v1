@@ -2,6 +2,7 @@ import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import type { AnthropicTool } from './llmService.js';
+import { isSkillVisibility, type SkillVisibility } from '../lib/skillVisibility.js';
 
 // ---------------------------------------------------------------------------
 // System Skill Service — reads platform-level skills from .md files
@@ -17,8 +18,14 @@ export interface SystemSkill {
   name: string;
   description: string;
   isActive: boolean;
-  /** Whether this skill is visible to org/subaccount admins. Defaults to false (platform-internal). */
-  isVisible: boolean;
+  /**
+   * Three-state cascade visibility for org/subaccount tiers. Defaults to
+   * 'none' so skills must be explicitly opted in.
+   *   none   — invisible to lower tiers
+   *   basic  — name + description only
+   *   full   — everything (instructions, methodology, definition)
+   */
+  visibility: SkillVisibility;
   definition: AnthropicTool;
   instructions: string | null;
   methodology: string | null;
@@ -86,8 +93,15 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
   const name = fm['name'] ?? slug;
   const description = fm['description'] ?? '';
   const isActive = fm['isActive'] !== 'false';
-  // isVisible defaults to false — skills must explicitly opt-in to be visible at org/subaccount level
-  const isVisible = fm['isVisible'] === 'true';
+  // visibility defaults to 'none'. Legacy isVisible boolean is honoured as
+  // a one-time fallback so older .md files keep working until they're
+  // migrated: isVisible: true → 'full', isVisible: false → 'none'.
+  let visibility: SkillVisibility = 'none';
+  if (fm['visibility'] && isSkillVisibility(fm['visibility'])) {
+    visibility = fm['visibility'];
+  } else if (fm['isVisible'] === 'true') {
+    visibility = 'full';
+  }
 
   // Extract JSON code block for tool definition
   const jsonMatch = body.match(/```json\n([\s\S]*?)\n```/);
@@ -109,7 +123,7 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
   const methodologyMatch = body.match(/^## Methodology\n([\s\S]*?)(?=^## |\s*$)/m);
   const methodology = methodologyMatch ? methodologyMatch[1].trim() : null;
 
-  return { id: slug, slug, name, description, isActive, isVisible, definition, instructions, methodology };
+  return { id: slug, slug, name, description, isActive, visibility, definition, instructions, methodology };
 }
 
 // ---------------------------------------------------------------------------
@@ -132,10 +146,29 @@ export const systemSkillService = {
     return skills.filter(s => s.isActive);
   },
 
-  /** Skills that are both active AND visible to org/subaccount level */
+  /** Skills that are both active AND visible to org/subaccount level
+   *  (visibility !== 'none'). Returns the raw row including the body — the
+   *  caller is responsible for stripping the body via stripBodyForBasic()
+   *  when visibility === 'basic'.
+   */
   async listVisibleSkills(): Promise<SystemSkill[]> {
     const skills = await this.listSkills();
-    return skills.filter(s => s.isActive && s.isVisible);
+    return skills.filter(s => s.isActive && s.visibility !== 'none');
+  },
+
+  /**
+   * Strip the body fields from a system skill so a 'basic' viewer only
+   * sees name + description + visibility (no instructions, methodology, or
+   * tool definition). Mirrors the same operation skillService does for
+   * org-level skills via decorateSkillForViewer.
+   */
+  stripBodyForBasic(skill: SystemSkill): SystemSkill {
+    return {
+      ...skill,
+      instructions: null,
+      methodology: null,
+      definition: { name: skill.definition.name, description: skill.definition.description, input_schema: { type: 'object', properties: {}, required: [] } } as AnthropicTool,
+    };
   },
 
   async getSkill(id: string): Promise<SystemSkill> {
@@ -153,10 +186,15 @@ export const systemSkillService = {
   },
 
   /**
-   * Toggle the isVisible flag on a skill by rewriting its .md frontmatter.
-   * The .md files are the source of truth so this is the only durable way to persist the change.
+   * Set the cascade visibility on a skill by rewriting its .md frontmatter.
+   * The .md files are the source of truth so this is the only durable way
+   * to persist the change. Replaces both legacy `isVisible:` lines and any
+   * existing `visibility:` line in one pass.
    */
-  async updateSkillVisibility(slug: string, isVisible: boolean): Promise<SystemSkill> {
+  async updateSkillVisibility(slug: string, visibility: SkillVisibility): Promise<SystemSkill> {
+    if (!isSkillVisibility(visibility)) {
+      throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
+    }
     const map = await loadSkills();
     const skill = map.get(slug);
     if (!skill) throw { statusCode: 404, message: 'System skill not found' };
@@ -164,13 +202,16 @@ export const systemSkillService = {
     const filePath = join(SKILLS_DIR, `${slug}.md`);
     const raw = await readFile(filePath, 'utf-8');
 
-    let updated: string;
-    if (/^isVisible:/m.test(raw)) {
-      // Replace existing isVisible line
-      updated = raw.replace(/^isVisible:.*$/m, `isVisible: ${isVisible}`);
+    let updated = raw;
+    // Strip any legacy isVisible line so it can never override visibility.
+    if (/^isVisible:/m.test(updated)) {
+      updated = updated.replace(/^isVisible:.*\n?/m, '');
+    }
+    if (/^visibility:/m.test(updated)) {
+      updated = updated.replace(/^visibility:.*$/m, `visibility: ${visibility}`);
     } else {
       // Inject after the last frontmatter key (before closing ---)
-      updated = raw.replace(/^(---\n[\s\S]*?)(^---)/m, `$1isVisible: ${isVisible}\n$2`);
+      updated = updated.replace(/^(---\n[\s\S]*?)(^---)/m, `$1visibility: ${visibility}\n$2`);
     }
 
     const { writeFile } = await import('fs/promises');
