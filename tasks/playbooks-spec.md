@@ -1,30 +1,87 @@
 # Playbooks — Detailed Dev Specification
 
-**Status:** Draft for review
+**Status:** Final review draft
 **Owner:** TBD
 **Related:** `architecture.md` § Playbooks (Multi-Step Automation)
+**Target migration:** `0074_playbooks.sql`
+**Last research integration:** Architecture review (singletonKey, non-blocking lock, side-effect classification, output-hash firewall, prototype-pollution hardening, watchdog sweep, parameterization deferred to 1.5)
+**Last main integration:** Reporting Agent paywall workflow merge (shared infra: `withBackoff`, `runCostBreaker`, `failure` helper, `skillVisibility`, `canonicaliseUrl`)
+
+## 0. How to read this document
+
+Sections 1–4 cover the data model and authoring format — read these to understand **what** a playbook is. Sections 5–8 cover runtime — read these to understand **how** the engine executes. Sections 9–10 cover UI and authoring workflow. Sections 11–13 cover testing, rollout, and risk. Section 14 is a sign-off checklist.
+
+The single most important constraint to internalise: **every step declares a `sideEffectType`, and the engine never auto-re-executes irreversible steps.** Mid-run editing is the feature most likely to cause real customer harm if implemented naively, and §5.4 exists to prevent that.
 
 ## 1. Overview
 
 Playbooks automate longer-form, multi-step processes against a subaccount. A Playbook is a versioned, immutable **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional. Steps consume outputs from earlier steps via templating against a growing run-level context. Independent branches execute in parallel.
 
-This spec covers Phase 1: the engine, schema, services, routes, and run-execution UI. Templates are authored as TypeScript files in `server/playbooks/*.playbook.ts` and seeded into the database on deploy. Phase 2 (visual builder) is out of scope.
+The motivating use case: a 15-step "create a new event" workflow that produces landing page copy, three promo emails, a confirmation email, social posts, and an internal brief — currently run as 15 manual prompts, each carrying context forward by hand.
 
-### 1.1 Goals
+This spec covers **Phase 1**: the engine, schema, services, routes, and run-execution UI. Templates are authored as TypeScript files in `server/playbooks/*.playbook.ts` and seeded into the database on deploy. **Phase 1.5** layers parameterization on top of the fork model. **Phase 2** adds a visual canvas builder for org users.
 
-- Execute multi-step processes reliably, resumably, and in parallel where possible.
-- Reuse the existing three-tier agent system, skill executor, review queue, pg-boss, budget, and WebSocket infrastructure unchanged.
+### 1.1 Glossary
+
+| Term | Meaning |
+|------|---------|
+| **DAG** | Directed Acyclic Graph. Steps declare `dependsOn` on earlier step ids. The engine topologically sorts and runs independent branches in parallel. No cycles permitted. |
+| **Playbook Template** | The definition — steps, dependencies, prompts, schemas. Versioned and immutable once published. |
+| **Playbook Version** | A frozen snapshot of a template. Runs lock to the version they started with. |
+| **Playbook Run** | An execution instance against a specific subaccount. Has its own growing context blob. |
+| **Step Run** | Execution record for a single step within a run. Has its own status, inputs, outputs, attempt number, and (optionally) a linked `agentRun`. |
+| **Run Context** | A single growing JSON blob keyed by step id. Steps reference prior outputs via templating (`{{ steps.event_basics.output.eventName }}`). |
+| **Side-effect type** | Required classification on every step (`none` / `idempotent` / `reversible` / `irreversible`) that drives mid-run editing safety. |
+| **Tick** | A single execution cycle of `playbookEngineService.tick(runId)`. Idempotent. Triggered by step completions, watchdog sweeps, and start-of-run. |
+| **Firewall pattern** | Output-hash check during invalidation: if a re-executed step produces a byte-identical result to the previous attempt, downstream invalidation stops propagating. |
+
+### 1.2 Goals
+
+- Execute multi-step processes reliably, resumably, and in parallel where dependencies allow.
+- Reuse the existing three-tier agent system, skill executor, review queue, pg-boss, budget, cost breaker, failure helper, and WebSocket infrastructure unchanged.
 - Allow templates to be authored as code (AI-friendly) and distributed via the three-tier system → org → subaccount-run model.
-- Support human-in-the-loop edits to step outputs mid-run, with automatic invalidation of downstream work.
+- Support human-in-the-loop edits to step outputs mid-run, with automatic invalidation of downstream work and explicit safety gates around side effects.
+- Surface real-time progress and per-step state to the UI without polling.
+- Self-heal from missed ticks and stuck runs without operator intervention.
 
-### 1.2 Non-goals (Phase 1)
+### 1.3 Non-goals (Phase 1)
 
 - Visual canvas builder for org users (Phase 2).
 - Marketplace / template sharing across orgs (future).
-- Cross-playbook composition (a step that triggers another playbook). Defer.
+- Cross-playbook composition (a step that triggers another playbook). Defer to Phase 2+.
 - Time-based step scheduling ("run step 5 at 9am Monday"). Defer.
+- Loop / iteration steps (`for each item in list, run subgraph`). Defer.
+- Per-org parameterization layer (`paramsSchema`) — column reserved in 0074, behaviour ships in Phase 1.5.
 
-## 2. Database Schema (Migration 0042)
+### 1.4 Out-of-scope rejected alternatives
+
+| Alternative | Why rejected |
+|-------------|--------------|
+| Adopt Temporal / Inngest / Trigger.dev | Operational complexity disproportionate to current scale. The pg-boss tick pattern with the §5 hardening layers covers ~10k concurrent runs — years of headroom. Revisit when 3+ adopt-threshold criteria are met. |
+| Replace Zod with TypeBox for output schemas | Real benefit (no JSON Schema conversion drift) does not justify introducing a second schema library. Zod is the codebase standard. Mitigated by the §11 round-trip CI check. |
+| Handlebars / arbitrary expression engine | Multiple historical RCEs via prototype pollution; compiles templates to JavaScript functions, incompatible with the security model. Disqualified. |
+| DB-native template authoring (no file system) | Loses git history, CI validation, environment reproducibility. Mirrors the well-known HubSpot workflow versioning pain point. |
+
+## 1.5 Shared infrastructure reuse (mandatory)
+
+The Playbooks engine **must** reuse the following primitives from `server/lib/` and `shared/iee/`. Bypassing them is a blocking issue in code review; several are enforced by lint rules.
+
+| Primitive | Where Playbooks uses it |
+|-----------|------------------------|
+| `withBackoff` (`server/lib/withBackoff.ts`) | All engine-level retries: schema parse retries, transient agent run errors, watchdog re-enqueue attempts, external webhook fan-out. Ad-hoc `setTimeout(... Math.pow(2,...))` is banned. |
+| `runCostBreaker` (`server/lib/runCostBreaker.ts`) | Called before every `agent_call` and `prompt` step dispatch and before each external skill call invoked from a step. Prevents runaway invalidation loops from blowing the per-run cost ceiling. The dry-run cost preview surfaced to the user during mid-run editing reads the same `subaccount_agents.maxCostPerRunCents` ceiling. |
+| `failure()` (`shared/iee/failure.ts`) | Single emit point for every failure persisted to `playbook_runs.error` or `playbook_step_runs.error`. Inline `{ failureReason: ... }` literals are banned. New failure reasons added to `FailureReason` enum (e.g. `playbook_dag_invalid`, `playbook_irreversible_blocked`, `playbook_template_drift`). |
+| `skillVisibility` (`server/lib/skillVisibility.ts`) | Step output visibility honours the same `contentsVisible` semantics when surfacing skill results inside a step's output payload. |
+| `canonicaliseUrl` (`server/lib/canonicaliseUrl.ts`) | Any URL stored in step outputs (e.g. landing page URLs from a generation step) is canonicalised before storage so deduplication and idempotency keys behave consistently. |
+| `inlineTextWriter` (`server/lib/inlineTextWriter.ts`) | When a step produces a long-form text artefact (a generated email body, a landing page draft), the engine writes it via the inline text writer for consistency with other run-scoped artefacts. |
+| Existing `agentRunService` | `prompt` and `agent_call` steps create real agent runs with `playbookStepRunId` set. Full three-tier model, handoff depth, idempotency keys, budget reservations, policy engine — all reused unchanged. |
+| Existing `reviewItems` / `hitlService` | `approval` step type creates a `reviewItem`. The HITL flow is unchanged. `playbook_step_reviews` records the linkage. |
+| Existing `correlation.ts` middleware | Every tick log line carries the run-level correlation id. Watchdog ticks generate their own correlation ids tagged `playbook-watchdog`. |
+| Existing pg-boss queue infrastructure | `playbook-run-tick` and `playbook-watchdog` are new queues alongside `agent-handoff-run` and the heartbeat queues. |
+| Existing WebSocket rooms (`useSocket`) | New `playbook-run:{runId}` room for per-run live updates; subaccount room receives coarse status events. |
+| Existing audit events (`auditEvents`) | Run start, cancellation, mid-run edits, approval decisions, template publish all emit audit events. |
+
+## 2. Database Schema (Migration 0074)
 
 All tables follow existing conventions: `id` (uuid pk), `createdAt`, `updatedAt`, `deletedAt` (where soft-deletes apply), `organisationId` for org-scoping.
 
@@ -861,7 +918,7 @@ When a system template's `latest_version` advances and an org has a fork at an o
 
 ### 12.1 Implementation order
 
-1. **Migration 0042** — schema only. Land first, no behaviour change.
+1. **Migration 0074** — schema only. Land first, no behaviour change.
 2. **Types + `definePlaybook` + validator + templating service** — pure code, fully unit-tested in isolation.
 3. **`playbookTemplateService` + seeder + npm scripts** — system templates loadable; no runtime behaviour yet.
 4. **`playbookEngineService` + `playbookRunService` + pg-boss queue** — engine runnable from a script, no UI.
@@ -881,7 +938,7 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 ### 12.3 Backwards compatibility
 
 - New tables only — no changes to existing schema.
-- Engine reuses `agentRuns` with a new nullable `playbookStepRunId` column (added in migration 0042).
+- Engine reuses `agentRuns` with a new nullable `playbookStepRunId` column (added in migration 0074).
 - No breaking changes to existing routes or services.
 
 ### 12.4 Observability

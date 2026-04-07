@@ -68,6 +68,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Executions | `executions.ts` |
 | Integration connections | `integrationConnections.ts` |
 | LLM usage | `llmUsage.ts` |
+| Web login connections (Reporting Agent) | `webLoginConnections.ts` |
 
 ### Shared route helpers
 
@@ -216,9 +217,11 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 29 built
 | Task management | `create_task`, `move_task`, `update_task`, `reassign_task`, `add_deliverable` |
 | Testing | `run_tests`, `run_playwright_test`, `write_tests` |
 | Code | `review_code`, `write_patch`, `search_codebase` |
-| Integration | `web_search`, `fetch_url`, `send_email` |
+| Integration | `web_search`, `fetch_url`, `send_email`, `send_to_slack`, `transcribe_audio` |
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
+
+`send_to_slack` and `transcribe_audio` were added with the Reporting Agent feature (migration 0073). Both go through `withBackoff` for retries and the `runCostBreaker` for cost ceilings.
 
 ### Skill executor & processor hooks
 
@@ -339,15 +342,73 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ## Migrations
 
-41 migrations (0001–0041). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
+73 migrations (0001–0073). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
 
 Recent migrations:
-- `0042` — playbooks: templates, versions, runs, step runs (Playbooks feature)
+- `0074` — playbooks: templates, versions, runs, step runs (Playbooks feature — planned)
+- `0073` — Reporting Agent paywall workflow (web login connections, IEE artifacts/runs/steps extensions, agent run extensions)
+- `0072` — `skills.contentsVisible` flag (controls whether skill output bodies are surfaced to downstream consumers)
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
 - `0039` — GitHub App schema
 - `0037` — workspace memory + workflow schema
 - `0036` — review queue + OAuth tables
+
+---
+
+## Shared Infrastructure (use these — do not reinvent)
+
+The following modules exist as **single-emit-point** primitives. New features must reuse them; bypassing them is a blocking issue in code review. Several are enforced by lint rules.
+
+### Retry / backoff — `server/lib/withBackoff.ts`
+
+Unified retry helper. **All external-call retries (LLM, integrations, webhooks, future engines) must go through this** rather than per-call `setTimeout`/`Math.pow` loops. Lint rule bans ad-hoc backoff outside this file.
+
+```typescript
+withBackoff({
+  label: 'whisper.transcribe',
+  isRetryable: (err) => isTransient(err),
+  maxAttempts: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 8000,
+  retryAfterMs: (err) => parseRetryAfterHeader(err),
+}, async () => callExternal())
+```
+
+Honours `Retry-After` headers, exponential backoff with full jitter, structured logging per attempt.
+
+### Run cost circuit breaker — `server/lib/runCostBreaker.ts`
+
+Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (default 100¢). Throws via the unified failure helper on overage. **Every cost-incurring boundary must call the breaker** — LLM router after each call, external integrations before each call. Prevents runaway loops from racking up real spend.
+
+### Failure helper — `shared/iee/failure.ts`
+
+**Single emit point for structured failures.** Every failure persisted to `agent_runs`, `execution_runs`, `execution_steps`, or any future run-like table must be constructed via `failure(reason, detail, metadata?)`. Inline `{ failureReason: '...' }` literals are banned by lint rule and a Zod check at the persistence boundary. Enriches metadata with `runId` + `correlationId` from AsyncLocalStorage.
+
+```typescript
+import { failure } from '../../shared/iee/failure.js';
+throw failure('cost_exceeded', 'whisper_call_blocked', { spentCents, limitCents });
+```
+
+`FailureReason` is a closed enum in `shared/iee/failureReason.ts` — adding new reasons requires a schema update.
+
+### Skill visibility — `server/lib/skillVisibility.ts`
+
+Drives whether a skill's output body is surfaced to downstream consumers (`skills.contentsVisible` flag, migration 0072). New skills decide visibility explicitly; default is hidden.
+
+### URL canonicalisation — `server/lib/canonicaliseUrl.ts`
+
+Single canonicalisation path for URLs across the system (deduplication, comparison, idempotency keys). Use it when storing or hashing URLs.
+
+### Other shared primitives
+
+| Module | Purpose |
+|--------|---------|
+| `server/lib/inlineTextWriter.ts` | Append-only text artefacts inside runs |
+| `server/lib/reportingAgentInvariant.ts` | End-of-run invariant checks (T25 pattern — assert run reached a terminal state with a structured outcome) |
+| `server/lib/reportingAgentRunHook.ts` | Reporting Agent post-run hook |
+
+---
 
 ---
 
