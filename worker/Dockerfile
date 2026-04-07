@@ -16,11 +16,12 @@ WORKDIR /repo
 COPY package.json package-lock.json* ./
 COPY worker/package.json ./worker/
 
-# Install root deps (server side — Drizzle, postgres-js, zod, pg-boss)
+# Install root deps. The worker shares these (drizzle-orm, postgres, pg-boss,
+# zod, playwright, typescript, tsx, @types/node) from /repo/node_modules — the
+# worker has no package.json dependencies of its own, which prevents duplicate
+# drizzle-orm installs that would otherwise cause TypeScript type-identity
+# errors when compiling the bundled server cone.
 RUN npm ci --omit=optional || npm install --omit=optional
-
-# Install worker deps
-RUN cd worker && (npm ci --omit=optional || npm install --omit=optional)
 
 # Copy source files needed for the worker build
 COPY shared ./shared
@@ -35,11 +36,13 @@ COPY server/services/providers ./server/services/providers
 COPY worker/tsconfig.json ./worker/
 COPY worker/src ./worker/src
 
-# Build the worker (transpiles worker/src + the bundled server cone)
-RUN cd worker && npm run build
+# Build the worker (transpiles worker/src + the bundled server cone). Invoked
+# via `npx tsc` from /repo so node resolution walks up to /repo/node_modules
+# instead of finding a duplicate package set under worker/node_modules.
+RUN npx tsc -p worker/tsconfig.json
 
 # Ensure Chromium is installed at the version Playwright expects
-RUN cd worker && npx playwright install chromium
+RUN npx playwright install chromium
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Runtime
