@@ -95,8 +95,10 @@ export const ieeRuns = pgTable(
     startedAt:        timestamp('started_at', { withTimezone: true }),
     completedAt:      timestamp('completed_at', { withTimezone: true }),
 
-    // Outcome
-    failureReason:    text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'unknown'>(),
+    // Outcome — extended via spec v3.4 §8.4 / T13: connector_timeout,
+    // rate_limited, data_incomplete, internal_error added for the
+    // Reporting Agent paths. Existing values retained.
+    failureReason:    text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'connector_timeout' | 'rate_limited' | 'data_incomplete' | 'internal_error' | 'unknown'>(),
     resultSummary:    jsonb('result_summary'),
     stepCount:        integer('step_count').notNull().default(0),
 
