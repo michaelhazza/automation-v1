@@ -42,6 +42,7 @@ COPY server/services/budgetService.ts ./server/services/budgetService.ts
 COPY server/services/pricingService.ts ./server/services/pricingService.ts
 COPY server/services/routerJobService.ts ./server/services/routerJobService.ts
 COPY server/services/costAggregateService.ts ./server/services/costAggregateService.ts
+COPY server/services/connectionTokenService.ts ./server/services/connectionTokenService.ts
 COPY server/services/providers ./server/services/providers
 # Transitive deps required by the bundled server cone (see worker/tsconfig.json):
 #   instrumentation.ts        — imported by server/lib/tracing.ts
