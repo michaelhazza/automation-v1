@@ -1,0 +1,14 @@
+node_modules
+.git
+.env
+.env.*
+dist
+coverage
+*.log
+.DS_Store
+.vscode
+.idea
+worker/node_modules
+worker/dist
+client/node_modules
+client/dist

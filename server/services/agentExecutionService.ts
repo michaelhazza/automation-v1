@@ -113,7 +113,20 @@ export interface AgentRunRequest {
   /** Explicit execution scope — never inferred from nullable fields */
   executionScope: 'subaccount' | 'org';
   runType: 'scheduled' | 'manual' | 'triggered';
-  executionMode?: 'api' | 'headless' | 'claude-code';
+  executionMode?: 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev';
+  /**
+   * Optional IEE task. Required when executionMode is 'iee_browser' or
+   * 'iee_dev'. Spec §9.1.
+   */
+  ieeTask?: {
+    type: 'browser' | 'dev';
+    goal: string;
+    startUrl?: string;
+    sessionKey?: string;
+    repoUrl?: string;
+    branch?: string;
+    commands?: string[];
+  };
   taskId?: string;
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
@@ -565,7 +578,47 @@ export const agentExecutionService = {
 
       let loopResult: LoopResult;
 
-      if (effectiveMode === 'claude-code') {
+      if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
+        // ── 8z. IEE — Integrated Execution Environment ──────────────────
+        // Spec §9.1. Enqueues a pg-boss job picked up by the worker. The
+        // worker writes terminal status to iee_runs and (in a future
+        // iteration) the agent run can be resumed when the row completes.
+        // For v1 the agent run completes immediately with a synthetic
+        // loopResult; the canonical execution state lives on the iee_run.
+        if (!request.ieeTask) {
+          throw { statusCode: 400, message: 'ieeTask is required when executionMode is iee_browser/iee_dev', errorCode: 'IEE_TASK_REQUIRED' };
+        }
+        const expectedType = effectiveMode === 'iee_browser' ? 'browser' : 'dev';
+        if (request.ieeTask.type !== expectedType) {
+          throw { statusCode: 400, message: `executionMode ${effectiveMode} requires ieeTask.type=${expectedType}`, errorCode: 'IEE_TASK_TYPE_MISMATCH' };
+        }
+        const { enqueueIEETask } = await import('./ieeExecutionService.js');
+        const enqueueResult = await enqueueIEETask({
+          task: request.ieeTask as Parameters<typeof enqueueIEETask>[0]['task'],
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          agentId: request.agentId,
+          agentRunId: run.id,
+          correlationId: run.id,
+        });
+        loopResult = {
+          summary: `IEE ${expectedType} task enqueued (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
+          toolCallsLog: [{
+            type: 'iee_handoff',
+            ieeRunId: enqueueResult.ieeRunId,
+            deduplicated: enqueueResult.deduplicated,
+            mode: effectiveMode,
+          }],
+          totalToolCalls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+          finalStatus: 'completed',
+        };
+      } else if (effectiveMode === 'claude-code') {
         // ── 8a. Claude Code CLI execution ──────────────────────────────
         // Spawn `claude -p` with the agent's prompt. Uses the host's
         // Claude Max plan — zero API cost. The same prompts & skills

@@ -28,7 +28,10 @@ export const agentRuns = pgTable(
 
     // How this run was initiated
     runType: text('run_type').notNull().$type<'scheduled' | 'manual' | 'triggered'>(),
-    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code'>(),
+    // 'iee_browser' / 'iee_dev' added rev 6 §9.1 — these route the run through
+    // the Integrated Execution Environment (server/services/ieeExecutionService.ts)
+    // instead of the standard API/headless tool dispatch.
+    executionMode: text('execution_mode').notNull().default('api').$type<'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev'>(),
 
     // Org vs subaccount execution scope (never inferred from nullable fields)
     executionScope: text('execution_scope').notNull().default('subaccount').$type<'subaccount' | 'org'>(),

@@ -35,6 +35,9 @@ export const SPAN_NAMES = [
   'memory.inject.build',
   'memory.insights.extract',
   'budget.reservation.check',
+  // ── IEE — Integrated Execution Environment (rev 6 §8.1) ─────────────────
+  'iee.execution.run',
+  'iee.execution.step',
 ] as const;
 
 export type SpanName = (typeof SPAN_NAMES)[number];
@@ -61,6 +64,21 @@ export const EVENT_NAMES = [
   'agent.handoff.enqueued',
   'agent.spawn.fanout',
   'run.status.changed',
+  // ── IEE — Integrated Execution Environment (rev 6 §8.1, §13.6) ──────────
+  'iee.execution.start',
+  'iee.execution.step.complete',
+  'iee.execution.step.failed',
+  'iee.execution.complete',
+  'iee.execution.failed',
+  'iee.browser.session_recreated',  // §13.6 — Playwright corruption recovery
+  'iee.dev.command',                // §13.6.1.c — per-command audit log
+  'iee.cleanup.orphan_removed',     // §12.3 — orphan workspace removal
+  // Reviewer round 3 #2 — audit trail for reservation releases done
+  // outside the normal finalizeRun() path. Reasons: worker_crash (boot
+  // reconciliation) | ttl_expired (cleanup sweep).
+  'iee.reservation.released.reconciliation',
+  // Reviewer round 4 #5 — periodic queue depth + age signal for SREs
+  'iee.queue.depth',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

@@ -104,6 +104,49 @@ export const JOB_CONFIG = {
     retryBackoff: true,
     expireInSeconds: 120,
   },
+
+  // ── IEE — Integrated Execution Environment (rev 6) ──────────────
+  // Spec refs: §3.1, §3.4, §11.5.5, §13.2 (reservation interplay).
+  // expireInSeconds is the hard pg-boss ceiling. The worker enforces a
+  // tighter MAX_EXECUTION_TIME_MS inside the loop. The 15-min reservation
+  // TTL (§13.6.1.a) is comfortably above this.
+  'iee-browser-task': {
+    retryLimit: 3,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'iee-browser-task__dlq',
+  },
+  'iee-dev-task': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'iee-dev-task__dlq',
+  },
+  // §12.3 + §13.6.1.a — periodic orphan and reservation cleanup
+  'iee-cleanup-orphans': {
+    expireInSeconds: 180,
+  },
+  // §11.3.5 — daily cost rollup into cost_aggregates
+  'iee-cost-rollup-daily': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+  },
+  // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
+  // when an iee_run reaches a terminal status. Subscribed by the main app
+  // (handler optional in v1) to resume the parent agent run, post results
+  // back to the agent's loop, etc. Reusing the existing pg-boss path keeps
+  // the reconnection async + decoupled.
+  'iee-run-completed': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'iee-run-completed__dlq',
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

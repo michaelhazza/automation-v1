@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "./dist",
+    "rootDir": "..",
+    "declaration": false,
+    "sourceMap": true,
+    "baseUrl": "."
+  },
+  "include": [
+    "src/**/*",
+    "../shared/**/*",
+    "../server/db/schema/**/*",
+    "../server/services/llmRouter.ts",
+    "../server/services/providers/**/*",
+    "../server/services/budgetService.ts",
+    "../server/services/pricingService.ts",
+    "../server/services/llmResolver.ts",
+    "../server/lib/**/*",
+    "../server/config/**/*"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
