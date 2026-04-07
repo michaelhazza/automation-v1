@@ -185,6 +185,7 @@ Immutable once published. New edits create a new version row.
 | `context_json` | jsonb | Growing run context (initial input + step outputs keyed by step id). Hard-bounded by `MAX_CONTEXT_BYTES_HARD` (§3.6). |
 | `context_size_bytes` | int default 0 | Tracked for fast soft/hard limit checks without re-serialising on every tick |
 | `replay_mode` | bool default false | When true, engine reads stored outputs instead of re-executing external calls (§5.10) |
+| `retain_indefinitely` | bool default false | Opt-in audit retention flag — runs marked true are excluded from the inline-ref GC sweep (§3.6) and any future archival job. Set when a run's outputs need to be preserved for compliance, customer reference, or external linkage. |
 | `started_by_user_id` | uuid fk | |
 | `started_at` | timestamp | |
 | `completed_at` | timestamp nullable | |
@@ -468,7 +469,7 @@ The templating resolver detects `inline_ref` values transparently — when a dow
 - Not referenced by any `playbook_step_runs.output_inline_ref_id` belonging to a run completed within the retention window.
 - Older than `INLINE_REF_RETENTION_DAYS` (default 90, env-configurable).
 
-Replay runs hold a strong reference to their source run's inline refs via the cloned step rows, so GC respects them naturally. Audit-critical runs can be flagged `retainIndefinitely: true` on `playbook_runs` (Phase 1.5 enhancement; Phase 1 ships without the flag and the default 90-day window).
+Replay runs hold a strong reference to their source run's inline refs via the cloned step rows, so GC respects them naturally. Audit-critical runs are flagged `retain_indefinitely = true` on `playbook_runs` (set by API, default false) and are excluded from the GC sweep. The default 90-day window applies to all other runs.
 
 ### 3.7 Per-step retry policy
 
@@ -770,7 +771,19 @@ A run is `running` whenever the engine has work it can dispatch. It transitions 
 | `failed` | At least one step failed with `failurePolicy === 'fail_run'` (the default), OR a `continue` failure blocked all remaining downstream paths. |
 | `cancelled` | Explicit user cancellation, parent run cancellation, or kill switch (§5.11). Transitions through `cancelling` first to allow in-flight steps to settle. |
 
-### 5.2 Tick algorithm (pseudocode)
+### 5.1.1 Context merge: deterministic rules
+
+`run.context_json` is built incrementally as steps complete, and **the merge is fully deterministic**. Two replays of the same run must produce byte-identical context blobs at every point in time. The rules:
+
+1. **Namespacing.** Step outputs live at `context.steps[<stepId>].output` — there is no shared namespace between steps. Different steps writing different fields cannot collide; different steps writing the same field would have to write to different `context.steps[<stepId>]` keys, which is impossible by construction.
+2. **Reserved keys.** `context._meta` is reserved for engine-managed metadata (resolved agents, run started timestamp, replay markers). Steps cannot write to `_meta`. Any attempt fails the step with `failure('playbook_schema_violation', 'reserved_key_write_attempt', { stepId, key })`.
+3. **Merge order on tick boundaries.** When multiple steps complete and are merged in the same tick (rare but possible after watchdog recovery or burst completion), they are merged in **deterministic order**: topological order first, then lexicographic `stepId` to break ties within a topological level. Never insertion order, never timestamp order.
+4. **No deep merge.** A step's output replaces the entire `context.steps[<stepId>].output` value — there is no recursive merging of nested objects. This eliminates the entire class of "did the new value extend or replace the old one?" bugs. Re-execution of a step (after invalidation) replaces the value in full.
+5. **Skip-and-reuse merges the previous output verbatim.** The reused payload is structurally identical to the original — the only difference is the surrounding `_meta` envelope (§5.4). Downstream consumers see the same data.
+6. **Invalidated outputs are removed.** When a step is invalidated, its `context.steps[<stepId>]` key is **deleted** from the context — not set to null, not preserved as stale data. The deletion happens before the dependent step runs are recreated as `pending`.
+7. **Replay determinism.** Because of rules 1–6, replaying a run produces byte-identical context at every tick. Any divergence is a bug, surfaced via the replay drift checks (§5.10).
+
+This is one of the system's load-bearing invariants — added to §5.13 as invariant 15.
 
 ```
 function tick(runId):
@@ -805,6 +818,22 @@ function tick(runId):
   capacity = MAX_PARALLEL_STEPS - currentlyRunning  // default 8
   toDispatch = ready.slice(0, max(0, capacity))
   // Remaining ready steps stay 'pending'; next tick (fired by step completion) will pick them up
+
+  // 3a. BATCH-AWARE COST CHECK — sum the estimated cost of the entire dispatch
+  // group and compare against remaining budget BEFORE dispatching any of them.
+  // The per-step breaker (called inside dispatch) catches individual overages,
+  // but a batch of 8 individually-cheap steps can still collectively blow the
+  // ceiling — especially during invalidation cascades. Block the whole batch
+  // if the projected total exceeds remaining budget.
+  batchEstimate = sum(playbookCostEstimatorService.estimateStep(s) for s in toDispatch)
+  remaining = runCostBreaker.remainingBudget(run.id)
+  if batchEstimate > remaining:
+    // Try shrinking the batch — dispatch what fits, leave the rest pending.
+    toDispatch = greedyFit(toDispatch, remaining)
+    if toDispatch.empty:
+      markRunFailed(runId, failure('playbook_cost_exceeded',
+        'batch_cost_blocked', { batchEstimate, remaining }))
+      return
 
   for step in toDispatch:
     sr = upsertStepRun(runId, step.id, status='running', attempt=1)
@@ -855,6 +884,23 @@ function dispatch(step, stepRun, run):
         markStepRunFailed(stepRun, failure('playbook_dag_invalid', 'conditional_eval_failed', { stepId, error }))
         enqueueTick(run.id)
         return
+
+      // DETERMINISM CHECK — if a prior attempt of this step exists with the same
+      // inputsHash, the result MUST match. Catches non-deterministic conditions
+      // (time-based logic, external data references, randomness) at the earliest
+      // possible point.
+      priorAttempt = findPriorCompletedAttempt(run.id, step.id)
+      if priorAttempt and priorAttempt.evaluationMeta.inputsHash === inputsHash:
+        if priorAttempt.evaluationMeta.result !== result:
+          markStepRunFailed(stepRun, failure('playbook_non_deterministic_condition',
+            'condition_diverged_on_replay', {
+              stepId, inputsHash,
+              priorResult: priorAttempt.evaluationMeta.result,
+              newResult: result
+            }))
+          enqueueTick(run.id)
+          return
+
       stepRun.outputJson = result ? step.trueOutput : step.falseOutput
       // Validate the chosen output against outputSchema (catches typos in trueOutput/falseOutput)
       parseResult = step.outputSchema.safeParse(stepRun.outputJson)
@@ -945,7 +991,7 @@ The `invalidated` rows stay in the DB for audit — they're never deleted.
 - Engine retries transient errors (network, rate limits) up to 3 times with exponential backoff via `withBackoff`. Permanent errors (schema mismatch after max parse retries) fail immediately.
 - **Irreversible steps never retry** — see §3.7 runtime backstop and §4.1 rule 12.
 - TripWire errors from skill executors propagate up — engine retries the step (subject to the irreversible exclusion).
-- **Input fingerprint dedup.** Each step run records `input_hash`. On retry, if a previous attempt of the same `(run_id, step_id)` had identical `input_hash` AND `output_json` is present, the engine **may** reuse the previous output instead of re-dispatching (controlled by `dedupOnIdenticalInput`, default false in Phase 1, opt-in per step type). Phase 1 ships the column and the hash; the dedup behaviour ships in 1.5 once we have telemetry on how often it would actually fire.
+- **Input fingerprint dedup (per-run, enabled in Phase 1).** Each step run records `input_hash` (SHA256 of canonical JSON of resolved inputs). Before dispatching any step, the engine queries: does a previous attempt of the same `(run_id, step_id)` exist with status `completed` AND identical `input_hash`? If yes, the engine **reuses the previous output verbatim** instead of re-dispatching — copies the row forward as a new completed attempt with `_meta.reusedFromAttempt = N`. This eliminates redundant LLM calls during invalidation cascades and watchdog-triggered re-ticks where the inputs genuinely haven't changed. Per-run scope only — no cross-run dedup in Phase 1 (cross-run is a Phase 1.5 enhancement gated on telemetry). **Irreversible steps never use input-hash reuse** — even though the inputs match, re-running the side effect must be an explicit human decision via skip-and-reuse.
 
 ### 5.6 Concurrency control (defense in depth)
 
@@ -1005,6 +1051,17 @@ Catches the "step completed but tick enqueue failed mid-transaction" race and an
 - pg-boss expired jobs surface to a poison handler that marks the step `failed` and re-ticks the run for failure-policy evaluation.
 - `retryLimit` per step type with exponential backoff at the queue level; engine-level retries (output schema parse failures) are tracked via the `attempt` column.
 
+**Timeout behaviour is `sideEffectType`-aware.** A timeout is not a clean "I know what happened" failure — the work may have completed externally without the engine seeing the result. Treat it accordingly:
+
+| `sideEffectType` | Timeout behaviour |
+|------------------|-------------------|
+| `none` | Retry per `retryPolicy` (default allowed). Pure computation; safe to re-run. |
+| `idempotent` | Retry per `retryPolicy` (default allowed). The destination's idempotency key dedupes any duplicate. |
+| `reversible` | **Retry only with explicit user confirmation.** Engine marks the step `awaiting_approval` with a "this step timed out — its effect may or may not have happened, do you want to retry?" prompt routed to the user who started the run. |
+| `irreversible` | **Fail immediately, never retry.** Same rule as the §3.7 retry ban. The user must inspect the external system manually and use mid-run editing's skip-and-reuse to record the actual outcome. |
+
+This aligns timeout handling with the rest of the side-effect safety model — a timeout is just a special case of "the engine doesn't know if the side effect happened", and the same caution applies.
+
 ### 5.9 Budget and policy integration
 
 - `agent_call` and `prompt` steps go through the existing agent run path → budget reservations apply automatically.
@@ -1040,7 +1097,16 @@ Replay mode is created via `POST /api/playbook-runs/:runId/replay` which clones 
 }
 ```
 
-This makes replay outputs **structurally distinguishable** from real ones at every consumer boundary. Downstream systems that integrate with playbook outputs (webhooks, UI, audit exports) can detect replay context and refuse to act on it ("non-production-valid"). The UI surfaces a persistent banner across the run detail page when `replay_mode = true`. **External system drift** (e.g. CMS schema changed since the original run) is therefore the consumer's responsibility to detect — replay only guarantees engine determinism, not external compatibility.
+This makes replay outputs **structurally distinguishable** from real ones at every consumer boundary. Downstream systems that integrate with playbook outputs (webhooks, UI, audit exports) can detect replay context and refuse to act on it ("non-production-valid"). The UI surfaces a persistent banner across the run detail page when `replay_mode = true`. **Hard external-effect block (engine-level, not consumer-level).** When `playbook_runs.replay_mode = true`, the engine refuses at dispatch time to invoke any code path that has external effects. Specifically:
+
+- `agent_call` and `prompt` steps **never** create real `agent_runs` rows — the engine reads the recorded output from the source run and writes it to the replay step run directly.
+- Any skill or tool flagged with external side effects (HTTP fetches that aren't read-only against allowlisted endpoints, integration writes, webhook fires, email sends, Slack posts, CMS publishes, payment calls) is blocked by the skill executor when invoked from a replay-mode run, regardless of `sideEffectType`. The block is enforced via a single check in `skillExecutor.ts` against `agentRun.playbookStepRun.run.replayMode`.
+- Outbound webhooks fired by the playbook engine itself (e.g. step completion notifications to org-configured endpoints) are suppressed for replay runs.
+- Any step that nonetheless calls `runCostBreaker` while in replay mode is treated as a programming error and fails with `failure('playbook_replay_violation', 'external_effect_in_replay', { stepId, attemptedCall })`.
+
+**External system drift** (e.g. CMS schema changed since the original run) is irrelevant under this rule because replay never reaches the external system. Consumers cannot accidentally act on replay data because the data never leaves the engine.
+
+This is enforced by §5.13 invariant 16 below.
 
 Use cases: reproducing a customer-reported issue without re-incurring side effects, demoing a workflow without burning credits, validating a refactor of a downstream consumer service against historical run shapes.
 
@@ -1094,6 +1160,10 @@ Single-source list of properties the engine must always preserve. Every PR touch
 12. **DAG immutability post-publish** — the `definition_json` of a published `playbook_template_versions` row is read-only forever.
 13. **Studio agent never writes files.** The Playbook Author agent's tool surface contains no `write_file`, `commit`, or git-mutating tools. Verified by static check on the agent's allowed-skill list (§10.8.10).
 14. **Save endpoint always re-validates.** `POST /api/system/playbook-studio/save-and-open-pr` runs the §4 validator against the file contents before calling the GitHub MCP. Failed validation here is a 422 — the chat artefact is never trusted to be valid (§10.8.6, §10.8.10).
+15. **Deterministic context merge.** Two replays of the same run produce byte-identical context blobs at every tick boundary. Steps cannot write to `context._meta`. Step outputs replace, never deep-merge. Invalidated outputs are deleted from context, not preserved as stale (§5.1.1).
+16. **Replay never reaches external systems.** Runs with `replay_mode = true` are blocked at engine and skill-executor layers from creating real `agent_runs`, calling external integrations, firing webhooks, sending messages, or invoking the cost breaker. The engine refuses external effects rather than relying on consumer behaviour (§5.10).
+17. **Conditional steps are deterministic.** A conditional step re-evaluated with the same `inputsHash` must produce the same result; divergence fails with `playbook_non_deterministic_condition` (§5.2 conditional dispatch).
+18. **Irreversible steps never reuse inputs by hash.** Even when `(run_id, step_id, input_hash)` matches a prior completed attempt, the engine never auto-reuses for `irreversible` steps — re-running an irreversible side effect must always be an explicit human decision (§5.5).
 
 If any invariant is violated in production, treat it as a P1 bug.
 
@@ -1176,6 +1246,9 @@ All services throw via `failure()`. The new failure reasons added to `FailureRea
 | `playbook_cost_exceeded` | `pre_flight_ceiling`, `mid_run_edit_estimate_exceeds_budget` |
 | `playbook_step_timeout` | `prompt_timeout`, `agent_call_timeout` |
 | `playbook_cancelled` | `user_cancelled`, `parent_run_cancelled` |
+| `playbook_non_deterministic_condition` | `condition_diverged_on_replay` |
+| `playbook_replay_violation` | `external_effect_in_replay`, `agent_run_in_replay`, `webhook_in_replay` |
+| `playbook_cost_exceeded` | adds `batch_cost_blocked` to existing list |
 
 ## 7. Routes
 
@@ -1719,12 +1792,13 @@ These settings are stored on the `agents` row for the Playbook Author agent (sys
 
 #### 10.8.4 Tool surface
 
-The Playbook Author agent gets exactly four tools, all read-only or sandbox-only. **No `write_file`, no `commit`, no `delete`** — the agent proposes, the human disposes.
+The Playbook Author agent gets exactly five tools, all read-only or sandbox-only. **No `write_file`, no `commit`, no `delete`** — the agent proposes, the human disposes.
 
 | Tool | Purpose |
 |------|---------|
 | `read_existing_playbook(slug)` | Load any current `.playbook.ts` file for reference. The agent uses this to ground new playbooks against existing ones structurally. |
 | `validate_candidate(fileContents)` | Runs `playbookTemplateService.validateDefinition()` against the in-progress file. Returns the same `ValidationError[]` shape from §4.2. |
+| `simulate_run(fileContents)` | Static analysis pass over the candidate file. Returns: topologically-sorted step list, parallelism profile (max concurrent steps per tick), longest path from any entry to any terminal step, summary of `irreversible` / `reversible` / `human_review` steps, list of `dependsOn` edges. **No execution.** This lets the agent describe the run shape back to the admin in plain English ("This is 12 steps, max parallelism is 4, the critical path is 7 steps, and there are 2 irreversible steps that will be hard to undo") before the file is finalised. Significantly improves output quality with minimal effort. |
 | `estimate_cost(fileContents)` | Runs `playbookCostEstimatorService.estimateRun()` so the agent can surface an order-of-magnitude cost to the admin before the file is saved. |
 | `propose_save(fileContents, filename, commitMessage)` | **Does not save.** Surfaces a "Save & Open PR" button in the right pane with the given filename and commit message pre-filled. The actual git action happens via the GitHub MCP under the **human admin's** identity, not the agent's, when the human clicks the button. |
 
@@ -1789,14 +1863,18 @@ Phase 1 — Discovery (chat)
   human review points.
 
 Phase 2 — Structure
-  Restate the DAG to the admin in plain English. Confirm before writing.
-  Example: "Here's what I have: 6 steps. Step 1 collects venue/capacity
-  from the user. Step 2 drafts positioning (you'll review before it
-  proceeds). Steps 3 and 4 run in parallel — landing page hero and
-  announcement email. Step 5 is a marketing review approval gate.
-  Step 6 publishes to the CMS — this is irreversible, so once it runs
-  it cannot be auto-re-executed if you edit anything upstream. Sound
-  right?"
+  Draft the file in memory, then call simulate_run() against it. Use the
+  parallelism profile, critical path, and irreversible-step list from
+  the result to restate the DAG to the admin in plain English. Confirm
+  before proceeding.
+  Example: "Here's what I have: 6 steps, simulate_run says max
+  parallelism is 2, critical path is 4 steps, 1 irreversible step at
+  the end. Step 1 collects venue/capacity from the user. Step 2 drafts
+  positioning (you'll review before it proceeds). Steps 3 and 4 run in
+  parallel — landing page hero and announcement email. Step 5 is a
+  marketing review approval gate. Step 6 publishes to the CMS — this
+  is irreversible, so once it runs it cannot be auto-re-executed if
+  you edit anything upstream. Sound right?"
 
 Phase 3 — Generation
   Call propose_save() with a full file. Then call validate_candidate()
@@ -1975,6 +2053,15 @@ Two new invariants extend the §5.13 list:
 - **Save endpoint re-validates** — `POST /api/system/playbook-studio/save-and-open-pr` returns 422 when given a tampered file that the chat agent claimed was valid; verified via integration test that bypasses the chat agent and posts directly.
 - **Save endpoint uses caller's GitHub identity** — integration test asserts the GitHub MCP call uses the authenticated user's identity, not a service account or the Playbook Author agent.
 - **Studio access is system-admin only** — non-admin requests to `/api/system/playbook-studio/*` return 403.
+- **Deterministic context merge** — two replays of the same run produce byte-identical context at every tick. Steps attempting to write `context._meta` fail with `reserved_key_write_attempt`.
+- **Per-run input-hash reuse** — a step re-dispatched with identical resolved inputs reuses the prior output without invoking the agent (verify via spy on `agentRunService.create`); the new attempt row carries `_meta.reusedFromAttempt`.
+- **Irreversible no-reuse** — even with identical input hash, an `irreversible` step is re-dispatched (or blocked per §5.4 user confirmation), never auto-reused.
+- **Conditional determinism** — synthetic conditional whose result depends on `Date.now()` is replayed; engine fails with `playbook_non_deterministic_condition`.
+- **Batch cost block** — dispatch group of 8 steps with summed estimate exceeding remaining budget; engine shrinks the batch greedily to fit, marks run failed only if zero steps fit.
+- **Replay external effect block** — replay run attempts an `agent_call`; engine fails with `playbook_replay_violation:agent_run_in_replay` instead of dispatching. Same test for webhook fire and integration write.
+- **Timeout × side effect** — `irreversible` step times out → fails immediately with no retry. `reversible` step times out → transitions to `awaiting_approval` with the timeout-confirmation prompt. `idempotent` step times out → retries per policy.
+- **`simulate_run` Studio tool** — given a 12-step file, returns max parallelism, critical path length, irreversible step count, full topo order. Verify the agent uses the result in its summary message.
+- **`retain_indefinitely` flag** — run flagged true is excluded from inline-ref GC sweep even after 90 days.
 
 ### 11.4 Integration tests
 
@@ -2075,6 +2162,10 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 | R28 | Save & Open PR endpoint trusts the chat artefact and skips re-validation | Low | High | Endpoint always re-runs the validator (invariant 14); 422 on failure; integration test asserts a tampered file is rejected (§10.8.6) | Engine owner |
 | R29 | Playbook Studio commits to repo under a service-account identity, breaking audit/blame | Low | Medium | GitHub MCP call uses the human admin's identity (already integrated for other repo ops); audit event records actor user id (§10.8.6) | Engine owner |
 | R30 | Studio loop generates playbooks with subtly wrong side-effect classifications | Medium | Critical | Master prompt forces explicit per-step confirmation; reviewer checklist (§10.7) catches at PR review; CI validator runs on every PR | Reviewer + Validator owner |
+| R31 | Non-deterministic context merge causes replay drift and impossible-to-debug bugs | Low | High | §5.1.1 deterministic merge rules; reserved `_meta` namespace; no deep merge; invariant 15 enforced via test (§11) | Engine owner |
+| R32 | Replay run leaks side effects into production systems | Low | Critical | Engine + skill executor refuse external calls when `replay_mode = true`; invariant 16; failure reason `playbook_replay_violation`; integration tests for every external surface | Engine owner |
+| R33 | Non-deterministic conditional (e.g. uses `Date.now()` or external lookup) corrupts replay and creates phantom branches | Medium | Medium | §5.2 conditional dispatch checks `inputsHash` against prior attempts; fails fast with `playbook_non_deterministic_condition`; invariant 17 | Engine owner |
+| R34 | Cascading invalidation triggers a batch of individually-cheap steps that collectively blow the cost ceiling | Medium | High | §5.2 step 3a batch-aware cost breaker estimates the dispatch group as a whole and shrinks (or refuses) the batch; failure reason `playbook_cost_exceeded:batch_cost_blocked` | Engine owner |
 
 ## 14. Final Review Checklist
 
