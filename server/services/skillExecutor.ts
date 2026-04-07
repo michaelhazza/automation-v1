@@ -438,12 +438,43 @@ export const skillExecutor = {
       case 'trigger_account_intervention':
         return proposeReviewGatedAction('trigger_account_intervention', input, context);
 
+      // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
+      case 'analyse_42macro_transcript':
+        return executeMethodologySkill('analyse_42macro_transcript', input, {
+          template: {
+            filename: 'YYYYMMDD_Report_Name.md',
+            tier1Dashboard: '',
+            tier2ExecutiveSummary: '',
+            tier3FullAnalysis: {
+              section1MacroSnapshot: '',
+              section2BitcoinAndDigitalAssets: '',
+              section3TheBottomLine: '',
+            },
+          },
+          guidance:
+            'Follow the 42 Macro A-Player Brain instructions injected into your system prompt. Output the three tiers (Dashboard, Executive Summary, Full Analysis) in plain language. Return the completed markdown content as the value of the tier3FullAnalysis fields and the rendered filename. The agent will pass the result to send_to_slack.',
+        });
+
       // ── Reporting Agent paywall workflow skills ───────────────────────────
       // Spec: docs/reporting-agent-paywall-workflow-spec.md §4 / Code Change B
       case 'transcribe_audio': {
         const { transcribeAudio } = await import('./transcribeAudioService.js');
         return transcribeAudio(
           input as Parameters<typeof transcribeAudio>[0],
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            agentId: context.agentId,
+            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+          },
+        );
+      }
+      // Spec: docs/reporting-agent-paywall-workflow-spec.md §6 / Code Change D
+      case 'fetch_paywalled_content': {
+        const { fetchPaywalledContent } = await import('./fetchPaywalledContentService.js');
+        return fetchPaywalledContent(
+          input as unknown as Parameters<typeof fetchPaywalledContent>[0],
           {
             runId: context.runId,
             organisationId: context.organisationId,
