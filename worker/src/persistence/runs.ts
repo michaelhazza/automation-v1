@@ -127,6 +127,11 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   if (bossRef) {
     try {
       await bossRef.send('iee-run-completed', {
+        // Reviewer round 4 #1 — deterministic dedup key. The retry sweep
+        // re-emits any terminal row whose eventEmittedAt is still NULL,
+        // including rows where the original send succeeded but the column
+        // update failed. Consumers can skip duplicates by tracking eventKey.
+        eventKey: `${input.ieeRunId}:${input.status}`,
         ieeRunId: input.ieeRunId,
         status: input.status,
         failureReason: input.failureReason,
@@ -176,6 +181,9 @@ export async function retryUnemittedEvents(): Promise<number> {
   for (const r of candidates) {
     try {
       await bossRef.send('iee-run-completed', {
+        // Same deterministic dedup key as the primary emit site so a
+        // consumer dedupe table can collapse the two paths to one event.
+        eventKey: `${r.id}:${r.status}`,
         ieeRunId: r.id,
         status: r.status,
         failureReason: r.failureReason,

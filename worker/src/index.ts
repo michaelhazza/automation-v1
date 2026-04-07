@@ -11,6 +11,7 @@ import { registerDevHandler } from './handlers/devTask.js';
 import { registerCleanupHandler } from './handlers/cleanupOrphans.js';
 import { registerCostRollupHandler } from './handlers/costRollup.js';
 import { reconcileAbandonedRuns } from './persistence/reconcile.js';
+import { startQueueMetricsLogger } from './runtime/queueMetrics.js';
 
 async function main(): Promise<void> {
   const { boss, workerInstanceId, shutdown } = await bootstrap();
@@ -24,6 +25,9 @@ async function main(): Promise<void> {
   await registerCleanupHandler(boss);
   await registerCostRollupHandler(boss);
 
+  // Reviewer round 4 #5 — periodic queue depth signal for SREs
+  const queueMetrics = startQueueMetricsLogger(env.IEE_QUEUE_METRICS_INTERVAL_MS);
+
   logger.info('iee.worker.started', {
     pollIntervalMs: env.WORKER_POLL_INTERVAL_MS,
     browserConcurrency: env.IEE_BROWSER_CONCURRENCY,
@@ -35,6 +39,7 @@ async function main(): Promise<void> {
 
   const handleSignal = (sig: string) => {
     logger.info('iee.worker.signal', { signal: sig });
+    queueMetrics.stop();
     void shutdown().then(() => process.exit(0));
   };
   process.on('SIGTERM', () => handleSignal('SIGTERM'));

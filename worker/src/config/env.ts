@@ -45,6 +45,9 @@ const EnvSchema = z.object({
   // System prompt knobs
   IEE_NO_PROGRESS_THRESHOLD: z.coerce.number().int().positive().default(3),
 
+  // Queue depth periodic logger (reviewer round 4 #5)
+  IEE_QUEUE_METRICS_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 });
 

@@ -77,6 +77,8 @@ export const EVENT_NAMES = [
   // outside the normal finalizeRun() path. Reasons: worker_crash (boot
   // reconciliation) | ttl_expired (cleanup sweep).
   'iee.reservation.released.reconciliation',
+  // Reviewer round 4 #5 — periodic queue depth + age signal for SREs
+  'iee.queue.depth',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

@@ -43,6 +43,31 @@ export const ieeRuns = pgTable(
     mode:             text('mode').notNull().$type<'api' | 'browser' | 'dev'>(),
 
     // Lifecycle
+    //
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ TERMINAL STATUS FINALITY CONTRACT (reviewer round 4 #4)              │
+    // │                                                                      │
+    // │ Once `status` is 'completed' or 'failed', NO further mutation is     │
+    // │ allowed on cost columns, resultSummary, stepCount, or status.        │
+    // │ Only the following columns may be updated post-terminal:             │
+    // │   • event_emitted_at  — set when the iee-run-completed event is      │
+    // │                         successfully published                       │
+    // │   • deleted_at        — soft delete                                  │
+    // │                                                                      │
+    // │ The only callers that write a terminal status today are:             │
+    // │   1. worker/src/persistence/runs.ts::finalizeRun()                   │
+    // │      — atomic with cost write + reservation release                  │
+    // │   2. worker/src/persistence/reconcile.ts::reconcileAbandonedRuns()   │
+    // │      — atomic with reservation release                               │
+    // │   3. worker/src/handlers/cleanupOrphans.ts::sweepReservationLeaks()  │
+    // │      — atomic with reservation release                               │
+    // │                                                                      │
+    // │ All three are gated by `WHERE status = ...` predicates that prevent  │
+    // │ a terminal row from being touched twice. Future contributors: do     │
+    // │ NOT add a fourth caller without preserving this invariant. If you    │
+    // │ need to update a terminal row, you almost certainly want a NEW row   │
+    // │ instead, or a denormalised column on a separate table.               │
+    // └──────────────────────────────────────────────────────────────────────┘
     status:           text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed'>(),
 
     // Idempotency — DB-level uniqueness, partial on deletedAt to allow soft-delete + reinsert

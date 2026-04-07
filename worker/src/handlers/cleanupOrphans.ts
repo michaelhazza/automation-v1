@@ -35,11 +35,41 @@ export async function registerCleanupHandler(boss: PgBoss): Promise<void> {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CLEANUP SWEEP ORDERING CONTRACT (reviewer round 4 #2)
+//
+// Sweeps run in this exact order. Future maintainers: do not reorder without
+// understanding why.
+//
+//   1. sweepWorkspaceOrphans         — purely filesystem; touches nothing
+//                                      that other sweeps depend on. Cheapest
+//                                      first.
+//
+//   2. sweepReservationLeaks         — flips pending+leaked rows to failed
+//                                      and releases their reservations. MUST
+//                                      run before sweepUnemittedEvents
+//                                      because it CREATES new terminal rows
+//                                      that the event sweep then needs to
+//                                      pick up. Order matters.
+//
+//   3. sweepBrowserSessionsReportOnly — read-only by default (deletion is
+//                                      opt-in). Independent of the others.
+//
+//   4. sweepUnemittedEvents          — re-publishes iee-run-completed for
+//                                      any terminal row whose
+//                                      event_emitted_at is still NULL.
+//                                      Includes the rows just terminated by
+//                                      sweep #2. MUST run last so it sees
+//                                      the latest state.
+//
+// If you add a new sweep, place it at the position dictated by its data
+// dependencies, not its discovery order.
+// ─────────────────────────────────────────────────────────────────────────────
 async function runCleanup(): Promise<void> {
-  await sweepWorkspaceOrphans();
-  await sweepReservationLeaks();
-  await sweepBrowserSessionsReportOnly();
-  await sweepUnemittedEvents();
+  await sweepWorkspaceOrphans();      // 1
+  await sweepReservationLeaks();      // 2 — must precede sweep #4
+  await sweepBrowserSessionsReportOnly(); // 3
+  await sweepUnemittedEvents();       // 4 — must run last
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
