@@ -877,13 +877,41 @@ enqueueTick(runId): Promise<void>
 
 ### 6.4 `playbookTemplatingService`
 
-Pure functions, fully unit-tested.
+Pure functions, fully unit-tested. No DB access. No I/O.
 
 ```typescript
 resolve(expression: string, context: RunContext): unknown
 resolveStep(step: PlaybookStep, context: RunContext): ResolvedStep
 extractReferences(expression: string): TemplateReference[]
+canonicalise(value: unknown): string  // canonical JSON for hashing
+hashOutput(value: unknown): string    // SHA256 of canonical JSON
 ```
+
+### 6.5 `playbookCostEstimatorService`
+
+Used by the dry-run preview during mid-run editing and at run start.
+
+```typescript
+estimateRun(definition: PlaybookDefinition): { totalCents: number; perStep: Record<string, number> }
+estimateSubgraph(definition: PlaybookDefinition, fromStepIds: string[]): { totalCents: number; affectedSteps: string[] }
+```
+
+Estimates use the existing `llmPricing` table and per-step `model` overrides. Token estimates are coarse — based on prompt length × historical output ratios. Accuracy ±50% is acceptable; the value is in giving the user an order-of-magnitude warning, not a precise quote.
+
+### 6.6 Service error catalogue
+
+All services throw via `failure()`. The new failure reasons added to `FailureReason` enum:
+
+| Reason | Detail examples |
+|--------|-----------------|
+| `playbook_dag_invalid` | `cycle_detected`, `unresolved_dep`, `orphan_step`, `template_ref_invalid` |
+| `playbook_template_drift` | `version_validation_failed`, `agent_slug_missing` |
+| `playbook_input_invalid` | `initial_input_schema_violation`, `step_form_schema_violation` |
+| `playbook_irreversible_blocked` | `mid_run_edit_irreversible`, `mid_run_edit_reversible_unconfirmed` |
+| `playbook_schema_violation` | `output_parse_failed`, `output_validation_failed` |
+| `playbook_cost_exceeded` | `pre_flight_ceiling`, `mid_run_edit_estimate_exceeds_budget` |
+| `playbook_step_timeout` | `prompt_timeout`, `agent_call_timeout` |
+| `playbook_cancelled` | `user_cancelled`, `parent_run_cancelled` |
 
 ## 7. Routes
 
@@ -921,6 +949,7 @@ System templates are read-only via API. Authoring is file-based (see §9).
 | POST | `/api/playbook-runs/:runId/steps/:stepRunId/input` | `playbook_runs.start` | Submit user_input form |
 | POST | `/api/playbook-runs/:runId/steps/:stepRunId/output` | `playbook_runs.edit_output` | Edit completed step output |
 | POST | `/api/playbook-runs/:runId/steps/:stepRunId/approve` | `playbook_runs.approve` | Approval decision |
+| GET | `/api/playbook-inbox` | `playbook_runs.read` | Cross-subaccount list of step runs awaiting current user's input or approval |
 
 ### 7.4 Request/response shapes (key endpoints)
 
@@ -952,14 +981,103 @@ System templates are read-only via API. Authoring is file-based (see §9).
       "type": "user_input",
       "status": "completed",
       "dependsOn": [],
+      "sideEffectType": "none",
       "input": { /* resolved */ },
       "output": { /* validated */ },
+      "outputHash": "sha256...",
+      "attempt": 1,
       "startedAt": "...",
       "completedAt": "..."
     }
   ],
   "definition": { /* full PlaybookDefinition for client rendering */ }
 }
+```
+
+**`POST /api/playbook-runs/:runId/steps/:stepRunId/output`** — mid-run edit. The most safety-critical endpoint in the system.
+
+```jsonc
+// request
+{
+  "output": { /* must conform to step's outputSchema */ },
+  "confirmReversible": ["step_id_1", "step_id_2"],     // optional explicit opt-in
+  "confirmIrreversible": ["step_id_3"],                 // optional explicit opt-in
+  "skipAndReuse": ["step_id_4"]                         // copy previous output forward instead of re-running
+}
+// response 200 — change accepted, downstream invalidated as requested
+{
+  "ok": true,
+  "invalidatedStepIds": ["..."],
+  "skippedStepIds": ["..."],
+  "estimatedCostCents": 4200
+}
+// response 409 — needs confirmation
+{
+  "error": "playbook_irreversible_blocked",
+  "detail": "mid_run_edit_irreversible",
+  "affected": [
+    {
+      "stepId": "publish_landing_page",
+      "name": "Publish landing page to CMS",
+      "sideEffectType": "irreversible",
+      "estimatedCostCents": 50,
+      "previousOutput": { /* what's already there */ }
+    }
+  ],
+  "totalEstimatedCostCents": 4250
+}
+// response 422 — output failed schema validation
+{ "error": "playbook_schema_violation", "issues": [ /* zod issues */ ] }
+```
+
+**`POST /api/playbook-runs/:runId/steps/:stepRunId/approve`**
+
+```jsonc
+// request
+{
+  "decision": "approved" | "rejected" | "edited",
+  "editedOutput": { /* required if decision === 'edited' */ },
+  "comment": "optional"
+}
+// response 200
+{ "ok": true, "stepRunStatus": "completed" | "failed" }
+```
+
+**`POST /api/playbook-runs/:runId/steps/:stepRunId/input`**
+
+```jsonc
+// request — for user_input steps
+{ "data": { /* must match step's formSchema */ } }
+// response 200
+{ "ok": true }
+```
+
+**`POST /api/playbook-runs/:runId/cancel`**
+
+```jsonc
+// request — empty body
+// response 200 — run transitions to 'cancelling', then 'cancelled' once in-flight steps stop
+{ "ok": true, "status": "cancelling" }
+```
+
+**`POST /api/playbook-templates/fork-system`**
+
+```jsonc
+// request
+{ "systemTemplateSlug": "event-creation" }
+// response 201
+{ "id": "uuid", "version": 1, "forkedFromVersion": 3 }
+```
+
+**`POST /api/playbook-templates/:id/publish`**
+
+```jsonc
+// request
+{ "definition": { /* full PlaybookDefinition */ } }
+// response 201
+{ "version": 4 }
+// response 422
+{ "error": "playbook_dag_invalid", "issues": [ /* ValidationError[] */ ] }
 ```
 
 ## 8. Permissions & Real-Time Events
