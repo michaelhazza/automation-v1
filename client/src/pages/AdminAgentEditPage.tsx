@@ -255,12 +255,15 @@ function HeartbeatTimeline({ agentName, intervalHours, offsetHours, offsetMinute
   );
 }
 
-function SectionCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function SectionCard({ title, subtitle, headerAction, children }: { title: string; subtitle?: string; headerAction?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="m-0 text-[15px] font-semibold text-slate-900">{title}</h2>
-        {subtitle && <p className="m-0 mt-1 text-xs text-slate-500">{subtitle}</p>}
+      <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="m-0 text-[15px] font-semibold text-slate-900">{title}</h2>
+          {subtitle && <p className="m-0 mt-1 text-xs text-slate-500">{subtitle}</p>}
+        </div>
+        {headerAction && <div className="shrink-0">{headerAction}</div>}
       </div>
       <div className="p-5">
         {children}
@@ -297,7 +300,8 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
   const [saveError, setSaveError] = useState('');
 
   // Tab
-  const [agentTab, setAgentTab] = useState<'config' | 'runs' | 'budget' | 'prompt-history'>('config');
+  const [agentTab, setAgentTab] = useState<'config' | 'behaviour' | 'capabilities' | 'scheduling' | 'runs' | 'budget'>('config');
+  const [showPromptHistory, setShowPromptHistory] = useState(false);
 
   // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
@@ -959,7 +963,14 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Tab bar ────────────────────────────────────────────────────── */}
       {!isNew && (
         <div className="flex gap-0 border-b border-slate-200 mt-5 mb-6">
-          {(['config', 'runs', 'budget', 'prompt-history'] as const).map(t => (
+          {([
+            ['config', 'Configuration'],
+            ['behaviour', 'Behaviour'],
+            ['capabilities', 'Capabilities'],
+            ['scheduling', 'Scheduling'],
+            ['runs', 'Runs'],
+            ['budget', 'Budget'],
+          ] as const).map(([t, label]) => (
             <button
               key={t}
               onClick={() => setAgentTab(t)}
@@ -969,7 +980,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
                   : 'text-slate-500 border-transparent hover:text-slate-800'
               }`}
             >
-              {t === 'config' ? 'Configuration' : t === 'runs' ? 'Runs' : t === 'budget' ? 'Budget' : 'Prompt History'}
+              {label}
             </button>
           ))}
         </div>
@@ -990,7 +1001,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </div>
       )}
 
-      {/* ── Section 1: Basic Info ── */}
+      {/* ── Section 1: Basic Info (incl. Hierarchy) ── */}
       <SectionCard title="Basic Info">
         <div className="grid grid-cols-2 gap-4">
           {/* Icon picker */}
@@ -1035,12 +1046,48 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               />
             </Field>
           </div>
+          {/* Hierarchy fields — small, identity-related, folded in here */}
+          {!isNew && <>
+            <Field label="Reports to" hint="Position this agent in your organisation's agent hierarchy.">
+              <select
+                value={form.parentAgentId}
+                onChange={(e) => setForm({ ...form, parentAgentId: e.target.value })}
+                className={inputCls}
+              >
+                <option value="">None (root agent)</option>
+                {allOrgAgents
+                  .filter((a) => a.id !== id)
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+              </select>
+            </Field>
+            <Field label="Title">
+              <input
+                value={form.agentTitle}
+                onChange={(e) => setForm({ ...form, agentTitle: e.target.value })}
+                className={inputCls}
+                placeholder="e.g. Head of Research"
+              />
+            </Field>
+          </>}
         </div>
       </SectionCard>
 
       {/* ── Section 2: Agent Prompt ── */}
       {agent?.isSystemManaged ? (
-        <SectionCard title="Agent Prompt">
+        <SectionCard
+          title="Agent Prompt"
+          headerAction={!isNew && id ? (
+            <button
+              type="button"
+              onClick={() => setShowPromptHistory(true)}
+              className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-[12px] font-medium cursor-pointer transition-colors [font-family:inherit]"
+            >
+              View History
+            </button>
+          ) : undefined}
+        >
           <div className="px-4 py-3 bg-violet-50 border border-violet-200 rounded-lg mb-4 text-[13px] text-violet-800">
             This agent&apos;s core system prompt is managed at the platform level and cannot be edited here.
             You can add additional instructions below that will be layered on top of the system prompt.
@@ -1059,7 +1106,18 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
           </Field>
         </SectionCard>
       ) : (
-        <SectionCard title="Agent Prompt">
+        <SectionCard
+          title="Agent Prompt"
+          headerAction={!isNew && id ? (
+            <button
+              type="button"
+              onClick={() => setShowPromptHistory(true)}
+              className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-[12px] font-medium cursor-pointer transition-colors [font-family:inherit]"
+            >
+              View History
+            </button>
+          ) : undefined}
+        >
           <Field
             label="System Prompt"
             hint="Define this agent's persona, role, and instructions. This is sent to the AI as the system instruction for every conversation."
@@ -1075,36 +1133,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         </SectionCard>
       )}
 
-      {/* ── Hierarchy ── */}
-      {!isNew && <SectionCard title="Hierarchy" subtitle="Position this agent in your organisation's agent hierarchy.">
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Reports to">
-            <select
-              value={form.parentAgentId}
-              onChange={(e) => setForm({ ...form, parentAgentId: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">None (root agent)</option>
-              {allOrgAgents
-                .filter((a) => a.id !== id)
-                .map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-            </select>
-          </Field>
-          <Field label="Title">
-            <input
-              value={form.agentTitle}
-              onChange={(e) => setForm({ ...form, agentTitle: e.target.value })}
-              className={inputCls}
-              placeholder="e.g. Head of Research"
-            />
-          </Field>
-        </div>
-      </SectionCard>}
+      </> /* end Configuration tab */}
 
-      {/* ── Section 3: Model Configuration ── */}
-      {!isNew && <SectionCard title="Model Configuration">
+      {/* ── Behaviour tab ───────────────────────────────────────────────── */}
+      {!isNew && agentTab === 'behaviour' && <>
+      {/* ── Section: Model Configuration ── */}
+      <SectionCard title="Model Configuration">
         <div className="grid grid-cols-2 gap-4">
           <Field label="Model Provider">
             <select
@@ -1169,10 +1203,13 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
               : 'Model settings are locked — sub-accounts cannot change them'}
           </span>
         </div>
-      </SectionCard>}
+      </SectionCard>
+      </> /* end Behaviour tab */}
 
-      {/* ── Section 4: Skills ── */}
-      {!isNew && <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
+      {/* ── Capabilities tab ────────────────────────────────────────────── */}
+      {!isNew && agentTab === 'capabilities' && <>
+      {/* ── Section: Skills ── */}
+      <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
         <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
           <div>
             <h2 className="m-0 text-[15px] font-semibold text-slate-900 inline">Skills</h2>
@@ -1248,10 +1285,10 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </div>
           )}
         </div>
-      </div>}
+      </div>
 
-      {/* ── Section 5: Data Sources ── */}
-      {!isNew && deleteDsId && (
+      {/* ── Section: Data Sources ── */}
+      {deleteDsId && (
         <ConfirmDialog
           title="Delete data source"
           message="Are you sure you want to delete this data source? This action cannot be undone."
@@ -1261,7 +1298,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
         />
       )}
 
-      {!isNew && <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden mb-5">
+      <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden mb-5">
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
           <div>
@@ -1437,13 +1474,18 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             </tbody>
           </table>
         )}
-      </div>}
+      </div>
+      </> /* end Capabilities tab */}
 
-      {/* ── Section 6: Heartbeat ── */}
-      {!isNew && <SectionCard title="Heartbeat">
+      {/* ── Scheduling tab ──────────────────────────────────────────────── */}
+      {!isNew && agentTab === 'scheduling' && <>
+      {/* ── Section: Schedule & Concurrency (combined) ── */}
+      <SectionCard
+        title="Schedule & Concurrency"
+        subtitle="When the agent runs, how often, and how overlapping or missed runs are handled. The schedule runs in the company's timezone."
+      >
         <p className="m-0 mb-[18px] text-[13.5px] text-slate-500 leading-relaxed">
           Heartbeats keep your agent active — it wakes up on a schedule, checks its tasks, and acts autonomously.
-          The schedule runs in the company's timezone.
         </p>
 
         {/* Enable toggle */}
@@ -1520,10 +1562,12 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             )}
           </div>
         )}
-      </SectionCard>}
 
-      {/* ── Section 7: Concurrency Policies ── */}
-      {!isNew && <SectionCard title="Concurrency Policies" subtitle="Control how overlapping and missed runs are handled.">
+        {/* Divider before concurrency controls */}
+        <div className="border-t border-slate-100 my-6" />
+        <div className="text-[13px] font-semibold text-slate-700 mb-1">Concurrency</div>
+        <div className="text-xs text-slate-500 mb-4">Control how overlapping and missed runs are handled.</div>
+
         <div className="flex flex-wrap gap-5">
           {/* Concurrency Policy */}
           <div className="min-w-[220px]">
@@ -1591,27 +1635,27 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
             <div className="text-xs text-slate-400 mt-1">How many runs can execute simultaneously (1–10).</div>
           </div>
         </div>
-      </SectionCard>}
+      </SectionCard>
+      </> /* end Scheduling tab */}
 
-      {/* Save button */}
-      <div className="flex gap-3 mb-7">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className={`px-6 py-2.5 text-white border-none rounded-lg text-[14px] font-semibold transition-colors ${saving ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-500 cursor-pointer'}`}
-        >
-          {saving
-            ? (isNew ? 'Creating...' : 'Saving...')
-            : (isNew ? 'Create Agent' : 'Save Changes')}
-        </button>
-        <button
-          onClick={() => navigate('/admin/agents')}
-          className="px-5 py-2.5 bg-slate-100 text-gray-700 border-none rounded-lg text-[14px] cursor-pointer"
-        >
-          Cancel
-        </button>
-      </div>
-      </> /* end config tab */}
+      {/* For new agents, show a Create button under the form (no tabs) */}
+      {isNew && (
+        <div className="flex gap-3 mb-7">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className={`px-6 py-2.5 text-white border-none rounded-lg text-[14px] font-semibold transition-colors ${saving ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-500 cursor-pointer'}`}
+          >
+            {saving ? 'Creating...' : 'Create Agent'}
+          </button>
+          <button
+            onClick={() => navigate('/admin/agents')}
+            className="px-5 py-2.5 bg-slate-100 text-gray-700 border-none rounded-lg text-[14px] cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* ── Runs tab ────────────────────────────────────────────────────── */}
       {!isNew && agentTab === 'runs' && id && <AgentRunsTab agentId={id} />}
@@ -1619,8 +1663,14 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Budget tab ──────────────────────────────────────────────────── */}
       {!isNew && agentTab === 'budget' && id && <AgentBudgetTab agentId={id} />}
 
-      {/* ── Prompt History tab ─────────────────────────────────────────── */}
-      {!isNew && agentTab === 'prompt-history' && id && <PromptHistoryTab agentId={id} onRollback={() => loadAgent(id)} />}
+      {/* ── Prompt history dialog (opened from the Agent Prompt section) ── */}
+      {!isNew && id && showPromptHistory && (
+        <PromptHistoryDialog
+          agentId={id}
+          onClose={() => setShowPromptHistory(false)}
+          onRollback={() => loadAgent(id)}
+        />
+      )}
 
     </>
   );
@@ -2083,6 +2133,36 @@ interface PromptRevision {
   changeDescription: string | null;
   changedBy: string | null;
   createdAt: string;
+}
+
+// Modal wrapper around PromptHistoryTab — opened from the Agent Prompt section.
+function PromptHistoryDialog({ agentId, onClose, onRollback }: { agentId: string; onClose: () => void; onRollback: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-6"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-[900px] max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <h2 className="m-0 text-[15px] font-semibold text-slate-900">Prompt History</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 border-0 bg-transparent cursor-pointer text-[18px] leading-none"
+          >
+            ×
+          </button>
+        </div>
+        <div className="p-5 overflow-auto">
+          <PromptHistoryTab agentId={agentId} onRollback={onRollback} />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PromptHistoryTab({ agentId, onRollback }: { agentId: string; onRollback: () => void }) {

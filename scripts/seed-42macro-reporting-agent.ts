@@ -45,7 +45,9 @@ import { integrationConnections } from '../server/db/schema/integrationConnectio
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
 
+const ORG_NAME = 'Breakout Solutions';
 const ORG_SLUG = 'breakout-solutions';
+const SUBACCOUNT_NAME = 'Breakout Solutions';
 const SUBACCOUNT_SLUG = '42macro-tracking';
 const AGENT_SLUG = 'reporting-agent';
 const ANALYSIS_SKILL_SLUG = 'analyse_42macro_transcript';
@@ -108,10 +110,41 @@ message body.
 Not financial advice — you explain and translate; you do not give personalised financial
 advice.`;
 
+// The skill description carries the FULL recipe for using this lens, including
+// which fetch skill to call upstream and what params to pass. The agent prompt
+// stays generic; each lens skill is self-describing. When a new domain lens
+// (analyse_yc_essay, analyse_fed_minutes, etc.) is added, drop its recipe in
+// the same way and the agent will pick it up automatically — no edits to the
+// agent's masterPrompt required.
+const ANALYSIS_SKILL_DESCRIPTION = `Convert a 42 Macro video transcript (or 42 Macro written research note) into a three-tier markdown analysis (Dashboard / Executive Summary / Full Analysis) using the 42 Macro GRID / Dr. Mo / KISS portfolio framework. Plain-language only.
+
+USE THIS LENS WHEN: the source is anything from 42macro.com or app.42macro.com (weekly videos, research notes, members-area uploads). Do not use it for non-42-Macro macro content; produce a generic summary instead.
+
+UPSTREAM RECIPE — how to acquire and convert the source before calling this skill:
+
+  1. fetch_paywalled_content
+       webLoginConnectionId:   the "42 Macro paywall login" web_login connection on this subaccount
+       contentUrl:             the 42 Macro page for the latest video (e.g. https://app.42macro.com/video/around_the_horn_weekly)
+       intent:                 "download_latest"
+       allowedDomains:         ["42macro.com", "app.42macro.com"]
+       expectedArtifactKind:   "video"
+       expectedMimeTypePrefix: "video/"
+       captureMode:            "capture_video"   ← 42 Macro has NO download button. The worker snoops the page network for the actual mp4/m3u8 the player loads and refetches it with the session cookies (HLS via ffmpeg).
+     If the call returns { noNewContent: true } the dedup fingerprint matched — emit \`done\` immediately, do NOT continue.
+
+  2. transcribe_audio
+       executionArtifactId:    the artifactId returned from step 1
+
+  3. analyse_42macro_transcript  ← THIS SKILL
+       transcript:             the transcript text from step 2
+       sourceTitle:            the video title (best guess from the page)
+       sourceDate:             today's date in YYYY-MM-DD
+
+  4. publish via send_to_slack / send_email / add_deliverable as instructed.`;
+
 const ANALYSIS_SKILL_DEFINITION = {
   name: ANALYSIS_SKILL_SLUG,
-  description:
-    'Convert a 42 Macro video transcript (or written research note) into a three-tier markdown analysis (Dashboard, Executive Summary, Full Analysis) using the 42 Macro GRID/KISS/Dr. Mo framework. Plain-language only.',
+  description: ANALYSIS_SKILL_DESCRIPTION,
   input_schema: {
     type: 'object',
     properties: {
@@ -134,29 +167,31 @@ const ANALYSIS_SKILL_DEFINITION = {
 
 const AGENT_MASTER_PROMPT = `You are the Reporting Agent.
 
-Your job: turn an external source (a paywalled video, a public webpage, a research note,
-a transcript, etc.) into a clear written report and publish it to the right channel
-(Slack, email, deliverable, task). You are domain-agnostic by default, but you have
-specialised lenses (skills) you can apply when the source matches their topic — see the
-"Specialised analysis lenses" section below.
+Your job: turn an external source (a paywalled video, a public webpage, a research
+note, a transcript, etc.) into a clear written report and publish it to the right
+channel (Slack, email, deliverable, task). You are domain-agnostic. Specialised
+analysis lenses live in your skill list — when a lens matches the source, follow
+the recipe in that skill's description.
 
 GENERAL FLOW
 
 You are usually given a source and a destination. Pick the right skills for each step:
 
   1. ACQUIRE the source
-       - fetch_paywalled_content   → for sources behind a login (uses a stored
-                                     web_login connection; supports both download
+       - fetch_paywalled_content   → sources behind a login (uses a stored
+                                     web_login connection; supports download
                                      buttons and snoop-the-network video capture)
-       - fetch_url                 → for public webpages and direct file URLs
+       - fetch_url                 → public webpages and direct file URLs
        - web_search                → when you need to discover the source
 
   2. CONVERT to text
-       - transcribe_audio          → for audio or video artifacts (Whisper)
+       - transcribe_audio          → audio or video artifacts (Whisper)
        - the result of fetch_url   → already text for HTML pages
 
   3. ANALYSE
-       - Pick a specialised lens skill if the source matches its topic (see below).
+       - If a specialised analysis skill (a "lens") matches the source's topic,
+         use it. The lens skill's description tells you exactly which upstream
+         fetch params to use, what to pass in, and what it returns.
        - Otherwise produce a plain-language summary in your own words: a one-line
          dashboard, a three-paragraph executive summary, and a sectioned full
          analysis.
@@ -177,39 +212,10 @@ Hard rules:
     technical term in everyday English.
   - You explain and translate; you do not give personalised financial advice.
 
-SPECIALISED ANALYSIS LENSES
-
-  • analyse_42macro_transcript — for 42 Macro videos and research notes. Returns the
-    three-tier 42 Macro framework output (Dashboard / Executive Summary / Full
-    Analysis) using GRID regimes, Dr. Mo, KISS portfolio.
-
-(Add new lens skills here as the agent's reporting surface area grows.)
-
-EXAMPLE — 42 MACRO WEEKLY REPORT (current primary use case)
-
-  1. fetch_paywalled_content
-       webLoginConnectionId: <ID of the "42 Macro paywall login" integration>
-       contentUrl:           the latest video page on app.42macro.com
-       intent:               "download_latest"
-       allowedDomains:       ["42macro.com", "app.42macro.com"]
-       expectedArtifactKind: "video"
-       expectedMimeTypePrefix: "video/"
-       captureMode:          "capture_video"   ← 42 Macro has NO download button.
-                             The worker snoops the page network for the actual
-                             mp4/m3u8 the player loads and refetches it with the
-                             session cookies (HLS via ffmpeg).
-
-  2. transcribe_audio
-       executionArtifactId:  the artifactId from step 1
-
-  3. analyse_42macro_transcript
-       transcript:           the transcript text from step 2
-       sourceTitle:          the video title (best guess from the page)
-       sourceDate:           today's date in YYYY-MM-DD
-
-  4. send_to_slack
-       message:              the rendered markdown body from step 3
-       filename:             the YYYYMMDD_Report_Name.md filename from step 3
+When a specialised analysis lens is available for the current source, prefer it
+over a generic summary — the lens carries domain expertise and a structured output
+format. Read the skill description before invoking it; the description includes
+the upstream fetch recipe needed to produce the right input.
 
 Emit \`done\` once the publish step returns a permalink / message id / deliverable id.`;
 
@@ -228,16 +234,27 @@ async function seed() {
   console.log('▸ Seeding 42 Macro Reporting Agent (Breakout Solutions)…\n');
 
   // ── 1. Organisation ────────────────────────────────────────────────────
-  const existingOrgs = await db
+  // Look up by slug first, then fall back to name. This handles the case
+  // where an org was created via the UI (or an older seed run) with a
+  // different slug — we reuse it instead of erroring on a unique-name
+  // collision or creating a duplicate.
+  let existingOrgs = await db
     .select()
     .from(organisations)
     .where(eq(organisations.slug, ORG_SLUG))
     .limit(1);
+  if (existingOrgs.length === 0) {
+    existingOrgs = await db
+      .select()
+      .from(organisations)
+      .where(eq(organisations.name, ORG_NAME))
+      .limit(1);
+  }
   const org = await upsertRow(existingOrgs, async () => {
     const [row] = await db
       .insert(organisations)
       .values({
-        name: 'Breakout Solutions',
+        name: ORG_NAME,
         slug: ORG_SLUG,
         plan: 'agency',
         status: 'active',
@@ -248,17 +265,27 @@ async function seed() {
   console.log(`  org              ${org.id} ${org.slug}`);
 
   // ── 2. Subaccount ──────────────────────────────────────────────────────
-  const existingSubs = await db
+  // Same fallback pattern: slug → name within the same org. The UI may have
+  // already created this subaccount under a different slug; reuse it rather
+  // than erroring or creating a duplicate.
+  let existingSubs = await db
     .select()
     .from(subaccounts)
     .where(and(eq(subaccounts.organisationId, org.id), eq(subaccounts.slug, SUBACCOUNT_SLUG)))
     .limit(1);
+  if (existingSubs.length === 0) {
+    existingSubs = await db
+      .select()
+      .from(subaccounts)
+      .where(and(eq(subaccounts.organisationId, org.id), eq(subaccounts.name, SUBACCOUNT_NAME)))
+      .limit(1);
+  }
   const subaccount = await upsertRow(existingSubs, async () => {
     const [row] = await db
       .insert(subaccounts)
       .values({
         organisationId: org.id,
-        name: '42 Macro Tracking',
+        name: SUBACCOUNT_NAME,
         slug: SUBACCOUNT_SLUG,
         status: 'active',
       })
