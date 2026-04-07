@@ -14,6 +14,9 @@
     "migrate:drizzle-legacy": "drizzle-kit migrate",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
+    "playbooks:validate": "tsx scripts/validate-playbooks.ts",
+    "playbooks:seed": "tsx scripts/seed-playbooks.ts",
+    "playbooks:test": "tsx server/lib/playbook/__tests__/playbook.test.ts",
     "test": "npm run test:gates && npm run test:qa",
     "test:gates": "bash scripts/run-all-gates.sh",
     "test:qa": "bash scripts/run-all-qa-tests.sh"
