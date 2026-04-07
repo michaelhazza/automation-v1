@@ -17,10 +17,36 @@ export const FailureReason = z.enum([
   'environment_error',
   'auth_failure',
   'budget_exceeded',
+  // Reporting Agent / paywall workflow additions (spec v3.4 §8.4)
+  // Aligned with the unified failure taxonomy. Existing values retained for
+  // backwards compatibility; new values cover cases the original enum did not.
+  'connector_timeout',  // external system did not respond within timeout
+  'rate_limited',       // external system returned 429 / equivalent
+  'data_incomplete',    // expected data missing or malformed (e.g. transcript too short)
+  'internal_error',     // bug or unexpected condition in our own code
   'unknown',
 ]);
 
 export type FailureReason = z.infer<typeof FailureReason>;
+
+/**
+ * Structured failure object — the ONLY shape that should be persisted to
+ * agent_runs / execution_runs / execution_steps as a failure. The
+ * `failure()` helper in shared/iee/failure.ts is the single emit point;
+ * inline `{ failureReason: ... }` literals are banned by lint rule and zod
+ * validation at the persistence boundary (spec v3.4 §8.4 / T13).
+ */
+export interface FailureObject {
+  failureReason: FailureReason;
+  failureDetail: string;
+  metadata?: Record<string, unknown>;
+}
+
+export const FailureObjectSchema = z.object({
+  failureReason: FailureReason,
+  failureDetail: z.string().min(1).max(200),
+  metadata: z.record(z.unknown()).optional(),
+});
 
 /**
  * Typed errors thrown by worker code. The classifier in
