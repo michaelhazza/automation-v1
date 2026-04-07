@@ -23,7 +23,12 @@
     "../server/services/pricingService.ts",
     "../server/services/llmResolver.ts",
     "../server/lib/**/*",
-    "../server/config/**/*"
+    "../server/config/**/*",
+    "../server/instrumentation.ts",
+    "../server/middleware/correlation.ts",
+    "../server/types/workflow.ts",
+    "../server/services/routerJobService.ts",
+    "../server/services/costAggregateService.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

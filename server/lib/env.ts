@@ -42,7 +42,6 @@ const envSchema = z.object({
   // Example: https://app.youragency.com
   APP_BASE_URL: z.string().optional().default('http://localhost:5173'),
   // Webhook adapter
-  WEBHOOK_BASE_URL: z.string().optional(),
   WEBHOOK_CALLBACK_SECRET: z.string().optional(),
   // AI Agent / LLM configuration
   ANTHROPIC_API_KEY: z.string().optional(),

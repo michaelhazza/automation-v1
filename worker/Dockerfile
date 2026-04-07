@@ -32,7 +32,16 @@ COPY server/services/llmRouter.ts ./server/services/llmRouter.ts
 COPY server/services/llmResolver.ts ./server/services/llmResolver.ts
 COPY server/services/budgetService.ts ./server/services/budgetService.ts
 COPY server/services/pricingService.ts ./server/services/pricingService.ts
+COPY server/services/routerJobService.ts ./server/services/routerJobService.ts
+COPY server/services/costAggregateService.ts ./server/services/costAggregateService.ts
 COPY server/services/providers ./server/services/providers
+# Transitive deps required by the bundled server cone (see worker/tsconfig.json):
+#   instrumentation.ts        — imported by server/lib/tracing.ts
+#   middleware/correlation.ts — declares the Express Request.correlationId augmentation used by asyncHandler
+#   types/workflow.ts         — imported by server/db/schema/workflowRuns.ts
+COPY server/instrumentation.ts ./server/instrumentation.ts
+COPY server/middleware ./server/middleware
+COPY server/types ./server/types
 COPY worker/tsconfig.json ./worker/
 COPY worker/src ./worker/src
 
