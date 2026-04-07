@@ -2,17 +2,24 @@
 # AutomationOS — local development Docker Compose
 # Spec: docs/iee-development-spec.md §12, tasks/windows-iee-setup-guide.md
 #
-# Three services run locally:
-#   • postgres  — local Postgres + pg-boss (mirrors Neon in production)
+# Two services run locally:
 #   • app       — main AutomationOS server (mirrors Replit in production)
 #   • worker    — IEE worker (mirrors DigitalOcean VPS in production)
 #
-# The worker is the ONLY component that runs on the production VPS. Locally
-# we run all three so the full execution loop can be exercised end-to-end
-# against a single Postgres instance, exactly as it will work in production.
+# Postgres is NOT in compose. Both services connect to the native Windows
+# Postgres install via host.docker.internal. The worker is the only component
+# that runs on the production VPS; locally we run app + worker against a
+# single Postgres instance so the full execution loop can be exercised
+# end-to-end exactly as it will work in production.
 #
 # Note: top-level `version:` field omitted — deprecated in Docker Compose v2.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Explicit project name so the stack is `automation_os` regardless of which
+# directory the repo is checked out into. Without this, Compose derives the
+# project name from the parent folder (e.g. `automation-v1`), which causes
+# container/volume names to drift between machines.
+name: automation_os
 
 services:
 

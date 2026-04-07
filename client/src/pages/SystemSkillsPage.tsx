@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import VisibilitySegmentedControl, { type SkillVisibility } from '../components/VisibilitySegmentedControl';
 
 interface SystemSkill {
   id: string;
@@ -10,7 +11,7 @@ interface SystemSkill {
   slug: string;
   description: string | null;
   isActive: boolean;
-  isVisible: boolean;
+  visibility: SkillVisibility;
   methodology: string | null;
   instructions: string | null;
   createdAt: string;
@@ -22,7 +23,6 @@ export default function SystemSkillsPage({ user }: { user: User }) {
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Record<string, string>>({});
-  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -36,16 +36,17 @@ export default function SystemSkillsPage({ user }: { user: User }) {
 
   useEffect(() => { load(); }, []);
 
-  const handleToggleVisible = async (skill: SystemSkill) => {
-    setTogglingId(skill.id);
+  const handleVisibilityChange = async (skill: SystemSkill, next: SkillVisibility) => {
     try {
-      await api.patch(`/api/system/skills/${skill.id}`, { isVisible: !skill.isVisible });
-      setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, isVisible: !s.isVisible } : s));
+      await api.patch(`/api/system/skills/${skill.id}`, { visibility: next });
+      setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, visibility: next } : s));
+      setActionError(prev => {
+        const { [skill.id]: _, ...rest } = prev;
+        return rest;
+      });
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
       setActionError(prev => ({ ...prev, [skill.id]: e.response?.data?.error ?? 'Failed to update' }));
-    } finally {
-      setTogglingId(null);
     }
   };
 
@@ -114,7 +115,7 @@ export default function SystemSkillsPage({ user }: { user: User }) {
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Slug</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Methodology</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Active</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]" title="When on, this skill is visible to org and subaccount admins">Visible to Orgs</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]" title="Cascade visibility to org and subaccount admins. None = hidden. Basic = name + description only. Full = entire skill body.">Visibility</th>
                 <th className="px-4 py-3 text-right font-semibold text-slate-700 text-[13px]">Actions</th>
               </tr>
             </thead>
@@ -141,15 +142,10 @@ export default function SystemSkillsPage({ user }: { user: User }) {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      type="button"
-                      title={skill.isVisible ? 'Visible to org/subaccount admins — click to hide' : 'Hidden from org/subaccount admins — click to show'}
-                      disabled={togglingId === skill.id}
-                      onClick={() => handleToggleVisible(skill)}
-                      className={`relative w-10 h-[22px] rounded-full border-0 cursor-pointer transition-colors disabled:opacity-50 ${skill.isVisible ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                    >
-                      <div className={`absolute w-[16px] h-[16px] rounded-full bg-white top-[3px] transition-all shadow-sm ${skill.isVisible ? 'left-[21px]' : 'left-[3px]'}`} />
-                    </button>
+                    <VisibilitySegmentedControl
+                      value={skill.visibility}
+                      onChange={(next) => handleVisibilityChange(skill, next)}
+                    />
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex gap-2 justify-end items-center">

@@ -324,10 +324,21 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           {agent.status === 'active' ? 'Active' : agent.status}
         </span>
         <span className="text-[12px] text-slate-400 font-mono shrink-0">{agent.modelId}</span>
+        <Link
+          to={`/admin/agents/${agentId}`}
+          title="Manage agent — prompts, skills, schedule, integrations"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[12.5px] font-semibold no-underline transition-colors shrink-0"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          Manage
+        </Link>
         <button
           onClick={() => setSidebarVisible((v) => !v)}
           title={sidebarVisible ? 'Hide conversations' : 'Show conversations'}
-          className={`ml-auto flex items-center p-1.5 rounded-lg border cursor-pointer transition-colors shrink-0 ${sidebarVisible ? 'bg-violet-50 border-indigo-200 text-indigo-600' : 'bg-transparent border-slate-200 text-slate-400 hover:text-slate-600'}`}
+          className={`flex items-center p-1.5 rounded-lg border cursor-pointer transition-colors shrink-0 ${sidebarVisible ? 'bg-violet-50 border-indigo-200 text-indigo-600' : 'bg-transparent border-slate-200 text-slate-400 hover:text-slate-600'}`}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
@@ -337,6 +348,54 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
 
       {/* Body */}
       <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Conversations sidebar — left-hand pane (standard chat UI convention) */}
+        {sidebarVisible && (
+          <div className="w-[220px] shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-3.5 pt-3.5 pb-2.5 border-b border-slate-100 shrink-0">
+              <button
+                onClick={handleNewConversation}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12.5px] font-semibold border-0 cursor-pointer transition-colors"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New Conversation
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              {conversations.length === 0 ? (
+                <div className="px-2 py-4 text-[12.5px] text-slate-400 text-center">No conversations yet</div>
+              ) : (
+                conversations.map((conv) => {
+                  const isActive = conv.id === activeConvId;
+                  return (
+                    <div
+                      key={conv.id}
+                      onClick={() => setActiveConvId(conv.id)}
+                      className={`flex items-start gap-1.5 px-2.5 py-2 rounded-xl mb-0.5 cursor-pointer border transition-colors ${isActive ? 'bg-violet-50 border-indigo-200' : 'bg-transparent border-transparent hover:bg-slate-50'}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-[12.5px] truncate leading-snug mb-0.5 ${isActive ? 'font-bold text-indigo-700' : 'font-medium text-slate-700'}`}>
+                          {conv.title ?? 'New conversation'}
+                        </div>
+                        <div className="text-[10.5px] text-slate-400">{formatConvDate(conv.updatedAt ?? conv.createdAt)}</div>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteConversation(conv.id, e)}
+                        title="Delete conversation"
+                        className="bg-transparent border-0 cursor-pointer text-slate-300 hover:text-red-400 text-base leading-none px-0.5 shrink-0 mt-0.5 transition-colors"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Messages */}
@@ -440,53 +499,6 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           </div>
         </div>
 
-        {/* Conversations sidebar */}
-        {sidebarVisible && (
-          <div className="w-[220px] shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-3.5 pt-3.5 pb-2.5 border-b border-slate-100 shrink-0">
-              <button
-                onClick={handleNewConversation}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12.5px] font-semibold border-0 cursor-pointer transition-colors"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                New Conversation
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2">
-              {conversations.length === 0 ? (
-                <div className="px-2 py-4 text-[12.5px] text-slate-400 text-center">No conversations yet</div>
-              ) : (
-                conversations.map((conv) => {
-                  const isActive = conv.id === activeConvId;
-                  return (
-                    <div
-                      key={conv.id}
-                      onClick={() => setActiveConvId(conv.id)}
-                      className={`flex items-start gap-1.5 px-2.5 py-2 rounded-xl mb-0.5 cursor-pointer border transition-colors ${isActive ? 'bg-violet-50 border-indigo-200' : 'bg-transparent border-transparent hover:bg-slate-50'}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-[12.5px] truncate leading-snug mb-0.5 ${isActive ? 'font-bold text-indigo-700' : 'font-medium text-slate-700'}`}>
-                          {conv.title ?? 'New conversation'}
-                        </div>
-                        <div className="text-[10.5px] text-slate-400">{formatConvDate(conv.updatedAt ?? conv.createdAt)}</div>
-                      </div>
-                      <button
-                        onClick={(e) => handleDeleteConversation(conv.id, e)}
-                        title="Delete conversation"
-                        className="bg-transparent border-0 cursor-pointer text-slate-300 hover:text-red-400 text-base leading-none px-0.5 shrink-0 mt-0.5 transition-colors"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

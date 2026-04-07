@@ -2,7 +2,7 @@
 name: Send to Slack
 description: Posts a message to a Slack channel via the configured Slack integration. Supports text and optional file attachments. Channel defaults to the integration's configured default if not specified. Persists the report body to the deliverable BEFORE calling Slack so operators can manually re-send if Slack fails.
 isActive: true
-isVisible: false
+visibility: none
 ---
 
 ```json

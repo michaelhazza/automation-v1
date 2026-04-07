@@ -2,7 +2,7 @@
 name: Run Tests
 description: Execute the project test suite within the Dev Execution Context.
 isActive: true
-isVisible: true
+visibility: none
 ---
 
 ```json

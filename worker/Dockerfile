@@ -12,6 +12,14 @@ FROM mcr.microsoft.com/playwright:v1.59.1-jammy AS build
 
 WORKDIR /repo
 
+# ffmpeg — required by worker/src/browser/captureStreamingVideo.ts for the
+# HLS (m3u8) download path used by paywalled video sources that don't expose
+# a direct download button (e.g. 42 Macro). The Playwright base image is
+# Ubuntu jammy, so apt-get works directly.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
 # Copy package manifests first for layer caching
 COPY package.json package-lock.json* ./
 COPY worker/package.json ./worker/
@@ -34,6 +42,7 @@ COPY server/services/budgetService.ts ./server/services/budgetService.ts
 COPY server/services/pricingService.ts ./server/services/pricingService.ts
 COPY server/services/routerJobService.ts ./server/services/routerJobService.ts
 COPY server/services/costAggregateService.ts ./server/services/costAggregateService.ts
+COPY server/services/connectionTokenService.ts ./server/services/connectionTokenService.ts
 COPY server/services/providers ./server/services/providers
 # Transitive deps required by the bundled server cone (see worker/tsconfig.json):
 #   instrumentation.ts        — imported by server/lib/tracing.ts
