@@ -186,6 +186,7 @@ Append-only — no soft delete. Cancelled runs stay for audit.
 | `status` | enum | `pending`, `running`, `awaiting_input`, `awaiting_approval`, `completed`, `failed`, `skipped`, `invalidated` |
 | `depends_on` | text[] | Snapshot from definition for query convenience |
 | `input_json` | jsonb nullable | Resolved inputs (post-templating) |
+| `input_hash` | text nullable | SHA256 of canonical JSON of `input_json`. Powers retry deduplication ("same inputs produced this output before") and unlocks future cross-run dedup. |
 | `output_json` | jsonb nullable | Validated against step's outputSchema |
 | `output_hash` | text nullable | SHA256 of canonical JSON output; powers the firewall pattern in invalidation |
 | `output_inline_ref_id` | uuid nullable | Set when output exceeds `MAX_STEP_OUTPUT_BYTES` and was spilled via `inlineTextWriter` |
@@ -437,9 +438,19 @@ Every step declares an `outputSchema` (Zod). On step completion:
 
 The templating resolver detects `inline_ref` values transparently — when a downstream step references `{{ steps.research.output.summary }}`, the resolver hydrates the inline text into memory just-in-time and reads the path. **Hydration is per-step, not per-run** so peak memory stays bounded.
 
+**Per-step hydration cache.** A single step often references the same inline ref multiple times (e.g. five `{{ steps.research.output.* }}` expressions across `agentInputs` and `prompt`). The resolver maintains a `Map<inlineRefId, hydratedValue>` scoped to one step execution, hydrates each ref at most once, and clears the cache when the step completes (success or failure). Without this cache, an N-expression × M-ref step pays O(N × M) disk reads.
+
 **Per-step context projection (Phase 1.5 enhancement, deferred).** Today every dispatched step receives the full context. In 1.5 we'll add a per-step `contextProjection: string[]` field listing which step outputs the prompt actually needs, so the engine can pass a minimal subset to the LLM. The data path is in place from Phase 1; only the prompt construction changes.
 
 **Hash and dedup.** `output_hash` is computed on the canonical JSON of the **full output** (pre-spillover), so the firewall pattern still works: a re-execution that produces a byte-identical large output is caught and propagation stops without re-hydrating downstream.
+
+**Retention and GC.** Inline refs accumulate quickly across thousands of runs. A pg-boss cron job `playbook-inline-ref-gc` runs daily and deletes refs that meet **all** of:
+
+- Not referenced by any non-terminal `playbook_runs` row (active runs).
+- Not referenced by any `playbook_step_runs.output_inline_ref_id` belonging to a run completed within the retention window.
+- Older than `INLINE_REF_RETENTION_DAYS` (default 90, env-configurable).
+
+Replay runs hold a strong reference to their source run's inline refs via the cloned step rows, so GC respects them naturally. Audit-critical runs can be flagged `retainIndefinitely: true` on `playbook_runs` (Phase 1.5 enhancement; Phase 1 ships without the flag and the default 90-day window).
 
 ### 3.7 Per-step retry policy
 
@@ -463,7 +474,9 @@ Defaults per step type:
 | `approval` | n/a | n/a |
 | `conditional` | 1 | none — fails fast on evaluation error |
 
-A step that calls a non-idempotent external API should set `maxAttempts: 1` to disable retries. Schema parse retries (engine-level) are independent of `retryPolicy` and always run up to the parse-retry limit (default 2). All retries flow through `withBackoff`.
+A step that calls a non-idempotent external API should set `maxAttempts: 1` to disable retries. Schema parse retries (engine-level) are independent of `retryPolicy` and run up to the parse-retry limit (default 2) **except for `irreversible` steps**, which never retry.
+
+**Runtime backstop:** the engine refuses to dispatch any retry of an `irreversible` step regardless of policy — if validation somehow let one through (e.g. older template version pre-rule), the dispatcher fails with `failure('playbook_irreversible_blocked', 'retry_attempt_blocked', { stepId, attempt })`. Validator catches it at publish time; this is belt-and-braces.
 
 ### 3.8 Optional quality score on step outputs
 
@@ -635,6 +648,8 @@ Lives in `playbookTemplateService.validateDefinition()`. Runs on:
 9. **Output schema present.** All steps declare `outputSchema`.
 10. **Agent refs resolvable.** For `agent_call` steps, the referenced agent slug exists at validation time (warning, not error, since system agents may be added later).
 11. **Version monotonic.** On publish, new version > existing latest version.
+12. **Irreversible steps cannot retry.** If `sideEffectType === 'irreversible'`, then `retryPolicy?.maxAttempts` must be `1` or unset. Engine-level schema-parse retries are also disabled for irreversible steps (parse failure → fail immediately, no second LLM call). This is a hard rule — duplicate retries on irreversible operations are exactly the failure mode `sideEffectType` exists to prevent.
+13. **Max DAG depth.** The longest path from any entry step to any terminal step must be ≤ `MAX_DAG_DEPTH` (default 50). Prevents pathological AI-generated graphs and bounds worst-case run duration.
 
 ### 4.2 Validator output
 
@@ -645,7 +660,8 @@ export interface ValidationError {
   rule: 'unique_id' | 'kebab_case' | 'unresolved_dep' | 'cycle' | 'orphan'
       | 'missing_entry' | 'unresolved_template_ref' | 'transitive_dep'
       | 'missing_field' | 'missing_output_schema' | 'agent_not_found'
-      | 'missing_side_effect_type' | 'version_not_monotonic';
+      | 'missing_side_effect_type' | 'version_not_monotonic'
+      | 'irreversible_with_retries' | 'max_dag_depth_exceeded';
   stepId?: string;
   path?: string;       // for cycle: comma-joined cycle path
   message: string;
@@ -758,8 +774,10 @@ function tick(runId):
   if ready.empty:
     if stepRuns.every(s => s.status in [completed, skipped]):
       markRunCompleted(runId)
-    elif stepRuns.any(s => s.status === 'failed') and noAlternatePath(definition, stepRuns):
+    elif anyFailedBlocksAllTerminalPaths(definition, stepRuns):
       markRunFailed(runId)
+    elif stepRuns.any(s => s.status === 'failed' and step.failurePolicy === 'continue'):
+      markRunCompletedWithErrors(runId)
     elif stepRuns.any(s => s.status in [awaiting_input, awaiting_approval, running]):
       updateRunStatus(runId, computeAggregateStatus(stepRuns))
     return
@@ -832,6 +850,33 @@ function dispatch(step, stepRun, run):
       enqueueTick(run.id)
 ```
 
+### 5.2.1 Failure propagation: terminal-path reachability
+
+`anyFailedBlocksAllTerminalPaths` is a graph reachability check, not a local sibling-check. The rule:
+
+> **A run is `failed` if and only if there exists at least one step with status `failed` and `failurePolicy: 'fail_run'` such that every terminal step in the DAG is reachable only via that failed step.**
+
+A "terminal step" is a step with no descendants (nothing has it in `dependsOn`). Algorithm:
+
+```
+function anyFailedBlocksAllTerminalPaths(definition, stepRuns):
+  failedFailRunIds = stepRuns where status='failed' and step.failurePolicy='fail_run'
+  if failedFailRunIds.empty: return false
+
+  terminalSteps = definition.steps where no other step depends on it
+  for terminal in terminalSteps:
+    paths = allPathsFromEntryToTerminal(definition, terminal)
+    // 'reachable' means at least one path doesn't pass through any failed-fail_run step
+    reachable = paths.any(path => path.intersect(failedFailRunIds).empty)
+    if reachable: return false   // at least one terminal still reachable
+
+  return true   // every terminal is blocked by a failed step
+```
+
+This handles the diamond/branch case correctly: if one branch fails with `continue` policy and another branch reaches a terminal, the run finishes `completed_with_errors`. If a `fail_run` step lies on the only path to every terminal, the run fails.
+
+For DAGs with thousands of steps the path enumeration would be expensive, so the implementation uses BFS from the failed step's descendants instead: a terminal is "blocked by failure F" iff every path from any entry step to that terminal passes through F. This is checked via dominator-tree intersection in O(V+E). The simpler enumeration above is the spec's reference behaviour.
+
 ### 5.3 Step completion handlers
 
 - **`onAgentRunCompleted(agentRunId)`** — webhook fired by agent run service. Looks up `playbook_step_runs.agent_run_id`, validates output against schema, merges to context, marks step `completed` (or `awaiting_approval` if `humanReviewRequired`), enqueues a tick.
@@ -877,8 +922,10 @@ The `invalidated` rows stay in the DB for audit — they're never deleted.
 
 - pg-boss tick jobs are idempotent — running `tick(runId)` twice is a no-op if no state changed.
 - Step-level agent runs use idempotency key `playbook:{runId}:{stepId}:{attempt}`. Retry increments `attempt`.
-- Engine retries transient errors (network, rate limits) up to 3 times with exponential backoff. Permanent errors (schema mismatch after max parse retries) fail immediately.
-- TripWire errors from skill executors propagate up — engine retries the step.
+- Engine retries transient errors (network, rate limits) up to 3 times with exponential backoff via `withBackoff`. Permanent errors (schema mismatch after max parse retries) fail immediately.
+- **Irreversible steps never retry** — see §3.7 runtime backstop and §4.1 rule 12.
+- TripWire errors from skill executors propagate up — engine retries the step (subject to the irreversible exclusion).
+- **Input fingerprint dedup.** Each step run records `input_hash`. On retry, if a previous attempt of the same `(run_id, step_id)` had identical `input_hash` AND `output_json` is present, the engine **may** reuse the previous output instead of re-dispatching (controlled by `dedupOnIdenticalInput`, default false in Phase 1, opt-in per step type). Phase 1 ships the column and the hash; the dedup behaviour ships in 1.5 once we have telemetry on how often it would actually fire.
 
 ### 5.6 Concurrency control (defense in depth)
 
@@ -958,6 +1005,22 @@ When set:
 - WebSocket events still fire so the UI can play back the run timeline.
 
 Replay mode is created via `POST /api/playbook-runs/:runId/replay` which clones the source run's metadata and step outputs into a fresh `playbook_runs` row with `replay_mode = true`. The original run is untouched.
+
+**Replay marker on every output.** Step outputs in a replay run carry a `_meta` envelope alongside the schema-validated payload:
+
+```jsonc
+{
+  "output": { /* original payload */ },
+  "_meta": {
+    "isReplay": true,
+    "replaySourceRunId": "uuid",
+    "replayedAt": "iso8601",
+    "sourceStepRunId": "uuid"
+  }
+}
+```
+
+This makes replay outputs **structurally distinguishable** from real ones at every consumer boundary. Downstream systems that integrate with playbook outputs (webhooks, UI, audit exports) can detect replay context and refuse to act on it ("non-production-valid"). The UI surfaces a persistent banner across the run detail page when `replay_mode = true`. **External system drift** (e.g. CMS schema changed since the original run) is therefore the consumer's responsibility to detect — replay only guarantees engine determinism, not external compatibility.
 
 Use cases: reproducing a customer-reported issue without re-incurring side effects, demoing a workflow without burning credits, validating a refactor of a downstream consumer service against historical run shapes.
 
@@ -1190,16 +1253,23 @@ System templates are read-only via API. Authoring is file-based (see §9).
 
 **`POST /api/playbook-runs/:runId/steps/:stepRunId/approve`**
 
+Both this endpoint and the mid-run edit endpoint accept an optimistic-concurrency `expectedVersion` taken from the step run row at UI load. If the row's `version` advanced in the meantime (e.g. an upstream edit invalidated this step or another reviewer acted first), the request is rejected with **409 Conflict** and the client must refetch the run before retrying.
+
 ```jsonc
 // request
 {
   "decision": "approved" | "rejected" | "edited",
   "editedOutput": { /* required if decision === 'edited' */ },
-  "comment": "optional"
+  "comment": "optional",
+  "expectedVersion": 3
 }
 // response 200
-{ "ok": true, "stepRunStatus": "completed" | "failed" }
+{ "ok": true, "stepRunStatus": "completed" | "failed", "newVersion": 4 }
+// response 409 — stale UI
+{ "error": "playbook_stale_version", "currentVersion": 5, "expectedVersion": 3 }
 ```
+
+The same `expectedVersion` field applies to `POST .../steps/:stepRunId/output` (mid-run edit) and `POST .../steps/:stepRunId/input` (user input submit). All three endpoints share the same stale-version semantics so a user editing or approving a step that has been invalidated by an upstream change can never overwrite the new pending row.
 
 **`POST /api/playbook-runs/:runId/steps/:stepRunId/input`**
 
