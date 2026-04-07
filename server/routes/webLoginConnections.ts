@@ -109,8 +109,8 @@ router.get(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const row = await webLoginConnectionService.getById(req.params.id, req.orgId!);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const row = await webLoginConnectionService.getById(req.params.id, req.orgId!, subaccount.id);
     if (!row) {
       res.status(404).json({ error: 'web_login connection not found' });
       return;
@@ -124,9 +124,9 @@ router.patch(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const parsed = updateBody.parse(req.body);
-    const updated = await webLoginConnectionService.update(req.params.id, req.orgId!, {
+    const updated = await webLoginConnectionService.update(req.params.id, req.orgId!, subaccount.id, {
       label: parsed.label,
       displayName: parsed.displayName,
       config: parsed.config as never,
@@ -143,7 +143,7 @@ router.patch(
       action: 'web_login_connection.update',
       entityType: 'integration_connection',
       entityId: updated.id,
-      metadata: { passwordRotated: !!parsed.password },
+      metadata: { passwordRotated: !!parsed.password, subaccountId: subaccount.id },
     });
     res.json(updated);
   }),
@@ -154,8 +154,8 @@ router.delete(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const ok = await webLoginConnectionService.revoke(req.params.id, req.orgId!);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const ok = await webLoginConnectionService.revoke(req.params.id, req.orgId!, subaccount.id);
     if (!ok) {
       res.status(404).json({ error: 'web_login connection not found' });
       return;
@@ -167,6 +167,7 @@ router.delete(
       action: 'web_login_connection.revoke',
       entityType: 'integration_connection',
       entityId: req.params.id,
+      metadata: { subaccountId: subaccount.id },
     });
     res.json({ message: 'web_login connection revoked' });
   }),
@@ -189,8 +190,8 @@ router.post(
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_MANAGE),
   asyncHandler(async (req, res) => {
-    await resolveSubaccount(req.params.subaccountId, req.orgId!);
-    const conn = await webLoginConnectionService.getById(req.params.id, req.orgId!);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const conn = await webLoginConnectionService.getById(req.params.id, req.orgId!, subaccount.id);
     if (!conn) {
       res.status(404).json({ error: 'web_login connection not found' });
       return;

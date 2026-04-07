@@ -36,6 +36,23 @@ ALTER TABLE task_deliverables
 ALTER TABLE task_deliverables
   ADD COLUMN IF NOT EXISTS body_text_truncated BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- ─── 4. Mutable run metadata on agent_runs (T11 / pr-reviewer MAJOR-2) ───────
+-- Distinct from configSnapshot which is immutable and reflects start-of-run
+-- resolved config. Used for write-during-run state like Slack post dedup
+-- hashes, fingerprint write tracking, etc.
+
+ALTER TABLE agent_runs
+  ADD COLUMN IF NOT EXISTS run_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- ─── 5. Make iee_artifacts.iee_run_id nullable (BLOCKER-1) ───────────────────
+-- The transcribe_audio skill (Code Change B) may be invoked from non-IEE
+-- agent runs where there is no parent IEE run. The artifact still carries
+-- organisationId for tenant scoping and metadata.runId for parent-run
+-- tracing. Spec v3.4 §4.4.1.
+
+ALTER TABLE iee_artifacts
+  ALTER COLUMN iee_run_id DROP NOT NULL;
+
 -- Note: integration_connections.providerType and authType enums are TEXT
 -- columns with TypeScript-side $type narrowing; no schema change is needed
 -- to add 'web_login' as a valid value. The application layer enforces the

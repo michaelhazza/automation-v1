@@ -20,7 +20,7 @@ import { createHash } from 'crypto';
 import { promises as fs, createReadStream } from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { ieeArtifacts } from '../db/schema/index.js';
 import { withBackoff } from '../lib/withBackoff.js';
@@ -170,7 +170,11 @@ export async function transcribeAudio(
     const [created] = await db
       .insert(ieeArtifacts)
       .values({
-        ieeRunId: ctx.ieeRunId ?? null as never,
+        // ieeRunId is nullable since this skill may run outside an IEE
+        // execution (e.g. from a regular skill-executor agent run). The
+        // metadata.runId / metadata.correlationId fields below carry the
+        // parent-run trace context for observability.
+        ieeRunId: ctx.ieeRunId ?? null,
         organisationId: ctx.organisationId,
         kind: 'file',
         path: tempPath,
@@ -222,7 +226,8 @@ async function getArtifactById(id: string, organisationId: string) {
 async function findCachedTranscript(contentHash: string, organisationId: string) {
   // Look for any existing artifact in the same org whose metadata.contentHash
   // matches and whose source was 'transcribe_audio'. Order by createdAt desc
-  // to prefer the most recent.
+  // (per pr-reviewer MAJOR-4) so we deterministically prefer the most recent
+  // cached transcript rather than getting an arbitrary row.
   const rows = await db
     .select()
     .from(ieeArtifacts)
@@ -233,6 +238,7 @@ async function findCachedTranscript(contentHash: string, organisationId: string)
         sql`${ieeArtifacts.metadata}->>'contentHash' = ${contentHash}`,
       ),
     )
+    .orderBy(desc(ieeArtifacts.createdAt))
     .limit(1);
   return rows[0] ?? null;
 }

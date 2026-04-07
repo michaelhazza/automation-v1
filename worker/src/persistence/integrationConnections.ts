@@ -35,7 +35,7 @@
 // directory in worker/src/.
 // ---------------------------------------------------------------------------
 
-import { and, eq, isNull, or, ne } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { db } from '../db.js';
 import { integrationConnections } from '../../../server/db/schema/integrationConnections.js';
 import { connectionTokenService } from '../../../server/services/connectionTokenService.js';
@@ -96,9 +96,12 @@ export async function getWebLoginConnectionForRun(
   connectionId: string,
 ): Promise<DecryptedWebLoginCredentials> {
   // Build the WHERE clause. Each condition is a hard requirement.
+  // Per pr-reviewer MAJOR-1: use eq(active) rather than ne(revoked) so
+  // 'error'-state connections (failed previous test, broken auth, etc.)
+  // are not silently used for live logins.
   const orgScope = eq(integrationConnections.organisationId, runContext.organisationId);
   const providerScope = eq(integrationConnections.providerType, 'web_login');
-  const notRevoked = ne(integrationConnections.connectionStatus, 'revoked');
+  const isActive = eq(integrationConnections.connectionStatus, 'active');
   const idMatch = eq(integrationConnections.id, connectionId);
 
   // T14 — subaccount scoping rule:
@@ -114,7 +117,7 @@ export async function getWebLoginConnectionForRun(
   const rows = await db
     .select()
     .from(integrationConnections)
-    .where(and(idMatch, orgScope, providerScope, notRevoked, subaccountScope))
+    .where(and(idMatch, orgScope, providerScope, isActive, subaccountScope))
     .limit(1);
 
   const row = rows[0];

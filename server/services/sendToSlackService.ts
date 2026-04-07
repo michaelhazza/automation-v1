@@ -165,7 +165,18 @@ export async function sendToSlack(
       runId: ctx.runId,
       correlationId: ctx.correlationId,
       maxAttempts: 3,
-      isRetryable: (err: unknown) => err instanceof SlackHttpError && (err.status === 429 || err.status >= 500),
+      baseDelayMs: 1_000,
+      // Per pr-reviewer MAJOR-3: retry on transient network errors as well
+      // as Slack 429 / 5xx. Only Slack-mapped 4xx (invalid_auth,
+      // channel_not_found) are non-retryable terminal failures.
+      isRetryable: (err: unknown) => {
+        if (err instanceof SlackHttpError) {
+          return err.status === 429 || err.status >= 500;
+        }
+        // Anything else (DNS failure, ECONNREFUSED, TCP reset, fetch
+        // throwing a TypeError on network) is treated as transient.
+        return true;
+      },
       retryAfterMs: (err: unknown) =>
         err instanceof SlackHttpError && err.retryAfterSeconds ? err.retryAfterSeconds * 1000 : undefined,
     },
@@ -257,35 +268,37 @@ function sha256(input: string): string {
 }
 
 async function findPriorPost(runId: string, postHash: string): Promise<PostedSlackEntry | null> {
+  // Read from agent_runs.run_metadata.slackPosts. This is the dedicated
+  // mutable run-scoped metadata bucket added in migration 0073 — distinct
+  // from configSnapshot which is immutable and reflects the start-of-run
+  // resolved configuration. Spec v3.4 §5.5.1 / T11; pr-reviewer MAJOR-2.
   const [row] = await db
-    .select({ configSnapshot: agentRuns.configSnapshot })
+    .select({ runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
     .where(eq(agentRuns.id, runId))
     .limit(1);
-  if (!row || !row.configSnapshot) return null;
-  const meta = (row.configSnapshot as Record<string, unknown> | null) ?? {};
+  if (!row || !row.runMetadata) return null;
+  const meta = row.runMetadata as Record<string, unknown>;
   const slackPosts = (meta.slackPosts as PostedSlackEntry[] | undefined) ?? [];
   return slackPosts.find((p) => p.postHash === postHash) ?? null;
 }
 
 async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<void> {
-  // Read-modify-write on agent_runs.configSnapshot.slackPosts. We use
-  // configSnapshot as the metadata bucket because agentRuns has no dedicated
-  // jsonb metadata column today; configSnapshot is jsonb and already used
-  // for run-scoped data.
+  // Read-modify-write on agent_runs.run_metadata.slackPosts (the dedicated
+  // mutable metadata bucket — see findPriorPost comment for context).
   const [row] = await db
-    .select({ configSnapshot: agentRuns.configSnapshot })
+    .select({ runMetadata: agentRuns.runMetadata })
     .from(agentRuns)
     .where(eq(agentRuns.id, runId))
     .limit(1);
   if (!row) return;
-  const meta = ((row.configSnapshot as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+  const meta = ((row.runMetadata as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
   const slackPosts = ((meta.slackPosts as PostedSlackEntry[] | undefined) ?? []).slice();
   slackPosts.push(entry);
   meta.slackPosts = slackPosts;
   await db
     .update(agentRuns)
-    .set({ configSnapshot: meta })
+    .set({ runMetadata: meta })
     .where(eq(agentRuns.id, runId));
 }
 

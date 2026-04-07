@@ -64,7 +64,6 @@ const MAGIC_SIGNATURES: Array<{ bytes: number[]; mimeStartsWith: string }> = [
   // HTML — used to detect "site returned an error page as a video" failure
   { bytes: [0x3c, 0x21, 0x44, 0x4f, 0x43], mimeStartsWith: 'text/html' }, // <!DOC
   { bytes: [0x3c, 0x68, 0x74, 0x6d, 0x6c], mimeStartsWith: 'text/html' }, // <html
-  { bytes: [0x3c, 0x68, 0x74, 0x6d, 0x6c], mimeStartsWith: 'text/html' },
 ];
 
 export interface ValidationOk {
