@@ -31,6 +31,7 @@ import {
   type ArtifactKind,
 } from './artifactValidator.js';
 import { getWebLoginConnectionForRun } from '../persistence/integrationConnections.js';
+import { captureStreamingVideo } from './captureStreamingVideo.js';
 import { sql } from 'drizzle-orm';
 import { subaccountAgents } from '../../../server/db/schema/subaccountAgents.js';
 import { agentRuns } from '../../../server/db/schema/agentRuns.js';
@@ -48,12 +49,14 @@ export interface BuildBrowserExecutorInput {
   // Spec v3.4 §6 Code Change D7 — paywall workflow integration
   webLoginConnectionId?: string;
   browserTaskContract?: BrowserTaskContract;
-  mode?: 'standard' | 'login_test';
+  mode?: 'standard' | 'login_test' | 'capture_video';
   correlationId?: string;
   /** Agent id for fingerprint dedup (T16 read path). */
   agentId?: string;
   /** Parent agent run id for runMetadata writes from the worker. */
   agentRunId?: string | null;
+  /** Optional play-button selector for capture_video mode. */
+  playSelector?: string;
 }
 
 export async function buildBrowserExecutor(
@@ -131,6 +134,46 @@ export async function buildBrowserExecutor(
       // there is no executor object that can ever be passed into the loop.
       try { await context.close(); } catch { /* swallow */ }
       throw new LoginTestComplete(proofPath);
+    }
+
+    // ── capture_video mode short-circuit ───────────────────────────────────
+    // Equivalent of the Chrome "Video Downloader" extension: snoop network
+    // traffic for the actual mp4/m3u8 the player loads, then refetch with
+    // the session cookies (Playwright APIRequestContext for mp4, ffmpeg for
+    // HLS). No LLM loop. The contract guard's framenavigated hook still
+    // fires for the navigation inside captureStreamingVideo, so the domain
+    // allow-list is enforced.
+    if (input.mode === 'capture_video') {
+      if (!input.startUrl) {
+        try { await context.close(); } catch { /* swallow */ }
+        throw new FailureError(
+          failure('execution_error', 'capture_video_requires_start_url', {}),
+        );
+      }
+      const outputPath = path.join(downloadsDir, `capture-${Date.now()}.mp4`);
+      let pageTitle: string | null = null;
+      let result: Awaited<ReturnType<typeof captureStreamingVideo>>;
+      try {
+        result = await captureStreamingVideo(context, page, {
+          contentUrl: input.startUrl,
+          outputPath,
+          playSelector: input.playSelector ?? null,
+          runId: input.ieeRunId,
+          correlationId: input.correlationId ?? input.ieeRunId,
+        });
+        try { pageTitle = await page.title(); } catch { /* swallow */ }
+      } catch (err) {
+        try { await context.close(); } catch { /* swallow */ }
+        throw err;
+      }
+      try { await context.close(); } catch { /* swallow */ }
+      throw new CaptureVideoComplete(
+        result.outputPath,
+        result.source,
+        result.capturedUrl,
+        input.startUrl,
+        pageTitle,
+      );
     }
   }
 
@@ -482,6 +525,25 @@ void agentRuns;
 export class LoginTestComplete {
   readonly _tag = 'LoginTestComplete' as const;
   constructor(public readonly screenshotPath: string) {}
+}
+
+/**
+ * capture_video mode sentinel — thrown by buildBrowserExecutor after the
+ * streaming-video capture finishes. browserTask.ts catches it, validates +
+ * persists the artifact via the existing validator, and finalizes the run.
+ *
+ * Carries enough info for the caller to record the artifact without having
+ * to re-derive anything from the page state (which has already been closed).
+ */
+export class CaptureVideoComplete {
+  readonly _tag = 'CaptureVideoComplete' as const;
+  constructor(
+    public readonly outputPath: string,
+    public readonly source: 'mp4' | 'hls',
+    public readonly capturedUrl: string,
+    public readonly pageUrl: string,
+    public readonly pageTitle: string | null,
+  ) {}
 }
 
 // ---------------------------------------------------------------------------

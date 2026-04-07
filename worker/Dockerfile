@@ -12,6 +12,14 @@ FROM mcr.microsoft.com/playwright:v1.59.1-jammy AS build
 
 WORKDIR /repo
 
+# ffmpeg — required by worker/src/browser/captureStreamingVideo.ts for the
+# HLS (m3u8) download path used by paywalled video sources that don't expose
+# a direct download button (e.g. 42 Macro). The Playwright base image is
+# Ubuntu jammy, so apt-get works directly.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
 # Copy package manifests first for layer caching
 COPY package.json package-lock.json* ./
 COPY worker/package.json ./worker/

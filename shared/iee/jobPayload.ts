@@ -67,11 +67,17 @@ export const BrowserTaskPayload = z.object({
    */
   browserTaskContract: BrowserTaskContract.optional(),
   /**
-   * Mode discriminator — 'standard' runs the LLM execution loop after
-   * login, 'login_test' runs only login + optional content navigation +
-   * screenshot, then exits without entering the LLM loop. Spec v3.4 §6.3.1 / T2.
+   * Mode discriminator:
+   *  - 'standard'      runs the LLM execution loop after login
+   *  - 'login_test'    runs only login + screenshot, no LLM loop (T2)
+   *  - 'capture_video' runs login + network-snoop streaming-video capture
+   *                    (mp4 or HLS via ffmpeg), no LLM loop. Used when the
+   *                    paywalled site has no download button — the Chrome
+   *                    "Video Downloader" extension equivalent.
    */
-  mode: z.enum(['standard', 'login_test']).default('standard'),
+  mode: z.enum(['standard', 'login_test', 'capture_video']).default('standard'),
+  /** Optional CSS selector for a custom play button used by capture_video. */
+  playSelector: z.string().max(500).optional(),
 });
 export type BrowserTaskPayload = z.infer<typeof BrowserTaskPayload>;
 
