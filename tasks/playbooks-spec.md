@@ -109,7 +109,7 @@ All tables follow existing conventions: `id` (uuid pk, default `gen_random_uuid(
 - New tables only — zero changes to existing schema rows.
 - One additive column on `agent_runs`: `playbook_step_run_id uuid null`. Indexed for the engine's reverse lookup on agent run completion. No backfill required.
 - One additive column on `subaccount_agents` is **not** required — the cost breaker reads `maxCostPerRunCents` which already exists.
-- The migration is reversible via a corresponding `0075_playbooks.down.sql` that drops all new tables and the new column. Down migrations are not run in production but exist for local rollback. The repo's custom forward-only `scripts/migrate.ts` runner does not execute down migrations automatically — they are kept only for manual local rollback.
+- The migration is reversible via a corresponding `migrations/_down/0075_playbooks.sql` that drops all new tables and the new column. Down migrations live in the `_down/` subdirectory so the custom forward-only runner (`scripts/migrate.ts`, which scans top-level `migrations/*.sql` only) never picks them up. They exist only for manual local rollback during development.
 
 ### 2.0.1 Drizzle schema layout
 
