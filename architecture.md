@@ -342,8 +342,184 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 41 migrations (0001–0041). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
 
 Recent migrations:
+- `0042` — playbooks: templates, versions, runs, step runs (Playbooks feature)
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
 - `0039` — GitHub App schema
 - `0037` — workspace memory + workflow schema
 - `0036` — review queue + OAuth tables
+
+---
+
+## Playbooks (Multi-Step Automation)
+
+Playbooks automate longer-form, multi-step processes (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Playbook is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
+
+### Terminology
+
+| Term | Meaning |
+|------|---------|
+| **DAG** | Directed Acyclic Graph. Steps declare `dependsOn` on earlier step ids. Engine topologically sorts and runs independent branches in parallel. No cycles permitted. |
+| **Playbook Template** | The definition — steps, dependencies, prompts, schemas. Versioned and immutable once published. |
+| **Playbook Version** | A frozen snapshot of a template. Runs lock to the version they started with. |
+| **Playbook Run** | An execution instance against a specific subaccount. Has its own growing context blob. |
+| **Step Run** | Execution record for a single step within a run. Has own status, inputs, outputs, and (optionally) a linked `agentRun`. |
+| **Run Context** | A single growing JSON blob keyed by step id. Steps reference prior outputs via templating (`{{ steps.event_basics.output.eventName }}`). |
+
+### Three-tier distribution model
+
+Mirrors the three-tier agent model:
+
+```
+System Playbook Template (systemPlaybookTemplates)
+  — Platform-shipped; read-only master definition
+  — Versioned; new versions trigger opt-in upgrades for forked orgs
+        ↓ fork / clone
+Org Playbook Template (playbookTemplates)
+  — Org-authored OR forked from system template (forkedFromSystemId, forkedVersion)
+  — Org owns the definition; editable by permission holders
+  — Immutable versions (playbookTemplateVersions) — publish increments version
+        ↓ execute against a subaccount
+Playbook Run (playbookRuns)
+  — Scoped to a single subaccount
+  — Locked to a specific playbookTemplateVersionId
+  — Survives template edits in flight
+```
+
+**Playbooks are authored at the org tier, executed at the subaccount tier.** Subaccounts never own template definitions — this avoids template drift across subaccounts. If a subaccount needs a variant, fork the template at org level and tag applicability.
+
+### Schema (migration 0042)
+
+| Table | Purpose |
+|-------|---------|
+| `systemPlaybookTemplates` | Platform-shipped templates. Mirrors `systemAgents`. |
+| `systemPlaybookTemplateVersions` | Immutable version snapshots of system templates. |
+| `playbookTemplates` | Org-owned templates. `forkedFromSystemId`, `forkedFromVersion` nullable. |
+| `playbookTemplateVersions` | Immutable published versions of org templates. `definitionJson` holds the full DAG. |
+| `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
+| `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
+| `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
+
+Soft deletes on templates (`deletedAt`). Runs are append-only history.
+
+### Step definition shape (stored in `definitionJson`)
+
+```typescript
+interface PlaybookStep {
+  id: string;                    // stable within template version
+  name: string;
+  type: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional';
+  dependsOn: string[];           // ids of prior steps
+  humanReviewRequired?: boolean; // pause for edit/approve before downstream consumes output
+  outputSchema: JSONSchema;      // zod-validated; downstream steps rely on shape
+
+  // type-specific
+  prompt?: string;                               // prompt with {{ templating }}
+  agentId?: string;                              // for type: agent_call — references org or system agent
+  formSchema?: JSONSchema;                       // for type: user_input — renders as form in UI
+  condition?: string;                            // for type: conditional — JSONLogic expression
+  inputs?: Record<string, string>;               // map of paramName -> template expression
+}
+
+interface PlaybookDefinition {
+  steps: PlaybookStep[];
+  initialInputSchema: JSONSchema;  // what the user provides when kicking off the run
+}
+```
+
+### Execution engine
+
+`playbookEngineService` is a state machine. Each run progresses through:
+
+```
+pending → running → (awaiting_input | awaiting_approval) → running → completed
+                                                                    ↘ failed | cancelled
+```
+
+**Per-tick algorithm (triggered by pg-boss job `playbook-run-tick`):**
+
+1. Load run + all step runs.
+2. Compute ready set: steps whose `dependsOn` are all `completed` and whose own status is `pending`.
+3. For each ready step, resolve its `inputs` by templating against `run.contextJson`.
+4. Dispatch in parallel:
+   - `prompt` / `agent_call` → enqueue an `agentRun` (reuses existing agent infrastructure, idempotency keys, budget reservations); step run links via `agentRunId`.
+   - `user_input` → set status `awaiting_input`, emit WebSocket event to inbox.
+   - `approval` → create `reviewItem`, set status `awaiting_approval`.
+   - `conditional` → evaluate JSONLogic synchronously, write output, mark `completed`.
+5. On any step completion (webhook from agent run, form submission, approval decision), validate output against `outputSchema`, merge into `run.contextJson`, re-enqueue a tick.
+6. If all steps `completed`, mark run `completed`. If any non-retryable failure and no alternative branch, mark `failed`.
+
+**Parallelism is free** — multiple ready steps dispatch simultaneously. Linear runs are just DAGs where every step depends on its predecessor.
+
+**Resumability** — all state lives in the DB. Engine can crash and resume on next tick with no loss.
+
+**Editing mid-run** — when a user edits a completed step's output, engine invalidates all downstream step runs (sets them back to `pending`) and re-ticks. This is the "reusing information from previous prompts, but sometimes there is some new information" loop.
+
+### Reuse of existing systems
+
+- **Agent runs** — `agent_call` step type creates an `agentRun` with `playbookStepRunId` set. The full three-tier agent model, skill system, handoff, and budget tracking are reused unchanged.
+- **Review queue** — `approval` step type creates a `reviewItem`. HITL flow is unchanged.
+- **pg-boss** — engine ticks are jobs on the `playbook-run-tick` queue. Same infrastructure as heartbeats.
+- **Idempotency keys** — step-level agent runs use `playbook:{runId}:{stepId}:{attempt}` as the key.
+- **WebSocket rooms** — run updates broadcast on the subaccount room; a dedicated `playbook-run:{runId}` room streams per-step progress to detail UI.
+- **Audit events** — run start, step completion, edits, approvals, template publish all emit audit events.
+
+### Routes
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `/api/system/playbook-templates` | `systemPlaybookTemplates.ts` | System admin CRUD on platform templates |
+| `/api/playbook-templates` | `playbookTemplates.ts` | Org CRUD, fork from system, publish version |
+| `/api/playbook-templates/:id/versions` | `playbookTemplates.ts` | List/get versions |
+| `/api/subaccounts/:subaccountId/playbook-runs` | `playbookRuns.ts` | List, start, cancel runs |
+| `/api/playbook-runs/:runId` | `playbookRuns.ts` | Run detail, context, step runs |
+| `/api/playbook-runs/:runId/steps/:stepRunId/input` | `playbookRuns.ts` | Submit form input for `user_input` step |
+| `/api/playbook-runs/:runId/steps/:stepRunId/output` | `playbookRuns.ts` | Edit a completed step's output (invalidates downstream) |
+| `/api/playbook-runs/:runId/steps/:stepRunId/approve` | `playbookRuns.ts` | Approve/reject an `approval` step |
+
+All routes follow the standard conventions: `asyncHandler`, `authenticate`, `resolveSubaccount` where applicable, org scoping via `req.orgId`, no direct `db` access, service errors as `{ statusCode, message, errorCode }`.
+
+### Services
+
+| Service | Responsibility |
+|---------|---------------|
+| `playbookTemplateService` | CRUD, fork from system, version publishing, validation of DAG (no cycles, all deps resolvable, output schemas valid) |
+| `playbookEngineService` | State machine ticks, step dispatch, context merging, downstream invalidation |
+| `playbookRunService` | Run lifecycle — start, cancel, query, surface to UI |
+| `playbookTemplatingService` | Resolves `{{ steps.x.output.y }}` expressions against run context; pure function, unit-testable |
+
+### Permissions
+
+New permission keys:
+
+- `playbook_templates.read` / `playbook_templates.write` / `playbook_templates.publish` (org-level)
+- `playbook_runs.read` / `playbook_runs.start` / `playbook_runs.cancel` / `playbook_runs.edit_output` / `playbook_runs.approve` (subaccount-level)
+
+Integrate into the existing permission set UI.
+
+### Client UI
+
+**Phase 1 — Run execution UI (ship with engine):**
+
+- `/playbooks` — list of available templates (org + forked from system), "Start Run" picker
+- `/subaccounts/:id/playbook-runs` — list of runs for a subaccount, status + progress (e.g. 7/15)
+- `/playbook-runs/:runId` — run detail: vertical stepper showing DAG, each step expandable with inputs/output, edit button on completed steps, inline forms for `user_input` steps, approval UI for `approval` steps, live updates via WebSocket
+- "Needs your input" inbox surfacing all paused runs across subaccounts the user has access to
+
+**Phase 2 — Visual template builder:**
+
+- `/playbook-templates/:id/edit` — canvas-based DAG editor (nodes = steps, edges = dependencies)
+- Sidebar for editing each step (type, prompt, agent, input mapping, output schema)
+- Version history + diff view
+- Test-run mode against a dummy subaccount
+
+Phase 1 ships with templates seeded from code/JSON. Phase 2 is a separate feature-coordinator pipeline.
+
+### Invariants (non-negotiable)
+
+- DAG validation must run on every template publish — reject cycles, unresolved `dependsOn`, or template expressions referencing nonexistent steps.
+- A run is locked to its `templateVersionId`. Editing the template never mutates in-flight runs.
+- Step output is validated against `outputSchema` before merging into run context.
+- Editing a completed step's output invalidates all transitively dependent downstream step runs.
+- `agent_call` steps respect the full budget, handoff depth, and policy engine rules — the engine never bypasses existing guardrails.
+- Org scoping applies to templates (`organisationId`) and runs (`organisationId` via subaccount).
