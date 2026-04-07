@@ -1,7 +1,7 @@
 # Reporting Agent — Paywall → Video → Transcript → Slack Workflow
 ## Detailed Development Specification
 
-**Status:** Draft v3.1 — adds pre-implementation checklist (§11) and small implementation-trap notes
+**Status:** Draft v3.2 — third-round micro-tightenings T15–T21 (correlationId invariant, fingerprint guard, artifact validation, persist-before-post, override flag, session cookie fallback, unified backoff)
 **Branch:** `claude/agent-paywall-video-workflow-OQTMA`
 **Related docs:**
 - `docs/iee-development-spec.md` — IEE worker, browser/dev handlers, execution_runs schema
@@ -336,7 +336,7 @@ Whisper is billed at $0.006/minute. Each call records a row in the existing `llm
 | Source artifact missing | Throw `{ statusCode: 404, errorCode: 'artifact_not_found' }` |
 | File too large after chunking | Throw `{ statusCode: 413, errorCode: 'audio_too_large' }` |
 | Whisper API 429 | Retry with exponential backoff (3 attempts, 2s/4s/8s) |
-| Whisper API 5xx | Throw as `TripWire` so pg-boss retries the parent skill execution |
+| Whisper API 5xx | Throw as `TripWire` so pg-boss retries the parent skill execution (uses shared `withBackoff` helper, see §8.5 / T21) |
 | Unsupported format | Throw `{ statusCode: 400, errorCode: 'unsupported_audio_format' }` |
 
 ### 4.7 Tests
@@ -480,6 +480,18 @@ Mitigation:
 4. The check is best-effort, not a database lock. Two simultaneous workers can still race and double-post, but parent-run idempotency makes simultaneous runs impossible in normal operation. The hash narrows the residual race window to the few hundred ms between read and write, and ensures that retries from the same run never duplicate even if the agent loop calls `send_to_slack` twice with semantically identical input.
 
 This is ~50 LOC and closes both the operator-retry loophole and the trivially-different-input loophole called out in T11.
+
+### 5.5.2 Persist before post (T18)
+
+The `send_to_slack` skill executor must follow a strict order, **even when called for a fresh post**:
+
+1. **Persist** the message body and any attachment artifacts to the DB (`execution_artifacts.inline_text` and/or `task_deliverables.body_text`) via `writeWithLimit`.
+2. **Then** call the Slack API.
+3. **Then** record the post hash + messageTs back to the run metadata.
+
+If step 2 fails, the body is already in the DB, so an operator can manually re-trigger Slack delivery from the run-detail UI without re-running the entire agent (which would re-hit Whisper, etc.).
+
+The skill rejects `{ message }` callers who do not also pass an `artifactId` or `bodyText` for the durable copy — the skill will not post anything that has not been persisted first. This is enforced in zod, not by convention.
 
 ### 5.6 Subaccount vs org connection resolution
 
@@ -672,11 +684,42 @@ export async function performLogin(page: Page, creds: WebLoginCredentials): Prom
       page.waitForNavigation({ waitUntil: 'networkidle', timeout: creds.timeoutMs }).catch(() => null),
       page.click(creds.submitSelector),
     ]);
+    // T20 — three-tier success detection, in priority order:
+    //   1. successSelector (if configured) — most reliable
+    //   2. URL changed away from loginUrl
+    //   3. A new session-like cookie was set by the login response
+    //      (matches /session|sess|sid|auth|token/i in the cookie name)
+    // The first one that succeeds wins. We accumulate failures only if all three fail.
+    let succeeded = false;
+    const failures: string[] = [];
+
     if (creds.successSelector) {
-      await page.waitForSelector(creds.successSelector, { timeout: creds.timeoutMs });
-    } else {
-      // Fall back to: URL must have changed away from loginUrl
-      if (page.url() === creds.loginUrl) throw new LoginFailed('url_unchanged');
+      try {
+        await page.waitForSelector(creds.successSelector, { timeout: creds.timeoutMs });
+        succeeded = true;
+      } catch { failures.push('selector_not_found'); }
+    }
+
+    if (!succeeded && page.url() !== creds.loginUrl) {
+      succeeded = true;
+    } else if (!succeeded) {
+      failures.push('url_unchanged');
+    }
+
+    if (!succeeded) {
+      const cookies = await page.context().cookies();
+      const sessionCookie = cookies.find(c =>
+        /session|sess|sid|auth|token/i.test(c.name) && c.value && c.value.length > 8
+      );
+      if (sessionCookie) {
+        succeeded = true;
+      } else {
+        failures.push('no_session_cookie');
+      }
+    }
+
+    if (!succeeded) {
+      throw new LoginFailed(failures.join(','));
     }
     span.end({ status: 'ok' });
   } catch (err) {
@@ -997,7 +1040,64 @@ The browser-task worker, on a `download_latest` intent, captures these fields as
 - Else if `contentHash` matches → skip (same file re-uploaded under a new URL).
 - Else proceed.
 
-On successful Slack post the agent calls `update_last_fingerprint` (or the existing `add_deliverable` skill is extended to also write the fingerprint) to persist the new value.
+**Fingerprint persistence guard (T16):** the new fingerprint is persisted **only if all of the following are true**:
+
+1. `download` step succeeded (file written, contract artifact-kind check passed)
+2. **Artifact validation succeeded** (T17 — see below)
+3. `transcribe_audio` step succeeded (Whisper returned a non-empty transcript)
+4. `process_*_transcript` report skill returned a non-empty result
+
+If any step short of these fails, the fingerprint is **not** persisted, so the next run will retry the same content rather than permanently skipping it. The fingerprint write happens at the end of the agent loop, immediately before the terminal `done()` step (or as part of `add_deliverable`).
+
+This means a partial download → corrupt transcript → failed report does NOT poison the fingerprint state. The reviewer's failure mode (permanently skipping valid future content) is closed.
+
+**Artifact validation before hashing (T17):** `contentHash` is computed only after the downloaded file passes a minimal validation step. The validation runs in the worker immediately after the download completes:
+
+```ts
+async function validateDownloadedArtifact(
+  filePath: string,
+  expected: { kind: ArtifactKind; mimeTypePrefix?: string; minBytes: number },
+): Promise<{ ok: true; contentHash: string } | { ok: false; reason: string }> {
+  const stat = await fs.stat(filePath);
+  // 1. Minimum size — guards against HTML error pages and partial downloads
+  if (stat.size < expected.minBytes) {
+    return { ok: false, reason: `file_too_small:${stat.size}` };
+  }
+  // 2. MIME re-check from file header (magic bytes), not just response Content-Type
+  const detected = await detectMimeFromFileHeader(filePath);  // file-type / mmmagic
+  if (expected.mimeTypePrefix && !detected.mime.startsWith(expected.mimeTypePrefix)) {
+    return { ok: false, reason: `mime_mismatch:${detected.mime}` };
+  }
+  // 3. Stream-hash the bytes
+  const contentHash = await sha256Stream(filePath);
+  return { ok: true, contentHash };
+}
+```
+
+Default `minBytes` per artifact kind:
+
+| Kind | minBytes |
+|---|---|
+| `video` | 51_200 (50 KB) |
+| `audio` | 10_240 (10 KB) |
+| `document` | 1_024 (1 KB) |
+| `image` | 1_024 (1 KB) |
+| `text` | 16 |
+
+If validation fails, the run terminates with `failure('data_incomplete', 'artifact_validation_failed', { reason })` and the fingerprint is **not** persisted (per T16). The bad file is kept on the worker disk for the run lifetime so an operator can inspect it from the run-detail UI screenshot/artifact section.
+
+This closes the "site returns an HTML error page advertised as a video" failure mode — without it, the worker would hash the HTML, persist the fingerprint, and silently skip every real future video that arrived after.
+
+On successful end of run, the agent calls `update_last_fingerprint` (or the existing `add_deliverable` skill is extended to also write the fingerprint) to persist the new value.
+
+**`ignoreFingerprint` override (T19):** the agent run accepts an optional `ignoreFingerprint: boolean` flag (default `false`) on the run-trigger payload. When `true`, the fingerprint check is **skipped** for that run only — the worker still computes and persists the new fingerprint at the end, but does not consult the prior one.
+
+Use cases:
+- Debugging a stuck workflow without manually clearing the fingerprint row
+- Reprocessing historical content after a prompt or skill change
+- Onboarding a new client whose subaccount already has a populated fingerprint from migration
+
+The flag is exposed only on the manual "Run now" UI and the API trigger — heartbeat-driven runs always default to `false`. Setting it writes an audit event so override usage is traceable.
 
 This is one column + one read + one write per run. Small operational addition, big robustness win against the failure modes the reviewer flagged.
 
@@ -1229,11 +1329,14 @@ T+90s  LLM step 3: calls process_42_macro_transcript with transcript
        → returns { reportMarkdown, filename: '20260407_42_Macro_Weekly.md' }
        ↓
 T+105s LLM step 4: calls send_to_slack with the reportMarkdown
-       → skillExecutor writes report to a temp file
-       → creates execution_artifacts row for the report
-       → slackApi.chatPostMessage(channel: '#breakout-weekly-reports')
-       → slackApi.filesUpload(report.md, threaded under the message)
-       → returns { messageTs, permalink }
+       → STEP A (T18): persist report markdown durably FIRST:
+                       - write execution_artifacts row with inline_text
+                       - write task_deliverables row with body_text
+                       (so an operator can manually re-send if Slack fails)
+       → STEP B: only after persistence succeeds, call Slack:
+                 - slackApi.chatPostMessage(channel: '#breakout-weekly-reports')
+                 - slackApi.filesUpload(report.md, threaded under the message)
+       → returns { messageTs, permalink, deliverableId }
        ↓
 T+108s LLM step 5: calls add_deliverable
        → links the report artifact + Slack permalink to the agent run task
@@ -1300,6 +1403,47 @@ Per reviewer T13: failures across browser-task, transcription, report skill, and
 | Slack rate limited | `rate_limited` | `slack_rate_limited` | Retry with `Retry-After` |
 | Encryption key missing at boot | `internal_error` | `encryption_key_missing` | Server refuses to start (boot-time check) |
 | Connection not found / wrong tenant | `auth_error` | `connection_not_found_or_unauthorized` | Operator audit; possible tenant-isolation alert |
+
+### 8.5 Unified retry / backoff abstraction (T21)
+
+All external-call retries (Whisper, Slack, future integrations) go through a single helper rather than ad-hoc per-integration loops:
+
+```ts
+// server/lib/withBackoff.ts
+export async function withBackoff<T>(
+  fn: () => Promise<T>,
+  opts: {
+    label: string;                       // e.g. 'whisper.transcribe', 'slack.chat.post'
+    maxAttempts: number;                 // default 3
+    baseDelayMs: number;                 // default 500
+    maxDelayMs: number;                  // default 8000
+    isRetryable: (err: unknown) => boolean;
+    onRetry?: (attempt: number, err: unknown) => void;
+    correlationId: string;               // logged on every attempt
+    runId: string;                       // logged on every attempt
+  },
+): Promise<T>;
+```
+
+Strategy: exponential backoff with full jitter. Honours `Retry-After` headers when present (Slack 429). Logs each attempt with `{ label, attempt, delayMs, correlationId, runId }` so retry behaviour is visible in observability without per-call instrumentation.
+
+Per-integration `isRetryable` predicates:
+
+| Caller | Retryable | Non-retryable |
+|---|---|---|
+| Whisper | 429, 5xx, network errors | 4xx (other), `audio_too_large` |
+| Slack | 429, 5xx, network errors | `invalid_auth`, `channel_not_found`, `ratelimited` returns Retry-After |
+| Browser fetch (download) | network errors, 5xx | 4xx |
+
+Why a single helper rather than per-integration loops:
+- Predictable behaviour under load (one place tunes the curve)
+- Single observability surface for retry storms
+- Single place to add circuit breakers in v2
+- Inline retry loops drift apart over time and produce inconsistent operational behaviour
+
+Lint rule: no `setTimeout(..., 1000 * Math.pow(2, attempt))` style ad-hoc backoff outside `withBackoff`.
+
+---
 
 A single helper `failure(reason, detail, metadata?)` is used by **every** code path to construct the failure object. Inline shapes like `throw { failureReason: 'login_failed' }` are **banned** — caught by both:
 1. **Lint rule** (added to `.eslintrc` for both `server/` and `worker/`): no object literal containing the key `failureReason` outside `server/lib/failure.ts` and `worker/src/runtime/failure.ts`.
@@ -1402,7 +1546,21 @@ Once these are confirmed, implementation begins on D.
 
 The only true blocker from the review (T1, plaintext secrets in payload) is closed. All others are hardening that has been folded into the relevant section rather than carried as TODOs.
 
-### v3.1 (current) — pre-implementation checklist + small implementation-trap notes
+### v3.2 (current) — third-round micro-tightenings
+
+| # | Tightening | Section |
+|---|---|---|
+| T15 | `correlationId` + `runId` invariant: every log line, artifact, Slack post, failure object, and audit event must carry both. Logger child context + persistence-layer zod check enforce it. | §11.9.1 |
+| T16 | Fingerprint persisted **only** if download + artifact validation + transcribe + report all succeed. Prevents permanent skip of valid future content after partial failure. | §6.7.2 |
+| T17 | Artifact validation before hashing: minimum file size + MIME re-check from file header (magic bytes), not just response Content-Type. Closes "HTML error page advertised as video" failure mode. | §6.7.2 |
+| T18 | `send_to_slack` must persist the report body to DB (`task_deliverables.body_text` / `execution_artifacts.inline_text`) **before** calling Slack. Operator can re-send manually if Slack fails. Enforced in zod, not by convention. | §5.5.2, §8.1 |
+| T19 | `ignoreFingerprint: boolean` flag on the run trigger payload (default `false`, heartbeat always `false`). For debug, reprocessing, and onboarding. Audit-logged. | §6.7.2 |
+| T20 | Three-tier login success detection: successSelector → URL change → session-cookie presence. Closes false negatives on sites with no stable selector and no URL change. | §6.4 |
+| T21 | All retry/backoff goes through a single `withBackoff` helper. Per-integration `isRetryable` predicates. Single observability surface, single place to add circuit breakers in v2. Lint rule bans ad-hoc backoff loops. | §8.5 |
+
+All seven are operational hygiene and edge-case containment. None require redesign. Spec is build-ready.
+
+### v3.1 — pre-implementation checklist + small implementation-trap notes
 
 | Area | Change | Section |
 |---|---|---|
@@ -1559,6 +1717,25 @@ Verification:
 - [ ] `BrowserTaskPayloadSchema` enqueued payload is logged once during a test run; `JSON.stringify(payload).length < 4096` (typical < 1 KB after T1)
 - [ ] No payload field contains arrays of artifact bytes, transcripts, or markdown bodies
 - [ ] No field of the payload schema is `z.any()` or unbounded `z.string()` — every string has a `max()`
+
+### 11.9.1 Correlation ID invariant (T15)
+
+**The rule:** every log line, every persisted artifact metadata blob, every Slack post payload, every failure object, and every audit event in this workflow must carry both `runId` and `correlationId`. No exceptions.
+
+This is what makes "why did this run fail?" answerable in 30 seconds — without it, debugging fragments across the agent run, the worker, the Whisper call, and the Slack post.
+
+Concretely:
+
+- **Logger**: the worker and server loggers must be instantiated with a child context that includes `{ runId, correlationId, organisationId }`. Anywhere a logger is created without that context is a bug.
+- **Artifacts**: `execution_artifacts.metadata` always includes `{ runId, correlationId }` in its jsonb payload, alongside the artifact-specific metadata.
+- **Slack**: the `send_to_slack` skill stores `{ runId, correlationId }` in `agent_runs.metadata.slackPosts[i]` so an operator looking at a Slack message can trace it back to a run.
+- **Failure objects**: `failure(reason, detail, metadata)` always merges `{ runId, correlationId }` into `metadata` automatically — callers never pass these explicitly, the helper enriches them from the `AsyncLocalStorage` trace context.
+- **Audit events**: `audit_events.metadata` always includes both fields.
+
+Verification (added to §11.10 checklist):
+- [ ] `grep -rEn "logger\.(info|warn|error)" worker/src server/services/skillExecutor.ts` reviewed; every logger instance traces back to a child context that includes `runId` and `correlationId`
+- [ ] Persistence layer for `execution_artifacts`, `audit_events`, and `agent_runs.metadata.slackPosts` rejects writes missing either field (zod check)
+- [ ] Manual: trigger a deliberate failure end-to-end; confirm a single search for `correlationId=<id>` surfaces the agent_run row, all execution_steps, the worker logs, the audit event, and the Slack post (or its failure)
 
 ### 11.10 Observability completeness — "why did this run fail?" in 30 seconds
 
