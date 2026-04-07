@@ -694,4 +694,62 @@ The path from here is execution, not architecture: complete the GHL data flow, w
 
 **Status: Ready to build the final 15%, then test with a real GHL agency.**
 
+---
+
+## 9. Currently Supported Integrations
+
+The platform supports integrations through three mechanisms: **direct adapters** (deep integrations with full OAuth lifecycle, ingestion, and outbound actions), **MCP servers** (external Model Context Protocol servers with auto-discovered tools), and **workflow engines** (process automation triggers).
+
+### 9.1 Direct Adapter Integrations
+
+Built into the platform with full canonical data ingestion, webhook handling, and outbound actions.
+
+| Integration | Type | Description |
+|-------------|------|-------------|
+| **GoHighLevel (GHL)** | CRM | Full OAuth flow with auto-discovery of all client locations, contact/opportunity/conversation/revenue ingestion, webhook event processing, and outbound contact creation — the primary connector for the agency vertical |
+| **Stripe** | Payments | API key authentication for payment processing, customer management, and subscription handling — used for billing and revenue tracking |
+| **Slack** | Messaging | OAuth-based messaging with channel listing, message posting, webhook event ingestion, and timing-safe HMAC verification — used for alert delivery and team notifications |
+| **Teamwork Desk** | Helpdesk/Ticketing | OAuth + API key authentication for ticket CRUD, replies, status management, and webhook event handling — for agencies managing client support workflows |
+| **GitHub (App)** | Developer | GitHub App installation model (not OAuth) with fine-grained per-repo access, webhook ingestion, and automatic task creation from issues/PRs — for agencies managing dev work |
+| **Gmail** | Email | OAuth2 with offline access for sending emails, reading inbox, and transactional notifications — used by intelligence agents for alert delivery |
+
+### 9.2 MCP Server Integrations (9 Pre-Configured Presets)
+
+External MCP servers managed by the MCP client manager. Auto-discovered tools, circuit breaker for resilience, integrated with the policy engine for governance.
+
+| Integration | Category | Description |
+|-------------|----------|-------------|
+| **Gmail** | Communication | Send, read, and search emails with 5 tools (send_email, read_inbox, search_messages, read_thread, list_labels) — uses the existing Gmail OAuth connection |
+| **Slack** | Communication | Post messages, read channels, manage conversations with 8 tools (post_message, list_channels, read_channel, search_messages) — uses Slack OAuth |
+| **HubSpot** | CRM | Manage contacts, deals, and companies with 12 tools (search_contacts, create_contact, search_deals, create_deal, list_companies) — uses HubSpot OAuth |
+| **GitHub** | Developer | Manage repositories, issues, pull requests, and code with 12 tools (search_repos, create_issue, list_prs, read_file, create_pr) — uses GitHub App installation |
+| **Brave Search** | Data & Search | Web and local search with 2 tools (web_search, local_search) — API key based, no OAuth required |
+| **Stripe** | Finance | Manage payments, customers, and subscriptions with 8 tools (list_customers, create_checkout, get_balance, list_invoices) — review-gated by default |
+| **Notion** | Productivity | Read and write pages, databases, and blocks with 10 tools (search, read_page, create_page, query_database, update_block) — API key based |
+| **Linear** *(via MCP)* | Developer | Issue tracking and project management — pre-configured in the MCP catalogue for agencies managing internal workflows |
+| **Jira** *(via MCP)* | Developer | Issue tracking with create, search, and update operations — pre-configured for enterprise dev workflows |
+
+### 9.3 Workflow Engine Integrations
+
+Process automation triggers — agents can fire processes in external workflow engines and receive results.
+
+| Integration | Type | Description |
+|-------------|------|-------------|
+| **n8n** | Workflow automation | Trigger n8n workflows from agent runs, with credential mapping and result callbacks — open-source self-hosted automation |
+| **Make.com** | Workflow automation | Trigger Make scenarios from agents with structured payloads — visual no-code automation |
+| **Zapier** | Workflow automation | Trigger Zaps via webhook with response handling — connects to 5,000+ apps in the Zapier ecosystem |
+| **Custom Webhook** | Generic | Trigger any HTTPS endpoint with HMAC signing, retries, and structured callbacks — escape hatch for proprietary systems |
+
+### 9.4 Integration Architecture Summary
+
+| Mechanism | Count | Effort to Add New | Use Case |
+|-----------|-------|------------------|----------|
+| Direct adapter | 6 (GHL, Stripe, Slack, Teamwork, GitHub, Gmail) | ~300 lines | Deep integration with canonical data ingestion + governance |
+| MCP preset | 9 (Gmail, Slack, HubSpot, GitHub, Brave, Stripe, Notion, Linear, Jira) | Catalogue entry only | Tool access without writing adapter code |
+| Workflow engine | 4 (n8n, Make, Zapier, custom) | Engine config | Triggering external automation flows |
+| **Total accessible** | **~19+ pre-built integrations** | **Plus any custom MCP server or webhook** | **Effectively unlimited via MCP + webhook escape hatches** |
+
+The combination means an agency gets immediate access to ~19 integrations out of the box, plus the ability to add any MCP-compatible server (200+ exist in the public ecosystem) or any HTTPS webhook with zero code changes.
+
+
 
