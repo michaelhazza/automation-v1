@@ -523,3 +523,213 @@ Phase 1 ships with templates seeded from code/JSON. Phase 2 is a separate featur
 - Editing a completed step's output invalidates all transitively dependent downstream step runs.
 - `agent_call` steps respect the full budget, handoff depth, and policy engine rules — the engine never bypasses existing guardrails.
 - Org scoping applies to templates (`organisationId`) and runs (`organisationId` via subaccount).
+
+---
+
+## IEE — Integrated Execution Environment
+
+IEE is a deterministic, multi-tenant execution context for **stateful agentic loops** over a browser or a dev workspace. Where the skill system is request/response, IEE is **iterative**: the LLM observes environment state, decides on an action, executes it, observes the result, and loops until `done`, `failed`, the step limit, or the wall-clock timeout. Costs are attributed per run for billing.
+
+The full spec lives in [`docs/iee-development-spec.md`](./docs/iee-development-spec.md). This section is the architectural overview.
+
+### Topology
+
+```
+Main app (Replit/Express)        Worker (Docker, DigitalOcean)
+  ├─ enqueues IEE jobs              ├─ pulls jobs from pg-boss
+  ├─ inserts ieeRuns rows           ├─ runs the execution loop (Playwright / shell)
+  └─ serves usage/cost APIs         └─ updates ieeRuns, writes ieeSteps
+              ↓                                ↑
+              └────── shared Postgres + pg-boss ──────┘
+```
+
+**Database is the only integration point.** No HTTP between app and worker.
+
+### Schema (migrations 0070, 0071)
+
+| Table | Purpose |
+|-------|---------|
+| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
+| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason`, `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
+| `ieeArtifacts` | Metadata for files/downloads emitted by a run. v1 stores metadata only; contents live on worker disk. |
+
+**LLM attribution** — `llmRequests` table gains `ieeRunId` (nullable FK) and `callSite` (`app`\|`worker`). Database CHECK constraint: `source_type <> 'iee' OR iee_run_id IS NOT NULL`.
+
+### Routing — how a task reaches IEE
+
+Decision happens in `agentExecutionService.executeAgentRun`:
+
+```typescript
+if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
+  if (!request.ieeTask) throw { statusCode: 400, message: 'ieeTask required' };
+  const { enqueueIEETask } = await import('./ieeExecutionService.js');
+  const enqueueResult = await enqueueIEETask({ task, organisationId, subaccountId, agentId, agentRunId, correlationId });
+  // Return synthetic loopResult — canonical state lives on the ieeRuns row.
+}
+```
+
+`executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. The IEE branch parks the agent run and lets the worker drive the actual execution.
+
+### Services & Routes
+
+| Service | Responsibility |
+|---------|----------------|
+| `ieeExecutionService` | Enqueue task. Idempotent insert (ON CONFLICT on `idempotencyKey`), budget reservation, pg-boss send, tracing. |
+| `ieeUsageService` | Per-run cost breakdown and aggregated usage queries (system / org / subaccount scope). Joins `ieeRuns` ⨝ `llmRequests`. |
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /api/iee/runs/:ieeRunId/cost` | `iee.ts` | Per-run cost breakdown (app vs worker LLM, runtime) |
+| `GET /api/iee/usage/system` | `iee.ts` | System-wide explorer (system_admin) |
+| `GET /api/orgs/:orgId/iee/usage` | `iee.ts` | Org-scoped explorer |
+| `GET /api/subaccounts/:subaccountId/iee/usage` | `iee.ts` | Subaccount-scoped explorer |
+
+Usage routes support filters: `from`, `to`, `agentIds`, `subaccountIds`, `statuses`, `types`, `failureReasons`, `minCostCents`, `search`, `sort`, `order`, `limit`, `cursor`.
+
+Standard conventions apply: `asyncHandler`, `authenticate`, org scoping via `req.orgId`, no direct `db` access.
+
+### Worker service
+
+Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerfile`](./worker/Dockerfile) (Playwright base image) and run as the `worker` service in [`docker-compose.yml`](./docker-compose.yml). Resource limits: `IEE_WORKER_MEM_LIMIT` (default 3g), `IEE_WORKER_CPUS` (default 2). Persistent volume for browser sessions at `/var/browser-sessions`.
+
+| File | Purpose |
+|------|---------|
+| `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
+| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
+| `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
+| `worker/src/handlers/cleanupOrphans.ts` | Periodic: stale workspaces, browser sessions, expired reservations |
+| `worker/src/handlers/costRollup.ts` | Periodic: aggregate `llmRequests` cost into `ieeRuns` denormalized columns |
+| `worker/src/loop/executionLoop.ts` | The four-exit-path loop |
+| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download |
+| `worker/src/dev/executor.ts` | Workspace, shell, git, file I/O |
+
+### The execution loop
+
+```
+runExecutionLoop():
+  while not terminal:
+    1. observe()                          → structured env state (capped sizes)
+    2. build prompt + observation
+    3. callRouter()                       → LLM call (sourceType='iee', callSite='worker', ieeRunId set)
+    4. parse + zod-validate the action
+    5. execute action
+    6. write ieeSteps row
+    7. heartbeat (lastHeartbeatAt)
+```
+
+**Exactly four exit paths** — no other terminations are valid:
+1. Action `done` → success
+2. Action `failed` → voluntary failure
+3. Step count exceeds `MAX_STEPS_PER_EXECUTION` → `step_limit_reached`
+4. Wall clock exceeds `MAX_EXECUTION_TIME_MS` → `timeout`
+
+`FailureReason` enum: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `unknown`.
+
+### Idempotency & deduplication
+
+Pattern in `ieeExecutionService`:
+
+1. Derive deterministic `idempotencyKey` from `(orgId, agentRunId, agentId, taskHash)`.
+2. `INSERT ... ON CONFLICT (idempotencyKey) WHERE deletedAt IS NULL DO NOTHING RETURNING id`.
+3. If no row returned, `SELECT` existing and apply:
+
+| Existing status | Behaviour |
+|-----------------|-----------|
+| `completed` | Return existing `resultSummary` immediately. **Do not enqueue.** |
+| `running` | Return run id; let in-flight worker finish. |
+| `pending` | Return run id; queued job will pick it up. |
+| `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
+
+The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
+
+### Cost attribution & billing
+
+Denormalized cost columns on `ieeRuns`:
+
+- `llmCostCents` — sum of `llm_requests.cost_with_margin_cents WHERE iee_run_id = run.id`
+- `llmCallCount`
+- `runtimeWallMs`, `runtimeCpuMs`, `runtimePeakRssBytes`
+- `runtimeCostCents` = `IEE_COST_CPU_USD_PER_SEC × cpuSec + IEE_COST_MEM_USD_PER_GB_HR × memGbHr + IEE_COST_FLAT_USD_PER_RUN`
+- `totalCostCents` = llm + runtime
+
+`costRollup` job aggregates from `llmRequests` after run completion. `ieeUsageService` joins these for the Usage Explorer.
+
+**Soft budget reservation** — created at enqueue (`IEE_RESERVATION_TTL_MINUTES`), released at finalization. Cleanup job sweeps expired reservations.
+
+### LLM router contract
+
+`llmRouter.routeCall` enforces, at runtime:
+
+```typescript
+if (ctx.sourceType === 'iee' && !ctx.ieeRunId) throw new RouterContractError(...);
+if (ctx.callSite === 'worker' && !ctx.ieeRunId) throw new RouterContractError(...);
+```
+
+The database CHECK constraint on `llmRequests` is the belt-and-braces backstop.
+
+### Frontend
+
+[`client/src/pages/UsagePage.tsx`](./client/src/pages/UsagePage.tsx) gains an `iee` tab alongside `overview` / `agents` / `models` / `runs` / `routing`. Loads `ieeRows`, `ieeSummary` from the scoped usage endpoint, with filters for type, status, search, failure reason, min cost. Per-run cost panel hits `/api/iee/runs/:ieeRunId/cost`.
+
+A Usage Explorer link appears in the left nav at all three scopes (system / org / subaccount), permission-gated.
+
+### Permissions
+
+| Scope | Key |
+|-------|-----|
+| Org | `org.billing.iee.view` |
+| Subaccount | `subaccount.billing.iee.view` |
+
+### Shared contracts (`shared/iee/`)
+
+Zod schemas + typed errors imported by both server and worker:
+
+- `IEEJobPayload`, `BrowserTaskPayload`, `DevTaskPayload`, `ResultSummary`
+- `ExecutionAction` union (`navigate` | `click` | `type` | `extract` | `download` | `run_command` | `write_file` | `read_file` | `git_clone` | `git_commit` | `done` | `failed`)
+- `Observation` (`url`, `pageText`, `clickableElements`, `inputs`, `files`, `lastCommandOutput`, `lastCommandExitCode`, `lastActionResult`)
+- `FailureReason` enum and typed errors: `TimeoutError`, `StepLimitError`, `SafetyError`, `BudgetExceededError`, `RouterContractError`
+
+### Environment variables
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `MAX_STEPS_PER_EXECUTION` | 25 | Hard step ceiling per run |
+| `MAX_EXECUTION_TIME_MS` | 300000 | Wall-clock ceiling |
+| `MAX_COMMAND_TIME_MS` | 30000 | Per-shell-command ceiling (dev mode) |
+| `IEE_BROWSER_CONCURRENCY` | 1 | pg-boss `teamSize` for browser queue |
+| `IEE_DEV_CONCURRENCY` | 2 | pg-boss `teamSize` for dev queue |
+| `IEE_HEARTBEAT_INTERVAL_MS` | 10000 | Worker heartbeat write cadence |
+| `IEE_HEARTBEAT_DEAD_AFTER_S` | 60 | Reconciler "dead worker" threshold |
+| `IEE_SESSION_TTL_DAYS` | 30 | Browser session lifetime |
+| `IEE_SESSION_AUTO_PRUNE` | false | Opt-in auto-delete of expired sessions |
+| `IEE_RESERVATION_TTL_MINUTES` | 15 | Soft budget reservation lifetime |
+| `IEE_MAX_STEPS` | 25 | Used for upfront budget estimation |
+| `IEE_AVG_LLM_COST_CENTS_PER_STEP` | 5 | Estimation only |
+| `IEE_FLAT_RUNTIME_COST_CENTS` | 20 | Estimation only |
+| `IEE_COST_CPU_USD_PER_SEC` | 0 | Runtime cost pricing |
+| `IEE_COST_MEM_USD_PER_GB_HR` | 0 | Runtime cost pricing |
+| `IEE_COST_FLAT_USD_PER_RUN` | 0 | Runtime cost pricing |
+| `IEE_GIT_AUTHOR_NAME` / `IEE_GIT_AUTHOR_EMAIL` | — | Commit author for dev tasks |
+| `BROWSER_SESSION_DIR` | `/var/browser-sessions` | Persistent session storage |
+| `WORKSPACE_BASE_DIR` | `/tmp/workspaces` | Ephemeral dev workspace root |
+
+### Job config (`server/config/jobConfig.ts`)
+
+```typescript
+'iee-browser-task': { retryLimit: 3, expireInMinutes: 10, retentionDays: 7, dlq: 'iee-browser-task__dlq' }
+'iee-dev-task':     { retryLimit: 2, expireInMinutes: 10, retentionDays: 7, dlq: 'iee-dev-task__dlq' }
+```
+
+### Invariants (non-negotiable)
+
+- **Database is the only integration point** between app and worker. No HTTP, no shared filesystem assumptions beyond the worker's own volumes.
+- **Idempotency is database-level** — unique partial index plus ON CONFLICT logic. Never compute it in application memory alone.
+- **Terminal status finality** — once `completed` or `failed`, only `eventEmittedAt`, `deletedAt`, and reconciliation cleanup may touch the row. Cost and result columns are frozen. Protects billing accuracy.
+- **Worker ownership assertion** — before destructive ops, `assertWorkerOwnership()` verifies `workerInstanceId` matches. Prevents double-execution after a crash + reassignment.
+- **Four exit paths only** — `done`, `failed`, `step_limit_reached`, `timeout`. The loop cannot terminate any other way.
+- **Observations are structured and capped** — never raw HTML or unbounded command output. `pageText` ≤ 8KB, ≤ 80 clickable elements, command output ≤ 4KB.
+- **Action schema validation before execute** — every LLM-emitted action is zod-parsed before any executor call. Invalid actions are a failed step, not a thrown exception.
+- **`source_type='iee'` requires `iee_run_id`** — enforced by both router runtime guard and database CHECK constraint.
+- **Tenant scoping on every query** — all cost/usage queries unconditionally filter by `organisationId`. System_admin scope override is an explicit parameter, never an implicit bypass.
+- **`iee_browser` / `iee_dev` execution modes** respect existing budget reservation, policy engine, and audit event flows — IEE never bypasses platform guardrails.
