@@ -83,7 +83,23 @@ The Playbooks engine **must** reuse the following primitives from `server/lib/` 
 
 ## 2. Database Schema (Migration 0074)
 
-All tables follow existing conventions: `id` (uuid pk), `createdAt`, `updatedAt`, `deletedAt` (where soft-deletes apply), `organisationId` for org-scoping.
+All tables follow existing conventions: `id` (uuid pk, default `gen_random_uuid()`), `createdAt`, `updatedAt`, `deletedAt` (where soft-deletes apply), `organisationId` for org-scoping. Drizzle schema files live under `server/db/schema/` — one file per table group.
+
+### 2.0 Migration safety
+
+- New tables only — zero changes to existing schema rows.
+- One additive column on `agent_runs`: `playbook_step_run_id uuid null`. Indexed for the engine's reverse lookup on agent run completion. No backfill required.
+- One additive column on `subaccount_agents` is **not** required — the cost breaker reads `maxCostPerRunCents` which already exists.
+- The migration is reversible via a corresponding `0074_playbooks.down.sql` that drops all new tables and the new column. Down migrations are not run in production but exist for local rollback.
+
+### 2.0.1 Drizzle schema layout
+
+```
+server/db/schema/
+├── playbookTemplates.ts            # systemPlaybookTemplates, playbookTemplates, *Versions
+├── playbookRuns.ts                 # playbookRuns, playbookStepRuns, playbookStepReviews
+└── agentRuns.ts                    # add playbookStepRunId column
+```
 
 ### 2.1 `system_playbook_templates`
 
@@ -197,6 +213,55 @@ Unique index on `(run_id, step_id, attempt)`.
 - `playbook_step_runs (agent_run_id)` — webhook lookup from agent run completion
 - `playbook_template_versions (template_id, version)` unique
 - `system_playbook_template_versions (system_template_id, version)` unique
+- `playbook_step_runs (run_id, step_id) where status not in ('invalidated','failed')` partial unique — only one live attempt per (run, step)
+- `agent_runs (playbook_step_run_id) where playbook_step_run_id is not null` — engine reverse lookup on agent completion
+
+### 2.9 Foreign key & integrity rules
+
+- `playbook_runs.template_version_id` → `playbook_template_versions.id` ON DELETE RESTRICT. Versions can never be deleted while runs reference them.
+- `playbook_step_runs.run_id` → `playbook_runs.id` ON DELETE CASCADE. Cancelled runs in test environments can be cleaned up; production never deletes runs.
+- `playbook_step_runs.agent_run_id` → `agent_runs.id` ON DELETE RESTRICT. Agent runs that belong to a playbook step are co-immutable.
+- `playbook_step_reviews.review_item_id` → `review_items.id` ON DELETE RESTRICT.
+- `playbook_templates.forked_from_system_id` → `system_playbook_templates.id` ON DELETE SET NULL. System template deletion deprecates rather than deletes; the FK preserves history if a hard delete ever happens.
+
+### 2.10 Status enums (Postgres)
+
+```sql
+CREATE TYPE playbook_run_status AS ENUM (
+  'pending', 'running', 'awaiting_input', 'awaiting_approval',
+  'completed', 'failed', 'cancelling', 'cancelled'
+);
+
+CREATE TYPE playbook_step_run_status AS ENUM (
+  'pending', 'running', 'awaiting_input', 'awaiting_approval',
+  'completed', 'failed', 'skipped', 'invalidated'
+);
+
+CREATE TYPE playbook_step_type AS ENUM (
+  'prompt', 'agent_call', 'user_input', 'approval', 'conditional'
+);
+
+CREATE TYPE playbook_side_effect_type AS ENUM (
+  'none', 'idempotent', 'reversible', 'irreversible'
+);
+
+CREATE TYPE playbook_step_review_decision AS ENUM (
+  'pending', 'approved', 'rejected', 'edited'
+);
+```
+
+### 2.11 Row-level security
+
+System templates have no `organisation_id` and are visible to all orgs (read-only via API). Org templates and runs are scoped via `organisation_id`. Phase 1 enforces this via service-layer `req.orgId` filtering — no Postgres RLS policies. **Phase 1.5 adds RLS policies as a defense-in-depth layer** when parameterization lands, since that increases cross-org template touchpoints. The RLS plan:
+
+```sql
+-- Phase 1.5
+ALTER TABLE playbook_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY org_isolation ON playbook_templates
+  USING (organisation_id = current_setting('app.org_id', true)::uuid);
+```
+
+The `app.org_id` GUC is set per-request by the existing auth middleware (a separate change in 1.5).
 
 ## 3. Definition Format
 
