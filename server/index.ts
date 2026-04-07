@@ -314,6 +314,15 @@ async function start() {
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
+  // Playbooks engine workers (tick + watchdog cron) — spec §5.2 + §5.7
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { playbookEngineService } = await import('./services/playbookEngineService.js');
+      await playbookEngineService.registerWorkers();
+    } catch (err) {
+      console.error('[boot] failed to register playbook engine workers', err);
+    }
+  }
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {
