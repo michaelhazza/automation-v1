@@ -176,6 +176,8 @@ docker compose up --build
 
 First build downloads the Playwright base image (~1.5 GB). Expect 5–10 minutes on a typical connection. Subsequent starts are <30 s.
 
+> **First-build expectations:** high CPU and RAM usage (close to your Docker Desktop allocation) is normal during the initial build and the first Postgres init. Don't panic if your laptop fan spins up. It settles within a minute of `iee.worker.started` appearing in the logs.
+
 You should see, in order:
 1. `postgres` — `database system is ready to accept connections`
 2. `app` — your existing app startup logs
@@ -193,6 +195,16 @@ docker compose up -d
 ## Step 7 — Verification
 
 Run all of the following. Each must pass before you start using the environment.
+
+### 7.0 60-second sanity check
+
+If you only have a minute, run this one command — it confirms the worker is alive and connected:
+
+```bash
+docker compose logs worker | tail -n 50
+```
+
+You should see a JSON line containing `"msg":"iee.worker.started"`. If you do, the worker is correctly wired to Postgres and pg-boss. If you don't, jump to Troubleshooting.
 
 ### 7.1 All containers running
 

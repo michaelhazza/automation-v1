@@ -2049,6 +2049,58 @@ The system prompt template in `worker/src/loop/systemPrompt.ts` is updated. No c
 
 This is in-memory and per-worker — it does **not** require new database state. A worker restart resets the suspect tracking, which is acceptable: the worst case is one extra failed run before the recovery kicks in.
 
+### 13.6.1 Tightening notes (rev 7)
+
+Three small additions on top of §13.2, §13.3, and §7.4 — closing the last micro-gaps without new architecture.
+
+**a) Reserved-cost leak cleanup (extends §13.2 + §12.3).** The `iee-cleanup-orphans` job gains a third sweep:
+
+```sql
+UPDATE execution_runs
+   SET reserved_cost_usd = 0,
+       status = 'failed',
+       failure_reason = 'environment_error',
+       completed_at = now()
+ WHERE status = 'pending'
+   AND reserved_cost_usd > 0
+   AND created_at < now() - interval '15 minutes'
+   AND deleted_at IS NULL;
+```
+
+15 minutes is well above the worst-case enqueue→pickup latency (`expireInMinutes` is 10 in `JOB_CONFIG`) but short enough that a stuck reservation cannot quietly gnaw at an org's budget. The threshold lives in `IEE_RESERVATION_TTL_MINUTES` (env, default `15`).
+
+**b) Heartbeat write-coalescing (extends §13.3).** The heartbeat interval already fires every 10s, but the `UPDATE` is guarded so writes only happen if the in-process `lastHeartbeatWrittenAt` is older than the interval minus a small jitter:
+
+```ts
+const HEARTBEAT_INTERVAL_MS = 10_000;
+let lastWritten = 0;
+const interval = setInterval(async () => {
+  const now = Date.now();
+  if (now - lastWritten < HEARTBEAT_INTERVAL_MS - 500) return;
+  lastWritten = now;
+  await db.execute(sql`UPDATE execution_runs SET last_heartbeat_at = now() WHERE id = ${runId}`);
+}, HEARTBEAT_INTERVAL_MS);
+interval.unref();
+```
+
+This caps DB write rate at ~6 writes/min/run regardless of timer drift or future code paths that might call the heartbeat opportunistically. Batching across runs is **not** added in v1 — at the planned concurrency (1 browser + 2 dev per worker) the write volume is trivial.
+
+**c) Per-command audit log (extends §7.4).** Every dev `run_command` step writes a structured log line in addition to the `execution_steps` row, intended for live debugging:
+
+```ts
+logger.info('iee.dev.command', {
+  executionRunId,
+  stepNumber,
+  command: truncate(command, 500),
+  exitCode,
+  durationMs,
+  stdout: truncateMiddle(stdout, 1500),
+  stderr: truncateMiddle(stderr, 1500),
+});
+```
+
+Total payload capped at ~4 KB per line. The full (un-truncated within the 64 KiB ring buffer cap) stdout/stderr already lives on the `execution_steps.output` row for forensic review; the log line is the fast-path debugging surface. Same banned-content rules from §8.3 apply — no secrets, no full HTML.
+
 ### 13.7 Schema additions summary (rev 6)
 
 Single migration adds:
@@ -2085,6 +2137,7 @@ These are noted so a future reviewer doesn't think they were missed.
 | 4 | 2026-04-07 | Added §11.7 (per-task drill-down with three separate cost lines: app LLM, worker LLM, worker compute — backed by new `call_site` and `execution_run_id` columns on `llmRequests`) and §11.8 (Usage Explorer page — single React component mounted at three scope URLs with full filters, search, sort, pagination, export, and a unified API endpoint). |
 | 5 | 2026-04-07 | §11.8.8: Usage Explorer is a top-level **left-nav** entry at every scope (system / org / subaccount), permission-gated, not nested under Settings. Settings → Billing keeps a convenience deep-link to it. |
 | 6 | 2026-04-07 | Part 13 robustness hardening: router-level + DB CHECK enforcement of `executionRunId` for IEE LLM calls; budget reservation column `reservedCostUsd` to fix the enqueue-time race; heartbeat moved to a `setInterval` loop independent of step execution; system-prompt anti-stagnation rule (3-step no-progress → change strategy or `failed`); dev command hardening (reject `$(`, backticks, process substitution, `eval`; wrap in `bash -c "set -euo pipefail; ..."`); Playwright session corruption auto-recovery on second consecutive failure. |
+| 7 | 2026-04-07 | §13.6.1 micro-tightening: reserved-cost leak sweep added to `iee-cleanup-orphans` (15 min TTL via `IEE_RESERVATION_TTL_MINUTES`); heartbeat write coalescing guard so DB writes are capped at one per interval; per-command audit log line `iee.dev.command` for fast-path debugging of dev runs. Windows guide: 60-second sanity check (§7.0) and first-build CPU/RAM expectations note. |
 
 
 
