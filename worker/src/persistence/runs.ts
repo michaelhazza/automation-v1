@@ -3,6 +3,7 @@
 // Spec §5.1 (loop contract), §11.7.2 (denormalised costs), §13.7 (schema).
 // ---------------------------------------------------------------------------
 
+import type PgBoss from 'pg-boss';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import { db } from '../db.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
@@ -10,6 +11,14 @@ import { budgetReservations } from '../../../server/db/schema/budgetReservations
 import { llmRequests } from '../../../server/db/schema/llmRequests.js';
 import type { ResultSummary } from '../../../shared/iee/jobPayload.js';
 import type { FailureReason } from '../../../shared/iee/failureReason.js';
+import { logger } from '../logger.js';
+
+// Lazy boss reference set by bootstrap so persistence/runs.ts can emit
+// iee-run-completed events without a circular import on bootstrap.ts.
+let bossRef: PgBoss | null = null;
+export function setPersistenceBoss(boss: PgBoss): void {
+  bossRef = boss;
+}
 
 export interface IeeRunRow {
   id: string;
@@ -109,6 +118,27 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
       })
       .where(eq(budgetReservations.idempotencyKey, `iee:${input.ieeRunId}`));
   });
+
+  // ── Reconnect hook (Appendix A.1 / reviewer round 2) ──────────────────────
+  // Emit a pg-boss event so the main app can subscribe and resume the parent
+  // agent run. Best-effort: a failure to emit must not undo the terminal
+  // state write above.
+  if (bossRef) {
+    try {
+      await bossRef.send('iee-run-completed', {
+        ieeRunId: input.ieeRunId,
+        status: input.status,
+        failureReason: input.failureReason,
+        totalCostCents,
+        stepCount: input.stepCount,
+      }, { retryLimit: 3, retryDelay: 5, retryBackoff: true });
+    } catch (err) {
+      logger.warn('iee.run_completed.emit_failed', {
+        ieeRunId: input.ieeRunId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 /** Aggregate LLM cost for the run from llm_requests, used at finalization. */

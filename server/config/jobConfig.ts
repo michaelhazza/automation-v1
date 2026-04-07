@@ -135,6 +135,18 @@ export const JOB_CONFIG = {
     retryBackoff: true,
     expireInSeconds: 300,
   },
+  // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
+  // when an iee_run reaches a terminal status. Subscribed by the main app
+  // (handler optional in v1) to resume the parent agent run, post results
+  // back to the agent's loop, etc. Reusing the existing pg-boss path keeps
+  // the reconnection async + decoupled.
+  'iee-run-completed': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'iee-run-completed__dlq',
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

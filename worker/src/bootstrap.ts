@@ -8,6 +8,7 @@ import PgBoss from 'pg-boss';
 import { db, client } from './db.js';
 import { env } from './config/env.js';
 import { logger, setBaseLogContext } from './logger.js';
+import { setPersistenceBoss } from './persistence/runs.js';
 
 export interface BootstrapResult {
   boss: PgBoss;
@@ -33,6 +34,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
   });
 
   await boss.start();
+  setPersistenceBoss(boss);
 
   // ── Compat check (§4.4.5) ───────────────────────────────────────────────
   try {

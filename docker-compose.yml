@@ -68,6 +68,15 @@ services:
       # Spec §6.2 / §13.6.
       - worker_sessions:/var/browser-sessions
     restart: unless-stopped
+    # ── Resource limits (reviewer round 2) ──────────────────────────────────
+    # Prevents a runaway dev command or a Playwright leak from starving the
+    # host. Conservative defaults; adjust per environment via env vars on
+    # the production VPS. Cgroup-level isolation is intentionally NOT in v1
+    # (no Firejail / gVisor / DinD) per spec §15.
+    mem_limit: ${IEE_WORKER_MEM_LIMIT:-3g}
+    mem_reservation: ${IEE_WORKER_MEM_RESERVATION:-1g}
+    cpus: ${IEE_WORKER_CPUS:-2}
+    pids_limit: 256
 
 volumes:
   postgres_data:
