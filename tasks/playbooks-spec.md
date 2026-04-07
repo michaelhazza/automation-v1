@@ -1126,6 +1126,42 @@ Subaccount-scoped room also receives a coarse `playbook:run:status` for dashboar
 | `playbook_step.output_edited` | `playbook_step_runs/{id}` (includes downstream invalidated count) |
 | `playbook_step.approval_decided` | `playbook_step_runs/{id}` |
 
+### 8.4 Logging & observability
+
+Every tick, dispatch, and step transition emits a structured log via the existing `logger` with these required fields:
+
+| Field | Source |
+|-------|--------|
+| `correlationId` | AsyncLocalStorage from the originating request, or `playbook-watchdog:{runId}` for sweeps |
+| `runId` | always |
+| `templateSlug`, `templateVersion` | always |
+| `stepId`, `stepRunId`, `attempt` | when relevant |
+| `subaccountId`, `organisationId` | always |
+| `event` | one of: `tick.start`, `tick.dispatch`, `tick.idle`, `step.dispatched`, `step.completed`, `step.failed`, `step.invalidated`, `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `watchdog.recovered`, `mid_run_edit.applied`, `mid_run_edit.blocked` |
+| `durationMs` | for completion events |
+
+### 8.5 Metrics
+
+Emitted via the existing metrics pipeline:
+
+| Metric | Type | Tags |
+|--------|------|------|
+| `playbook.runs.started` | counter | `org_id`, `template_slug` |
+| `playbook.runs.completed` | counter | `org_id`, `template_slug`, `outcome` (completed/failed/cancelled) |
+| `playbook.runs.duration_ms` | histogram | `template_slug` |
+| `playbook.steps.dispatched` | counter | `template_slug`, `step_type` |
+| `playbook.steps.duration_ms` | histogram | `template_slug`, `step_id` |
+| `playbook.steps.parse_retries` | counter | `template_slug`, `step_id` |
+| `playbook.invalidations.cascade_size` | histogram | `template_slug` — number of downstream steps invalidated by a single edit |
+| `playbook.invalidations.firewall_stops` | counter | `template_slug` — output-hash matches that prevented further propagation |
+| `playbook.watchdog.recovered_runs` | counter | — number of stuck runs the sweep self-healed |
+| `playbook.cost_breaker.blocks` | counter | `org_id`, `template_slug` |
+| `playbook.parallelism_factor` | histogram | `template_slug` — average concurrent step count during a run |
+
+### 8.6 Tracing
+
+Spans wrap each tick and each step dispatch. Step spans link to the underlying agent run span via the existing trace context. Watchdog ticks are traced separately so they don't pollute user-initiated trace timelines.
+
 ## 9. Phase 1 Client UI
 
 All pages lazy-loaded per existing convention. Permissions-driven nav additions.
@@ -1168,6 +1204,49 @@ All pages lazy-loaded per existing convention. Permissions-driven nav additions.
 - Form rendering for `user_input` and initial input → reuse existing form generator (or add `@rjsf/core` if not present).
 - DAG diagram → use `reactflow` (lightweight, well-supported). Read-only in Phase 1.
 - Stepper → custom component; existing review queue UI patterns are close enough to copy.
+- Toast / notification system → existing.
+- Confirmation dialogs → existing modal system.
+
+### 9.6 Mid-run edit UX (the safety-critical flow)
+
+When a user clicks **Edit** on a completed step:
+
+1. **Edit modal opens** with the current output rendered as a form derived from the step's `outputSchema`. User edits and clicks Save.
+2. Client `POST`s the new output without confirmation flags.
+3. If the server returns **200**, the modal shows a success toast with "N steps will re-run, est. cost $X" and closes.
+4. If the server returns **409**, the modal expands to a **safety review pane**:
+   - List of affected downstream steps grouped by `sideEffectType`.
+   - For each `irreversible` step: previous output preview, three radio options — `Re-run anyway`, `Skip and reuse previous`, `Cancel edit`.
+   - For each `reversible` step: simpler confirm/skip toggle.
+   - For `none`/`idempotent`: shown as informational ("will re-run automatically").
+   - Total estimated cost banner at the top.
+5. User makes their choices and clicks **Apply**. Client re-`POST`s with the appropriate `confirmIrreversible` / `confirmReversible` / `skipAndReuse` arrays.
+6. Server validates the choices cover all blocked steps and applies the edit.
+
+Cancelling the modal at any point leaves the run untouched.
+
+### 9.7 Live updates
+
+`PlaybookRunDetail` joins the `playbook-run:{runId}` WebSocket room on mount and leaves on unmount. Reducer applies events to local state:
+
+- `playbook:step:dispatched` → set step status to `running`
+- `playbook:step:completed` → update output, status `completed`, animate the row
+- `playbook:step:awaiting_input` → status flip + scroll to row + focus form
+- `playbook:step:invalidated` → grey out the row + show "re-running" indicator
+- `playbook:run:status` → update header
+
+No polling. The list page (`SubaccountPlaybookRuns`) does a single fetch on mount and listens to the subaccount-level coarse status events.
+
+### 9.8 Empty / loading / error states
+
+Every page handles all four states:
+
+| State | Behaviour |
+|-------|-----------|
+| Loading | Skeleton matching the final layout (no spinners) |
+| Empty (no runs) | Friendly empty state with a CTA to start one |
+| Error (fetch failed) | Inline error with retry button |
+| Permission denied | Hide the page from nav; if accessed directly, render the standard 403 page |
 
 ## 10. Authoring Workflow & Seeder
 
