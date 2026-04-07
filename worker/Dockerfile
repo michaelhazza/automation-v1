@@ -45,17 +45,18 @@ COPY server/types ./server/types
 COPY worker/tsconfig.json ./worker/
 COPY worker/src ./worker/src
 
-# Build the worker (transpiles worker/src + the bundled server cone). Invoked
-# via `npx tsc` from /repo so node resolution walks up to /repo/node_modules
-# instead of finding a duplicate package set under worker/node_modules.
-RUN npx tsc -p worker/tsconfig.json
+# Typecheck only — we run the worker via tsx at runtime (see CMD below) so
+# there's no emitted dist/. tsx handles extensionless ESM imports that plain
+# `node` against compiled output cannot, which avoids the ERR_MODULE_NOT_FOUND
+# class of failures from the bundled server cone's index barrels.
+RUN npx tsc -p worker/tsconfig.json --noEmit
 
 # Ensure Chromium is installed at the version Playwright expects
 RUN npx playwright install chromium
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Runtime
+# Runtime — dev image, executes TypeScript directly via tsx.
 # ─────────────────────────────────────────────────────────────────────────────
 ENV NODE_ENV=production
-WORKDIR /repo/worker
-CMD ["node", "dist/worker/src/index.js"]
+WORKDIR /repo
+CMD ["npx", "tsx", "worker/src/index.ts"]
