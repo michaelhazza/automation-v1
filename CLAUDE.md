@@ -146,6 +146,13 @@ Each skill should have a single clear responsibility.
 - Flexibility beats strict instruction sets for complex tasks
 - The goal is good outcomes, not instruction compliance
 
+## 10. Docs Stay In Sync With Code
+
+- If a code change invalidates something described in a doc (`CLAUDE.md`, `architecture.md`, `KNOWLEDGE.md`, skill references, or any file under `references/`), update that doc **in the same session and the same commit** as the code change.
+- Not later. Not "I'll come back to it." Right now, as part of the task.
+- Before marking a task complete, ask: "did I change behaviour or structure that any doc describes?" If yes, the doc update is part of the task — not a follow-up.
+- Stale docs are worse than missing docs. A wrong reference misleads future sessions; a missing one just sends the agent to read the code.
+
 ---
 
 ## Task Management Workflow
