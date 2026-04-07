@@ -438,6 +438,36 @@ export const skillExecutor = {
       case 'trigger_account_intervention':
         return proposeReviewGatedAction('trigger_account_intervention', input, context);
 
+      // ── Reporting Agent paywall workflow skills ───────────────────────────
+      // Spec: docs/reporting-agent-paywall-workflow-spec.md §4 / Code Change B
+      case 'transcribe_audio': {
+        const { transcribeAudio } = await import('./transcribeAudioService.js');
+        return transcribeAudio(
+          input as Parameters<typeof transcribeAudio>[0],
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            agentId: context.agentId,
+            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+          },
+        );
+      }
+      // Spec: docs/reporting-agent-paywall-workflow-spec.md §5 / Code Change C
+      case 'send_to_slack': {
+        const { sendToSlack } = await import('./sendToSlackService.js');
+        return sendToSlack(
+          input as Parameters<typeof sendToSlack>[0],
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            agentId: context.agentId,
+            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+          },
+        );
+      }
+
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
     }

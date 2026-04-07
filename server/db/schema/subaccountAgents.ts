@@ -68,6 +68,24 @@ export const subaccountAgents = pgTable(
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
     nextRunAt: timestamp('next_run_at', { withTimezone: true }),
 
+    // ── Content fingerprint (Reporting Agent dedup, T4/T10) ──────────────
+    // Map of intent → fingerprint of last successfully processed content.
+    // Shape: { 'download_latest': { sourceUrl, pageTitle, publishedAt?,
+    //   contentHash, processedAt, agentRunId } }
+    // Persisted ONLY after download + validation + transcribe + report all
+    // succeed (T16). Spec v3.4 §6.7.2.
+    lastProcessedFingerprintsByIntent: jsonb('last_processed_fingerprints_by_intent')
+      .notNull()
+      .default({})
+      .$type<Record<string, {
+        sourceUrl: string;
+        pageTitle?: string;
+        publishedAt?: string;
+        contentHash: string;
+        processedAt: string;
+        agentRunId: string;
+      }>>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

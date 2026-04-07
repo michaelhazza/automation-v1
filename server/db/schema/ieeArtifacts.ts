@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, boolean, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { ieeRuns } from './ieeRuns';
 
@@ -15,7 +15,11 @@ export const ieeArtifacts = pgTable(
   'iee_artifacts',
   {
     id:             uuid('id').defaultRandom().primaryKey(),
-    ieeRunId:       uuid('iee_run_id').notNull().references(() => ieeRuns.id, { onDelete: 'cascade' }),
+    // Nullable per Code Change B (transcribe_audio): the skill executor may
+    // be invoked from non-IEE agent runs where there is no parent IEE run.
+    // The persisted artifact still carries organisationId for tenant scoping
+    // and metadata.runId for parent-run tracing. Spec v3.4 §4.4.1.
+    ieeRunId:       uuid('iee_run_id').references(() => ieeRuns.id, { onDelete: 'cascade' }),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
 
     kind:           text('kind').notNull().$type<'download' | 'file' | 'log'>(),
@@ -23,6 +27,12 @@ export const ieeArtifacts = pgTable(
     sizeBytes:      bigint('size_bytes', { mode: 'number' }),
     mimeType:       text('mime_type'),
     metadata:       jsonb('metadata'),
+
+    // Inline text body for small text artifacts (≤1 MB after UTF-8-safe
+    // truncation). Used so transcripts and other small text outputs survive
+    // worker container cleanup. T12 / spec v3.4 §6.7.3.
+    inlineText:           text('inline_text'),
+    inlineTextTruncated:  boolean('inline_text_truncated').notNull().default(false),
 
     createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

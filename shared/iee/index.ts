@@ -9,6 +9,7 @@
  */
 
 export * from './failureReason.js';
+export * from './failure.js';
 export * from './observation.js';
 export * from './actionSchema.js';
 export * from './jobPayload.js';
