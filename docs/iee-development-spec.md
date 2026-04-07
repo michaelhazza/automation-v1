@@ -1693,7 +1693,26 @@ The service method behind it is the existing `ieeUsageService.getIEECost(...)` e
 - Server-side cap: any single query touching > 100,000 `execution_runs` rows returns a 400 with "narrow your filters" — prevents accidental denial of service from a date range covering years.
 - The chart series is downsampled server-side to ≤ 90 buckets regardless of date range (day → week → month bucketing automatic).
 
-#### 11.8.8 What this guarantees
+#### 11.8.8 Navigation placement
+
+The Usage Explorer is reachable from the **left navigation** at every scope, **not** from Settings. Treat it as a first-class top-level destination.
+
+| Scope | Nav location | Label | Icon |
+|---|---|---|---|
+| System admin | System admin left nav, top-level item | "Usage" | line/bar chart icon (match existing nav iconography) |
+| Organisation | Organisation left nav, top-level item | "Usage" | same icon |
+| Subaccount | Subaccount left nav, top-level item | "Usage" | same icon |
+
+Rules:
+
+1. **Top-level item, not nested under Settings or Billing.** It is its own entry. If the existing nav has a "Billing" group, "Usage" sits as a sibling, not a child.
+2. **Visibility is permission-gated** via the existing nav permission mechanism: each entry only renders when the user holds the corresponding `billing.iee.view.{system|org|subaccount}` permission. Users without permission do not see the item at all.
+3. **Active state** uses the existing nav active-state styling. Route matching is on the page route prefix (`/admin/usage`, `/orgs/:orgId/usage`, `/subaccounts/:subaccountId/usage`).
+4. **Order in the nav:** placed near the bottom of the primary nav group, above any administrative/settings items, so it sits in the "operational data" cluster (Runs, Agents, Usage) rather than the "configuration" cluster.
+5. **No duplicate entry under Settings.** If a user reaches Settings → Billing today, that page keeps the line-item additions from §11.5.5 and gains a "View detailed usage →" link that deep-links to the Usage Explorer for the current scope. The link is convenience-only; the canonical entry point is the left nav.
+6. The nav entries are added in the same files that already define the nav for each scope (audit step during implementation — likely `client/src/components/nav/SystemNav.tsx`, `OrgNav.tsx`, `SubaccountNav.tsx` or equivalent). No new nav primitives.
+
+#### 11.8.9 What this guarantees
 
 The user's question — *"Aggregated billing page viewable at subaccount/org/system level, with filters, ordering, search — is that included?"* — answer: **yes, as a single Usage Explorer page mounted at three URLs with scope-scoped permissions, full filter/search/sort/export, and a unified API endpoint.** Confirmed.
 
@@ -1851,6 +1870,7 @@ A short list, treat as binding:
 | 2 | 2026-04-07 | Added Part 11 (cost attribution — LLM + runtime) and Part 12 (risk tightening from review feedback). Added `workerInstanceId` / `lastHeartbeatAt` / cost columns to `executionRuns`. Added `'budget_exceeded'` to FailureReason. Added `iee-cleanup-orphans` and `iee-cost-rollup-daily` scheduled jobs. |
 | 3 | 2026-04-07 | Replaced Part 11.5 with full integration into the existing usage/billing system: shared `source` enum on rollup table, `ieeUsageService` with system/org/subaccount scoping, additive API endpoints, IEE as a line item on existing system/org/subaccount billing UIs (not new pages), three-level budget enforcement, reuse of existing notification channels and invoicing path. |
 | 4 | 2026-04-07 | Added §11.7 (per-task drill-down with three separate cost lines: app LLM, worker LLM, worker compute — backed by new `call_site` and `execution_run_id` columns on `llmRequests`) and §11.8 (Usage Explorer page — single React component mounted at three scope URLs with full filters, search, sort, pagination, export, and a unified API endpoint). |
+| 5 | 2026-04-07 | §11.8.8: Usage Explorer is a top-level **left-nav** entry at every scope (system / org / subaccount), permission-gated, not nested under Settings. Settings → Billing keeps a convenience deep-link to it. |
 
 
 
