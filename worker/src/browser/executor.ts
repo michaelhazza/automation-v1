@@ -31,6 +31,9 @@ import {
   type ArtifactKind,
 } from './artifactValidator.js';
 import { getWebLoginConnectionForRun } from '../persistence/integrationConnections.js';
+import { sql } from 'drizzle-orm';
+import { subaccountAgents } from '../../../server/db/schema/subaccountAgents.js';
+import { agentRuns } from '../../../server/db/schema/agentRuns.js';
 
 const NAV_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 10_000;
@@ -47,6 +50,10 @@ export interface BuildBrowserExecutorInput {
   browserTaskContract?: BrowserTaskContract;
   mode?: 'standard' | 'login_test';
   correlationId?: string;
+  /** Agent id for fingerprint dedup (T16 read path). */
+  agentId?: string;
+  /** Parent agent run id for runMetadata writes from the worker. */
+  agentRunId?: string | null;
 }
 
 export async function buildBrowserExecutor(
@@ -119,11 +126,11 @@ export async function buildBrowserExecutor(
           error: err instanceof Error ? err.message : String(err),
         });
       }
-      return buildLoginTestExecutor({
-        ieeRunId: input.ieeRunId,
-        context,
-        screenshotPath: proofPath,
-      });
+      // Throw a sentinel — browserTask.ts's login_test short-circuit
+      // catches this and finalizes the run as completed. Pure throw means
+      // there is no executor object that can ever be passed into the loop.
+      try { await context.close(); } catch { /* swallow */ }
+      throw new LoginTestComplete(proofPath);
     }
   }
 
@@ -144,8 +151,26 @@ export async function buildBrowserExecutor(
 
   if (input.startUrl) {
     try {
-      await page.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+      // Route through the contract guard so startUrl is also subject to
+      // the domain allow-list (pr-reviewer round 2 #2).
+      if (contractGuard) {
+        await contractGuard.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+        const violations = contractGuard.getViolations();
+        if (violations.length > 0) {
+          throw new FailureError(
+            failure('environment_error', `contract_violation:${violations[0].kind}`, {
+              kind: violations[0].kind,
+              detail: violations[0].detail,
+            }),
+          );
+        }
+      } else {
+        await page.goto(input.startUrl, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+      }
     } catch (err) {
+      // Contract violations must terminate the run; transient nav errors
+      // are logged and swallowed (legacy behaviour).
+      if (err instanceof FailureError) throw err;
       logger.warn('iee.browser.start_url_failed', {
         ieeRunId: input.ieeRunId,
         startUrl: input.startUrl,
@@ -186,7 +211,18 @@ export async function buildBrowserExecutor(
       assertNoContractViolations();
       switch (action.type) {
         case 'navigate': {
-          await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+          // Per pr-reviewer round 2 #2: navigation MUST go through the
+          // contract guard so the domain allow-list is preventative, not
+          // observational. Without contract: behave as before (no contract,
+          // no enforcement).
+          if (contractGuard) {
+            await contractGuard.goto(action.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+            // Hard stop if the guard refused — assertNoContractViolations()
+            // will throw and the loop will terminate.
+            assertNoContractViolations();
+          } else {
+            await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
+          }
           lastResult = `navigated to ${action.url}`;
           return { output: { url: page.url() }, summary: lastResult };
         }
@@ -263,6 +299,37 @@ export async function buildBrowserExecutor(
             );
           }
 
+          // T16 read path — short-circuit if the content hash matches what
+          // we last successfully processed for this (subaccount_agent,
+          // intent). The agent will see the lastResult on the next observe
+          // and emit `done`. The end-of-run invariant accepts this branch
+          // because terminationResult='no_new_content' only requires
+          // fingerprintRead. Per pr-reviewer round 2 #3.
+          const intent = input.browserTaskContract?.intent;
+          if (intent && input.subaccountId && input.agentId && input.agentRunId) {
+            const matched = await checkFingerprintMatch({
+              organisationId: input.organisationId,
+              subaccountId: input.subaccountId,
+              agentId: input.agentId,
+              intent,
+              contentHash: validation.contentHash,
+            });
+            // Always mark fingerprintRead so the invariant can confirm the
+            // cache was consulted (even on a miss).
+            await markFingerprintRead(input.agentRunId, matched);
+            if (matched) {
+              lastResult = `no_new_content: contentHash matches last processed fingerprint for intent=${intent}; emit done`;
+              return {
+                output: {
+                  noNewContent: true,
+                  intent,
+                  contentHash: validation.contentHash,
+                },
+                summary: lastResult,
+              };
+            }
+          }
+
           await db.insert(ieeArtifacts).values({
             ieeRunId: input.ieeRunId,
             organisationId: input.organisationId,
@@ -278,6 +345,20 @@ export async function buildBrowserExecutor(
             } as object,
           });
           downloadEmitted = true;
+
+          // Stage the candidate fingerprint into the parent agent_runs row
+          // so the end-of-run hook can persist it after the invariant
+          // passes. T16 write half. Per pr-reviewer round 2 #1 this writes
+          // via the atomic jsonb merge helper.
+          if (intent && input.agentRunId) {
+            await markFingerprintCandidate(input.agentRunId, {
+              intent,
+              sourceUrl: page.url(),
+              pageTitle: await page.title().catch(() => undefined),
+              contentHash: validation.contentHash,
+            });
+          }
+
           lastResult = `downloaded ${suggestedName} (${validation.sizeBytes} bytes, sha256=${validation.contentHash.slice(0, 12)}…)`;
           assertNoContractViolations();
           return {
@@ -320,48 +401,87 @@ export async function buildBrowserExecutor(
 }
 
 // ---------------------------------------------------------------------------
-// login_test mode — no-op StepExecutor that immediately reports done.
-// Spec v3.4 §6.3.1 / T2.
+// T16 fingerprint read/stage helpers — worker side.
+//
+// The worker is the natural place to do the contentHash comparison because
+// it is the only component that has the file bytes. The persist itself
+// happens in server/lib/reportingAgentRunHook.ts at end-of-run; the worker
+// stages the candidate into agent_runs.run_metadata so the hook has it.
 // ---------------------------------------------------------------------------
 
-function buildLoginTestExecutor(args: {
-  ieeRunId: string;
-  context: BrowserContext;
-  screenshotPath: string;
-}): StepExecutor {
-  let emitted = false;
-  return {
-    mode: 'browser',
-    availableActions: BROWSER_ACTION_TYPES,
-    async observe(): Promise<Observation> {
-      // Synthetic minimum-viable observation; the loop will not actually
-      // call the LLM because execute() returns 'done' on the first turn.
-      return {
-        url: 'about:blank',
-        pageText: 'login_test_mode_complete',
-        clickableElements: [],
-        inputs: [],
-        lastActionResult: emitted ? 'login_test_done' : undefined,
-      } as Observation;
-    },
-    async execute(): Promise<ActionResult> {
-      // Per pr-reviewer S1 — this executor is intentionally only consumed by
-      // browserTask.ts's login_test short-circuit (which calls dispose()
-      // immediately after build). It is NOT loop-safe: handing it to
-      // runExecutionLoop would still trigger an LLM call before execute()
-      // fires, violating spec T2. Fail loudly if anything ever passes us
-      // through the loop instead.
-      emitted = true;
-      throw new FailureError(
-        failure('internal_error', 'login_test_executor_not_for_loop', {
-          screenshotPath: args.screenshotPath,
-        }),
-      );
-    },
-    async dispose(): Promise<void> {
-      try { await args.context.close(); } catch { /* swallow */ }
-    },
-  };
+interface FingerprintCheckArgs {
+  organisationId: string;
+  subaccountId: string;
+  agentId: string;
+  intent: string;
+  contentHash: string;
+}
+
+async function checkFingerprintMatch(args: FingerprintCheckArgs): Promise<boolean> {
+  const rows = await db
+    .select({ map: subaccountAgents.lastProcessedFingerprintsByIntent })
+    .from(subaccountAgents)
+    .where(
+      sql`${subaccountAgents.organisationId} = ${args.organisationId}
+          AND ${subaccountAgents.subaccountId} = ${args.subaccountId}
+          AND ${subaccountAgents.agentId} = ${args.agentId}`,
+    )
+    .limit(1);
+  const row = rows[0];
+  if (!row?.map) return false;
+  const map = row.map as Record<string, { contentHash?: string } | undefined>;
+  return map[args.intent]?.contentHash === args.contentHash;
+}
+
+async function markFingerprintRead(agentRunId: string, matched: boolean): Promise<void> {
+  // Atomic jsonb merge so we don't race with skill writes.
+  const patch = JSON.stringify({
+    fingerprintRead: true,
+    ...(matched ? { terminationResult: 'no_new_content' } : {}),
+  });
+  await db.execute(sql`
+    UPDATE agent_runs
+       SET run_metadata = jsonb_set(
+             COALESCE(run_metadata, '{}'::jsonb),
+             '{reportingAgent}',
+             COALESCE(run_metadata->'reportingAgent', '{}'::jsonb) || ${patch}::jsonb,
+             true
+           )
+     WHERE id = ${agentRunId}
+  `);
+}
+
+async function markFingerprintCandidate(
+  agentRunId: string,
+  fp: { intent: string; sourceUrl: string; pageTitle?: string; contentHash: string },
+): Promise<void> {
+  const patch = JSON.stringify({ fingerprint: fp });
+  await db.execute(sql`
+    UPDATE agent_runs
+       SET run_metadata = jsonb_set(
+             COALESCE(run_metadata, '{}'::jsonb),
+             '{reportingAgent}',
+             COALESCE(run_metadata->'reportingAgent', '{}'::jsonb) || ${patch}::jsonb,
+             true
+           )
+     WHERE id = ${agentRunId}
+  `);
+}
+
+// Suppress unused-import warning when only the type-side of agentRuns is needed.
+void agentRuns;
+
+// ---------------------------------------------------------------------------
+// login_test mode — no executor is returned. browserTask.ts handles this
+// branch by calling buildBrowserExecutor() in 'login_test' mode (which
+// performs the login + success screenshot in this file's prelude), then
+// receives a sentinel via the LoginTestComplete throw and finalizes the
+// run as completed without entering runExecutionLoop. Spec v3.4 §6.3.1 / T2.
+// ---------------------------------------------------------------------------
+
+export class LoginTestComplete {
+  readonly _tag = 'LoginTestComplete' as const;
+  constructor(public readonly screenshotPath: string) {}
 }
 
 // ---------------------------------------------------------------------------
