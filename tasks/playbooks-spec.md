@@ -13,6 +13,21 @@ Sections 1–4 cover the data model and authoring format — read these to under
 
 The single most important constraint to internalise: **every step declares a `sideEffectType`, and the engine never auto-re-executes irreversible steps.** Mid-run editing is the feature most likely to cause real customer harm if implemented naively, and §5.4 exists to prevent that.
 
+## 0.1 Naming conventions
+
+| Layer | Convention | Examples |
+|-------|------------|----------|
+| Postgres tables, columns, types, enums | `snake_case` | `playbook_runs`, `output_hash`, `playbook_run_status` |
+| TypeScript identifiers (vars, fields, fns, types) | `camelCase` (types `PascalCase`) | `playbookEngineService`, `sideEffectType`, `PlaybookStep` |
+| Step ids inside a playbook definition | `kebab_case` (lowercase, `_` allowed, kebab convention enforced by validator regex `^[a-z][a-z0-9_]*$`) | `event_basics`, `landing_page_hero` |
+| Template slugs (filename and DB) | `kebab-case` | `event-creation`, `monthly-newsletter` |
+| Failure reasons | `snake_case` constants in the `FailureReason` enum | `playbook_dag_invalid`, `playbook_irreversible_blocked` |
+| WebSocket event types | `colon:separated` namespaces | `playbook:step:completed`, `playbook:run:status` |
+| Permission keys | `dot.separated.scope` | `playbook_runs.edit_output` |
+| Audit event names | `resource.action` | `playbook_template.published` |
+
+The Drizzle layer maps `snake_case` columns to `camelCase` TS fields automatically — use the TS identifiers everywhere except in raw migration SQL.
+
 ## 1. Overview
 
 Playbooks automate longer-form, multi-step processes against a subaccount. A Playbook is a versioned, immutable **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional. Steps consume outputs from earlier steps via templating against a growing run-level context. Independent branches execute in parallel.
@@ -1117,7 +1132,9 @@ estimateRun(definition: PlaybookDefinition): { totalCents: number; perStep: Reco
 estimateSubgraph(definition: PlaybookDefinition, fromStepIds: string[]): { totalCents: number; affectedSteps: string[] }
 ```
 
-Estimates use the existing `llmPricing` table and per-step `model` overrides. Token estimates are coarse — based on prompt length × historical output ratios. Accuracy ±50% is acceptable; the value is in giving the user an order-of-magnitude warning, not a precise quote.
+Estimates use the existing `llmPricing` table and per-step `model` overrides. Token estimates are coarse — based on prompt length × historical output ratios. Accuracy ±50% is acceptable initially; the value is in giving the user an order-of-magnitude warning, not a precise quote.
+
+**Feedback loop (compounding accuracy).** Every completed step records its actual cost (already tracked via `costAggregates`). The estimator queries a rolling window (last 50 runs of the same template version, same step id) and adjusts the projected cost per step toward the rolling mean. This is a one-line change once telemetry is in place — `estimateStep(stepId, version) = base_estimate * (rolling_actual / rolling_estimated)`. Phase 1 ships the storage path (actual costs already exist on `agent_runs` linked via `playbook_step_run_id`); Phase 1.5 turns on the adjustment. Within 50 runs of any template the estimator should converge to ±15%.
 
 ### 6.6 Service error catalogue
 
@@ -1230,7 +1247,12 @@ System templates are read-only via API. Authoring is file-based (see §9).
   "ok": true,
   "invalidatedStepIds": ["..."],
   "skippedStepIds": ["..."],
-  "estimatedCostCents": 4200
+  "estimatedCostCents": 4200,
+  "cascade": {
+    "size": 7,                    // total downstream steps invalidated
+    "criticalPathLength": 4,      // longest re-execution path through the invalidated subgraph
+    "estimatedDurationMs": 180000 // critical path × per-step duration estimate
+  }
 }
 // response 409 — needs confirmation
 {
@@ -1245,7 +1267,12 @@ System templates are read-only via API. Authoring is file-based (see §9).
       "previousOutput": { /* what's already there */ }
     }
   ],
-  "totalEstimatedCostCents": 4250
+  "totalEstimatedCostCents": 4250,
+  "cascade": {
+    "size": 7,
+    "criticalPathLength": 4,
+    "estimatedDurationMs": 180000
+  }
 }
 // response 422 — output failed schema validation
 { "error": "playbook_schema_violation", "issues": [ /* zod issues */ ] }
@@ -1356,7 +1383,7 @@ Subaccount-scoped room also receives a coarse `playbook:run:status` for dashboar
 }
 ```
 
-**Per-run sequence number** is allocated by a small `playbook_run_event_sequences` Postgres counter (incremented in the same transaction that mutates the step run row, so the sequence is always consistent with the underlying state). Clients buffer events and apply them in `sequence` order, dropping any duplicates by `eventId`. If a gap is detected (e.g. seq 45 received, then seq 47 with no 46), the client falls back to `GET /api/playbook-runs/:runId` to refetch full state — Phase 1 favours simplicity over a gap-fill protocol. The sequence counter survives reconnects: on reconnect, the client supplies the last seen sequence and the server replays any newer events (or, in Phase 1, the client just refetches).
+**Per-run sequence number** is allocated by a small `playbook_run_event_sequences` Postgres counter (incremented in the same transaction that mutates the step run row, so the sequence is always consistent with the underlying state). Clients buffer events and apply them in `sequence` order, dropping any duplicates by `eventId`. If a gap is detected (e.g. seq 45 received, then seq 47 with no 46), the client falls back to `GET /api/playbook-runs/:runId` to refetch full state — Phase 1 favours simplicity over a gap-fill protocol. **Phase 1.5 adds an incremental replay endpoint** `GET /api/playbook-runs/:runId/events?sinceSequence=N` that returns just the missed events; the client integrates them without a full refetch. Phase 1 ships with the sequence numbers and the eventId so the wire format is forward-compatible. The sequence counter survives reconnects: on reconnect, the client supplies the last seen sequence and the server replays any newer events (or, in Phase 1, the client just refetches).
 
 The `playbook_run_event_sequences` table is a single column `(run_id pk, last_sequence bigint)`. Allocated values are stored on the events themselves; the table is just the counter source.
 
@@ -1402,6 +1429,12 @@ Emitted via the existing metrics pipeline:
 | `playbook.watchdog.recovered_runs` | counter | — number of stuck runs the sweep self-healed |
 | `playbook.cost_breaker.blocks` | counter | `org_id`, `template_slug` |
 | `playbook.parallelism_factor` | histogram | `template_slug` — average concurrent step count during a run |
+| `playbook.steps.awaiting_input_duration_ms` | histogram | `template_slug`, `step_id` — measured at completion (or current age via watchdog) |
+| `playbook.steps.awaiting_approval_duration_ms` | histogram | `template_slug`, `step_id` |
+| `playbook.steps.awaiting_input_stuck` | gauge | `template_slug`, `step_id` — count of step runs awaiting input older than 24h |
+| `playbook.steps.awaiting_approval_stuck` | gauge | `template_slug`, `step_id` — count of step runs awaiting approval older than 48h |
+
+**Stuck-awaiting alerts.** The watchdog sweep (§5.7) also scans for step runs in `awaiting_input` or `awaiting_approval` and updates the gauges above. Alert thresholds: page on `awaiting_input > 24h` and `awaiting_approval > 48h`. These are warnings, not errors — the run isn't broken, the human is. Alert routes to the run's starting user and any subaccount admins.
 
 ### 8.6 Tracing
 
@@ -1464,7 +1497,7 @@ When a user clicks **Edit** on a completed step:
    - For each `irreversible` step: previous output preview, three radio options — `Re-run anyway`, `Skip and reuse previous`, `Cancel edit`.
    - For each `reversible` step: simpler confirm/skip toggle.
    - For `none`/`idempotent`: shown as informational ("will re-run automatically").
-   - Total estimated cost banner at the top.
+   - Total estimated cost banner at the top, plus **cascade summary**: "7 steps will re-run, longest re-execution path is 4 steps (~3 min)". Helps the user feel the blast radius before clicking Apply.
 5. User makes their choices and clicks **Apply**. Client re-`POST`s with the appropriate `confirmIrreversible` / `confirmReversible` / `skipAndReuse` arrays.
 6. Server validates the choices cover all blocked steps and applies the edit.
 
@@ -1649,6 +1682,16 @@ The PR description should explain the playbook's purpose in one paragraph and an
 - **Replay drift detection** — modify a stored conditional input between source and replay → replay fails with `playbook_replay_drift:conditional_diverged`.
 - **WebSocket sequence ordering** — events emitted in order 45, 46, 47; client receives 47 then 45 then 46; reducer applies in correct order; duplicate `eventId` is dropped.
 - **Per-step retry policy override** — step with `retryPolicy.maxAttempts: 1` does not retry on transient error; step without override retries up to default.
+- **Irreversible no-retry** — `irreversible` step with transient error fails immediately; validator rejects an irreversible step with `retryPolicy.maxAttempts: 3`.
+- **Hydration cache** — single step with five expressions referencing same inline ref triggers exactly one hydration; verified via spy on the inline reader.
+- **Inline ref GC** — synthetic refs older than retention with no active references are deleted; refs held by replay runs survive.
+- **Terminal-path failure** — diamond DAG (A → B / A → C / B+C → D); B fails with `fail_run`, run marked `failed` because D unreachable. Same DAG with B as `continue` and C succeeding → run finishes `completed_with_errors`.
+- **Approval version guard** — UI loads step at version=3, upstream edit pushes it to version=5, approve with `expectedVersion=3` returns 409.
+- **Output edit version guard** — same as above for the mid-run edit endpoint.
+- **Input hash dedup (forward-compat)** — verify `input_hash` is populated; behaviour assertion deferred to 1.5.
+- **Cascade summary** — mid-run edit response includes correct `cascade.size` and `criticalPathLength` for a diamond invalidation.
+- **Stuck-awaiting alert** — synthetic step in `awaiting_input` for >24h is detected by watchdog and incremented in the gauge.
+- **MAX_DAG_DEPTH** — validator rejects a chain of 51 sequential steps.
 
 ### 11.4 Integration tests
 
@@ -1730,6 +1773,14 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 | R16 | Run continues executing after org suspended or kill switch tripped | Low | High | Tick begins with kill switch check (§5.11); watchdog re-checks on every sweep cycle | Engine owner |
 | R17 | Resolved agent deleted mid-run → opaque DB error on dispatch | Low | Medium | Re-verify cached agent id immediately before each dispatch; fail with `playbook_template_drift` (§3.4) | Engine owner |
 | R18 | WebSocket events arrive out of order or duplicated, client UI shows stale state | Medium | Low | Per-run monotonic `sequence` + `eventId` envelope; client dedups and orders; gap → refetch (§8.2) | Client owner |
+| R19 | Step references same inline ref multiple times → repeated disk reads, slow tick | Medium | Low | Per-step hydration cache `Map<inlineRefId, value>` cleared on step completion (§3.6) | Engine owner |
+| R20 | Inline ref blob storage grows unbounded | Medium | Medium | `playbook-inline-ref-gc` cron with `INLINE_REF_RETENTION_DAYS = 90`; respects active runs and replay clones (§3.6) | Ops owner |
+| R21 | Retry policy on irreversible step causes duplicate side effects | Low | Critical | Validator rule 12 rejects at publish; runtime backstop blocks dispatch with `playbook_irreversible_blocked:retry_attempt_blocked` (§4.1, §3.7) | Engine owner |
+| R22 | Failure propagation incorrectly marks `failed` instead of `completed_with_errors` on diamond DAGs | Medium | Medium | Terminal-path reachability algorithm in §5.2.1 replaces local sibling check; explicit unit test for diamond + branch + failed-on-one-arm | Engine owner |
+| R23 | Approval / edit race: user approves a step that was just invalidated by an upstream edit | Medium | Medium | `expectedVersion` optimistic-concurrency guard on approve, output edit, and input submit endpoints (§7) | Engine owner |
+| R24 | Replay output mistaken for production data by downstream consumers | Low | High | `_meta.isReplay = true` envelope on every replay output; persistent UI banner; consumers contractually responsible for honouring (§5.10) | Engine owner + Integrators |
+| R25 | Long-pending `awaiting_input` / `awaiting_approval` steps go unnoticed | High | Low | Watchdog updates stuck gauges; alert thresholds 24h / 48h route to starting user + subaccount admins (§8.5) | Ops owner |
+| R26 | Pathological AI-generated DAG with thousands of step depth blows worst-case duration | Low | Medium | `MAX_DAG_DEPTH = 50` validator rule (§4.1 rule 13) | Validator owner |
 
 ## 14. Final Review Checklist
 
@@ -1746,9 +1797,13 @@ Before this spec is approved for implementation, every reviewer should sign off 
 - [ ] Side-effect classification is enforced at definition time, not just at edit time
 - [ ] Mid-run editing flow blocks irreversible re-execution by default
 - [ ] Dry-run cost preview is shown before any cascading invalidation
+- [ ] Cascade summary (size + critical path) is shown alongside cost
 - [ ] Templating resolver hardening prevents prototype pollution at every layer
 - [ ] Cost breaker is called on every dispatch boundary
 - [ ] All failure paths route through the `failure()` helper
+- [ ] Validator rejects retryable irreversible steps; runtime backstop also blocks
+- [ ] `expectedVersion` guard on approve / edit / input prevents stale-UI overwrites
+- [ ] Replay outputs carry `_meta.isReplay = true` envelope
 
 ### Reliability
 - [ ] Three-layer concurrency control is correct (queue dedup → advisory lock → optimistic guard)
