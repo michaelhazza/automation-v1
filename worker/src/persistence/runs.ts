@@ -122,7 +122,8 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
   // ── Reconnect hook (Appendix A.1 / reviewer round 2) ──────────────────────
   // Emit a pg-boss event so the main app can subscribe and resume the parent
   // agent run. Best-effort: a failure to emit must not undo the terminal
-  // state write above.
+  // state write above. eventEmittedAt is set ONLY on successful emit so the
+  // cleanup job can retry nulls (reviewer round 3 #1).
   if (bossRef) {
     try {
       await bossRef.send('iee-run-completed', {
@@ -132,13 +133,89 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
         totalCostCents,
         stepCount: input.stepCount,
       }, { retryLimit: 3, retryDelay: 5, retryBackoff: true });
+      await db
+        .update(ieeRuns)
+        .set({ eventEmittedAt: new Date() })
+        .where(eq(ieeRuns.id, input.ieeRunId));
     } catch (err) {
       logger.warn('iee.run_completed.emit_failed', {
         ieeRunId: input.ieeRunId,
         error: err instanceof Error ? err.message : String(err),
       });
+      // Leave eventEmittedAt NULL — cleanup job will retry.
     }
   }
+}
+
+/**
+ * Retry the iee-run-completed event for any terminal row whose
+ * eventEmittedAt is still NULL. Called by iee-cleanup-orphans.
+ */
+export async function retryUnemittedEvents(): Promise<number> {
+  if (!bossRef) return 0;
+  const candidates = await db
+    .select({
+      id: ieeRuns.id,
+      status: ieeRuns.status,
+      failureReason: ieeRuns.failureReason,
+      totalCostCents: ieeRuns.totalCostCents,
+      stepCount: ieeRuns.stepCount,
+    })
+    .from(ieeRuns)
+    .where(
+      and(
+        isNull(ieeRuns.eventEmittedAt),
+        isNull(ieeRuns.deletedAt),
+        // Only terminal rows
+        sql`${ieeRuns.status} IN ('completed', 'failed')`,
+      ),
+    )
+    .limit(200);
+
+  let retried = 0;
+  for (const r of candidates) {
+    try {
+      await bossRef.send('iee-run-completed', {
+        ieeRunId: r.id,
+        status: r.status,
+        failureReason: r.failureReason,
+        totalCostCents: r.totalCostCents,
+        stepCount: r.stepCount,
+      }, { retryLimit: 3, retryDelay: 5, retryBackoff: true });
+      await db
+        .update(ieeRuns)
+        .set({ eventEmittedAt: new Date() })
+        .where(eq(ieeRuns.id, r.id));
+      retried++;
+    } catch (err) {
+      logger.warn('iee.run_completed.retry_failed', {
+        ieeRunId: r.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return retried;
+}
+
+/**
+ * Reviewer round 3 #3 — assert this worker still owns the run before doing
+ * anything destructive in a step. Cheap (single PK read). Returns false if
+ * another worker has reclaimed the row (e.g. boot reconciliation flipped it
+ * to failed during a long-running step) so the loop can abort cleanly
+ * without writing further state into a row it no longer owns.
+ */
+export async function assertWorkerOwnership(
+  ieeRunId: string,
+  expectedWorkerInstanceId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ workerInstanceId: ieeRuns.workerInstanceId, status: ieeRuns.status })
+    .from(ieeRuns)
+    .where(eq(ieeRuns.id, ieeRunId))
+    .limit(1);
+  if (!row) return false;
+  if (row.status !== 'running') return false;
+  return row.workerInstanceId === expectedWorkerInstanceId;
 }
 
 /** Aggregate LLM cost for the run from llm_requests, used at finalization. */

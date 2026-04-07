@@ -65,6 +65,7 @@ export async function handleIEEJob<T>(input: HandleJobInput<T>): Promise<void> {
       correlationId: run.correlationId,
       goal: run.goal,
       executor,
+      workerInstanceId: input.workerInstanceId,
     });
 
     // Aggregate LLM cost from llm_requests rows that landed during the loop

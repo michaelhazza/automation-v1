@@ -58,5 +58,14 @@ export async function reconcileAbandonedRuns(currentWorkerInstanceId: string): P
       count: result.length,
       cutoffSeconds: env.IEE_HEARTBEAT_DEAD_AFTER_S,
     });
+    // Reviewer round 3 #2 — audit each release individually so cost
+    // discrepancies in the future can be traced to a specific worker death.
+    for (const r of result) {
+      logger.info('iee.reservation.released.reconciliation', {
+        ieeRunId: r.id,
+        reason: 'worker_crash',
+        cutoffSeconds: env.IEE_HEARTBEAT_DEAD_AFTER_S,
+      });
+    }
   }
 }

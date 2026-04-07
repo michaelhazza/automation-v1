@@ -28,6 +28,7 @@ import {
 import { env } from '../config/env.js';
 import { logger, truncate } from '../logger.js';
 import { recordStep } from '../persistence/steps.js';
+import { assertWorkerOwnership } from '../persistence/runs.js';
 import { startHeartbeat } from './heartbeat.js';
 import { classifyError } from './failureClassification.js';
 import { summariseStep, type CompressedStep } from './stepHistory.js';
@@ -69,6 +70,9 @@ export interface ExecutionLoopInput {
   correlationId: string;
   goal: string;
   executor: StepExecutor;
+  /** Reviewer round 3 #3 — passed in by the handler so each step can verify
+   *  this worker still owns the row before doing anything destructive. */
+  workerInstanceId: string;
 }
 
 export interface ExecutionLoopResult {
@@ -113,6 +117,24 @@ export async function runExecutionLoop(input: ExecutionLoopInput): Promise<Execu
       // ── Exit path 4: timeout ─────────────────────────────────────────────
       if (Date.now() > deadline) {
         throw new TimeoutError(`Execution time ${env.MAX_EXECUTION_TIME_MS}ms exceeded`);
+      }
+
+      // ── Ownership check (reviewer round 3 #3) ────────────────────────────
+      // Cheap PK read. Aborts the loop cleanly if another worker has
+      // reclaimed the row (e.g. boot reconciliation flipped it to failed
+      // during a long Playwright operation). Without this check the loop
+      // would keep writing steps into a row it no longer owns.
+      const stillOwned = await assertWorkerOwnership(input.ieeRunId, input.workerInstanceId);
+      if (!stillOwned) {
+        logger.warn('iee.execution.ownership_lost', {
+          ieeRunId: input.ieeRunId,
+          workerInstanceId: input.workerInstanceId,
+          stepNumber,
+        });
+        terminalStatus = 'failed';
+        terminalFailureReason = 'environment_error';
+        terminalOutput = 'Worker ownership lost — another worker reclaimed this run';
+        break;
       }
 
       // Observe ────────────────────────────────────────────────────────────

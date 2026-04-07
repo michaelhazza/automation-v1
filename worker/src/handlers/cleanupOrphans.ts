@@ -18,6 +18,7 @@ import { env } from '../config/env.js';
 import { logger } from '../logger.js';
 import { ieeRuns } from '../../../server/db/schema/ieeRuns.js';
 import { budgetReservations } from '../../../server/db/schema/budgetReservations.js';
+import { retryUnemittedEvents } from '../persistence/runs.js';
 
 const QUEUE = 'iee-cleanup-orphans';
 
@@ -38,6 +39,24 @@ async function runCleanup(): Promise<void> {
   await sweepWorkspaceOrphans();
   await sweepReservationLeaks();
   await sweepBrowserSessionsReportOnly();
+  await sweepUnemittedEvents();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sweep 4: retry iee-run-completed for terminal rows whose event_emitted_at
+// is still NULL (reviewer round 3 #1).
+// ─────────────────────────────────────────────────────────────────────────────
+async function sweepUnemittedEvents(): Promise<void> {
+  try {
+    const retried = await retryUnemittedEvents();
+    if (retried > 0) {
+      logger.info('iee.cleanup.events_retried', { count: retried });
+    }
+  } catch (err) {
+    logger.warn('iee.cleanup.event_retry_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,6 +155,14 @@ async function sweepReservationLeaks(): Promise<void> {
     count: leaked.length,
     ttlMinutes: env.IEE_RESERVATION_TTL_MINUTES,
   });
+  // Reviewer round 3 #2 — per-row audit trail
+  for (const r of leaked) {
+    logger.info('iee.reservation.released.reconciliation', {
+      ieeRunId: r.id,
+      reason: 'ttl_expired',
+      ttlMinutes: env.IEE_RESERVATION_TTL_MINUTES,
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -59,6 +59,13 @@ export const ieeRuns = pgTable(
     workerInstanceId: text('worker_instance_id'),
     lastHeartbeatAt:  timestamp('last_heartbeat_at', { withTimezone: true }),
 
+    // Reviewer round 3 — set when the worker successfully publishes the
+    // 'iee-run-completed' pg-boss event after a terminal status write. NULL
+    // means the event has not been emitted (yet, or because the publish
+    // failed). The cleanup job retries nulls so the agent-resume hook is
+    // never silently lost.
+    eventEmittedAt:  timestamp('event_emitted_at', { withTimezone: true }),
+
     // Timing
     startedAt:        timestamp('started_at', { withTimezone: true }),
     completedAt:      timestamp('completed_at', { withTimezone: true }),

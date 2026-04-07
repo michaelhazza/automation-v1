@@ -73,6 +73,10 @@ export const EVENT_NAMES = [
   'iee.browser.session_recreated',  // §13.6 — Playwright corruption recovery
   'iee.dev.command',                // §13.6.1.c — per-command audit log
   'iee.cleanup.orphan_removed',     // §12.3 — orphan workspace removal
+  // Reviewer round 3 #2 — audit trail for reservation releases done
+  // outside the normal finalizeRun() path. Reasons: worker_crash (boot
+  // reconciliation) | ttl_expired (cleanup sweep).
+  'iee.reservation.released.reconciliation',
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
