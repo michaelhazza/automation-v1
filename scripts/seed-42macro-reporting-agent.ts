@@ -328,7 +328,7 @@ async function seed() {
         definition: ANALYSIS_SKILL_DEFINITION,
         instructions: ANALYSIS_SKILL_INSTRUCTIONS,
         isActive: true,
-        contentsVisible: false,
+        visibility: 'none',
       })
       .returning();
     analysisSkill = row;

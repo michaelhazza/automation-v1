@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import { getActiveClientId } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import VisibilitySegmentedControl, { type SkillVisibility } from '../components/VisibilitySegmentedControl';
 
 interface Skill {
   id: string;
@@ -12,6 +13,8 @@ interface Skill {
   description: string | null;
   skillType: 'built_in' | 'custom';
   isActive: boolean;
+  visibility: SkillVisibility;
+  canManageSkill?: boolean;
   methodology: string | null;
   instructions: string | null;
   createdAt: string;
@@ -62,6 +65,20 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
   };
 
   useEffect(() => { load(); }, [activeClientId]);
+
+  const handleVisibilityChange = async (skill: Skill, next: SkillVisibility) => {
+    try {
+      await api.patch(`/api/skills/${skill.id}/visibility`, { visibility: next });
+      setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, visibility: next } : s));
+      setActionError(prev => {
+        const { [skill.id]: _, ...rest } = prev;
+        return rest;
+      });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setActionError(prev => ({ ...prev, [skill.id]: e.response?.data?.error ?? 'Failed to update visibility' }));
+    }
+  };
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -156,6 +173,7 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Type</th>
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Used by</th>
                 <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700">Status</th>
+                <th className="px-4 py-3 text-left text-[13px] font-semibold text-slate-700" title="Cascade visibility to subaccount admins. None = hidden. Basic = name + description only. Full = entire skill body.">Visibility</th>
                 <th className="px-4 py-3 text-right text-[13px] font-semibold text-slate-700">Actions</th>
               </tr>
             </thead>
@@ -197,6 +215,16 @@ export default function AdminSkillsPage({ user: _user }: { user: User }) {
                       <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-medium ${skill.isActive ? 'bg-green-100 text-green-800' : 'bg-orange-50 text-orange-800'}`}>
                         {skill.isActive ? 'Active' : 'Inactive'}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {skill.skillType === 'custom' ? (
+                        <VisibilitySegmentedControl
+                          value={skill.visibility ?? 'none'}
+                          onChange={(next) => handleVisibilityChange(skill, next)}
+                        />
+                      ) : (
+                        <span className="text-[11.5px] text-slate-400" title="Built-in skill visibility is set at the system tier.">System-managed</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {skill.skillType === 'custom' ? (
