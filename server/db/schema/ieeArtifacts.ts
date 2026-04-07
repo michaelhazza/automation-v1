@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, bigint, jsonb, timestamp, boolean, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { ieeRuns } from './ieeRuns';
 
@@ -23,6 +23,12 @@ export const ieeArtifacts = pgTable(
     sizeBytes:      bigint('size_bytes', { mode: 'number' }),
     mimeType:       text('mime_type'),
     metadata:       jsonb('metadata'),
+
+    // Inline text body for small text artifacts (≤1 MB after UTF-8-safe
+    // truncation). Used so transcripts and other small text outputs survive
+    // worker container cleanup. T12 / spec v3.4 §6.7.3.
+    inlineText:           text('inline_text'),
+    inlineTextTruncated:  boolean('inline_text_truncated').notNull().default(false),
 
     createdAt:      timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
