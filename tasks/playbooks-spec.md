@@ -556,9 +556,80 @@ Lives in `playbookTemplateService.validateDefinition()`. Runs on:
 
 Returns either `{ ok: true }` or `{ ok: false, errors: ValidationError[] }` where each error includes step id, rule violated, and human-readable message. UI surfaces these inline in the (Phase 2) builder; seeder fails the deploy with clear logs.
 
+```typescript
+export interface ValidationError {
+  rule: 'unique_id' | 'kebab_case' | 'unresolved_dep' | 'cycle' | 'orphan'
+      | 'missing_entry' | 'unresolved_template_ref' | 'transitive_dep'
+      | 'missing_field' | 'missing_output_schema' | 'agent_not_found'
+      | 'missing_side_effect_type' | 'version_not_monotonic';
+  stepId?: string;
+  path?: string;       // for cycle: comma-joined cycle path
+  message: string;
+}
+```
+
+### 4.3 Cycle detection (Kahn's algorithm)
+
+```
+function detectCycles(steps):
+  inDegree = map step.id -> count of incoming edges
+  queue = [s for s in steps if inDegree[s.id] == 0]
+  visited = []
+  while queue not empty:
+    s = queue.pop()
+    visited.push(s)
+    for child where child.dependsOn includes s.id:
+      inDegree[child.id]--
+      if inDegree[child.id] == 0:
+        queue.push(child)
+  if len(visited) < len(steps):
+    cycle = findCyclePath(steps - visited)  // DFS from any unvisited node
+    return ValidationError('cycle', path: cycle.join(' -> '))
+  return ok
+```
+
+### 4.4 Template reference checking
+
+For every step, parse all `{{ ... }}` expressions in `prompt`, `agentInputs.*`, and `condition`. For each reference:
+
+- `run.input.<path>` → assert `<path>` resolves against `definition.initialInputSchema`
+- `run.subaccount.<path>` → assert `<path>` is in the allowed subaccount field set (`id`, `name`, `timezone`, `slug`)
+- `run.org.<path>` → assert `<path>` is in the allowed org field set (`id`, `name`)
+- `steps.<id>.output.<path>`:
+  - assert `<id>` is listed in this step's `dependsOn` (no transitive — must be explicit)
+  - assert `<id>` exists in the steps array
+  - assert `<path>` resolves against the referenced step's `outputSchema`
+
+Path resolution against Zod schemas uses a small introspection helper that walks `ZodObject.shape`. Unsupported paths through `ZodUnion` / `ZodDiscriminatedUnion` produce a warning, not an error (Phase 1 keeps strict mode for `ZodObject` only; complex refinements graduate in 1.5).
+
+### 4.5 When the validator runs
+
+| Trigger | Failure mode |
+|---------|--------------|
+| Seeder load (system templates) | Build fails. CI gates the deploy. |
+| Org template publish | API returns 422 with the full error list. |
+| Run start | Engine refuses to start the run; returns 422 with detail. (Catches schema drift between publish and start — rare but possible if shared types change.) |
+| Pre-commit hook (optional) | `npm run playbooks:validate` runs the validator against every file in `server/playbooks/*` and fails the commit on errors. Recommended but not enforced. |
+
 ## 5. Execution Engine
 
-`playbookEngineService` is a state machine driven by pg-boss jobs on the `playbook-run-tick` queue. The engine is **stateless between ticks** — all state lives in the DB.
+`playbookEngineService` is a state machine driven by pg-boss jobs on the `playbook-run-tick` queue. The engine is **stateless between ticks** — all state lives in the DB. A tick is the unit of progress: each completed step (or human action) enqueues exactly one tick, the tick handler determines what's runnable, dispatches it, and exits.
+
+### 5.0 Start-of-run flow
+
+`playbookRunService.startRun(orgId, subaccountId, templateId, initialInput, userId)`:
+
+1. Resolve org template → latest published version. If none, return 422.
+2. Validate `initialInput` against `definition.initialInputSchema`. Return 422 with field errors on failure.
+3. Re-run §4 validator against the locked version (catches schema drift since publish).
+4. Resolve every `agentRef` (§3.4). Cache resolved agent ids in `_meta.resolvedAgents`.
+5. Pre-flight cost check: call `runCostBreaker` with the run's projected ceiling. If the org has no budget headroom at all, fail fast.
+6. Insert `playbook_runs` row with `status='pending'`, `context_json={ input: initialInput, _meta: { ... } }`.
+7. Insert `playbook_step_runs` rows for **all entry steps** (those with empty `dependsOn`) with `status='pending'`, `attempt=1`.
+8. Enqueue first tick via pg-boss with `singletonKey: runId`.
+9. Emit `playbook:run:status` WebSocket event.
+10. Emit `playbook_run.started` audit event.
+11. Return `{ runId, status: 'pending' }` (status will flip to `running` on first tick).
 
 ### 5.1 Run lifecycle
 
