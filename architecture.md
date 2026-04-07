@@ -342,8 +342,394 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 41 migrations (0001–0041). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
 
 Recent migrations:
+- `0042` — playbooks: templates, versions, runs, step runs (Playbooks feature)
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
 - `0039` — GitHub App schema
 - `0037` — workspace memory + workflow schema
 - `0036` — review queue + OAuth tables
+
+---
+
+## Playbooks (Multi-Step Automation)
+
+Playbooks automate longer-form, multi-step processes (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Playbook is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
+
+### Terminology
+
+| Term | Meaning |
+|------|---------|
+| **DAG** | Directed Acyclic Graph. Steps declare `dependsOn` on earlier step ids. Engine topologically sorts and runs independent branches in parallel. No cycles permitted. |
+| **Playbook Template** | The definition — steps, dependencies, prompts, schemas. Versioned and immutable once published. |
+| **Playbook Version** | A frozen snapshot of a template. Runs lock to the version they started with. |
+| **Playbook Run** | An execution instance against a specific subaccount. Has its own growing context blob. |
+| **Step Run** | Execution record for a single step within a run. Has own status, inputs, outputs, and (optionally) a linked `agentRun`. |
+| **Run Context** | A single growing JSON blob keyed by step id. Steps reference prior outputs via templating (`{{ steps.event_basics.output.eventName }}`). |
+
+### Three-tier distribution model
+
+Mirrors the three-tier agent model:
+
+```
+System Playbook Template (systemPlaybookTemplates)
+  — Platform-shipped; read-only master definition
+  — Versioned; new versions trigger opt-in upgrades for forked orgs
+        ↓ fork / clone
+Org Playbook Template (playbookTemplates)
+  — Org-authored OR forked from system template (forkedFromSystemId, forkedVersion)
+  — Org owns the definition; editable by permission holders
+  — Immutable versions (playbookTemplateVersions) — publish increments version
+        ↓ execute against a subaccount
+Playbook Run (playbookRuns)
+  — Scoped to a single subaccount
+  — Locked to a specific playbookTemplateVersionId
+  — Survives template edits in flight
+```
+
+**Playbooks are authored at the org tier, executed at the subaccount tier.** Subaccounts never own template definitions — this avoids template drift across subaccounts. If a subaccount needs a variant, fork the template at org level and tag applicability.
+
+### Schema (migration 0042)
+
+| Table | Purpose |
+|-------|---------|
+| `systemPlaybookTemplates` | Platform-shipped templates. Mirrors `systemAgents`. |
+| `systemPlaybookTemplateVersions` | Immutable version snapshots of system templates. |
+| `playbookTemplates` | Org-owned templates. `forkedFromSystemId`, `forkedFromVersion` nullable. |
+| `playbookTemplateVersions` | Immutable published versions of org templates. `definitionJson` holds the full DAG. |
+| `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
+| `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
+| `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
+
+Soft deletes on templates (`deletedAt`). Runs are append-only history.
+
+### Step definition shape (stored in `definitionJson`)
+
+```typescript
+interface PlaybookStep {
+  id: string;                    // stable within template version
+  name: string;
+  type: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional';
+  dependsOn: string[];           // ids of prior steps
+  humanReviewRequired?: boolean; // pause for edit/approve before downstream consumes output
+  outputSchema: JSONSchema;      // zod-validated; downstream steps rely on shape
+
+  // type-specific
+  prompt?: string;                               // prompt with {{ templating }}
+  agentId?: string;                              // for type: agent_call — references org or system agent
+  formSchema?: JSONSchema;                       // for type: user_input — renders as form in UI
+  condition?: string;                            // for type: conditional — JSONLogic expression
+  inputs?: Record<string, string>;               // map of paramName -> template expression
+}
+
+interface PlaybookDefinition {
+  steps: PlaybookStep[];
+  initialInputSchema: JSONSchema;  // what the user provides when kicking off the run
+}
+```
+
+### Execution engine
+
+`playbookEngineService` is a state machine. Each run progresses through:
+
+```
+pending → running → (awaiting_input | awaiting_approval) → running → completed
+                                                                    ↘ failed | cancelled
+```
+
+**Per-tick algorithm (triggered by pg-boss job `playbook-run-tick`):**
+
+1. Load run + all step runs.
+2. Compute ready set: steps whose `dependsOn` are all `completed` and whose own status is `pending`.
+3. For each ready step, resolve its `inputs` by templating against `run.contextJson`.
+4. Dispatch in parallel:
+   - `prompt` / `agent_call` → enqueue an `agentRun` (reuses existing agent infrastructure, idempotency keys, budget reservations); step run links via `agentRunId`.
+   - `user_input` → set status `awaiting_input`, emit WebSocket event to inbox.
+   - `approval` → create `reviewItem`, set status `awaiting_approval`.
+   - `conditional` → evaluate JSONLogic synchronously, write output, mark `completed`.
+5. On any step completion (webhook from agent run, form submission, approval decision), validate output against `outputSchema`, merge into `run.contextJson`, re-enqueue a tick.
+6. If all steps `completed`, mark run `completed`. If any non-retryable failure and no alternative branch, mark `failed`.
+
+**Parallelism is free** — multiple ready steps dispatch simultaneously. Linear runs are just DAGs where every step depends on its predecessor.
+
+**Resumability** — all state lives in the DB. Engine can crash and resume on next tick with no loss.
+
+**Editing mid-run** — when a user edits a completed step's output, engine invalidates all downstream step runs (sets them back to `pending`) and re-ticks. This is the "reusing information from previous prompts, but sometimes there is some new information" loop.
+
+### Reuse of existing systems
+
+- **Agent runs** — `agent_call` step type creates an `agentRun` with `playbookStepRunId` set. The full three-tier agent model, skill system, handoff, and budget tracking are reused unchanged.
+- **Review queue** — `approval` step type creates a `reviewItem`. HITL flow is unchanged.
+- **pg-boss** — engine ticks are jobs on the `playbook-run-tick` queue. Same infrastructure as heartbeats.
+- **Idempotency keys** — step-level agent runs use `playbook:{runId}:{stepId}:{attempt}` as the key.
+- **WebSocket rooms** — run updates broadcast on the subaccount room; a dedicated `playbook-run:{runId}` room streams per-step progress to detail UI.
+- **Audit events** — run start, step completion, edits, approvals, template publish all emit audit events.
+
+### Routes
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `/api/system/playbook-templates` | `systemPlaybookTemplates.ts` | System admin CRUD on platform templates |
+| `/api/playbook-templates` | `playbookTemplates.ts` | Org CRUD, fork from system, publish version |
+| `/api/playbook-templates/:id/versions` | `playbookTemplates.ts` | List/get versions |
+| `/api/subaccounts/:subaccountId/playbook-runs` | `playbookRuns.ts` | List, start, cancel runs |
+| `/api/playbook-runs/:runId` | `playbookRuns.ts` | Run detail, context, step runs |
+| `/api/playbook-runs/:runId/steps/:stepRunId/input` | `playbookRuns.ts` | Submit form input for `user_input` step |
+| `/api/playbook-runs/:runId/steps/:stepRunId/output` | `playbookRuns.ts` | Edit a completed step's output (invalidates downstream) |
+| `/api/playbook-runs/:runId/steps/:stepRunId/approve` | `playbookRuns.ts` | Approve/reject an `approval` step |
+
+All routes follow the standard conventions: `asyncHandler`, `authenticate`, `resolveSubaccount` where applicable, org scoping via `req.orgId`, no direct `db` access, service errors as `{ statusCode, message, errorCode }`.
+
+### Services
+
+| Service | Responsibility |
+|---------|---------------|
+| `playbookTemplateService` | CRUD, fork from system, version publishing, validation of DAG (no cycles, all deps resolvable, output schemas valid) |
+| `playbookEngineService` | State machine ticks, step dispatch, context merging, downstream invalidation |
+| `playbookRunService` | Run lifecycle — start, cancel, query, surface to UI |
+| `playbookTemplatingService` | Resolves `{{ steps.x.output.y }}` expressions against run context; pure function, unit-testable |
+
+### Permissions
+
+New permission keys:
+
+- `playbook_templates.read` / `playbook_templates.write` / `playbook_templates.publish` (org-level)
+- `playbook_runs.read` / `playbook_runs.start` / `playbook_runs.cancel` / `playbook_runs.edit_output` / `playbook_runs.approve` (subaccount-level)
+
+Integrate into the existing permission set UI.
+
+### Client UI
+
+**Phase 1 — Run execution UI (ship with engine):**
+
+- `/playbooks` — list of available templates (org + forked from system), "Start Run" picker
+- `/subaccounts/:id/playbook-runs` — list of runs for a subaccount, status + progress (e.g. 7/15)
+- `/playbook-runs/:runId` — run detail: vertical stepper showing DAG, each step expandable with inputs/output, edit button on completed steps, inline forms for `user_input` steps, approval UI for `approval` steps, live updates via WebSocket
+- "Needs your input" inbox surfacing all paused runs across subaccounts the user has access to
+
+**Phase 2 — Visual template builder:**
+
+- `/playbook-templates/:id/edit` — canvas-based DAG editor (nodes = steps, edges = dependencies)
+- Sidebar for editing each step (type, prompt, agent, input mapping, output schema)
+- Version history + diff view
+- Test-run mode against a dummy subaccount
+
+Phase 1 ships with templates seeded from code/JSON. Phase 2 is a separate feature-coordinator pipeline.
+
+### Invariants (non-negotiable)
+
+- DAG validation must run on every template publish — reject cycles, unresolved `dependsOn`, or template expressions referencing nonexistent steps.
+- A run is locked to its `templateVersionId`. Editing the template never mutates in-flight runs.
+- Step output is validated against `outputSchema` before merging into run context.
+- Editing a completed step's output invalidates all transitively dependent downstream step runs.
+- `agent_call` steps respect the full budget, handoff depth, and policy engine rules — the engine never bypasses existing guardrails.
+- Org scoping applies to templates (`organisationId`) and runs (`organisationId` via subaccount).
+
+---
+
+## IEE — Integrated Execution Environment
+
+IEE is a deterministic, multi-tenant execution context for **stateful agentic loops** over a browser or a dev workspace. Where the skill system is request/response, IEE is **iterative**: the LLM observes environment state, decides on an action, executes it, observes the result, and loops until `done`, `failed`, the step limit, or the wall-clock timeout. Costs are attributed per run for billing.
+
+The full spec lives in [`docs/iee-development-spec.md`](./docs/iee-development-spec.md). This section is the architectural overview.
+
+### Topology
+
+```
+Main app (Replit/Express)        Worker (Docker, DigitalOcean)
+  ├─ enqueues IEE jobs              ├─ pulls jobs from pg-boss
+  ├─ inserts ieeRuns rows           ├─ runs the execution loop (Playwright / shell)
+  └─ serves usage/cost APIs         └─ updates ieeRuns, writes ieeSteps
+              ↓                                ↑
+              └────── shared Postgres + pg-boss ──────┘
+```
+
+**Database is the only integration point.** No HTTP between app and worker.
+
+### Schema (migrations 0070, 0071)
+
+| Table | Purpose |
+|-------|---------|
+| `ieeRuns` | One row per IEE job. Fields: `agentRunId`, `type` (`browser`\|`dev`), `status` (`pending`\|`running`\|`completed`\|`failed`), `idempotencyKey`, `correlationId`, `goal`, `task` (JSONB), `resultSummary`, `stepCount`, `llmCostCents`, `runtimeCostCents`, `totalCostCents`, `workerInstanceId`, `lastHeartbeatAt`, `eventEmittedAt`. Soft delete. Unique partial index on `idempotencyKey WHERE deletedAt IS NULL`. |
+| `ieeSteps` | Append-only per-step log. Fields: `ieeRunId`, `stepNumber`, `actionType`, `input`, `output`, `success`, `failureReason`, `durationMs`. Unique on `(ieeRunId, stepNumber)` to prevent retry double-writes. |
+| `ieeArtifacts` | Metadata for files/downloads emitted by a run. v1 stores metadata only; contents live on worker disk. |
+
+**LLM attribution** — `llmRequests` table gains `ieeRunId` (nullable FK) and `callSite` (`app`\|`worker`). Database CHECK constraint: `source_type <> 'iee' OR iee_run_id IS NOT NULL`.
+
+### Routing — how a task reaches IEE
+
+Decision happens in `agentExecutionService.executeAgentRun`:
+
+```typescript
+if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
+  if (!request.ieeTask) throw { statusCode: 400, message: 'ieeTask required' };
+  const { enqueueIEETask } = await import('./ieeExecutionService.js');
+  const enqueueResult = await enqueueIEETask({ task, organisationId, subaccountId, agentId, agentRunId, correlationId });
+  // Return synthetic loopResult — canonical state lives on the ieeRuns row.
+}
+```
+
+`executionMode` is one of `api` | `headless` | `claude-code` | `iee_browser` | `iee_dev`. The IEE branch parks the agent run and lets the worker drive the actual execution.
+
+### Services & Routes
+
+| Service | Responsibility |
+|---------|----------------|
+| `ieeExecutionService` | Enqueue task. Idempotent insert (ON CONFLICT on `idempotencyKey`), budget reservation, pg-boss send, tracing. |
+| `ieeUsageService` | Per-run cost breakdown and aggregated usage queries (system / org / subaccount scope). Joins `ieeRuns` ⨝ `llmRequests`. |
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /api/iee/runs/:ieeRunId/cost` | `iee.ts` | Per-run cost breakdown (app vs worker LLM, runtime) |
+| `GET /api/iee/usage/system` | `iee.ts` | System-wide explorer (system_admin) |
+| `GET /api/orgs/:orgId/iee/usage` | `iee.ts` | Org-scoped explorer |
+| `GET /api/subaccounts/:subaccountId/iee/usage` | `iee.ts` | Subaccount-scoped explorer |
+
+Usage routes support filters: `from`, `to`, `agentIds`, `subaccountIds`, `statuses`, `types`, `failureReasons`, `minCostCents`, `search`, `sort`, `order`, `limit`, `cursor`.
+
+Standard conventions apply: `asyncHandler`, `authenticate`, org scoping via `req.orgId`, no direct `db` access.
+
+### Worker service
+
+Lives in [`worker/`](./worker/), separate process, packaged via [`worker/Dockerfile`](./worker/Dockerfile) (Playwright base image) and run as the `worker` service in [`docker-compose.yml`](./docker-compose.yml). Resource limits: `IEE_WORKER_MEM_LIMIT` (default 3g), `IEE_WORKER_CPUS` (default 2). Persistent volume for browser sessions at `/var/browser-sessions`.
+
+| File | Purpose |
+|------|---------|
+| `worker/src/index.ts` | Bootstrap: pg-boss, Drizzle, tracing, reconcile orphans, register handlers, SIGTERM handling |
+| `worker/src/handlers/browserTask.ts` | Subscribes to `iee-browser-task` queue |
+| `worker/src/handlers/devTask.ts` | Subscribes to `iee-dev-task` queue |
+| `worker/src/handlers/runHandler.ts` | Shared lifecycle: parse, mark running, run loop, finalize, sum costs |
+| `worker/src/handlers/cleanupOrphans.ts` | Periodic: stale workspaces, browser sessions, expired reservations |
+| `worker/src/handlers/costRollup.ts` | Periodic: aggregate `llmRequests` cost into `ieeRuns` denormalized columns |
+| `worker/src/loop/executionLoop.ts` | The four-exit-path loop |
+| `worker/src/browser/executor.ts` | Playwright actions: navigate, click, type, extract, download |
+| `worker/src/dev/executor.ts` | Workspace, shell, git, file I/O |
+
+### The execution loop
+
+```
+runExecutionLoop():
+  while not terminal:
+    1. observe()                          → structured env state (capped sizes)
+    2. build prompt + observation
+    3. callRouter()                       → LLM call (sourceType='iee', callSite='worker', ieeRunId set)
+    4. parse + zod-validate the action
+    5. execute action
+    6. write ieeSteps row
+    7. heartbeat (lastHeartbeatAt)
+```
+
+**Exactly four exit paths** — no other terminations are valid:
+1. Action `done` → success
+2. Action `failed` → voluntary failure
+3. Step count exceeds `MAX_STEPS_PER_EXECUTION` → `step_limit_reached`
+4. Wall clock exceeds `MAX_EXECUTION_TIME_MS` → `timeout`
+
+`FailureReason` enum: `timeout` | `step_limit_reached` | `execution_error` | `environment_error` | `auth_failure` | `budget_exceeded` | `unknown`.
+
+### Idempotency & deduplication
+
+Pattern in `ieeExecutionService`:
+
+1. Derive deterministic `idempotencyKey` from `(orgId, agentRunId, agentId, taskHash)`.
+2. `INSERT ... ON CONFLICT (idempotencyKey) WHERE deletedAt IS NULL DO NOTHING RETURNING id`.
+3. If no row returned, `SELECT` existing and apply:
+
+| Existing status | Behaviour |
+|-----------------|-----------|
+| `completed` | Return existing `resultSummary` immediately. **Do not enqueue.** |
+| `running` | Return run id; let in-flight worker finish. |
+| `pending` | Return run id; queued job will pick it up. |
+| `failed` | If retry policy allows: soft-delete, insert new, enqueue. Else return failed row. |
+
+The worker also defensively bails if the row's status is not `pending` on receipt — guards against pg-boss double-delivery.
+
+### Cost attribution & billing
+
+Denormalized cost columns on `ieeRuns`:
+
+- `llmCostCents` — sum of `llm_requests.cost_with_margin_cents WHERE iee_run_id = run.id`
+- `llmCallCount`
+- `runtimeWallMs`, `runtimeCpuMs`, `runtimePeakRssBytes`
+- `runtimeCostCents` = `IEE_COST_CPU_USD_PER_SEC × cpuSec + IEE_COST_MEM_USD_PER_GB_HR × memGbHr + IEE_COST_FLAT_USD_PER_RUN`
+- `totalCostCents` = llm + runtime
+
+`costRollup` job aggregates from `llmRequests` after run completion. `ieeUsageService` joins these for the Usage Explorer.
+
+**Soft budget reservation** — created at enqueue (`IEE_RESERVATION_TTL_MINUTES`), released at finalization. Cleanup job sweeps expired reservations.
+
+### LLM router contract
+
+`llmRouter.routeCall` enforces, at runtime:
+
+```typescript
+if (ctx.sourceType === 'iee' && !ctx.ieeRunId) throw new RouterContractError(...);
+if (ctx.callSite === 'worker' && !ctx.ieeRunId) throw new RouterContractError(...);
+```
+
+The database CHECK constraint on `llmRequests` is the belt-and-braces backstop.
+
+### Frontend
+
+[`client/src/pages/UsagePage.tsx`](./client/src/pages/UsagePage.tsx) gains an `iee` tab alongside `overview` / `agents` / `models` / `runs` / `routing`. Loads `ieeRows`, `ieeSummary` from the scoped usage endpoint, with filters for type, status, search, failure reason, min cost. Per-run cost panel hits `/api/iee/runs/:ieeRunId/cost`.
+
+A Usage Explorer link appears in the left nav at all three scopes (system / org / subaccount), permission-gated.
+
+### Permissions
+
+| Scope | Key |
+|-------|-----|
+| Org | `org.billing.iee.view` |
+| Subaccount | `subaccount.billing.iee.view` |
+
+### Shared contracts (`shared/iee/`)
+
+Zod schemas + typed errors imported by both server and worker:
+
+- `IEEJobPayload`, `BrowserTaskPayload`, `DevTaskPayload`, `ResultSummary`
+- `ExecutionAction` union (`navigate` | `click` | `type` | `extract` | `download` | `run_command` | `write_file` | `read_file` | `git_clone` | `git_commit` | `done` | `failed`)
+- `Observation` (`url`, `pageText`, `clickableElements`, `inputs`, `files`, `lastCommandOutput`, `lastCommandExitCode`, `lastActionResult`)
+- `FailureReason` enum and typed errors: `TimeoutError`, `StepLimitError`, `SafetyError`, `BudgetExceededError`, `RouterContractError`
+
+### Environment variables
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `MAX_STEPS_PER_EXECUTION` | 25 | Hard step ceiling per run |
+| `MAX_EXECUTION_TIME_MS` | 300000 | Wall-clock ceiling |
+| `MAX_COMMAND_TIME_MS` | 30000 | Per-shell-command ceiling (dev mode) |
+| `IEE_BROWSER_CONCURRENCY` | 1 | pg-boss `teamSize` for browser queue |
+| `IEE_DEV_CONCURRENCY` | 2 | pg-boss `teamSize` for dev queue |
+| `IEE_HEARTBEAT_INTERVAL_MS` | 10000 | Worker heartbeat write cadence |
+| `IEE_HEARTBEAT_DEAD_AFTER_S` | 60 | Reconciler "dead worker" threshold |
+| `IEE_SESSION_TTL_DAYS` | 30 | Browser session lifetime |
+| `IEE_SESSION_AUTO_PRUNE` | false | Opt-in auto-delete of expired sessions |
+| `IEE_RESERVATION_TTL_MINUTES` | 15 | Soft budget reservation lifetime |
+| `IEE_MAX_STEPS` | 25 | Used for upfront budget estimation |
+| `IEE_AVG_LLM_COST_CENTS_PER_STEP` | 5 | Estimation only |
+| `IEE_FLAT_RUNTIME_COST_CENTS` | 20 | Estimation only |
+| `IEE_COST_CPU_USD_PER_SEC` | 0 | Runtime cost pricing |
+| `IEE_COST_MEM_USD_PER_GB_HR` | 0 | Runtime cost pricing |
+| `IEE_COST_FLAT_USD_PER_RUN` | 0 | Runtime cost pricing |
+| `IEE_GIT_AUTHOR_NAME` / `IEE_GIT_AUTHOR_EMAIL` | — | Commit author for dev tasks |
+| `BROWSER_SESSION_DIR` | `/var/browser-sessions` | Persistent session storage |
+| `WORKSPACE_BASE_DIR` | `/tmp/workspaces` | Ephemeral dev workspace root |
+
+### Job config (`server/config/jobConfig.ts`)
+
+```typescript
+'iee-browser-task': { retryLimit: 3, expireInMinutes: 10, retentionDays: 7, dlq: 'iee-browser-task__dlq' }
+'iee-dev-task':     { retryLimit: 2, expireInMinutes: 10, retentionDays: 7, dlq: 'iee-dev-task__dlq' }
+```
+
+### Invariants (non-negotiable)
+
+- **Database is the only integration point** between app and worker. No HTTP, no shared filesystem assumptions beyond the worker's own volumes.
+- **Idempotency is database-level** — unique partial index plus ON CONFLICT logic. Never compute it in application memory alone.
+- **Terminal status finality** — once `completed` or `failed`, only `eventEmittedAt`, `deletedAt`, and reconciliation cleanup may touch the row. Cost and result columns are frozen. Protects billing accuracy.
+- **Worker ownership assertion** — before destructive ops, `assertWorkerOwnership()` verifies `workerInstanceId` matches. Prevents double-execution after a crash + reassignment.
+- **Four exit paths only** — `done`, `failed`, `step_limit_reached`, `timeout`. The loop cannot terminate any other way.
+- **Observations are structured and capped** — never raw HTML or unbounded command output. `pageText` ≤ 8KB, ≤ 80 clickable elements, command output ≤ 4KB.
+- **Action schema validation before execute** — every LLM-emitted action is zod-parsed before any executor call. Invalid actions are a failed step, not a thrown exception.
+- **`source_type='iee'` requires `iee_run_id`** — enforced by both router runtime guard and database CHECK constraint.
+- **Tenant scoping on every query** — all cost/usage queries unconditionally filter by `organisationId`. System_admin scope override is an explicit parameter, never an implicit bypass.
+- **`iee_browser` / `iee_dev` execution modes** respect existing budget reservation, policy engine, and audit event flows — IEE never bypasses platform guardrails.
