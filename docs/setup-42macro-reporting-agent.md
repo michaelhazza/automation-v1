@@ -111,6 +111,33 @@ curl -X PATCH http://localhost:3000/api/subaccounts/<SUBACCOUNT_ID>/connections/
 
 ---
 
+## 3c. Confirm ffmpeg is in the worker image
+
+42 Macro has no download button — the worker uses **`capture_video` mode**,
+which is equivalent to the Chrome "Video Downloader" extension: it snoops
+the page's network requests for the actual mp4/m3u8 URL the HTML5 player
+loads, then refetches it with the session cookies. HLS streams are
+downloaded via **ffmpeg**.
+
+The worker Docker image now installs ffmpeg in its build stage
+(`worker/Dockerfile`). If you're running the worker outside Docker for local
+dev, install ffmpeg manually:
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt-get install ffmpeg
+```
+
+Verify with `ffmpeg -version`. If the binary isn't on `PATH`, the worker
+will fail with `failure: environment_error / ffmpeg_spawn_failed`.
+
+If you rebuilt the worker image: `docker compose build worker`.
+
+---
+
 ## 4. Smoke test the login (highest priority gate)
 
 Per spec §11.8, run the manual Playwright smoke test against the real paywall
@@ -133,8 +160,10 @@ What to confirm:
 - [ ] No hidden redirects to disallowed domains
 - [ ] The members video page renders server-side (downloads aren't hydrated by client JS that Playwright would miss)
 - [ ] No 2FA / captcha prompts (out of scope for v1)
-- [ ] Find the CSS selector for the **download button** on the video page —
-      you'll need it for step 5
+- [ ] **No download button needed** — the workflow uses `capture_video`
+      mode, which grabs the video from network traffic. Just confirm a
+      video element loads after login and that the player triggers media
+      requests.
 
 If the smoke test fails, fix the selectors (step 3a) before going further.
 
@@ -155,9 +184,9 @@ curl -X POST http://localhost:3000/api/subaccounts/<SUBACCOUNT_ID>/agents/<SUBAC
   -d '{
     "trigger": "manual",
     "input": {
-      "contentUrl": "https://42macro.com/members/videos/<latest-video-slug>",
-      "downloadSelector": "button[data-test=download-video]",
-      "videoTitle": "Macro Scouting Report"
+      "contentUrl": "https://app.42macro.com/video/around_the_horn_weekly",
+      "captureMode": "capture_video",
+      "videoTitle": "Around the Horn Weekly"
     }
   }'
 ```

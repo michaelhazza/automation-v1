@@ -35,7 +35,21 @@ export interface FetchPaywalledContentInput {
   allowedDomains: string[];
   expectedArtifactKind?: 'video' | 'audio' | 'document' | 'image' | 'text';
   expectedMimeTypePrefix?: string;
-  downloadSelector: string;
+  /**
+   * Capture mode:
+   *  - 'download_button': click downloadSelector to trigger a Playwright
+   *    download (sites that expose an explicit download button)
+   *  - 'capture_video':   no download button — snoop the page network for
+   *    the actual mp4/m3u8 the player loads, refetch with session cookies,
+   *    save to disk (HLS via ffmpeg). Equivalent of the Chrome
+   *    "Video Downloader" extension. Use this for 42 Macro and similar
+   *    paywalled players.
+   */
+  captureMode?: 'download_button' | 'capture_video';
+  /** Required when captureMode='download_button'. */
+  downloadSelector?: string;
+  /** Optional CSS selector for a play button when captureMode='capture_video'. */
+  playSelector?: string;
   timeoutMs?: number;
 }
 
@@ -73,6 +87,20 @@ export async function fetchPaywalledContent(
   ctx: FetchPaywalledContentContext,
 ): Promise<FetchPaywalledContentResult> {
   const timeoutMs = input.timeoutMs ?? 300_000;
+  const captureMode = input.captureMode ?? 'download_button';
+
+  if (captureMode === 'download_button' && !input.downloadSelector) {
+    throw new FailureError(
+      failure('execution_error', 'download_selector_required', {
+        hint: 'captureMode=download_button requires downloadSelector. For paywalled players with no download button, set captureMode=capture_video.',
+      }),
+    );
+  }
+
+  const goal =
+    captureMode === 'capture_video'
+      ? `Navigate to ${input.contentUrl}, snoop the page network for the streaming video URL, and download it (mp4 or HLS). No LLM loop.`
+      : `Navigate to ${input.contentUrl} and click the download selector ${input.downloadSelector}. Then emit 'done' once the download completes.`;
 
   const contract: BrowserTaskContract = {
     webLoginConnectionId: input.webLoginConnectionId,
@@ -81,7 +109,7 @@ export async function fetchPaywalledContent(
     expectedArtifactKind: input.expectedArtifactKind,
     expectedMimeTypePrefix: input.expectedMimeTypePrefix,
     successCondition: { artifactDownloaded: true },
-    goal: `Navigate to ${input.contentUrl} and click the download selector ${input.downloadSelector}. Then emit 'done' once the download completes.`,
+    goal,
     maxSteps: 10,
     timeoutMs,
   };
@@ -93,7 +121,8 @@ export async function fetchPaywalledContent(
       startUrl: input.contentUrl,
       webLoginConnectionId: input.webLoginConnectionId,
       browserTaskContract: contract,
-      mode: 'standard',
+      mode: captureMode === 'capture_video' ? 'capture_video' : 'standard',
+      playSelector: input.playSelector,
     },
     organisationId: ctx.organisationId,
     subaccountId: ctx.subaccountId,

@@ -42,9 +42,18 @@ isVisible: false
         "type": "string",
         "description": "MIME prefix the magic bytes must satisfy (e.g. 'video/', 'audio/')."
       },
+      "captureMode": {
+        "type": "string",
+        "enum": ["download_button", "capture_video"],
+        "description": "How to grab the file. 'download_button' clicks downloadSelector and lets Playwright catch the resulting download (use when the site exposes an explicit download button). 'capture_video' snoops the page network for the streaming-video URL the player loads, then refetches it with the session cookies (mp4 directly, HLS via ffmpeg). Use 'capture_video' for paywalled players with no download button (e.g. 42 Macro). Defaults to 'download_button'."
+      },
       "downloadSelector": {
         "type": "string",
-        "description": "CSS selector of the download button on the content page."
+        "description": "CSS selector of the download button on the content page. Required when captureMode='download_button'."
+      },
+      "playSelector": {
+        "type": "string",
+        "description": "Optional CSS selector for the play button on the video page (used by captureMode='capture_video'). If omitted, the worker tries a default list of common HTML5 player selectors."
       },
       "timeoutMs": {
         "type": "integer",
@@ -57,8 +66,7 @@ isVisible: false
       "webLoginConnectionId",
       "contentUrl",
       "intent",
-      "allowedDomains",
-      "downloadSelector"
+      "allowedDomains"
     ]
   }
 }

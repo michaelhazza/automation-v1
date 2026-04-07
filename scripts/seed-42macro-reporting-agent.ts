@@ -132,12 +132,21 @@ Available skills (use them in this exact order):
 
   1. fetch_paywalled_content
        - webLoginConnectionId: <ID of the "42 Macro paywall login" connection>
-       - contentUrl:           the latest video page on 42macro.com
+       - contentUrl:           the latest video page on 42macro.com (e.g.
+                               https://app.42macro.com/video/around_the_horn_weekly)
        - intent:               "download_latest"
-       - allowedDomains:       ["42macro.com"]
+       - allowedDomains:       ["42macro.com", "app.42macro.com"]
        - expectedArtifactKind: "video"
        - expectedMimeTypePrefix: "video/"
-       - downloadSelector:     the CSS selector for the download button on the page
+       - captureMode:          "capture_video"   ← 42 Macro has NO download
+                               button. The worker snoops the page network for
+                               the actual mp4/m3u8 the player loads and
+                               refetches it with the session cookies
+                               (HLS via ffmpeg). Equivalent of the Chrome
+                               "Video Downloader" extension.
+       - playSelector:         omit (worker tries default HTML5 player
+                               selectors); only set if the default click
+                               doesn't trigger media load.
      If the result is { noNewContent: true }, immediately emit \`done\` —
      the dedup fingerprint matched and there is nothing new to process.
 
