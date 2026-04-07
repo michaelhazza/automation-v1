@@ -17,7 +17,10 @@
 services:
 
   postgres:
-    image: postgres:15
+    # pgvector/pgvector ships pgvector preinstalled — required because the
+    # schema uses `vector` columns (see server/db/schema/*). Stock postgres:15
+    # fails drizzle-kit push with: type "vector" does not exist.
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER:     ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -26,6 +29,10 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Init scripts run once on first boot of an empty volume. See
+      # db-init/01-extensions.sql for the pgvector extension required by
+      # the schema.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -38,7 +45,8 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3000:3000"   # Express API server
+      - "5000:5000"   # Vite dev server (the frontend — open this in your browser)
     env_file: .env
     environment:
       # Override the placeholder DATABASE_URL from .env so the in-Docker
