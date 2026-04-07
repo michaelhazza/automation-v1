@@ -63,7 +63,10 @@ Immutable. Seeder creates a new row when a definition file's version number chan
 | `forked_from_version` | int nullable | The system version that was forked |
 | `latest_version` | int | |
 | `created_by_user_id` | uuid fk | |
+| `params_json` | jsonb default `'{}'` | Phase 1.5 — org-level parameter values for parameterized templates. Empty object in Phase 1. |
 | `created_at`, `updated_at`, `deleted_at` | timestamps | |
+
+> **Phase 1.5 — Parameterization layer.** Pure forking scales badly when an org has many forks of system templates that drift from upstream. Phase 1.5 adds a parameterization model: system templates declare a `paramsSchema` (typed config surface — channels, thresholds, prompt variants, feature toggles), and orgs supply a `params_json` value object instead of forking. Parameterized orgs auto-upgrade when the platform ships a new template version because their config carries forward unchanged. Forking is reserved as an escape hatch for the ~5% of orgs that need structural changes. Phase 1 ships the column empty so the data path exists; the layered distribution model (parameterize → inherit/override → fork) is implemented in 1.5 before fork count gets large.
 
 ### 2.4 `playbook_template_versions`
 
@@ -108,6 +111,9 @@ Append-only — no soft delete. Cancelled runs stay for audit.
 | `depends_on` | text[] | Snapshot from definition for query convenience |
 | `input_json` | jsonb nullable | Resolved inputs (post-templating) |
 | `output_json` | jsonb nullable | Validated against step's outputSchema |
+| `output_hash` | text nullable | SHA256 of canonical JSON output; powers the firewall pattern in invalidation |
+| `version` | int default 0 | Optimistic concurrency guard for state transitions |
+| `side_effect_type` | enum | Snapshot from definition: `none`, `idempotent`, `reversible`, `irreversible` |
 | `agent_run_id` | uuid fk nullable | Links to `agentRuns` for `agent_call` and `prompt` types |
 | `attempt` | int default 1 | For idempotency keying on retry |
 | `started_at`, `completed_at` | timestamps nullable | |
@@ -157,6 +163,12 @@ export interface AgentRef {
   slug: string;  // resolved at run start to a concrete agentId
 }
 
+export type SideEffectType =
+  | 'none'         // pure computation, LLM calls — safe to re-run freely
+  | 'idempotent'   // upserts, file writes with idempotency keys — safe to re-run
+  | 'reversible'   // sent emails, posted comments — re-run requires user confirmation
+  | 'irreversible';// charges, external API calls without idempotency — DEFAULT-BLOCK re-run
+
 export interface PlaybookStep {
   id: string;                       // stable, unique within definition, kebab_case
   name: string;                     // user-facing label
@@ -164,6 +176,7 @@ export interface PlaybookStep {
   type: StepType;
   dependsOn: string[];              // ids of prior steps; empty for entry steps
   humanReviewRequired?: boolean;    // pause after completion until user approves/edits
+  sideEffectType: SideEffectType;   // REQUIRED — drives invalidation safety on mid-run editing
 
   // type: prompt
   prompt?: string;                  // template string with {{ expressions }}
@@ -195,6 +208,7 @@ export interface PlaybookDefinition {
   description: string;
   version: number;                  // bump on every published edit
   initialInputSchema: ZodSchema;    // what user provides at run start
+  paramsSchema?: ZodSchema;         // Phase 1.5 — declared but unused in Phase 1
   steps: PlaybookStep[];
 }
 ```
@@ -224,10 +238,19 @@ Available namespaces:
 
 Resolver rules:
 
-- Path access only — no arbitrary code execution. Use a small interpreter (e.g. `jsonpath-plus` or hand-rolled dot path).
+- Path access only — no arbitrary code execution. Hand-rolled dot-path interpreter (~100–200 LOC + 500+ LOC of tests).
+- **Prototype pollution hardening (mandatory):**
+  - Build the context object with `Object.create(null)` so it has no prototype chain.
+  - Blocklist these path segments outright: `__proto__`, `constructor`, `prototype`. Reject the expression at validation time, not runtime.
+  - Whitelist allowed top-level prefixes: `run.input.`, `run.subaccount.`, `run.org.`, `steps.`. Anything else fails validation.
+  - Use `Object.hasOwn()` before each traversal step — never bare `in` or `obj[key]`.
 - Missing path → throw `TemplatingError` with the missing path. Engine marks the step `failed` with a clear error.
+- Null-safe traversal: missing intermediate paths return `undefined`, surfaced as a `TemplatingError`, never silently `null`.
+- Array index access supported: `steps.research.output.findings[0].title`.
 - Type coercion: values render as JSON.stringify for objects, raw string for primitives.
-- All template expressions in a step's `prompt`, `agentInputs`, and `condition` must reference only steps listed in `dependsOn`. Validator enforces this.
+- All template expressions in a step's `prompt`, `agentInputs`, and `condition` must reference only steps listed in `dependsOn` (no transitive deps). Validator enforces this.
+
+> **Future (Phase 1.5+):** add **JSONata** as an optional power-user expression engine for transforms the dot-path resolver can't handle (filtering, aggregation, conditional expressions). Use a `{{= ... }}` prefix to distinguish JSONata expressions from simple path references. JSONata parses to an AST (enabling static dependency extraction) and runs sandboxed with no access to Node globals. **Handlebars is explicitly disqualified** — it has had multiple RCEs via prototype pollution and compiles templates to JavaScript functions, incompatible with our security model.
 
 ### 3.4 Output schema enforcement
 
@@ -370,15 +393,38 @@ function dispatch(step, stepRun, run):
 
 ### 5.4 Mid-run output editing
 
-`POST /api/playbook-runs/:runId/steps/:stepRunId/output` accepts a new output payload.
+`POST /api/playbook-runs/:runId/steps/:stepRunId/output` accepts a new output payload. This is the dirty-flag-propagation pattern from build systems (Make, Bazel, Gradle), with side-effect safety bolted on.
 
-1. Validate against the step's `outputSchema`.
-2. Update the step run's `outputJson`, set status `completed` (was probably already completed).
-3. **Invalidate downstream:** compute the transitive set of step runs that depend on this step (BFS over `dependsOn` edges). For each, set status `invalidated` and clear `outputJson`. Recreate them as fresh `pending` step runs (new `attempt` number).
-4. Re-merge context from scratch using only currently-completed step outputs.
-5. Enqueue tick.
+**Pre-edit safety check (must run before invalidation):**
 
-The `invalidated` rows stay in the DB for audit — they're not deleted.
+1. Acquire the run-level advisory lock for the duration of the operation.
+2. Compute the transitive downstream set via BFS over `dependsOn` edges.
+3. Inspect each downstream step's `sideEffectType`:
+   - `none` / `idempotent` → safe to re-run automatically.
+   - `reversible` → requires user confirmation in the response (returns 409 with the affected list unless `?confirmReversible=true`).
+   - `irreversible` → **default-blocked**. Returns 409 with the affected list. User must either (a) explicitly opt in per step via `confirmIrreversible: [stepIds]` OR (b) choose "skip and reuse previous output" per step. Never auto-re-execute.
+4. Compute estimated cost (sum of downstream step LLM token estimates) and return a **dry-run preview** in any 409 response: "Editing this step will re-run N steps and cost approximately $X."
+
+**Edit + invalidation:**
+
+1. Validate the new payload against the step's `outputSchema`.
+2. **Hash the new output** (canonical JSON → SHA256). If identical to previous output, no-op the entire flow — nothing changed, nothing to invalidate. This is the **firewall pattern** from incremental compilers and prevents cost explosions when an "edit" is actually a save with no changes.
+3. Update the step run's `outputJson` and `outputHash`. Status stays `completed`.
+4. For each transitively dependent step run:
+   - Mark current row `invalidated` (audit; not deleted).
+   - Insert a new `pending` row with `attempt = previous + 1`, carrying forward `humanReviewRequired` user responses where present (pre-fill, not restart).
+   - Steps marked "skip and reuse" copy their previous output forward to the new attempt with status `completed`.
+5. **Cancel any in-flight downstream steps:** for step runs currently in `running` status within the invalidation set, fire an `AbortController` signal to the agent run / job worker. If the step completes before cancellation lands, discard its result (the step run row is already `invalidated`).
+6. Re-merge context from scratch using only currently-completed step outputs (the new edited one + all unaffected siblings).
+7. Enqueue tick.
+
+**Idempotency keys for re-execution.** All re-runs use `playbook:{runId}:{stepId}:{attempt}` as the key. External APIs called by `idempotent` steps must accept this key to deduplicate at the destination.
+
+**DAG fan-in handling.** If steps A→C and B→C converge at C, and only A is invalidated, the new C step run merges its context from the new A output and the existing valid B output. The context merger always pulls latest valid output per parent.
+
+**Output-hash firewall propagation.** When a re-executed step completes, hash its output. If the hash equals the previous attempt's hash, **stop propagating invalidation** to its downstream — the change didn't actually affect this branch. This can prevent re-running entire subtrees when an edit produces deterministic output.
+
+The `invalidated` rows stay in the DB for audit — they're never deleted.
 
 ### 5.5 Idempotency and retries
 
@@ -387,11 +433,63 @@ The `invalidated` rows stay in the DB for audit — they're not deleted.
 - Engine retries transient errors (network, rate limits) up to 3 times with exponential backoff. Permanent errors (schema mismatch after max parse retries) fail immediately.
 - TripWire errors from skill executors propagate up — engine retries the step.
 
-### 5.6 Concurrency control
+### 5.6 Concurrency control (defense in depth)
 
-- Per-run advisory lock (`pg_advisory_xact_lock(hashtext('playbook-run:' || runId))`) held for the duration of a tick. Prevents two ticks racing on the same run.
-- No global lock — different runs tick in parallel.
-- `for update skip locked` on the step runs query inside a tick to avoid rare double-dispatch.
+Three layers, all required:
+
+**Layer 1 — Queue deduplication (cheapest, runs first).** All tick jobs are enqueued with:
+
+```typescript
+boss.send('playbook-run-tick', { runId }, {
+  singletonKey: runId,
+  useSingletonQueue: true,
+  retryLimit: 3,
+  retryBackoff: true,
+  expireInSeconds: 120,
+});
+```
+
+`singletonKey` + `useSingletonQueue` causes pg-boss to enforce a unique partial index on `(name, singletonKey)` filtered to non-terminal states. Ten parallel step completions firing ten ticks collapse into **one** tick job in the queue — no advisory-lock contention, no redundant work.
+
+**Layer 2 — Non-blocking advisory lock (inside the tick handler).** Use `pg_try_advisory_xact_lock`, not the blocking variant:
+
+```sql
+SELECT pg_try_advisory_xact_lock(hashtext('playbook-run:' || $1)::bigint)
+```
+
+If the lock isn't acquired, the handler **exits silently** — another tick is already evaluating this run and our work would be redundant. Blocking would queue handlers and exhaust the connection pool under load. The UUID `runId` is hashed via `hashtext()` to fit pg's bigint parameter; collision risk is vanishingly small and would only cause brief unrelated-run serialization, never a correctness issue.
+
+**Layer 3 — Optimistic state guards on step transitions.** When transitioning a step run from `pending` to `running`:
+
+```sql
+UPDATE playbook_step_runs SET status='running', version = version+1
+WHERE id = $1 AND status = 'pending' AND version = $expected
+```
+
+Affected-row check catches the extremely unlikely case where two handlers both pass the advisory lock and try to launch the same step. Adds a `version` int column to `playbook_step_runs`.
+
+### 5.7 Watchdog sweep (self-healing)
+
+Pg-boss cron job `playbook-watchdog`, runs every 60 seconds:
+
+```
+SELECT runs where status in (running, awaiting_input, awaiting_approval)
+For each run:
+  - If has step runs whose deps are all completed but status is pending,
+    AND no playbook-run-tick singleton job exists for this runId,
+    enqueue a tick.
+  - If has step runs in 'running' state older than step.timeoutSeconds (default 30 min),
+    mark them failed and enqueue a tick.
+```
+
+Catches the "step completed but tick enqueue failed mid-transaction" race and any other class of missed-tick bug. **Step completion + tick enqueue must happen in the same DB transaction** as the primary defense; the watchdog is the safety net.
+
+### 5.8 Step timeouts and poison messages
+
+- Each step type has a default `expireInSeconds` (prompt: 5min, agent_call: 30min, user_input: indefinite, approval: indefinite, conditional: 5sec).
+- Per-step override allowed in definition: `timeoutSeconds`.
+- pg-boss expired jobs surface to a poison handler that marks the step `failed` and re-ticks the run for failure-policy evaluation.
+- `retryLimit` per step type with exponential backoff at the queue level; engine-level retries (output schema parse failures) are tracked via the `attempt` column.
 
 ### 5.7 Budget and policy integration
 
@@ -712,8 +810,12 @@ When a system template's `latest_version` advances and an org has a fork at an o
 ### 11.1 Unit tests
 
 - **`playbookTemplatingService`** — path resolution, missing path errors, namespace handling, edge cases (nested arrays, null values).
+  - **Prototype pollution test suite (mandatory):** every blocked path segment (`__proto__`, `constructor`, `prototype`) rejected at validation time. Confirm `Object.create(null)` context has no inherited keys. Confirm whitelist-prefix enforcement.
 - **DAG validator** — every rule from §4.1, with positive and negative cases. Cycle detection, orphan detection, template reference resolution.
 - **`definePlaybook`** type tests — TS compile-time tests using `tsd` for the type helpers.
+- **Zod ↔ JSON Schema round-trip CI check** — for every step `outputSchema` across all seeded playbooks: convert via `z.toJSONSchema()`, validate a sample payload through both Zod and AJV, assert identical accept/reject behaviour. Catches `z.transform()` and `.optional()` semantic drift bugs at CI time, not production.
+- **Output hash determinism** — same payload (with key order shuffled) produces the same canonical hash.
+- **Side-effect classification** — every step in every seeded playbook declares a `sideEffectType`; CI fails if any step omits it.
 
 ### 11.2 Service tests
 
@@ -731,8 +833,13 @@ When a system template's `latest_version` advances and an org has a fork at an o
 - **Conditional step** — true and false branches both verified.
 - **Output schema mismatch** — retries up to N times, fails cleanly after.
 - **Edit-mid-run** — invalidates downstream, re-runs them, completes correctly.
-- **Concurrent ticks** — advisory lock prevents double-dispatch (test with two simulated workers).
-- **Cancellation** — in-flight steps complete or are abandoned cleanly; run marked cancelled.
+- **Edit-mid-run with `irreversible` downstream** — returns 409 with affected list and dry-run cost; only proceeds with explicit per-step opt-in.
+- **Edit-mid-run with `reversible` downstream** — returns 409 unless `confirmReversible=true`.
+- **Output-hash firewall** — re-running a step with deterministic output stops invalidation propagation; downstream is not re-executed.
+- **Concurrent ticks** — singleton key prevents duplicate queue jobs; non-blocking advisory lock no-ops on contention; optimistic state guard catches double-dispatch (test with two simulated workers).
+- **Watchdog sweep** — kill the tick enqueue mid-transaction, verify the watchdog re-enqueues within 60s and the run progresses.
+- **Step timeout / poison message** — expired step transitions to failed and the run's failure policy executes.
+- **Cancellation** — in-flight steps receive AbortController signal; run marked cancelled.
 
 ### 11.4 Integration tests
 
