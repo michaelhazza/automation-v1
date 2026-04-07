@@ -337,6 +337,54 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
 
       {/* Body */}
       <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* Conversations sidebar — left-hand pane (standard chat UI convention) */}
+        {sidebarVisible && (
+          <div className="w-[220px] shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden">
+            <div className="px-3.5 pt-3.5 pb-2.5 border-b border-slate-100 shrink-0">
+              <button
+                onClick={handleNewConversation}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12.5px] font-semibold border-0 cursor-pointer transition-colors"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New Conversation
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              {conversations.length === 0 ? (
+                <div className="px-2 py-4 text-[12.5px] text-slate-400 text-center">No conversations yet</div>
+              ) : (
+                conversations.map((conv) => {
+                  const isActive = conv.id === activeConvId;
+                  return (
+                    <div
+                      key={conv.id}
+                      onClick={() => setActiveConvId(conv.id)}
+                      className={`flex items-start gap-1.5 px-2.5 py-2 rounded-xl mb-0.5 cursor-pointer border transition-colors ${isActive ? 'bg-violet-50 border-indigo-200' : 'bg-transparent border-transparent hover:bg-slate-50'}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-[12.5px] truncate leading-snug mb-0.5 ${isActive ? 'font-bold text-indigo-700' : 'font-medium text-slate-700'}`}>
+                          {conv.title ?? 'New conversation'}
+                        </div>
+                        <div className="text-[10.5px] text-slate-400">{formatConvDate(conv.updatedAt ?? conv.createdAt)}</div>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteConversation(conv.id, e)}
+                        title="Delete conversation"
+                        className="bg-transparent border-0 cursor-pointer text-slate-300 hover:text-red-400 text-base leading-none px-0.5 shrink-0 mt-0.5 transition-colors"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Messages */}
@@ -440,53 +488,6 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
           </div>
         </div>
 
-        {/* Conversations sidebar */}
-        {sidebarVisible && (
-          <div className="w-[220px] shrink-0 bg-white border-l border-slate-200 flex flex-col overflow-hidden">
-            <div className="px-3.5 pt-3.5 pb-2.5 border-b border-slate-100 shrink-0">
-              <button
-                onClick={handleNewConversation}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[12.5px] font-semibold border-0 cursor-pointer transition-colors"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                New Conversation
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2">
-              {conversations.length === 0 ? (
-                <div className="px-2 py-4 text-[12.5px] text-slate-400 text-center">No conversations yet</div>
-              ) : (
-                conversations.map((conv) => {
-                  const isActive = conv.id === activeConvId;
-                  return (
-                    <div
-                      key={conv.id}
-                      onClick={() => setActiveConvId(conv.id)}
-                      className={`flex items-start gap-1.5 px-2.5 py-2 rounded-xl mb-0.5 cursor-pointer border transition-colors ${isActive ? 'bg-violet-50 border-indigo-200' : 'bg-transparent border-transparent hover:bg-slate-50'}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-[12.5px] truncate leading-snug mb-0.5 ${isActive ? 'font-bold text-indigo-700' : 'font-medium text-slate-700'}`}>
-                          {conv.title ?? 'New conversation'}
-                        </div>
-                        <div className="text-[10.5px] text-slate-400">{formatConvDate(conv.updatedAt ?? conv.createdAt)}</div>
-                      </div>
-                      <button
-                        onClick={(e) => handleDeleteConversation(conv.id, e)}
-                        title="Delete conversation"
-                        className="bg-transparent border-0 cursor-pointer text-slate-300 hover:text-red-400 text-base leading-none px-0.5 shrink-0 mt-0.5 transition-colors"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
