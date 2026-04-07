@@ -1,7 +1,7 @@
 # Reporting Agent — Paywall → Video → Transcript → Slack Workflow
 ## Detailed Development Specification
 
-**Status:** **Final v3.3 — build-ready, spec closed.** Fourth-round tightenings T22–T25 (transcription cache, cost circuit breaker, download stall guard, end-of-run invariant). No further reviewer rounds — all subsequent feedback would be implementation review against a real PR.
+**Status:** **Final v3.4 — build-ready, spec closed.** Adds T26 (Slack post verification) and T27 (transcript sanity floor) — two cheap fail-closed checks. No further rounds.
 **Branch:** `claude/agent-paywall-video-workflow-OQTMA`
 **Related docs:**
 - `docs/iee-development-spec.md` — IEE worker, browser/dev handlers, execution_runs schema
@@ -307,6 +307,14 @@ case 'transcribe_audio': {
 
   // 4. Stitch + persist
   const transcript = parts.map(p => p.text).join('\n\n');
+
+  // T27 — transcript sanity floor: catches silent Whisper failures
+  // and corrupted audio that passed validation but produced no usable text
+  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 50) {
+    throw failure('data_incomplete', 'transcript_too_short', { wordCount });
+  }
+
   const artifact = await ieeArtifactService.create({
     organisationId: ctx.organisationId,
     executionRunId: ctx.executionRunId,
@@ -490,7 +498,15 @@ case 'send_to_slack': {
   // 3. Permalink
   const permalink = await slackApi.chatGetPermalink({ token: botToken, channel, message_ts: post.ts });
 
-  // 4. Audit
+  // 4. T26 — verification ping: assert the post actually returned what we expect
+  if (!post.ts || !permalink.permalink) {
+    throw failure('internal_error', 'slack_post_incomplete', {
+      hasMessageTs: !!post.ts,
+      hasPermalink: !!permalink.permalink,
+    });
+  }
+
+  // 5. Audit
   await auditService.record({ actor: 'agent', purpose: 'send_to_slack', resourceId: conn.id });
 
   return { messageTs: post.ts, permalink: permalink.permalink };
@@ -1657,7 +1673,16 @@ Once these are confirmed, implementation begins on D.
 
 The only true blocker from the review (T1, plaintext secrets in payload) is closed. All others are hardening that has been folded into the relevant section rather than carried as TODOs.
 
-### v3.3 (current, **final**) — fourth-round failure-proofing
+### v3.4 (current, **final**) — two cheap fail-closed checks
+
+| # | Tightening | Section |
+|---|---|---|
+| T26 | Slack post verification ping: assert `messageTs` and `permalink` are present after the API call. Catches partial Slack success / SDK shape regressions. | §5.5 |
+| T27 | Transcript sanity floor: reject transcripts < 50 words via `failure('data_incomplete', 'transcript_too_short')`. Catches silent Whisper failures and corrupted audio. | §4.4 |
+
+**Spec closed for real this time.** 27 enforced tightenings across 5 review rounds. No more architecture, no more constraints. Next iteration is implementation.
+
+### v3.3 — fourth-round failure-proofing
 
 | # | Tightening | Section |
 |---|---|---|
