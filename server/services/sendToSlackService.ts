@@ -88,6 +88,15 @@ export async function sendToSlack(
   input: SendToSlackInput,
   ctx: SendToSlackContext,
 ): Promise<SendToSlackResult> {
+  // T23 — assert run is within budget BEFORE issuing the external call.
+  // Spec v3.4 §8.4.1. Routes overage through the unified failure taxonomy.
+  const { assertWithinRunBudget } = await import('../lib/runCostBreaker.js');
+  await assertWithinRunBudget({
+    runId: ctx.runId,
+    organisationId: ctx.organisationId,
+    correlationId: ctx.correlationId,
+  });
+
   // 1. Resolve the Slack connection (subaccount → org fallback)
   const conn = await resolveSlackConnection(ctx.organisationId, ctx.subaccountId);
   if (!conn) {
@@ -206,6 +215,12 @@ export async function sendToSlack(
     correlationId: ctx.correlationId,
   });
 
+  // T25 — mark Reporting Agent run state so the end-of-run invariant
+  // can confirm a slack post landed. Spec v3.4 §8.4.2.
+  await mergeReportingAgentRunMeta(ctx.runId, {
+    slackPost: { messageTs: post.ts, permalink },
+  });
+
   return {
     messageTs: post.ts,
     permalink,
@@ -296,6 +311,30 @@ async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<
   const slackPosts = ((meta.slackPosts as PostedSlackEntry[] | undefined) ?? []).slice();
   slackPosts.push(entry);
   meta.slackPosts = slackPosts;
+  await db
+    .update(agentRuns)
+    .set({ runMetadata: meta })
+    .where(eq(agentRuns.id, runId));
+}
+
+/**
+ * Merge a partial Reporting Agent state object into agent_runs.run_metadata.
+ * Used by skills to mark the steps they completed so the end-of-run
+ * invariant (T25) can confirm a successful workflow. Spec v3.4 §8.4.2.
+ */
+async function mergeReportingAgentRunMeta(
+  runId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const [row] = await db
+    .select({ runMetadata: agentRuns.runMetadata })
+    .from(agentRuns)
+    .where(eq(agentRuns.id, runId))
+    .limit(1);
+  if (!row) return;
+  const meta = ((row.runMetadata as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+  const ra = ((meta.reportingAgent as Record<string, unknown> | undefined) ?? {});
+  meta.reportingAgent = { ...ra, ...patch };
   await db
     .update(agentRuns)
     .set({ runMetadata: meta })
