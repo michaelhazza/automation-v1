@@ -1092,6 +1092,8 @@ Single-source list of properties the engine must always preserve. Every PR touch
 10. **Watchdog liveness** — every non-terminal run advances within `WATCHDOG_INTERVAL_SECONDS` of any reachable state change, even if no explicit tick is enqueued.
 11. **Transactional state changes** — step status transitions and tick enqueues happen in the same DB transaction.
 12. **DAG immutability post-publish** — the `definition_json` of a published `playbook_template_versions` row is read-only forever.
+13. **Studio agent never writes files.** The Playbook Author agent's tool surface contains no `write_file`, `commit`, or git-mutating tools. Verified by static check on the agent's allowed-skill list (§10.8.10).
+14. **Save endpoint always re-validates.** `POST /api/system/playbook-studio/save-and-open-pr` runs the §4 validator against the file contents before calling the GitHub MCP. Failed validation here is a 422 — the chat artefact is never trusted to be valid (§10.8.6, §10.8.10).
 
 If any invariant is violated in production, treat it as a P1 bug.
 
@@ -1375,6 +1377,7 @@ Add to `permissions` seed:
 | `playbook_runs.cancel` | subaccount | Cancel running playbooks |
 | `playbook_runs.edit_output` | subaccount | Edit completed step outputs (triggers downstream invalidation) |
 | `playbook_runs.approve` | subaccount | Decide on `approval` step gates |
+| `playbook_studio.access` | system | Required to access the Playbook Studio chat authoring UI and its endpoints. **System-admin only in Phase 1** — no org-level grant. (§10.8) |
 
 System admin and org admin bypass as today.
 
@@ -1421,6 +1424,9 @@ The `playbook_run_event_sequences` table is a single column `(run_id pk, last_se
 | `playbook_run.cancelled` | `playbook_runs/{id}` |
 | `playbook_step.output_edited` | `playbook_step_runs/{id}` (includes downstream invalidated count) |
 | `playbook_step.approval_decided` | `playbook_step_runs/{id}` |
+| `playbook_studio.session_started` | `playbook_studio_sessions/{id}` |
+| `playbook_studio.candidate_validated` | `playbook_studio_sessions/{id}` (with validation result + error count) |
+| `playbook_studio.pr_opened` | `playbook_studio_sessions/{id}` (with PR URL + commit hash) |
 
 ### 8.4 Logging & observability
 
@@ -1658,6 +1664,255 @@ When the AI generates a new `*.playbook.ts` file (or significantly edits one), t
 
 The PR description should explain the playbook's purpose in one paragraph and any non-obvious step dependencies.
 
+### 10.8 Playbook Studio (system-admin conversational authoring UI)
+
+Phase 1 ships with a chat-based authoring tool called **Playbook Studio**. It is a system-admin-only page that hosts a focused conversation with a hidden system agent ("Playbook Author") whose job is to elicit the playbook's structure from the admin and produce a complete, validator-passing `.playbook.ts` file. The file is presented as a chat artefact; the human commits it via a normal GitHub PR. **The agent never writes to disk and never commits — those actions belong to the human.**
+
+This replaces the Phase 2 visual canvas builder for the system-admin authoring case. Phase 2 (org-user authoring) remains visual + parameterised, but most templates will be system templates created via Studio.
+
+#### 10.8.1 Why this exists
+
+- A 15-step playbook is faster to describe in conversation than to drag together in a builder.
+- The file-based authoring model is exceptionally well-suited to LLM authoring — strong types catch mistakes at edit time, existing playbooks act as in-context examples, the validator gives precise error feedback the agent can self-heal against.
+- It eliminates the largest piece of speculative future scope (the visual builder).
+- It validates the AI authoring loop in production, which is the riskiest assumption in the file-based model.
+- The blast radius is bounded by the same git review process every other repo change goes through.
+
+#### 10.8.2 UI structure
+
+New page at `/system/playbook-studio`. Mirrors the recently-reflowed `AgentChatPage` layout (conversation list left, chat centre, artefact right):
+
+```
+┌─ Playbook Studio ─────────────────────────────────────────┐
+│ ┌─ Conversations ─────┐ ┌─ Chat ─────┐ ┌─ Candidate file ─┐│
+│ │ • Event launch      │ │ system     │ │ event-launch.    ││
+│ │ • Monthly newsletter│ │ user       │ │ playbook.ts      ││
+│ │ • Client onboarding │ │ assistant  │ │                  ││
+│ │ + New playbook      │ │ ...        │ │ // monaco        ││
+│ └─────────────────────┘ │            │ │ // (read-only)   ││
+│                         │ [Manage]   │ │                  ││
+│                         │ [textarea] │ │ [Validate]       ││
+│                         │ [Send    ] │ │ [Save & Open PR] ││
+│                         └────────────┘ └──────────────────┘│
+└────────────────────────────────────────────────────────────┘
+```
+
+- **Conversations pane (left).** List of in-flight authoring sessions. Each session is a draft tied to a candidate file. Persists across browser reloads.
+- **Chat pane (centre).** Standard chat transcript bound to the Playbook Author agent. Same component as `AgentChatPage` reused — only the bound agent and the surrounding page chrome differ.
+- **Candidate file pane (right).** **Read-only Monaco preview** of the in-progress `.playbook.ts` file. Updates live as the agent revises it. `[Validate]` re-runs the §4 validator. `[Save & Open PR]` is enabled only after validation passes.
+
+The right pane is intentionally **not** an editable code editor. The admin edits the file by talking to the agent, not by typing in the pane. This preserves the conversation as the source of truth and keeps the loop simple.
+
+#### 10.8.3 Manage button
+
+Same pattern as the Reporting Agent's Manage button (recently shipped to main). Opens a side panel exposing the small surface that lets the admin tune behaviour without forking the agent:
+
+| Field | Type | Effect |
+|-------|------|--------|
+| Master prompt | text (read-only display, editable by system admin) | The prompt in §10.8.5 below. Changes are recorded as edits to the agent's `additionalPrompt` — the master prompt itself stays code-managed. |
+| Style preset | enum | `concise` / `verbose` / `step-by-step Q&A` |
+| Default `humanReviewRequired` | boolean | Whether new steps default to true (most playbooks should) |
+| Output mode | enum | `single file` / `chat-narrated then file` / `propose, validate, fix, present` |
+| Reference playbooks | multi-select | Which existing `*.playbook.ts` files to load as in-context examples (the agent is significantly better with concrete examples than spec alone) |
+
+These settings are stored on the `agents` row for the Playbook Author agent (system-managed) and applied to every new authoring session.
+
+#### 10.8.4 Tool surface
+
+The Playbook Author agent gets exactly four tools, all read-only or sandbox-only. **No `write_file`, no `commit`, no `delete`** — the agent proposes, the human disposes.
+
+| Tool | Purpose |
+|------|---------|
+| `read_existing_playbook(slug)` | Load any current `.playbook.ts` file for reference. The agent uses this to ground new playbooks against existing ones structurally. |
+| `validate_candidate(fileContents)` | Runs `playbookTemplateService.validateDefinition()` against the in-progress file. Returns the same `ValidationError[]` shape from §4.2. |
+| `estimate_cost(fileContents)` | Runs `playbookCostEstimatorService.estimateRun()` so the agent can surface an order-of-magnitude cost to the admin before the file is saved. |
+| `propose_save(fileContents, filename, commitMessage)` | **Does not save.** Surfaces a "Save & Open PR" button in the right pane with the given filename and commit message pre-filled. The actual git action happens via the GitHub MCP under the **human admin's** identity, not the agent's, when the human clicks the button. |
+
+These tools are wired through the existing skill executor pipeline so they respect the policy engine, audit events, and the run cost breaker like every other agent tool.
+
+#### 10.8.5 Master prompt
+
+The Playbook Author agent ships with this master prompt. It is loaded from `server/agents/playbook-author/master-prompt.md` so it lives in the repo and changes via PR.
+
+```
+You are the Playbook Author — a system agent that helps platform admins
+create new Playbook templates by talking to them.
+
+A Playbook is a versioned, immutable DAG of steps that automates a multi-
+step process against a subaccount. The full specification is in
+tasks/playbooks-spec.md. You have read it. You will not invent fields,
+step types, or behaviours that contradict the spec.
+
+YOUR JOB
+Have a focused conversation with the admin to elicit:
+  1. The playbook's purpose in one sentence
+  2. The initial inputs the user will provide at run start
+  3. Each meaningful step, its type, and its dependencies
+  4. Side-effect classification for every step (this is non-negotiable)
+  5. Which steps need humanReviewRequired
+  6. Approval gates and where they belong
+
+Then produce a complete, validator-passing TypeScript file at
+server/playbooks/<slug>.playbook.ts using the definePlaybook helper.
+
+CONVERSATION STYLE
+- Ask one focused question at a time. Do not interview-dump.
+- Confirm understanding by restating. Especially confirm the dependency
+  graph before writing the file ("So step 3 and step 4 both depend only
+  on step 2, meaning they run in parallel — correct?").
+- If the admin describes something ambiguous, ask. Do not guess.
+- Keep responses short. The admin is busy.
+
+NON-NEGOTIABLE RULES (violating these is a P0 bug)
+1. Every step MUST declare sideEffectType. Never default it. If the
+   admin hasn't told you, ask: "Does this step send anything externally
+   or just compute? Specifically: is it none, idempotent, reversible, or
+   irreversible?"
+2. Steps that call external APIs without idempotency keys are
+   irreversible. Default the question to that and require explicit
+   downgrade.
+3. Irreversible steps cannot have retryPolicy.maxAttempts > 1. Validator
+   rejects this. Don't propose it.
+4. Every step has an outputSchema. Tight enough to catch garbage, loose
+   enough not to over-constrain.
+5. Template expressions in a step's prompt or agentInputs may only
+   reference steps listed in that step's dependsOn. No transitive deps.
+6. Step ids are kebab_case matching ^[a-z][a-z0-9_]*$.
+7. Max DAG depth is 50. Refuse to produce deeper graphs.
+8. Identify parallelism opportunities actively. If two steps both depend
+   only on the same upstream step, they run in parallel. Tell the admin
+   this is happening so they understand the run shape.
+
+WORKFLOW
+Phase 1 — Discovery (chat)
+  Ask about purpose, inputs, the rough sequence, side effects,
+  human review points.
+
+Phase 2 — Structure
+  Restate the DAG to the admin in plain English. Confirm before writing.
+  Example: "Here's what I have: 6 steps. Step 1 collects venue/capacity
+  from the user. Step 2 drafts positioning (you'll review before it
+  proceeds). Steps 3 and 4 run in parallel — landing page hero and
+  announcement email. Step 5 is a marketing review approval gate.
+  Step 6 publishes to the CMS — this is irreversible, so once it runs
+  it cannot be auto-re-executed if you edit anything upstream. Sound
+  right?"
+
+Phase 3 — Generation
+  Call propose_save() with a full file. Then call validate_candidate()
+  on it. If validation fails, fix and re-validate. Loop until clean.
+  Maximum 3 fix attempts; if still failing, surface the errors to the
+  admin and ask for human help.
+
+Phase 4 — Review
+  Show the admin the validated file. Run estimate_cost() and surface
+  the result. Ask if they want to open a PR.
+
+Phase 5 — PR
+  When the admin says yes, call propose_save() with the final file and
+  a commit message. Tell the admin "I've prepared the file — click
+  'Save & Open PR' on the right to commit it via your GitHub identity."
+  YOU DO NOT COMMIT. The human commits.
+
+REFERENCE EXAMPLES
+You have access to existing playbooks via read_existing_playbook(). When
+the admin describes something similar to an existing one, load it with
+that tool and use it as a structural template. Concrete examples
+produce far better output than working from spec alone.
+
+WHAT YOU REFUSE TO DO
+- Write a playbook that bypasses sideEffectType
+- Include retries on irreversible steps
+- Auto-commit or auto-merge anything
+- Invent step types or fields not in the spec
+- Produce files with cycles, orphans, or unreferenced dependencies
+- Generate playbooks longer than 50 steps in any single path
+```
+
+#### 10.8.6 Save & Open PR — the trust boundary
+
+This is the most safety-critical detail in the entire feature. Read it carefully.
+
+The `propose_save` tool **does not** write any file or call any git action. It only returns a successful response that causes the right pane to enable the "Save & Open PR" button with the proposed filename and commit message pre-filled. The button click runs in the **human admin's browser session**, not in an agent run, and calls a new server endpoint:
+
+`POST /api/system/playbook-studio/save-and-open-pr`
+
+The endpoint:
+
+1. Verifies the caller has `playbook_studio.access` permission (system-admin only).
+2. Re-runs the validator against the file contents (defense in depth — never trust the chat artefact).
+3. Calls the GitHub MCP **under the human admin's GitHub identity** (already integrated for other repo operations) to:
+   - Create a branch named `playbook-studio/<slug>-<timestamp>`
+   - Commit the file with the supplied message
+   - Open a PR against `main`
+4. Returns the PR URL to the UI.
+5. Emits an audit event `playbook_studio.pr_opened` with the actor, slug, branch, and PR url.
+
+The PR then runs CI exactly like any human-authored playbook PR: the validator runs as part of CI, the §10.7 reviewer checklist applies, and a human reviewer (which may or may not be the same admin) merges. **No auto-merge, ever.**
+
+Three things this design deliberately avoids:
+
+- **No service account commits.** The author identity on the PR is the admin's GitHub identity, so blame, attribution, and audit are correct.
+- **No bypass of CI.** The same validator that runs at deploy-time also runs in CI on the PR. A second-time validation failure is impossible to merge.
+- **No persistence in the database.** The file lives in git. The chat conversation is persisted (so the admin can return to it) but the file itself is the canonical artefact and only exists in git.
+
+#### 10.8.7 Permissions and audit
+
+| Key | Tier | Description |
+|-----|------|-------------|
+| `playbook_studio.access` | system | Required to access the Playbook Studio page and use any of its endpoints. **System-admin only in Phase 1.** No org-level grant. |
+
+New audit events:
+
+| Action | Resource |
+|--------|----------|
+| `playbook_studio.session_started` | `playbook_studio_sessions/{id}` |
+| `playbook_studio.candidate_validated` | `playbook_studio_sessions/{id}` (with validation result + error count) |
+| `playbook_studio.pr_opened` | `playbook_studio_sessions/{id}` (with PR URL + commit hash) |
+
+Sessions are stored in a small `playbook_studio_sessions` table:
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | uuid pk | |
+| `created_by_user_id` | uuid fk | system admin |
+| `agent_run_id` | uuid fk | links to the underlying chat agent run |
+| `candidate_file_contents` | text | latest version of the proposed file |
+| `candidate_validation_state` | enum | `unvalidated` / `valid` / `invalid` |
+| `pr_url` | text nullable | populated after Save & Open PR |
+| `created_at`, `updated_at` | timestamps | |
+
+This is the only Playbook Studio data persisted to the playbooks DB. The chat transcript itself uses the existing agent run / message infrastructure (the author agent is just another system agent under the hood).
+
+#### 10.8.8 Reuse of existing systems
+
+| Concern | Reused infra |
+|---------|--------------|
+| Chat UI | `AgentChatPage` component reused — only the bound agent and right-pane content differ |
+| Author agent | New system agent, `slug: 'playbook-author'`, `isSystemManaged: true`. Master prompt loaded from `server/agents/playbook-author/master-prompt.md`. Hidden from non-system-admin views via the existing tier model |
+| Tool calls | Standard skill executor pipeline — `read_existing_playbook`, `validate_candidate`, `estimate_cost`, `propose_save` are skills like any other |
+| Cost / failure / retry | Existing `runCostBreaker` + `withBackoff` + `failure()` apply unchanged |
+| GitHub PR creation | Existing GitHub MCP integration, called under the human's identity |
+| Audit | Existing `auditEvents` table |
+| Permissions | Existing permission system; one new key |
+| Conversation persistence | Existing agent run + message infrastructure |
+
+#### 10.8.9 Non-goals (explicitly out of scope)
+
+- **Editing playbooks visually.** No drag-and-drop. The admin describes changes in conversation; the agent revises the file.
+- **Running playbooks from Studio.** Studio is authoring-only. Run execution is via the rest of the Phase 1 UI.
+- **Auto-commit / auto-merge.** Never. The button is always one click; the merge is always a separate human action.
+- **Org-admin authoring via Studio.** Phase 1 is system-admin-only. Org authoring stays on the Phase 2 visual builder (or deferred parameterisation in Phase 1.5).
+- **Direct file write to disk.** The agent has no file system write access. Every change goes through the propose-validate-PR loop.
+- **Editable Monaco pane.** The right pane is a read-only preview. Edits happen via chat.
+
+#### 10.8.10 Engine invariants relevant to Studio
+
+Two new invariants extend the §5.13 list:
+
+13. **Studio agent never writes files.** The Playbook Author agent's tool surface contains no `write_file` or git-mutating tools. Verified by static check on the agent's allowed-skill list.
+14. **Save endpoint always re-validates.** `POST /api/system/playbook-studio/save-and-open-pr` runs the validator before calling the GitHub MCP. A failed validation here is a 422 — the chat artefact is never trusted to be valid.
+
 ## 11. Test Plan
 
 ### 11.1 Unit tests
@@ -1716,6 +1971,10 @@ The PR description should explain the playbook's purpose in one paragraph and an
 - **Cascade summary** — mid-run edit response includes correct `cascade.size` and `criticalPathLength` for a diamond invalidation.
 - **Stuck-awaiting alert** — synthetic step in `awaiting_input` for >24h is detected by watchdog and incremented in the gauge.
 - **MAX_DAG_DEPTH** — validator rejects a chain of 51 sequential steps.
+- **Playbook Studio agent has no write tools** — static check enumerates the `playbook-author` agent's allowed-skill list and fails if it contains any of `write_file`, `commit`, `delete`, or any git-mutating skill.
+- **Save endpoint re-validates** — `POST /api/system/playbook-studio/save-and-open-pr` returns 422 when given a tampered file that the chat agent claimed was valid; verified via integration test that bypasses the chat agent and posts directly.
+- **Save endpoint uses caller's GitHub identity** — integration test asserts the GitHub MCP call uses the authenticated user's identity, not a service account or the Playbook Author agent.
+- **Studio access is system-admin only** — non-admin requests to `/api/system/playbook-studio/*` return 403.
 
 ### 11.4 Integration tests
 
@@ -1737,7 +1996,7 @@ The PR description should explain the playbook's purpose in one paragraph and an
 
 ### 12.1 Implementation order
 
-1. **Migration 0075** — schema only. Land first, no behaviour change.
+1. **Migration 0075** — schema only (includes `playbook_studio_sessions` table from §10.8.7). Land first, no behaviour change.
 2. **Types + `definePlaybook` + validator + templating service** — pure code, fully unit-tested in isolation.
 3. **`playbookTemplateService` + seeder + npm scripts** — system templates loadable; no runtime behaviour yet.
 4. **`playbookEngineService` + `playbookRunService` + pg-boss queue** — engine runnable from a script, no UI.
@@ -1745,10 +2004,17 @@ The PR description should explain the playbook's purpose in one paragraph and an
 6. **Hook into `agentRunService.onComplete`** — connect engine to existing agent infrastructure.
 7. **WebSocket events** — broadcast on the new room.
 8. **Phase 1 UI pages** — library, run detail, inbox.
-9. **Permissions seed** — add new keys, integrate into permission set UI.
-10. **Seed 1–2 real system playbooks** (start with the event creation one).
+8.5. **Playbook Studio (§10.8)** — system-admin chat authoring UI. Order:
+   a. Seed the `playbook-author` system agent + load master prompt from `server/agents/playbook-author/master-prompt.md`
+   b. Implement the four tools (`read_existing_playbook`, `validate_candidate`, `estimate_cost`, `propose_save`)
+   c. Implement `POST /api/system/playbook-studio/save-and-open-pr` (re-validates + calls GitHub MCP under human identity)
+   d. Build the `/system/playbook-studio` page (reuse `AgentChatPage` component, swap right pane for read-only Monaco preview)
+   e. Wire the Manage button (style preset, default `humanReviewRequired`, output mode, reference playbooks selector)
+   f. Add `playbook_studio.access` permission (system-admin only) and the three audit events
+9. **Permissions seed** — add new keys (including `playbook_studio.access`), integrate into permission set UI.
+10. **Seed 1–2 real system playbooks** — author them via Playbook Studio (this is the dogfood loop for the Studio itself).
 11. **Internal dogfood** — run end-to-end against a real subaccount.
-12. **Release behind a feature flag** — `playbooks_enabled` per org.
+12. **Release behind a feature flag** — `playbooks_enabled` per org. Studio itself is system-admin gated and ships unflagged.
 
 ### 12.2 Feature flag
 
@@ -1805,6 +2071,10 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 | R24 | Replay output mistaken for production data by downstream consumers | Low | High | `_meta.isReplay = true` envelope on every replay output; persistent UI banner; consumers contractually responsible for honouring (§5.10) | Engine owner + Integrators |
 | R25 | Long-pending `awaiting_input` / `awaiting_approval` steps go unnoticed | High | Low | Watchdog updates stuck gauges; alert thresholds 24h / 48h route to starting user + subaccount admins (§8.5) | Ops owner |
 | R26 | Pathological AI-generated DAG with thousands of step depth blows worst-case duration | Low | Medium | `MAX_DAG_DEPTH = 50` validator rule (§4.1 rule 13) | Validator owner |
+| R27 | Playbook Studio agent acquires file-write or git tools and bypasses human review | Very low | Critical | Static check on the agent's allowed-skill list (invariant 13); no `write_file` / `commit` / `delete` tools registered for `playbook-author` agent; `propose_save` is documented as a UI signal not a write op (§10.8.4, §10.8.10) | Engine owner |
+| R28 | Save & Open PR endpoint trusts the chat artefact and skips re-validation | Low | High | Endpoint always re-runs the validator (invariant 14); 422 on failure; integration test asserts a tampered file is rejected (§10.8.6) | Engine owner |
+| R29 | Playbook Studio commits to repo under a service-account identity, breaking audit/blame | Low | Medium | GitHub MCP call uses the human admin's identity (already integrated for other repo ops); audit event records actor user id (§10.8.6) | Engine owner |
+| R30 | Studio loop generates playbooks with subtly wrong side-effect classifications | Medium | Critical | Master prompt forces explicit per-step confirmation; reviewer checklist (§10.7) catches at PR review; CI validator runs on every PR | Reviewer + Validator owner |
 
 ## 14. Final Review Checklist
 
@@ -1847,6 +2117,11 @@ Before this spec is approved for implementation, every reviewer should sign off 
 - [ ] AI authoring loop is realistic — existing playbooks serve as in-context examples
 - [ ] Validator runs at every meaningful boundary (seeder, publish, run start, optional pre-commit)
 - [ ] Versioning rules prevent silent reverts
+- [ ] Playbook Studio agent has no file-write or git tools (invariant 13)
+- [ ] Save & Open PR endpoint re-validates before calling GitHub MCP (invariant 14)
+- [ ] Save action runs under the human admin's GitHub identity, never a service account
+- [ ] Studio is system-admin only in Phase 1 (no org grant)
+- [ ] Master prompt forces explicit `sideEffectType` confirmation per step
 
 ### Operability
 - [ ] Logging fields are sufficient for debugging a stuck run from the logs alone
