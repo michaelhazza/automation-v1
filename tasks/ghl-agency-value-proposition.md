@@ -165,5 +165,104 @@ Automation OS delivers value through five distinct pillars, each addressing a do
 
 **Underlying capability:** `systemTemplateService.loadToOrg()` (built, with strict/lenient metric validation), GHL Agency Intelligence Template seeded with full operational defaults (migration 0068), Portfolio Health Agent system agent seeded.
 
+---
+
+## 3. Feature-to-Value Matrix
+
+This is the complete inventory of platform features that deliver value to GHL agencies, mapped to the agency problem they solve and their current build status.
+
+### 3.1 GHL Integration Layer
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| GHL OAuth flow | Agency-level OAuth with token refresh, AES-256 encryption | Connect once, system access to all client locations | Built |
+| Auto-discovery of locations | `listAccounts()` enumerates all GHL sub-accounts under the agency | No per-client setup — all clients appear automatically | Built |
+| Webhook ingestion | HMAC-SHA256 verification, deduplication, async processing of GHL events | Real-time updates as things happen in client accounts | Built |
+| Canonical entity normalization | Contacts, opportunities, conversations, revenue normalized from GHL data | Vendor-neutral data layer — agents don't know about GHL specifically | Built |
+| Rate limiting | 100 req/10s per location, 200k/day cap, queued requests | Stays within GHL API quotas without dropping requests | Built |
+| Sync phase state machine | Backfill → transition → live, with webhook queue replay | Clean initial setup, no race conditions during first sync | Built |
+| Backfill contamination guard | Historical data flagged, excluded from baselines | Anomaly detection isn't poisoned by initial data import | Built |
+| Outbound CRM actions | `createContact`, `tagContact`, `updateContact` | Agents can act on client GHL accounts (with HITL gates) | Partial |
+
+### 3.2 Cross-Client Intelligence
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| Portfolio Health Agent | Org-level agent that scans all accounts on a schedule (default 4h) | Replaces manual Monday morning checking with automation | Built (seeded) |
+| Health score computation | Configurable factors per agency, weighted composite score 0-100 | Single number tells you if a client is healthy | Built |
+| Trend detection | Improving / stable / declining based on snapshot history | "Client X is declining" — directional signal not just point-in-time | Built |
+| Anomaly detection | Per-account, per-metric statistical baselines, configurable thresholds | Catch deviations like "lead volume down 40% from baseline" | Built |
+| Anomaly dedup | Configurable window (default 60min) prevents repeat alerts | No spam when an issue persists across scan cycles | Built |
+| Churn risk scoring | Configurable signals (trajectory, stagnation, engagement, low health) | "Top 5 clients at risk this month" — prioritised retention list | Built |
+| Cohort queries | Filter accounts by tags (vertical, tier, region) | "Show me all premium dental clients" segmentation | Built |
+| Portfolio reports | Generated briefings with overview, accounts needing attention, anomalies | Monday morning email replaces manual review | Built |
+| Cold start handling | Returns null score during first 14 data points instead of misleading numbers | New clients show "building baseline" instead of fake health | Built |
+| Output explainability | Every score includes top factors, confidence reasoning, data quality | Operator sees WHY a score is what it is — required for trust | Built |
+| Confidence scoring | Reduced confidence when factors are missing or stale | Operators know when not to trust an automated decision | Built |
+
+### 3.3 Governance & Trust
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| Policy engine | Priority-ordered rules: auto / review / block per tool slug | Define "AI rules of engagement" once, enforce everywhere | Built |
+| HITL review queue | Promise-based blocking, agent waits for approval | High-stakes actions get human review before execution | Built |
+| Bulk approve/reject | Approve 10 pending interventions at once | Doesn't take 30 minutes to clear the review queue | Built |
+| Edit before approve | Operator can modify proposed action before executing | Human refinement without full rejection | Built |
+| Intervention cooldowns | Prevent same intervention firing repeatedly per account | "We already escalated this — don't propose it again for 24h" | Built |
+| Account overrides | Per-client suppression with expiry | "Pause monitoring for Client X for 7 days" — surgical control | Built |
+| Alert fatigue guard | Max 20 alerts/run, 3/account/day, low-priority batching | Operator gets actionable alerts, not noise | Built |
+| Authority rules | Org agents can't write to subaccount data without explicit allowlist | Prevent cross-client mistakes by AI | Built |
+| Audit trail | Every action logged with actor, timestamp, reasoning | Compliance + debugging + trust | Built |
+| Intervention effectiveness tracking | Health score before/after interventions, outcome classification | "Did 'pause campaign' actually help?" — measurable | Built |
+| Causal linkage | Interventions linked to triggering anomaly + run + config version | "Why did the system propose this?" — fully traceable | Built |
+
+### 3.4 Cost Control & Margin
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| 8-level budget hierarchy | Caps at agent/run/daily/monthly/org/global levels | Runaway costs are structurally impossible | Built |
+| Pre-run cost reservations | Reserve estimated cost before agent starts | Prevent overspend at execution time | Built |
+| 10-dimension cost attribution | org, subaccount, run, agent, provider, task type, etc. | Know exactly what each client costs | Built |
+| Margin markup config | Raw cost × markup % = customer cost | Price AI services with margin certainty | Built |
+| Per-run cost snapshot | estimatedCostCents + actualCostCents on agent_runs | Run-level profitability analysis | Built |
+| Rate limiting | Per-minute and per-hour LLM call limits | Smooth out cost spikes, stay within provider quotas | Built |
+| Daily/monthly cost rollups | Aggregate views per dimension | Dashboards and invoicing data ready | Built |
+
+### 3.5 Multi-Client Operational Features
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| Unified inbox | Aggregates tasks + reviews + failed runs across all clients | Single place to see what needs attention | Built |
+| Org-wide inbox toggle | Opt-in per subaccount to appear in org view | Control which clients show up in the agency-level feed | Built |
+| Subaccount tagging | Key-value tags (vertical, tier, region, etc.) | Segment clients however the agency thinks about them | Built |
+| Bulk tagging | Apply tags across multiple subaccounts at once | Onboard new tier of clients quickly | Built |
+| Org memory | Cross-client learnings stored as semantic entries with quality scores | "Dental clients respond best to same-day follow-up" — accumulated wisdom | Built |
+| Memory promotion | Patterns observed across 3+ subaccounts auto-promoted to org level | System gets smarter over time without manual training | Built |
+| Job queue health | Per-queue metrics, DLQ depth, retry rates | Operational visibility into agent execution health | Built |
+| Real-time WebSocket updates | Live updates as agents run, alerts fire, scores change | Dashboard reflects reality without page refresh | Built |
+
+### 3.6 Template Deployment
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| GHL Agency Intelligence Template | Full operational config seed with 5 health factors, 4 churn signals, 4 intervention types | One-click activation provisions everything | Built (seeded) |
+| Portfolio Health Agent seed | Org-level system agent with intelligence skills enabled | The flagship agency monitoring agent, ready to deploy | Built (seeded) |
+| `loadToOrg()` activation | Provisions agents, creates configs, seeds memory, schedules first scan | Agency goes from zero to monitoring in minutes | Built |
+| Metric availability validation | Strict/lenient mode prevents activating templates with missing metrics | Don't deploy templates that won't work | Built |
+| Template versioning | Track which template version is applied per org | Update propagation with operator opt-in | Built |
+| Operator customisation | Per-org overrides on factor weights, thresholds, alert destinations | Each agency tunes the system to their portfolio | Built |
+| Memory seeds | Pre-loaded org memory entries from template | Agency starts with sensible context, not empty state | Built |
+| Activation UI | Library page → wizard → operator inputs → confirmation | Self-service deployment without dev involvement | Pending |
+
+### 3.7 MCP Ecosystem (Extensibility)
+
+| Feature | What It Does | Agency Value | Status |
+|---------|-------------|-------------|--------|
+| MCP client manager | Spawns and manages external MCP servers | Add new tool integrations without writing adapters | Built |
+| 9 MCP presets | Gmail, Slack, HubSpot, GitHub, Linear, Jira, Brave, Notion, Stripe | Pre-configured access to common tools | Built |
+| Auto tool discovery | MCP servers expose tools dynamically | New tools appear without code changes | Built |
+| Permission integration | MCP tools respect policy engine and HITL gates | Same governance applies to external tools | Built |
+| Circuit breaker | Disable failing MCP servers automatically | Resilience to flaky external services | Built |
+
 
 
