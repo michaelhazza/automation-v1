@@ -24,7 +24,9 @@ export const ieeSteps = pgTable(
     input:           jsonb('input').notNull(),
     output:          jsonb('output'),
     success:         boolean('success').notNull(),
-    failureReason:   text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'unknown'>(),
+    // Extended via spec v3.4 §8.4 / T13 to match the broadened FailureReason
+    // enum (connector_timeout, rate_limited, data_incomplete, internal_error).
+    failureReason:   text('failure_reason').$type<'timeout' | 'step_limit_reached' | 'execution_error' | 'environment_error' | 'auth_failure' | 'budget_exceeded' | 'connector_timeout' | 'rate_limited' | 'data_incomplete' | 'internal_error' | 'unknown'>(),
     durationMs:      integer('duration_ms'),
 
     createdAt:       timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
