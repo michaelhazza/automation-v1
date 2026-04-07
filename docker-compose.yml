@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AutomationOS — local development Docker Compose
+# Spec: docs/iee-development-spec.md §12, tasks/windows-iee-setup-guide.md
+#
+# Three services run locally:
+#   • postgres  — local Postgres + pg-boss (mirrors Neon in production)
+#   • app       — main AutomationOS server (mirrors Replit in production)
+#   • worker    — IEE worker (mirrors DigitalOcean VPS in production)
+#
+# The worker is the ONLY component that runs on the production VPS. Locally
+# we run all three so the full execution loop can be exercised end-to-end
+# against a single Postgres instance, exactly as it will work in production.
+#
+# Note: top-level `version:` field omitted — deprecated in Docker Compose v2.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB:       ${POSTGRES_DB:-automation_os}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      # Override the placeholder DATABASE_URL from .env so the in-Docker
+      # service hostname (`postgres`) is used inside the Compose network.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-automation_os}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    env_file: .env
+    environment:
+      # Same override — worker shares Postgres with the app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-automation_os}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      # Persistent browser sessions survive container restarts.
+      # Spec §6.2 / §13.6.
+      - worker_sessions:/var/browser-sessions
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  worker_sessions:
