@@ -2,7 +2,7 @@
 name: Fetch Paywalled Content
 description: Logs into a paywalled site using a stored web_login connection, navigates to a content URL, and downloads the artifact (e.g. video) under deny-by-default contract enforcement. Returns the persisted iee_artifacts row + contentHash. Short-circuits with noNewContent=true if the freshly-validated contentHash matches the agent's last processed fingerprint for this intent.
 isActive: true
-isVisible: false
+visibility: basic
 ---
 
 ```json

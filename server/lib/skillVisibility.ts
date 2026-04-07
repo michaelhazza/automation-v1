@@ -1,27 +1,37 @@
 /**
- * Skill visibility helpers — Code Change A from the Reporting Agent spec.
+ * Skill visibility helpers — three-state cascade.
  *
- * Spec: docs/reporting-agent-paywall-workflow-spec.md §3 / T6.
+ * The cascade runs system → organisation → subaccount. At every level the
+ * owner sets a `visibility` value that controls what the level below sees:
  *
- * Two distinct predicates, intentionally separated:
- *  - canViewContents(): may the viewer read the skill body (instructions,
- *    methodology, definition)? Owner-tier viewers always can. Lower tiers
- *    only when the skill is flagged contentsVisible.
- *  - canManageSkill(): may the viewer edit/delete the skill? Owner-tier
- *    only AND must hold the relevant permission.
+ *   none   — skill is invisible to lower tiers (filtered out of lists)
+ *   basic  — name + one-line description visible only; body stripped
+ *   full   — everything visible (instructions, methodology, definition)
  *
- * Visibility never grants write access. The two are explicitly distinct
- * because an owner-tier user may legitimately need read access without
- * edit rights.
+ * Two predicates kept intentionally distinct from `canManageSkill`:
+ *  - isVisibleToViewer():  may the viewer SEE the skill in lists at all
+ *  - canViewContents():    may the viewer read the body fields
+ *  - canManageSkill():     may the viewer edit/delete the skill (owner-tier
+ *                          + permission only — visibility never grants edit)
+ *
+ * Owner-tier viewers always see everything regardless of the visibility
+ * value. Visibility only ever restricts; it never expands.
  */
 
 export type SkillTier = 'system' | 'organisation' | 'subaccount';
+export type SkillVisibility = 'none' | 'basic' | 'full';
+
+export const SKILL_VISIBILITY_VALUES: readonly SkillVisibility[] = ['none', 'basic', 'full'];
+
+export function isSkillVisibility(v: unknown): v is SkillVisibility {
+  return v === 'none' || v === 'basic' || v === 'full';
+}
 
 export interface SkillVisibilityInput {
   /** Tier that owns the skill (where it was defined). */
   ownerTier: SkillTier;
-  /** Whether the contents-visible flag is set on the skill. */
-  contentsVisible: boolean;
+  /** Cascade visibility set by the owner. */
+  visibility: SkillVisibility;
 }
 
 export interface SkillViewer {
@@ -32,25 +42,36 @@ export interface SkillViewer {
 }
 
 /**
+ * Is the skill visible to the viewer at all? Owner tier always yes; lower
+ * tiers only when visibility is 'basic' or 'full'.
+ *
+ * Used to filter list endpoints. List responses must omit skills entirely
+ * when this returns false.
+ */
+export function isSkillVisibleToViewer(skill: SkillVisibilityInput, viewer: SkillViewer): boolean {
+  if (viewer.tier === skill.ownerTier) return true;
+  return skill.visibility !== 'none';
+}
+
+/**
  * May the viewer read the full skill body (instructions, methodology,
  * tool definition)?
  *
- * Rules:
- *  - Owner tier always sees contents (no manage permission required for read).
- *  - Lower tiers gated by the contentsVisible flag.
+ *  - Owner tier always yes.
+ *  - Lower tiers: only when visibility === 'full'. The 'basic' state shows
+ *    metadata only and the body is stripped at the response boundary.
  */
 export function canViewContents(skill: SkillVisibilityInput, viewer: SkillViewer): boolean {
   if (viewer.tier === skill.ownerTier) return true;
-  return skill.contentsVisible === true;
+  return skill.visibility === 'full';
 }
 
 /**
  * May the viewer edit / delete the skill?
  *
- * Rules:
  *  - Must be at the owning tier.
  *  - Must hold the skill-management permission at that tier.
- *  - The contentsVisible flag is irrelevant — visibility never grants edit.
+ *  - Visibility is irrelevant — visibility never grants edit.
  */
 export function canManageSkill(skill: SkillVisibilityInput, viewer: SkillViewer): boolean {
   if (viewer.tier !== skill.ownerTier) return false;
