@@ -60,6 +60,8 @@ export const ORG_PERMISSIONS = {
   // MCP Servers
   MCP_SERVERS_VIEW: 'org.mcp_servers.view',
   MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
+  // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
+  IEE_USAGE_VIEW: 'org.billing.iee.view',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -95,6 +97,8 @@ export const SUBACCOUNT_PERMISSIONS = {
   // Review
   REVIEW_VIEW: 'subaccount.review.view',
   REVIEW_APPROVE: 'subaccount.review.approve',
+  // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
+  IEE_USAGE_VIEW: 'subaccount.billing.iee.view',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
