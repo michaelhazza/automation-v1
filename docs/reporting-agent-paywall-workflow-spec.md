@@ -1,7 +1,7 @@
 # Reporting Agent — Paywall → Video → Transcript → Slack Workflow
 ## Detailed Development Specification
 
-**Status:** Draft v2 — incorporates reviewer tightenings (see §10 Change Log)
+**Status:** Draft v3 — incorporates second-round reviewer tightenings T8–T14 (see §10 Change Log)
 **Branch:** `claude/agent-paywall-video-workflow-OQTMA`
 **Related docs:**
 - `docs/iee-development-spec.md` — IEE worker, browser/dev handlers, execution_runs schema
@@ -468,13 +468,18 @@ Slack itself is not idempotent. The parent agent run's idempotency key protects 
 
 Mitigation:
 
-1. The `send_to_slack` skill writes its result (`messageTs`, `channel`, `permalink`) to the `execution_steps.output` jsonb of its own step row, **and** to a small denormalised lookup on `agent_runs.metadata.slackPosts: Array<{ channel, messageTs, permalink, postedAt }>`.
-2. Before posting, the skill checks `agent_runs.metadata.slackPosts` for an existing post in the same channel for this run. If one exists:
+1. The `send_to_slack` skill computes a **deterministic post hash** (T11) before posting:
+   ```
+   postHash = sha256(`${runId}:${channel}:${filename ?? ''}:${messageTextHash}`)
+   ```
+   `messageTextHash` is `sha256(message)` so trivially-different messages still dedupe correctly when the meaningful content is the same.
+2. The skill writes its result (`postHash`, `messageTs`, `channel`, `permalink`) to `execution_steps.output` **and** to a denormalised lookup on `agent_runs.metadata.slackPosts: Array<{ postHash, channel, messageTs, permalink, postedAt }>`.
+3. Before posting, the skill checks `agent_runs.metadata.slackPosts` for an entry with the same `postHash`. If one exists:
    - Default behaviour: **skip** the post and return the cached `messageTs` + `permalink`. Log a warning.
    - Alternative behaviour (configurable per skill input `onDuplicate: 'skip' | 'reply_in_thread' | 'force'`, default `'skip'`): post a follow-up reply in-thread referencing the prior post.
-3. The check is best-effort, not a database lock — race conditions between two simultaneous worker processes are tolerated (Slack will dedupe by content if we add a request hash header in v2, but v1 accepts the risk because parent-run idempotency makes simultaneous duplicate runs already impossible).
+4. The check is best-effort, not a database lock. Two simultaneous workers can still race and double-post, but parent-run idempotency makes simultaneous runs impossible in normal operation. The hash narrows the residual race window to the few hundred ms between read and write, and ensures that retries from the same run never duplicate even if the agent loop calls `send_to_slack` twice with semantically identical input.
 
-This is a small safeguard, ~30 LOC, and closes the operator-retry loophole called out in the review.
+This is ~50 LOC and closes both the operator-retry loophole and the trivially-different-input loophole called out in T11.
 
 ### 5.6 Subaccount vs org connection resolution
 
@@ -786,9 +791,87 @@ async function handle(payload: BrowserTaskPayload) {
 The worker therefore needs **read access to `integration_connections` and `secretsCrypto`**. This means:
 - The worker process needs `ENCRYPTION_KEY` in its environment (added to `worker/Dockerfile` env passthrough and `docker-compose.yml`).
 - The worker needs DB access to `integration_connections` (already has it via the existing IEE schema sharing).
-- A small `worker/src/persistence/integrationConnections.ts` repo with a single scoped `getByIdScoped` query — strict org+subaccount filter, no list/search methods.
+- A purposely **single-method, single-purpose** repo file (see §6.6.2) — no generic `getById`, no list, no search.
 
 This trades a tiny amount of additional worker code for a materially better security posture: plaintext secrets never enter pg-boss queue rows, never enter Postgres job payloads, and exist only in worker process memory for the seconds between fetch and `performLogin` completion.
+
+### 6.6.2 Worker repo: single-method hard boundary (T8)
+
+The worker is now a privileged component (it has `ENCRYPTION_KEY` and DB access to `integration_connections`). To prevent that privilege from becoming a future footgun, the worker's persistence layer for connections is **deliberately constrained to one method**:
+
+`worker/src/persistence/integrationConnections.ts`:
+
+```ts
+// The ONLY method exported. There is no getById, no list, no search.
+// This file does not export the connection table object.
+export async function getWebLoginConnectionForRun(
+  runContext: { organisationId: string; subaccountId: string | null; runId: string },
+  connectionId: string,
+): Promise<DecryptedWebLoginConnection> {
+  const row = await db.query.integrationConnections.findFirst({
+    where: and(
+      eq(integrationConnections.id, connectionId),
+      eq(integrationConnections.organisationId, runContext.organisationId),
+      eq(integrationConnections.type, 'web_login'),
+      isNull(integrationConnections.deletedAt),
+      // T14: subaccount scoping rule, see §6.6.3
+      runContext.subaccountId
+        ? or(
+            eq(integrationConnections.subaccountId, runContext.subaccountId),
+            isNull(integrationConnections.subaccountId),
+          )
+        : isNull(integrationConnections.subaccountId),
+    ),
+  });
+  if (!row) {
+    throw new WebLoginConnectionNotFound(connectionId, runContext);
+  }
+  // Decrypt at the boundary so callers never see ciphertext shape
+  return {
+    id: row.id,
+    config: row.configJson as WebLoginConfig,
+    password: secretsCrypto.decrypt((row.secretsJson as { password: string }).password),
+  };
+}
+```
+
+**Hard rules enforced by this single function:**
+1. `organisationId` must match the run's org. Always.
+2. `type` must be `'web_login'`. No type confusion bugs.
+3. `deletedAt` must be null. Soft-deleted credentials cannot be used.
+4. **T14 rule** — see §6.6.3.
+
+There is no escape hatch in `worker/src/persistence/`. If a future feature needs a different connection type, it adds a sibling single-purpose function (`getSlackConnectionForRun`, `getOpenAiConnectionForRun`) — never a generic `getConnectionById`.
+
+A unit test asserts the file's exported surface area is exactly `getWebLoginConnectionForRun` (and any future siblings) and nothing else. Lint rule (added to `worker/.eslintrc`) bans `import { db }` outside `worker/src/persistence/`.
+
+### 6.6.3 Cross-subaccount credential isolation (T14)
+
+**The rule:** if the agent run has a `subaccountId`, the connection must belong to that subaccount **or** be a null-subaccount org-wide fallback. A connection belonging to a *different* subaccount must never resolve, even if the caller passes its ID.
+
+This is enforced in the WHERE clause of `getWebLoginConnectionForRun` (see §6.6.2):
+
+```sql
+-- pseudocode of the predicate
+WHERE organisation_id = :runOrgId
+  AND type = 'web_login'
+  AND deleted_at IS NULL
+  AND (
+    (:runSubaccountId IS NOT NULL AND (subaccount_id = :runSubaccountId OR subaccount_id IS NULL))
+    OR
+    (:runSubaccountId IS NULL AND subaccount_id IS NULL)
+  )
+```
+
+Without this clause, a malicious or buggy caller could pass `connectionId = <other subaccount's paywall>` and (because org_id matches) successfully decrypt a credential belonging to a different client.
+
+A tenant-isolation test asserts:
+- Run with `subaccountId = A` + connection ID belonging to subaccount B → returns not-found, **never** the row.
+- Run with `subaccountId = A` + connection ID belonging to org-wide (null subaccount) → returns the row.
+- Run with `subaccountId = null` (org-level run) + connection ID belonging to subaccount A → returns not-found.
+- Run with `subaccountId = null` + connection ID belonging to org-wide (null subaccount) → returns the row.
+
+Same rule will be applied to every future `get*ConnectionForRun` function.
 
 ### 6.7 Audit and rotation
 
@@ -853,6 +936,28 @@ For the Reporting Agent, the contract for the paywall step is:
 
 This contract is constructed by `agentExecutionService` based on the agent's tool-call arguments — it is **not** authored by the LLM directly. The LLM provides intent + connection name; the service fills in `allowedDomains` from the `web_login` connection's `loginUrl` host and the `contentUrl` host, and fills in `expectedArtifactKind` from the agent definition. This keeps the LLM in the role of "decide what to do" while the deterministic service enforces "what is permissible".
 
+#### Deny-by-default enforcement (T9)
+
+The contract is not advisory. The worker operates in **deny-by-default mode**: any action that does not pass an explicit contract check is a **hard failure**, never a warning.
+
+Enforcement points in `worker/src/browser/`:
+
+| Action | Check | On violation |
+|---|---|---|
+| `page.goto(url)` (initial + every navigation) | URL host ∈ `allowedDomains` (exact or suffix match) | `terminate` with `failure_reason: 'auth_error'` (sub: `contract_violation_domain`) |
+| HTTP redirect during navigation | Final URL host ∈ `allowedDomains` | `terminate` with same reason; capture redirect chain in failure metadata |
+| Download event | MIME type starts with `expectedMimeTypePrefix` (if set) **and** file kind matches `expectedArtifactKind` | `terminate` with `failure_reason: 'data_incomplete'` (sub: `contract_violation_artifact_kind`) |
+| `execution_artifacts` write | `kind` matches `expectedArtifactKind` | `terminate` (defence in depth — should already be caught above) |
+| LLM-loop step count | ≤ `maxSteps` | `terminate` with `failure_reason: 'internal_error'` (sub: `step_limit_exceeded`) |
+| Wall-clock | ≤ `timeoutMs` | `terminate` with `failure_reason: 'connector_timeout'` |
+| `successCondition` not satisfied at end of loop | At least one of selectorPresent / urlMatches / artifactDownloaded met | `terminate` with `failure_reason: 'data_incomplete'` (sub: `success_condition_unmet`) |
+
+**Termination semantics:** "terminate" means the run is closed immediately, the artifact (if partial) is marked invalid, the failure reason + sub-detail are persisted to `execution_runs`, and the parent agent run sees a hard failure rather than a soft skip. There is no retry inside the same run.
+
+A wrapper class `ContractEnforcedPage` proxies the Playwright `Page` object — every navigation method is intercepted and validated against `allowedDomains` before being passed through. The LLM execution loop receives only `ContractEnforcedPage`, never the raw page. This makes the enforcement non-bypassable from inside the loop.
+
+The spec text is intentionally explicit about "deny by default, hard fail, no warnings" so future devs cannot quietly soften it into a logged warning.
+
 ### 6.7.2 Content fingerprint to skip duplicate downloads (reviewer T4)
 
 "Just take the most recent" will produce wrong behaviour when the newest item is pinned, not actually a video, the same asset reordered, or not downloadable. v1 adds a minimal persisted fingerprint so the agent can skip obvious duplicates without needing full multi-video history.
@@ -861,22 +966,27 @@ New table column on `subaccount_agents` (small migration, no new table):
 
 ```sql
 ALTER TABLE subaccount_agents
-  ADD COLUMN last_processed_content_fingerprint jsonb;
+  ADD COLUMN last_processed_fingerprints_by_intent jsonb NOT NULL DEFAULT '{}'::jsonb;
 ```
 
-`last_processed_content_fingerprint` shape:
+**Per reviewer T10:** the column is keyed by **intent** so the same agent linkage can run multiple distinct browser intents (e.g. `download_latest` for videos and `download_latest` for a separate report feed) without colliding. Shape:
+
 ```ts
-{
-  sourceUrl: string;          // canonical URL of the item
-  pageTitle: string;
-  publishedAt?: string;       // ISO if extractable
-  contentHash: string;        // sha256 of downloaded file
-  processedAt: string;        // ISO
-  agentRunId: string;
-}
+type FingerprintsByIntent = {
+  [intent: string]: {  // e.g. 'download_latest', 'download_by_url'
+    sourceUrl: string;          // canonical URL of the item
+    pageTitle: string;
+    publishedAt?: string;       // ISO if extractable
+    contentHash: string;        // sha256 of downloaded file
+    processedAt: string;        // ISO
+    agentRunId: string;
+  };
+};
 ```
 
-The browser-task worker, on a `download_latest` intent, captures these four fields as part of the download step result. The agent's next step reads `subaccount_agents.last_processed_content_fingerprint` (via a small skill `read_last_fingerprint`, or as part of the agent run context) and compares:
+Reads use `last_processed_fingerprints_by_intent[intent]`; writes use a small JSONB merge. No need for a separate row per intent in v1.
+
+The browser-task worker, on a `download_latest` intent, captures these fields as part of the download step result. The agent's next step reads the fingerprint for the current intent and compares:
 - If `sourceUrl` matches → skip, terminate the agent run gracefully with `result: 'no_new_content'`.
 - Else if `contentHash` matches → skip (same file re-uploaded under a new URL).
 - Else proceed.
@@ -901,14 +1011,32 @@ Schema addition (folded into the same migration as §2.3):
 
 ```sql
 ALTER TABLE task_deliverables
-  ADD COLUMN body_text text;
+  ADD COLUMN body_text text,
+  ADD COLUMN body_text_truncated boolean NOT NULL DEFAULT false;
 ALTER TABLE execution_artifacts
-  ADD COLUMN inline_text text;  -- nullable, used for small text artifacts
+  ADD COLUMN inline_text text,
+  ADD COLUMN inline_text_truncated boolean NOT NULL DEFAULT false;
 ```
 
-`add_deliverable` skill is updated so callers may pass either `{ artifactId }` or `{ bodyText, mimeType, filename }`. The Reporting Agent uses the latter form for the report.
+#### Size thresholds and overflow behaviour (T12)
 
-Result: even after worker container cleanup, the deliverable body is queryable from the main DB. Object storage upload (v2) will replace `body_text` for large deliverables but the schema is forward-compatible.
+Inline-text columns have **explicit hard ceilings**, enforced at write time. Without these, someone will eventually dump a 10 MB transcript into the DB and slow every list query.
+
+| Column | Max bytes | On overflow |
+|---|---|---|
+| `execution_artifacts.inline_text` | **1 MB** (1,048,576 bytes) | Truncate at 1 MB - 100 bytes (leaving room for an ellipsis marker), set `inline_text_truncated = true`, keep the original on the worker disk + in `execution_artifacts.path`. The skill that produced it logs a warning step. |
+| `task_deliverables.body_text` | **2 MB** (2,097,152 bytes) | Truncate at 2 MB - 100 bytes, set `body_text_truncated = true`, write a separate full-size artifact and link it via `task_deliverables.artifactId`. The deliverable record always remains queryable; the truncation flag tells the UI to show "truncated — open full file". |
+
+Both ceilings are enforced by a single `writeWithLimit(table, column, text, maxBytes)` helper in `server/lib/inlineTextWriter.ts`. The helper returns `{ stored, wasTruncated, originalBytes }` so callers can audit. Truncation **never** silently fails; it always writes the truncated body, sets the flag, and emits a warning step.
+
+For the Reporting Agent's typical 60-minute video:
+- Whisper transcript: ~50–80 KB → comfortably inline.
+- Final report markdown: ~5–15 KB → comfortably inline.
+- Neither hits the ceiling in normal operation. The ceilings exist to prevent pathological inputs from breaking the DB.
+
+`add_deliverable` skill is updated so callers may pass either `{ artifactId }` or `{ bodyText, mimeType, filename }`. The Reporting Agent uses the latter form for the report. The skill internally uses `writeWithLimit`.
+
+Result: even after worker container cleanup, the deliverable body is queryable from the main DB, with explicit size guarantees. Object storage upload (v2) will replace inline storage for large deliverables but the schema is forward-compatible.
 
 ### 6.8 2FA / captcha — **out of scope**
 
@@ -1128,15 +1256,42 @@ Total wall-clock for a typical 60-minute video: roughly 2–3 minutes (Whisper i
 
 ### 8.4 Failure handling matrix
 
-| Failure point | failureReason | Recovery |
-|---|---|---|
-| `performLogin` selector miss | `login_failed` | Operator inspects screenshot artifact, updates selectors, re-runs |
-| Paywall down | `login_failed` (timeout) | Heartbeat retries next week; operator can manually re-run |
-| No new video found | `no_new_content` (custom — agent skips remaining steps gracefully) | Normal — agent run marked completed, no Slack post |
-| Whisper rate limit | retried 3× then `transcription_failed` | Heartbeat retries next week |
-| Whisper file too large | `audio_too_large` | Operator investigates source video; may need higher chunk count |
-| Report skill output empty | `skill_output_invalid` | Bug in prompt or transcript — operator inspects |
-| Slack token revoked | `slack_invalid_auth` | Connection marked broken; operator re-pastes token |
+Per reviewer T13: failures across browser-task, transcription, report skill, and Slack are aligned to a **single unified taxonomy**. All failures use a `failureReason` from the standard enum (already used elsewhere in the system per `shared/iee/failureReason.ts`) plus an optional `failureDetail` string for sub-categorisation. This keeps downstream analytics, dashboards, and alerting consistent.
+
+**Standard `failureReason` enum (extend existing if needed):**
+
+| Reason | Meaning |
+|---|---|
+| `connector_timeout` | External system did not respond within timeout |
+| `rate_limited` | External system returned 429 / equivalent |
+| `auth_error` | Authentication / authorisation failure (login failed, token revoked, contract domain violation) |
+| `data_incomplete` | Expected data was missing or malformed (no new content, contract artifact mismatch, success condition unmet) |
+| `internal_error` | Bug or unexpected condition in our own code |
+| `unknown` | Catch-all for unclassified failures |
+
+**Mapping for this workflow:**
+
+| Failure point | failureReason | failureDetail | Recovery |
+|---|---|---|---|
+| `performLogin` selector miss | `auth_error` | `login_failed_selector_missing` | Operator inspects screenshot, updates selectors, re-runs |
+| `performLogin` timeout | `connector_timeout` | `login_navigation_timeout` | Heartbeat retries next week |
+| Contract domain violation | `auth_error` | `contract_violation_domain` | Bug in agent contract or compromised redirect — investigate immediately |
+| Contract artifact-kind mismatch | `data_incomplete` | `contract_violation_artifact_kind` | Source page changed format — operator investigates |
+| Step limit exceeded | `internal_error` | `step_limit_exceeded` | Loop is stuck — increase `maxSteps` only after diagnosing root cause |
+| Wall-clock timeout | `connector_timeout` | `browser_task_timeout` | Site slow / down |
+| Success condition unmet | `data_incomplete` | `success_condition_unmet` | Site structure changed — update success selector |
+| No new content (fingerprint match) | *not a failure* — terminates with `result: 'no_new_content'`, status `completed` | — | Normal weekly outcome |
+| Whisper 429 (after retries) | `rate_limited` | `whisper_rate_limited` | Heartbeat retries next week |
+| Whisper file too large | `data_incomplete` | `audio_too_large` | Source video is unusually long; investigate chunking |
+| Whisper API 5xx | `connector_timeout` | `whisper_upstream_error` | TripWire retry |
+| Report skill output empty | `internal_error` | `skill_output_empty` | Bug in prompt or transcript |
+| Slack token revoked | `auth_error` | `slack_invalid_auth` | Connection marked broken; operator re-pastes token |
+| Slack channel not found | `data_incomplete` | `slack_channel_not_found` | Operator updates channel |
+| Slack rate limited | `rate_limited` | `slack_rate_limited` | Retry with `Retry-After` |
+| Encryption key missing at boot | `internal_error` | `encryption_key_missing` | Server refuses to start (boot-time check) |
+| Connection not found / wrong tenant | `auth_error` | `connection_not_found_or_unauthorized` | Operator audit; possible tenant-isolation alert |
+
+A single helper `failure(reason, detail, metadata?)` is used by every code path to construct the failure object, so the taxonomy stays consistent and there is no place for a free-text `failureReason` to creep in. Lint rule (or runtime zod check) ensures `failureReason` is always one of the enum values.
 
 ---
 
@@ -1222,6 +1377,35 @@ Once these are confirmed, implementation begins on D.
 | Q7 | `ENCRYPTION_KEY` must be separate from `JWT_SECRET`. Rationale documented. | §2.4 |
 
 The only true blocker from the review (T1, plaintext secrets in payload) is closed. All others are hardening that has been folded into the relevant section rather than carried as TODOs.
+
+### v3 (current) — second-round reviewer tightenings
+
+| # | Tightening | Section |
+|---|---|---|
+| T8 | Worker connection repo is a single-purpose function (`getWebLoginConnectionForRun`). No generic `getById`, no list, no search. Lint rule prevents `db` import outside `worker/src/persistence/`. | §6.6.2 |
+| T9 | Deny-by-default contract enforcement. Hard fail (never warning) on domain violation, artifact mismatch, step/time limits, success-condition unmet. `ContractEnforcedPage` proxy makes it non-bypassable. | §6.7.1 |
+| T10 | Fingerprint shape is keyed by intent (`last_processed_fingerprints_by_intent`) so multi-intent agents don't collide. | §6.7.2 |
+| T11 | Slack post dedup uses a deterministic `postHash = sha256(runId + channel + filename + messageTextHash)` so trivially-different inputs still dedupe. | §5.5.1 |
+| T12 | Explicit byte ceilings on inline text (1 MB artifact, 2 MB deliverable) with `*_truncated` flags and a single `writeWithLimit` helper. Truncation never silently fails. | §6.7.3 |
+| T13 | All failures aligned to a single `failureReason` enum (`connector_timeout`, `rate_limited`, `auth_error`, `data_incomplete`, `internal_error`, `unknown`) plus a `failureDetail` sub-string. Single `failure()` helper enforces consistency. | §8.4 |
+| T14 | Cross-subaccount credential isolation enforced in the WHERE clause of `getWebLoginConnectionForRun`. Tenant-isolation tests assert all four resolution cases. | §6.6.3 |
+
+All seven are hardening / edge-case containment / future-proofing. None require redesign. Reviewer explicitly green-lit build after this round.
+
+### v2 — first-round reviewer tightenings
+
+| # | Tightening | Section |
+|---|---|---|
+| T1 | Decrypted secrets never enter pg-boss payload. Worker fetches by `connectionId` and decrypts just-in-time. | §6.5, §6.6, §6.6.1 |
+| T2 | `login_test` mode is a deterministic, non-LLM path. Worker handler branches before `executionLoop`. | §6.3.1 |
+| T3 | Per-step Slack idempotency: cache `messageTs` on the run, skip duplicate posts on operator retry. | §5.5.1 |
+| T4 | Persisted content fingerprint on `subaccount_agents` to skip duplicate downloads (pinned, reordered, same hash). | §6.7.2 |
+| T5 | Artifact durability matrix: report markdown stored in `task_deliverables.body_text` so deliverables survive worker cleanup. | §6.7.3 |
+| T6 | Split `canViewContents` from `canManageSkill`. Owner-tier read no longer requires manage permission. | §3.4 |
+| T7 | Explicit `BrowserTaskContractSchema` (allowedDomains, expectedArtifactKind, successCondition, etc.) constructed by the service, not the LLM. | §6.7.1 |
+| Q2 | Paywall 2FA confirmed absent. | §9.4 |
+| Q4 | Slack workspace for dev: throwaway + mocked. | §9.4 |
+| Q7 | `ENCRYPTION_KEY` must be separate from `JWT_SECRET`. Rationale documented. | §2.4 |
 
 ### v1 — original draft (superseded)
 
