@@ -18,7 +18,7 @@
  * connections require an exact subaccountId match.
  */
 
-import { eq, and, isNull, or } from 'drizzle-orm';
+import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
 import { connectionTokenService } from './connectionTokenService.js';
@@ -94,13 +94,19 @@ function sanitize(row: IntegrationConnection) {
 
 export const webLoginConnectionService = {
   /**
-   * List all web_login connections for an org. If `subaccountId` is set, also
-   * filter to that subaccount; otherwise returns org-level only.
+   * List all active web_login connections for an org/subaccount scope.
+   * Subaccount scope returns subaccount-specific connections only (NOT org
+   * fallback — that is the runtime resolution path's responsibility, not
+   * the management API).
+   *
+   * Revoked connections are excluded — the management API should never
+   * surface them to the UI.
    */
   async list(organisationId: string, subaccountId: string | null) {
     const conditions = [
       eq(integrationConnections.organisationId, organisationId),
       eq(integrationConnections.providerType, 'web_login'),
+      ne(integrationConnections.connectionStatus, 'revoked'),
     ];
     if (subaccountId) {
       conditions.push(eq(integrationConnections.subaccountId, subaccountId));
@@ -112,20 +118,31 @@ export const webLoginConnectionService = {
   },
 
   /**
-   * Get one web_login connection by id, scoped to org.
-   * Returns the sanitized shape; the password is never exposed via this path.
+   * Get one web_login connection by id. **Tenant-scoped on both
+   * organisationId AND subaccountId** (per pr-reviewer BLOCKER-2 fix):
+   *  - subaccountId === null  → only org-level connections (subaccount_id IS NULL)
+   *  - subaccountId === 'X'   → only connections with subaccount_id = 'X'
+   *
+   * A user with CONNECTIONS_VIEW on subaccount A cannot fetch a connection
+   * belonging to subaccount B by knowing its UUID. Revoked connections are
+   * also excluded.
    */
-  async getById(id: string, organisationId: string) {
+  async getById(id: string, organisationId: string, subaccountId: string | null) {
+    const conditions = [
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.organisationId, organisationId),
+      eq(integrationConnections.providerType, 'web_login'),
+      ne(integrationConnections.connectionStatus, 'revoked'),
+    ];
+    if (subaccountId === null) {
+      conditions.push(isNull(integrationConnections.subaccountId));
+    } else {
+      conditions.push(eq(integrationConnections.subaccountId, subaccountId));
+    }
     const [row] = await db
       .select()
       .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-          eq(integrationConnections.providerType, 'web_login'),
-        ),
-      )
+      .where(and(...conditions))
       .limit(1);
     return row ? sanitize(row) : null;
   },
@@ -168,11 +185,12 @@ export const webLoginConnectionService = {
 
   /**
    * Update label/displayName/config and optionally rotate the password.
-   * Tenant-isolated by organisationId.
+   * Tenant-isolated on BOTH organisationId AND subaccountId per BLOCKER-2.
    */
   async update(
     id: string,
     organisationId: string,
+    subaccountId: string | null,
     patch: {
       label?: string;
       displayName?: string;
@@ -180,16 +198,21 @@ export const webLoginConnectionService = {
       password?: string;
     },
   ) {
+    const scopeConditions = [
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.organisationId, organisationId),
+      eq(integrationConnections.providerType, 'web_login'),
+    ];
+    if (subaccountId === null) {
+      scopeConditions.push(isNull(integrationConnections.subaccountId));
+    } else {
+      scopeConditions.push(eq(integrationConnections.subaccountId, subaccountId));
+    }
+
     const [existing] = await db
       .select()
       .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-          eq(integrationConnections.providerType, 'web_login'),
-        ),
-      );
+      .where(and(...scopeConditions));
     if (!existing) return null;
 
     const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -209,12 +232,7 @@ export const webLoginConnectionService = {
     const [updated] = await db
       .update(integrationConnections)
       .set(updates)
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-        ),
-      )
+      .where(and(...scopeConditions))
       .returning();
     return updated ? sanitize(updated) : null;
   },
@@ -222,19 +240,27 @@ export const webLoginConnectionService = {
   /**
    * Soft-revoke (matches the existing pattern in integrationConnectionService).
    * Sets connectionStatus to 'revoked' and clears the password.
+   *
+   * Tenant-isolated on BOTH organisationId AND subaccountId per BLOCKER-2.
    */
-  async revoke(id: string, organisationId: string) {
+  async revoke(id: string, organisationId: string, subaccountId: string | null) {
+    const scopeConditions = [
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.organisationId, organisationId),
+      eq(integrationConnections.providerType, 'web_login'),
+    ];
+    if (subaccountId === null) {
+      scopeConditions.push(isNull(integrationConnections.subaccountId));
+    } else {
+      scopeConditions.push(eq(integrationConnections.subaccountId, subaccountId));
+    }
+
     const [existing] = await db
       .select()
       .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-          eq(integrationConnections.providerType, 'web_login'),
-        ),
-      );
+      .where(and(...scopeConditions));
     if (!existing) return false;
+
     await db
       .update(integrationConnections)
       .set({
@@ -242,34 +268,35 @@ export const webLoginConnectionService = {
         secretsRef: null,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-        ),
-      );
+      .where(and(...scopeConditions));
     return true;
   },
 
   /**
    * Update the last-test status fields after a connection-test run completes.
    * Called by the route handler after polling the IEE login_test job result.
+   * Tenant-isolated on BOTH organisationId AND subaccountId per BLOCKER-2.
    */
   async recordTestResult(
     id: string,
     organisationId: string,
+    subaccountId: string | null,
     result: { success: boolean; error?: string },
   ) {
+    const scopeConditions = [
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.organisationId, organisationId),
+      eq(integrationConnections.providerType, 'web_login'),
+    ];
+    if (subaccountId === null) {
+      scopeConditions.push(isNull(integrationConnections.subaccountId));
+    } else {
+      scopeConditions.push(eq(integrationConnections.subaccountId, subaccountId));
+    }
     const [existing] = await db
       .select()
       .from(integrationConnections)
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-          eq(integrationConnections.providerType, 'web_login'),
-        ),
-      );
+      .where(and(...scopeConditions));
     if (!existing) return null;
     const config: WebLoginConfigStored = {
       ...((existing.configJson as WebLoginConfigStored | null) ?? { loginUrl: '', username: '' }),
@@ -285,12 +312,7 @@ export const webLoginConnectionService = {
         connectionStatus: result.success ? 'active' : existing.connectionStatus,
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(integrationConnections.id, id),
-          eq(integrationConnections.organisationId, organisationId),
-        ),
-      )
+      .where(and(...scopeConditions))
       .returning();
     return updated ? sanitize(updated) : null;
   },

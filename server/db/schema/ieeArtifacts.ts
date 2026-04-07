@@ -15,7 +15,11 @@ export const ieeArtifacts = pgTable(
   'iee_artifacts',
   {
     id:             uuid('id').defaultRandom().primaryKey(),
-    ieeRunId:       uuid('iee_run_id').notNull().references(() => ieeRuns.id, { onDelete: 'cascade' }),
+    // Nullable per Code Change B (transcribe_audio): the skill executor may
+    // be invoked from non-IEE agent runs where there is no parent IEE run.
+    // The persisted artifact still carries organisationId for tenant scoping
+    // and metadata.runId for parent-run tracing. Spec v3.4 §4.4.1.
+    ieeRunId:       uuid('iee_run_id').references(() => ieeRuns.id, { onDelete: 'cascade' }),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
 
     kind:           text('kind').notNull().$type<'download' | 'file' | 'log'>(),

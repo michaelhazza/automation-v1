@@ -48,6 +48,12 @@ export const agentRuns = pgTable(
     resolvedSkillSlugs: jsonb('resolved_skill_slugs').$type<string[]>(),
     resolvedLimits: jsonb('resolved_limits'),
 
+    // Mutable run-scoped metadata bucket. Distinct from configSnapshot,
+    // which is immutable and reflects the start-of-run resolved config.
+    // Used for write-during-run state like Slack post dedup hashes,
+    // fingerprint write tracking, etc. Spec v3.4 §5.5.1 / T11.
+    runMetadata: jsonb('run_metadata').notNull().default({}).$type<Record<string, unknown>>(),
+
     // Status tracking
     status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded'>(),
 
