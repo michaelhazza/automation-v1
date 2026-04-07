@@ -17,9 +17,10 @@
  * failure must not poison future runs.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agentRuns } from '../db/schema/index.js';
+import { failure, FailureError } from '../../shared/iee/failure.js';
 import {
   assertReportingAgentRunComplete,
   type ReportingAgentRunState,
@@ -55,6 +56,33 @@ export interface ReportingAgentHookInput {
 }
 
 /**
+ * Atomic JSONB merge into agent_runs.run_metadata.reportingAgent.
+ *
+ * Per pr-reviewer B3: a SELECT-then-UPDATE pattern can lose writes if two
+ * skill calls land concurrently (or if the end-of-run hook reads while a
+ * skill is still in flight). Postgres `jsonb_set` + `||` operate atomically
+ * inside a single UPDATE statement and eliminate the read step.
+ *
+ * The patch is shallow-merged into runMetadata.reportingAgent.
+ */
+export async function mergeReportingAgentRunMeta(
+  runId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const patchJson = JSON.stringify(patch);
+  await db.execute(sql`
+    UPDATE agent_runs
+       SET run_metadata = jsonb_set(
+             COALESCE(run_metadata, '{}'::jsonb),
+             '{reportingAgent}',
+             COALESCE(run_metadata->'reportingAgent', '{}'::jsonb) || ${patchJson}::jsonb,
+             true
+           )
+     WHERE id = ${runId}
+  `);
+}
+
+/**
  * Run the end-of-run invariant + fingerprint persist for a successful
  * Reporting Agent run. No-op if the run is not a Reporting Agent run.
  *
@@ -84,6 +112,22 @@ export async function finalizeReportingAgentRun(
   };
 
   assertReportingAgentRunComplete(state);
+
+  // Per pr-reviewer B4: if a fingerprint is present but the run is org-level
+  // (no subaccount agent to anchor it on), refuse to silently skip the
+  // persist. Surface as an internal_error so the operator notices.
+  if (
+    terminationResult === 'success' &&
+    ra.fingerprint &&
+    !input.subaccountAgentId
+  ) {
+    throw new FailureError(
+      failure('internal_error', 'fingerprint_persist_skipped_no_subaccount_agent', {
+        runId: input.runId,
+        organisationId: input.organisationId,
+      }),
+    );
+  }
 
   // Persist fingerprint after invariant passes (happy path only).
   if (

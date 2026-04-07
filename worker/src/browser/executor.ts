@@ -213,12 +213,24 @@ export async function buildBrowserExecutor(
           const suggestedName = download.suggestedFilename() || `download-${Date.now()}`;
           const savePath = path.join(downloadsDir, suggestedName);
 
-          // T24 — download stall guard
+          // T24 — download wall-clock guard.
+          //
+          // NOTE: Playwright's `download.saveAs()` does not expose a chunk
+          // stream, so we cannot feed `guard.record()` and the stall +
+          // throughput checks would falsely trip on any download longer than
+          // `stallMs`. We disable those by setting stallMs / minBytesPerSec
+          // to effectively no-op values; only the wall-clock check is
+          // enforced from this call site. Per pr-reviewer B2.
           const wallClockMs = Math.min(
             input.browserTaskContract?.timeoutMs ?? 600_000,
             600_000,
           );
-          const guard = createDownloadStallGuard({ wallClockMs });
+          const guard = createDownloadStallGuard({
+            wallClockMs,
+            stallMs: wallClockMs + 1, // disable stall trip
+            minBytesPerSec: 0,        // disable throughput trip
+            warmupMs: wallClockMs + 1,
+          });
           try {
             await Promise.race([download.saveAs(savePath), guard.abortPromise]);
             guard.finish();
@@ -333,12 +345,18 @@ function buildLoginTestExecutor(args: {
       } as Observation;
     },
     async execute(): Promise<ActionResult> {
+      // Per pr-reviewer S1 — this executor is intentionally only consumed by
+      // browserTask.ts's login_test short-circuit (which calls dispose()
+      // immediately after build). It is NOT loop-safe: handing it to
+      // runExecutionLoop would still trigger an LLM call before execute()
+      // fires, violating spec T2. Fail loudly if anything ever passes us
+      // through the loop instead.
       emitted = true;
-      return {
-        output: { mode: 'login_test', screenshotPath: args.screenshotPath },
-        summary: 'login_test completed — login succeeded; LLM loop skipped',
-        artifacts: [args.screenshotPath],
-      };
+      throw new FailureError(
+        failure('internal_error', 'login_test_executor_not_for_loop', {
+          screenshotPath: args.screenshotPath,
+        }),
+      );
     },
     async dispose(): Promise<void> {
       try { await args.context.close(); } catch { /* swallow */ }

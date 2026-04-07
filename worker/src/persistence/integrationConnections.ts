@@ -38,6 +38,7 @@
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { db } from '../db.js';
 import { integrationConnections } from '../../../server/db/schema/integrationConnections.js';
+import { auditEvents } from '../../../server/db/schema/auditEvents.js';
 import { connectionTokenService } from '../../../server/services/connectionTokenService.js';
 import { logger } from '../logger.js';
 
@@ -137,11 +138,32 @@ export async function getWebLoginConnectionForRun(
   // Decrypt at the boundary so callers never see ciphertext.
   const password = connectionTokenService.decryptToken(row.secretsRef) as Plaintext<string>;
 
-  // Audit log entry for the secret read. Worker has DB access so the audit
-  // event is written by the caller via auditEvents (not via the server-side
-  // auditService which depends on the request context). The minimum we
-  // emit here is a structured log line carrying { runId, connectionId,
-  // organisationId, subaccountId } so an operator can trace it.
+  // Audit row for the secret read. Spec §2.5 / pr-reviewer B1 — every read
+  // of a credential's secretsRef writes a durable audit_events row.
+  // Best-effort: a write failure here must NOT prevent the run from
+  // proceeding (otherwise a transient DB hiccup blocks all paywall logins),
+  // but it IS logged loudly so an operator notices.
+  try {
+    await db.insert(auditEvents).values({
+      organisationId: row.organisationId,
+      actorType: 'system',
+      action: 'web_login_connection.read',
+      entityType: 'integration_connection',
+      entityId: row.id,
+      correlationId: runContext.runId,
+      metadata: {
+        purpose: 'iee-browser-task',
+        runId: runContext.runId,
+        subaccountId: row.subaccountId,
+      },
+    });
+  } catch (err) {
+    logger.error('worker.web_login_connection.audit_write_failed', {
+      runId: runContext.runId,
+      connectionId: row.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   logger.info('worker.web_login_connection.fetched', {
     runId: runContext.runId,
     connectionId: row.id,

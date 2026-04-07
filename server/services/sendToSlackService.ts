@@ -31,6 +31,7 @@ import {
 import { connectionTokenService } from './connectionTokenService.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import { writeWithLimit, INLINE_TEXT_LIMITS } from '../lib/inlineTextWriter.js';
+import { mergeReportingAgentRunMeta } from '../lib/reportingAgentRunHook.js';
 import { failure, FailureError } from '../../shared/iee/failure.js';
 import { logger } from '../lib/logger.js';
 
@@ -311,30 +312,6 @@ async function recordPriorPost(runId: string, entry: PostedSlackEntry): Promise<
   const slackPosts = ((meta.slackPosts as PostedSlackEntry[] | undefined) ?? []).slice();
   slackPosts.push(entry);
   meta.slackPosts = slackPosts;
-  await db
-    .update(agentRuns)
-    .set({ runMetadata: meta })
-    .where(eq(agentRuns.id, runId));
-}
-
-/**
- * Merge a partial Reporting Agent state object into agent_runs.run_metadata.
- * Used by skills to mark the steps they completed so the end-of-run
- * invariant (T25) can confirm a successful workflow. Spec v3.4 §8.4.2.
- */
-async function mergeReportingAgentRunMeta(
-  runId: string,
-  patch: Record<string, unknown>,
-): Promise<void> {
-  const [row] = await db
-    .select({ runMetadata: agentRuns.runMetadata })
-    .from(agentRuns)
-    .where(eq(agentRuns.id, runId))
-    .limit(1);
-  if (!row) return;
-  const meta = ((row.runMetadata as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
-  const ra = ((meta.reportingAgent as Record<string, unknown> | undefined) ?? {});
-  meta.reportingAgent = { ...ra, ...patch };
   await db
     .update(agentRuns)
     .set({ runMetadata: meta })
