@@ -123,6 +123,30 @@ async function loadSubaccountPermissions(userId: string, subaccountId: string): 
   return new Set(rows.map((r) => r.permissionKey));
 }
 
+// ─── hasOrgPermission (programmatic check) ────────────────────────────────────
+
+/**
+ * Programmatic permission check usable inside async handlers (where the
+ * `requireOrgPermission` middleware can't be applied — e.g. when the
+ * decision affects the response shape rather than the request authorisation).
+ *
+ * Mirrors `requireOrgPermission` semantics:
+ *  - system_admin and org_admin always return true
+ *  - everyone else: returns true iff the permission key is in their org
+ *    permission set
+ *
+ * Uses the same per-request cache as `requireOrgPermission`.
+ */
+export async function hasOrgPermission(req: Request, permissionKey: string): Promise<boolean> {
+  if (!req.user) return false;
+  if (req.user.role === 'system_admin' || req.user.role === 'org_admin') return true;
+  const organisationId = req.orgId ?? req.user.organisationId;
+  if (!req._orgPermissionCache) {
+    req._orgPermissionCache = await loadOrgPermissions(req.user.id, organisationId);
+  }
+  return req._orgPermissionCache.has(permissionKey);
+}
+
 // ─── requireOrgPermission ──────────────────────────────────────────────────────
 
 /**
