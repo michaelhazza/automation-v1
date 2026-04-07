@@ -130,46 +130,40 @@ export async function finalizeReportingAgentRun(
   }
 
   // Persist fingerprint after invariant passes (happy path only).
+  // Per pr-reviewer round 2 #1: use atomic jsonb_set so concurrent runs
+  // finishing at the same time cannot lose each other's writes. The
+  // previous SELECT-then-UPDATE pattern was a silent data-loss race that
+  // would lead to duplicate processing on the next run.
   if (
     terminationResult === 'success' &&
     ra.fingerprint &&
     input.subaccountAgentId
   ) {
     const fp = ra.fingerprint;
-    const [row] = await db
-      .select({
-        existing: subaccountAgents.lastProcessedFingerprintsByIntent,
-      })
-      .from(subaccountAgents)
-      .where(eq(subaccountAgents.id, input.subaccountAgentId))
-      .limit(1);
-    const existing = (row?.existing ?? {}) as Record<string, unknown>;
-    const nextMap = {
-      ...existing,
-      [fp.intent]: {
-        sourceUrl: fp.sourceUrl,
-        pageTitle: fp.pageTitle,
-        publishedAt: fp.publishedAt,
-        contentHash: fp.contentHash,
-        processedAt: new Date().toISOString(),
-        agentRunId: input.runId,
-      },
-    };
-    await db
-      .update(subaccountAgents)
-      .set({
-        lastProcessedFingerprintsByIntent: nextMap as never,
-        updatedAt: new Date(),
-      })
-      .where(eq(subaccountAgents.id, input.subaccountAgentId));
+    const entryJson = JSON.stringify({
+      sourceUrl: fp.sourceUrl,
+      pageTitle: fp.pageTitle,
+      publishedAt: fp.publishedAt,
+      contentHash: fp.contentHash,
+      processedAt: new Date().toISOString(),
+      agentRunId: input.runId,
+    });
+    await db.execute(sql`
+      UPDATE subaccount_agents
+         SET last_processed_fingerprints_by_intent = jsonb_set(
+               COALESCE(last_processed_fingerprints_by_intent, '{}'::jsonb),
+               ARRAY[${fp.intent}],
+               ${entryJson}::jsonb,
+               true
+             ),
+             updated_at = NOW()
+       WHERE id = ${input.subaccountAgentId}
+    `);
 
-    // Mirror onto agent_runs.runMetadata so the run row carries proof of
-    // the persist for forensic queries.
-    await db
-      .update(agentRuns)
-      .set({
-        runMetadata: { ...(input.runMetadata ?? {}), fingerprintWrittenAt: new Date().toISOString() } as never,
-      })
-      .where(eq(agentRuns.id, input.runId));
+    // Mirror the persist onto agent_runs.run_metadata via the same atomic
+    // helper so a concurrent skill write does not clobber it.
+    await mergeReportingAgentRunMeta(input.runId, {
+      fingerprintWrittenAt: new Date().toISOString(),
+    });
   }
 }

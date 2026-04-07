@@ -13,7 +13,7 @@ import { computeRuntimeCostCents } from '../runtime/cost.js';
 export interface HandleJobInput<T> {
   job: PgBoss.Job<T>;
   workerInstanceId: string;
-  buildExecutor: (run: { id: string; organisationId: string; subaccountId: string | null }, payload: IEEJobPayload) => Promise<StepExecutor>;
+  buildExecutor: (run: { id: string; organisationId: string; subaccountId: string | null; agentId: string; agentRunId: string | null }, payload: IEEJobPayload) => Promise<StepExecutor>;
 }
 
 export async function handleIEEJob<T>(input: HandleJobInput<T>): Promise<void> {
@@ -52,7 +52,7 @@ export async function handleIEEJob<T>(input: HandleJobInput<T>): Promise<void> {
   let executor: StepExecutor | null = null;
   try {
     executor = await input.buildExecutor(
-      { id: run.id, organisationId: run.organisationId, subaccountId: run.subaccountId },
+      { id: run.id, organisationId: run.organisationId, subaccountId: run.subaccountId, agentId: run.agentId, agentRunId: run.agentRunId },
       payload,
     );
 

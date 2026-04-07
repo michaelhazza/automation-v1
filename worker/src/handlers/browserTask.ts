@@ -5,7 +5,7 @@
 import type PgBoss from 'pg-boss';
 import { env } from '../config/env.js';
 import { handleIEEJob } from './runHandler.js';
-import { buildBrowserExecutor } from '../browser/executor.js';
+import { buildBrowserExecutor, LoginTestComplete } from '../browser/executor.js';
 import { IEEJobPayload } from '../../../shared/iee/jobPayload.js';
 import { loadRun, markRunning, finalizeRun } from '../persistence/runs.js';
 import { logger } from '../logger.js';
@@ -34,7 +34,11 @@ export async function registerBrowserHandler(boss: PgBoss, workerInstanceId: str
         if (!claimed) return;
         const startMs = Date.now();
         try {
-          const executor = await buildBrowserExecutor({
+          // buildBrowserExecutor in login_test mode performs the login and
+          // throws LoginTestComplete on success — there is no executor
+          // object to keep around, by design (per pr-reviewer S1 the
+          // login_test trap was removed entirely).
+          await buildBrowserExecutor({
             ieeRunId: run.id,
             organisationId: run.organisationId,
             subaccountId: run.subaccountId,
@@ -44,35 +48,42 @@ export async function registerBrowserHandler(boss: PgBoss, workerInstanceId: str
             browserTaskContract: task.browserTaskContract,
             mode: 'login_test',
             correlationId: payload.correlationId,
+            agentId: run.agentId,
+            agentRunId: run.agentRunId,
           });
-          await executor.dispose();
-          await finalizeRun({
-            ieeRunId: run.id,
-            status: 'completed',
-            failureReason: null,
-            resultSummary: {
-              success: true,
-              output: { mode: 'login_test' },
+          // Should not reach here — login_test always throws LoginTestComplete.
+          throw new Error('login_test_unexpected_executor_returned');
+        } catch (loginTestErr) {
+          if (loginTestErr instanceof LoginTestComplete) {
+            await finalizeRun({
+              ieeRunId: run.id,
+              status: 'completed',
+              failureReason: null,
+              resultSummary: {
+                success: true,
+                output: { mode: 'login_test', screenshotPath: loginTestErr.screenshotPath },
+                stepCount: 0,
+                durationMs: Date.now() - startMs,
+              },
               stepCount: 0,
-              durationMs: Date.now() - startMs,
-            },
-            stepCount: 0,
-            llmCostCents: 0,
-            llmCallCount: 0,
-            runtimeWallMs: Date.now() - startMs,
-            runtimeCpuMs: 0,
-            runtimePeakRssBytes: 0,
-            runtimeCostCents: 0,
-          });
-          logger.info('iee.login_test.complete', { ieeRunId: run.id });
-        } catch (err) {
+              llmCostCents: 0,
+              llmCallCount: 0,
+              runtimeWallMs: Date.now() - startMs,
+              runtimeCpuMs: 0,
+              runtimePeakRssBytes: 0,
+              runtimeCostCents: 0,
+            });
+            logger.info('iee.login_test.complete', { ieeRunId: run.id });
+            return;
+          }
+          // Login failed (or any other unexpected error). Finalize as failed.
           await finalizeRun({
             ieeRunId: run.id,
             status: 'failed',
             failureReason: 'auth_failure',
             resultSummary: {
               success: false,
-              output: err instanceof Error ? err.message.slice(0, 500) : 'login_test failed',
+              output: loginTestErr instanceof Error ? loginTestErr.message.slice(0, 500) : 'login_test failed',
               stepCount: 0,
               durationMs: Date.now() - startMs,
             },
@@ -86,7 +97,7 @@ export async function registerBrowserHandler(boss: PgBoss, workerInstanceId: str
           });
           logger.warn('iee.login_test.failed', {
             ieeRunId: run.id,
-            error: err instanceof Error ? err.message : String(err),
+            error: loginTestErr instanceof Error ? loginTestErr.message : String(loginTestErr),
           });
         }
         return;
@@ -110,6 +121,8 @@ export async function registerBrowserHandler(boss: PgBoss, workerInstanceId: str
             browserTaskContract: payload.task.browserTaskContract,
             mode: payload.task.mode,
             correlationId: payload.correlationId,
+            agentId: run.agentId,
+            agentRunId: run.agentRunId,
           });
         },
       });
