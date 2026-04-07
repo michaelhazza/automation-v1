@@ -62,6 +62,11 @@ export const ORG_PERMISSIONS = {
   MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'org.billing.iee.view',
+  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
+  PLAYBOOK_TEMPLATES_READ: 'org.playbook_templates.read',
+  PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
+  PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
+  PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -99,6 +104,12 @@ export const SUBACCOUNT_PERMISSIONS = {
   REVIEW_APPROVE: 'subaccount.review.approve',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'subaccount.billing.iee.view',
+  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
+  PLAYBOOK_RUNS_READ: 'subaccount.playbook_runs.read',
+  PLAYBOOK_RUNS_START: 'subaccount.playbook_runs.start',
+  PLAYBOOK_RUNS_CANCEL: 'subaccount.playbook_runs.cancel',
+  PLAYBOOK_RUNS_EDIT_OUTPUT: 'subaccount.playbook_runs.edit_output',
+  PLAYBOOK_RUNS_APPROVE: 'subaccount.playbook_runs.approve',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
