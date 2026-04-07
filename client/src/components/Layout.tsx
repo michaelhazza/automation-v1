@@ -609,6 +609,9 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.processes.view') && (
                 <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
               )}
+              {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.playbook_templates.read')) && (
+                <NavItem to="/playbooks" icon={<Icons.automations />} label="Playbooks" />
+              )}
               {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
               )}

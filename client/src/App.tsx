@@ -50,6 +50,8 @@ const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
+const PlaybooksLibraryPage = lazy(() => import('./pages/PlaybooksLibraryPage'));
+const PlaybookRunDetailPage = lazy(() => import('./pages/PlaybookRunDetailPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
@@ -158,6 +160,8 @@ export default function App() {
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
           <Route path="/inbox" element={<InboxPage user={user!} />} />
+          <Route path="/playbooks" element={<PlaybooksLibraryPage user={user!} />} />
+          <Route path="/playbook-runs/:runId" element={<PlaybookRunDetailPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
