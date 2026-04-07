@@ -1472,9 +1472,241 @@ The existing billing notification channels (email, in-app, webhook — whichever
 ### 11.6 v1 deferral list (cost-related)
 
 - Per-step cost breakdown in the UI (run-level only)
-- Per-LLM-call drill-down on the run cost panel (audit-only via `llm_requests` for now)
 - Real-time websocket push of cost as a run executes (rely on poll/refresh for v1)
 - Cost forecasting and anomaly detection
+
+### 11.7 Per-task cost drill-down (run detail)
+
+> Added in revision 4 in response to follow-up: confirm that LLM costs and compute costs are visible *separately* on a single task, and that LLM costs incurred on the main-app side are distinguishable from LLM costs incurred inside the worker.
+
+#### 11.7.1 The two LLM call sites
+
+Both the main app and the worker call `routeCall()`. Without a discriminator they would land in `llmRequests` indistinguishably. To make the run-detail breakdown meaningful, the router context gains a `callSite` field:
+
+```ts
+// Extension to LLMCallContext (server/services/llmRouter.ts)
+type CallSite = 'app' | 'worker';
+
+interface LLMCallContext {
+  // ...existing fields...
+  callSite: CallSite;            // NEW — required
+  executionRunId?: string;       // NEW — set when callSite = 'worker', or
+                                 //       when an app-side call is part of an IEE run
+}
+```
+
+Implementation rules:
+
+1. Existing app-side callers default to `callSite: 'app'` via a wrapper — no caller code changes beyond a single helper update.
+2. The worker's `routerClient.ts` always sets `callSite: 'worker'` and `executionRunId`.
+3. The `llmRequests` table gains two columns: `call_site text not null default 'app'` and `execution_run_id uuid null` (indexed). Migration is part of the IEE migration set.
+4. The `llmRequests.execution_run_id` index is partial (`WHERE execution_run_id IS NOT NULL`) to keep it cheap.
+
+This means **every LLM call associated with an IEE run is queryable by run id, with the call site preserved.** An agent that does some preparatory LLM work in the app, then enqueues an IEE task, will show **both** rows of LLM cost on the same run-detail page, clearly separated.
+
+#### 11.7.2 Run-detail Cost panel — exact contents
+
+The Cost panel on the existing execution/agent-run detail page renders:
+
+```
+┌─ Cost ─────────────────────────────────────────────────────┐
+│                                                            │
+│  Total                                  $0.0421            │
+│  ├─ LLM (app side)         3 calls      $0.0098            │
+│  ├─ LLM (worker side)     12 calls      $0.0287            │
+│  └─ Compute (worker)      48s wall      $0.0036            │
+│                          12.4 CPU-s                        │
+│                          312 MB peak                       │
+│                                                            │
+│  Steps: 12   Duration: 48s                                 │
+│                                                            │
+│  [ View LLM call breakdown ▾ ]                             │
+└────────────────────────────────────────────────────────────┘
+```
+
+Data sources:
+- **LLM (app side)** — `SUM(cost_usd), COUNT(*) FROM llm_requests WHERE execution_run_id = $1 AND call_site = 'app'`
+- **LLM (worker side)** — `SUM(cost_usd), COUNT(*) FROM llm_requests WHERE execution_run_id = $1 AND call_site = 'worker'`
+- **Compute (worker)** — `runtimeCostUsd`, `runtimeWallMs`, `runtimeCpuMs`, `runtimePeakRssBytes` from `executionRuns` (denormalised at completion)
+- **Total** — `totalCostUsd` from `executionRuns` (sum of all three)
+
+> Important: `executionRuns.llmCostUsd` is the **sum of both call sites** for that run, so the displayed total reconciles. The split is computed by joining `llm_requests` on demand for the panel; the denormalised columns are still the source of truth for rollup tables.
+
+Expanding **View LLM call breakdown** reveals a per-call list (timestamp, call site, model, prompt tokens, completion tokens, cost). This reuses the existing LLM-call detail component if one exists; otherwise it's a small new table component. Audit step during implementation.
+
+API endpoint:
+
+```
+GET /api/executions/:runId/cost
+→ {
+    total: { usd, ... },
+    llm: {
+      app:    { usd, callCount },
+      worker: { usd, callCount },
+    },
+    compute: {
+      usd, wallMs, cpuMs, peakRssBytes,
+    },
+    steps: number,
+    durationMs: number,
+  }
+
+GET /api/executions/:runId/cost/llm-calls?limit=50&offset=0
+→ paginated llm_requests rows for this run
+```
+
+Permissions: anyone who can see the run can see its cost panel. This reuses the existing run-view permission check — no new permission key for the panel itself.
+
+#### 11.7.3 What this guarantees
+
+The user's question — *"Can we see LLM costs on the server side, plus compute costs and LLM costs on the worker side, separately?"* — answer: **yes, on the run-detail page, in a single panel, with three distinct lines (app LLM / worker LLM / worker compute) and a reconciled total.** Confirmed.
+
+### 11.8 Aggregated Usage Explorer page
+
+> Added in revision 4 in response to follow-up: a single dedicated usage/cost page reused across system, organisation, and subaccount scopes, with proper filters, search, sort, and pagination.
+
+#### 11.8.1 Single page, three scopes
+
+One React route, mounted at three different URLs:
+
+| Scope | Route | Required permission |
+|---|---|---|
+| System | `/admin/usage` | `billing.iee.view.system` |
+| Organisation | `/orgs/:orgId/usage` | `billing.iee.view.org` (org-scoped) |
+| Subaccount | `/subaccounts/:subaccountId/usage` | `billing.iee.view.subaccount` |
+
+The page is a single component `UsageExplorer.tsx` parameterised by scope. Layout, filters, sort, search, export — all identical across scopes. Only the data the user can see changes (enforced server-side).
+
+This is *additional* to the line-item additions on existing billing dashboards (§11.5.5). Those remain — the dashboard gives an at-a-glance view; the Usage Explorer is the deep-dive surface.
+
+#### 11.8.2 Page layout
+
+```
+┌─ Usage Explorer ───────────────────────────────────────────┐
+│  Scope: [Org: Acme ▾]                          [Export ⬇] │
+│                                                            │
+│  ┌─ Filters ─────────────────────────────────────────────┐ │
+│  │ Date range:  [Last 30 days ▾]   From [    ] To [    ]│ │
+│  │ Source:      [☑ LLM (app)] [☑ LLM (worker)] [☑ Comp]│ │
+│  │ Subaccount:  [All ▾]    Agent: [All ▾]               │ │
+│  │ Status:      [All ▾]    Type: [browser/dev/api ▾]    │ │
+│  │ Min cost:    [    ]     Search: [goal contains... ]  │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+│  Summary cards:                                            │
+│   Total: $X     LLM-app: $A     LLM-worker: $B            │
+│   Compute: $C   Runs: N         Avg/run: $X/N             │
+│                                                            │
+│  ┌─ Cost over time chart (stacked: app/worker/compute) ──┐│
+│  └───────────────────────────────────────────────────────┘│
+│                                                            │
+│  ┌─ Runs table ─────────────────────────────────────────┐ │
+│  │ Started ↓ │ Agent │ Type │ Status │ Steps │ LLM-app │ │
+│  │           │       │      │        │       │ LLM-wkr │ │
+│  │           │       │      │        │       │ Compute │ │
+│  │           │       │      │        │       │ Total ↓ │ │
+│  │  [pageable, sortable, click row → run detail]        │ │
+│  └──────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────┘
+```
+
+#### 11.8.3 Filters (all combinable)
+
+| Filter | Type | Notes |
+|---|---|---|
+| Date range | preset (today / 7d / 30d / 90d / MTD / custom) | Server enforces a 1-year max window |
+| Cost source | multi-select: `llm_app`, `llm_worker`, `compute` | At least one must be selected |
+| Subaccount | dropdown | Visible only at system + org scopes; auto-bound at subaccount scope |
+| Agent | dropdown (multi-select) | Filtered to agents in the current scope |
+| Status | multi-select: `pending`, `running`, `completed`, `failed` | |
+| Execution type | multi-select: `browser`, `dev`, `api` | |
+| Failure reason | multi-select | Visible only when `failed` status is selected |
+| Min cost | number input (USD) | Hides runs below threshold |
+| Goal search | text input | Server-side `ILIKE` on `executionRuns.goal`, debounced 300ms client-side |
+| Run id | text input | Exact match jump |
+
+All filters are URL query parameters so views are linkable and shareable.
+
+#### 11.8.4 Sorting + pagination
+
+- Sort columns: `startedAt` (default DESC), `totalCostUsd`, `llmCostUsd`, `runtimeCostUsd`, `stepCount`, `durationMs`. Click column header to toggle asc/desc.
+- Pagination: cursor-based (the existing pattern in `server/routes/`). Default page size 50, max 200. Page size selectable by the user.
+- "Load more" infinite scroll OR classic pager — match the existing pattern in the rest of the admin UI (audit step). Don't invent a new pagination style.
+
+#### 11.8.5 Export
+
+CSV and JSON export buttons. Export respects the active filters. Server enforces a 50,000-row export ceiling (export of larger sets requires the existing async-export job pattern, if one exists — audit). Filename: `iee-usage-{scope}-{from}-{to}.csv`.
+
+#### 11.8.6 API endpoint
+
+A single endpoint backs the page:
+
+```
+GET /api/usage/iee?
+   scope=system|organisation|subaccount
+   &organisationId=<uuid>          (required for organisation/subaccount)
+   &subaccountId=<uuid>            (required for subaccount)
+   &from=<iso>&to=<iso>
+   &sources=llm_app,llm_worker,compute
+   &agentIds=<uuid>,<uuid>
+   &subaccountIds=<uuid>,<uuid>    (system/org scope only)
+   &statuses=completed,failed
+   &types=browser,dev
+   &failureReasons=timeout,...
+   &minCostUsd=0.01
+   &search=<text>
+   &sort=startedAt|totalCostUsd|...
+   &order=asc|desc
+   &cursor=<opaque>
+   &limit=50
+
+→ {
+    summary: {
+       total: { usd, runCount },
+       llmApp:    { usd, callCount },
+       llmWorker: { usd, callCount },
+       compute:   { usd, cpuMs, wallMs },
+    },
+    series: [                           // for the chart
+       { day: '2026-04-01', llmApp, llmWorker, compute }, ...
+    ],
+    rows: [
+       { id, startedAt, agentId, agentName, type, status,
+         stepCount, durationMs, llmAppUsd, llmWorkerUsd,
+         computeUsd, totalUsd, failureReason }, ...
+    ],
+    nextCursor: <opaque|null>,
+  }
+```
+
+The endpoint is permission-gated by scope:
+- System scope → `billing.iee.view.system`
+- Organisation scope → `billing.iee.view.org` AND `organisationId` matches caller's org (system admin bypasses)
+- Subaccount scope → `billing.iee.view.subaccount` AND `resolveSubaccount(subaccountId, orgId)` succeeds
+
+The service method behind it is the existing `ieeUsageService.getIEECost(...)` extended with filter/sort/pagination params, OR a new `ieeUsageService.queryUsage(...)` if the existing signature gets too wide. Implementation choice during build.
+
+#### 11.8.7 Performance
+
+- Summary card numbers come from `usage_rollups` when the date range aligns with day boundaries; otherwise from a live aggregate over `execution_runs`.
+- The runs table query is bounded by an index on `(organisation_id, started_at DESC)` already required by §2.1.1.
+- Server-side cap: any single query touching > 100,000 `execution_runs` rows returns a 400 with "narrow your filters" — prevents accidental denial of service from a date range covering years.
+- The chart series is downsampled server-side to ≤ 90 buckets regardless of date range (day → week → month bucketing automatic).
+
+#### 11.8.8 What this guarantees
+
+The user's question — *"Aggregated billing page viewable at subaccount/org/system level, with filters, ordering, search — is that included?"* — answer: **yes, as a single Usage Explorer page mounted at three URLs with scope-scoped permissions, full filter/search/sort/export, and a unified API endpoint.** Confirmed.
+
+### 11.9 Updated audit checklist (revision 4)
+
+In addition to §11.5.1 audit items, before implementation the builder must also confirm:
+
+- [ ] Whether `llmRequests` already has a `call_site` or equivalent column. If yes, reuse. If no, add via the IEE migration.
+- [ ] Whether `llmRequests` already has an `executionRunId` / `runId` correlation column. If yes, confirm shape. If no, add.
+- [ ] Existing pagination pattern in admin tables (cursor vs. offset). Match it in the Usage Explorer.
+- [ ] Existing export pattern (sync download vs. async job). Match it.
+- [ ] Existing chart/series component(s). Reuse, don't reinvent.
+- [ ] Existing filter UI primitives (date pickers, multi-selects). Reuse.
 
 ---
 
@@ -1618,6 +1850,7 @@ A short list, treat as binding:
 | 1 | 2026-04-07 | Initial draft from dev brief |
 | 2 | 2026-04-07 | Added Part 11 (cost attribution — LLM + runtime) and Part 12 (risk tightening from review feedback). Added `workerInstanceId` / `lastHeartbeatAt` / cost columns to `executionRuns`. Added `'budget_exceeded'` to FailureReason. Added `iee-cleanup-orphans` and `iee-cost-rollup-daily` scheduled jobs. |
 | 3 | 2026-04-07 | Replaced Part 11.5 with full integration into the existing usage/billing system: shared `source` enum on rollup table, `ieeUsageService` with system/org/subaccount scoping, additive API endpoints, IEE as a line item on existing system/org/subaccount billing UIs (not new pages), three-level budget enforcement, reuse of existing notification channels and invoicing path. |
+| 4 | 2026-04-07 | Added §11.7 (per-task drill-down with three separate cost lines: app LLM, worker LLM, worker compute — backed by new `call_site` and `execution_run_id` columns on `llmRequests`) and §11.8 (Usage Explorer page — single React component mounted at three scope URLs with full filters, search, sort, pagination, export, and a unified API endpoint). |
 
 
 
