@@ -216,12 +216,32 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 29 built
 | Workspace | `read_workspace`, `write_workspace`, `read_codebase` |
 | Task management | `create_task`, `move_task`, `update_task`, `reassign_task`, `add_deliverable` |
 | Testing | `run_tests`, `run_playwright_test`, `write_tests` |
-| Code | `review_code`, `write_patch`, `search_codebase` |
-| Integration | `web_search`, `fetch_url`, `send_email`, `send_to_slack`, `transcribe_audio` |
+| Code | `review_code`, `write_patch`, `search_codebase`, `create_pr` |
+| Integration | `web_search`, `fetch_url`, `fetch_paywalled_content`, `send_email`, `send_to_slack`, `transcribe_audio` |
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
+| Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux` |
 
-`send_to_slack` and `transcribe_audio` were added with the Reporting Agent feature (migration 0073). Both go through `withBackoff` for retries and the `runCostBreaker` for cost ceilings.
+`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
+
+### Skill visibility cascade (migration 0074)
+
+Skills now use a three-state visibility cascade `system → organisation → subaccount`. At every level the owner sets `visibility`:
+
+| Value | Effect on lower tiers |
+|-------|----------------------|
+| `none` | Skill is invisible — filtered from lists entirely |
+| `basic` | Name + one-line description visible; body fields stripped |
+| `full` | Everything visible (instructions, methodology, full definition) |
+
+Helpers in `server/lib/skillVisibility.ts`:
+
+- `isVisibleToViewer()` — should this skill appear in the viewer's list?
+- `canViewContents()` — may the viewer read body fields?
+- `canManageSkill()` — separate permission check; visibility never grants edit rights.
+
+Owner-tier viewers always see `full` regardless of the visibility value. Visibility only restricts; it never expands.
 
 ### Skill executor & processor hooks
 
@@ -342,12 +362,13 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ## Migrations
 
-73 migrations (0001–0073). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
+74 migrations (0001–0074). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
-- `0074` — playbooks: templates, versions, runs, step runs (Playbooks feature — planned)
+- `0075` — playbooks: templates, versions, runs, step runs (Playbooks feature — planned)
+- `0074` — `skills.visibility` three-state cascade (`none` / `basic` / `full`) replacing the boolean `contentsVisible`
 - `0073` — Reporting Agent paywall workflow (web login connections, IEE artifacts/runs/steps extensions, agent run extensions)
-- `0072` — `skills.contentsVisible` flag (controls whether skill output bodies are surfaced to downstream consumers)
+- `0072` — original `skills.contentsVisible` flag (superseded by 0074 three-state cascade)
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
 - `0039` — GitHub App schema
@@ -407,6 +428,10 @@ Single canonicalisation path for URLs across the system (deduplication, comparis
 | `server/lib/inlineTextWriter.ts` | Append-only text artefacts inside runs |
 | `server/lib/reportingAgentInvariant.ts` | End-of-run invariant checks (T25 pattern — assert run reached a terminal state with a structured outcome) |
 | `server/lib/reportingAgentRunHook.ts` | Reporting Agent post-run hook |
+| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + browser worker) |
+| `worker/src/browser/captureStreamingVideo.ts` | Snoop-and-refetch video downloader for the `capture_video` mode of `browserTask` (HLS / DASH support) |
+| `scripts/migrate.ts` | Custom forward-only SQL migration runner — replaces `drizzle-kit migrate` for deploys |
+| `scripts/seed-42macro-reporting-agent.ts` | Reference seeder pattern for system-managed agents + skill bundles |
 
 ---
 
