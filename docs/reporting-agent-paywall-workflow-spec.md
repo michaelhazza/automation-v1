@@ -1,7 +1,7 @@
 # Reporting Agent — Paywall → Video → Transcript → Slack Workflow
 ## Detailed Development Specification
 
-**Status:** Draft v3 — incorporates second-round reviewer tightenings T8–T14 (see §10 Change Log)
+**Status:** Draft v3.1 — adds pre-implementation checklist (§11) and small implementation-trap notes
 **Branch:** `claude/agent-paywall-video-workflow-OQTMA`
 **Related docs:**
 - `docs/iee-development-spec.md` — IEE worker, browser/dev handlers, execution_runs schema
@@ -472,7 +472,7 @@ Mitigation:
    ```
    postHash = sha256(`${runId}:${channel}:${filename ?? ''}:${messageTextHash}`)
    ```
-   `messageTextHash` is `sha256(message)` so trivially-different messages still dedupe correctly when the meaningful content is the same.
+   `messageTextHash` is `sha256(finalRenderedMarkdown)` — computed on the **final rendered output** that will actually be posted, not on a templated/intermediate string. This ensures formatting-only differences (whitespace, mrkdwn escaping) still produce the same hash and dedupe correctly. Concretely: render → hash → check → post, in that order. Never hash the template, the unrendered prompt output, or the input args.
 2. The skill writes its result (`postHash`, `messageTs`, `channel`, `permalink`) to `execution_steps.output` **and** to a denormalised lookup on `agent_runs.metadata.slackPosts: Array<{ postHash, channel, messageTs, permalink, postedAt }>`.
 3. Before posting, the skill checks `agent_runs.metadata.slackPosts` for an entry with the same `postHash`. If one exists:
    - Default behaviour: **skip** the post and return the cached `messageTs` + `permalink`. Log a warning.
@@ -974,15 +974,21 @@ ALTER TABLE subaccount_agents
 ```ts
 type FingerprintsByIntent = {
   [intent: string]: {  // e.g. 'download_latest', 'download_by_url'
-    sourceUrl: string;          // canonical URL of the item
+    sourceUrl: string;          // canonical URL of the item — see hashing rules below
     pageTitle: string;
     publishedAt?: string;       // ISO if extractable
-    contentHash: string;        // sha256 of downloaded file
+    contentHash: string;        // sha256 of the FINAL DOWNLOADED FILE BYTES — not URL, not metadata, not headers
     processedAt: string;        // ISO
     agentRunId: string;
   };
 };
 ```
+
+**Hashing rules (must be enforced in code, not by convention):**
+- `contentHash` is computed by streaming the downloaded file bytes through `crypto.createHash('sha256')` after the download completes and before the file is moved or transformed. **Never** hash a URL, response headers, or partial content.
+- `sourceUrl` is **canonicalised** before storage and before comparison: lowercase host, strip default ports (`:443`, `:80`), strip tracking query params (`utm_*`, `gclid`, `fbclid`, `ref`, `source`), strip URL fragment, normalise trailing slash. A small `canonicaliseUrl()` helper in `worker/src/util/url.ts` is the single source of truth — same helper used on write and on compare.
+
+Without these rules the dedup logic will silently misbehave on the day a tracking parameter changes or a CDN URL gains a cache-buster.
 
 Reads use `last_processed_fingerprints_by_intent[intent]`; writes use a small JSONB merge. No need for a separate row per intent in v1.
 
@@ -1028,6 +1034,10 @@ Inline-text columns have **explicit hard ceilings**, enforced at write time. Wit
 | `task_deliverables.body_text` | **2 MB** (2,097,152 bytes) | Truncate at 2 MB - 100 bytes, set `body_text_truncated = true`, write a separate full-size artifact and link it via `task_deliverables.artifactId`. The deliverable record always remains queryable; the truncation flag tells the UI to show "truncated — open full file". |
 
 Both ceilings are enforced by a single `writeWithLimit(table, column, text, maxBytes)` helper in `server/lib/inlineTextWriter.ts`. The helper returns `{ stored, wasTruncated, originalBytes }` so callers can audit. Truncation **never** silently fails; it always writes the truncated body, sets the flag, and emits a warning step.
+
+**UTF-8 safety:** truncation operates on bytes, not characters. After cutting at `maxBytes - 100`, the helper **backtracks to the nearest UTF-8 character boundary** (the byte before the next continuation byte) so the stored text never ends mid-codepoint. It then appends a marker like `\n\n…[truncated]` (which itself is < 100 bytes, hence the headroom). Without backtracking, a multi-byte character (emoji, accented letter, CJK glyph) split across the boundary would render as a replacement character or break the markdown parser downstream.
+
+A unit test asserts that for inputs containing 4-byte characters at the boundary, the output is valid UTF-8 and shorter than `maxBytes`.
 
 For the Reporting Agent's typical 60-minute video:
 - Whisper transcript: ~50–80 KB → comfortably inline.
@@ -1291,7 +1301,21 @@ Per reviewer T13: failures across browser-task, transcription, report skill, and
 | Encryption key missing at boot | `internal_error` | `encryption_key_missing` | Server refuses to start (boot-time check) |
 | Connection not found / wrong tenant | `auth_error` | `connection_not_found_or_unauthorized` | Operator audit; possible tenant-isolation alert |
 
-A single helper `failure(reason, detail, metadata?)` is used by every code path to construct the failure object, so the taxonomy stays consistent and there is no place for a free-text `failureReason` to creep in. Lint rule (or runtime zod check) ensures `failureReason` is always one of the enum values.
+A single helper `failure(reason, detail, metadata?)` is used by **every** code path to construct the failure object. Inline shapes like `throw { failureReason: 'login_failed' }` are **banned** — caught by both:
+1. **Lint rule** (added to `.eslintrc` for both `server/` and `worker/`): no object literal containing the key `failureReason` outside `server/lib/failure.ts` and `worker/src/runtime/failure.ts`.
+2. **Runtime zod validation** at the persistence boundary: `execution_runs.failureReason` and `agent_runs.failureReason` are typed as the enum, and the persistence layer rejects any other value with an error.
+
+The helper signature is fixed:
+
+```ts
+export function failure(
+  reason: FailureReason,           // enum
+  detail: string,                   // free-form sub-reason, e.g. 'login_failed_selector_missing'
+  metadata?: Record<string, unknown>,
+): FailureObject;
+```
+
+This is the **single emit point** for the entire workflow. Without it, the reviewer's prediction holds: 2–3 places will bypass the enum and analytics will degrade silently.
 
 ---
 
@@ -1378,7 +1402,19 @@ Once these are confirmed, implementation begins on D.
 
 The only true blocker from the review (T1, plaintext secrets in payload) is closed. All others are hardening that has been folded into the relevant section rather than carried as TODOs.
 
-### v3 (current) — second-round reviewer tightenings
+### v3.1 (current) — pre-implementation checklist + small implementation-trap notes
+
+| Area | Change | Section |
+|---|---|---|
+| Slack dedup | `messageTextHash` must be computed on the final rendered markdown, not on a templated/intermediate string | §5.5.1 |
+| Fingerprint | `contentHash` must stream the file bytes; `sourceUrl` must go through `canonicaliseUrl()` on both write and compare | §6.7.2 |
+| Truncation | `writeWithLimit` must backtrack to a UTF-8 character boundary before appending the marker | §6.7.3 |
+| Failure helper | Inline `{ failureReason: ... }` shapes are banned; lint rule + zod validation enforce single emit point | §8.4 |
+| New §11 | Pre-implementation checklist: 11 build-time verification steps to run before merging each of A/B/C/D, including the manual paywall smoke test as the highest-priority gate for D | §11 |
+
+These are implementation hygiene, not architecture. Spec is now build-ready.
+
+### v3 — second-round reviewer tightenings
 
 | # | Tightening | Section |
 |---|---|---|
@@ -1410,6 +1446,145 @@ All seven are hardening / edge-case containment / future-proofing. None require 
 ### v1 — original draft (superseded)
 
 Initial spec covering A/B/C/D code changes and the §7 configuration walkthrough.
+
+---
+
+## 11. Pre-Implementation Checklist
+
+These are **build-time verification steps**, not new architecture. Run them at the start of Code Change D and again before merging each of A/B/C/D. None of these should slow planning, but skipping any of them will cause real-world pain after deploy.
+
+### 11.1 Browser contract is genuinely non-bypassable
+
+Architectural intent: §6.7.1 (`ContractEnforcedPage`).
+
+Verification (must all be true before merging D):
+
+- [ ] `grep -rn "page\." worker/src/browser/` returns only references to the wrapper, never to a raw Playwright `Page` outside `playwrightContext.ts`
+- [ ] `executionLoop()` signature accepts only `ContractEnforcedPage`, not `Page`
+- [ ] No helper utility (`worker/src/browser/observe.ts`, `worker/src/browser/executor.ts`) reads from a raw `Page`
+- [ ] Unit test: instantiate `ContractEnforcedPage` with a fake page; assert that calling `goto('https://evil.example.com')` against an `allowedDomains: ['42macro.com']` contract throws and never delegates to the underlying page
+- [ ] Unit test: assert that a server-side redirect to an out-of-contract host terminates the run (the wrapper hooks into the `response` event to validate final URL)
+
+If any one of these fails, the deny-by-default model is broken and the change must not merge.
+
+### 11.2 Agent → contract construction boundary
+
+Architectural intent: §6.7.1 (service-built contract, not LLM-built).
+
+Verification:
+
+- [ ] `agentExecutionService` is the **only** caller of `BrowserTaskContractSchema.parse()`
+- [ ] The LLM tool definition for `browser_task` exposes only `intent` and `connectionName` (or `connectionId`) — **never** `allowedDomains`, `expectedArtifactKind`, or `successCondition`
+- [ ] Tool argument validation strips any extra keys the LLM tries to send (zod `.strict()`)
+- [ ] Unit test: simulated LLM tool call attempting `{ intent: 'download_latest', allowedDomains: ['evil.com'] }` is rejected by the tool argument schema before reaching the service
+
+This closes the prompt-injection / hallucination expansion path.
+
+### 11.3 Worker is a trusted enclave with secrets — lock down logging
+
+Architectural intent: §6.6.2 (single-purpose repo, T8).
+
+Verification:
+
+- [ ] `grep -rEn "console\.(log|error|warn|info)" worker/src/` reviewed manually; no logger receives a `WebLoginCredentials`, `password`, `botToken`, or full connection row
+- [ ] Logger redaction list updated: `password`, `secretsJson`, `botToken`, `apiKey`, `Authorization`, `cookie`. Logger applies redaction recursively on object payloads.
+- [ ] Error serialization (e.g. `err.message`, `err.stack`) never includes the credentials object — `performLogin` catches and re-throws via `failure()` with metadata that explicitly excludes `creds`
+- [ ] No retry path re-enqueues a payload containing decrypted secrets (impossible by §6.5 / T1, but verified once more here)
+- [ ] `DecryptedWebLoginConnection` type's `password` field is `Branded<string, 'Plaintext'>` so any accidental serialization via `JSON.stringify` of a payload containing it can be caught by a custom replacer
+
+### 11.4 Failure helper is the only emit point
+
+Architectural intent: §8.4 (T13).
+
+Verification:
+
+- [ ] Lint rule active in both `server/` and `worker/` ESLint configs
+- [ ] `grep -rn "failureReason:" server/ worker/ shared/ | grep -v 'lib/failure.ts' | grep -v 'runtime/failure.ts' | grep -v 'schema/'` returns zero results outside the helper, schemas, and persistence layer
+- [ ] Persistence layer zod validates `failureReason` against the enum on every write
+
+### 11.5 Slack hash stability
+
+Architectural intent: §5.5.1 (T11).
+
+Verification:
+
+- [ ] `messageTextHash` is computed inside `send_to_slack` skill executor **after** any markdown rendering / variable substitution and **before** the `chatPostMessage` call
+- [ ] Unit test: same logical input passed twice through the skill produces the same `postHash`
+- [ ] Unit test: input with different whitespace/escaping but identical rendered output produces the same `postHash`
+- [ ] Unit test: input that genuinely differs in content produces a different `postHash`
+
+### 11.6 Fingerprint correctness
+
+Architectural intent: §6.7.2 (T4 + T10).
+
+Verification:
+
+- [ ] `contentHash` computed by streaming the file from disk through `crypto.createHash('sha256')` after download completes; never derived from URL, headers, or in-memory metadata
+- [ ] `canonicaliseUrl()` helper exists in `worker/src/util/url.ts` and is called both at write time (before storing fingerprint) and at compare time (before lookup)
+- [ ] Unit test: two URLs differing only in `?utm_source=...` produce the same canonical form
+- [ ] Unit test: two byte-identical files at different URLs produce the same `contentHash`
+- [ ] Unit test: a 1-byte change in the file produces a different `contentHash`
+
+### 11.7 UTF-8 safe truncation
+
+Architectural intent: §6.7.3 (T12).
+
+Verification:
+
+- [ ] `writeWithLimit` backtracks to a UTF-8 character boundary before appending the truncation marker
+- [ ] Unit test: input containing 4-byte emoji at byte position `maxBytes - 1` produces valid UTF-8 output, shorter than `maxBytes`, with no replacement characters
+- [ ] Unit test: round-trip the truncated value through `Buffer.from(stored, 'utf8').toString('utf8')` and assert no decoding error
+
+### 11.8 Login flow resilience — manual smoke test against the real paywall
+
+This is the **single biggest external risk** in D and must be done before writing the bulk of the code.
+
+Verification:
+
+- [ ] Manually run a one-off Playwright script (10 lines) against `https://42macro.com/login` with the real credentials — confirm:
+  - Login succeeds with the default selectors (`#email`, `#password`, `button[type=submit]`)
+  - No hidden redirect chain (more than one navigation between login and dashboard)
+  - No JS-only navigation that breaks `waitForNavigation`
+  - The members video page renders server-side (not behind a JS hydration that hides downloads)
+  - The latest video has a stable, scrapable download URL or button
+- [ ] If any of the above fails: capture the actual DOM and stop. Re-plan §6.4 selector defaults and possibly the `download_latest` browser intent strategy before continuing.
+- [ ] Document the confirmed selectors in §7.2 step 1 so the operator setup is one-shot.
+
+### 11.9 pg-boss payload size sanity
+
+Architectural intent: §6.5 / T1 (no secrets in payload).
+
+Verification:
+
+- [ ] `BrowserTaskPayloadSchema` enqueued payload is logged once during a test run; `JSON.stringify(payload).length < 4096` (typical < 1 KB after T1)
+- [ ] No payload field contains arrays of artifact bytes, transcripts, or markdown bodies
+- [ ] No field of the payload schema is `z.any()` or unbounded `z.string()` — every string has a `max()`
+
+### 11.10 Observability completeness — "why did this run fail?" in 30 seconds
+
+Verification: for a deliberately-failed run (login_failed by wrong password), an operator opening the run detail page should see, **without grepping logs**:
+
+- [ ] The terminal `failureReason` and `failureDetail`
+- [ ] The `performLogin` step result (success / failure with sub-reason)
+- [ ] The screenshot artifact captured at the failure point, linked from the run detail UI
+- [ ] The contract that was used (allowedDomains, intent, expectedArtifactKind)
+- [ ] Any contract violations that occurred (with the offending URL / mime type / etc.)
+- [ ] The fingerprint decision (skip vs process, with the matching prior fingerprint if skipped)
+- [ ] The Slack post result (messageTs + permalink, or failure reason)
+
+If any of these are not surfaced in the existing run-detail UI, add the minimum tracing/event fields to make them visible. Better to add a logging line now than to debug a production failure blind in three weeks.
+
+### 11.11 Things to **not** spend time on (deferred)
+
+Per the reviewer, do not delay D for:
+
+- Perfect Slack race handling (the hash + parent-run idempotency is sufficient for v1)
+- Object-storage upload for artifacts
+- Multi-video / multi-period selection logic
+- Slack OAuth install flow
+- Advanced retry orchestration beyond the existing retry profiles
+
+These are tracked as v2 follow-ups in §9.5.
 
 
 
