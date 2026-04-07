@@ -1340,6 +1340,22 @@ When a system template's `latest_version` advances and an org has a fork at an o
 2. Diff view: side-by-side of v3 and v4 step lists.
 3. Two options: "Upgrade my fork" (creates new org version) or "Stay on v3" (dismisses banner until next system version).
 
+### 10.7 Human review checklist for AI-authored playbook PRs
+
+When the AI generates a new `*.playbook.ts` file (or significantly edits one), the reviewer must verify:
+
+- [ ] Every step has `sideEffectType` declared (CI catches this but worth eyeballing)
+- [ ] `irreversible` steps are correctly classified — review every external API call carefully
+- [ ] `humanReviewRequired: true` is set on any step whose output a human would want to tweak
+- [ ] `dependsOn` graph matches the intended logical flow (check for missed parallelism opportunities)
+- [ ] Template expressions only reference declared dependencies (validator catches this)
+- [ ] `outputSchema` is tight enough to catch garbage from the LLM but loose enough to not over-constrain
+- [ ] Prompts include enough context from the run (don't assume the agent has memory)
+- [ ] `version` field is bumped if editing an existing playbook
+- [ ] No secrets, customer data, or hardcoded org-specific values in the prompts
+
+The PR description should explain the playbook's purpose in one paragraph and any non-obvious step dependencies.
+
 ## 11. Test Plan
 
 ### 11.1 Unit tests
@@ -1427,11 +1443,77 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 
 ### 12.5 Open questions
 
-1. Should `agent_call` steps be allowed to spawn handoffs? Currently yes (existing agent system handles it) — but this could blow up token budgets unexpectedly. Recommend: yes, with the existing `MAX_HANDOFF_DEPTH=5` limit applying per agent run.
-2. Should runs be cancellable mid-step, or only between steps? Recommend: between steps only (Phase 1) — cancelling a running agent run is messy. Mark run as `cancelling`, let current steps finish, then transition to `cancelled`.
-3. Versioning model for org forks: linear (v1, v2, v3) or branched (v1, v1.1, v2)? Recommend: linear, simple. Branching is YAGNI for Phase 1.
-4. Should the inbox surface runs assigned to anyone in the user's permission scope, or only runs the user started? Recommend: anyone in scope — playbooks are collaborative.
+1. Should `agent_call` steps be allowed to spawn handoffs? Currently yes (existing agent system handles it) — but this could blow up token budgets unexpectedly. **Recommend: yes**, with the existing `MAX_HANDOFF_DEPTH=5` limit applying per agent run, plus the `runCostBreaker` ceiling as backstop.
+2. Should runs be cancellable mid-step, or only between steps? **Recommend: between steps with mid-step abort attempt**. Mark run as `cancelling`, fire `AbortController` to in-flight steps; if a step completes before cancellation lands, accept its output and then transition to `cancelled`.
+3. Versioning model for org forks: linear (v1, v2, v3) or branched (v1, v1.1, v2)? **Recommend: linear**. Branching is YAGNI for Phase 1.
+4. Should the inbox surface runs assigned to anyone in the user's permission scope, or only runs the user started? **Recommend: anyone in scope** — playbooks are collaborative.
+5. Should we expose a "re-run from step X" feature that re-executes from an arbitrary point without an edit? **Recommend: defer**. The mid-run edit flow already covers the common case ("change something then re-run downstream"), and bare "re-run from here" is the same flow with no-op edit input. Add only if user demand surfaces.
+6. How long are completed runs retained? **Recommend: indefinite for now** with a future archival job once storage becomes a concern. `playbook_step_runs` row counts could grow quickly so monitor early.
+
+## 13. Risk Register
+
+| # | Risk | Likelihood | Impact | Mitigation | Owner |
+|---|------|------------|--------|------------|-------|
+| R1 | Mid-run edit re-runs an irreversible step and causes real-world side effects (charge / send / publish) | Low | Critical | `sideEffectType` mandatory; default-block irreversible re-runs; explicit per-step opt-in; CI fails if any step lacks classification (§5.4, §11.1) | Engine owner |
+| R2 | Templating resolver enables prototype pollution → RCE | Low | Critical | `Object.create(null)` contexts; blocklist `__proto__`/`constructor`/`prototype`; whitelist top-level prefixes; unit test suite for every blocked path; validator rejects offending expressions at publish time (§3.3) | Engine owner |
+| R3 | Tick storms exhaust pg-boss / connection pool under wide-fan-out playbooks | Medium | High | `singletonKey: runId` collapses redundant ticks at queue level; non-blocking advisory lock no-ops on contention; load test with a 50-step diamond DAG (§5.6) | Engine owner |
+| R4 | Engine misses a tick after step completion → run permanently stuck | Medium | High | Step completion + tick enqueue in single transaction; watchdog sweep every 60s as safety net (§5.7); alert on `playbook.watchdog.recovered_runs > 0` | Engine owner |
+| R5 | Cost runaway from invalidation cascades | Medium | High | `runCostBreaker` enforced before every dispatch; pre-flight estimate at run start; mid-run edit dry-run preview shows cost before applying; output-hash firewall stops propagation when output is unchanged (§5.4, §1.5) | Engine owner |
+| R6 | Zod ↔ JSON Schema drift via `z.transform()` causes runtime validation mismatches | Low | Medium | CI round-trip check on every seeded playbook's `outputSchema` (§11.1); ban `.transform()` in step output schemas via lint rule | Validator owner |
+| R7 | Schema drift between template publish and run start (e.g. system agent renamed) | Low | Medium | Re-run validator at run start (§4.5); resolved agent ids cached on the run row (§3.4); migration of an in-flight run is impossible (locked to `template_version_id`) | Engine owner |
+| R8 | Concurrent ticks double-dispatch a step | Very low | Medium | Three layers of defense: queue dedup, advisory lock, optimistic state guard with `version` column (§5.6) | Engine owner |
+| R9 | Org-authored playbooks contain prompt injection that manipulates the agent | Medium | Medium | Existing policy engine and skill executor processor pipeline apply unchanged; agent system already handles untrusted prompts; document the threat model in admin docs | Security review |
+| R10 | Forked templates drift from upstream and orgs ignore upgrade banners | High | Low | Phase 1.5 parameterization layer reduces fork count for the 80% case; banner is a visible nag, not blocking | Product |
+| R11 | Engine throughput hits ~10k concurrent run ceiling | Very low (years away) | Medium | Monitor metrics; revisit Temporal/Inngest decision when 3+ adopt-threshold criteria are met (§1.4) | Eng leadership |
+| R12 | Migration 0074 conflicts with a parallel feature branch's schema work | Low | Low | Coordinate migration number assignment via the feature-coordinator pipeline before opening PR | Implementer |
+
+## 14. Final Review Checklist
+
+Before this spec is approved for implementation, every reviewer should sign off on the following:
+
+### Architecture
+- [ ] DAG model is the right shape for the use case (vs. linear-only or graph-with-loops)
+- [ ] Three-tier distribution (system → org → run) matches existing agent system semantics
+- [ ] All seven new tables are necessary; no consolidation possible
+- [ ] Engine reuses existing infrastructure (`agentRunService`, `reviewItems`, `pg-boss`, `withBackoff`, `runCostBreaker`, `failure`, WebSocket rooms, audit) without bypass
+- [ ] Phase 1.5 parameterization plan is credible — `params_json` column reservation is the only Phase 1 cost
+
+### Safety
+- [ ] Side-effect classification is enforced at definition time, not just at edit time
+- [ ] Mid-run editing flow blocks irreversible re-execution by default
+- [ ] Dry-run cost preview is shown before any cascading invalidation
+- [ ] Templating resolver hardening prevents prototype pollution at every layer
+- [ ] Cost breaker is called on every dispatch boundary
+- [ ] All failure paths route through the `failure()` helper
+
+### Reliability
+- [ ] Three-layer concurrency control is correct (queue dedup → advisory lock → optimistic guard)
+- [ ] Watchdog sweep covers every "step done but no tick" failure mode
+- [ ] Step completion + tick enqueue are transactional
+- [ ] Run state survives server restart (verified by integration test in §11)
+- [ ] Cancellation semantics are well-defined and tested
+
+### Authoring
+- [ ] File-based authoring is the right Phase 1 choice (vs. DB-native or YAML)
+- [ ] AI authoring loop is realistic — existing playbooks serve as in-context examples
+- [ ] Validator runs at every meaningful boundary (seeder, publish, run start, optional pre-commit)
+- [ ] Versioning rules prevent silent reverts
+
+### Operability
+- [ ] Logging fields are sufficient for debugging a stuck run from the logs alone
+- [ ] Metrics cover the key dashboards (run throughput, parallelism, cascade size, cost breaker blocks, watchdog recoveries)
+- [ ] Feature flag plan allows controlled rollout per org
+- [ ] Rollback plan is documented (down migration + flag disable)
+
+### Sign-off
+
+| Role | Name | Date | Notes |
+|------|------|------|-------|
+| Tech lead | | | |
+| Product | | | |
+| Security | | | |
+| Eng manager | | | |
 
 ---
 
-**End of spec.** Review, comment, and assign owner before implementation.
+**End of spec.** Once all sign-offs are recorded above, this spec is approved for implementation and should be handed to the `feature-coordinator` agent to drive the Phase 1 pipeline per `CLAUDE.md` § Local Dev Agent Fleet.
