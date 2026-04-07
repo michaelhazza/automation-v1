@@ -1862,6 +1862,219 @@ A short list, treat as binding:
 
 ---
 
+## Part 13 — Robustness Hardening (rev 6)
+
+> Added in revision 6 in response to a second round of review. Six small but binding changes that close real failure modes in the design as previously written. None of these are speculative; each maps to a concrete way the system would otherwise drift, race, or silently corrupt.
+
+### 13.1 `executionRunId` enforcement at the router boundary
+
+**Risk:** Cost attribution depends on every IEE-originated LLM call carrying `executionRunId`. A single forgotten path silently breaks per-run cost reporting and the §11.7 drill-down panel.
+
+**Fix — two layers:**
+
+1. **Router-level guard** in `server/services/llmRouter.ts::routeCall`:
+
+   ```ts
+   if (params.context.sourceType === 'iee' && !params.context.executionRunId) {
+     throw new Error('llmRouter: executionRunId is required when sourceType="iee"');
+   }
+   if (params.context.callSite === 'worker' && !params.context.executionRunId) {
+     throw new Error('llmRouter: executionRunId is required when callSite="worker"');
+   }
+   ```
+
+   This is the **only** place the rule lives. Callers cannot accidentally bypass it.
+
+2. **Database CHECK constraint** on `llmRequests`, added in the IEE migration:
+
+   ```sql
+   ALTER TABLE llm_requests
+     ADD CONSTRAINT llm_requests_iee_requires_run_id
+     CHECK (source_type <> 'iee' OR execution_run_id IS NOT NULL);
+   ```
+
+   Belt and braces. Even if a future code path forgets the router guard (e.g. raw insert from a migration script), the database refuses the row.
+
+The combination guarantees that **any LLM cost row tagged `iee` is queryable by `executionRunId`** — which is the integrity invariant the §11.7 drill-down depends on.
+
+### 13.2 Budget reservation (race-condition fix)
+
+**Risk:** §11.5.8 budget guardrail checks `actual <= limit` at enqueue time. Ten jobs enqueued in the same second all see "actual is fine" and all run, blowing the budget.
+
+**Fix — soft reservation pattern:**
+
+1. New column on `executionRuns`:
+
+   | Column | Type | Notes |
+   |---|---|---|
+   | `reservedCostUsd` | `numeric(10,4)` not null, default `0` | Set at enqueue, cleared at completion |
+
+2. **Estimation at enqueue:**
+
+   ```ts
+   // server/services/ieeUsageService.ts
+   function estimateCostUsd(task: BrowserTask | DevTask): number {
+     const avgLlmCostPerStep = 0.005;   // tunable, env-driven (IEE_AVG_LLM_COST_PER_STEP)
+     const avgRuntimeCostPerRun = 0.002;
+     return MAX_STEPS_PER_EXECUTION * avgLlmCostPerStep + avgRuntimeCostPerRun;
+   }
+   ```
+
+   The averages live in `runtimeCostConfig.ts` alongside the runtime pricing model. They are conservative — better to over-reserve and reject a job than to under-reserve and silently overspend.
+
+3. **Budget check (revised):**
+
+   ```ts
+   const usedUsd     = await sumActualCostForPeriod(orgId, period);
+   const reservedUsd = await sumReservedCostForPeriod(orgId, period);
+   const estimated   = estimateCostUsd(task);
+   if (usedUsd + reservedUsd + estimated > limitUsd) {
+     throw budgetExceeded();
+   }
+   ```
+
+   This check is wrapped in the same transaction as the `INSERT INTO execution_runs ... reservedCostUsd = $estimated` so the reservation is visible to the next enqueue attempt immediately. Postgres serialisable isolation is **not** required — the read-then-insert is acceptable because the worst case is a single over-shoot of one estimate-sized job, not unbounded blow-out.
+
+4. **At run completion:**
+
+   ```sql
+   UPDATE execution_runs
+     SET status = $status,
+         llm_cost_usd = $llm,
+         runtime_cost_usd = $runtime,
+         total_cost_usd = $total,
+         reserved_cost_usd = 0   -- release reservation
+     WHERE id = $runId;
+   ```
+
+   Reservation is released atomically with the actual cost write.
+
+5. **Stale reservation cleanup:** The existing `iee-cleanup-orphans` job (§12.3) is extended to also zero out `reservedCostUsd` for any row whose status is terminal (`completed` / `failed`) but still has a non-zero reservation — a defensive cleanup for crash scenarios.
+
+### 13.3 Heartbeat in a separate interval loop
+
+**Risk:** §12.7 specified a 10s heartbeat with a 60s death threshold. If a Playwright `page.goto` blocks the event loop for >60s on a slow page, the worker would falsely declare itself dead and fail otherwise-healthy runs.
+
+**Fix:**
+
+1. Heartbeat is driven by `setInterval`, **not** by step boundaries:
+
+   ```ts
+   // worker/src/loop/heartbeat.ts
+   export function startHeartbeat(executionRunId: string, db: Db): () => void {
+     const interval = setInterval(async () => {
+       await db.execute(sql`
+         UPDATE execution_runs
+            SET last_heartbeat_at = now()
+          WHERE id = ${executionRunId}
+       `);
+     }, 10_000);
+     interval.unref();
+     return () => clearInterval(interval);
+   }
+   ```
+
+2. The heartbeat lives on the **Node.js timer loop**, which fires even while the worker is awaiting an async Playwright call. It only stalls if the entire process is hung — which is exactly when we *do* want to fail it over.
+
+3. The death threshold stays at 60s. The reconciliation scan (worker boot) still moves abandoned `running` rows to `failed` with `failureReason: 'environment_error'` if `now() - lastHeartbeatAt > 60s` AND `workerInstanceId != currentWorkerInstanceId`.
+
+4. The heartbeat handle is started in the loop's `try` block and **always** cleared in the `finally` block, paired with the terminal status write.
+
+### 13.4 System-prompt anti-stagnation rule
+
+**Risk:** Long-running loops where the LLM keeps trying minor variations of the same failed action without progress — burning steps and budget.
+
+**Fix — additive rule in the system prompt** (no schema or code change):
+
+> "After every step, briefly assess whether the last action moved you closer to the goal. If three consecutive steps have produced no observable progress (no new information, no state change toward the goal), choose a fundamentally different strategy on the next step or call `failed` with a clear reason. Do not repeat near-identical actions."
+
+The worker does **not** enforce this programmatically — that would require LLM-side reasoning the worker can't easily inspect. The rule lives in the prompt and is reinforced by the budgeted loop ceiling (`MAX_STEPS_PER_EXECUTION` is the hard backstop).
+
+The system prompt template in `worker/src/loop/systemPrompt.ts` is updated. No code change beyond that string.
+
+### 13.5 Dev command execution hardening
+
+**Risk:** §7.4 denylist blocks literal patterns like `sudo` and `rm -rf /`, but shell parsing allows trivial evasions: `echo rm -rf / | sh`, `$(rm -rf /)`, backticks, etc.
+
+**Fix — three layers:**
+
+1. **Reject command-substitution syntax pre-spawn.** The denylist gains reject patterns:
+
+   ```ts
+   // worker/src/dev/denylist.ts
+   const REJECT_PATTERNS = [
+     /\$\(/,         // $( command substitution
+     /`/,            // backtick command substitution
+     /<\(/,          // process substitution
+     /\beval\b/,     // eval
+     /\bexec\s/,     // exec replacement of shell
+     // ...existing literal denylist...
+   ];
+   ```
+
+2. **Wrap commands in a hardened shell invocation:**
+
+   ```ts
+   spawn('bash', [
+     '-lc',
+     'set -euo pipefail; ' + command,
+   ], {
+     cwd: workspaceDir,
+     env: sanitisedEnv,
+     stdio: ['ignore', 'pipe', 'pipe'],
+   });
+   ```
+
+   `set -euo pipefail` makes failures loud and pipelines safer. `bash` (not `/bin/sh`) is required for `pipefail`. The Playwright base image includes bash.
+
+3. **The denylist is a defence-in-depth layer, not the primary safety net.** The primary safety net remains the workspace path validation (§7.3) — even if a command escapes the denylist, it cannot write outside its workspace because the workspace path resolver runs **before** any filesystem call originating from a worker action, and the subprocess inherits the workspace as its `cwd` and has no privilege to modify host paths via the sanitised PATH and dropped HOME.
+
+> v1 explicitly does **not** sandbox the subprocess (no Firejail, no gVisor, no Docker-in-Docker — see §15). The combination of denylist + path validation + sanitised env + workspace cwd is the v1 safety boundary. Sandbox isolation is in the v2 backlog.
+
+### 13.6 Playwright session corruption recovery
+
+**Risk:** Persistent contexts can become corrupted (broken cookies, half-written storage state) and permanently break a session for an organisation.
+
+**Fix — auto-recovery with single retry:**
+
+1. The browser executor tracks per-context launch failures in a small in-memory map keyed by `userDataDir`.
+2. **First failure** to launch a persistent context: classify as `environment_error`, mark the session dir as "suspect" in memory, fail the run.
+3. **Second consecutive failure** for the same `userDataDir` across different runs (within the same worker process): the executor:
+   - Renames the session dir to `${userDataDir}.corrupt.${timestamp}` (preserves it for forensics, doesn't lose it forever)
+   - Creates a fresh empty `userDataDir` and launches into that
+   - Logs `iee.browser.session_recreated` with the dir, the suspect marker, and a reason
+   - The current run proceeds with the fresh session
+4. The corrupt-session backups are subject to the same cleanup job (§12.3) extended to remove `*.corrupt.*` directories older than 30 days.
+5. **Why two failures, not one:** a single failure could be a transient network/CDN problem. Two consecutive failures across runs strongly indicate session-level corruption.
+
+This is in-memory and per-worker — it does **not** require new database state. A worker restart resets the suspect tracking, which is acceptable: the worst case is one extra failed run before the recovery kicks in.
+
+### 13.7 Schema additions summary (rev 6)
+
+Single migration adds:
+
+| Table | Change |
+|---|---|
+| `executionRuns` | `reservedCostUsd numeric(10,4) not null default 0` |
+| `llmRequests` | `call_site text not null default 'app'` (rev 4 — restated) |
+| `llmRequests` | `execution_run_id uuid null` (rev 4 — restated) |
+| `llmRequests` | `CHECK (source_type <> 'iee' OR execution_run_id IS NOT NULL)` (rev 6) |
+
+No other schema changes from rev 4/5.
+
+### 13.8 What rev 6 does NOT add
+
+Deliberately not introducing:
+
+- A `step_progress` field tracked in the DB (the anti-stagnation rule lives in the prompt only)
+- Sandbox isolation for dev subprocesses (Firejail / gVisor / DinD remain in v2)
+- Per-org session-corruption tracking (in-memory per worker is sufficient for v1)
+- A "kill switch" to remotely abort a running execution (deferred — pg-boss cancel + worker SIGTERM is the v1 escape valve)
+
+These are noted so a future reviewer doesn't think they were missed.
+
+---
+
 ## Appendix C — Spec revisions
 
 | Rev | Date | Notes |
@@ -1871,6 +2084,7 @@ A short list, treat as binding:
 | 3 | 2026-04-07 | Replaced Part 11.5 with full integration into the existing usage/billing system: shared `source` enum on rollup table, `ieeUsageService` with system/org/subaccount scoping, additive API endpoints, IEE as a line item on existing system/org/subaccount billing UIs (not new pages), three-level budget enforcement, reuse of existing notification channels and invoicing path. |
 | 4 | 2026-04-07 | Added §11.7 (per-task drill-down with three separate cost lines: app LLM, worker LLM, worker compute — backed by new `call_site` and `execution_run_id` columns on `llmRequests`) and §11.8 (Usage Explorer page — single React component mounted at three scope URLs with full filters, search, sort, pagination, export, and a unified API endpoint). |
 | 5 | 2026-04-07 | §11.8.8: Usage Explorer is a top-level **left-nav** entry at every scope (system / org / subaccount), permission-gated, not nested under Settings. Settings → Billing keeps a convenience deep-link to it. |
+| 6 | 2026-04-07 | Part 13 robustness hardening: router-level + DB CHECK enforcement of `executionRunId` for IEE LLM calls; budget reservation column `reservedCostUsd` to fix the enqueue-time race; heartbeat moved to a `setInterval` loop independent of step execution; system-prompt anti-stagnation rule (3-step no-progress → change strategy or `failed`); dev command hardening (reject `$(`, backticks, process substitution, `eval`; wrap in `bash -c "set -euo pipefail; ..."`); Playwright session corruption auto-recovery on second consecutive failure. |
 
 
 

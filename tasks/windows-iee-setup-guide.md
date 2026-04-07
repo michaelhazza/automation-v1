@@ -15,6 +15,13 @@ The result: three services running locally via Docker Compose — main app, IEE 
 
 ---
 
+## Prerequisites
+
+- **Disk space:** at least **15 GB free** on the WSL2 virtual disk. The Playwright base image alone is ~1.5 GB; persistent browser sessions, Postgres data, and dev workspaces grow over time. Going below 10 GB causes silent Docker build failures.
+- **RAM:** 8 GB system RAM minimum. Docker Desktop will be allocated 6 GB.
+
+---
+
 ## Step 1 — Enable WSL2 + Ubuntu
 
 Open **PowerShell as Administrator** and run:
@@ -318,7 +325,12 @@ docker compose exec postgres psql -U postgres -d automation_os
 
 # Container resource usage (watch for OOM)
 docker stats
+
+# Full reset (wipes Postgres + sessions + workspaces, rebuilds everything)
+docker compose down -v && docker compose up --build -d
 ```
+
+> **Node version note:** you don't run Node directly on Windows for this project — everything runs inside containers. The worker container's Node version is pinned by the Playwright base image (`mcr.microsoft.com/playwright:v1.44.0-jammy` → Node 20). If you want to run any worker scripts directly on the host for debugging, install Node 20 LTS via `nvm` inside WSL2 to match.
 
 ---
 
