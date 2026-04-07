@@ -1,7 +1,7 @@
 # Reporting Agent — Paywall → Video → Transcript → Slack Workflow
 ## Detailed Development Specification
 
-**Status:** Draft v3.2 — third-round micro-tightenings T15–T21 (correlationId invariant, fingerprint guard, artifact validation, persist-before-post, override flag, session cookie fallback, unified backoff)
+**Status:** **Final v3.3 — build-ready, spec closed.** Fourth-round tightenings T22–T25 (transcription cache, cost circuit breaker, download stall guard, end-of-run invariant). No further reviewer rounds — all subsequent feedback would be implementation review against a real PR.
 **Branch:** `claude/agent-paywall-video-workflow-OQTMA`
 **Related docs:**
 - `docs/iee-development-spec.md` — IEE worker, browser/dev handlers, execution_runs schema
@@ -324,6 +324,43 @@ case 'transcribe_audio': {
   };
 }
 ```
+
+### 4.4.1 Idempotent transcription cache (T22)
+
+Whisper calls cost real money and add latency. If a run fails after transcription succeeds (e.g. the report skill or Slack post fails) and then retries, the naive path re-calls Whisper for the same audio.
+
+Mitigation: cache lookup keyed by **`contentHash`** (preferred) with a fallback to `(runId, sourceArtifactId)`:
+
+```ts
+async function transcribeWithCache(input, ctx) {
+  const sourceArtifact = await ieeArtifactRepo.getById(input.executionArtifactId, ctx.organisationId);
+  const contentHash = sourceArtifact.metadata?.contentHash;  // computed in §6.7.2 / T17
+
+  // 1. Cache lookup by contentHash (org-scoped)
+  if (contentHash) {
+    const cached = await ieeArtifactRepo.findTranscriptByContentHash(contentHash, ctx.organisationId);
+    if (cached) {
+      logger.info('transcription cache hit', { contentHash, cachedArtifactId: cached.id });
+      return loadCachedTranscript(cached);
+    }
+  }
+
+  // 2. Fallback lookup by (runId, sourceArtifactId) — for sources without a contentHash
+  const sameRunCached = await ieeArtifactRepo.findTranscriptForRunAndSource(ctx.runId, input.executionArtifactId);
+  if (sameRunCached) return loadCachedTranscript(sameRunCached);
+
+  // 3. Cache miss — call Whisper
+  return callWhisperAndPersist(input, ctx, contentHash);
+}
+```
+
+The cache write side: when a transcript artifact is persisted, its `metadata` includes `{ kind: 'transcript', sourceContentHash: contentHash }`. The lookup is a simple indexed query on `execution_artifacts` filtered by `organisationId` and the metadata field.
+
+**Scope of the cache:** organisation-wide. Two distinct subaccounts in the same org that happen to download a byte-identical file (rare in practice, but possible) share the cache hit. Cross-org sharing is **never** allowed — the WHERE clause includes `organisationId`. This matches the existing tenant-isolation rules.
+
+**Cache invalidation:** none in v1. Whisper output is deterministic enough that re-transcribing the same bytes produces semantically identical output. If a future Whisper model upgrade meaningfully changes results, that triggers a one-off cache flush, not a per-run check.
+
+This closes the silent cost-bleed failure mode at scale: a run that retries 3× after a Slack failure pays for Whisper once, not three times.
 
 ### 4.5 Cost tracking
 
@@ -1051,6 +1088,20 @@ If any step short of these fails, the fingerprint is **not** persisted, so the n
 
 This means a partial download → corrupt transcript → failed report does NOT poison the fingerprint state. The reviewer's failure mode (permanently skipping valid future content) is closed.
 
+**Download stall guard (T24):** the download itself is monitored for stalls *during* transfer, before validation runs. A stalled but partially-complete download could pass the T17 minimum-size check while being garbage.
+
+The download wrapper tracks:
+- `bytesReceived` running total
+- `lastProgressAt` timestamp (updated each chunk)
+- A rolling 10-second throughput window
+
+Hard rules:
+- If `now() - lastProgressAt > 10_000` ms with the download not yet complete → abort with `failure('connector_timeout', 'download_stalled')`.
+- If rolling 10-second throughput < 10 KB/sec for any 10-second window after the first 5 seconds → abort with `failure('connector_timeout', 'download_too_slow')`.
+- Hard wall-clock cap: `min(contract.timeoutMs, 600_000)` — if not finished, abort with `failure('connector_timeout', 'download_wall_clock')`.
+
+Aborted downloads are deleted from disk; no fingerprint is written; the run fails fast. This closes the failure mode where a stalled download produces a partially-corrupt file that passes T17's static size check, gets hashed, fingerprinted, and silently poisons future runs.
+
 **Artifact validation before hashing (T17):** `contentHash` is computed only after the downloaded file passes a minimal validation step. The validation runs in the worker immediately after the download completes:
 
 ```ts
@@ -1341,7 +1392,17 @@ T+105s LLM step 4: calls send_to_slack with the reportMarkdown
 T+108s LLM step 5: calls add_deliverable
        → links the report artifact + Slack permalink to the agent run task
        ↓
-T+109s LLM step 6: calls done() — agent_runs.status = completed
+T+109s LLM step 6: calls done()
+       → END-OF-RUN INVARIANT (T25) runs FIRST, before status flips:
+           assert transcript artifact exists for this run
+           assert reportMarkdown was generated and persisted
+           assert slackPost recorded OR explicit no_new_content skip
+           assert deliverable persisted with body_text
+           assert fingerprint write completed (unless no_new_content)
+         If any assertion fails:
+           failure('internal_error', 'incomplete_run_state', { missing: [...] })
+         Else:
+           agent_runs.status = completed
        ↓
 T+109s WebSocket emits run-complete to subscribed clients
        Audit events written for: credential read, slack post, deliverable created
@@ -1403,6 +1464,56 @@ Per reviewer T13: failures across browser-task, transcription, report skill, and
 | Slack rate limited | `rate_limited` | `slack_rate_limited` | Retry with `Retry-After` |
 | Encryption key missing at boot | `internal_error` | `encryption_key_missing` | Server refuses to start (boot-time check) |
 | Connection not found / wrong tenant | `auth_error` | `connection_not_found_or_unauthorized` | Operator audit; possible tenant-isolation alert |
+
+### 8.4.2 End-of-run invariant assertion (T25)
+
+Before any agent run for the Reporting Agent flips to `status = completed`, an invariant check runs and the run is rejected if any expected artifact of a successful run is missing. This catches silent regressions, partial execution paths, and future-developer mistakes that would otherwise produce a "successful" run with no actual deliverable.
+
+Invariant for the Reporting Agent (other agent profiles can register their own):
+
+```ts
+function assertReportingAgentRunComplete(run: AgentRunContext): void {
+  const missing: string[] = [];
+
+  // Skip the assertion entirely for the explicit no-content path
+  if (run.terminationResult === 'no_new_content') {
+    if (!run.fingerprintRead) missing.push('fingerprint_read');
+    if (missing.length) throw failure('internal_error', 'incomplete_run_state', { missing });
+    return;
+  }
+
+  if (!run.transcriptArtifactId) missing.push('transcript');
+  if (!run.reportMarkdownDeliverableId) missing.push('report_deliverable');
+  if (!run.slackPost) missing.push('slack_post');
+  if (!run.fingerprintWritten) missing.push('fingerprint_write');
+
+  if (missing.length) {
+    throw failure('internal_error', 'incomplete_run_state', { missing });
+  }
+}
+```
+
+The check runs in `agentExecutionService` immediately before persisting `status = completed`. It is not optional, not bypassable from inside the LLM loop, and uses the same `failure()` helper so it routes through the standard taxonomy.
+
+This is the last gate before "success" — and it ensures "success" actually means a transcript was produced, a report was persisted, a Slack post (or explicit skip) was recorded, and the fingerprint was advanced. Without it, a future bug that silently skips a step could go undetected for weeks.
+
+### 8.4.1 Run-level cost circuit breaker (T23)
+
+The Reporting Agent has a multi-component cost surface (browser LLM loop + Whisper + report skill). A bug in any of those — infinite retry, runaway loop, mispriced model — could rack up real spend before a human notices.
+
+Mitigation: a **per-run cost ceiling** that hard-terminates the run when exceeded.
+
+- `agent_runs.maxRunCostCents` — new column, integer, nullable. When null, the system default applies.
+- System default: **100 cents (USD $1.00)** for the Reporting Agent profile. Configurable per agent in the agent definition. Configurable per subaccount link as an override (subaccount overrides org default).
+- The existing `costAggregates` table is read after every cost-incurring step (LLM call, Whisper call). Helper: `assertWithinRunBudget(runId, maxCostCents)` is called from the same place that records `llm_requests`.
+- On overage: immediate hard termination via `failure('internal_error', 'cost_limit_exceeded', { spentCents, limitCents })`. Step in flight completes its current API call (no mid-flight cancel) but no further calls are made. The terminal `done()` is replaced by a failure step.
+- Ceiling check is **evaluated at every cost-incurring boundary**, not on a timer — so a runaway 100-step browser loop trips it within one extra step rather than minutes later.
+
+Why a hard ceiling rather than a soft warning:
+- Soft warnings have never prevented a single cost incident in the history of cloud computing
+- The reviewer flagged this specifically because browser + Whisper + LLM together is exactly the kind of multi-component surface where pricing surprises hide
+
+Operator override: setting `maxRunCostCents` higher (or `null` for no limit) is a deliberate per-agent or per-subaccount config change, audit-logged. It is not adjustable from inside the LLM loop.
 
 ### 8.5 Unified retry / backoff abstraction (T21)
 
@@ -1546,7 +1657,18 @@ Once these are confirmed, implementation begins on D.
 
 The only true blocker from the review (T1, plaintext secrets in payload) is closed. All others are hardening that has been folded into the relevant section rather than carried as TODOs.
 
-### v3.2 (current) — third-round micro-tightenings
+### v3.3 (current, **final**) — fourth-round failure-proofing
+
+| # | Tightening | Section |
+|---|---|---|
+| T22 | Idempotent transcription cache keyed by `contentHash` (org-scoped). Retries after a post-Whisper failure pay for Whisper once, not N times. | §4.4.1 |
+| T23 | Run-level cost circuit breaker (`maxRunCostCents`, default $1.00). Hard termination on overage at every cost-incurring boundary. Audit-logged operator override only. | §8.4.1 |
+| T24 | Download stall guard: 10s no-progress abort, 10 KB/s minimum throughput, hard wall-clock cap. Stops corrupt partial downloads from passing T17 size check. | §6.7.2 |
+| T25 | End-of-run invariant assertion: before flipping `status = completed`, assert transcript + report + Slack post + deliverable + fingerprint all exist. Single non-bypassable gate using the standard `failure()` helper. | §8.4.2 |
+
+**Spec closed.** All architectural, security, operational, and edge-case feedback has been folded into enforced constraints. Total: 25 enforced tightenings across 4 review rounds.
+
+### v3.2 — third-round micro-tightenings
 
 | # | Tightening | Section |
 |---|---|---|
