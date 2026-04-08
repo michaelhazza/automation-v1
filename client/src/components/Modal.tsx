@@ -6,9 +6,10 @@ interface ModalProps {
   onClose: () => void;
   children: React.ReactNode;
   maxWidth?: number;
+  disableBackdropClose?: boolean;
 }
 
-export default function Modal({ title, onClose, children, maxWidth = 520 }: ModalProps) {
+export default function Modal({ title, onClose, children, maxWidth = 520, disableBackdropClose = false }: ModalProps) {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -19,7 +20,7 @@ export default function Modal({ title, onClose, children, maxWidth = 520 }: Moda
 
   return createPortal(
     <div
-      onClick={onClose}
+      onClick={disableBackdropClose ? undefined : onClose}
       className="fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6 animate-[fadeIn_0.15s_ease-out_both]"
     >
       <div
