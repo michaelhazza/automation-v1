@@ -89,3 +89,7 @@ export * from './accountOverrides';
 export * from './ieeRuns';
 export * from './ieeSteps';
 export * from './ieeArtifacts';
+
+// Playbooks — multi-step automation engine (migration 0076)
+export * from './playbookTemplates';
+export * from './playbookRuns';

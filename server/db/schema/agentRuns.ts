@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -98,6 +99,11 @@ export const agentRuns = pgTable(
     isSubAgent: boolean('is_sub_agent').notNull().default(false),
     parentSpawnRunId: uuid('parent_spawn_run_id'),
 
+    // Playbooks reverse link (migration 0076) — set when this agent run was
+    // dispatched by a Playbooks step. Engine reads this in onAgentRunCompleted
+    // to find the originating step run.
+    playbookStepRunId: uuid('playbook_step_run_id'),
+
     // Heartbeat — stale run detection (GSD-2 adoption)
     lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
     lastToolStartedAt: timestamp('last_tool_started_at', { withTimezone: true }),
@@ -126,6 +132,10 @@ export const agentRuns = pgTable(
     idempotencyKeyIdx: uniqueIndex('agent_runs_idempotency_key_idx').on(table.idempotencyKey),
     // Stale run cleanup query
     staleRunIdx: index('agent_runs_stale_run_idx').on(table.status, table.lastActivityAt),
+    // Playbooks reverse lookup (migration 0076)
+    playbookStepRunIdx: index('agent_runs_playbook_step_run_id_idx')
+      .on(table.playbookStepRunId)
+      .where(sql`${table.playbookStepRunId} IS NOT NULL`),
   })
 );
 

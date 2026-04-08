@@ -85,6 +85,9 @@ router.get(
     const { attachment, task } = await attachmentService.getAttachment(orgId, attachmentId);
 
     // Verify the user has access to the task's subaccount
+    if (!task.subaccountId) {
+      throw { statusCode: 404, message: 'Attachment not found' };
+    }
     await resolveSubaccount(task.subaccountId, orgId);
 
     const safeName = sanitiseFileName(attachment.fileName);

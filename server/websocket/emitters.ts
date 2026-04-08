@@ -112,6 +112,18 @@ export function emitSubaccountUpdate(
   emitToRoom(`subaccount:${subaccountId}`, event, subaccountId, data);
 }
 
+// ─── Playbook run events ──────────────────────────────────────────────────────
+// Spec: tasks/playbooks-spec.md §8.2. Per-run room with monotonic
+// sequence number plus a coarse subaccount-level event for dashboards.
+
+export function emitPlaybookRunUpdate(
+  runId: string,
+  event: string,
+  data: Record<string, unknown>
+): void {
+  emitToRoom(`playbook-run:${runId}`, event, runId, data);
+}
+
 // ─── Org-wide events ──────────────────────────────────────────────────────────
 
 export function emitOrgUpdate(

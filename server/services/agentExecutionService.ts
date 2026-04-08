@@ -139,6 +139,21 @@ export interface AgentRunRequest {
   orgAgentConfigId?: string;
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
+  /**
+   * Playbooks: when this agent run was dispatched by a Playbook step, the
+   * step run id is stamped onto agent_runs.playbook_step_run_id so the
+   * completion hook can route the result back to the engine.
+   * Spec tasks/playbooks-spec.md §5.2 / step 6 wiring.
+   */
+  playbookStepRunId?: string;
+  /**
+   * The principal that initiated this run, when known. Plumbed into the
+   * SkillExecutionContext so user-scoped tools (e.g. Playbook Studio
+   * propose_save) can enforce ownership without making downstream
+   * database lookups. Optional because system / scheduled runs have no
+   * initiating user. Review finding #3.
+   */
+  userId?: string;
 }
 
 export interface AgentRunResult {
@@ -241,6 +256,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
+        playbookStepRunId: request.playbookStepRunId ?? null,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
@@ -447,7 +463,7 @@ export const agentExecutionService = {
       try {
         const { mcpClientManager } = await import('./mcpClientManager.js');
         const mcp = await mcpClientManager.connectForRun({
-          runId,
+          runId: run.id,
           organisationId: request.organisationId,
           agentId: request.agentId,
           subaccountId: request.subaccountId ?? null,
@@ -459,10 +475,10 @@ export const agentExecutionService = {
           const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
           const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
           enhancedTools.push(...cappedTools);
-          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
+          logger.info('mcp.tools_loaded', { runId: run.id, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
         }
       } catch (err) {
-        logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        logger.warn('mcp.connect_failed', { runId: run.id, error: err instanceof Error ? err.message : String(err) });
         // Non-fatal — agent runs without MCP tools
       }
 
@@ -855,6 +871,20 @@ export const agentExecutionService = {
         totalToolCalls: loopResult.totalToolCalls, totalTokens: loopResult.totalTokens,
         tasksCreated: loopResult.tasksCreated, durationMs,
       });
+
+      // Playbooks: if this agent run was dispatched by a Playbook step, route
+      // its result back to the engine so the step run can be marked completed
+      // and the next tick fired. Hook is non-blocking — failures are logged
+      // and do not affect the agent run completion.
+      try {
+        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
+        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+          ok: true,
+          output: { summary: loopResult.summary ?? '' },
+        });
+      } catch (err) {
+        console.error('[AgentExecution] playbook hook failed (non-fatal)', err);
+      }
       if (isOrgRun) {
         emitOrgUpdate(request.organisationId, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: finalStatus,
@@ -949,6 +979,18 @@ export const agentExecutionService = {
       emitAgentRunUpdate(run.id, 'agent:run:failed', {
         status: 'failed', errorMessage, durationMs,
       });
+
+      // Playbooks: route the failure to the engine so the step run is marked
+      // failed and downstream failure-policy logic runs.
+      try {
+        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
+        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+          ok: false,
+          error: errorMessage,
+        });
+      } catch (hookErr) {
+        console.error('[AgentExecution] playbook hook failed (non-fatal)', hookErr);
+      }
       if (isOrgRun) {
         emitOrgUpdate(request.organisationId, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: 'failed',
@@ -1308,6 +1350,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             organisationId: request.organisationId,
             subaccountId: request.subaccountId ?? null,
             agentId: request.agentId,
+            userId: request.userId,
             orgProcesses,
             handoffDepth: request.handoffDepth,
             isSubAgent: request.isSubAgent,
