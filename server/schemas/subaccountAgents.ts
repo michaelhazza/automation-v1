@@ -14,7 +14,24 @@ const updateLinkBase = z.object({
   agentTitle: z.string().nullable(),
   heartbeatEnabled: z.boolean(),
   heartbeatIntervalHours: z.number().positive().nullable(),
-  heartbeatOffsetMinutes: z.number().nonnegative(),
+  heartbeatOffsetHours: z.number().nonnegative().int(),
+  heartbeatOffsetMinutes: z.number().nonnegative().int(),
+  concurrencyPolicy: z.enum(['skip_if_active', 'coalesce_if_active', 'always_enqueue']),
+  catchUpPolicy: z.enum(['skip_missed', 'enqueue_missed_with_cap']),
+  catchUpCap: z.number().int().nonnegative(),
+  maxConcurrentRuns: z.number().int().positive(),
+  // Schedule
+  scheduleCron: z.string().nullable(),
+  scheduleEnabled: z.boolean(),
+  scheduleTimezone: z.string().max(100),
+  // Skills, instructions, budget
+  skillSlugs: z.array(z.string()).nullable(),
+  customInstructions: z.string().max(10000).nullable(),
+  tokenBudgetPerRun: z.number().int().positive(),
+  maxToolCallsPerRun: z.number().int().positive(),
+  timeoutSeconds: z.number().int().positive(),
+  maxCostPerRunCents: z.number().int().nonnegative().nullable(),
+  maxLlmCallsPerRun: z.number().int().positive().nullable(),
 });
 export const updateLinkBody = updateLinkBase.partial().refine(
   obj => Object.keys(obj).length > 0,

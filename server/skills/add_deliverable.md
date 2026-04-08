@@ -2,6 +2,7 @@
 name: Add Deliverable
 description: Attach a deliverable (output/artifact) to a task.
 isActive: true
+visibility: basic
 ---
 
 ```json

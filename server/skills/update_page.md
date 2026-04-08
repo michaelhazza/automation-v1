@@ -2,6 +2,7 @@
 name: Update Page
 description: Update an existing page's HTML, meta, or form configuration.
 isActive: true
+visibility: basic
 ---
 
 ```json

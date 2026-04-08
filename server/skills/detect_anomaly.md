@@ -2,6 +2,7 @@
 name: Detect Anomaly
 description: Compare current metrics against historical baseline and flag significant deviations
 isActive: true
+visibility: basic
 ---
 
 ```json

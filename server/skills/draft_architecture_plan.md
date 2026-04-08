@@ -2,6 +2,7 @@
 name: Draft Architecture Plan
 description: Enforces plan-before-build discipline. Produces a structured architecture plan that the Dev Agent follows during implementation. Invoked on Standard, Significant, and Major classified tasks.
 isActive: true
+visibility: basic
 ---
 
 ```json

@@ -2,6 +2,7 @@
 name: Triage Intake
 description: Captures ideas, feature requests, and bugs into the task board. Operates in capture mode (fast intake) or triage mode (assess and route the untriaged backlog).
 isActive: true
+visibility: basic
 ---
 
 ```json

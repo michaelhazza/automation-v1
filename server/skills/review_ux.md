@@ -2,6 +2,7 @@
 name: Review UX
 description: Performs a UX review pass on tasks that produce user-facing UI changes. Catches UX issues before they reach the codebase.
 isActive: true
+visibility: basic
 ---
 
 ```json

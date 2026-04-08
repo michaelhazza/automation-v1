@@ -67,6 +67,7 @@ const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const HierarchyTemplatesPage = lazy(() => import('./pages/HierarchyTemplatesPage'));
 const ConnectorConfigsPage = lazy(() => import('./pages/ConnectorConfigsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
+const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 
 function PageLoader() {
   return (
@@ -183,6 +184,7 @@ export default function App() {
             <Route path="/admin/mcp-servers" element={<McpServersPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />

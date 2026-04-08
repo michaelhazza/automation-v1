@@ -7,10 +7,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "outDir": "../dist/server",
-    "rootDir": ".",
+    "outDir": "../dist",
+    "rootDir": "..",
     "allowSyntheticDefaultImports": true
   },
-  "include": ["./**/*.ts"],
+  "include": ["./**/*.ts", "../shared/**/*.ts"],
   "exclude": ["node_modules"]
 }

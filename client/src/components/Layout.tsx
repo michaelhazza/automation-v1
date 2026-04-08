@@ -661,7 +661,7 @@ export default function Layout({ user, children }: LayoutProps) {
                   to={`/agents/${a.agentId}`}
                   icon={a.agent.icon ? <span className="text-[13px] shrink-0 leading-none">{a.agent.icon}</span> : <Icons.agents />}
                   label={a.agent.name}
-                  manageTo={`/admin/agents/${a.agentId}`}
+                  manageTo={`/admin/subaccounts/${activeClientId}/agents/${a.id}/manage`}
                 />
               ))}
             </>

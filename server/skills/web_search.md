@@ -2,6 +2,7 @@
 name: Web Search
 description: Search the web for current information using Tavily AI search.
 isActive: true
+visibility: basic
 ---
 
 ```json
