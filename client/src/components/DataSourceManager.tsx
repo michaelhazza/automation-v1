@@ -170,27 +170,23 @@ export default function DataSourceManager({ scope, canEdit }: Props) {
           loadingMode: form.loadingMode,
         });
       } else if (form.sourceType === 'file_upload') {
-        // New file upload flow: upload file, then create source with returned storage path
+        // Atomic upload + create in one request — the server-side service
+        // method handles best-effort cleanup if the DB insert fails after
+        // the S3 upload succeeds. (pr-reviewer Major 4.)
         if (!pendingFile) {
           setError('Select a file to upload');
           return;
         }
         const fd = new FormData();
         fd.append('file', pendingFile);
-        const uploadRes = await api.post(`${baseUrl}/upload`, fd, {
+        fd.append('name', form.name);
+        if (form.description) fd.append('description', form.description);
+        fd.append('contentType', form.contentType);
+        fd.append('loadingMode', form.loadingMode);
+        fd.append('priority', String(form.priority));
+        fd.append('maxTokenBudget', String(form.maxTokenBudget));
+        await api.post(`${baseUrl}/upload`, fd, {
           headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        const { storagePath } = uploadRes.data;
-        await api.post(baseUrl, {
-          name: form.name,
-          description: form.description || undefined,
-          sourceType: 'file_upload',
-          sourcePath: storagePath,
-          contentType: form.contentType,
-          priority: form.priority,
-          maxTokenBudget: form.maxTokenBudget,
-          cacheMinutes: form.cacheMinutes,
-          loadingMode: form.loadingMode,
         });
       } else {
         // New URL-based source

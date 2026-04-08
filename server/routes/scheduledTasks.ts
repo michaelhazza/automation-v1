@@ -122,32 +122,15 @@ router.post(
   })
 );
 
-// ─── Reassignment preview (spec §7.6) ───────────────────────────────────────
-// Returns the cascade preview — how many data sources would move and which
-// would collide with the new agent's existing sources — without making any
-// DB changes. Used by the UI confirmation dialog when an operator changes
-// the assigned agent on a scheduled task with attached data sources.
-
-router.get(
-  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/reassignment-preview',
-  authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
-  asyncHandler(async (req, res) => {
-    const newAgentId = req.query.newAgentId;
-    if (typeof newAgentId !== 'string' || newAgentId.length === 0) {
-      res.status(400).json({ error: 'newAgentId query parameter is required' });
-      return;
-    }
-    const preview = await agentService.previewScheduledTaskReassignment(
-      req.params.stId,
-      newAgentId,
-      req.orgId!,
-    );
-    res.json(preview);
-  })
-);
-
 // ─── Scheduled task data sources (spec §9) ──────────────────────────────────
+//
+// NOTE: The cascade preview endpoint and the in-UI agent reassignment flow
+// (spec §7.6) are deferred to a follow-up. The backend cascade itself in
+// scheduledTaskService.update IS implemented and transactional — agent
+// reassignment via API or seed script will still cascade safely. What's
+// deferred is exposing it through the detail page edit form with a UI
+// confirmation dialog. Tracked for a follow-up that adds an agent picker
+// to the edit form. (pr-reviewer Blocker 5.)
 
 // List data sources for a scheduled task
 router.get(
@@ -163,7 +146,9 @@ router.get(
   })
 );
 
-// Upload a file as a data source
+// Upload a file AND create the data source row in one atomic call.
+// Multipart fields: `file` (the upload), `name`, `description?`,
+// `contentType?`, `loadingMode?`, `priority?`, `maxTokenBudget?`.
 router.post(
   '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/upload',
   authenticate,
@@ -175,10 +160,21 @@ router.post(
       res.status(400).json({ error: 'No file provided' });
       return;
     }
+    const body = req.body as Record<string, string | undefined>;
+    const name = body.name ?? files[0].originalname;
     const result = await agentService.uploadScheduledTaskDataSourceFile(
       req.params.stId,
       req.orgId!,
       files[0],
+      {
+        name,
+        description: body.description,
+        contentType: body.contentType as 'json' | 'csv' | 'markdown' | 'text' | 'auto' | undefined,
+        loadingMode: body.loadingMode as 'eager' | 'lazy' | undefined,
+        priority: body.priority !== undefined ? Number(body.priority) : undefined,
+        maxTokenBudget: body.maxTokenBudget !== undefined ? Number(body.maxTokenBudget) : undefined,
+      },
+      req.user?.id,
     );
     res.status(201).json(result);
   })
@@ -206,6 +202,7 @@ router.post(
         name, description, sourceType, sourcePath, sourceHeaders,
         contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
       },
+      req.user?.id,
     );
     res.status(201).json(result);
   })
@@ -223,6 +220,7 @@ router.patch(
       req.params.stId,
       req.orgId!,
       req.body,
+      req.user?.id,
     );
     res.json(result);
   })
@@ -238,6 +236,7 @@ router.delete(
       req.params.sourceId,
       req.params.stId,
       req.orgId!,
+      req.user?.id,
     );
     res.json({ success: true });
   })

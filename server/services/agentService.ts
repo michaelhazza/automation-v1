@@ -473,7 +473,15 @@ export async function fetchDataSourcesByScope(
 
     // Lazy sources: emit manifest entry only; do NOT fetch content upfront.
     // The read_data_source skill will call loadSourceContent on demand.
+    //
+    // Estimate sizeBytes from maxTokenBudget so the manifest's "~XKB" hint
+    // gives the agent a useful "should I bother reading this?" signal.
+    // The estimate uses ~4 chars/token (matching approxTokens) — it's a
+    // ceiling for the source, not the actual file size, but for the agent's
+    // decision-making "is this big enough to consume meaningful context?"
+    // it's the right heuristic. (pr-reviewer Major 2.)
     if (source.loadingMode === 'lazy') {
+      const estimatedSize = source.maxTokenBudget * 4;
       results.push({
         id: source.id,
         scope: resolvedScope,
@@ -482,7 +490,7 @@ export async function fetchDataSourcesByScope(
         content: '',
         contentType: source.contentType,
         tokenCount: 0,
-        sizeBytes: 0,
+        sizeBytes: estimatedSize,
         loadingMode: 'lazy',
         priority: source.priority,
         fetchOk: true,
@@ -1209,7 +1217,8 @@ export const agentService = {
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
-    }
+    },
+    actorUserId?: string
   ) {
     const st = await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
@@ -1241,6 +1250,22 @@ export const agentService = {
       dataSyncScheduler.schedule(source.id, source.cacheMinutes * 60 * 1000);
     }
 
+    // Audit event (spec §10.5 / pr-reviewer Blocker 3)
+    await auditService.log({
+      organisationId,
+      actorId: actorUserId,
+      actorType: actorUserId ? 'user' : 'system',
+      action: 'scheduled_task.data_source.created',
+      entityType: 'scheduled_task_data_source',
+      entityId: source.id,
+      metadata: {
+        scheduledTaskId,
+        name: source.name,
+        sourceType: source.sourceType,
+        loadingMode: source.loadingMode,
+      },
+    });
+
     return source;
   },
 
@@ -1259,7 +1284,8 @@ export const agentService = {
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
-    }>
+    }>,
+    actorUserId?: string
   ) {
     await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
@@ -1274,7 +1300,10 @@ export const agentService = {
       );
     if (!existing) throw { statusCode: 404, message: 'Data source not found' };
 
-    const update: Record<string, unknown> = { updatedAt: new Date() };
+    // Build the update payload as a properly-typed Drizzle partial.
+    // (pr-reviewer Major 1: previously cast to `never` which bypassed
+    // Drizzle's column type checking entirely.)
+    const update: Partial<typeof agentDataSources.$inferInsert> = { updatedAt: new Date() };
     if (data.name !== undefined) update.name = data.name;
     if (data.description !== undefined) update.description = data.description;
     if (data.sourcePath !== undefined) update.sourcePath = data.sourcePath;
@@ -1295,7 +1324,7 @@ export const agentService = {
 
     const [updated] = await db
       .update(agentDataSources)
-      .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
+      .set(update)
       .where(eq(agentDataSources.id, sourceId))
       .returning();
 
@@ -1305,13 +1334,29 @@ export const agentService = {
       dataSyncScheduler.cancel(updated.id);
     }
 
+    // Audit event (spec §10.5 / pr-reviewer Blocker 3)
+    await auditService.log({
+      organisationId,
+      actorId: actorUserId,
+      actorType: actorUserId ? 'user' : 'system',
+      action: 'scheduled_task.data_source.updated',
+      entityType: 'scheduled_task_data_source',
+      entityId: updated.id,
+      metadata: {
+        scheduledTaskId,
+        name: updated.name,
+        changedFields: Object.keys(data),
+      },
+    });
+
     return updated;
   },
 
   async deleteScheduledTaskDataSource(
     sourceId: string,
     scheduledTaskId: string,
-    organisationId: string
+    organisationId: string,
+    actorUserId?: string
   ) {
     await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
@@ -1330,6 +1375,22 @@ export const agentService = {
     dataSourceCache.delete(sourceId);
     lastGoodContentCache.delete(sourceId);
     await db.delete(agentDataSources).where(eq(agentDataSources.id, sourceId));
+
+    // Audit event (spec §10.5 / pr-reviewer Blocker 3)
+    await auditService.log({
+      organisationId,
+      actorId: actorUserId,
+      actorType: actorUserId ? 'user' : 'system',
+      action: 'scheduled_task.data_source.deleted',
+      entityType: 'scheduled_task_data_source',
+      entityId: sourceId,
+      metadata: {
+        scheduledTaskId,
+        name: existing.name,
+        sourceType: existing.sourceType,
+      },
+    });
+
     return { message: 'Data source removed' };
   },
 
@@ -1378,12 +1439,34 @@ export const agentService = {
     }
   },
 
+  /**
+   * Upload a file AND create the data source row in a single atomic call.
+   * Previously the route called this and then made a second request to
+   * `addScheduledTaskDataSource` — if the second request failed, the file
+   * would orphan in S3 indefinitely. Combining the two into one service
+   * method ensures that if the DB insert fails after the upload, we
+   * best-effort clean up the S3 object before propagating the error.
+   * (pr-reviewer Major 4.)
+   *
+   * Caller passes display metadata (name / description / contentType /
+   * loadingMode / priority) so the row matches what the operator
+   * intended in the upload form.
+   */
   async uploadScheduledTaskDataSourceFile(
     scheduledTaskId: string,
     organisationId: string,
-    file: Express.Multer.File
+    file: Express.Multer.File,
+    metadata: {
+      name: string;
+      description?: string;
+      contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
+      loadingMode?: 'eager' | 'lazy';
+      priority?: number;
+      maxTokenBudget?: number;
+    },
+    actorUserId?: string
   ) {
-    await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+    const st = await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
 
     const fileId = uuidv4();
     const storagePath = `scheduled-task-data-sources/${scheduledTaskId}/${fileId}-${file.originalname}`;
@@ -1396,65 +1479,68 @@ export const agentService = {
       ContentType: file.mimetype,
     }));
 
-    return { storagePath, fileName: file.originalname, mimeType: file.mimetype, fileSizeBytes: file.size };
-  },
+    // From here on, if anything fails we must best-effort delete the
+    // uploaded object so it doesn't orphan.
+    try {
+      const [source] = await db
+        .insert(agentDataSources)
+        .values({
+          agentId: st.assignedAgentId,
+          scheduledTaskId,
+          name: metadata.name,
+          description: metadata.description,
+          sourceType: 'file_upload',
+          sourcePath: storagePath,
+          contentType: metadata.contentType ?? 'auto',
+          syncMode: 'lazy', // file_upload is always static
+          loadingMode: metadata.loadingMode ?? 'eager',
+          priority: metadata.priority ?? 0,
+          maxTokenBudget: metadata.maxTokenBudget ?? 8000,
+          cacheMinutes: 60,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
 
-  /**
-   * Cascade preview for UI confirmation dialog when reassigning a scheduled
-   * task to a different agent. Returns the list of data source names that
-   * would collide (same normalised name) with the new agent's own
-   * agent-level sources. See spec §7.6.
-   */
-  async previewScheduledTaskReassignment(
-    scheduledTaskId: string,
-    newAgentId: string,
-    organisationId: string
-  ) {
-    await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+      await auditService.log({
+        organisationId,
+        actorId: actorUserId,
+        actorType: actorUserId ? 'user' : 'system',
+        action: 'scheduled_task.data_source.created',
+        entityType: 'scheduled_task_data_source',
+        entityId: source.id,
+        metadata: {
+          scheduledTaskId,
+          name: source.name,
+          sourceType: 'file_upload',
+          loadingMode: source.loadingMode,
+          fileName: file.originalname,
+          fileSizeBytes: file.size,
+        },
+      });
 
-    // Verify the new agent exists and belongs to this org
-    const [newAgent] = await db
-      .select()
-      .from(agents)
-      .where(
-        and(
-          eq(agents.id, newAgentId),
-          eq(agents.organisationId, organisationId),
-          isNull(agents.deletedAt),
-        )
-      );
-    if (!newAgent) throw { statusCode: 404, message: 'New agent not found' };
-
-    const taskSources = await db
-      .select({ name: agentDataSources.name })
-      .from(agentDataSources)
-      .where(eq(agentDataSources.scheduledTaskId, scheduledTaskId));
-
-    if (taskSources.length === 0) {
-      return { cascadedCount: 0, willOverrideNewAgentSources: [] };
+      return source;
+    } catch (err) {
+      // Best-effort cleanup — we don't want to fail the original error if
+      // the cleanup itself fails, so swallow any cleanup error and log it.
+      try {
+        const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+        await s3.send(new DeleteObjectCommand({ Bucket: getBucketName(), Key: storagePath }));
+      } catch (cleanupErr) {
+        console.error(
+          '[agentService] Failed to clean up orphaned upload after insert error:',
+          { storagePath, cleanupErr }
+        );
+      }
+      throw err;
     }
-
-    const newAgentOwnSources = await db
-      .select({ name: agentDataSources.name })
-      .from(agentDataSources)
-      .where(
-        and(
-          eq(agentDataSources.agentId, newAgentId),
-          isNull(agentDataSources.subaccountAgentId),
-          isNull(agentDataSources.scheduledTaskId),
-        )
-      );
-
-    const newAgentNames = new Set(
-      newAgentOwnSources.map(s => s.name.toLowerCase().trim())
-    );
-    const willOverrideNewAgentSources = taskSources
-      .map(s => s.name)
-      .filter(n => newAgentNames.has(n.toLowerCase().trim()));
-
-    return {
-      cascadedCount: taskSources.length,
-      willOverrideNewAgentSources,
-    };
   },
+
+  // Note: previewScheduledTaskReassignment was removed in the pr-reviewer
+  // hardening pass. The cascade itself in scheduledTaskService.update is
+  // implemented and transactional, but the UI flow that would have called
+  // this preview endpoint was deferred — there's no agent picker in the
+  // ScheduledTaskDetailPage edit form yet. When the agent reassignment UI
+  // lands, restore this method (it was a pure read with no side effects)
+  // and re-add the GET /reassignment-preview route in scheduledTasks.ts.
 };

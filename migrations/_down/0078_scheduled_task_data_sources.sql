@@ -1,5 +1,12 @@
 -- Reverse 0078_scheduled_task_data_sources.sql
 
+-- Permission backfill reversal — remove the grants and the key itself
+DELETE FROM permission_set_items
+  WHERE permission_key = 'org.scheduled_tasks.data_sources.manage';
+
+DELETE FROM permissions
+  WHERE key = 'org.scheduled_tasks.data_sources.manage';
+
 ALTER TABLE agent_runs DROP COLUMN IF EXISTS context_sources_snapshot;
 
 DROP INDEX IF EXISTS agent_data_sources_unique_per_scope_idx;

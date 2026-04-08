@@ -64,3 +64,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_data_sources_unique_per_scope_idx
 -- except for the optional safety-net truncated: true flip post-render.
 ALTER TABLE agent_runs
   ADD COLUMN IF NOT EXISTS context_sources_snapshot JSONB;
+
+-- ─── Permission backfill (spec §10.2 / pr-reviewer Blocker 4) ──────────────
+--
+-- Insert the new permission key into the global permissions table if it
+-- doesn't already exist, then grant it to every existing permission set
+-- that already grants `org.agents.edit`. Without this backfill, existing
+-- deployments would have the new key declared in the application code but
+-- not granted to anyone except org admins (who get it via the seeder's
+-- Object.values(ORG_PERMISSIONS) for fresh orgs), so the new data-source
+-- routes would 403 for everyone in production.
+
+INSERT INTO permissions (key, description, group_name)
+VALUES (
+  'org.scheduled_tasks.data_sources.manage',
+  'Manage data sources (reference files, URLs) attached to scheduled tasks',
+  'org.agents'
+)
+ON CONFLICT (key) DO NOTHING;
+
+INSERT INTO permission_set_items (permission_set_id, permission_key)
+SELECT psi.permission_set_id, 'org.scheduled_tasks.data_sources.manage'
+FROM permission_set_items psi
+WHERE psi.permission_key = 'org.agents.edit'
+  AND NOT EXISTS (
+    SELECT 1 FROM permission_set_items existing
+    WHERE existing.permission_set_id = psi.permission_set_id
+      AND existing.permission_key = 'org.scheduled_tasks.data_sources.manage'
+  );
