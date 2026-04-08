@@ -179,7 +179,8 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done |
-| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase review | After `pr-reviewer` on Significant and Major tasks |
+| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase **code** review | After `pr-reviewer` on Significant and Major tasks |
+| `spec-reviewer` | Codex review loop with Claude adjudication — for **spec documents**, not code. Classifies findings as mechanical / directional / ambiguous, auto-applies mechanical fixes, pauses for HITL on anything directional. Max 5 iterations, stops early on two consecutive mechanical-only rounds. Reads `docs/spec-context.md` as framing ground truth. | After a draft spec is written, before starting implementation against it |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
 
 ### Task Classification
@@ -211,9 +212,13 @@ Classify every task before starting:
 # Full pipeline for a planned feature
 "feature-coordinator: implement [feature name]"
 
-# Second-phase Codex loop (Significant and Major tasks only)
+# Second-phase Codex loop for CODE (Significant and Major tasks only)
 # Run AFTER pr-reviewer has fixed initial issues
 "dual-reviewer: [brief description of what was implemented]"
+
+# Spec review loop for SPEC DOCUMENTS (not code)
+# Run AFTER a draft spec is written, BEFORE implementing against it
+"spec-reviewer: review docs/path-to-spec.md"
 ```
 
 ### Independent review is not optional
@@ -223,6 +228,27 @@ For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marki
 For **Significant and Major tasks**, also invoke `dual-reviewer` after `pr-reviewer`. This runs up to three Codex review iterations with Claude adjudicating each recommendation — accepting valid issues, rejecting items that conflict with project conventions, and documenting the reasoning. When `dual-reviewer` finishes, the PR is ready to create.
 
 **Before creating any PR** — regardless of task size — always run `pr-reviewer` then `dual-reviewer` before creating the pull request. Do not create a PR without both reviewers having passed.
+
+### Spec review is the equivalent pipeline for spec documents
+
+When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code. The agent:
+
+- Reads `docs/spec-context.md` as framing ground truth before every run.
+- Runs up to **5** Codex review iterations (not 3 — specs need more rounds because they're denser).
+- Stops early on two consecutive mechanical-only rounds.
+- Classifies every finding as **mechanical**, **directional**, or **ambiguous**.
+- **Auto-applies mechanical findings** (contradictions, stale language, file inventory drift, sequencing bugs, under-specified contracts).
+- **Pauses for HITL** on directional or ambiguous findings (scope changes, phase re-ordering, testing posture changes, rollout posture changes, architecture changes, anything that would invalidate a baked-in framing assumption).
+- Writes checkpoint files at `tasks/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md` when HITL is needed. The human edits the checkpoint's `Decision:` lines and re-invokes the agent to resume.
+
+**Directional findings are never auto-applied, even if the recommendation looks obviously correct.** The classifier biases aggressively toward HITL — a false positive costs 30 seconds of reading; a false negative costs a wrong-shaped spec and a re-review round.
+
+**When to invoke `spec-reviewer`:**
+
+- After writing any non-trivial spec document
+- Before starting implementation against a spec
+- After a major edit to an existing spec (e.g. incorporating feedback from a stakeholder)
+- NOT for trivial doc updates (typos, one-line clarifications) — just edit and move on
 
 ---
 
