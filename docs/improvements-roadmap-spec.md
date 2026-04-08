@@ -66,11 +66,41 @@ Every item in this spec that touches agent runs, pg-boss jobs, tool dispatch, or
 
 **Checkpoint boundary semantics:**
 
-- The checkpoint from P2.1 is written **after** an iteration completes its full side-effect sequence, **not** per tool. One checkpoint per iteration.
-- "Iteration" is defined as: LLM call → zero or more tool calls executed sequentially → full response recorded in `agent_run_messages`.
-- If the process crashes **between** a tool call completing and the checkpoint being persisted, resume replays the iteration from the beginning of the tool-call loop. The handler's idempotency guarantees the side effect doesn't duplicate. The checkpoint's job is to advance the loop cursor, NOT to prevent tool re-execution.
-- If the process crashes **after** the checkpoint is persisted but **before** the next iteration begins, resume starts cleanly at the next iteration with no replay.
-- The race window between side-effect completion and checkpoint persistence is small (milliseconds) but real. It is handled by the handler's idempotency, not by tightening the window.
+This was ambiguous in earlier drafts and has been resolved explicitly.
+
+**Terminology, stated once:**
+
+- **"Loop iteration"** (the outer level) = one full pass of the agentic loop: an LLM call returns with zero or more tool calls in its response; all those tool calls are then executed sequentially; then the loop advances to the next LLM call. This is the `iteration` counter in `runAgenticLoop()` at `agentExecutionService.ts:1291`.
+- **"Tool call"** (the inner level) = a single tool invocation within an iteration. An iteration may contain multiple tool calls if the LLM's response emits several at once.
+
+**The authoritative rule: the checkpoint is written after every completed tool call, not once per iteration.**
+
+This is finer-grained than "per iteration" and it is the correct choice because an LLM response that emits 5 tool calls in a single iteration would otherwise replay all 5 on resume, relying entirely on handler idempotency to prevent duplicate side effects. Per-tool-call checkpointing tightens the replay window to a single tool call — idempotency still matters (the race between tool completion and checkpoint persistence is real), but the blast radius of the race is strictly smaller.
+
+**Concrete sequence within an iteration:**
+
+```
+LLM call emits tool calls [A, B, C]
+Execute A
+  ↳ checkpoint: { iteration: N, lastCompletedToolCallId: A.id, messageCursor: ... }
+Execute B
+  ↳ checkpoint: { iteration: N, lastCompletedToolCallId: B.id, messageCursor: ... }
+Execute C
+  ↳ checkpoint: { iteration: N, lastCompletedToolCallId: C.id, messageCursor: ... }
+Advance to iteration N+1
+  ↳ next LLM call
+```
+
+**Resume behaviour:**
+
+- Crash **between** tool A completing and its checkpoint write → resume replays A. A is idempotent, so no duplicate side effect. Then executes B and C normally.
+- Crash **after** tool A's checkpoint write, **before** tool B starts → resume skips A (already done per checkpoint), starts at B. No replay.
+- Crash **mid-tool-call B** (B's handler is partway through its work) → resume replays B. B is idempotent, so no duplicate side effect. Then executes C.
+- Crash **after tool C completes** and its checkpoint is persisted, before the next LLM call → resume skips A, B, C, starts the next iteration's LLM call.
+
+**The race window between tool completion and checkpoint persistence is narrow (milliseconds) but real.** It is handled by the handler's idempotency, not by tightening the window. Shrinking per-iteration checkpointing to per-tool-call does not eliminate the race — it only narrows the replay scope when the race fires.
+
+**Why not write the checkpoint transactionally with the tool's side effect?** Because many side effects are to systems outside Postgres (third-party APIs, webhooks, email providers, GHL) and cannot participate in a Postgres transaction. The fundamental constraint is distributed commit, not Drizzle's transaction API.
 
 ### Required of every new action handler added by this roadmap
 
@@ -949,7 +979,7 @@ Adding the new `agent_run_messages` table creates an overlap: `toolCallsLog` con
 | Column / table | Holds | Write frequency | Lifecycle |
 |---|---|---|---|
 | `agent_run_messages` (new table) | Full conversation including tool calls + tool results | Append-only, once per message | Authoritative for new runs; RLS-protected (see "Sprint sequencing" below) |
-| `agent_run_snapshots.checkpoint` (new column) | Pointers only: iteration, messageCursor, counters, resume token, configVersion hash | Updated ~once per iteration, ~500 bytes bounded | New; required for resume |
+| `agent_run_snapshots.checkpoint` (new column) | Pointers only: iteration, messageCursor, counters, resume token, configVersion hash, lastCompletedToolCallId | Updated **once per completed tool call** (not once per iteration — see Execution Model section), ~500 bytes bounded | New; required for resume |
 | `agent_run_snapshots.toolCallsLog` (existing column) | **Deprecated.** Derived tool-call subset written once at run completion for backward-compatible UI reads | Once at run completion | Legacy; removed in a follow-up ticket after the debug UI migrates |
 
 The revised design splits the concern into three pieces:
@@ -1175,13 +1205,17 @@ A new entry point `resumeAgentRun(runId, { useLatestConfig = false } = {})` that
 6. Calls `runAgenticLoop()` with `startingIteration: checkpoint.iteration + 1` and the rehydrated messages.
 7. The loop continues from where it left off.
 
-#### One-side-effect-per-iteration rule (LangGraph)
+#### Per-tool-call checkpoint rule (LangGraph-inspired)
 
-The book's caveat: on resume, the iteration that wrote the checkpoint may have re-run partially. For tools with side effects, this creates double-execution risk.
+This is the rule that implements the Execution Model section's "checkpoint per completed tool call" semantics inside `runAgenticLoop`.
 
-The rule: **every iteration commits a single completed tool call before checkpointing**. If an iteration produces multiple tool calls in one LLM response, they execute one at a time, each followed by a checkpoint write. Resume always restarts the *next* iteration, never re-runs a completed tool call.
+The rule: **an iteration's inner tool-call loop executes one tool call, writes a checkpoint including `lastCompletedToolCallId`, executes the next tool call, writes another checkpoint, and so on until all tool calls from the current LLM response are done.** Then the loop advances to the next LLM call.
 
-This is a meaningful change to `runAgenticLoop()`. Today (line 1495) the loop iterates over all tool calls in a single response in a tight `for` loop. After P2.1, that loop becomes: execute one, checkpoint, execute next, checkpoint, ...
+This is a meaningful change to `runAgenticLoop()`. Today (line 1495) the loop iterates over all tool calls in a single LLM response in a tight `for` loop without checkpointing between them. After P2.1, that loop becomes: execute one, checkpoint, execute next, checkpoint, ... until all are done, then the next iteration's LLM call runs.
+
+**Resume correctness property:** given a checkpoint with `lastCompletedToolCallId = X`, the resume path skips all tool calls in the current LLM response up to and including X, then executes the next one. This guarantees no completed tool call is re-executed on resume from a clean checkpoint.
+
+**The race window** (tool completes → crash → checkpoint not persisted) is still real and still handled by the handler's declared `idempotencyStrategy`, exactly as specified in the Execution Model section. This rule narrows the window's blast radius but does not eliminate it.
 
 #### How HITL becomes async
 
@@ -1237,7 +1271,7 @@ Once Sprint 2 lands, P2.1 is a single-sprint item:
 
 1. Migration 0084 adds the `checkpoint jsonb` column to `agent_run_snapshots` **and** creates `agent_run_messages` with its RLS policy in the same SQL file. `rlsProtectedTables.ts` manifest appended in the same commit. Down-migration at `migrations/_down/0084_*.sql`.
 2. `agentRunMessageService` shipped first — `runAgenticLoop` cannot start writing messages until the service exists.
-3. `persistCheckpoint()` writes after each iteration (throttled to match the existing heartbeat). Writes only the lightweight checkpoint — messages already went into `agent_run_messages` via the service.
+3. `persistCheckpoint()` writes **after each completed tool call** (per the authoritative rule in the Execution Model section). The call is throttled by coalescing multiple tool calls within the same millisecond into a single write — in practice tool calls take longer than that, so the throttle is rarely relevant. Writes only the lightweight checkpoint — messages already went into `agent_run_messages` via the service.
 4. `resumeAgentRun()` reads the checkpoint, streams messages from `agent_run_messages` where `sequence_number <= checkpoint.messageCursor`, reconstructs `LoopParams`.
 5. Inner tool-call loop refactored to one-at-a-time execution.
 6. `hitlService` refactored from blocking-wait to enqueue-on-decide (new `agent-run-resume` pg-boss job with `singletonKey: 'run:${runId}'`).
@@ -2547,14 +2581,22 @@ Total new unit test files: **11**. All are small, pure-logic, and stable.
 |---|---|---|
 | 1 | `verify-action-registry-zod.sh` | Every `ACTION_REGISTRY` entry uses Zod, none uses legacy `ParameterSchema` shape. |
 | 1 | `verify-pure-helper-convention.sh` | Every `*.test.ts` file has a sibling `*Pure.ts` import. |
-| 2 | `verify-rls-coverage.sh` | Every protected table (list from P1.1) has a `CREATE POLICY` in `migrations/`. |
+| 1 | `verify-idempotency-strategy-declared.sh` | Every `ACTION_REGISTRY` entry declares `idempotencyStrategy: 'read_only' \| 'keyed_write' \| 'locked'` (enforces the Execution Model contract). |
+| 2 | `verify-rls-coverage.sh` | Every protected table in `rlsProtectedTables.ts` has a `CREATE POLICY` in `migrations/`. |
+| 2 | `verify-rls-contract-compliance.sh` | No raw `db.select(...)` / `db.insert(...)` calls outside services or outside the ALS wrapper. Enforces Layer A of the RLS execution contract. |
 | 2 | `verify-scope-assertion-callsites.sh` | Every known retrieval boundary calls `assertScope()` or is on an explicit allowlist. |
 | 2 | `verify-pretool-middleware-registered.sh` | `proposeAction` is no longer called from per-case blocks in `skillExecutor.ts` — it lives in the `preTool` middleware only. |
+| 2 | `verify-job-idempotency-keys.sh` | Every new `boss.send('...')` call includes a `singletonKey` option. Enforces the job idempotency contract. |
 | 3 | `verify-reflection-middleware-registered.sh` | `reflectionLoopMiddleware` is in `pipeline.postTool`. |
+| 3 | `verify-middleware-state-serialised.sh` | Every field on `MiddlewareContext` has a matching field on `SerialisableMiddlewareContext` (or is marked `// ephemeral:`). Enforces Rule 2 of the checkpoint persistence contract. |
+| 3 | `verify-run-state-source-of-truth.sh` | No new code reads `agent_run_snapshots.toolCallsLog` directly except the one allow-listed debug UI file. Prevents drift during the `toolCallsLog` deprecation window. |
 | 4 | `verify-playbook-run-mode-enforced.sh` | `playbookEngineService` branches on `runMode` per tick. |
 | 5 | `verify-critique-gate-shadow-only.sh` | `CRITIQUE_GATE_SHADOW_MODE = true` and no callsite routes based on gate result. |
+| 5 | `verify-confidence-escape-hatch-wired.sh` | The `preTool` middleware contains the escape-hatch branch, `MIN_TOOL_ACTION_CONFIDENCE` is declared in `limits.ts`, and `blocked_by: 'low_confidence'` is in the `ask_clarifying_question` schema. |
 
-Total new static gates: **8**. Each is <30 lines of bash, checks one structural invariant, near-zero maintenance.
+Total new static gates: **14**. Each is <30 lines of bash, checks one structural invariant, near-zero maintenance.
+
+The gate count grew from the initial "8" count as later spec iterations added cross-cutting contracts (Execution Model, RLS execution contract, middleware persistence contract, tool-confidence escape hatch). Each added contract brought its own enforcement gate — which is why gates are the right primary investment: they're cheap to add and each one prevents a specific class of regression.
 
 **The one runtime smoke test:**
 
@@ -2695,7 +2737,7 @@ Every scheduled item in one place. Each sprint is a coherent chunk of work that 
 | 13 | P2.3 Slice A | `tool_intent` convention in agent prompt template + `extractToolIntentConfidence()` pure helper. |
 | 14 | P2.3 Slice B | Migration 0085 adds `confidence_threshold` + `guidance_text` to `policy_rules`. Confidence upgrade logic in `policyEngineService.evaluatePolicy()`. |
 | 15 | P2.3 Slice C | `getDecisionTimeGuidance()` in the policy engine. `preTool` middleware injects guidance as `<system-reminder>` blocks. |
-| 16 | P2.1 | Migration 0084 adds `checkpoint` column to `agent_run_snapshots`. `persistCheckpoint()` after each iteration. `resumeAgentRun()` for crash recovery. Inner tool-call loop refactored to one-at-a-time. `hitlService` refactored from blocking-wait to enqueue-on-decide. New `agent-run-resume` pg-boss job. |
+| 16 | P2.1 | Migration 0084 adds `checkpoint` column to `agent_run_snapshots` **and** creates `agent_run_messages` with RLS policy in the same SQL file. `persistCheckpoint()` writes after **each completed tool call** (per-tool-call, not per-iteration — see Execution Model section). `resumeAgentRun()` uses `configSnapshot` by default, live config via audited admin override only. Inner tool-call loop refactored to one-at-a-time with per-tool checkpoint writes. `hitlService` refactored from blocking-wait to enqueue-on-decide. New `agent-run-resume` pg-boss job with `singletonKey: 'run:${runId}'`. `SerialisableMiddlewareContext` shipped with `middlewareVersion: 1` (bumped to 2 when P2.2 lands). |
 
 **Sprint 3 gate:** Kill an agent run mid-iteration, restart, resume produces byte-equivalent output to an uninterrupted run. Reflection loop blocks a malformed `write_patch` in a unit test. Confidence < 0.7 upgrades an auto decision to review.
 

@@ -241,7 +241,7 @@ Things to still **not** build even in Phase 2:
 
 This section is the actionable checklist for whoever picks up the "flesh out testing" ticket. It is scoped to the current-phase posture only — Phase 2 items are not included because they shouldn't be built yet.
 
-### A. New static gate scripts (8 total)
+### A. New static gate scripts (14 total)
 
 Each is a new file in `scripts/verify-*.sh`, wired into `scripts/run-all-gates.sh`. Each is <30 lines of bash, single-purpose, grep-based.
 
@@ -249,14 +249,22 @@ Each is a new file in `scripts/verify-*.sh`, wired into `scripts/run-all-gates.s
 |---|---|---|---|
 | A1 | `verify-action-registry-zod.sh` | 1 | Every entry in `server/config/actionRegistry.ts` uses Zod (`z.object`), none uses the legacy `ParameterSchema` interface shape. |
 | A2 | `verify-pure-helper-convention.sh` | 1 | For every `*.test.ts` file in `**/__tests__/`, assert a sibling `*Pure.ts` file exists and is imported. Prevents drift from the convention. |
-| A3 | `verify-rls-coverage.sh` | 2 | For every protected table (see P1.1 list below), assert a `CREATE POLICY` statement exists in `migrations/*.sql`. Fails CI if a new protected table is added without an RLS policy. |
-| A4 | `verify-scope-assertion-callsites.sh` | 2 | For every known retrieval boundary (runContextLoader, workspaceMemoryService, taskAttachmentContextService, etc.), assert the file contains a call to `assertScope(`. Prevents new retrieval code from skipping the assertion. |
-| A5 | `verify-pretool-middleware-registered.sh` | 2 | Assert `actionService.proposeAction` is called from exactly one place — the `preTool` middleware in `agentExecutionService.ts`. Fails if any per-case callsite reappears in `skillExecutor.ts`. |
-| A6 | `verify-reflection-middleware-registered.sh` | 3 | Assert `reflectionLoopMiddleware` is registered in `pipeline.postTool` in `agentExecutionService.ts`. |
-| A7 | `verify-playbook-run-mode-enforced.sh` | 4 | Assert `playbookEngineService` branches on `runMode` per tick — grep for the four mode constants (`auto`, `supervised`, `background`, `bulk`). |
-| A8 | `verify-critique-gate-shadow-only.sh` | 5 | Assert `CRITIQUE_GATE_SHADOW_MODE = true` in `limits.ts` AND no callsite in `agentExecutionService.ts` routes agent behaviour based on the gate result (gate writes telemetry only). |
+| A3 | `verify-idempotency-strategy-declared.sh` | 1 | Every `ACTION_REGISTRY` entry declares `idempotencyStrategy: 'read_only' \| 'keyed_write' \| 'locked'`. Enforces the Execution Model contract (every side-effecting handler must declare how it stays safe under retry). |
+| A4 | `verify-rls-coverage.sh` | 2 | For every protected table listed in `server/config/rlsProtectedTables.ts`, assert a `CREATE POLICY` statement exists in `migrations/*.sql`. Fails CI if a new protected table is added without an RLS policy. |
+| A5 | `verify-rls-contract-compliance.sh` | 2 | No raw `db.select(...)` / `db.insert(...)` calls exist outside services or outside the ALS wrapper. Enforces Layer A of the RLS execution contract. |
+| A6 | `verify-scope-assertion-callsites.sh` | 2 | For every known retrieval boundary (runContextLoader, workspaceMemoryService, taskAttachmentContextService, etc.), assert the file contains a call to `assertScope(`. Prevents new retrieval code from skipping the assertion. |
+| A7 | `verify-pretool-middleware-registered.sh` | 2 | Assert `actionService.proposeAction` is called from exactly one place — the `preTool` middleware in `agentExecutionService.ts`. Fails if any per-case callsite reappears in `skillExecutor.ts`. |
+| A8 | `verify-job-idempotency-keys.sh` | 2 | Every new `boss.send('...')` call includes a `singletonKey` option. Enforces the job idempotency contract from the cross-cutting idempotency section. |
+| A9 | `verify-reflection-middleware-registered.sh` | 3 | Assert `reflectionLoopMiddleware` is registered in `pipeline.postTool` in `agentExecutionService.ts`. |
+| A10 | `verify-middleware-state-serialised.sh` | 3 | Assert every field on the `MiddlewareContext` runtime type has a matching field on `SerialisableMiddlewareContext` (or is marked `// ephemeral:` with a comment). Enforces Rule 2 of the checkpoint persistence contract — no middleware state is recomputed on resume. |
+| A11 | `verify-run-state-source-of-truth.sh` | 3 | No new code reads `agent_run_snapshots.toolCallsLog` directly except the one allow-listed debug UI file. Prevents drift between `toolCallsLog` and `agent_run_messages` during the deprecation window. |
+| A12 | `verify-playbook-run-mode-enforced.sh` | 4 | Assert `playbookEngineService` branches on `runMode` per tick — grep for the four mode constants (`auto`, `supervised`, `background`, `bulk`). |
+| A13 | `verify-critique-gate-shadow-only.sh` | 5 | Assert `CRITIQUE_GATE_SHADOW_MODE = true` in `limits.ts` AND no callsite in `agentExecutionService.ts` routes agent behaviour based on the gate result (gate writes telemetry only). |
+| A14 | `verify-confidence-escape-hatch-wired.sh` | 5 | Assert the `preTool` middleware contains the confidence escape-hatch branch, `MIN_TOOL_ACTION_CONFIDENCE` is declared in `limits.ts`, and `blocked_by: 'low_confidence'` is in the `ask_clarifying_question` skill's parameter schema. |
 
-**Protected tables list for A3:** `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `task_activities`, `task_deliverables`, `audit_events`.
+**Protected tables list for A4** (derived from `server/config/rlsProtectedTables.ts` manifest, maintained per the "RLS policy ships with CREATE TABLE" rule): `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `agent_run_messages`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `task_activities`, `task_deliverables`, `audit_events`, `tool_call_security_events`, `regression_cases`, `memory_blocks`, `memory_block_attachments`.
+
+The list grew from 11 to 16 across the roadmap. New protected tables added in later sprints (`agent_run_messages`, `tool_call_security_events`, `regression_cases`, `memory_blocks`, `memory_block_attachments`) each ship their RLS policy atomically with their CREATE TABLE per the sequencing rule in P2.1.
 
 ### B. New runtime unit test files (11 total)
 
@@ -345,15 +353,16 @@ Additional candidates (not counted in the 11 but worth adding if the implementer
 
 | Kind | Count |
 |---|---|
-| New static gates | 8 |
+| New static gates | 14 |
 | New unit test files | 11 |
+| New integration tests (I1-I3) | 3 |
 | New smoke tests | 1 |
 | New fixture files | ~10 |
 | New bash runners | 1 (`run-all-unit-tests.sh`) |
 | New npm scripts | 1 (`test:unit`) |
 | P1.2 regression capture (passive, grows with usage) | 1 pipeline |
 
-**Total new files in the testing layer:** ~32. All follow existing conventions. No new frameworks. No new dependencies beyond what's already in `package.json`.
+**Total new files in the testing layer:** ~41 (14 gates + 11 unit tests + 3 integration tests + 1 smoke test + ~10 fixtures + 1 bash runner + 1 npm script change). All follow existing conventions. No new frameworks. No new dependencies beyond what's already in `package.json`.
 
 ---
 
