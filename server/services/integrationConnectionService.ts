@@ -313,14 +313,20 @@ export const integrationConnectionService = {
       conditions.push(isNull(integrationConnections.label));
     }
 
-    const [existing] = await db.select({ id: integrationConnections.id })
+    const [existing] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
       .from(integrationConnections)
       .where(and(...conditions))
       .limit(1);
 
     if (existing) {
+      // Merge scopes into existing configJson to preserve operator-set fields
+      // (e.g. Slack defaultChannel) that the provider does not re-send on reconnect.
+      const mergedConfigJson = {
+        ...(existing.configJson as Record<string, unknown> | null ?? {}),
+        scopes: params.scopes,
+      };
       await db.update(integrationConnections)
-        .set(updateSet)
+        .set({ ...updateSet, configJson: mergedConfigJson })
         .where(eq(integrationConnections.id, existing.id));
     } else {
       try {
@@ -330,13 +336,17 @@ export const integrationConnectionService = {
         const isUniqueViolation = (err as { code?: string }).code === '23505';
         if (isUniqueViolation) {
           // Re-query and update the row that won the race
-          const [raceWinner] = await db.select({ id: integrationConnections.id })
+          const [raceWinner] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
             .from(integrationConnections)
             .where(and(...conditions))
             .limit(1);
           if (raceWinner) {
+            const mergedConfigJson = {
+              ...(raceWinner.configJson as Record<string, unknown> | null ?? {}),
+              scopes: params.scopes,
+            };
             await db.update(integrationConnections)
-              .set(updateSet)
+              .set({ ...updateSet, configJson: mergedConfigJson })
               .where(eq(integrationConnections.id, raceWinner.id));
           }
         } else {

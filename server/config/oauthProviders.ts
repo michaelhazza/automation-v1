@@ -44,7 +44,9 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   slack: {
     authUrl: 'https://slack.com/oauth/v2/authorize',
     tokenUrl: 'https://slack.com/api/oauth.v2.access',
-    scopes: ['chat:write', 'channels:read', 'users:read'],
+    // chat:write.public — post to channels the bot hasn't been invited to
+    // files:write       — attach report files
+    scopes: ['chat:write', 'chat:write.public', 'channels:read', 'users:read', 'files:write'],
   },
 
   ghl: {

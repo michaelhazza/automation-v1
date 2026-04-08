@@ -7,11 +7,9 @@
 
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
-import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
-import { db } from '../db/index.js';
-import { subaccounts } from '../db/schema/index.js';
 import { authenticate, checkOrgPermission } from '../middleware/auth.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { OAUTH_PROVIDERS, getProviderClientId, getProviderClientSecret } from '../config/oauthProviders.js';
@@ -30,10 +28,11 @@ router.get(
   '/api/integrations/oauth2/auth-url',
   authenticate,
   asyncHandler(async (req, res) => {
-    const { provider, subaccountId, scope: connectionScope } = req.query as {
+    const { provider, subaccountId, scope: connectionScope, returnPath } = req.query as {
       provider: string;
       subaccountId?: string;
       scope?: string;
+      returnPath?: string;
     };
 
     const isOrgLevel = connectionScope === 'org';
@@ -66,30 +65,32 @@ router.get(
     }
 
     // For subaccount-scoped connections, verify the subaccount belongs to the org
+    // (also filters soft-deleted subaccounts via resolveSubaccount)
     if (subaccountId && !isOrgLevel) {
-      const [subaccount] = await db
-        .select({ id: subaccounts.id })
-        .from(subaccounts)
-        .where(
-          and(
-            eq(subaccounts.id, subaccountId),
-            eq(subaccounts.organisationId, req.orgId!),
-          ),
-        )
-        .limit(1);
-
-      if (!subaccount) {
-        throw Object.assign(new Error('Subaccount not found'), { statusCode: 404 });
-      }
+      await resolveSubaccount(subaccountId, req.orgId!);
     }
 
-    // State JWT: signed nonce binding provider + scope + orgId for CSRF protection
+    // State JWT: signed nonce binding provider + scope + orgId for CSRF protection.
+    // returnPath is the client-supplied path to redirect to after the callback
+    // (e.g. /admin/subaccounts/:id/connections). Validated to be a relative path only.
+    // Validate returnPath is a relative path to prevent open redirect.
+    // Allow alphanumeric, slashes, hyphens, underscores, dots — but reject
+    // path traversal (..) and anything that could form a protocol-relative URL (//).
+    const safeReturnPath =
+      returnPath &&
+      /^\/[a-zA-Z0-9/._-]*$/.test(returnPath) &&
+      !returnPath.includes('..') &&
+      !returnPath.startsWith('//')
+        ? returnPath
+        : null;
+
     const state = jwt.sign(
       {
         provider,
         subaccountId: isOrgLevel ? null : subaccountId,
         organisationId: req.orgId!,
         connectionScope: isOrgLevel ? 'org' : 'subaccount',
+        returnPath: safeReturnPath,
         nonce: crypto.randomUUID(),
       },
       env.JWT_SECRET,
@@ -129,16 +130,28 @@ router.get(
 
     const appBase = env.APP_BASE_URL;
 
-    // Provider signalled an error (e.g. user denied consent)
+    // Provider signalled an error (e.g. user denied consent).
+    // OAuth providers include the state parameter in error responses, so attempt
+    // to decode it to recover returnPath and send the user back to the origin page.
     if (oauthError) {
-      return res.redirect(`${appBase}/settings/integrations?error=${encodeURIComponent(oauthError)}`);
+      let errorReturnPath: string | null = null;
+      if (state) {
+        try {
+          const errorPayload = jwt.verify(state, env.JWT_SECRET) as { returnPath?: string | null };
+          errorReturnPath = errorPayload.returnPath ?? null;
+        } catch {
+          // State invalid or expired — fall back to default
+        }
+      }
+      const errorBase = errorReturnPath ?? '/settings/integrations';
+      return res.redirect(`${appBase}${errorBase}?error=${encodeURIComponent(oauthError)}`);
     }
 
     if (!code || !state) {
       return res.redirect(`${appBase}/settings/integrations?error=missing_params`);
     }
 
-    let payload: { provider: string; subaccountId: string | null; organisationId: string; connectionScope?: string };
+    let payload: { provider: string; subaccountId: string | null; organisationId: string; connectionScope?: string; returnPath?: string | null };
     try {
       payload = jwt.verify(state, env.JWT_SECRET) as typeof payload;
     } catch {
@@ -147,15 +160,18 @@ router.get(
 
     const { provider, subaccountId, organisationId } = payload;
     const isOrgLevel = payload.connectionScope === 'org';
+    const redirectBase = payload.returnPath
+      || (isOrgLevel ? '/settings/org-connections' : '/settings/integrations');
+
     const config = OAUTH_PROVIDERS[provider];
     if (!config) {
-      return res.redirect(`${appBase}/settings/integrations?error=unknown_provider`);
+      return res.redirect(`${appBase}${redirectBase}?error=unknown_provider`);
     }
 
     const clientId = getProviderClientId(provider);
     const clientSecret = getProviderClientSecret(provider);
     if (!clientId || !clientSecret) {
-      return res.redirect(`${appBase}/settings/integrations?error=provider_not_configured`);
+      return res.redirect(`${appBase}${redirectBase}?error=provider_not_configured`);
     }
 
     // Exchange authorization code for tokens
@@ -189,13 +205,13 @@ router.get(
       if (!tokenResponse.ok) {
         const errText = await tokenResponse.text().catch(() => tokenResponse.statusText);
         console.error(`[OAuth] Token exchange failed for ${provider}:`, errText);
-        return res.redirect(`${appBase}/settings/integrations?error=token_exchange_failed`);
+        return res.redirect(`${appBase}${redirectBase}?error=token_exchange_failed`);
       }
 
       tokenData = await tokenResponse.json();
     } catch (err) {
       console.error(`[OAuth] Token exchange error for ${provider}:`, err);
-      return res.redirect(`${appBase}/settings/integrations?error=token_exchange_error`);
+      return res.redirect(`${appBase}${redirectBase}?error=token_exchange_error`);
     }
 
     const claimedAt = Math.floor(Date.now() / 1000);
@@ -219,11 +235,9 @@ router.get(
       });
     } catch (err) {
       console.error(`[OAuth] Failed to store ${provider} connection:`, err);
-      const redirectBase = isOrgLevel ? '/settings/org-connections' : '/settings/integrations';
       return res.redirect(`${appBase}${redirectBase}?error=storage_failed`);
     }
 
-    const redirectBase = isOrgLevel ? '/settings/org-connections' : '/settings/integrations';
     return res.redirect(`${appBase}${redirectBase}?connected=${provider}`);
   }),
 );
