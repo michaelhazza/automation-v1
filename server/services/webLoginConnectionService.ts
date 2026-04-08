@@ -196,12 +196,17 @@ export const webLoginConnectionService = {
       displayName?: string;
       config?: WebLoginConfigInput;
       password?: string;
+      connectionStatus?: 'active' | 'error';
     },
   ) {
     const scopeConditions = [
       eq(integrationConnections.id, id),
       eq(integrationConnections.organisationId, organisationId),
       eq(integrationConnections.providerType, 'web_login'),
+      // Revoked connections cannot be updated — revoke() is a one-way operation
+      // that clears the password. Allowing updates on revoked rows could create
+      // an 'active' connection with no secretsRef.
+      ne(integrationConnections.connectionStatus, 'revoked'),
     ];
     if (subaccountId === null) {
       scopeConditions.push(isNull(integrationConnections.subaccountId));
@@ -227,6 +232,9 @@ export const webLoginConnectionService = {
     }
     if (patch.password) {
       updates.secretsRef = connectionTokenService.encryptToken(patch.password);
+    }
+    if (patch.connectionStatus !== undefined) {
+      updates.connectionStatus = patch.connectionStatus;
     }
 
     const [updated] = await db
