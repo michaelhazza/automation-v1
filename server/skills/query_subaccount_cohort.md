@@ -2,6 +2,7 @@
 name: Query Subaccount Cohort
 description: Read board health and memory summaries across multiple subaccounts, filtered by tags
 isActive: true
+visibility: basic
 ---
 
 ```json

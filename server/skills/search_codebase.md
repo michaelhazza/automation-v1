@@ -2,7 +2,7 @@
 name: Search Codebase
 description: Search the project codebase for files, symbols, or text patterns.
 isActive: true
-isVisible: false
+visibility: none
 ---
 
 ```json

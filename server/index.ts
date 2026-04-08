@@ -63,6 +63,10 @@ import systemProcessesRouter from './routes/systemProcesses.js';
 import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
+import webLoginConnectionsRouter from './routes/webLoginConnections.js';
+import playbookTemplatesRouter from './routes/playbookTemplates.js';
+import playbookRunsRouter from './routes/playbookRuns.js';
+import playbookStudioRouter from './routes/playbookStudio.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
@@ -93,6 +97,7 @@ import pageProjectsRouter from './routes/pageProjects.js';
 import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
+import ieeRouter from './routes/iee.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
@@ -201,6 +206,10 @@ app.use(systemProcessesRouter);
 app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
 app.use(orgConnectionsRouter);
+app.use(webLoginConnectionsRouter);
+app.use(playbookTemplatesRouter);
+app.use(playbookRunsRouter);
+app.use(playbookStudioRouter);
 app.use(processConnectionMappingsRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
@@ -230,6 +239,7 @@ app.use(pageRoutesRouter);
 app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
+app.use(ieeRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -251,13 +261,20 @@ app.use('/api', (req, res) => {
 
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
+import { ZodError } from 'zod';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
 
-  if (err instanceof Error) {
-    message = err.message;
+  if (err instanceof ZodError) {
+    statusCode = 400;
+    errorCode = 'validation_error';
+    message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+  } else if (err instanceof Error) {
+    // Unwrap DrizzleQueryError — its .message is the raw SQL; the real error is in .cause
+    const cause = (err as Error & { cause?: Error }).cause;
+    message = cause?.message ?? err.message;
     const withStatus = err as Error & { status?: number; statusCode?: number; errorCode?: string };
     statusCode = withStatus.status ?? withStatus.statusCode ?? 500;
     errorCode = withStatus.errorCode ?? errorCode;
@@ -306,6 +323,15 @@ async function start() {
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
+  // Playbooks engine workers (tick + watchdog cron) — spec §5.2 + §5.7
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { playbookEngineService } = await import('./services/playbookEngineService.js');
+      await playbookEngineService.registerWorkers();
+    } catch (err) {
+      console.error('[boot] failed to register playbook engine workers', err);
+    }
+  }
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {

@@ -1,49 +1,80 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillService } from '../services/skillService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import type { SkillTier } from '../lib/skillVisibility.js';
 
 const router = Router();
 
-// ─── List all skills (visible built-in + custom) for the skills library page ──
-// Built-in skills are only included if the matching system skill has isVisible=true.
+/**
+ * Determine the viewer's tier and manage permission for a skill, used by
+ * the visibility decorator (Code Change A / spec v3.4 §3 / T6).
+ *
+ * - system_admin → 'system' tier with manage permission
+ * - org_admin or holders of AGENTS_EDIT → 'organisation' tier with manage
+ * - everyone else → 'organisation' tier without manage permission
+ *
+ * Subaccount-tier viewers are not currently distinguished from org tier in
+ * this route file because the route paths themselves are org-scoped. When
+ * subaccount-scoped skill routes are added, the tier resolution will need
+ * to be re-checked.
+ */
+async function resolveSkillViewer(req: import('express').Request): Promise<{ tier: SkillTier; hasManagePermission: boolean }> {
+  if (req.user?.role === 'system_admin') {
+    return { tier: 'system', hasManagePermission: true };
+  }
+  const hasManage = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_EDIT);
+  return { tier: 'organisation', hasManagePermission: hasManage };
+}
+
+// ─── List all skills (custom + opted-in system) for the skills library page ──
+// System skills are only included if the system admin has set their cascade
+// visibility to 'basic' or 'full'. Org skills are decorated by the same
+// visibility logic if the viewer is below the organisation tier (currently
+// always organisation, so no-op — but the cascade plumbing is in place for
+// when a subaccount-scoped skills route lands).
 
 router.get('/api/skills/all', authenticate, asyncHandler(async (req, res) => {
-  const [skills, visibleSystemSkills] = await Promise.all([
+  const viewer = await resolveSkillViewer(req);
+  const [orgSkills, visibleSystemSkills] = await Promise.all([
     skillService.listSkills(req.orgId!),
     systemSkillService.listVisibleSkills(),
   ]);
 
-  // Start with custom (non-built-in) skills from the DB
-  const customSkills = skills.filter((s: { skillType: string }) => s.skillType !== 'built_in');
+  // Org-level skills go through the visibility decorator. nulls = invisible.
+  const decoratedOrg = orgSkills
+    .filter((s: { skillType: string }) => s.skillType !== 'built_in')
+    .map(s => skillService.decorateSkillForViewer(s, viewer))
+    .filter((s): s is NonNullable<typeof s> => s !== null);
 
-  // Map visible system skills into the shape the frontend expects,
-  // preferring the DB row if one exists (so org-level overrides are preserved)
-  const dbSlugSet = new Set(skills.map((s: { slug: string }) => s.slug));
-  const systemAsBuiltIn = visibleSystemSkills
-    .filter(ss => !dbSlugSet.has(ss.slug))
-    .map(ss => ({
-      id: ss.id,
-      slug: ss.slug,
-      name: ss.name,
-      description: ss.description,
-      skillType: 'built_in' as const,
-      isActive: ss.isActive,
+  // System skills come from the file-based service. We project them into
+  // the same shape the org list uses so the client can render them in one
+  // table. Body is stripped when visibility === 'basic'.
+  const projectedSystem = visibleSystemSkills.map(s => {
+    const stripped = s.visibility === 'full' ? s : systemSkillService.stripBodyForBasic(s);
+    return {
+      id: stripped.id,
       organisationId: null,
-      methodology: ss.methodology,
+      name: stripped.name,
+      slug: stripped.slug,
+      description: stripped.description,
+      skillType: 'built_in' as const,
+      definition: stripped.definition,
+      instructions: stripped.instructions,
+      methodology: stripped.methodology,
+      isActive: stripped.isActive,
+      visibility: stripped.visibility,
       createdAt: null,
       updatedAt: null,
-    }));
+      deletedAt: null,
+      canViewContents: stripped.visibility === 'full',
+      canManageSkill: false, // org users cannot manage system skills
+    };
+  });
 
-  // Also include DB built-in skills that are visible
-  const visibleSlugs = new Set(visibleSystemSkills.map(s => s.slug));
-  const dbBuiltIn = skills.filter((s: { skillType: string; slug: string }) =>
-    s.skillType === 'built_in' && visibleSlugs.has(s.slug)
-  );
-
-  res.json([...customSkills, ...dbBuiltIn, ...systemAsBuiltIn]);
+  res.json([...projectedSystem, ...decoratedOrg]);
 }));
 
 // ─── List skills (org-specific custom skills only; built-in skills are now system-level) ──
@@ -52,15 +83,39 @@ router.get('/api/skills', authenticate, asyncHandler(async (req, res) => {
   const skills = await skillService.listSkills(req.orgId!);
   // Filter out built-in skills from org listing — they are now managed as system skills
   const orgSkills = skills.filter((s: { skillType: string }) => s.skillType !== 'built_in');
-  res.json(orgSkills);
+  const viewer = await resolveSkillViewer(req);
+  res.json(
+    orgSkills
+      .map(s => skillService.decorateSkillForViewer(s, viewer))
+      .filter((s): s is NonNullable<typeof s> => s !== null),
+  );
 }));
 
 // ─── Get single skill ────────────────────────────────────────────────────────
 
 router.get('/api/skills/:id', authenticate, asyncHandler(async (req, res) => {
   const skill = await skillService.getSkill(req.params.id, req.orgId!);
-  res.json(skill);
+  const viewer = await resolveSkillViewer(req);
+  const decorated = skillService.decorateSkillForViewer(skill, viewer);
+  if (!decorated) {
+    res.status(404).json({ error: 'Skill not found' });
+    return;
+  }
+  res.json(decorated);
 }));
+
+// ─── Update skill visibility (inline from the list page) ─────────────────────
+
+router.patch(
+  '/api/skills/:id/visibility',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { visibility } = req.body;
+    const skill = await skillService.updateSkillVisibility(req.params.id, req.orgId!, visibility);
+    res.json(skill);
+  }),
+);
 
 // ─── Create custom skill (org-level) ─────────────────────────────────────────
 

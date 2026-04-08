@@ -2,6 +2,7 @@
 name: Trigger Process
 description: Trigger an automation process/workflow.
 isActive: true
+visibility: basic
 ---
 
 ```json

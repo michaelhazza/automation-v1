@@ -85,3 +85,11 @@ export * from './canonicalMetrics';
 export * from './metricDefinitions';
 export * from './interventionOutcomes';
 export * from './accountOverrides';
+// IEE — Integrated Execution Environment (rev 6)
+export * from './ieeRuns';
+export * from './ieeSteps';
+export * from './ieeArtifacts';
+
+// Playbooks — multi-step automation engine (migration 0076)
+export * from './playbookTemplates';
+export * from './playbookRuns';

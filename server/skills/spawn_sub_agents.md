@@ -2,6 +2,7 @@
 name: Spawn Sub-Agents
 description: Split work into 2-3 parallel sub-tasks executed by agents simultaneously.
 isActive: true
+visibility: basic
 ---
 
 ```json

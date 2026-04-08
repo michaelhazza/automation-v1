@@ -2,7 +2,7 @@
 name: Review Code
 description: Structured self-review on all changed files before submitting a patch to the HITL review queue. Catches blocking issues before they reach the human reviewer.
 isActive: true
-isVisible: false
+visibility: basic
 ---
 
 ```json

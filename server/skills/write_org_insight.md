@@ -2,6 +2,7 @@
 name: Write Org Insight
 description: Store a cross-subaccount pattern or insight in org-level memory
 isActive: true
+visibility: basic
 ---
 
 ```json

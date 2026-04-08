@@ -2,6 +2,7 @@
 name: Move Task
 description: Move a task to a different board column.
 isActive: true
+visibility: basic
 ---
 
 ```json

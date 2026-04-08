@@ -84,8 +84,12 @@ router.get(
 
     const { attachment, task } = await attachmentService.getAttachment(orgId, attachmentId);
 
-    // Verify the user has access to the task's subaccount
-    await resolveSubaccount(task.subaccountId, orgId);
+    // Verify the user has access to the task's subaccount.
+    // Org-wide tasks (subaccountId === null) skip this check — orgId
+    // ownership is already enforced by attachmentService.getAttachment().
+    if (task.subaccountId) {
+      await resolveSubaccount(task.subaccountId, orgId);
+    }
 
     const safeName = sanitiseFileName(attachment.fileName);
 

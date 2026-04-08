@@ -50,6 +50,9 @@ const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
+const PlaybooksLibraryPage = lazy(() => import('./pages/PlaybooksLibraryPage'));
+const PlaybookRunDetailPage = lazy(() => import('./pages/PlaybookRunDetailPage'));
+const PlaybookStudioPage = lazy(() => import('./pages/PlaybookStudioPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
@@ -62,6 +65,7 @@ const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
+const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 
 function PageLoader() {
   return (
@@ -156,6 +160,8 @@ export default function App() {
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
           <Route path="/inbox" element={<InboxPage user={user!} />} />
+          <Route path="/playbooks" element={<PlaybooksLibraryPage user={user!} />} />
+          <Route path="/playbook-runs/:runId" element={<PlaybookRunDetailPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
@@ -176,6 +182,7 @@ export default function App() {
             <Route path="/admin/mcp-servers" element={<McpServersPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
@@ -205,6 +212,7 @@ export default function App() {
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
+            <Route path="/system/playbook-studio" element={<PlaybookStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />

@@ -9,7 +9,7 @@
 import type { Socket } from 'socket.io';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executions, agentRuns, agentConversations, subaccounts } from '../db/schema/index.js';
+import { executions, agentRuns, agentConversations, subaccounts, playbookRuns } from '../db/schema/index.js';
 
 // UUID format check — reject malformed IDs early
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -112,6 +112,25 @@ export function handleConnection(socket: Socket): void {
   socket.on('leave:conversation', (conversationId: unknown) => {
     if (!isValidUUID(conversationId)) return;
     socket.leave(`conversation:${conversationId}`);
+  });
+
+  // ── Join a playbook run room (validated against org ownership) ──────
+  socket.on('join:playbook-run', async (runId: unknown) => {
+    if (!isValidUUID(runId)) return;
+    try {
+      const [run] = await db.select({ id: playbookRuns.id })
+        .from(playbookRuns)
+        .where(and(eq(playbookRuns.id, runId), eq(playbookRuns.organisationId, orgId)));
+      if (!run) return;
+      socket.join(`playbook-run:${runId}`);
+    } catch {
+      // DB error — silently reject
+    }
+  });
+
+  socket.on('leave:playbook-run', (runId: unknown) => {
+    if (!isValidUUID(runId)) return;
+    socket.leave(`playbook-run:${runId}`);
   });
 
   // Clean up on disconnect — Socket.IO auto-removes from all rooms

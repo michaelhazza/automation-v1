@@ -2,6 +2,7 @@
 name: Read Inbox
 description: Read emails from a connected inbox provider.
 isActive: true
+visibility: basic
 ---
 
 ```json

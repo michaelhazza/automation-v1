@@ -104,6 +104,80 @@ export const JOB_CONFIG = {
     retryBackoff: true,
     expireInSeconds: 120,
   },
+
+  // ── IEE — Integrated Execution Environment (rev 6) ──────────────
+  // Spec refs: §3.1, §3.4, §11.5.5, §13.2 (reservation interplay).
+  // expireInSeconds is the hard pg-boss ceiling. The worker enforces a
+  // tighter MAX_EXECUTION_TIME_MS inside the loop. The 15-min reservation
+  // TTL (§13.6.1.a) is comfortably above this.
+  'iee-browser-task': {
+    retryLimit: 3,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'iee-browser-task__dlq',
+  },
+  'iee-dev-task': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'iee-dev-task__dlq',
+  },
+  // §12.3 + §13.6.1.a — periodic orphan and reservation cleanup
+  'iee-cleanup-orphans': {
+    expireInSeconds: 180,
+  },
+  // §11.3.5 — daily cost rollup into cost_aggregates
+  'iee-cost-rollup-daily': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+  },
+  // Reviewer round 2 — Appendix A.1 reconnect hook. Emitted by the worker
+  // when an iee_run reaches a terminal status. Subscribed by the main app
+  // (handler optional in v1) to resume the parent agent run, post results
+  // back to the agent's loop, etc. Reusing the existing pg-boss path keeps
+  // the reconnection async + decoupled.
+  'iee-run-completed': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'iee-run-completed__dlq',
+  },
+
+  // ── Playbooks engine (multi-step automation, migration 0076) ────
+  // Spec: tasks/playbooks-spec.md §5.6 (concurrency) + §5.7 (watchdog).
+  // Tick jobs are enqueued with singletonKey: runId so multiple step
+  // completions collapse into one tick. Watchdog runs every 60s as
+  // self-healing for missed ticks.
+  'playbook-run-tick': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'playbook-run-tick__dlq',
+  },
+  'playbook-watchdog': {
+    retryLimit: 1,
+    retryDelay: 10,
+    retryBackoff: false,
+    expireInSeconds: 60,
+    deadLetter: 'playbook-watchdog__dlq',
+  },
+  // Async dispatch queue for prompt + agent_call step types. The engine
+  // tick handler enqueues onto this; a worker picks it up and runs the
+  // existing agentExecutionService.executeRun synchronously.
+  // Spec §5.2 dispatch case + §5.5 idempotency keys.
+  'playbook-agent-step': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'playbook-agent-step__dlq',
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

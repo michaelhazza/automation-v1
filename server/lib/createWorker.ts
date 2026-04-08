@@ -40,7 +40,7 @@ export function createWorker<T>(options: WorkerOptions<T>) {
     options.queue,
     { teamSize, teamConcurrency: 1 },
     async (job) => {
-      const retryCount = getRetryCount(job);
+      const retryCount = getRetryCount(job as unknown as { retrycount?: number } & Record<string, unknown>);
       if (retryCount > 0) {
         console.warn(`[Worker:${options.queue}] Retry #${retryCount} for job ${job.id}`);
       }

@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { authenticate } from '../middleware/auth.js';
-import { requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { taskService } from '../services/taskService.js';
 
 // ---------------------------------------------------------------------------

@@ -146,6 +146,13 @@ Each skill should have a single clear responsibility.
 - Flexibility beats strict instruction sets for complex tasks
 - The goal is good outcomes, not instruction compliance
 
+## 10. Docs Stay In Sync With Code
+
+- If a code change invalidates something described in a doc (`CLAUDE.md`, `architecture.md`, `KNOWLEDGE.md`, skill references, or any file under `references/`), update that doc **in the same session and the same commit** as the code change.
+- Not later. Not "I'll come back to it." Right now, as part of the task.
+- Before marking a task complete, ask: "did I change behaviour or structure that any doc describes?" If yes, the doc update is part of the task — not a follow-up.
+- Stale docs are worse than missing docs. A wrong reference misleads future sessions; a missing one just sends the agent to read the code.
+
 ---
 
 ## Task Management Workflow
@@ -172,6 +179,7 @@ Agents live in `.claude/agents/`. Read their definitions before invoking them.
 | `triage-agent` | Capture ideas and bugs mid-session without derailing focus | Any time an idea or bug surfaces and you don't want to lose it |
 | `architect` | Architecture decisions and implementation plans | Before implementing any SIGNIFICANT or MAJOR task |
 | `pr-reviewer` | Independent code review — read-only, no self-review bias | Before marking any non-trivial task done |
+| `dual-reviewer` | Codex review loop with Claude adjudication — second-phase review | After `pr-reviewer` on Significant and Major tasks |
 | `feature-coordinator` | End-to-end pipeline for planned multi-chunk features | Starting a new planned feature from scratch |
 
 ### Task Classification
@@ -182,8 +190,8 @@ Classify every task before starting:
 |-------|-----------|--------|
 | **Trivial** | Single file, obvious change, no design decisions | Implement directly |
 | **Standard** | 2–4 files, clear approach, no new patterns | Implement, then invoke pr-reviewer |
-| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then pr-reviewer |
-| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline |
+| **Significant** | Multiple domains, design decisions, or new patterns | Invoke architect first, then implement, then pr-reviewer → dual-reviewer |
+| **Major** | New subsystem, cross-cutting concern, or architectural change | Invoke feature-coordinator to orchestrate the full pipeline; pr-reviewer → dual-reviewer before PR |
 
 ### Invoking agents
 
@@ -202,11 +210,19 @@ Classify every task before starting:
 
 # Full pipeline for a planned feature
 "feature-coordinator: implement [feature name]"
+
+# Second-phase Codex loop (Significant and Major tasks only)
+# Run AFTER pr-reviewer has fixed initial issues
+"dual-reviewer: [brief description of what was implemented]"
 ```
 
 ### Independent review is not optional
 
 For Standard, Significant, and Major tasks — invoke `pr-reviewer` before marking done. The main session has implementation bias. The reviewer eliminates it.
+
+For **Significant and Major tasks**, also invoke `dual-reviewer` after `pr-reviewer`. This runs up to three Codex review iterations with Claude adjudicating each recommendation — accepting valid issues, rejecting items that conflict with project conventions, and documenting the reasoning. When `dual-reviewer` finishes, the PR is ready to create.
+
+**Before creating any PR** — regardless of task size — always run `pr-reviewer` then `dual-reviewer` before creating the pull request. Do not create a PR without both reviewers having passed.
 
 ---
 

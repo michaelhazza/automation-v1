@@ -1,9 +1,11 @@
 import { pgTable, uuid, text, integer, numeric, boolean, timestamp, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { users } from './users';
 import { agentRuns } from './agentRuns';
 import { executions } from './executions';
+import { ieeRuns } from './ieeRuns';
 
 // ---------------------------------------------------------------------------
 // llm_requests — append-only financial ledger
@@ -23,9 +25,18 @@ export const llmRequests = pgTable(
     subaccountId:   uuid('subaccount_id').references(() => subaccounts.id),
     userId:         uuid('user_id').references(() => users.id),
     sourceType:     text('source_type').notNull().default('agent_run'),
-    // 'agent_run' | 'process_execution' | 'system'
+    // 'agent_run' | 'process_execution' | 'system' | 'iee'  (IEE added rev 6)
     runId:          uuid('run_id').references(() => agentRuns.id),
     executionId:    uuid('execution_id').references(() => executions.id),
+    // IEE attribution — added in rev 6/§13.1. When sourceType='iee', this MUST be set.
+    // Enforced by:
+    //   1. Router-level guard in server/services/llmRouter.ts
+    //   2. DB CHECK constraint llm_requests_iee_requires_run_id (see migration)
+    ieeRunId:       uuid('iee_run_id').references(() => ieeRuns.id),
+    // Spec §11.7.1 — distinguishes LLM calls made on the main app side from
+    // those made by the IEE worker side, so the run-detail Cost panel can
+    // split LLM cost between app and worker for the same run.
+    callSite:       text('call_site').notNull().default('app').$type<'app' | 'worker'>(),
     agentName:      text('agent_name'),
     taskType:       text('task_type').notNull().default('general'),
 
@@ -97,6 +108,10 @@ export const llmRequests = pgTable(
     createdAtIdx:         index('llm_requests_created_at_idx').on(table.createdAt),
     executionIdIdx:       index('llm_requests_execution_id_idx').on(table.executionId),
     executionPhaseIdx:    index('llm_requests_execution_phase_idx').on(table.executionPhase, table.billingMonth),
+    // §13.1 — partial index, only IEE rows pay the index cost
+    ieeRunIdIdx:          index('llm_requests_iee_run_id_idx')
+      .on(table.ieeRunId)
+      .where(sql`${table.ieeRunId} IS NOT NULL`),
   }),
 );
 
@@ -116,13 +131,23 @@ export const TASK_TYPES = [
   'scheduling',
   'review',
   'general',
+  // Workspace-memory retrieval helper calls — HyDE query expansion and
+  // post-retrieval context enrichment, both issued by workspaceMemoryService.
+  'hyde_expansion',
+  'context_enrichment',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];
 
-// Valid source types
-export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system'] as const;
+// Valid source types — 'iee' added rev 6 §13.1 for the Integrated Execution Environment.
+// When sourceType='iee', llmRequests.ieeRunId MUST be set (router guard + DB CHECK).
+export const SOURCE_TYPES = ['agent_run', 'process_execution', 'system', 'iee'] as const;
 export type SourceType = typeof SOURCE_TYPES[number];
+
+// Call sites — distinguishes LLM calls made on the main-app side from those
+// made by the IEE worker process. Spec §11.7.1.
+export const CALL_SITES = ['app', 'worker'] as const;
+export type CallSite = typeof CALL_SITES[number];
 
 // Valid LLM request statuses
 export const LLM_REQUEST_STATUSES = [
@@ -137,8 +162,9 @@ export const LLM_REQUEST_STATUSES = [
 ] as const;
 export type LlmRequestStatus = typeof LLM_REQUEST_STATUSES[number];
 
-// Execution phases for routing
-export const EXECUTION_PHASES = ['planning', 'execution', 'synthesis'] as const;
+// Execution phases for routing — 'iee_loop_step' added rev 6 §1.4 / §5.5.
+// Used by the IEE worker so the router can apply an IEE-specific model policy.
+export const EXECUTION_PHASES = ['planning', 'execution', 'synthesis', 'iee_loop_step'] as const;
 export type ExecutionPhase = typeof EXECUTION_PHASES[number];
 
 // Capability tiers

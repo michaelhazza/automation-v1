@@ -113,7 +113,20 @@ export interface AgentRunRequest {
   /** Explicit execution scope — never inferred from nullable fields */
   executionScope: 'subaccount' | 'org';
   runType: 'scheduled' | 'manual' | 'triggered';
-  executionMode?: 'api' | 'headless' | 'claude-code';
+  executionMode?: 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev';
+  /**
+   * Optional IEE task. Required when executionMode is 'iee_browser' or
+   * 'iee_dev'. Spec §9.1.
+   */
+  ieeTask?: {
+    type: 'browser' | 'dev';
+    goal: string;
+    startUrl?: string;
+    sessionKey?: string;
+    repoUrl?: string;
+    branch?: string;
+    commands?: string[];
+  };
   taskId?: string;
   triggerContext?: Record<string, unknown>;
   handoffDepth?: number;
@@ -126,6 +139,21 @@ export interface AgentRunRequest {
   orgAgentConfigId?: string;
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
+  /**
+   * Playbooks: when this agent run was dispatched by a Playbook step, the
+   * step run id is stamped onto agent_runs.playbook_step_run_id so the
+   * completion hook can route the result back to the engine.
+   * Spec tasks/playbooks-spec.md §5.2 / step 6 wiring.
+   */
+  playbookStepRunId?: string;
+  /**
+   * The principal that initiated this run, when known. Plumbed into the
+   * SkillExecutionContext so user-scoped tools (e.g. Playbook Studio
+   * propose_save) can enforce ownership without making downstream
+   * database lookups. Optional because system / scheduled runs have no
+   * initiating user. Review finding #3.
+   */
+  userId?: string;
 }
 
 export interface AgentRunResult {
@@ -228,6 +256,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
+        playbookStepRunId: request.playbookStepRunId ?? null,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),
@@ -434,7 +463,7 @@ export const agentExecutionService = {
       try {
         const { mcpClientManager } = await import('./mcpClientManager.js');
         const mcp = await mcpClientManager.connectForRun({
-          runId,
+          runId: run.id,
           organisationId: request.organisationId,
           agentId: request.agentId,
           subaccountId: request.subaccountId ?? null,
@@ -446,10 +475,10 @@ export const agentExecutionService = {
           const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
           const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
           enhancedTools.push(...cappedTools);
-          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
+          logger.info('mcp.tools_loaded', { runId: run.id, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
         }
       } catch (err) {
-        logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        logger.warn('mcp.connect_failed', { runId: run.id, error: err instanceof Error ? err.message : String(err) });
         // Non-fatal — agent runs without MCP tools
       }
 
@@ -565,7 +594,47 @@ export const agentExecutionService = {
 
       let loopResult: LoopResult;
 
-      if (effectiveMode === 'claude-code') {
+      if (effectiveMode === 'iee_browser' || effectiveMode === 'iee_dev') {
+        // ── 8z. IEE — Integrated Execution Environment ──────────────────
+        // Spec §9.1. Enqueues a pg-boss job picked up by the worker. The
+        // worker writes terminal status to iee_runs and (in a future
+        // iteration) the agent run can be resumed when the row completes.
+        // For v1 the agent run completes immediately with a synthetic
+        // loopResult; the canonical execution state lives on the iee_run.
+        if (!request.ieeTask) {
+          throw { statusCode: 400, message: 'ieeTask is required when executionMode is iee_browser/iee_dev', errorCode: 'IEE_TASK_REQUIRED' };
+        }
+        const expectedType = effectiveMode === 'iee_browser' ? 'browser' : 'dev';
+        if (request.ieeTask.type !== expectedType) {
+          throw { statusCode: 400, message: `executionMode ${effectiveMode} requires ieeTask.type=${expectedType}`, errorCode: 'IEE_TASK_TYPE_MISMATCH' };
+        }
+        const { enqueueIEETask } = await import('./ieeExecutionService.js');
+        const enqueueResult = await enqueueIEETask({
+          task: request.ieeTask as Parameters<typeof enqueueIEETask>[0]['task'],
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId ?? null,
+          agentId: request.agentId,
+          agentRunId: run.id,
+          correlationId: run.id,
+        });
+        loopResult = {
+          summary: `IEE ${expectedType} task enqueued (ieeRunId=${enqueueResult.ieeRunId}${enqueueResult.deduplicated ? ', deduplicated' : ''})`,
+          toolCallsLog: [{
+            type: 'iee_handoff',
+            ieeRunId: enqueueResult.ieeRunId,
+            deduplicated: enqueueResult.deduplicated,
+            mode: effectiveMode,
+          }],
+          totalToolCalls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          tasksCreated: 0,
+          tasksUpdated: 0,
+          deliverablesCreated: 0,
+          finalStatus: 'completed',
+        };
+      } else if (effectiveMode === 'claude-code') {
         // ── 8a. Claude Code CLI execution ──────────────────────────────
         // Spawn `claude -p` with the agent's prompt. Uses the host's
         // Claude Max plan — zero API cost. The same prompts & skills
@@ -732,7 +801,35 @@ export const agentExecutionService = {
 
       // ── 9. Finalise the run ─────────────────────────────────────────────
       const durationMs = Date.now() - startTime;
-      const finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+      let finalStatus = (loopResult.finalStatus ?? 'completed') as 'completed' | 'failed' | 'timeout' | 'loop_detected' | 'budget_exceeded';
+
+      // T25 / T16 — Reporting Agent end-of-run hook. Runs the invariant
+      // and persists the content fingerprint. No-op for non-Reporting-Agent
+      // runs. Spec v3.4 §6.7.2 / §8.4.2.
+      if (finalStatus === 'completed') {
+        try {
+          const [runRow] = await db
+            .select({ runMetadata: agentRuns.runMetadata })
+            .from(agentRuns)
+            .where(eq(agentRuns.id, run.id))
+            .limit(1);
+          const { finalizeReportingAgentRun } = await import('../lib/reportingAgentRunHook.js');
+          await finalizeReportingAgentRun({
+            runId: run.id,
+            subaccountAgentId: request.subaccountAgentId ?? null,
+            organisationId: request.organisationId,
+            runMetadata: (runRow?.runMetadata ?? null) as Record<string, unknown> | null,
+          });
+        } catch (err) {
+          // Invariant or persist failed — downgrade to failed so the run
+          // does not flip to completed in an inconsistent state.
+          logger.error('reportingAgent.finalize_failed', {
+            runId: run.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          finalStatus = 'failed';
+        }
+      }
 
       await db.update(agentRuns).set({
         status: finalStatus,
@@ -774,6 +871,20 @@ export const agentExecutionService = {
         totalToolCalls: loopResult.totalToolCalls, totalTokens: loopResult.totalTokens,
         tasksCreated: loopResult.tasksCreated, durationMs,
       });
+
+      // Playbooks: if this agent run was dispatched by a Playbook step, route
+      // its result back to the engine so the step run can be marked completed
+      // and the next tick fired. Hook is non-blocking — failures are logged
+      // and do not affect the agent run completion.
+      try {
+        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
+        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+          ok: true,
+          output: { summary: loopResult.summary ?? '' },
+        });
+      } catch (err) {
+        console.error('[AgentExecution] playbook hook failed (non-fatal)', err);
+      }
       if (isOrgRun) {
         emitOrgUpdate(request.organisationId, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: finalStatus,
@@ -868,6 +979,18 @@ export const agentExecutionService = {
       emitAgentRunUpdate(run.id, 'agent:run:failed', {
         status: 'failed', errorMessage, durationMs,
       });
+
+      // Playbooks: route the failure to the engine so the step run is marked
+      // failed and downstream failure-policy logic runs.
+      try {
+        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
+        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+          ok: false,
+          error: errorMessage,
+        });
+      } catch (hookErr) {
+        console.error('[AgentExecution] playbook hook failed (non-fatal)', hookErr);
+      }
       if (isOrgRun) {
         emitOrgUpdate(request.organisationId, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: 'failed',
@@ -1227,6 +1350,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             organisationId: request.organisationId,
             subaccountId: request.subaccountId ?? null,
             agentId: request.agentId,
+            userId: request.userId,
             orgProcesses,
             handoffDepth: request.handoffDepth,
             isSubAgent: request.isSubAgent,

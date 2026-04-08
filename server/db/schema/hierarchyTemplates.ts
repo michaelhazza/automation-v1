@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm'; // used for partial index WHERE clauses
 import { organisations } from './organisations';
+import { systemHierarchyTemplates } from './systemHierarchyTemplates';
 
 // ---------------------------------------------------------------------------
 // Hierarchy Templates — org-scoped reusable agent organisation blueprints
@@ -25,6 +26,10 @@ export const hierarchyTemplates = pgTable(
 
     // 'manual' | 'paperclip_import' | 'from_system'
     sourceType: text('source_type').notNull().default('manual').$type<'manual' | 'paperclip_import' | 'from_system'>(),
+
+    // When sourceType === 'from_system', links this org template back to its
+    // source system template so the "refresh config" upsert path can find it.
+    systemTemplateId: uuid('system_template_id').references(() => systemHierarchyTemplates.id),
 
     // Raw Paperclip manifest stored for reference
     paperclipManifest: jsonb('paperclip_manifest'),

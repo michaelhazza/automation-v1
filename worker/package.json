@@ -1,0 +1,7 @@
+{
+  "name": "automation-os-worker",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "AutomationOS IEE worker — Integrated Execution Environment runner. Spec: docs/iee-development-spec.md. Runtime dependencies (drizzle-orm, postgres, pg-boss, playwright, zod) and dev tooling (typescript, tsx, @types/node) are intentionally NOT declared here — they are resolved from the repo root /repo/node_modules to avoid duplicate package installs that cause TypeScript type-identity conflicts during the Docker build."
+}

@@ -2,6 +2,7 @@
 name: Reassign Task
 description: Reassign an existing task to another agent.
 isActive: true
+visibility: basic
 ---
 
 ```json

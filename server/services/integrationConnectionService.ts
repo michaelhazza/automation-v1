@@ -295,6 +295,11 @@ export const integrationConnectionService = {
     // Partial unique indexes don't support onConflictDoUpdate target, so we
     // use a non-atomic check-then-insert/update pattern with a 23505 catch
     // for concurrent OAuth callbacks. Safe under expected callback frequency.
+    //
+    // Label is intentionally excluded from the lookup: a seed or admin may have
+    // pre-created a placeholder row with a custom label (e.g. 'Breakout Solutions Slack').
+    // We want to update that row rather than insert a new one and hit the unique
+    // constraint on (subaccount_id, provider_type).
     const conditions = [
       eq(integrationConnections.organisationId, params.organisationId),
       eq(integrationConnections.providerType, params.providerType as IntegrationConnection['providerType']),
@@ -306,21 +311,20 @@ export const integrationConnectionService = {
       conditions.push(isNull(integrationConnections.subaccountId));
     }
 
-    // Label matching: NULL label matches NULL
-    if (params.label) {
-      conditions.push(eq(integrationConnections.label, params.label));
-    } else {
-      conditions.push(isNull(integrationConnections.label));
-    }
-
-    const [existing] = await db.select({ id: integrationConnections.id })
+    const [existing] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
       .from(integrationConnections)
       .where(and(...conditions))
       .limit(1);
 
     if (existing) {
+      // Merge scopes into existing configJson to preserve operator-set fields
+      // (e.g. Slack defaultChannel) that the provider does not re-send on reconnect.
+      const mergedConfigJson = {
+        ...(existing.configJson as Record<string, unknown> | null ?? {}),
+        scopes: params.scopes,
+      };
       await db.update(integrationConnections)
-        .set(updateSet)
+        .set({ ...updateSet, configJson: mergedConfigJson })
         .where(eq(integrationConnections.id, existing.id));
     } else {
       try {
@@ -330,13 +334,17 @@ export const integrationConnectionService = {
         const isUniqueViolation = (err as { code?: string }).code === '23505';
         if (isUniqueViolation) {
           // Re-query and update the row that won the race
-          const [raceWinner] = await db.select({ id: integrationConnections.id })
+          const [raceWinner] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })
             .from(integrationConnections)
             .where(and(...conditions))
             .limit(1);
           if (raceWinner) {
+            const mergedConfigJson = {
+              ...(raceWinner.configJson as Record<string, unknown> | null ?? {}),
+              scopes: params.scopes,
+            };
             await db.update(integrationConnections)
-              .set(updateSet)
+              .set({ ...updateSet, configJson: mergedConfigJson })
               .where(eq(integrationConnections.id, raceWinner.id));
           }
         } else {

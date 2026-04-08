@@ -2,6 +2,7 @@
 name: Compute Health Score
 description: Calculate a composite health score (0-100) for a subaccount based on normalised metrics
 isActive: true
+visibility: basic
 ---
 
 ```json

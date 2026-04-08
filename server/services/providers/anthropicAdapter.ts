@@ -12,7 +12,7 @@ const anthropicAdapter: LLMProviderAdapter = {
   async call(params: ProviderCallParams): Promise<ProviderResponse> {
     const apiKey = env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'anthropic' };
+      throw { statusCode: 503, code: 'PROVIDER_NOT_CONFIGURED', provider: 'anthropic', message: 'ANTHROPIC_API_KEY is not set' };
     }
 
     const body: Record<string, unknown> = {

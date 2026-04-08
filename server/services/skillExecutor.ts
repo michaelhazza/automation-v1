@@ -58,6 +58,16 @@ export interface SkillExecutionContext {
   /** Null for org-level agent runs */
   subaccountId: string | null;
   agentId: string;
+  /**
+   * The principal that initiated this run, when known. Populated by
+   * agentExecutionService when the AgentRunRequest carries a userId.
+   * Used by user-scoped tools (e.g. Playbook Studio propose_save) to
+   * enforce ownership without trusting tool inputs. Undefined for
+   * scheduled / system runs that have no initiating user — tools that
+   * require a user MUST refuse to run when this is undefined.
+   * Review finding #3.
+   */
+  userId?: string;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   handoffDepth?: number;
   isSubAgent?: boolean;
@@ -261,6 +271,18 @@ export const skillExecutor = {
       case 'fetch_url':
         return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
 
+      // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
+      case 'playbook_read_existing':
+        return executePlaybookReadExisting(input);
+      case 'playbook_validate':
+        return executePlaybookValidate(input);
+      case 'playbook_simulate':
+        return executePlaybookSimulate(input);
+      case 'playbook_estimate_cost':
+        return executePlaybookEstimateCost(input);
+      case 'playbook_propose_save':
+        return executePlaybookProposeSave(input, context);
+
       // ── Review-gated skills (proposes action, does NOT execute immediately) ──
       case 'send_email':
         return proposeReviewGatedAction('send_email', input, context);
@@ -437,6 +459,67 @@ export const skillExecutor = {
       }
       case 'trigger_account_intervention':
         return proposeReviewGatedAction('trigger_account_intervention', input, context);
+
+      // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
+      case 'analyse_42macro_transcript':
+        return executeMethodologySkill('analyse_42macro_transcript', input, {
+          template: {
+            filename: 'YYYYMMDD_Report_Name.md',
+            tier1Dashboard: '',
+            tier2ExecutiveSummary: '',
+            tier3FullAnalysis: {
+              section1MacroSnapshot: '',
+              section2BitcoinAndDigitalAssets: '',
+              section3TheBottomLine: '',
+            },
+          },
+          guidance:
+            'Follow the 42 Macro A-Player Brain instructions injected into your system prompt. Output the three tiers (Dashboard, Executive Summary, Full Analysis) in plain language. Return the completed markdown content as the value of the tier3FullAnalysis fields and the rendered filename. The agent will pass the result to send_to_slack.',
+        });
+
+      // ── Reporting Agent paywall workflow skills ───────────────────────────
+      // Spec: docs/reporting-agent-paywall-workflow-spec.md §4 / Code Change B
+      case 'transcribe_audio': {
+        const { transcribeAudio } = await import('./transcribeAudioService.js');
+        return transcribeAudio(
+          input as Parameters<typeof transcribeAudio>[0],
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            agentId: context.agentId,
+            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+          },
+        );
+      }
+      // Spec: docs/reporting-agent-paywall-workflow-spec.md §6 / Code Change D
+      case 'fetch_paywalled_content': {
+        const { fetchPaywalledContent } = await import('./fetchPaywalledContentService.js');
+        return fetchPaywalledContent(
+          input as unknown as Parameters<typeof fetchPaywalledContent>[0],
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            agentId: context.agentId,
+            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+          },
+        );
+      }
+      // Spec: docs/reporting-agent-paywall-workflow-spec.md §5 / Code Change C
+      case 'send_to_slack': {
+        const { sendToSlack } = await import('./sendToSlackService.js');
+        return sendToSlack(
+          input as unknown as Parameters<typeof sendToSlack>[0],
+          {
+            runId: context.runId,
+            organisationId: context.organisationId,
+            subaccountId: context.subaccountId,
+            agentId: context.agentId,
+            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+          },
+        );
+      }
 
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
@@ -2302,5 +2385,126 @@ function executeMethodologySkill(
     skillName,
     template: scaffold.template,
     guidance: scaffold.guidance,
+  };
+}
+
+// ─── Playbook Studio tool executors ──────────────────────────────────────────
+// Spec: tasks/playbooks-spec.md §10.8.4 — the five tools the Playbook
+// Author agent calls. All five delegate to playbookStudioService.
+//
+// Dynamic-imported on first call to avoid pulling the playbook services
+// into the eager skillExecutor graph (which is loaded by every agent run).
+
+async function executePlaybookReadExisting(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const slug = String(input.slug ?? '');
+  if (!slug) return { success: false, error: 'slug is required' };
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  try {
+    return playbookStudioService.readExistingPlaybook(slug);
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function executePlaybookValidate(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const definition = input.definition;
+  if (!definition) return { success: false, error: 'definition is required' };
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  return playbookStudioService.validateCandidate(definition);
+}
+
+async function executePlaybookSimulate(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const definition = input.definition;
+  if (!definition) return { success: false, error: 'definition is required' };
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  return playbookStudioService.simulateRun(definition);
+}
+
+async function executePlaybookEstimateCost(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const definition = input.definition;
+  if (!definition) return { success: false, error: 'definition is required' };
+  const mode = (input.mode as 'optimistic' | 'pessimistic' | undefined) ?? 'pessimistic';
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  return playbookStudioService.estimateCost(definition, { mode });
+}
+
+async function executePlaybookProposeSave(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  // Definition-only API. The agent supplies the validated definition
+  // object (NOT raw file contents) and the server renders the
+  // .playbook.ts file deterministically. There is no input the agent
+  // can use to inject arbitrary file content — that's the whole point
+  // of spec invariant 14 in the post-round-3 design.
+  const sessionId = String(input.sessionId ?? '');
+  const definition = input.definition;
+  if (!sessionId) {
+    return { success: false, error: 'sessionId is required' };
+  }
+  if (!definition || typeof definition !== 'object') {
+    return {
+      success: false,
+      error:
+        'definition object is required. propose_save no longer accepts fileContents — the server renders the playbook file deterministically from the validated definition.',
+    };
+  }
+  // Strict user-scope enforcement (review finding #3 from the previous
+  // round). The agent run's initiating principal MUST be present on the
+  // SkillExecutionContext; if it's missing (e.g. a scheduled / system
+  // run that has no user identity), we refuse to write to user-owned
+  // session rows.
+  if (!context.userId) {
+    return {
+      success: false,
+      error:
+        'playbook_propose_save requires a user-scoped agent run. The current run has no userId on its SkillExecutionContext (likely a scheduled or system run). Studio sessions can only be modified by their owners.',
+    };
+  }
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  // Validate + render in one call. This re-uses the exact same code
+  // path the /render endpoint uses, so the server's view of the
+  // canonical file body is consistent everywhere.
+  const rendered = playbookStudioService.validateAndRender(definition);
+  if (!rendered.ok) {
+    return {
+      success: false,
+      error: 'Definition failed validation',
+      validationErrors: rendered.errors,
+    };
+  }
+  // Persist the rendered file as the session's candidate, scoped by
+  // (sessionId, userId). Returns false when the session doesn't exist
+  // OR isn't owned by the calling user.
+  const updated = await playbookStudioService.updateCandidate(
+    sessionId,
+    context.userId,
+    rendered.fileContents,
+    'valid'
+  );
+  if (!updated) {
+    return {
+      success: false,
+      error:
+        'Session not found or not owned by the calling user. The agent can only update its own session.',
+    };
+  }
+  return {
+    success: true,
+    message:
+      'Candidate rendered and recorded. The human admin must click Save & Open PR in the Studio UI to commit this file via their GitHub identity.',
+    sessionId,
+    definitionHash: rendered.definitionHash,
   };
 }

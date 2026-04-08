@@ -40,9 +40,13 @@ const envSchema = z.object({
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS: z.coerce.number().optional().default(1),
   // Publicly reachable frontend URL — used to build invite and password reset links in emails.
   // Example: https://app.youragency.com
-  APP_BASE_URL: z.string().optional().default('http://localhost:5173'),
+  APP_BASE_URL: z.string().optional().default('http://localhost:5000'),
+  // Base URL used exclusively for OAuth callback redirect_uri sent to providers.
+  // Set this to a publicly reachable URL (e.g. ngrok tunnel) when developing locally,
+  // while APP_BASE_URL stays as localhost so the post-auth redirect lands on the local UI.
+  // Falls back to APP_BASE_URL if not set (correct behaviour in production).
+  OAUTH_CALLBACK_BASE_URL: z.string().optional(),
   // Webhook adapter
-  WEBHOOK_BASE_URL: z.string().optional(),
   WEBHOOK_CALLBACK_SECRET: z.string().optional(),
   // AI Agent / LLM configuration
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -88,6 +92,14 @@ const envSchema = z.object({
   GITHUB_APP_PRIVATE_KEY: z.string().optional(), // PEM key, base64-encoded for env vars
   GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
+
+  // Playbook Studio — PR creation against the platform's own repo
+  // (spec tasks/playbooks-spec.md §10.8.6). Optional: when unset, the
+  // Save & Open PR endpoint returns a structured error explaining how
+  // to configure it. The token must have repo scope on PLAYBOOK_STUDIO_REPO.
+  PLAYBOOK_STUDIO_GITHUB_TOKEN: z.string().optional(),
+  PLAYBOOK_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
+  PLAYBOOK_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
 });
 
 export const env = envSchema.parse(process.env);

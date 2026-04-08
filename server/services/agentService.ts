@@ -495,6 +495,8 @@ export const agentService = {
       responseMode: agent.responseMode,
       outputSize: agent.outputSize,
       allowModelOverride: agent.allowModelOverride,
+      defaultSkillSlugs: (agent.defaultSkillSlugs ?? []) as string[],
+      icon: agent.icon ?? '',
       status: agent.status,
       systemAgentId: agent.systemAgentId,
       isSystemManaged: agent.isSystemManaged,

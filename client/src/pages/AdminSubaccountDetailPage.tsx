@@ -65,7 +65,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
         api.get(`/api/subaccounts/${subaccountId}/processes`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
-        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
+        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err: { response?: { status?: number } }) => { if (err?.response?.status !== 404) console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);
@@ -673,7 +673,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {l.agent.icon && <span className="text-lg shrink-0">{l.agent.icon}</span>}
                     <div className="min-w-0">
-                      <Link to={`/admin/agents/${l.agentId}`} className="font-medium text-slate-800 hover:text-indigo-600 no-underline transition-colors text-[14px]">{l.agent.name}</Link>
+                      <Link to={`/admin/subaccounts/${subaccountId}/agents/${l.id}/manage`} className="font-medium text-slate-800 hover:text-indigo-600 no-underline transition-colors text-[14px]">{l.agent.name}</Link>
                       {l.agent.description && <div className="text-[12px] text-slate-400 mt-0.5 truncate">{l.agent.description}</div>}
                     </div>
                     {l.agentRole && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full shrink-0">{l.agentRole}</span>}
@@ -682,6 +682,12 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 ml-4 shrink-0">
+                    <Link
+                      to={`/admin/subaccounts/${subaccountId}/agents/${l.id}/manage`}
+                      className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-md text-[12px] font-medium transition-colors no-underline"
+                    >
+                      Manage
+                    </Link>
                     <button
                       onClick={() => handleRunAgent(l.agentId, 'api')}
                       disabled={runningAgentId === l.agentId}
