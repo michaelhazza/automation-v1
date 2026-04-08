@@ -155,6 +155,26 @@ Each skill should have a single clear responsibility.
 
 ---
 
+## Long Document Writing
+
+Large single-shot `Write` calls to long documentation files can freeze Claude Code. Any time you are about to produce a documentation file (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, or an extensionless `README`/`CHANGELOG`/`LICENSE`) that will exceed **~10,000 characters** (roughly 250–300 lines of typical markdown), use the chunked workflow — no exceptions.
+
+### Workflow
+
+1. **Create a `TodoWrite` task list first.** One todo per chunk. The user needs to SEE the phases move through — the task list is **mandatory, not optional**. Name each todo after the section it covers (e.g. "Chunk 2/5 — Testing philosophy").
+2. **Write the skeleton once.** A single `Write` call containing only the file header, table of contents, and section headings. Keep the skeleton well under the 10,000-char threshold.
+3. **Append each section via `Edit`.** For every chunk: mark its todo `in_progress`, use `Edit` to append the section content, mark the todo `completed`, give the user a one-line summary of what landed, then move to the next chunk.
+4. **Never batch completions.** Update the task list one chunk at a time so the user watches live progress through the phases.
+5. **Track chunks in `tasks/todo.md`** for Significant or Major documents, the same as any other multi-step task.
+
+### Enforcement
+
+`.claude/hooks/long-doc-guard.js` runs as a `PreToolUse` hook on every `Write` tool call. If the target file is a documentation file and the content exceeds 10,000 characters, the hook blocks the call (exit 2) and feeds instructions back to Claude. If you ever see `BLOCKED by long-doc-guard`, do not try to "work around" it — follow the chunked workflow above.
+
+Threshold and scope live in `.claude/hooks/long-doc-guard.js` (`LONG_DOC_THRESHOLD`, `DOC_EXT_RE`, `DOC_BASENAME_RE`). Update them there, not in settings.
+
+---
+
 ## Task Management Workflow
 
 Every non-trivial task follows this sequence:
