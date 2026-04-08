@@ -23,6 +23,36 @@ interface McpServer {
   createdAt: string;
 }
 
+interface ConnectorConfig {
+  id: string;
+  connectorType: string;
+  enabled: boolean;
+  status: string;
+  pollingIntervalMinutes: number | null;
+  lastSyncAt: string | null;
+  syncStatus: string | null;
+  createdAt: string;
+}
+
+// Unified integration item for the Active tab
+interface IntegrationItem {
+  id: string;
+  name: string;
+  type: 'mcp_server' | 'native_connector';
+  status: string;
+  description: string | null;
+  toolCount: number;
+  lastActivity: string | null;
+  raw: McpServer | ConnectorConfig;
+}
+
+const CONNECTOR_LABELS: Record<string, string> = {
+  ghl: 'GoHighLevel',
+  stripe: 'Stripe',
+  teamwork: 'Teamwork',
+  slack: 'Slack',
+};
+
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-green-100 text-green-800',
   disabled: 'bg-slate-100 text-slate-600',
@@ -48,11 +78,13 @@ type ActiveTab = 'servers' | 'catalogue';
 
 interface User { id: string; role: string; organisationId?: string }
 
-export default function McpServersPage({ user: _user }: { user: User }) {
+export default function McpServersPage({ user: _user, subaccountId, embedded = false }: { user: User; subaccountId?: string; embedded?: boolean }) {
   const [servers, setServers] = useState<McpServer[]>([]);
+  const [connectors, setConnectors] = useState<ConnectorConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ActiveTab>('servers');
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteType, setDeleteType] = useState<'mcp' | 'connector'>('mcp');
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ serverId: string; success: boolean; toolCount: number; tools: Array<{ name: string; description?: string }>; error?: string } | null>(null);
   const [editServer, setEditServer] = useState<McpServer | null>(null);
@@ -62,19 +94,55 @@ export default function McpServersPage({ user: _user }: { user: User }) {
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/mcp-servers');
-      setServers(data);
+      const mcpUrl = subaccountId ? `/api/subaccounts/${subaccountId}/mcp-servers` : '/api/mcp-servers';
+      const connectorUrl = subaccountId ? `/api/subaccounts/${subaccountId}/connectors` : '/api/org/connectors';
+      const [mcpRes, connectorRes] = await Promise.all([
+        api.get(mcpUrl),
+        api.get(connectorUrl).catch(() => ({ data: [] })),
+      ]);
+      setServers(mcpRes.data);
+      setConnectors(connectorRes.data);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [subaccountId]);
+
+  // Build unified integration list
+  const integrations: IntegrationItem[] = [
+    ...servers.map((s): IntegrationItem => ({
+      id: s.id,
+      name: s.name,
+      type: 'mcp_server',
+      status: s.status,
+      description: s.description,
+      toolCount: s.discoveredToolsJson?.length ?? 0,
+      lastActivity: s.lastConnectedAt,
+      raw: s,
+    })),
+    ...connectors.map((c): IntegrationItem => ({
+      id: c.id,
+      name: CONNECTOR_LABELS[c.connectorType] ?? c.connectorType,
+      type: 'native_connector',
+      status: c.status ?? (c.enabled ? 'active' : 'disabled'),
+      description: `Data connector · Polls every ${c.pollingIntervalMinutes ?? 60}m`,
+      toolCount: 0,
+      lastActivity: c.lastSyncAt,
+      raw: c,
+    })),
+  ];
 
   useEffect(() => { load(); }, [load]);
 
   const handleDelete = async (id: string) => {
-    await api.delete(`/api/mcp-servers/${id}`);
+    if (deleteType === 'connector') {
+      const url = subaccountId ? `/api/subaccounts/${subaccountId}/connectors/${id}` : `/api/org/connectors/${id}`;
+      await api.delete(url);
+    } else {
+      const url = subaccountId ? `/api/subaccounts/${subaccountId}/mcp-servers/${id}` : `/api/mcp-servers/${id}`;
+      await api.delete(url);
+    }
     setDeleteId(null);
     load();
   };
@@ -123,18 +191,20 @@ export default function McpServersPage({ user: _user }: { user: User }) {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">MCP Servers</h1>
-          <p className="text-sm text-slate-500 mt-2 max-w-lg leading-relaxed">
-            Connect external tool servers to expand agent capabilities. Browse the catalogue to add integrations.
-          </p>
+      {!embedded && (
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h1 className="text-[28px] font-bold text-slate-800 m-0">Integrations</h1>
+            <p className="text-sm text-slate-500 mt-2 max-w-lg leading-relaxed">
+              Connect external tools and data sources to expand agent capabilities. Browse the catalogue to add integrations.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tab bar */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6 w-fit">
-        {([['servers', `My Servers (${servers.length})`], ['catalogue', 'Catalogue']] as const).map(([key, label]) => (
+        {([['servers', `Active (${integrations.length})`], ['catalogue', 'Catalogue']] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setTab(key as ActiveTab)}
@@ -148,12 +218,12 @@ export default function McpServersPage({ user: _user }: { user: User }) {
       </div>
 
       {tab === 'catalogue' && (
-        <McpCatalogue onAdded={handleAdded} />
+        <McpCatalogue onAdded={handleAdded} subaccountId={subaccountId} />
       )}
 
       {tab === 'servers' && (
         <>
-          {servers.length === 0 ? (
+          {integrations.length === 0 ? (
             <div className="py-16 px-8 flex flex-col items-center text-center bg-white border border-slate-200 rounded-xl">
               <div className="text-[15px] font-semibold text-slate-800 mb-1.5">No integrations configured yet</div>
               <p className="text-sm text-slate-500 mb-4">Browse the catalogue to add your first integration.</p>
@@ -166,66 +236,100 @@ export default function McpServersPage({ user: _user }: { user: User }) {
             </div>
           ) : (
             <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
-              {servers.map((server) => {
-                const toolCount = server.discoveredToolsJson?.length ?? 0;
-                const isCircuitOpen = server.circuitOpenUntil && new Date(server.circuitOpenUntil) > new Date();
+              {integrations.map((item) => {
+                const isMcp = item.type === 'mcp_server';
+                const server = isMcp ? item.raw as McpServer : null;
+                const connector = !isMcp ? item.raw as ConnectorConfig : null;
+                const isCircuitOpen = server?.circuitOpenUntil && new Date(server.circuitOpenUntil) > new Date();
 
                 return (
-                  <div key={server.id} className="bg-white border border-slate-200 rounded-xl p-5">
+                  <div key={`${item.type}-${item.id}`} className="bg-white border border-slate-200 rounded-xl p-5">
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${server.status === 'active' ? 'bg-green-500' : server.status === 'error' ? 'bg-red-500' : 'bg-slate-400'}`} />
-                        <div className="font-bold text-[16px] text-slate-800">{server.name}</div>
+                        <span className={`w-2 h-2 rounded-full ${item.status === 'active' ? 'bg-green-500' : item.status === 'error' ? 'bg-red-500' : 'bg-slate-400'}`} />
+                        <div className="font-bold text-[16px] text-slate-800">{item.name}</div>
                       </div>
-                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-semibold capitalize ${STATUS_STYLES[server.status] ?? STATUS_STYLES.disabled}`}>
-                        {server.status}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${isMcp ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}`}>
+                          {isMcp ? 'Tools' : 'Data Sync'}
+                        </span>
+                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-semibold capitalize ${STATUS_STYLES[item.status] ?? STATUS_STYLES.disabled}`}>
+                          {item.status}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="space-y-1 mb-3 text-[13px] text-slate-500">
-                      <div>{server.transport} · {toolCount} tools</div>
-                      <div>Gate: {GATE_LABELS[server.defaultGateLevel] ?? server.defaultGateLevel}</div>
-                      <div>Connected: {timeAgo(server.lastConnectedAt)}</div>
-                      {isCircuitOpen && (
-                        <div className="text-orange-600 font-medium">Circuit open — retrying {timeAgo(server.circuitOpenUntil)}</div>
+                      {isMcp && server && (
+                        <>
+                          <div>{server.transport} · {item.toolCount} tools</div>
+                          <div>Gate: {GATE_LABELS[server.defaultGateLevel] ?? server.defaultGateLevel}</div>
+                          <div>Connected: {timeAgo(server.lastConnectedAt)}</div>
+                          {isCircuitOpen && (
+                            <div className="text-orange-600 font-medium">Circuit open — retrying {timeAgo(server.circuitOpenUntil)}</div>
+                          )}
+                          {server.lastError && server.status === 'error' && (
+                            <div className="text-red-500 text-[12px] truncate">{server.lastError}</div>
+                          )}
+                        </>
                       )}
-                      {server.lastError && server.status === 'error' && (
-                        <div className="text-red-500 text-[12px] truncate">{server.lastError}</div>
+                      {!isMcp && connector && (
+                        <>
+                          <div>Polls every {connector.pollingIntervalMinutes ?? 60} minutes</div>
+                          {connector.lastSyncAt && <div>Last sync: {timeAgo(connector.lastSyncAt)}</div>}
+                          {connector.syncStatus && (
+                            <div className={connector.syncStatus === 'error' ? 'text-red-500' : 'text-green-600'}>
+                              Sync: {connector.syncStatus}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 
                     <div className="flex gap-2 pt-2 border-t border-slate-100">
-                      <button
-                        onClick={() => handleTest(server.id)}
-                        disabled={testingId === server.id}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer disabled:opacity-50"
-                      >
-                        {testingId === server.id ? 'Testing...' : 'Test'}
-                      </button>
-                      {toolCount > 0 && (
+                      {isMcp && server && (
+                        <>
+                          <button
+                            onClick={() => handleTest(server.id)}
+                            disabled={testingId === server.id}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer disabled:opacity-50"
+                          >
+                            {testingId === server.id ? 'Testing...' : 'Test'}
+                          </button>
+                          {item.toolCount > 0 && (
+                            <button
+                              onClick={() => setToolBrowserServer(server)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
+                            >
+                              Tools
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleEdit(server)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
+                      {!isMcp && connector && (
                         <button
-                          onClick={() => setToolBrowserServer(server)}
+                          onClick={async () => { try { const syncUrl = subaccountId ? `/api/subaccounts/${subaccountId}/connectors/${connector.id}/sync` : `/api/org/connectors/${connector.id}/sync`; await api.post(syncUrl); load(); } catch {} }}
                           className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
                         >
-                          Tools
+                          Sync Now
                         </button>
                       )}
                       <button
-                        onClick={() => handleEdit(server)}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => setDeleteId(server.id)}
+                        onClick={() => { setDeleteId(item.id); setDeleteType(isMcp ? 'mcp' : 'connector'); }}
                         className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-xs font-medium transition-colors border-0 cursor-pointer"
                       >
                         Delete
                       </button>
                     </div>
 
-                    {/* Test result inline */}
-                    {testResult?.serverId === server.id && (
+                    {/* Test result inline (MCP only) */}
+                    {isMcp && testResult?.serverId === item.id && (
                       <div className={`mt-3 p-3 rounded-lg text-[12px] ${testResult.success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
                         {testResult.success
                           ? `Connected — discovered ${testResult.toolCount} tools`
@@ -243,8 +347,8 @@ export default function McpServersPage({ user: _user }: { user: User }) {
       {/* Delete confirm */}
       {deleteId && (
         <ConfirmDialog
-          title="Delete MCP Server"
-          message={`Delete "${servers.find(s => s.id === deleteId)?.name}"? This will remove the server configuration and all agent links. Agents will lose access to tools from this server on their next run.`}
+          title="Delete Integration"
+          message={`Delete "${integrations.find(i => i.id === deleteId)?.name}"? This will remove the configuration. Agents will lose access to this integration on their next run.`}
           confirmLabel="Delete"
           onConfirm={() => handleDelete(deleteId)}
           onCancel={() => setDeleteId(null)}

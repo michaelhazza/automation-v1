@@ -59,13 +59,14 @@ function sanitizeConnection(conn: IntegrationConnection) {
 export const integrationConnectionService = {
   // ── Org-level connection CRUD ──────────────────────────────────────────────
 
-  async listOrgConnections(organisationId: string) {
+  async listOrgConnections(organisationId: string, provider?: string) {
     const rows = await db
       .select()
       .from(integrationConnections)
       .where(and(
         eq(integrationConnections.organisationId, organisationId),
         isNull(integrationConnections.subaccountId),
+        provider ? eq(integrationConnections.providerType, provider as typeof integrationConnections.providerType._.data) : undefined,
       ));
     return rows.map(sanitizeConnection);
   },
@@ -80,6 +81,20 @@ export const integrationConnectionService = {
         isNull(integrationConnections.subaccountId),
       ));
     return conn ? sanitizeConnection(conn) : null;
+  },
+
+  // Like getOrgConnection but returns the raw row including encrypted tokens.
+  // Used by routes that need to decrypt tokens (e.g. Slack channel fetching).
+  async getOrgConnectionWithToken(id: string, organisationId: string) {
+    const [conn] = await db
+      .select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, id),
+        eq(integrationConnections.organisationId, organisationId),
+        isNull(integrationConnections.subaccountId),
+      ));
+    return conn ?? null;
   },
 
   async createOrgConnection(organisationId: string, data: {

@@ -15,6 +15,18 @@ export const connectorConfigService = {
       .where(eq(connectorConfigs.organisationId, organisationId));
   },
 
+  async listBySubaccount(organisationId: string, subaccountId: string) {
+    return db
+      .select()
+      .from(connectorConfigs)
+      .where(
+        and(
+          eq(connectorConfigs.organisationId, organisationId),
+          eq(connectorConfigs.subaccountId, subaccountId),
+        )
+      );
+  },
+
   async get(id: string, organisationId: string) {
     const [config] = await db
       .select()
@@ -50,6 +62,28 @@ export const connectorConfigService = {
       .insert(connectorConfigs)
       .values({
         organisationId,
+        connectorType: data.connectorType as ConnectorType,
+        connectionId: data.connectionId ?? null,
+        configJson: data.configJson ?? null,
+        pollIntervalMinutes: data.pollIntervalMinutes ?? 60,
+        webhookSecret: data.webhookSecret ?? null,
+      })
+      .returning();
+    return config;
+  },
+
+  async createForSubaccount(organisationId: string, subaccountId: string, data: {
+    connectorType: string;
+    connectionId?: string;
+    configJson?: Record<string, unknown>;
+    pollIntervalMinutes?: number;
+    webhookSecret?: string;
+  }) {
+    const [config] = await db
+      .insert(connectorConfigs)
+      .values({
+        organisationId,
+        subaccountId,
         connectorType: data.connectorType as ConnectorType,
         connectionId: data.connectionId ?? null,
         configJson: data.configJson ?? null,

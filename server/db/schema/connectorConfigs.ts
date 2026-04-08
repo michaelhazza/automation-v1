@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations.js';
+import { subaccounts } from './subaccounts.js';
 import { integrationConnections } from './integrationConnections.js';
 
 export const connectorConfigs = pgTable(
@@ -7,6 +8,7 @@ export const connectorConfigs = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     organisationId: uuid('organisation_id').notNull().references(() => organisations.id),
+    subaccountId: uuid('subaccount_id').references(() => subaccounts.id),
     connectorType: text('connector_type').notNull().$type<'ghl' | 'hubspot' | 'stripe' | 'slack' | 'teamwork' | 'custom'>(),
     connectionId: uuid('connection_id').references(() => integrationConnections.id),
     configJson: jsonb('config_json').$type<Record<string, unknown>>(),
@@ -24,6 +26,7 @@ export const connectorConfigs = pgTable(
   (table) => ({
     orgConnectorUnique: uniqueIndex('connector_configs_org_type_unique').on(table.organisationId, table.connectorType),
     orgIdx: index('connector_configs_org_idx').on(table.organisationId),
+    subaccountIdx: index('connector_configs_subaccount_idx').on(table.subaccountId),
     statusIdx: index('connector_configs_status_idx').on(table.status),
   })
 );

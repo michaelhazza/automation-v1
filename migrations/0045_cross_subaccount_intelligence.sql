@@ -50,7 +50,7 @@ CREATE TABLE org_memory_entries (
   entry_type text NOT NULL DEFAULT 'observation',
   scope_tags jsonb,
   quality_score real NOT NULL DEFAULT 0.5,
-  embedding vector(1536),
+  embedding text, -- pgvector not installed; use ALTER COLUMN ... TYPE vector(1536) once pgvector is available
   evidence_count integer NOT NULL DEFAULT 1,
   included_in_summary boolean NOT NULL DEFAULT false,
   access_count integer NOT NULL DEFAULT 0,

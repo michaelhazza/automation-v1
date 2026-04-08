@@ -12,10 +12,20 @@ interface ConnectorConfig {
   createdAt: string;
 }
 
+const CONNECTOR_TYPES = [
+  { value: 'ghl', label: 'GoHighLevel' },
+  { value: 'stripe', label: 'Stripe' },
+  { value: 'teamwork', label: 'Teamwork' },
+  { value: 'slack', label: 'Slack' },
+];
+
 export default function ConnectorConfigsPage() {
   const [connectors, setConnectors] = useState<ConnectorConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ connectorType: 'ghl', pollIntervalMinutes: 60 });
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -33,6 +43,20 @@ export default function ConnectorConfigsPage() {
       await api.post(`/api/org/connectors/${id}/sync`);
       await load();
     } catch { setError('Sync failed'); }
+  }
+
+  async function handleCreate() {
+    try {
+      setCreating(true);
+      await api.post('/api/org/connectors', {
+        connectorType: createForm.connectorType,
+        pollIntervalMinutes: createForm.pollIntervalMinutes,
+      });
+      setShowCreate(false);
+      setCreateForm({ connectorType: 'ghl', pollIntervalMinutes: 60 });
+      await load();
+    } catch { setError('Failed to create connector'); }
+    finally { setCreating(false); }
   }
 
   async function handleDelete(id: string) {
@@ -53,10 +77,50 @@ export default function ConnectorConfigsPage() {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
-      <div className="mb-6">
-        <h1 className="text-[24px] font-bold text-slate-900 mt-0 mb-1">Connector Configs</h1>
-        <p className="text-[14px] text-slate-500 m-0">Organisation-level data connectors for automatic polling and sync.</p>
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-[24px] font-bold text-slate-900 mt-0 mb-1">Connector Configs</h1>
+          <p className="text-[14px] text-slate-500 m-0">Organisation-level data connectors for automatic polling and sync.</p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold"
+        >
+          + Add Connector
+        </button>
       </div>
+
+      {showCreate && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
+          <h3 className="text-[15px] font-semibold text-slate-800 mb-4 mt-0">Add Connector</h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-[12px] text-slate-500 font-medium mb-1">Connector Type</label>
+              <select
+                value={createForm.connectorType}
+                onChange={e => setCreateForm({ ...createForm, connectorType: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[14px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {CONNECTOR_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[12px] text-slate-500 font-medium mb-1">Poll Interval (minutes)</label>
+              <input
+                type="number"
+                value={createForm.pollIntervalMinutes}
+                onChange={e => setCreateForm({ ...createForm, pollIntervalMinutes: parseInt(e.target.value) || 60 })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-[14px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                min={1}
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-[13px] text-slate-600 cursor-pointer">Cancel</button>
+            <button onClick={handleCreate} disabled={creating} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white border-0 rounded-lg text-[13px] cursor-pointer font-semibold">{creating ? 'Creating...' : 'Create'}</button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg mb-4 text-[14px] flex justify-between items-center">
