@@ -9,7 +9,7 @@ import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEd
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
 const ConnectionsPage = lazy(() => import('./ConnectionsPage'));
-const McpServersPage = lazy(() => import('./McpServersPage'));
+const IntegrationsAndCredentialsPage = lazy(() => import('./IntegrationsAndCredentialsPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
 
 interface Subaccount { id: string; name: string; slug: string; status: string; includeInOrgInbox: boolean; }
@@ -403,7 +403,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       {/* Integrations */}
       {activeTab === 'integrations' && (
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading integrations...</div>}>
-          <McpServersPage user={_user as any} subaccountId={subaccountId} embedded />
+          <IntegrationsAndCredentialsPage user={_user as any} subaccountId={subaccountId} embedded />
         </Suspense>
       )}
 
