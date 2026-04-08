@@ -2,7 +2,7 @@
 
 **Branch:** `claude/multi-step-automation-hzlRg`
 **Spec:** [`tasks/playbooks-spec.md`](./playbooks-spec.md)
-**Migration target:** `0075_playbooks.sql`
+**Migration target:** `0076_playbooks.sql`
 
 ## Status
 
@@ -14,7 +14,7 @@ LLM-driven Playbook Author agent are explicitly deferred (see below).
 
 | Step | Status | Files |
 |------|--------|-------|
-| 1. Migration 0075 | DONE | `migrations/0075_playbooks.sql`, `migrations/_down/0075_playbooks.sql`, `server/db/schema/playbookTemplates.ts`, `server/db/schema/playbookRuns.ts`, `server/db/schema/agentRuns.ts` (additive col), `server/db/schema/index.ts` |
+| 1. Migration 0076 | DONE | `migrations/0076_playbooks.sql`, `migrations/_down/0076_playbooks.sql`, `server/db/schema/playbookTemplates.ts`, `server/db/schema/playbookRuns.ts`, `server/db/schema/agentRuns.ts` (additive col), `server/db/schema/index.ts` |
 | 2. Types + validator + templating | DONE | `server/lib/playbook/{types,definePlaybook,canonicalJson,hash,templating,validator,index}.ts` + 33 unit tests |
 | 3. Template service + seeder | DONE | `server/services/playbookTemplateService.ts`, `scripts/seed-playbooks.ts`, `scripts/validate-playbooks.ts`, npm scripts |
 | 4. Engine + run service + queue | DONE | `server/services/playbookEngineService.ts`, `server/services/playbookRunService.ts`, `server/config/jobConfig.ts` |
@@ -120,8 +120,8 @@ All four return clean.
 ## Files added
 
 ```
-migrations/0075_playbooks.sql                              (244 lines)
-migrations/_down/0075_playbooks.sql                        (22 lines)
+migrations/0076_playbooks.sql                              (244 lines)
+migrations/_down/0076_playbooks.sql                        (22 lines)
 server/db/schema/playbookTemplates.ts                      (135 lines)
 server/db/schema/playbookRuns.ts                           (211 lines)
 server/lib/playbook/types.ts                               (197 lines)

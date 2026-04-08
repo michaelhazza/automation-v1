@@ -40,7 +40,12 @@ const envSchema = z.object({
   PASSWORD_RESET_TOKEN_EXPIRY_HOURS: z.coerce.number().optional().default(1),
   // Publicly reachable frontend URL — used to build invite and password reset links in emails.
   // Example: https://app.youragency.com
-  APP_BASE_URL: z.string().optional().default('http://localhost:5173'),
+  APP_BASE_URL: z.string().optional().default('http://localhost:5000'),
+  // Base URL used exclusively for OAuth callback redirect_uri sent to providers.
+  // Set this to a publicly reachable URL (e.g. ngrok tunnel) when developing locally,
+  // while APP_BASE_URL stays as localhost so the post-auth redirect lands on the local UI.
+  // Falls back to APP_BASE_URL if not set (correct behaviour in production).
+  OAUTH_CALLBACK_BASE_URL: z.string().optional(),
   // Webhook adapter
   WEBHOOK_CALLBACK_SECRET: z.string().optional(),
   // AI Agent / LLM configuration

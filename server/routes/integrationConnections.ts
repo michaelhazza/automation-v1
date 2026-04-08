@@ -158,4 +158,65 @@ router.delete(
   })
 );
 
+// Fetch Slack channel list using the stored bot token.
+// Returns [{id, name}] sorted alphabetically so the UI can render a searchable dropdown.
+router.get(
+  '/api/subaccounts/:subaccountId/connections/:id/slack-channels',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const [conn] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.subaccountId, subaccount.id),
+        eq(integrationConnections.providerType, 'slack'),
+      ));
+
+    if (!conn) throw { statusCode: 404, message: 'Slack connection not found' };
+    if (!conn.accessToken) throw { statusCode: 422, message: 'Slack connection has no token — reconnect first' };
+
+    const token = connectionTokenService.decryptToken(conn.accessToken);
+
+    // Fetch all channels (public + private the bot is a member of), paginating up to 500.
+    const channels: { id: string; name: string }[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const params = new URLSearchParams({
+        types: 'public_channel',
+        exclude_archived: 'true',
+        limit: '200',
+      });
+      if (cursor) params.set('cursor', cursor);
+
+      const response = await fetch(`https://slack.com/api/conversations.list?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      const data = await response.json() as {
+        ok: boolean;
+        channels?: { id: string; name: string }[];
+        response_metadata?: { next_cursor?: string };
+        error?: string;
+      };
+
+      if (!data.ok) {
+        throw { statusCode: 502, message: `Slack API error: ${data.error ?? 'unknown'}` };
+      }
+
+      for (const ch of data.channels ?? []) {
+        channels.push({ id: ch.id, name: ch.name });
+      }
+
+      cursor = data.response_metadata?.next_cursor || undefined;
+    } while (cursor && channels.length < 500);
+
+    channels.sort((a, b) => a.name.localeCompare(b.name));
+    res.json(channels);
+  })
+);
+
 export default router;

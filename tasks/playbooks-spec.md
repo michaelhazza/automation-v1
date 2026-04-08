@@ -3,7 +3,7 @@
 **Status:** Build-ready — **spec is closed for pre-build refinement.** Six review rounds have closed every meaningful architectural and operational risk. The next round of feedback should be a post-implementation lessons note, not another pre-build refinement. Highest-leverage next action: hand this to the `feature-coordinator` agent and start §12 implementation order step 1. Items explicitly deferred to post-build operational learning: per-org concurrency fairness, `executionSlot` observability field, conditional confidence logging, Studio playbook version drift detection, hierarchical FailureReason naming, adaptive parallelism, JSONata expression engine, parameterization layer (Phase 1.5).
 **Owner:** TBD
 **Related:** `architecture.md` § Playbooks (Multi-Step Automation)
-**Target migration:** `0075_playbooks.sql`
+**Target migration:** `0076_playbooks.sql`
 **Last research integration:** Architecture review (singletonKey, non-blocking lock, side-effect classification, output-hash firewall, prototype-pollution hardening, watchdog sweep, parameterization deferred to 1.5)
 **Last main integration:** Reporting Agent paywall workflow merge (shared infra: `withBackoff`, `runCostBreaker`, `failure` helper, `skillVisibility`, `canonicaliseUrl`)
 
@@ -66,7 +66,7 @@ This spec covers **Phase 1**: the engine, schema, services, routes, and run-exec
 - Cross-playbook composition (a step that triggers another playbook). Defer to Phase 2+.
 - Time-based step scheduling ("run step 5 at 9am Monday"). Defer.
 - Loop / iteration steps (`for each item in list, run subgraph`). Defer.
-- Per-org parameterization layer (`paramsSchema`) — column reserved in 0075, behaviour ships in Phase 1.5.
+- Per-org parameterization layer (`paramsSchema`) — column reserved in 0076, behaviour ships in Phase 1.5.
 - Per-step context projection (passing only required fields to LLM instead of full context). Phase 1 passes the full context; Phase 1.5 adds opt-in projection.
 - **Cross-run resource locking** (e.g. `resourceLockKey: 'cms:page:homepage'` to prevent two runs writing to the same external entity simultaneously). Real concern but external to the engine. Phase 2+ if real demand surfaces.
 - **HITL fatigue mitigations** — `autoApproveIfConfidenceAbove`, batch approvals, "trust this step type" — product-side enhancements for after we have telemetry on actual approval friction. Phase 2+.
@@ -100,7 +100,7 @@ The Playbooks engine **must** reuse the following primitives from `server/lib/` 
 | Existing WebSocket rooms (`useSocket`) | New `playbook-run:{runId}` room for per-run live updates; subaccount room receives coarse status events. |
 | Existing audit events (`auditEvents`) | Run start, cancellation, mid-run edits, approval decisions, template publish all emit audit events. |
 
-## 2. Database Schema (Migration 0075)
+## 2. Database Schema (Migration 0076)
 
 All tables follow existing conventions: `id` (uuid pk, default `gen_random_uuid()`), `createdAt`, `updatedAt`, `deletedAt` (where soft-deletes apply), `organisationId` for org-scoping. Drizzle schema files live under `server/db/schema/` — one file per table group.
 
@@ -109,7 +109,7 @@ All tables follow existing conventions: `id` (uuid pk, default `gen_random_uuid(
 - New tables only — zero changes to existing schema rows.
 - One additive column on `agent_runs`: `playbook_step_run_id uuid null`. Indexed for the engine's reverse lookup on agent run completion. No backfill required.
 - One additive column on `subaccount_agents` is **not** required — the cost breaker reads `maxCostPerRunCents` which already exists.
-- The migration is reversible via a corresponding `migrations/_down/0075_playbooks.sql` that drops all new tables and the new column. Down migrations live in the `_down/` subdirectory so the custom forward-only runner (`scripts/migrate.ts`, which scans top-level `migrations/*.sql` only) never picks them up. They exist only for manual local rollback during development.
+- The migration is reversible via a corresponding `migrations/_down/0076_playbooks.sql` that drops all new tables and the new column. Down migrations live in the `_down/` subdirectory so the custom forward-only runner (`scripts/migrate.ts`, which scans top-level `migrations/*.sql` only) never picks them up. They exist only for manual local rollback during development.
 
 ### 2.0.1 Drizzle schema layout
 
@@ -2108,7 +2108,7 @@ Two new invariants extend the §5.13 list:
 
 ### 12.1 Implementation order
 
-1. **Migration 0075** — schema only (includes `playbook_studio_sessions` table from §10.8.7). Land first, no behaviour change.
+1. **Migration 0076** — schema only (includes `playbook_studio_sessions` table from §10.8.7). Land first, no behaviour change.
 2. **Types + `definePlaybook` + validator + templating service** — pure code, fully unit-tested in isolation.
 3. **`playbookTemplateService` + seeder + npm scripts** — system templates loadable; no runtime behaviour yet.
 4. **`playbookEngineService` + `playbookRunService` + pg-boss queue** — engine runnable from a script, no UI.
@@ -2135,7 +2135,7 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 ### 12.3 Backwards compatibility
 
 - New tables only — no changes to existing schema.
-- Engine reuses `agentRuns` with a new nullable `playbookStepRunId` column (added in migration 0075).
+- Engine reuses `agentRuns` with a new nullable `playbookStepRunId` column (added in migration 0076).
 - No breaking changes to existing routes or services.
 
 ### 12.4 Observability
@@ -2168,7 +2168,7 @@ Add to org settings: `featureFlags.playbooks: boolean` (default false). Routes r
 | R9 | Org-authored playbooks contain prompt injection that manipulates the agent | Medium | Medium | Existing policy engine and skill executor processor pipeline apply unchanged; agent system already handles untrusted prompts; document the threat model in admin docs | Security review |
 | R10 | Forked templates drift from upstream and orgs ignore upgrade banners | High | Low | Phase 1.5 parameterization layer reduces fork count for the 80% case; banner is a visible nag, not blocking | Product |
 | R11 | Engine throughput hits ~10k concurrent run ceiling | Very low (years away) | Medium | Monitor metrics; revisit Temporal/Inngest decision when 3+ adopt-threshold criteria are met (§1.4) | Eng leadership |
-| R12 | Migration number conflicts with a parallel feature branch's schema work (this risk has already materialised once — original spec target 0074 was taken by `skill_visibility`; bumped to 0075). Re-check immediately before implementation in case it advances again. | Medium | Low | Coordinate migration number assignment via the feature-coordinator pipeline; re-verify `migrations/` directory at PR-open time | Implementer |
+| R12 | Migration number conflicts with a parallel feature branch's schema work (this risk has already materialised twice — original spec target 0074 was taken by `skill_visibility`, then 0075 was taken by `drop_stale_connection_unique_indexes`; bumped to 0076). Re-check immediately before implementation in case it advances again. | High | Low | Coordinate migration number assignment via the feature-coordinator pipeline; re-verify `migrations/` directory at PR-open time | Implementer |
 | R13 | Run context grows unbounded → multi-MB rows, token bloat, slow ticks | Medium | High | `MAX_STEP_OUTPUT_BYTES` auto-spills via `inlineTextWriter`; `MAX_CONTEXT_BYTES_HARD` fails the run; per-step context projection planned for 1.5 (§3.6, §5.12) | Engine owner |
 | R14 | Wide DAG (e.g. 20 parallel steps) launches 20 concurrent agent runs → rate limits + cost spike | Medium | High | `MAX_PARALLEL_STEPS` per-run cap (default 8); excess steps stay pending and dispatch as siblings complete (§5.2) | Engine owner |
 | R15 | Conditional step has malformed expression or wrong-shape output → silent corruption | Low | Medium | Tightened §5.2 conditional dispatch validates against `outputSchema`, catches eval errors, persists `evaluationMeta` for audit | Engine owner |

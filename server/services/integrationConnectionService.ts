@@ -295,6 +295,11 @@ export const integrationConnectionService = {
     // Partial unique indexes don't support onConflictDoUpdate target, so we
     // use a non-atomic check-then-insert/update pattern with a 23505 catch
     // for concurrent OAuth callbacks. Safe under expected callback frequency.
+    //
+    // Label is intentionally excluded from the lookup: a seed or admin may have
+    // pre-created a placeholder row with a custom label (e.g. 'Breakout Solutions Slack').
+    // We want to update that row rather than insert a new one and hit the unique
+    // constraint on (subaccount_id, provider_type).
     const conditions = [
       eq(integrationConnections.organisationId, params.organisationId),
       eq(integrationConnections.providerType, params.providerType as IntegrationConnection['providerType']),
@@ -304,13 +309,6 @@ export const integrationConnectionService = {
       conditions.push(eq(integrationConnections.subaccountId, params.subaccountId));
     } else {
       conditions.push(isNull(integrationConnections.subaccountId));
-    }
-
-    // Label matching: NULL label matches NULL
-    if (params.label) {
-      conditions.push(eq(integrationConnections.label, params.label));
-    } else {
-      conditions.push(isNull(integrationConnections.label));
     }
 
     const [existing] = await db.select({ id: integrationConnections.id, configJson: integrationConnections.configJson })

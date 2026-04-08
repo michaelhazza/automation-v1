@@ -5,7 +5,7 @@
 --
 -- Schema only — services, routes, engine, and UI ship in subsequent commits
 -- per §12.1 implementation order. Forward-only migration per project
--- convention. Down migration kept at 0075_playbooks.down.sql for local
+-- convention. Down migration kept at _down/0076_playbooks.sql for local
 -- rollback only — never run in production.
 --
 -- Tables created:

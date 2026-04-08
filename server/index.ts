@@ -261,13 +261,20 @@ app.use('/api', (req, res) => {
 
 // Global error handler — standardised JSON response format
 import { logger } from './lib/logger.js';
+import { ZodError } from 'zod';
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   let statusCode = 500;
   let message = 'Internal server error';
   let errorCode = 'internal_error';
 
-  if (err instanceof Error) {
-    message = err.message;
+  if (err instanceof ZodError) {
+    statusCode = 400;
+    errorCode = 'validation_error';
+    message = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+  } else if (err instanceof Error) {
+    // Unwrap DrizzleQueryError — its .message is the raw SQL; the real error is in .cause
+    const cause = (err as Error & { cause?: Error }).cause;
+    message = cause?.message ?? err.message;
     const withStatus = err as Error & { status?: number; statusCode?: number; errorCode?: string };
     statusCode = withStatus.status ?? withStatus.statusCode ?? 500;
     errorCode = withStatus.errorCode ?? errorCode;
