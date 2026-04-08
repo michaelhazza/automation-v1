@@ -1,6 +1,6 @@
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentDataSources } from '../db/schema/index.js';
+import { agentDataSources, agents } from '../db/schema/index.js';
 import {
   loadSourceContent,
   type LoadedDataSource,
@@ -171,15 +171,25 @@ export async function executeReadDataSource(
       source.content = content;
       source.tokenCount = approxTokens(content);
     } else {
-      // Lazy agent / scheduled-task / subaccount data source
+      // Lazy agent / scheduled-task / subaccount data source.
+      // Defense-in-depth: agent_data_sources has no organisationId column,
+      // so we join through `agents` and assert the parent agent belongs to
+      // the run's organisation. This prevents a hypothetical context-pool
+      // poisoning attack from causing a cross-org row read at runtime.
       const [row] = await db
-        .select()
+        .select({ ds: agentDataSources })
         .from(agentDataSources)
-        .where(eq(agentDataSources.id, source.id));
+        .innerJoin(agents, eq(agents.id, agentDataSources.agentId))
+        .where(
+          and(
+            eq(agentDataSources.id, source.id),
+            eq(agents.organisationId, context.organisationId),
+          )
+        );
       if (!row) {
         return { ok: false, error: 'Source row missing from database' };
       }
-      const { content, fetchOk, tokenCount } = await loadSourceContent(row);
+      const { content, fetchOk, tokenCount } = await loadSourceContent(row.ds);
       if (!fetchOk) {
         return { ok: false, error: `Failed to fetch source '${source.name}'` };
       }

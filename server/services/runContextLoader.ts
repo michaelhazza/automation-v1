@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { scheduledTasks } from '../db/schema/index.js';
 import {
@@ -90,7 +90,15 @@ export async function loadRunContextData(
     const [st] = await db
       .select({ description: scheduledTasks.description })
       .from(scheduledTasks)
-      .where(eq(scheduledTasks.id, triggerScheduledTaskId));
+      .where(
+        and(
+          eq(scheduledTasks.id, triggerScheduledTaskId),
+          // Defense-in-depth: scheduledTaskId is sourced from caller-supplied
+          // triggerContext, so we must scope by the run's own organisationId
+          // rather than trust the id in isolation.
+          eq(scheduledTasks.organisationId, request.organisationId),
+        )
+      );
     if (st?.description && st.description.trim().length > 0) {
       taskInstructions = st.description.trim();
     }

@@ -1325,8 +1325,19 @@ export const agentService = {
     const [updated] = await db
       .update(agentDataSources)
       .set(update)
-      .where(eq(agentDataSources.id, sourceId))
+      .where(
+        and(
+          eq(agentDataSources.id, sourceId),
+          // Re-assert the scheduled-task ownership in the UPDATE itself.
+          // The earlier select() proved ownership at read time, but a
+          // concurrent request targeting the same sourceId could otherwise
+          // race past it. The composite WHERE makes the UPDATE a no-op
+          // unless the row still belongs to this scheduled task.
+          eq(agentDataSources.scheduledTaskId, scheduledTaskId),
+        )
+      )
       .returning();
+    if (!updated) throw { statusCode: 404, message: 'Data source not found' };
 
     if (updated.syncMode === 'proactive') {
       dataSyncScheduler.schedule(updated.id, updated.cacheMinutes * 60 * 1000);
@@ -1374,7 +1385,17 @@ export const agentService = {
     dataSyncScheduler.cancel(sourceId);
     dataSourceCache.delete(sourceId);
     lastGoodContentCache.delete(sourceId);
-    await db.delete(agentDataSources).where(eq(agentDataSources.id, sourceId));
+    await db
+      .delete(agentDataSources)
+      .where(
+        and(
+          eq(agentDataSources.id, sourceId),
+          // Reassert scheduled-task ownership in the DELETE statement to
+          // close the TOCTOU window between the existence check above and
+          // the destructive write below.
+          eq(agentDataSources.scheduledTaskId, scheduledTaskId),
+        )
+      );
 
     // Audit event (spec §10.5 / pr-reviewer Blocker 3)
     await auditService.log({
