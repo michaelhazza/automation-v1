@@ -128,30 +128,55 @@ router.post(
   })
 );
 
+// ─── Render (deterministic file preview from validated definition) ───────────
+//
+// Returns the canonical .playbook.ts file body that the save endpoint
+// would commit for the given definition. The Studio UI uses this to
+// power the read-only preview pane next to the JSON editor — what you
+// see is exactly what gets committed.
+
+router.post(
+  '/api/system/playbook-studio/render',
+  authenticate,
+  requireSystemAdmin,
+  asyncHandler(async (req, res) => {
+    const { definition } = req.body as { definition?: unknown };
+    if (!definition || typeof definition !== 'object') {
+      res.status(400).json({ error: 'definition object is required' });
+      return;
+    }
+    const result = playbookStudioService.validateAndRender(definition);
+    if (!result.ok) {
+      res.status(422).json(result);
+      return;
+    }
+    res.json(result);
+  })
+);
+
 // ─── Save & open PR (the trust boundary) ─────────────────────────────────────
+//
+// Accepts ONLY a definition object — fileContents is no longer a
+// caller-supplied input. The server validates the definition and renders
+// the .playbook.ts file deterministically before committing. This closes
+// the validate-one-thing-commit-another attack: there is no field on
+// this endpoint the caller can use to inject arbitrary file content.
 
 router.post(
   '/api/system/playbook-studio/sessions/:id/save-and-open-pr',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const { fileContents, definition } = req.body as {
-      fileContents?: string;
-      definition?: unknown;
-    };
-    if (!fileContents || typeof fileContents !== 'string') {
-      res.status(400).json({ error: 'fileContents is required' });
-      return;
-    }
+    const { definition } = req.body as { definition?: unknown };
     if (!definition || typeof definition !== 'object') {
       res.status(400).json({
-        error: 'definition object is required for the mandatory pre-PR validation pass',
+        error:
+          'definition object is required. The server is the only producer of the playbook file body — pass the validated definition only.',
       });
       return;
     }
     const result = await playbookStudioService.saveAndOpenPr(
       req.params.id,
-      fileContents,
       definition,
       req.user!.id
     );

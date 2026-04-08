@@ -448,6 +448,119 @@ test('rule 13: max DAG depth', () => {
   assertFailedWithRule(result, 'max_dag_depth_exceeded', 'max depth caught');
 });
 
+// ─── renderPlaybookFile: deterministic from definition (review round 3) ──────
+//
+// These tests prove the file body is a pure function of the definition.
+// Spec invariant 14: the save endpoint never trusts client-supplied
+// fileContents — instead, the server renders the file deterministically
+// and commits THAT. These tests pin the contract.
+//
+// Imports come from the pure renderer module, NOT from
+// playbookStudioService, because the latter transitively loads env / db
+// which we don't want in unit tests.
+
+console.log('\n── renderPlaybookFile (definition/file consistency) ──');
+
+const { renderPlaybookFile } = await import('../renderer.js');
+// computeDefinitionHash is just a thin wrapper around hashValue — use
+// hashValue directly so we don't pull the studio service into the test.
+const computeDefinitionHash = (def: unknown) => hashValue(def);
+
+const sampleDefinition = {
+  slug: 'render-test',
+  name: 'Render Test',
+  description: 'Pin the renderer output',
+  version: 1,
+  steps: [
+    {
+      id: 'first_step',
+      name: 'First',
+      type: 'user_input',
+      dependsOn: [],
+      sideEffectType: 'none',
+      formSchema: {},
+      outputSchema: {},
+    },
+    {
+      id: 'second_step',
+      name: 'Second',
+      type: 'agent_call',
+      dependsOn: ['first_step'],
+      sideEffectType: 'irreversible',
+      humanReviewRequired: true,
+      retryPolicy: { maxAttempts: 1 },
+      agentRef: { kind: 'system', slug: 'copywriter' },
+      agentInputs: { prompt: 'hello' },
+      prompt: 'Generate something',
+      outputSchema: {},
+    },
+  ],
+};
+
+test('renderPlaybookFile: deterministic — same input produces byte-identical output', () => {
+  const hash = computeDefinitionHash(sampleDefinition);
+  const a = renderPlaybookFile(sampleDefinition, hash);
+  const b = renderPlaybookFile(sampleDefinition, hash);
+  if (a !== b) throw new Error('non-deterministic render');
+});
+
+test('renderPlaybookFile: embeds the definition hash as a magic comment', () => {
+  const hash = computeDefinitionHash(sampleDefinition);
+  const out = renderPlaybookFile(sampleDefinition, hash);
+  if (!out.includes(`@playbook-definition-hash: ${hash}`)) {
+    throw new Error('hash comment missing from rendered output');
+  }
+});
+
+test('renderPlaybookFile: emits import + definePlaybook wrapper', () => {
+  const hash = computeDefinitionHash(sampleDefinition);
+  const out = renderPlaybookFile(sampleDefinition, hash);
+  if (!out.includes("import { definePlaybook } from '../lib/playbook/definePlaybook.js'")) {
+    throw new Error('definePlaybook import missing');
+  }
+  if (!out.includes('export default definePlaybook({')) {
+    throw new Error('definePlaybook wrapper call missing');
+  }
+});
+
+test('renderPlaybookFile: preserves all step structural fields verbatim', () => {
+  const hash = computeDefinitionHash(sampleDefinition);
+  const out = renderPlaybookFile(sampleDefinition, hash);
+  // slug, name, ids, deps, side effects, agent ref, prompt — all present
+  for (const needle of [
+    '"render-test"',
+    '"Render Test"',
+    '"first_step"',
+    '"second_step"',
+    '"irreversible"',
+    'humanReviewRequired: true',
+    '{"kind":"system","slug":"copywriter"}',
+    '"Generate something"',
+  ]) {
+    if (!out.includes(needle)) {
+      throw new Error(`expected output to contain ${needle}`);
+    }
+  }
+});
+
+test('renderPlaybookFile: schema fields use z.any() placeholder (no JSON literal injection)', () => {
+  const hash = computeDefinitionHash(sampleDefinition);
+  const out = renderPlaybookFile(sampleDefinition, hash);
+  if (!out.includes('outputSchema: z.any(),')) {
+    throw new Error('outputSchema must render as z.any() placeholder');
+  }
+  if (!out.includes('formSchema: z.any(),')) {
+    throw new Error('formSchema must render as z.any() placeholder');
+  }
+});
+
+test('renderPlaybookFile: hash changes when definition changes', () => {
+  const h1 = computeDefinitionHash(sampleDefinition);
+  const tweaked = { ...sampleDefinition, name: 'Different Name' };
+  const h2 = computeDefinitionHash(tweaked);
+  if (h1 === h2) throw new Error('hash should change when definition changes');
+});
+
 console.log('\n──────────────────────────────────');
 console.log(`${passed} passed, ${failed} failed`);
 console.log('──────────────────────────────────\n');

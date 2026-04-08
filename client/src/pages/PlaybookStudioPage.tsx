@@ -61,38 +61,38 @@ type ToolResult =
   | { kind: 'estimate'; cents: number; mode: string; perStep: Record<string, number> }
   | { kind: 'save'; ok: boolean; prUrl?: string; errors?: ValidationError[] };
 
-const SAMPLE = `// Paste a definePlaybook(...) call here, or describe the playbook in
-// natural language and let the Playbook Author agent draft it (coming soon).
-// For now you can author manually and use the buttons below to validate.
-
-import { z } from 'zod';
-import { definePlaybook } from '../lib/playbook/definePlaybook.js';
-
-export default definePlaybook({
-  slug: 'new-playbook',
-  name: 'New Playbook',
-  description: '',
-  version: 1,
-  initialInputSchema: z.object({}),
-  steps: [
+// Default starter definition shown in the JSON pane on first load.
+// The user edits this; the server renders the corresponding .playbook.ts
+// file body and returns it via the /render endpoint.
+const STARTER_DEFINITION_JSON = `{
+  "slug": "my-new-playbook",
+  "name": "My New Playbook",
+  "description": "",
+  "version": 1,
+  "steps": [
     {
-      id: 'first_step',
-      name: 'First step',
-      type: 'user_input',
-      dependsOn: [],
-      sideEffectType: 'none',
-      formSchema: z.object({}),
-      outputSchema: z.object({}),
-    },
-  ],
-});
-`;
+      "id": "first_step",
+      "name": "First step",
+      "type": "user_input",
+      "dependsOn": [],
+      "sideEffectType": "none",
+      "formSchema": {},
+      "outputSchema": {}
+    }
+  ]
+}`;
 
 export default function PlaybookStudioPage(_props: { user: User }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [fileContents, setFileContents] = useState(SAMPLE);
-  const [definitionJson, setDefinitionJson] = useState('{\n  "slug": "demo",\n  "name": "Demo",\n  "version": 1,\n  "steps": []\n}');
+  // Read-only preview of the .playbook.ts file the server would commit
+  // for the current definition. Populated by the /render endpoint and
+  // refreshed whenever the definition changes. The user never edits this
+  // directly — it is the server's authoritative output.
+  const [renderedPreview, setRenderedPreview] = useState<string>(
+    '// Server-rendered preview will appear here once the definition validates.\n'
+  );
+  const [definitionJson, setDefinitionJson] = useState(STARTER_DEFINITION_JSON);
   const [toolResult, setToolResult] = useState<ToolResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +136,7 @@ export default function PlaybookStudioPage(_props: { user: User }) {
       const created: Session = res.data.session;
       setSessions([created, ...sessions]);
       setActiveSessionId(created.id);
-      setFileContents(SAMPLE);
+      setRenderedPreview('// Edit the definition JSON below and click Validate to render a preview.\n');
       setToolResult(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create session');
@@ -145,14 +145,21 @@ export default function PlaybookStudioPage(_props: { user: User }) {
 
   async function switchSession(s: Session) {
     setActiveSessionId(s.id);
-    setFileContents(s.candidateFileContents || SAMPLE);
+    setRenderedPreview(
+      s.candidateFileContents ||
+        '// No saved candidate yet. Edit the definition JSON below and click Validate to render a preview.\n'
+    );
     setToolResult(null);
   }
 
   async function loadReference(slug: string) {
     try {
       const res = await api.get(`/api/system/playbook-studio/playbooks/${slug}`);
-      setFileContents(res.data.contents);
+      // Reference playbooks are loaded into the preview pane for the
+      // user to read, but the source of truth is still the definition
+      // JSON below — they should copy structural patterns into their
+      // own definition rather than editing the preview directly.
+      setRenderedPreview(res.data.contents);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reference');
     }
@@ -186,10 +193,14 @@ export default function PlaybookStudioPage(_props: { user: User }) {
 
       if (kind === 'validate') {
         const res = await api.post('/api/system/playbook-studio/validate', { definition: parsed });
-        // The validate response includes a definitionHash on success;
-        // saveAndOpenPr re-runs validate to get a fresh hash anyway, so
-        // the UI just surfaces it in the result panel for transparency.
         setToolResult({ kind: 'validate', ...res.data });
+        // On a successful validate, refresh the preview pane so the
+        // user sees the canonical file body the server would commit
+        // for this definition. The preview is the single source of
+        // truth — it's exactly what saveAndOpenPr would render.
+        if (res.data?.ok) {
+          await refreshPreview(parsed);
+        }
       } else if (kind === 'simulate') {
         const res = await api.post('/api/system/playbook-studio/simulate', { definition: parsed });
         setToolResult({ kind: 'simulate', ...res.data });
@@ -211,37 +222,35 @@ export default function PlaybookStudioPage(_props: { user: User }) {
    * Re-runs validate against the current definition JSON. Returns the
    * fresh canonical hash on success, null on failure (with the error
    * surfaced via toolResult). Used by saveAndOpenPr to guarantee the
-   * hash it embeds matches the EXACT definition the server is about to
-   * validate during save — no chance of stale hash drift.
+   * Definition-only save flow.
+   *
+   * The server is the only producer of the .playbook.ts file body —
+   * the UI sends just the validated definition object. The server
+   * validates, renders the file deterministically, and commits it.
+   * There is no client-side fileContents anywhere in this path, so
+   * there's nothing the client can tamper with that bypasses
+   * validation.
+   *
+   * The "preview" pane shows what the server would commit (via the
+   * /render endpoint, refreshed whenever the user updates the
+   * definition or clicks Validate).
    */
-  async function validateAndGetHash(definition: unknown): Promise<string | null> {
-    try {
-      const res = await api.post('/api/system/playbook-studio/validate', { definition });
-      if (!res.data?.ok) {
-        setToolResult({ kind: 'validate', ok: false, errors: res.data?.errors ?? [] });
-        return null;
-      }
-      const hash = res.data?.definitionHash;
-      if (typeof hash !== 'string') {
-        setError('Validate response missing definitionHash — server out of date?');
-        return null;
-      }
-      return hash;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Validation failed');
-      return null;
-    }
-  }
 
   /**
-   * Removes any existing @playbook-definition-hash magic comment from the
-   * file contents and prepends a fresh one with the canonical hash. The
-   * server's save endpoint requires this comment to match the validated
-   * definition's hash exactly (spec invariant 14).
+   * Re-renders the preview pane against the current definition. Called
+   * after every successful Validate / Simulate / Estimate so the user
+   * always sees the latest server-rendered file body.
    */
-  function injectDefinitionHashComment(contents: string, hash: string): string {
-    const stripped = contents.replace(/\/\/\s*@playbook-definition-hash:\s*[a-f0-9]{64}\s*\n?/g, '');
-    return `// @playbook-definition-hash: ${hash}\n${stripped}`;
+  async function refreshPreview(definition: unknown): Promise<void> {
+    try {
+      const res = await api.post('/api/system/playbook-studio/render', { definition });
+      if (res.data?.ok && typeof res.data?.fileContents === 'string') {
+        setRenderedPreview(res.data.fileContents);
+      }
+    } catch {
+      // Preview is best-effort; if the definition is invalid the render
+      // endpoint returns 422 and the user sees the validate result.
+    }
   }
 
   async function saveAndOpenPr() {
@@ -249,10 +258,6 @@ export default function PlaybookStudioPage(_props: { user: User }) {
       setError('Create or select a session first');
       return;
     }
-    // The save endpoint requires BOTH fileContents and a structured
-    // definition (spec invariant 14 — the validator runs against the
-    // definition, never against raw TS source). Parse the JSON pane and
-    // bail with a clear error if it's invalid.
     let parsedDefinition: unknown;
     try {
       parsedDefinition = JSON.parse(definitionJson);
@@ -267,29 +272,30 @@ export default function PlaybookStudioPage(_props: { user: User }) {
     setBusy(true);
     setError(null);
     try {
-      // Always re-validate to get a FRESH canonical hash. Stale hashes
-      // from earlier validate runs are rejected by the server even if
-      // the definition appears identical, because the server compares
-      // structurally and any whitespace tweak in the JSON pane changes
-      // the structurally-canonical hash.
-      const definitionHash = await validateAndGetHash(parsedDefinition);
-      if (!definitionHash) {
-        setBusy(false);
-        return;
-      }
-      const fileWithHash = injectDefinitionHashComment(fileContents, definitionHash);
-      // Persist the injected version locally so the user sees what was sent
-      setFileContents(fileWithHash);
-
       const res = await api.post(
         `/api/system/playbook-studio/sessions/${activeSessionId}/save-and-open-pr`,
-        { fileContents: fileWithHash, definition: parsedDefinition }
+        { definition: parsedDefinition }
       );
+      // The server returns its rendered file alongside the PR URL —
+      // surface it in the preview so the user sees exactly what landed.
+      if (typeof res.data?.renderedFileContents === 'string') {
+        setRenderedPreview(res.data.renderedFileContents);
+      }
       setToolResult({ kind: 'save', ok: true, ...res.data });
       await loadSessions();
     } catch (err) {
-      const data = (err as { response?: { data?: { ok?: boolean; errors?: ValidationError[] } } })
-        ?.response?.data;
+      const data = (err as {
+        response?: {
+          data?: {
+            ok?: boolean;
+            errors?: ValidationError[];
+            renderedFileContents?: string;
+          };
+        };
+      })?.response?.data;
+      if (data?.renderedFileContents) {
+        setRenderedPreview(data.renderedFileContents);
+      }
       if (data?.errors) {
         setToolResult({ kind: 'save', ok: false, errors: data.errors });
       } else {
@@ -389,12 +395,17 @@ export default function PlaybookStudioPage(_props: { user: User }) {
           )}
         </div>
 
+        {/* Read-only preview of the file the server would commit. The
+            user never edits this directly — the source of truth is the
+            definition JSON pane below. The server's /render endpoint
+            populates this value via refreshPreview() after every
+            successful Validate. */}
         <textarea
-          value={fileContents}
-          onChange={(e) => setFileContents(e.target.value)}
+          value={renderedPreview}
+          readOnly
           className="flex-1 font-mono text-xs p-4 border-0 focus:outline-none resize-none bg-slate-900 text-slate-100"
           spellCheck={false}
-          placeholder="Paste a definePlaybook(...) call here…"
+          aria-label="Server-rendered playbook file preview (read-only)"
         />
 
         <div className="border-t border-slate-200 p-3 bg-slate-50 space-y-2">

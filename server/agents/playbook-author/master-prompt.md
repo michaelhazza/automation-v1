@@ -66,20 +66,31 @@ Phase 2 — Structure
   you edit anything upstream. Sound right?"
 
 Phase 3 — Generation
-  Call playbook_propose_save with a full file. Then call playbook_validate
-  on it. If validation fails, fix and re-validate. Loop until clean.
+  Build the definition object in your head, then call playbook_validate
+  with it. If validation fails, fix and re-validate. Loop until clean.
   Maximum 3 fix attempts; if still failing, surface the errors to the
-  admin and ask for human help.
+  admin and ask for human help. Never try to write a .playbook.ts file
+  string yourself — the SERVER renders the file deterministically from
+  the validated definition. Your job is to produce a clean definition
+  object.
 
 Phase 4 — Review
-  Show the admin the validated file. Run playbook_estimate_cost (default
-  pessimistic mode) and surface the result. Ask if they want to open a PR.
+  After playbook_validate returns ok, run playbook_estimate_cost
+  (default pessimistic mode) and surface the result. Tell the admin
+  the rendered file is now visible in the Studio preview pane on the
+  right side of the page so they can review the canonical file body
+  before approving. Ask if they want to open a PR.
 
 Phase 5 — PR
-  When the admin says yes, call playbook_propose_save with the final
-  file and the current sessionId. Tell the admin "I've prepared the
-  file — click 'Save & Open PR' on the right pane to commit it via your
-  GitHub identity." YOU DO NOT COMMIT. The human commits.
+  When the admin says yes, call playbook_propose_save with the
+  definition object (NOT a file string) and the current sessionId.
+  The server will validate and render the file again, persist it as
+  the session's candidate, and return a definitionHash. Tell the admin
+  "I've prepared the file. The server rendered it deterministically
+  from the validated definition (hash: <short>). Click 'Save & Open
+  PR' on the right pane to commit it via your GitHub identity."
+  YOU DO NOT COMMIT. The human commits. NEVER pass fileContents — the
+  server is the only producer of the file body.
 
 REFERENCE EXAMPLES
 You have access to existing playbooks via playbook_read_existing. Call

@@ -45,45 +45,46 @@ import type {
 import { logger } from '../lib/logger.js';
 import { validateDefinition as runtimeValidateDefinition } from '../lib/playbook/validator.js';
 import { hashValue } from '../lib/playbook/hash.js';
+import { renderPlaybookFile } from '../lib/playbook/renderer.js';
 import { createPlaybookPr } from './playbookStudioGithub.js';
+
+// Re-export the renderer so existing imports of
+// playbookStudioService.renderPlaybookFile keep working.
+export { renderPlaybookFile };
 
 const PLAYBOOKS_DIR = resolve(process.cwd(), 'server/playbooks');
 
 // ─── Definition/file consistency (spec invariant 14) ─────────────────────────
 //
-// The save endpoint validates a structured `definition` object then commits
-// `fileContents` to GitHub. To prevent the validate-one-thing-commit-another
-// attack, the file MUST embed a magic comment containing the canonical hash
-// of the validated definition. The save endpoint extracts the hash from the
-// file via the regex below and rejects any mismatch.
+// Studio's save flow does NOT accept caller-supplied fileContents. The
+// server is the only producer of the file body via renderPlaybookFile()
+// below. The flow is:
 //
-// The Studio UI computes the same hash via the validate endpoint's response
-// and auto-injects/updates this comment in the file before sending the save
-// request. The agent's propose_save tool does the same thing.
+//   1. Caller (UI or agent tool) submits a structured `definition` only
+//   2. Server validates the definition via the runtime validator
+//   3. Server canonicalises + hashes the validated definition
+//   4. Server renders the .playbook.ts file deterministically from the
+//      validated definition, embedding the hash as a magic comment
+//   5. Server commits THAT generated file via the GitHub PR helper
 //
-// The hash is also a permanent audit trail in git history: any reviewer can
-// see exactly which definition the committed file represents.
-const DEFINITION_HASH_COMMENT_RE = /\/\/\s*@playbook-definition-hash:\s*([a-f0-9]{64})\b/;
-const DEFINITION_HASH_COMMENT_LINE = (hash: string) => `// @playbook-definition-hash: ${hash}`;
+// This closes the validate-one-thing-commit-another attack: there is no
+// fileContents field at any boundary the caller can tamper with. The
+// magic hash comment is no longer security-relevant — it is now just an
+// audit trail in git history showing which definition produced the file.
+// (The actual comment string lives in the pure renderer module.)
 
 /**
  * Computes the canonical hash of a validated definition. Same algorithm
  * as the engine's hashValue helper — canonical JSON (key-sorted) → SHA256.
- * Exposed for the validate endpoint so the UI can fetch and inject the
- * magic comment.
+ * Exposed so the validate route can return it for UI display.
  */
 export function computeDefinitionHash(definition: unknown): string {
   return hashValue(definition);
 }
 
-/**
- * Extracts the embedded hash from a candidate file's contents. Returns
- * null if the magic comment is missing.
- */
-function extractDefinitionHashFromFile(fileContents: string): string | null {
-  const m = fileContents.match(DEFINITION_HASH_COMMENT_RE);
-  return m ? m[1] : null;
-}
+// renderPlaybookFile lives in ../lib/playbook/renderer.ts (pure module
+// with no DB / env dependencies so the unit test suite can import it
+// directly). It is re-exported at the top of this file.
 
 // ─── Structural validator (no Zod required) ──────────────────────────────────
 
@@ -125,6 +126,28 @@ export const playbookStudioService = {
    */
   computeDefinitionHash(definition: unknown): string {
     return computeDefinitionHash(definition);
+  },
+
+  /**
+   * Validates the definition and renders the deterministic playbook
+   * file. Used by the /api/system/playbook-studio/render endpoint and
+   * by the Studio UI's preview pane. Returns either the rendered file
+   * + canonical hash, or a structured validation error.
+   */
+  validateAndRender(
+    definition: unknown
+  ): { ok: true; fileContents: string; definitionHash: string } | { ok: false; errors: ValidationError[] } {
+    if (!definition || typeof definition !== 'object') {
+      return {
+        ok: false,
+        errors: [{ rule: 'missing_field', message: 'definition must be an object' }],
+      };
+    }
+    const validation = this.validateCandidate(definition);
+    if (!validation.ok) return validation;
+    const definitionHash = computeDefinitionHash(definition);
+    const fileContents = renderPlaybookFile(definition as Record<string, unknown>, definitionHash);
+    return { ok: true, fileContents, definitionHash };
   },
 
   /** read_existing_playbook tool. Read-only, file system. */
@@ -413,26 +436,34 @@ export const playbookStudioService = {
   },
 
   /**
-   * Validates the candidate file + definition and opens a real GitHub PR
-   * via the playbookStudioGithub helper. Always re-validates first
-   * (spec invariant 14): the chat artefact is never trusted.
+   * Validates the structured definition, derives the playbook file
+   * deterministically from it via renderPlaybookFile(), and opens a
+   * GitHub PR with the rendered file.
    *
-   * REQUIRES a structured `definition` object alongside `fileContents`.
-   * The definition is what gets validated; the fileContents is what gets
-   * written to the PR. Both must be present — passing only fileContents
-   * is rejected because the validator cannot reliably parse arbitrary
-   * TypeScript source.
+   * THIS METHOD DOES NOT ACCEPT CALLER-SUPPLIED fileContents.
+   * The server is the only producer of the file body. This closes the
+   * validate-one-thing-commit-another attack: there is no input the
+   * caller can tamper with that bypasses validation. Spec invariant 14
+   * (the save endpoint always re-validates AND now also always
+   * re-renders the file from the validated source).
    *
-   * Returns 422 (`ok: false`) on validation failure, missing definition,
-   * or when GitHub integration is not configured. The endpoint surfaces
-   * these as structured errors so the UI can display them inline.
+   * Flow:
+   *   1. Verify session ownership (review finding #2)
+   *   2. Validate definition via the runtime validator (all 13 rules)
+   *   3. Hash the validated definition canonically
+   *   4. Render the .playbook.ts file from the validated definition
+   *   5. Open the PR with the rendered file via the GitHub helper
+   *   6. Persist the rendered file + PR URL on the session row
+   *
+   * Returns 422 (`ok: false`) on session-not-found, validation failure,
+   * or PR creation failure. Surfaces structured errors so the UI can
+   * display them inline.
    */
   async saveAndOpenPr(
     sessionId: string,
-    fileContents: string,
     definition: unknown,
     userId: string
-  ): Promise<{ ok: boolean; prUrl?: string; errors?: ValidationError[]; reason?: string }> {
+  ): Promise<{ ok: boolean; prUrl?: string; errors?: ValidationError[]; reason?: string; renderedFileContents?: string }> {
     // Load and verify the session belongs to the calling user BEFORE
     // doing any validation or PR work. Without this guard, the endpoint
     // would happily create a PR against a stale or non-existent session
@@ -453,9 +484,9 @@ export const playbookStudioService = {
       };
     }
 
-    // Mandatory: caller must supply a structured definition object that
-    // we can validate. Spec invariant 14 — the save endpoint always
-    // re-runs the validator and never trusts the chat artefact.
+    // Mandatory: caller must supply a structured definition object.
+    // Spec invariant 14 — the save endpoint always re-runs the validator
+    // and never trusts a chat artefact.
     if (!definition || typeof definition !== 'object') {
       return {
         ok: false,
@@ -463,19 +494,15 @@ export const playbookStudioService = {
           {
             rule: 'missing_field',
             message:
-              'definition object is required (the validator cannot reliably parse raw TypeScript). The Studio UI sends both fileContents and a structured definition.',
+              'definition object is required. The Studio is the only producer of the playbook file body — pass the validated definition only.',
           },
         ],
       };
     }
 
-    // Mandatory validation against the runtime DAG validator. This
-    // covers all 13 rules including cycle, orphan, and max DAG depth —
-    // the structural subset has been removed in favour of the canonical
-    // implementation.
+    // Mandatory validation against the runtime DAG validator. All 13 rules.
     const validation = this.validateCandidate(definition);
     if (!validation.ok) {
-      await this.updateCandidate(sessionId, userId, fileContents, 'invalid');
       logger.warn('playbook_studio_validation_failed', {
         event: 'playbook_studio.candidate_validated',
         sessionId,
@@ -484,7 +511,7 @@ export const playbookStudioService = {
       return { ok: false, errors: validation.errors };
     }
 
-    // Extract the slug from the validated definition (not from raw text).
+    // Extract the slug from the validated definition.
     const slug = (definition as { slug?: unknown }).slug;
     if (typeof slug !== 'string' || !/^[a-z0-9_-]+$/.test(slug)) {
       return {
@@ -498,48 +525,16 @@ export const playbookStudioService = {
       };
     }
 
-    // Definition/file consistency enforcement (spec invariant 14).
-    // The validated definition has a deterministic canonical hash. The
-    // file MUST embed that hash in a magic comment. If missing or
-    // mismatched, refuse to commit — this closes the validate-one-thing-
-    // commit-another attack where a caller passes a clean definition
-    // alongside malicious fileContents.
-    const expectedHash = computeDefinitionHash(definition);
-    const fileHash = extractDefinitionHashFromFile(fileContents);
-    if (!fileHash) {
-      logger.warn('playbook_studio_save_missing_definition_hash', {
-        sessionId,
-        userId,
-      });
-      return {
-        ok: false,
-        errors: [
-          {
-            rule: 'missing_field',
-            message: `fileContents must include the magic comment "${DEFINITION_HASH_COMMENT_LINE(
-              expectedHash
-            )}" so the server can verify the file matches the validated definition. The Studio UI auto-injects this on save; if you are calling the endpoint directly, add the line near the top of the file.`,
-          },
-        ],
-      };
-    }
-    if (fileHash !== expectedHash) {
-      logger.warn('playbook_studio_save_definition_hash_mismatch', {
-        sessionId,
-        userId,
-        expectedHash,
-        fileHash,
-      });
-      return {
-        ok: false,
-        errors: [
-          {
-            rule: 'missing_field',
-            message: `definition/file hash mismatch — the file's @playbook-definition-hash (${fileHash}) does not match the validated definition's hash (${expectedHash}). The fileContents you submitted does not represent the same playbook as the definition object. Re-generate the file from the validated definition before retrying.`,
-          },
-        ],
-      };
-    }
+    // Render the file deterministically from the validated definition.
+    // The hash embedded in the file's magic comment is computed from
+    // exactly the same definition object that was just validated, so
+    // there is no possible drift between what we validated and what we
+    // commit.
+    const definitionHash = computeDefinitionHash(definition);
+    const renderedFileContents = renderPlaybookFile(
+      definition as Record<string, unknown>,
+      definitionHash
+    );
 
     // Look up the user for the commit author identity (spec §10.8.6 —
     // commit runs under the human admin's identity, never a service account).
@@ -562,7 +557,7 @@ export const playbookStudioService = {
     try {
       prResult = await createPlaybookPr({
         slug,
-        fileContents,
+        fileContents: renderedFileContents,
         authorName,
         authorEmail: user?.email ?? undefined,
       });
@@ -573,22 +568,24 @@ export const playbookStudioService = {
         error: e.message,
         errorCode: e.errorCode,
       });
-      await this.updateCandidate(sessionId, userId, fileContents, 'valid');
+      // Persist the rendered file on the session even on failure so the
+      // user can retry without re-rendering.
+      await this.updateCandidate(sessionId, userId, renderedFileContents, 'valid');
       return {
         ok: false,
         reason: e.message ?? 'PR creation failed',
         errors: [{ rule: 'missing_field', message: e.message ?? 'PR creation failed' }],
+        renderedFileContents,
       };
     }
 
     // Final session row update — scope by both sessionId AND createdByUserId
-    // (review finding #2). The earlier ownership check via getSession()
-    // already proved the user owns this session, but defence-in-depth says
-    // every persistence write should still carry the user scope.
+    // (review finding #2). Records the rendered file as the definitive
+    // candidate now that the PR is open.
     await db
       .update(playbookStudioSessions)
       .set({
-        candidateFileContents: fileContents,
+        candidateFileContents: renderedFileContents,
         candidateValidationState: 'valid',
         prUrl: prResult.prUrl,
         updatedAt: new Date(),
@@ -607,8 +604,9 @@ export const playbookStudioService = {
       prUrl: prResult.prUrl,
       branch: prResult.branch,
       commitSha: prResult.commitSha,
+      definitionHash,
     });
 
-    return { ok: true, prUrl: prResult.prUrl };
+    return { ok: true, prUrl: prResult.prUrl, renderedFileContents };
   },
 };

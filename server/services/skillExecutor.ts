@@ -2443,17 +2443,28 @@ async function executePlaybookProposeSave(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  const fileContents = String(input.fileContents ?? '');
+  // Definition-only API. The agent supplies the validated definition
+  // object (NOT raw file contents) and the server renders the
+  // .playbook.ts file deterministically. There is no input the agent
+  // can use to inject arbitrary file content — that's the whole point
+  // of spec invariant 14 in the post-round-3 design.
   const sessionId = String(input.sessionId ?? '');
-  if (!fileContents || !sessionId) {
-    return { success: false, error: 'fileContents and sessionId are required' };
+  const definition = input.definition;
+  if (!sessionId) {
+    return { success: false, error: 'sessionId is required' };
   }
-  // Strict user-scope enforcement (review finding #3). The agent run's
-  // initiating principal MUST be present on the SkillExecutionContext;
-  // if it's missing (e.g. a scheduled / system run that has no user
-  // identity), we refuse to write to user-owned session rows.
-  // agentExecutionService populates context.userId from
-  // request.userId for user-initiated runs.
+  if (!definition || typeof definition !== 'object') {
+    return {
+      success: false,
+      error:
+        'definition object is required. propose_save no longer accepts fileContents — the server renders the playbook file deterministically from the validated definition.',
+    };
+  }
+  // Strict user-scope enforcement (review finding #3 from the previous
+  // round). The agent run's initiating principal MUST be present on the
+  // SkillExecutionContext; if it's missing (e.g. a scheduled / system
+  // run that has no user identity), we refuse to write to user-owned
+  // session rows.
   if (!context.userId) {
     return {
       success: false,
@@ -2462,14 +2473,24 @@ async function executePlaybookProposeSave(
     };
   }
   const { playbookStudioService } = await import('./playbookStudioService.js');
-  // Use the strict user-scoped updateCandidate which checks both id
-  // AND createdByUserId. Returns false when the session doesn't exist
-  // OR isn't owned by the calling user — both surface as the same
-  // "session not owned" response so we don't leak session ids.
+  // Validate + render in one call. This re-uses the exact same code
+  // path the /render endpoint uses, so the server's view of the
+  // canonical file body is consistent everywhere.
+  const rendered = playbookStudioService.validateAndRender(definition);
+  if (!rendered.ok) {
+    return {
+      success: false,
+      error: 'Definition failed validation',
+      validationErrors: rendered.errors,
+    };
+  }
+  // Persist the rendered file as the session's candidate, scoped by
+  // (sessionId, userId). Returns false when the session doesn't exist
+  // OR isn't owned by the calling user.
   const updated = await playbookStudioService.updateCandidate(
     sessionId,
     context.userId,
-    fileContents,
+    rendered.fileContents,
     'valid'
   );
   if (!updated) {
@@ -2482,7 +2503,8 @@ async function executePlaybookProposeSave(
   return {
     success: true,
     message:
-      'Candidate recorded. The human admin must click Save & Open PR in the Studio UI to commit this file via their GitHub identity.',
+      'Candidate rendered and recorded. The human admin must click Save & Open PR in the Studio UI to commit this file via their GitHub identity.',
     sessionId,
+    definitionHash: rendered.definitionHash,
   };
 }
