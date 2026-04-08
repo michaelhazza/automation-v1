@@ -29,6 +29,8 @@ export const updateAgentBody = createAgentBody.partial().refine(
 export type UpdateAgentInput = z.infer<typeof updateAgentBody>;
 
 // POST /api/agents/:id/data-sources
+// Also reused by POST /api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources
+// (migration 0078 / spec §9).
 export const createDataSourceBody = z.object({
   name: z.string().min(1).max(255),
   description: z.string().max(2000).optional(),
@@ -39,6 +41,7 @@ export const createDataSourceBody = z.object({
   priority: z.number().int().optional(),
   maxTokenBudget: z.number().int().positive().optional(),
   cacheMinutes: z.number().int().nonnegative().optional(),
+  loadingMode: z.enum(['eager', 'lazy']).optional(),
 });
 export type CreateDataSourceInput = z.infer<typeof createDataSourceBody>;
 

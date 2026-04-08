@@ -1,6 +1,7 @@
 import { pgTable, uuid, text, integer, timestamp, index } from 'drizzle-orm/pg-core';
 import { agents } from './agents';
 import { subaccountAgents } from './subaccountAgents';
+import { scheduledTasks } from './scheduledTasks';
 
 export const agentDataSources = pgTable(
   'agent_data_sources',
@@ -27,6 +28,10 @@ export const agentDataSources = pgTable(
     cacheMinutes: integer('cache_minutes').notNull().default(60),
     // Sync mode: lazy = re-fetch on demand when cache expires; proactive = background polling
     syncMode: text('sync_mode').notNull().default('lazy').$type<'lazy' | 'proactive'>(),
+    // Loading mode: eager = rendered into the system prompt Knowledge Base block;
+    //               lazy  = manifest entry only, agent fetches on demand via read_data_source skill.
+    // Migration 0078. Default 'eager' for backward compatibility.
+    loadingMode: text('loading_mode').notNull().default('eager').$type<'eager' | 'lazy'>(),
     lastFetchedAt: timestamp('last_fetched_at', { withTimezone: true }),
     lastFetchStatus: text('last_fetch_status').$type<'ok' | 'error' | 'pending'>(),
     lastFetchError: text('last_fetch_error'),
@@ -36,6 +41,11 @@ export const agentDataSources = pgTable(
     // When NULL, this is an org-level data source (original behaviour).
     subaccountAgentId: uuid('subaccount_agent_id')
       .references(() => subaccountAgents.id, { onDelete: 'cascade' }),
+    // Scheduled-task-scoped data source: when set, this source is loaded only for runs
+    // fired by the specified scheduled task. Mutually exclusive with subaccountAgentId
+    // (enforced by a CHECK constraint in migration 0078).
+    scheduledTaskId: uuid('scheduled_task_id')
+      .references(() => scheduledTasks.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -43,6 +53,7 @@ export const agentDataSources = pgTable(
     agentIdx: index('agent_data_sources_agent_idx').on(table.agentId),
     agentPriorityIdx: index('agent_data_sources_agent_priority_idx').on(table.agentId, table.priority),
     subaccountAgentIdx: index('agent_data_sources_subaccount_agent_idx').on(table.subaccountAgentId),
+    scheduledTaskIdx: index('agent_data_sources_scheduled_task_idx').on(table.scheduledTaskId),
   })
 );
 

@@ -405,8 +405,33 @@ export const agentExecutionService = {
         // DEC not configured for this subaccount — skip snapshot (non-dev agents)
       }
 
-      // ── 3. Load training data ───────────────────────────────────────────
-      const dataSourceContents = await agentService.fetchAgentDataSources(request.agentId);
+      // ── 3. Load run context data (cascading scopes + task attachments + instructions) ──
+      // Spec §7.1/§7.2. Pulls agent-wide, subaccount-scoped, scheduled-task-
+      // scoped, and task-instance data across all four scopes; resolves
+      // same-name overrides; enforces the eager budget upstream of
+      // buildSystemPrompt; caps the lazy manifest; and exposes the scheduled
+      // task's description as taskInstructions for the new system-prompt layer.
+      const { loadRunContextData } = await import('./runContextLoader.js');
+      const runContextData = await loadRunContextData({
+        agentId: request.agentId,
+        organisationId: request.organisationId,
+        subaccountAgentId: request.subaccountAgentId ?? null,
+        taskId: request.taskId ?? null,
+        triggerContext: request.triggerContext,
+      });
+
+      // Only eager sources flagged includedInPrompt: true are rendered into
+      // the Knowledge Base block. Sources excluded by the upstream budget
+      // walk or by same-name override resolution stay in runContextData
+      // (for snapshot persistence) but do not appear in the prompt.
+      const dataSourceContents = runContextData.eager
+        .filter(s => s.includedInPrompt)
+        .map(s => ({
+          name: s.name,
+          description: s.description,
+          content: s.content,
+          contentType: s.contentType,
+        }));
 
       // ── 4. Load org processes for trigger_process skill ─────────────────
       const orgProcesses = await getOrgProcessesForTools(request.organisationId);
@@ -455,6 +480,30 @@ export const agentExecutionService = {
         }
         return tool;
       });
+
+      // ── 5a. Auto-inject read_data_source (spec §8.4) ─────────────────────
+      // The skill is default-on for every agent run. It's read-only, cheap,
+      // and only useful when data sources are attached. Rather than requiring
+      // each system agent to list it in defaultSystemSkillSlugs, we append it
+      // to the tool list here so every agent can call it without operator
+      // action. The skill is already registered via systemSkillService because
+      // the .md file exists at server/skills/read_data_source.md.
+      if (!enhancedTools.some(t => t.name === 'read_data_source')) {
+        const readDataSourceSkill = await systemSkillService.getSkillBySlug('read_data_source');
+        if (readDataSourceSkill && readDataSourceSkill.visibility !== 'none') {
+          enhancedTools.push({
+            name: readDataSourceSkill.definition.name,
+            description: readDataSourceSkill.definition.description,
+            input_schema: readDataSourceSkill.definition.input_schema,
+          });
+          if (readDataSourceSkill.instructions || readDataSourceSkill.methodology) {
+            const parts: string[] = [];
+            if (readDataSourceSkill.instructions) parts.push(readDataSourceSkill.instructions);
+            if (readDataSourceSkill.methodology) parts.push(readDataSourceSkill.methodology);
+            systemSkillInstructions.push(parts.join('\n\n'));
+          }
+        }
+      }
 
       // ── 5b. MCP tool resolution ────────────────────────────────────────
       let mcpClients: Map<string, import('./mcpClientManager.js').McpClientInstance> | null = null;
@@ -533,6 +582,45 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Additional Instructions\n${configCustomInstructions}`);
       }
 
+      // Layer 3.5: Task Instructions — only when run originates from a scheduled task.
+      // Spec §7.2. The scheduled task's description is injected as a dedicated
+      // layer so operators can treat the scheduled task as the "project" and the
+      // agent's master prompt as the generic reporting brain.
+      if (runContextData.taskInstructions) {
+        systemPromptParts.push(
+          `\n\n---\n## Task Instructions\nYou are executing a recurring task. Follow these instructions precisely:\n\n${runContextData.taskInstructions}`
+        );
+      }
+
+      // Layer 3.6: Available Context Sources — the lazy manifest.
+      // Spec §7.3. Shows the agent which reference files exist without
+      // loading their content. The agent fetches on demand via the
+      // read_data_source skill. Capped at MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT;
+      // elided entries remain available via read_data_source op='list'.
+      if (runContextData.manifestForPrompt.length > 0) {
+        const scopeLabels: Record<string, string> = {
+          task_instance: 'task attachment',
+          scheduled_task: 'scheduled task',
+          subaccount: 'subaccount',
+          agent: 'agent',
+        };
+        const manifestLines = runContextData.manifestForPrompt.map((s) => {
+          const scopeLabel = scopeLabels[s.scope] ?? s.scope;
+          const sizeHint = s.sizeBytes > 0 ? ` (~${Math.round(s.sizeBytes / 1024)}KB)` : '';
+          const unreadable = !s.fetchOk ? ' [binary — not readable]' : '';
+          const desc = s.description ? ` — ${s.description}` : '';
+          return `- **${s.name}** [${scopeLabel}]${sizeHint}${unreadable}${desc} (id: \`${s.id}\`)`;
+        }).join('\n');
+
+        const elidedNote = runContextData.manifestElidedCount > 0
+          ? `\n\n_${runContextData.manifestElidedCount} additional source(s) are available but not listed here to keep the prompt compact. Call \`read_data_source\` with \`op: 'list'\` to see the full inventory._`
+          : '';
+
+        systemPromptParts.push(
+          `\n\n---\n## Available Context Sources\nThe following additional reference materials are available. Use the \`read_data_source\` tool to fetch any of them on demand:\n\n${manifestLines}${elidedNote}`
+        );
+      }
+
       // Add team roster (loaded fresh from DB every run)
       const teamRoster = isOrgRun
         ? await buildOrgTeamRoster(request.organisationId, request.agentId)
@@ -575,6 +663,40 @@ export const agentExecutionService = {
       const fullSystemPrompt = systemPromptParts.join('');
       const systemPromptTokens = approxTokens(fullSystemPrompt);
 
+      // Persist the context sources snapshot (spec §7.5). Captures every
+      // entry considered at run-start time — winners, suppressed losers,
+      // lazy manifest, eager-but-budget-excluded. Used by the run detail
+      // UI Context Sources panel for debugging.
+      const allForSnapshot = [
+        ...runContextData.eager,
+        ...runContextData.manifest,
+        ...runContextData.suppressed,
+      ];
+      const contextSourcesSnapshot = allForSnapshot.map((s) => ({
+        id: s.id,
+        scope: s.scope,
+        name: s.name,
+        description: s.description,
+        contentType: s.contentType,
+        loadingMode: s.loadingMode,
+        sizeBytes: s.sizeBytes,
+        tokenCount: s.tokenCount,
+        fetchOk: s.fetchOk,
+        // orderIndex is always assigned in runContextLoader step 5,
+        // BEFORE suppression, so every entry carries a stable index.
+        orderIndex: s.orderIndex!,
+        includedInPrompt: s.includedInPrompt ?? false,
+        truncated: s.truncated ?? false,
+        suppressedByOverride: s.suppressedByOverride ?? false,
+        suppressedBy: s.suppressedBy,
+        exclusionReason: (() => {
+          if (s.suppressedByOverride) return 'override_suppressed' as const;
+          if (s.loadingMode === 'lazy') return 'lazy_not_rendered' as const;
+          if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'budget_exceeded' as const;
+          return null;
+        })(),
+      }));
+
       await db.update(agentRuns).set({
         memoryStateAtStart: memory ?? null,
         skillsUsed: [
@@ -582,6 +704,7 @@ export const agentExecutionService = {
           ...skillSlugs,
         ],
         systemPromptTokens,
+        contextSourcesSnapshot,
       }).where(eq(agentRuns.id, run.id));
 
       // H-5: store large snapshot in agent_run_snapshots (keep agent_runs lean)
@@ -754,6 +877,7 @@ export const agentExecutionService = {
             pipeline,
             mcpClients,
             mcpLazyRegistry,
+            runContextData,
           });
 
           // ── Finalize Langfuse trace (inside withTrace so context is available) ──
@@ -1036,6 +1160,13 @@ interface LoopParams {
   pipeline: MiddlewarePipeline;
   mcpClients?: Map<string, import('./mcpClientManager.js').McpClientInstance> | null;
   mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig> | null;
+  /**
+   * Context data pool for this run — populated upstream by loadRunContextData.
+   * Threaded through to the skill execution context so the read_data_source
+   * skill handler can answer list/read ops against the same pool used to
+   * build the system prompt. See spec §8.2.
+   */
+  runContextData: import('./runContextLoader.js').RunContextData;
 }
 
 interface LoopResult {
@@ -1098,7 +1229,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
     runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
-    saLink, pipeline, mcpClients, mcpLazyRegistry,
+    saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
   } = params;
 
   const toolCallsLog: object[] = [];
@@ -1108,6 +1239,29 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let tasksUpdated = 0;
   let deliverablesCreated = 0;
   let finalStatus: string | undefined;
+
+  // Persistent skill execution context — created ONCE outside the loop so
+  // that counters (readDataSourceCallCount, mcpCallCount) survive across
+  // iterations. Previously this was rebuilt inline on every tool call,
+  // which would have reset the counters every iteration.
+  const skillExecutionContext: import('./skillExecutor.js').SkillExecutionContext = {
+    runId,
+    organisationId: request.organisationId,
+    subaccountId: request.subaccountId ?? null,
+    agentId: request.agentId,
+    userId: request.userId,
+    orgProcesses,
+    handoffDepth: request.handoffDepth,
+    isSubAgent: request.isSubAgent,
+    tokenBudget,
+    startTime,
+    timeoutMs,
+    taskId: request.taskId,
+    _mcpClients: mcpClients ?? undefined,
+    _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
+    runContextData,
+    readDataSourceCallCount: 0,
+  };
 
   // Throttle trace events to prevent event floods (max 2/sec)
   const traceThrottle = new TraceThrottle(runId);
@@ -1345,22 +1499,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         return skillExecutor.execute({
           skillName: toolCall.name,
           input: toolCall.input,
-          context: {
-            runId,
-            organisationId: request.organisationId,
-            subaccountId: request.subaccountId ?? null,
-            agentId: request.agentId,
-            userId: request.userId,
-            orgProcesses,
-            handoffDepth: request.handoffDepth,
-            isSubAgent: request.isSubAgent,
-            tokenBudget,
-            startTime,
-            timeoutMs,
-            taskId: request.taskId,
-            _mcpClients: mcpClients ?? undefined,
-            _mcpLazyRegistry: mcpLazyRegistry ?? undefined,
-          },
+          context: skillExecutionContext,
         });
       }, { actionType: toolCall.name });
 

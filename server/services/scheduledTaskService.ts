@@ -118,11 +118,74 @@ export const scheduledTaskService = {
       update.nextRunAt = await this.computeNextOccurrence(rrule, timezone, scheduleTime);
     }
 
+    // Detect assignedAgentId change — triggers a cascade on any data sources
+    // attached to this scheduled task. See spec §7.6.
+    const agentChanged =
+      data.assignedAgentId !== undefined &&
+      data.assignedAgentId !== existing.assignedAgentId;
+
     const [updated] = await db
       .update(scheduledTasks)
       .set(update)
       .where(eq(scheduledTasks.id, id))
       .returning();
+
+    if (agentChanged) {
+      // Import lazily to avoid a circular dependency between
+      // scheduledTaskService and agentService at module load time.
+      const { agentDataSources } = await import('../db/schema/index.js');
+      const { auditService } = await import('./auditService.js');
+
+      // Count first so the audit metadata is accurate
+      const cascadedRows = await db
+        .select({ id: agentDataSources.id, name: agentDataSources.name })
+        .from(agentDataSources)
+        .where(eq(agentDataSources.scheduledTaskId, id));
+
+      if (cascadedRows.length > 0) {
+        // Cascade the agentId update to point at the new assigned agent
+        await db
+          .update(agentDataSources)
+          .set({ agentId: data.assignedAgentId!, updatedAt: new Date() })
+          .where(eq(agentDataSources.scheduledTaskId, id));
+
+        // Compute the list of scheduled-task source names that will now
+        // override the new agent's OWN agent-level sources at runtime (§3.6).
+        // Purely informational — no DB change beyond the cascade above.
+        const { isNull } = await import('drizzle-orm');
+        const newAgentOwnSources = await db
+          .select({ name: agentDataSources.name })
+          .from(agentDataSources)
+          .where(
+            and(
+              eq(agentDataSources.agentId, data.assignedAgentId!),
+              isNull(agentDataSources.subaccountAgentId),
+              isNull(agentDataSources.scheduledTaskId),
+            )
+          );
+
+        const newAgentNames = new Set(
+          newAgentOwnSources.map(s => s.name.toLowerCase().trim())
+        );
+        const willOverrideNewAgentSources = cascadedRows
+          .map(s => s.name)
+          .filter(n => newAgentNames.has(n.toLowerCase().trim()));
+
+        await auditService.log({
+          organisationId,
+          actorType: 'system',
+          action: 'scheduled_task.assigned_agent_changed',
+          entityType: 'scheduled_task',
+          entityId: id,
+          metadata: {
+            oldAgentId: existing.assignedAgentId,
+            newAgentId: data.assignedAgentId!,
+            cascadedDataSourceCount: cascadedRows.length,
+            willOverrideNewAgentSources,
+          },
+        });
+      }
+    }
 
     return updated;
   },

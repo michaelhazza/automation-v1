@@ -31,6 +31,42 @@ export const TOKEN_INPUT_RATIO = 0.7;
 /** Rough token estimation split: proportion attributed to output */
 export const TOKEN_OUTPUT_RATIO = 0.3;
 
+// ── Context data source retrieval limits (spec §8.3) ───────────────────────
+
+/**
+ * Maximum number of read_data_source `op: 'read'` calls allowed per agent run.
+ * Prevents runaway loops and caps the cumulative tool-call cost of context
+ * retrieval. The list op is unlimited because it's cheap.
+ */
+export const MAX_READ_DATA_SOURCE_CALLS_PER_RUN = 20;
+
+/**
+ * Maximum tokens returned by a single read_data_source `op: 'read'` call.
+ * Enforced as a hard ceiling: even if the caller passes a larger `limit`,
+ * the response is clamped to this value. Sources larger than this must be
+ * walked via the offset/limit continuation pattern.
+ *
+ * Chosen to be well under the smallest typical context window so a single
+ * read never blows the conversation.
+ */
+export const MAX_READ_DATA_SOURCE_TOKENS_PER_CALL = 15000;
+
+/**
+ * Maximum tokens rendered into the "## Your Knowledge Base" block via the
+ * pre-prompt budget walk in loadRunContextData. Matches the existing
+ * maxDataTokens default in llmService.buildSystemPrompt — the upstream walk
+ * is the primary enforcement, the downstream truncation is a safety net.
+ */
+export const MAX_EAGER_BUDGET = 60000;
+
+/**
+ * Maximum number of lazy manifest entries rendered INTO the system prompt's
+ * "## Available Context Sources" block. Entries beyond this cap are still
+ * accessible via read_data_source op='list' — the cap only affects inline
+ * visibility in the prompt to keep runs with large manifests compact.
+ */
+export const MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT = 25;
+
 // ── Model defaults ──────────────────────────────────────────────────────────
 
 // EXTRACTION_MODEL removed — internal extraction calls now use executionPhase: 'execution'

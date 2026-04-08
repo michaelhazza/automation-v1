@@ -55,6 +55,29 @@ export const agentRuns = pgTable(
     // fingerprint write tracking, etc. Spec v3.4 §5.5.1 / T11.
     runMetadata: jsonb('run_metadata').notNull().default({}).$type<Record<string, unknown>>(),
 
+    // Snapshot of the context data sources considered for this run, captured
+    // by loadRunContextData at run-start time. Frozen after the run starts
+    // (except for an optional post-render `truncated: true` safety-net flip).
+    // Used by the run detail UI Context Sources panel for debugging.
+    // Migration 0078. See docs/cascading-context-data-sources-spec.md §7.5.
+    contextSourcesSnapshot: jsonb('context_sources_snapshot').$type<Array<{
+      id: string;
+      scope: 'agent' | 'subaccount' | 'scheduled_task' | 'task_instance';
+      name: string;
+      description: string | null;
+      contentType: string;
+      loadingMode: 'eager' | 'lazy';
+      sizeBytes: number;
+      tokenCount: number;
+      fetchOk: boolean;
+      orderIndex: number;
+      includedInPrompt: boolean;
+      truncated: boolean;
+      suppressedByOverride: boolean;
+      suppressedBy?: string;
+      exclusionReason: 'budget_exceeded' | 'override_suppressed' | 'lazy_not_rendered' | null;
+    }>>(),
+
     // Status tracking
     status: text('status').notNull().default('pending').$type<'pending' | 'running' | 'completed' | 'failed' | 'timeout' | 'cancelled' | 'loop_detected' | 'budget_exceeded'>(),
 
