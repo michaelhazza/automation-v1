@@ -372,7 +372,19 @@ The `true` (is_local) flag scopes the setting to the current transaction, which 
 
 **Path 3: System jobs (cron, migrations, admin tooling).** These do not have a natural `organisationId` and must use an explicit admin-bypass connection. A new `server/lib/adminDbConnection.ts` exports `withAdminConnection(fn)` which acquires a connection bound to a Postgres role that has `BYPASSRLS` (the role is `admin_role` referenced in the RLS policy examples). All migrations and cron jobs that legitimately need cross-org access must use this helper. The helper logs every invocation to `audit_events` with the caller's stack trace so admin-bypass usage is traceable.
 
-**Hard-failure mode: RLS-protected query with no org context.** The per-request tx wrapper is not enough on its own; a badly-written service call could still pass a DB handle around. So the RLS policies themselves include a defensive clause:
+**Hard-failure mode: RLS-protected query with no org context.**
+
+This is where the previous draft was ambiguous. There are actually **two distinct failure modes at two distinct layers**, and they catch different classes of bug. Both exist; they do not conflict; they are not alternatives.
+
+**Layer A — ALS guard in services (loud failure, first line of defence).**
+
+Every service-layer DB access checks AsyncLocalStorage for an active tx context before touching the database. If ALS has no current tx, the service throws `failure('missing_org_context', ...)` immediately and the request fails with a 500 + structured failure reason. This is the **primary** defence and the one that should catch almost every bug — a service that forgot to open a transaction, a test that called a service without the wrapper, a worker handler that dispatched to a service synchronously without first binding ALS.
+
+Characteristic: loud, deterministic, actionable stack trace.
+
+**Layer B — RLS policy default on protected tables (silent fail-closed, backup defence-in-depth).**
+
+RLS policies include a defensive clause that fail-closes when `app.organisation_id` is unset:
 
 ```sql
 CREATE POLICY tasks_org_isolation ON tasks
@@ -386,11 +398,25 @@ CREATE POLICY tasks_org_isolation ON tasks
   );
 ```
 
-When `app.organisation_id` is unset, **every query against a protected table returns zero rows and every write fails silently** — which sounds bad but is exactly the defensive behaviour we want: zero rows is a loud-enough signal to trigger the integration test (see Testing strategy), and writes failing are caught by `failure()` propagation.
+This layer catches a different class of bug: **raw SQL executed outside the service layer**, admin tooling that bypasses the ALS wrapper, a future contributor who writes `db.select(...)` directly in a route or a script. Any of these reach Postgres without Layer A having fired. Layer B's behaviour: queries return zero rows, writes silently fail (no rows inserted), and the calling code gets an unexpected empty result.
 
-**Silent-zero-row detection:** the integration test `rls.context-propagation.test.ts` (see Testing strategy updates) deliberately runs a query against `tasks` with no org context set and asserts the result is empty — not because zero rows is the desired production behaviour, but because the test is proving that the no-context path fails closed. The same test then runs the query inside a properly-scoped transaction and asserts the expected rows come back. If either assertion fails, the contract is broken.
+Characteristic: silent, deterministic, harder to debug from the code side — but impossible to defeat without explicitly using the admin-bypass connection.
 
-**Non-compliant code is a blocking issue.** A new static gate `verify-rls-contract-compliance.sh` greps for raw `db.select(...)` / `db.insert(...)` calls outside services and outside the ALS wrapper, and fails CI if any appear. This is the automated enforcement of the contract.
+**Why both layers exist:**
+
+- Layer A alone is insufficient because a single missed `db.select()` outside a service bypasses the guard entirely. Layer B catches it.
+- Layer B alone is insufficient because silent zero-row bugs are nightmarishly hard to track down. Layer A fires first and makes 99% of bugs visible with a clear stack trace.
+- Together they cover the full matrix: every service call gets caught loudly by A; every non-service call gets caught silently but unavoidably by B.
+
+**What the integration test asserts about each layer:**
+
+The `rls.context-propagation.test.ts` integration test (see Testing strategy) exercises both layers explicitly:
+
+- **Layer A assertion:** call a service with no ALS tx bound, assert `failure('missing_org_context')` is thrown synchronously.
+- **Layer B assertion:** bypass the service layer entirely, execute a raw `db.select().from(tasks)` inside a `withAdminConnection()` wrapper that has deliberately NOT set `app.organisation_id`, assert zero rows are returned even though `tasks` contains rows.
+- **Combined assertion:** open a legit ALS tx for `fixture-org-001`, execute a service call, assert only `fixture-org-001` rows come back (both layers agree).
+
+**Non-compliant code is a blocking issue.** The static gate `verify-rls-contract-compliance.sh` greps for raw `db.select(...)` / `db.insert(...)` calls outside services and outside the ALS wrapper, and fails CI if any appear. This is the automated enforcement of Layer A. Layer B is enforced by the migrations themselves — once the policy is in place, the only way to bypass it is the explicit admin-bypass connection.
 
 **Migration sequencing:**
 
@@ -793,9 +819,37 @@ Mirror the Playbooks pattern. Three additions:
 
 #### Schema additions
 
-**Decision: extend `agent_run_snapshots` with a lightweight checkpoint + store messages separately.**
+**Decision: extend `agent_run_snapshots` with a lightweight checkpoint + store messages separately + deprecate `agent_run_snapshots.toolCallsLog`.**
 
-The first version of this spec planned a single `checkpoint jsonb` column holding the full message history. That design has a real problem: on a 50-iteration agent run, the checkpoint would be rewritten ~50 times with a progressively larger `messages` array, causing row bloat (Postgres rewrites the full jsonb blob on every update), write amplification, and slower reads. On long-running reporting-agent sweeps this becomes operationally ugly within days.
+The first version of this spec planned a single `checkpoint jsonb` column holding the full message history. That design has a real problem: on a 50-iteration agent run, the checkpoint would be rewritten ~50 times with a progressively larger `messages` array, causing row bloat (Postgres rewrites the full jsonb blob on every update), write amplification, and slower reads.
+
+**Reconciliation with existing `agent_run_snapshots.toolCallsLog`:**
+
+`agent_run_snapshots` already has a `toolCallsLog jsonb` column from the H-5 blob extraction (see `server/db/schema/agentRunSnapshots.ts:20`). This column holds the finalised tool-call history written **once at run completion** for debug purposes. It is read by the run detail UI to render the tool call timeline.
+
+Adding the new `agent_run_messages` table creates an overlap: `toolCallsLog` contains tool-call records, `agent_run_messages` contains messages including tool results. If both coexist without a clear contract, there are two sources of truth.
+
+**The resolution — a phased handover:**
+
+1. **During P2.1 rollout:** `agent_run_messages` becomes the **authoritative** source of both tool calls and their results for runs that went through the new loop. `toolCallsLog` is marked deprecated in the schema comment but stays populated for backward compatibility with old runs and the debug UI.
+
+2. **Write-time behaviour:** the refactored `runAgenticLoop` writes to `agent_run_messages` append-only during execution. At run completion, it **also** writes a derived `toolCallsLog` jsonb blob by projecting the tool-call subset of the messages. This one-off write at completion keeps the existing UI working without changes.
+
+3. **Read-time behaviour:** new code (the run detail page's Plan panel from P4.3, the trajectory comparison tool from P3.3, the regression replay from P1.2) reads exclusively from `agent_run_messages`. Existing code (the debug UI rendering the tool call timeline) continues to read `toolCallsLog` until it's updated.
+
+4. **Deprecation window:** `toolCallsLog` stays in the schema through Phase 1-5 of this roadmap. It is removed only when the debug UI has been migrated to read from `agent_run_messages` — a follow-up ticket after the roadmap lands, not part of the roadmap itself.
+
+5. **Gate to prevent drift:** a new static gate `verify-run-state-source-of-truth.sh` fails CI if any new code reads `agent_run_snapshots.toolCallsLog` directly (except the one allow-listed debug UI file). This stops future code from accidentally reintroducing the dual source of truth.
+
+**Why not just drop `toolCallsLog` in the same migration?** Because the debug UI migration is non-trivial, out of scope for P2.1, and removing the column would break the UI immediately. The deprecation window is the cleanest way to keep both working during the transition.
+
+**Single-column mistake avoided.** The `agent_run_snapshots.checkpoint` column is NOT a replacement for `toolCallsLog`. It holds pointers only (iteration, messageCursor, counters) — never messages or tool call records. Three-way clean division:
+
+| Column / table | Holds | Write frequency | Lifecycle |
+|---|---|---|---|
+| `agent_run_messages` (new table) | Full conversation including tool calls + tool results | Append-only, once per message | Authoritative for new runs; RLS-protected (see "Sprint sequencing" below) |
+| `agent_run_snapshots.checkpoint` (new column) | Pointers only: iteration, messageCursor, counters, resume token, configVersion hash | Updated ~once per iteration, ~500 bytes bounded | New; required for resume |
+| `agent_run_snapshots.toolCallsLog` (existing column) | **Deprecated.** Derived tool-call subset written once at run completion for backward-compatible UI reads | Once at run completion | Legacy; removed in a follow-up ticket after the debug UI migrates |
 
 The revised design splits the concern into three pieces:
 
@@ -822,7 +876,50 @@ CREATE INDEX agent_run_messages_run_idx
 
 Every iteration appends its new messages (user injection, assistant response, tool results) with monotonically incremented `sequence_number`. **Never updated after insert.** Write amplification is bounded to the size of the new message, not the full history.
 
-RLS policy ships with migration 0080 as part of P1.1 Layer 1 (add to the protected-tables list).
+**Sprint sequencing for `agent_run_messages` RLS:**
+
+There is a temporal ordering issue to be explicit about. The P1.1 RLS batch (migrations 0079-0081) ships in **Sprint 2**. `agent_run_messages` is created in **Sprint 3** via migration 0084 as part of P2.1. You cannot add an RLS policy to a table that does not exist yet. The P1.1 "protected tables list" in Sprint 2 therefore does NOT include `agent_run_messages`.
+
+**The contract:** migration 0084 (Sprint 3) ships `agent_run_messages` WITH its RLS policy in the same SQL file. The policy mirrors the shape used by the 0079-0081 batch:
+
+```sql
+-- Part of migration 0084 (Sprint 3 / P2.1)
+CREATE TABLE agent_run_messages (
+  ...
+);
+
+ALTER TABLE agent_run_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY agent_run_messages_org_isolation ON agent_run_messages
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+
+CREATE POLICY agent_run_messages_admin_bypass ON agent_run_messages
+  TO admin_role
+  USING (true)
+  WITH CHECK (true);
+```
+
+**`verify-rls-coverage.sh` updates atomically with the migration.** The protected tables list used by the gate script is not a code constant — it's derived at gate-run time by reading a well-known manifest. Migration 0084 appends `agent_run_messages` to `server/config/rlsProtectedTables.ts` in the same commit as the CREATE TABLE. The gate script reads the manifest and greps migrations for matching `CREATE POLICY` statements. One commit, one coherent change.
+
+This pattern is the **general rule for any new protected table added by later sprints**: the RLS policy ships with the table creation, not deferred to a separate migration. The P1.1 batch (0079-0081) is a one-off retrofit for existing tables. Every new table from Sprint 2 onwards follows the at-creation pattern.
+
+**What this means for each later sprint that adds a protected table:**
+
+| Sprint | Table | Migration | RLS policy location |
+|---|---|---|---|
+| 2 | `regression_cases` (P1.2) | 0083 | Same migration as CREATE TABLE |
+| 2 | `tool_call_security_events` (P1.1 Layer 3) | 0082 | Same migration as CREATE TABLE |
+| 3 | `agent_run_messages` (P2.1) | 0084 | Same migration as CREATE TABLE |
+| 5 | `memory_blocks`, `memory_block_attachments` (P4.2) | 0088 | Same migration as CREATE TABLE |
+
+The P1.1 rollback table at the bottom of P1.1 is updated to reflect this — migration 0083 and 0084's rollback caveats now include "drop the RLS policy and remove from `rlsProtectedTables.ts` in the same commit".
 
 **Piece 2: Lightweight checkpoint on `agent_run_snapshots`.**
 
@@ -1605,12 +1702,81 @@ Narrow the agent's tool space *before* the LLM reasons, based on the intent of t
 
    `HARD_REMOVAL_CONFIDENCE_THRESHOLD = 0.85` in `limits.ts`. A keyword classifier will rarely hit that threshold in practice — which is intentional. Hard removal should be rare and deliberate, not the default.
 
-4. **Core fallback skills — always preserved.** The `coreFallbackSkills` list above is treated as a hard invariant: no matter what the classifier says, these skills stay in `activeTools`. The list is small and stable:
-   - `ask_clarifying_question` — a new universal skill added in Sprint 5 specifically for this purpose. It lets the agent emit a clarification request when topic-narrowing has eliminated tools it needed, instead of failing silently. Its `parameterSchema` is just `{ question: string }` and it writes the question to the agent run's summary.
-   - `read_workspace` — universal context access.
-   - `search_codebase` / `web_search` — universal retrieval.
+4. **Core fallback skills — explicit universal-skill contract.**
 
-   If the agent's allowlist doesn't contain one of these, it's skipped (can't force a skill into the active tool list that isn't allowed).
+   Previous drafts of this spec said "these skills stay in `activeTools` no matter what the classifier says" and then waved at "if the agent's allowlist doesn't contain one of these, it's skipped". That is not a contract — it's a hand-wave. Here is the concrete contract.
+
+   **How a skill becomes universal:**
+
+   `ActionDefinition` gains a new optional field in P0.2 Slice B (added to the list with `scopeRequirements`, `topics`, `requiresCritiqueGate`, `onFailure`, `isMethodology`):
+
+   ```ts
+   export interface ActionDefinition {
+     // ... existing fields ...
+
+     /**
+      * P4.1 — universal skills are always available to every agent regardless
+      * of the per-link `skillSlugs` allowlist, and always preserved through the
+      * topic filter regardless of classifier output. Use sparingly — this is a
+      * platform-wide override.
+      */
+     isUniversal?: boolean;
+   }
+   ```
+
+   **The universal set, declared in the action registry:**
+
+   The following skills set `isUniversal: true`. They are added to the action registry in Sprint 5 alongside the topic-filter work:
+
+   - `ask_clarifying_question` — new skill added in Sprint 5 specifically as the graceful-degradation path. When topic narrowing or scope validation eliminates tools the agent needed, this skill lets the agent emit a clarification request instead of failing silently. `parameterSchema = z.object({ question: z.string(), blocked_by: z.enum(['topic_filter', 'scope_check', 'no_relevant_tool']).optional() })`. The handler writes the question to `agent_runs.summary`, marks the run `awaiting_clarification`, and emits a WebSocket event.
+   - `read_workspace` — universal context access (reads `workspace_memories`).
+   - `search_codebase` — universal read-only retrieval.
+   - `web_search` — universal read-only retrieval.
+
+   **How universal skills interact with `subaccountAgents.skillSlugs`:**
+
+   Universal skills **merge into** the agent's effective allowlist at resolution time. They do NOT override it; they do NOT require the operator to add them explicitly. The merge happens in `skillService.getToolsForRun()`:
+
+   ```ts
+   const linkAllowlist = saLink.skillSlugs ?? agent.defaultSkillSlugs ?? [];
+   const universalSkills = ACTION_REGISTRY
+     .filter(a => a.isUniversal === true)
+     .map(a => a.actionType);
+   const effectiveAllowlist = Array.from(new Set([...linkAllowlist, ...universalSkills]));
+   ```
+
+   This means:
+   - Every agent in every subaccount has access to `ask_clarifying_question`, `read_workspace`, `search_codebase`, `web_search` by default.
+   - Operators cannot *remove* universal skills from an agent via the allowlist — a universal skill bypasses the allowlist entirely by design. This is a deliberate platform policy: there is no legitimate reason to prevent an agent from asking a clarifying question or reading its own workspace.
+   - Operators CAN still block a universal skill via the policy engine (`policyRules` can set `decision = 'block'` on a universal skill for a specific subaccount). The universal merge only affects the allowlist; the policy engine still runs.
+
+   **How the topic filter treats universal skills:**
+
+   The topic filter's `coreFallbackSkills` array is derived from `ACTION_REGISTRY.filter(a => a.isUniversal === true).map(a => a.actionType)` at middleware construction time — it is NOT a hardcoded list in the filter middleware. This means adding a new universal skill in the action registry automatically propagates it into the topic filter's preserve list without touching middleware code.
+
+   **What the topic filter does when the effective allowlist has zero tools matching the classified topic:**
+
+   This is the scenario the hand-wave didn't cover. Explicit behaviour:
+
+   ```
+   effectiveAllowlist = [...linkAllowlist, ...universalSkills]
+   topicMatches = effectiveAllowlist.filter(s => matchesClassifiedTopic(s))
+
+   if (topicMatches.length === 0) {
+     // Zero-match fallback: the classifier produced a topic the agent has no tools for.
+     // This can happen legitimately (classifier is wrong) or catastrophically (agent
+     // is misconfigured). We fail open to universal skills only + log the telemetry
+     // row loudly.
+     logTelemetry('topic_filter_zero_match', {
+       runId, classifiedTopics, effectiveAllowlistSize, universalSkills
+     });
+     activeTools = activeTools.filter(t => universalSkills.includes(t.name));
+   }
+   ```
+
+   The zero-match fallback gives the agent exactly the universal skills — no subject-specific tools at all. This is intentional: if the classifier confidently says "this is an `email` task" and the agent has no email tools, giving it random unrelated tools is worse than making it ask `ask_clarifying_question` to recover. The fallback is the primary reason `ask_clarifying_question` exists — it's the guaranteed-available escape hatch.
+
+   Zero-match events are loud in telemetry (separate `topic_filter_zero_match` event name, not just a log line) so operators can review whether the classifier is over-aggressive or the allowlist is too narrow.
 
 5. **Telemetry.** Every classification writes to `llmRequests.metadataJson.topic_filter`:
    ```json
