@@ -14,6 +14,24 @@ interface ToolCallEntry {
   actionId?: string;
 }
 
+interface ContextSourceSnapshotEntry {
+  id: string;
+  scope: 'agent' | 'subaccount' | 'scheduled_task' | 'task_instance';
+  name: string;
+  description: string | null;
+  contentType: string;
+  loadingMode: 'eager' | 'lazy';
+  sizeBytes: number;
+  tokenCount: number;
+  fetchOk: boolean;
+  orderIndex: number;
+  includedInPrompt: boolean;
+  truncated: boolean;
+  suppressedByOverride: boolean;
+  suppressedBy?: string;
+  exclusionReason: 'budget_exceeded' | 'override_suppressed' | 'lazy_not_rendered' | null;
+}
+
 interface RunDetail {
   id: string;
   organisationId: string;
@@ -53,6 +71,7 @@ interface RunDetail {
   durationMs: number | null;
   createdAt: string;
   updatedAt: string;
+  contextSourcesSnapshot: ContextSourceSnapshotEntry[] | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -314,6 +333,10 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
         </CollapsibleSection>
       )}
 
+      {run.contextSourcesSnapshot && run.contextSourcesSnapshot.length > 0 && (
+        <ContextSourcesPanel snapshot={run.contextSourcesSnapshot} />
+      )}
+
       {run.memoryStateAtStart && (
         <CollapsibleSection title="Memory State at Start">
           <div className="mt-3"><JsonBlock data={run.memoryStateAtStart} maxHeight={300} /></div>
@@ -407,5 +430,127 @@ function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number;
       {showInput && entry.input != null && <div className="mt-2"><JsonBlock data={entry.input} maxHeight={200} /></div>}
       {showOutput && entry.output != null && <div className="mt-2"><JsonBlock data={entry.output} maxHeight={200} /></div>}
     </div>
+  );
+}
+
+// ─── Context Sources Panel (spec §11.5) ────────────────────────────────────
+// Reads the frozen snapshot persisted by loadRunContextData at run start and
+// shows which data sources were considered, which were included in the prompt,
+// which were excluded by budget, and which were suppressed by same-name
+// override. Coloured rows give operators a single-glance view.
+
+const SCOPE_BADGE: Record<string, string> = {
+  task_instance:  'bg-purple-100 text-purple-800',
+  scheduled_task: 'bg-indigo-100 text-indigo-800',
+  subaccount:     'bg-blue-100  text-blue-800',
+  agent:          'bg-slate-100 text-slate-700',
+};
+
+const SCOPE_LABEL: Record<string, string> = {
+  task_instance:  'Task attachment',
+  scheduled_task: 'Scheduled task',
+  subaccount:     'Subaccount',
+  agent:          'Agent',
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '—';
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function rowBgClass(s: ContextSourceSnapshotEntry): string {
+  if (s.suppressedByOverride) return 'bg-amber-50';
+  if (s.loadingMode === 'eager' && !s.includedInPrompt) return 'bg-red-50';
+  if (s.truncated) return 'bg-yellow-50';
+  return '';
+}
+
+function statusLabel(s: ContextSourceSnapshotEntry) {
+  if (s.suppressedByOverride) {
+    return <span className="text-amber-700">overridden</span>;
+  }
+  if (!s.fetchOk) {
+    return <span className="text-red-600">failed / binary</span>;
+  }
+  if (s.loadingMode === 'eager' && !s.includedInPrompt) {
+    return (
+      <span className="text-red-700" title={s.exclusionReason ?? 'budget exceeded'}>
+        excluded (budget)
+      </span>
+    );
+  }
+  if (s.loadingMode === 'lazy') {
+    return <span className="text-slate-600">manifest (lazy)</span>;
+  }
+  if (s.truncated) {
+    return <span className="text-amber-700">truncated</span>;
+  }
+  return <span className="text-green-700">in prompt</span>;
+}
+
+function ContextSourcesPanel({ snapshot }: { snapshot: ContextSourceSnapshotEntry[] }) {
+  const sorted = [...snapshot].sort((a, b) => a.orderIndex - b.orderIndex);
+  const includedCount = sorted.filter(s => s.includedInPrompt && !s.suppressedByOverride).length;
+  const excludedCount = sorted.filter(
+    s => s.loadingMode === 'eager' && !s.includedInPrompt && !s.suppressedByOverride
+  ).length;
+  const suppressedCount = sorted.filter(s => s.suppressedByOverride).length;
+
+  return (
+    <CollapsibleSection
+      title="Context Sources"
+      badge={
+        <span className="text-[11px] font-medium text-slate-500 ml-2">
+          {includedCount} in prompt · {excludedCount} excluded · {suppressedCount} overridden
+        </span>
+      }
+    >
+      <div className="mt-3 bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">#</th>
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Name</th>
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Scope</th>
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Mode</th>
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Size</th>
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Tokens</th>
+              <th className="text-left px-3 py-2 text-[11px] font-semibold text-slate-500 uppercase">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {sorted.map((s) => (
+              <tr key={`${s.id}-${s.orderIndex}`} className={`${rowBgClass(s)} hover:bg-slate-50`}>
+                <td className="px-3 py-2 text-[11px] text-slate-400 font-mono">
+                  {/* orderIndex is guaranteed present on snapshot entries (§7.1 step 5) */}
+                  {s.orderIndex + 1}
+                </td>
+                <td className="px-3 py-2 text-[12px] text-slate-700">
+                  {s.name}
+                  {s.suppressedBy && (
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      overridden by <code>{s.suppressedBy.slice(0, 8)}</code>
+                    </div>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${SCOPE_BADGE[s.scope] ?? SCOPE_BADGE.agent}`}>
+                    {SCOPE_LABEL[s.scope] ?? s.scope}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-[11px] text-slate-600">{s.loadingMode}</td>
+                <td className="px-3 py-2 text-[11px] text-slate-600">{formatBytes(s.sizeBytes)}</td>
+                <td className="px-3 py-2 text-[11px] text-slate-600">
+                  {s.tokenCount > 0 ? `~${s.tokenCount.toLocaleString()}` : '—'}
+                </td>
+                <td className="px-3 py-2 text-[11px]">{statusLabel(s)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </CollapsibleSection>
   );
 }

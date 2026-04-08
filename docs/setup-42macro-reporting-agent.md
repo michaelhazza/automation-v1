@@ -1,5 +1,16 @@
 # Setup — 42 Macro Reporting Agent (local dev)
 
+> **Note (2026-04-08):** This document describes the first iteration of the
+> 42 Macro reporting agent, which uses a custom `analyse_42macro_transcript`
+> skill and a purpose-built seed script. The newer recommended approach is
+> to configure reporting agents via **scheduled task instructions and data
+> sources** — see [`cascading-context-data-sources-spec.md`](./cascading-context-data-sources-spec.md)
+> and [`how-to-configure-a-recurring-report.md`](./how-to-configure-a-recurring-report.md).
+> This document is retained as a reference for the paywall + transcription +
+> Slack pipeline, which is still the right pattern for that workflow. The
+> specialist-skill-per-report approach is being superseded for new reports
+> by the configuration-driven cascading data sources flow.
+
 End-to-end paywall → transcript → analysis → Slack workflow for the
 **Breakout Solutions** organisation. Use this doc once the seed script has run
 to finish wiring the parts that need real credentials.
