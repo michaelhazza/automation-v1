@@ -3,20 +3,17 @@
  *
  * What this script creates / upserts (idempotent — safe to re-run):
  *   1. organisation:           "Breakout Solutions"            (slug: breakout-solutions)
- *   2. subaccount:             "42 Macro Tracking"             (slug: 42macro-tracking)
- *   3. org-level skill:        analyse_42macro_transcript      (custom prompt skill,
- *                                                              full 42 Macro A-Player Brain
- *                                                              instructions in body)
- *   4. agent:                  "42 Macro Reporting Agent"      (slug: 42macro-reporting-agent)
- *      with masterPrompt orchestrating fetch_paywalled_content → transcribe_audio →
- *      analyse_42macro_transcript → send_to_slack
- *      and defaultSkillSlugs: [those four]
- *   5. subaccount_agent:       links the agent to the 42 Macro Tracking subaccount,
- *                              with skillSlugs = the four
- *   6. integration_connection placeholder rows (connectionStatus='error' so the worker
+ *   2. subaccount:             "Breakout Solutions"            (slug: 42macro-tracking)
+ *   3. agent:                  "Reporting Agent"               (slug: reporting-agent)
+ *      with masterPrompt and defaultSkillSlugs pointing at all required skills
+ *   4. subaccount_agent:       links the agent to the subaccount with skillSlugs
+ *   5. integration_connection placeholder rows (connectionStatus='error' so the worker
  *      refuses to use them until you fill in real values):
  *        - web_login   "42 Macro paywall login"
  *        - slack       "Breakout Solutions Slack"
+ *
+ * Skills are file-based (server/skills/*.md) — no DB writes needed.
+ * analyse_42macro_transcript lives at server/skills/analyse_42macro_transcript.md.
  *
  * What this script CANNOT create (you must finish setup manually — see
  * docs/setup-42macro-reporting-agent.md for the exact steps):
@@ -39,7 +36,6 @@ import { organisations } from '../server/db/schema/organisations.js';
 import { subaccounts } from '../server/db/schema/subaccounts.js';
 import { agents } from '../server/db/schema/agents.js';
 import { subaccountAgents } from '../server/db/schema/subaccountAgents.js';
-import { skills } from '../server/db/schema/skills.js';
 import { integrationConnections } from '../server/db/schema/integrationConnections.js';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -50,120 +46,20 @@ const ORG_SLUG = 'breakout-solutions';
 const SUBACCOUNT_NAME = 'Breakout Solutions';
 const SUBACCOUNT_SLUG = '42macro-tracking';
 const AGENT_SLUG = 'reporting-agent';
-const ANALYSIS_SKILL_SLUG = 'analyse_42macro_transcript';
 
-// Generic reporting-agent skill set + the one 42-Macro-specific analysis
-// skill that satisfies the current use case. Add or remove from this list
-// as the agent's reporting surface area expands. The first four are the
-// "typical reporting agent" baseline (fetch from a source → turn it into
-// text → analyse → publish); analyse_42macro_transcript is the
-// domain-specific lens layered on top.
+// All skills are file-based (server/skills/*.md) — no DB writes needed.
+// Add or remove slugs here as the agent's reporting surface area expands.
 const SKILL_SLUGS = [
   'fetch_paywalled_content',
   'fetch_url',
   'web_search',
   'transcribe_audio',
-  ANALYSIS_SKILL_SLUG,
+  'analyse_42macro_transcript',
   'send_to_slack',
   'send_email',
   'add_deliverable',
 ] as const;
 
-// ─── 42 Macro A-Player Brain prompt — pasted verbatim into the skill body ────
-// Source: user-provided GPT system prompt (Nov 2025 revision).
-const ANALYSIS_SKILL_INSTRUCTIONS = String.raw`# 42 Macro A-Player Brain — full system prompt
-
-You are the 42 Macro A-Player Brain, an expert analyst trained on the complete 42 Macro
-methodology built by Darius Dale, founder and CEO of 42Macro. Your purpose is to translate
-complex, institutional-grade macro analysis into something any person can understand and
-act on.
-
-ALWAYS produce three tiers of output for every input transcript:
-
-  TIER 1: DASHBOARD             (≤30 seconds to read; 5 data points + 1 sentence)
-  TIER 2: EXECUTIVE SUMMARY     (250–350 words, plain-English prose, 4 paragraphs)
-  TIER 3: FULL ANALYSIS         (sectioned: Macro Snapshot, Bitcoin & Digital Assets,
-                                 The Bottom Line)
-
-Plain language is the highest content priority. Explain every technical term immediately
-in plain English. Short sentences. One idea at a time. No jargon as a shortcut.
-
-Use the GRID Regime framework (Goldilocks / Reflation / Inflation / Deflation), Dr. Mo
-risk overlay, and the Fourth Turning context. Use the KISS Portfolio (60% equities / 30%
-gold / 10% Bitcoin) as the positioning anchor.
-
-The full reference prompt (regime definitions, Bitcoin playbook, plain-language glossary,
-output format guardrails, and operating rules) is documented in
-docs/42macro-analysis-skill.md and is the source of truth for all reasoning. Follow it
-verbatim for every analysis.
-
-OUTPUT FORMAT (mandatory):
-  - Filename:       YYYYMMDD_Report_Name.md  (date from the source document; underscores
-                    instead of spaces in the name)
-  - Headers:        TIER 1: DASHBOARD / TIER 2: EXECUTIVE SUMMARY / TIER 3: FULL ANALYSIS
-  - Section names:  SECTION 1: MACRO SNAPSHOT / SECTION 2: BITCOIN AND DIGITAL ASSETS /
-                    SECTION 3: THE BOTTOM LINE
-
-Return the rendered markdown body so the agent loop can pass it to send_to_slack as the
-message body.
-
-Not financial advice — you explain and translate; you do not give personalised financial
-advice.`;
-
-// The skill description carries the FULL recipe for using this lens, including
-// which fetch skill to call upstream and what params to pass. The agent prompt
-// stays generic; each lens skill is self-describing. When a new domain lens
-// (analyse_yc_essay, analyse_fed_minutes, etc.) is added, drop its recipe in
-// the same way and the agent will pick it up automatically — no edits to the
-// agent's masterPrompt required.
-const ANALYSIS_SKILL_DESCRIPTION = `Convert a 42 Macro video transcript (or 42 Macro written research note) into a three-tier markdown analysis (Dashboard / Executive Summary / Full Analysis) using the 42 Macro GRID / Dr. Mo / KISS portfolio framework. Plain-language only.
-
-USE THIS LENS WHEN: the source is anything from 42macro.com or app.42macro.com (weekly videos, research notes, members-area uploads). Do not use it for non-42-Macro macro content; produce a generic summary instead.
-
-UPSTREAM RECIPE — how to acquire and convert the source before calling this skill:
-
-  1. fetch_paywalled_content
-       webLoginConnectionId:   the "42 Macro paywall login" web_login connection on this subaccount
-       contentUrl:             the 42 Macro page for the latest video (e.g. https://app.42macro.com/video/around_the_horn_weekly)
-       intent:                 "download_latest"
-       allowedDomains:         ["42macro.com", "app.42macro.com"]
-       expectedArtifactKind:   "video"
-       expectedMimeTypePrefix: "video/"
-       captureMode:            "capture_video"   ← 42 Macro has NO download button. The worker snoops the page network for the actual mp4/m3u8 the player loads and refetches it with the session cookies (HLS via ffmpeg).
-     If the call returns { noNewContent: true } the dedup fingerprint matched — emit \`done\` immediately, do NOT continue.
-
-  2. transcribe_audio
-       executionArtifactId:    the artifactId returned from step 1
-
-  3. analyse_42macro_transcript  ← THIS SKILL
-       transcript:             the transcript text from step 2
-       sourceTitle:            the video title (best guess from the page)
-       sourceDate:             today's date in YYYY-MM-DD
-
-  4. publish via send_to_slack / send_email / add_deliverable as instructed.`;
-
-const ANALYSIS_SKILL_DEFINITION = {
-  name: ANALYSIS_SKILL_SLUG,
-  description: ANALYSIS_SKILL_DESCRIPTION,
-  input_schema: {
-    type: 'object',
-    properties: {
-      transcript: {
-        type: 'string',
-        description: 'Full transcript or research-note text to analyse.',
-      },
-      sourceTitle: {
-        type: 'string',
-        description: "Optional title of the source document, used to derive the filename (YYYYMMDD_Report_Name.md).",
-      },
-      sourceDate: {
-        type: 'string',
-        description: 'Optional ISO date (YYYY-MM-DD) of the source document. Used as YYYYMMDD prefix in the filename.',
-      },
-    },
-    required: ['transcript'],
-  },
-};
 
 const AGENT_MASTER_PROMPT = `You are the Reporting Agent.
 
@@ -294,48 +190,9 @@ async function seed() {
   });
   console.log(`  subaccount       ${subaccount.id} ${subaccount.slug}`);
 
-  // ── 3. Custom analysis skill ───────────────────────────────────────────
-  // Always upsert the skill body so re-running the seed picks up prompt edits.
-  const existingSkills = await db
-    .select()
-    .from(skills)
-    .where(and(eq(skills.organisationId, org.id), eq(skills.slug, ANALYSIS_SKILL_SLUG)))
-    .limit(1);
-  let analysisSkill = existingSkills[0];
-  if (analysisSkill) {
-    await db
-      .update(skills)
-      .set({
-        name: '42 Macro A-Player Analysis',
-        description:
-          'Three-tier 42 Macro framework analysis (Dashboard / Executive Summary / Full Analysis) of any transcript or research note. Plain-language only.',
-        definition: ANALYSIS_SKILL_DEFINITION,
-        instructions: ANALYSIS_SKILL_INSTRUCTIONS,
-        isActive: true,
-        updatedAt: new Date(),
-      })
-      .where(eq(skills.id, analysisSkill.id));
-  } else {
-    const [row] = await db
-      .insert(skills)
-      .values({
-        organisationId: org.id,
-        name: '42 Macro A-Player Analysis',
-        slug: ANALYSIS_SKILL_SLUG,
-        description:
-          'Three-tier 42 Macro framework analysis (Dashboard / Executive Summary / Full Analysis) of any transcript or research note. Plain-language only.',
-        skillType: 'custom',
-        definition: ANALYSIS_SKILL_DEFINITION,
-        instructions: ANALYSIS_SKILL_INSTRUCTIONS,
-        isActive: true,
-        visibility: 'none',
-      })
-      .returning();
-    analysisSkill = row;
-  }
-  console.log(`  skill            ${analysisSkill.id} ${analysisSkill.slug}`);
+  // Skills are file-based (server/skills/*.md) — no DB step needed.
 
-  // ── 4. Agent ───────────────────────────────────────────────────────────
+  // ── 3. Agent ───────────────────────────────────────────────────────────
   // Migration: the legacy slug was '42macro-reporting-agent'. If we find a
   // row with that slug AND no row at the new slug, rename it in place so
   // the user's existing local DB gets the new generic identity without
@@ -406,7 +263,7 @@ async function seed() {
   }
   console.log(`  agent            ${agent.id} ${agent.slug} (${agent.name})`);
 
-  // ── 5. Subaccount agent link ───────────────────────────────────────────
+  // ── 4. Subaccount agent link ───────────────────────────────────────────
   // Always update the per-subaccount instance to match the desired skill
   // list so newly added skills (e.g. fetch_url, web_search, send_email)
   // become available without manual UI work.
@@ -462,7 +319,7 @@ async function seed() {
   }
   console.log(`  subaccount_agent ${subAgent.id}`);
 
-  // ── 6. Integration connection placeholders ─────────────────────────────
+  // ── 5. Integration connection placeholders ─────────────────────────────
   // Status='error' so the worker REFUSES to use them until you replace the
   // placeholder secret with a real one (see docs/setup-42macro-reporting-agent.md).
   await db

@@ -2,7 +2,7 @@
 name: Transcribe Audio
 description: Converts an audio or video file (mp3, mp4, m4a, wav, webm, mpeg, mpga) into a text transcript using OpenAI Whisper. Accepts either an executionArtifactId from a prior browser/dev task or a direct URL. Caches transcripts by content hash so retries do not double-bill Whisper.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ```json

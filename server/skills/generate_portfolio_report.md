@@ -2,6 +2,7 @@
 name: Generate Portfolio Report
 description: Generate a structured intelligence briefing across the entire portfolio
 isActive: true
+visibility: basic
 ---
 
 ```json

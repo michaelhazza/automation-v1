@@ -2,6 +2,7 @@
 name: Trigger Account Intervention
 description: Propose an intervention action for a subaccount — always HITL-gated
 isActive: true
+visibility: basic
 ---
 
 ```json

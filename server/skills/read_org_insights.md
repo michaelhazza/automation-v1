@@ -2,6 +2,7 @@
 name: Read Org Insights
 description: Query cross-subaccount insights stored in org-level memory
 isActive: true
+visibility: basic
 ---
 
 ```json

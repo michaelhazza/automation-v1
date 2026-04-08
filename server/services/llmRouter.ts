@@ -173,6 +173,7 @@ interface FallbackAttempt {
 function isNonRetryableError(err: unknown): boolean {
   const e = err as { statusCode?: number; code?: string; message?: string };
   if (e.statusCode === 400 || e.statusCode === 401 || e.statusCode === 403) return true;
+  if (e.code === 'PROVIDER_NOT_CONFIGURED') return true;
   const code = (e.code ?? '').toLowerCase();
   return code.includes('auth') || code.includes('invalid') || code.includes('bad_request');
 }

@@ -2,6 +2,7 @@ import { eq, and, or, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
 import type { AnthropicTool } from './llmService.js';
+import { systemSkillService } from './systemSkillService.js';
 import {
   canViewContents as canViewContentsHelper,
   canManageSkill as canManageSkillHelper,
@@ -78,23 +79,39 @@ export const skillService = {
 
     for (const slug of skillSlugs) {
       const skill = await this.getSkillBySlug(slug, organisationId);
-      if (!skill) continue;
 
-      const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
-      if (def && def.name) {
-        tools.push({
-          name: def.name,
-          description: def.description,
-          input_schema: def.input_schema,
-        });
-      }
+      if (skill) {
+        const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
+        if (def && def.name) {
+          tools.push({
+            name: def.name,
+            description: def.description,
+            input_schema: def.input_schema,
+          });
+        }
 
-      // Combine instructions and methodology into a single guidance block
-      const parts: string[] = [];
-      if (skill.instructions) parts.push(skill.instructions);
-      if (skill.methodology) parts.push(skill.methodology);
-      if (parts.length > 0) {
-        instructions.push(parts.join('\n\n'));
+        const parts: string[] = [];
+        if (skill.instructions) parts.push(skill.instructions);
+        if (skill.methodology) parts.push(skill.methodology);
+        if (parts.length > 0) {
+          instructions.push(parts.join('\n\n'));
+        }
+      } else {
+        // Fall back to system skills (file-based) for platform-provided skill slugs
+        const systemSkill = await systemSkillService.getSkillBySlug(slug);
+        if (systemSkill) {
+          tools.push({
+            name: systemSkill.definition.name,
+            description: systemSkill.definition.description,
+            input_schema: systemSkill.definition.input_schema,
+          });
+          const parts: string[] = [];
+          if (systemSkill.instructions) parts.push(systemSkill.instructions);
+          if (systemSkill.methodology) parts.push(systemSkill.methodology);
+          if (parts.length > 0) {
+            instructions.push(parts.join('\n\n'));
+          }
+        }
       }
     }
 

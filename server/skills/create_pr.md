@@ -2,6 +2,7 @@
 name: Create PR
 description: Create a GitHub pull request from approved and applied patches.
 isActive: true
+visibility: basic
 ---
 
 ```json

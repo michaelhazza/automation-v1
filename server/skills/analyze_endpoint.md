@@ -2,6 +2,7 @@
 name: Analyze Endpoint
 description: Probe an API endpoint and verify contract compliance.
 isActive: true
+visibility: basic
 ---
 
 ```json

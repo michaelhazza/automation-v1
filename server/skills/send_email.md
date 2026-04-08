@@ -2,6 +2,7 @@
 name: Send Email
 description: Send an email via a connected email provider.
 isActive: true
+visibility: basic
 ---
 
 ```json

@@ -2,7 +2,7 @@
 name: Capture Screenshot
 description: Launch a headless browser, navigate to a URL, and capture a screenshot for visual QA validation.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ```json

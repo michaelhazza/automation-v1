@@ -2,7 +2,7 @@
 name: Run Command
 description: Execute an approved shell command in the project root directory.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ```json

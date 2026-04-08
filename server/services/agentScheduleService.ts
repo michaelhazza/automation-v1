@@ -405,7 +405,7 @@ export const agentScheduleService = {
    */
   async updateSchedule(
     subaccountAgentId: string,
-    data: { scheduleCron?: string; scheduleEnabled?: boolean; scheduleTimezone?: string }
+    data: { scheduleCron?: string | null; scheduleEnabled?: boolean; scheduleTimezone?: string }
   ) {
     const [sa] = await db
       .select()
