@@ -118,13 +118,107 @@ export const scheduledTaskService = {
       update.nextRunAt = await this.computeNextOccurrence(rrule, timezone, scheduleTime);
     }
 
-    const [updated] = await db
-      .update(scheduledTasks)
-      .set(update)
-      .where(eq(scheduledTasks.id, id))
-      .returning();
+    // Detect assignedAgentId change — triggers a cascade on any data sources
+    // attached to this scheduled task. See spec §7.6.
+    const agentChanged =
+      data.assignedAgentId !== undefined &&
+      data.assignedAgentId !== existing.assignedAgentId;
 
-    return updated;
+    // Lazy imports keep us out of the agentService circular-import chain.
+    // Hoisted out of the conditional below so the transaction body can use them.
+    const { agentDataSources } = await import('../db/schema/index.js');
+    const { auditService } = await import('./auditService.js');
+    const { isNull } = await import('drizzle-orm');
+
+    // Wrap the scheduled task update AND the cascade in a single transaction
+    // (pr-reviewer Blocker 2). Without this, a cascade failure after the
+    // scheduled task UPDATE commits would leave data sources orphaned: the
+    // task would point at the new agent but the data sources would still
+    // carry the old agentId, so fetchDataSourcesByScope (which filters by
+    // agentId) would silently return zero rows for that scheduled task.
+    type TxResult = {
+      updated: typeof existing;
+      auditPayload: {
+        cascadedDataSourceCount: number;
+        willOverrideNewAgentSources: string[];
+      } | null;
+    };
+
+    const txResult: TxResult = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(scheduledTasks)
+        .set(update)
+        .where(eq(scheduledTasks.id, id))
+        .returning();
+
+      if (!agentChanged) {
+        return { updated: row, auditPayload: null };
+      }
+
+      // Count first so the audit metadata is accurate
+      const cascadedRows = await tx
+        .select({ id: agentDataSources.id, name: agentDataSources.name })
+        .from(agentDataSources)
+        .where(eq(agentDataSources.scheduledTaskId, id));
+
+      if (cascadedRows.length === 0) {
+        return { updated: row, auditPayload: null };
+      }
+
+      // Cascade the agentId update to point at the new assigned agent
+      await tx
+        .update(agentDataSources)
+        .set({ agentId: data.assignedAgentId!, updatedAt: new Date() })
+        .where(eq(agentDataSources.scheduledTaskId, id));
+
+      // Compute the list of scheduled-task source names that will now
+      // override the new agent's OWN agent-level sources at runtime (§3.6).
+      // Purely informational — no DB change beyond the cascade above.
+      const newAgentOwnSources = await tx
+        .select({ name: agentDataSources.name })
+        .from(agentDataSources)
+        .where(
+          and(
+            eq(agentDataSources.agentId, data.assignedAgentId!),
+            isNull(agentDataSources.subaccountAgentId),
+            isNull(agentDataSources.scheduledTaskId),
+          )
+        );
+
+      const newAgentNames = new Set(
+        newAgentOwnSources.map(s => s.name.toLowerCase().trim())
+      );
+      return {
+        updated: row,
+        auditPayload: {
+          cascadedDataSourceCount: cascadedRows.length,
+          willOverrideNewAgentSources: cascadedRows
+            .map(s => s.name)
+            .filter(n => newAgentNames.has(n.toLowerCase().trim())),
+        },
+      };
+    });
+
+    // Emit the audit event AFTER the transaction commits — auditService.log
+    // catches and swallows its own errors, so it's safe to invoke outside
+    // the transaction without compromising consistency.
+    if (txResult.auditPayload) {
+      await auditService.log({
+        organisationId,
+        actorType: 'system',
+        action: 'scheduled_task.assigned_agent_changed',
+        entityType: 'scheduled_task',
+        entityId: id,
+        metadata: {
+          oldAgentId: existing.assignedAgentId,
+          newAgentId: data.assignedAgentId!,
+          cascadedDataSourceCount: txResult.auditPayload.cascadedDataSourceCount,
+          willOverrideNewAgentSources: txResult.auditPayload.willOverrideNewAgentSources,
+        },
+      });
+    }
+
+    return txResult.updated;
   },
 
   async delete(id: string, organisationId: string) {

@@ -82,6 +82,19 @@ export interface SkillExecutionContext {
   _mcpLazyRegistry?: Map<string, import('../db/schema/mcpServerConfigs.js').McpServerConfig>;
   /** MCP call counter for budget enforcement. */
   mcpCallCount?: number;
+  /**
+   * Loaded context data for this run — populated by agentExecutionService
+   * via loadRunContextData before the loop starts. Used by the
+   * read_data_source skill handler to answer list/read ops against the
+   * same pool that was used to build the system prompt. See spec §8.2.
+   */
+  runContextData?: import('./runContextLoader.js').RunContextData;
+  /**
+   * Running count of read_data_source `op: 'read'` calls made during
+   * this run. Enforced against MAX_READ_DATA_SOURCE_CALLS_PER_RUN.
+   * Lives on the context so it survives across tool-call iterations.
+   */
+  readDataSourceCallCount?: number;
 }
 
 interface SkillExecutionParams {
@@ -249,6 +262,12 @@ export const skillExecutor = {
       case 'spawn_sub_agents': {
         requireSubaccountContext(context, 'spawn_sub_agents');
         return executeSpawnSubAgents(input, context);
+      }
+
+      // ── Context data source retrieval (spec §8.2) ────────────────────────
+      case 'read_data_source': {
+        const { executeReadDataSource } = await import('../tools/readDataSource.js');
+        return executeReadDataSource(input, context);
       }
 
       // ── Auto-gated skills (action record for audit, executes synchronously) ──

@@ -1,6 +1,6 @@
-import { eq, and, isNull, asc, max, desc } from 'drizzle-orm';
+import { eq, and, or, isNull, asc, max, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agents, agentDataSources, users, agentPromptRevisions } from '../db/schema/index.js';
+import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks } from '../db/schema/index.js';
 import crypto from 'crypto';
 import { auditService } from './auditService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
@@ -313,6 +313,221 @@ async function runProactiveSync(sourceId: string): Promise<void> {
 // Fetch all data sources for an agent (used by LLM context builder)
 // ---------------------------------------------------------------------------
 
+/**
+ * Pure extraction of the content-loading branch from the original
+ * fetchAgentDataSources loop. Shared by fetchDataSourcesByScope and by
+ * the read_data_source skill handler so they use the same fetching /
+ * caching / error-handling path. No logic change from the original.
+ */
+export async function loadSourceContent(
+  source: typeof agentDataSources.$inferSelect
+): Promise<{ content: string; fetchOk: boolean; tokenCount: number }> {
+  // file_upload is always read from storage — no expiry logic needed
+  const isStatic = source.sourceType === 'file_upload';
+
+  let content = isStatic ? null : getCachedContent(source.id);
+  let fetchOk = true;
+
+  if (!content) {
+    try {
+      const raw = await fetchSourceContent(source);
+      content = formatContent(raw, source.contentType);
+
+      // Update both caches for live sources
+      if (!isStatic) {
+        lastGoodContentCache.set(source.id, content);
+        setCachedContent(source.id, content, source.cacheMinutes);
+      }
+
+      db.update(agentDataSources)
+        .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
+        .where(eq(agentDataSources.id, source.id))
+        .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
+    } catch (err) {
+      fetchOk = false;
+      const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
+
+      db.update(agentDataSources)
+        .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
+        .where(eq(agentDataSources.id, source.id))
+        .catch((err2) => console.error('[AgentService] Failed to update data source fetch status (error):', err2));
+
+      // Use last good content as silent fallback (end users see no disruption)
+      const fallback = lastGoodContentCache.get(source.id);
+      if (fallback) {
+        content = fallback;
+      } else {
+        content = `[Data source "${source.name}" could not be loaded: ${errMsg}]`;
+      }
+
+      // Alert admins for lazy sources that fail (proactive sources alert via runProactiveSync)
+      if (source.syncMode === 'lazy') {
+        db.select().from(agentDataSources).where(eq(agentDataSources.id, source.id))
+          .then(([fresh]) => { if (fresh) return maybeSendDataSourceAlert(fresh, errMsg); })
+          .catch((err2) => console.error('[AgentService] Failed to fetch data source for lazy alert:', err2));
+      }
+    }
+  }
+
+  const tokenCount = approxTokens(content);
+  return { content, fetchOk, tokenCount };
+}
+
+/**
+ * Scope descriptor for loading data sources. See spec §6.1.
+ *
+ * At least `agentId` must be set. Optionally narrows by subaccountAgentId
+ * (for subaccount-specific sources) or scheduledTaskId (for scheduled-task-
+ * specific sources). These two are orthogonal — a run either came from a
+ * subaccount-agent link, or from a scheduled task, but not both sources of
+ * scoping at the same row level.
+ */
+export interface DataSourceScope {
+  agentId: string;
+  subaccountAgentId?: string | null;
+  scheduledTaskId?: string | null;
+}
+
+/**
+ * LoadedDataSource — the raw shape returned by fetchDataSourcesByScope and
+ * loadTaskAttachmentsAsContext. The "decision" fields (orderIndex,
+ * includedInPrompt, etc.) are populated later by loadRunContextData — see
+ * spec §6.1 for the full pre/post-loader invariant.
+ */
+export interface LoadedDataSource {
+  id: string;
+  scope: 'agent' | 'subaccount' | 'scheduled_task' | 'task_instance';
+  name: string;
+  description: string | null;
+  content: string;
+  contentType: string;
+  tokenCount: number;
+  sizeBytes: number;
+  loadingMode: 'eager' | 'lazy';
+  priority: number;
+  fetchOk: boolean;
+  maxTokenBudget: number;
+
+  // Decision fields — populated by loadRunContextData after sorting,
+  // override suppression, and the budget walk. Optional at the type level
+  // because fetchDataSourcesByScope and loadTaskAttachmentsAsContext return
+  // values with none of them set. See spec §6.1.
+  orderIndex?: number;
+  includedInPrompt?: boolean;
+  truncated?: boolean;
+  suppressedByOverride?: boolean;
+  suppressedBy?: string;
+}
+
+/**
+ * Load data sources across the three agent_data_sources scopes:
+ *   - agent-wide (agentId matches, no subaccount/scheduled-task scope)
+ *   - subaccount-scoped (agentId + subaccountAgentId match)
+ *   - scheduled-task-scoped (scheduledTaskId matches — agentId is
+ *     denormalised on the row but the scope key is the scheduled task)
+ *
+ * A single DB round-trip uses OR conditions so hitting all three scopes
+ * costs one query. Results are returned in stable priority order; the
+ * caller (loadRunContextData) handles scope-precedence sorting and
+ * same-name override resolution.
+ */
+export async function fetchDataSourcesByScope(
+  scope: DataSourceScope
+): Promise<LoadedDataSource[]> {
+  const conditions = [
+    // 1. Agent-wide: agentId matches, no subaccount or scheduled task scope
+    and(
+      eq(agentDataSources.agentId, scope.agentId),
+      isNull(agentDataSources.subaccountAgentId),
+      isNull(agentDataSources.scheduledTaskId),
+    ),
+  ];
+
+  if (scope.subaccountAgentId) {
+    conditions.push(
+      and(
+        eq(agentDataSources.agentId, scope.agentId),
+        eq(agentDataSources.subaccountAgentId, scope.subaccountAgentId),
+      )
+    );
+  }
+
+  if (scope.scheduledTaskId) {
+    conditions.push(
+      eq(agentDataSources.scheduledTaskId, scope.scheduledTaskId),
+    );
+  }
+
+  const rows = await db
+    .select()
+    .from(agentDataSources)
+    .where(or(...conditions))
+    .orderBy(asc(agentDataSources.priority));
+
+  const results: LoadedDataSource[] = [];
+  for (const source of rows) {
+    const resolvedScope: LoadedDataSource['scope'] =
+      source.scheduledTaskId ? 'scheduled_task'
+      : source.subaccountAgentId ? 'subaccount'
+      : 'agent';
+
+    // Lazy sources: emit manifest entry only; do NOT fetch content upfront.
+    // The read_data_source skill will call loadSourceContent on demand.
+    //
+    // Estimate sizeBytes from maxTokenBudget so the manifest's "~XKB" hint
+    // gives the agent a useful "should I bother reading this?" signal.
+    // The estimate uses ~4 chars/token (matching approxTokens) — it's a
+    // ceiling for the source, not the actual file size, but for the agent's
+    // decision-making "is this big enough to consume meaningful context?"
+    // it's the right heuristic. (pr-reviewer Major 2.)
+    if (source.loadingMode === 'lazy') {
+      const estimatedSize = source.maxTokenBudget * 4;
+      results.push({
+        id: source.id,
+        scope: resolvedScope,
+        name: source.name,
+        description: source.description,
+        content: '',
+        contentType: source.contentType,
+        tokenCount: 0,
+        sizeBytes: estimatedSize,
+        loadingMode: 'lazy',
+        priority: source.priority,
+        fetchOk: true,
+        maxTokenBudget: source.maxTokenBudget,
+      });
+      continue;
+    }
+
+    // Eager: fetch content now via the shared helper.
+    const { content, fetchOk, tokenCount } = await loadSourceContent(source);
+    results.push({
+      id: source.id,
+      scope: resolvedScope,
+      name: source.name,
+      description: source.description,
+      content,
+      contentType: source.contentType,
+      tokenCount,
+      sizeBytes: Buffer.byteLength(content, 'utf8'),
+      loadingMode: 'eager',
+      priority: source.priority,
+      fetchOk,
+      maxTokenBudget: source.maxTokenBudget,
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Backwards-compatible wrapper for the legacy fetchAgentDataSources signature.
+ * Kept for conversationService.ts:179 (agent-chat surface) which needs agent-
+ * level sources only, no scheduled-task or subaccount scoping.
+ *
+ * The return shape is a subset of LoadedDataSource that matches what the
+ * existing buildSystemPrompt consumer at llmService.ts:283 expects.
+ */
 export async function fetchAgentDataSources(
   agentId: string
 ): Promise<Array<{
@@ -326,77 +541,23 @@ export async function fetchAgentDataSources(
   priority: number;
   fetchOk: boolean;
 }>> {
-  const sources = await db
-    .select()
-    .from(agentDataSources)
-    .where(eq(agentDataSources.agentId, agentId))
-    .orderBy(asc(agentDataSources.priority));
-
-  const results = [];
-
-  for (const source of sources) {
-    // file_upload is always read from storage — no expiry logic needed
-    const isStatic = source.sourceType === 'file_upload';
-
-    let content = isStatic ? null : getCachedContent(source.id);
-    let fetchOk = true;
-
-    if (!content) {
-      try {
-        const raw = await fetchSourceContent(source);
-        content = formatContent(raw, source.contentType);
-
-        // Update both caches for live sources
-        if (!isStatic) {
-          lastGoodContentCache.set(source.id, content);
-          setCachedContent(source.id, content, source.cacheMinutes);
-        }
-
-        db.update(agentDataSources)
-          .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
-          .where(eq(agentDataSources.id, source.id))
-          .catch((err) => console.error('[AgentService] Failed to update data source fetch status (ok):', err));
-      } catch (err) {
-        fetchOk = false;
-        const errMsg = err instanceof Error ? err.message : 'Unknown fetch error';
-
-        db.update(agentDataSources)
-          .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
-          .where(eq(agentDataSources.id, source.id))
-          .catch((err2) => console.error('[AgentService] Failed to update data source fetch status (error):', err2));
-
-        // Use last good content as silent fallback (end users see no disruption)
-        const fallback = lastGoodContentCache.get(source.id);
-        if (fallback) {
-          content = fallback;
-        } else {
-          content = `[Data source "${source.name}" could not be loaded: ${errMsg}]`;
-        }
-
-        // Alert admins for lazy sources that fail (proactive sources alert via runProactiveSync)
-        if (source.syncMode === 'lazy') {
-          db.select().from(agentDataSources).where(eq(agentDataSources.id, source.id))
-            .then(([fresh]) => { if (fresh) return maybeSendDataSourceAlert(fresh, errMsg); })
-            .catch((err2) => console.error('[AgentService] Failed to fetch data source for lazy alert:', err2));
-        }
-      }
-    }
-
-    const tokenCount = approxTokens(content);
-    results.push({
-      id: source.id,
-      name: source.name,
-      description: source.description,
-      content,
-      contentType: source.contentType,
-      tokenCount,
-      maxTokenBudget: source.maxTokenBudget,
-      priority: source.priority,
-      fetchOk,
-    });
-  }
-
-  return results;
+  const loaded = await fetchDataSourcesByScope({ agentId });
+  // Keep only eager sources for backwards compatibility — the old function
+  // always returned fully-loaded content. Lazy sources in the agent-chat
+  // surface would need a different UX, which is not part of this change.
+  return loaded
+    .filter((s) => s.loadingMode === 'eager')
+    .map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      content: s.content,
+      contentType: s.contentType,
+      tokenCount: s.tokenCount,
+      maxTokenBudget: s.maxTokenBudget,
+      priority: s.priority,
+      fetchOk: s.fetchOk,
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -801,6 +962,7 @@ export const agentService = {
       sourceHeaders?: Record<string, string>;
       contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode?: 'lazy' | 'proactive';
+      loadingMode?: 'eager' | 'lazy';
       priority?: number;
       maxTokenBudget?: number;
       cacheMinutes?: number;
@@ -826,6 +988,7 @@ export const agentService = {
         sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
         contentType: data.contentType ?? 'auto',
         syncMode,
+        loadingMode: data.loadingMode ?? 'eager',
         priority: data.priority ?? 0,
         maxTokenBudget: data.maxTokenBudget ?? 8000,
         cacheMinutes: data.cacheMinutes ?? 60,
@@ -852,6 +1015,7 @@ export const agentService = {
       sourceHeaders?: Record<string, string> | null;
       contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
       syncMode: 'lazy' | 'proactive';
+      loadingMode: 'eager' | 'lazy';
       priority: number;
       maxTokenBudget: number;
       cacheMinutes: number;
@@ -878,6 +1042,7 @@ export const agentService = {
     if (data.priority !== undefined) update.priority = data.priority;
     if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
     if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
+    if (data.loadingMode !== undefined) update.loadingMode = data.loadingMode;
     // file_upload is always static
     if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
       update.syncMode = data.syncMode;
@@ -1000,4 +1165,382 @@ export const agentService = {
   },
 
   fetchAgentDataSources,
+  fetchDataSourcesByScope,
+  loadSourceContent,
+
+  // ─── Scheduled task data sources (spec §6.4) ──────────────────────────────
+  //
+  // These methods mirror the agent-level CRUD but scope attachments to a
+  // specific scheduled task. They all verify that the scheduled task belongs
+  // to `organisationId` before any read or write to guard against cross-org
+  // tampering via guessed ids.
+
+  /**
+   * Helper: load a scheduled task and verify org ownership.
+   * Throws 404 if the task does not exist or belongs to a different org.
+   */
+  async _getScheduledTaskOrThrow(scheduledTaskId: string, organisationId: string) {
+    const [st] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.id, scheduledTaskId),
+          eq(scheduledTasks.organisationId, organisationId),
+        )
+      );
+    if (!st) throw { statusCode: 404, message: 'Scheduled task not found' };
+    return st;
+  },
+
+  async listScheduledTaskDataSources(scheduledTaskId: string, organisationId: string) {
+    await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+    return db
+      .select()
+      .from(agentDataSources)
+      .where(eq(agentDataSources.scheduledTaskId, scheduledTaskId))
+      .orderBy(asc(agentDataSources.priority));
+  },
+
+  async addScheduledTaskDataSource(
+    scheduledTaskId: string,
+    organisationId: string,
+    data: {
+      name: string;
+      description?: string;
+      sourceType: 'r2' | 's3' | 'http_url' | 'google_docs' | 'dropbox' | 'file_upload';
+      sourcePath: string;
+      sourceHeaders?: Record<string, string>;
+      contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
+      syncMode?: 'lazy' | 'proactive';
+      loadingMode?: 'eager' | 'lazy';
+      priority?: number;
+      maxTokenBudget?: number;
+      cacheMinutes?: number;
+    },
+    actorUserId?: string
+  ) {
+    const st = await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+
+    // file_upload is always static — force lazy and ignore any syncMode provided
+    const syncMode = data.sourceType === 'file_upload' ? 'lazy' : (data.syncMode ?? 'lazy');
+
+    const [source] = await db
+      .insert(agentDataSources)
+      .values({
+        agentId: st.assignedAgentId,
+        scheduledTaskId,
+        name: data.name,
+        description: data.description,
+        sourceType: data.sourceType,
+        sourcePath: data.sourcePath,
+        sourceHeaders: data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : undefined,
+        contentType: data.contentType ?? 'auto',
+        syncMode,
+        loadingMode: data.loadingMode ?? 'eager',
+        priority: data.priority ?? 0,
+        maxTokenBudget: data.maxTokenBudget ?? 8000,
+        cacheMinutes: data.cacheMinutes ?? 60,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    if (source.syncMode === 'proactive') {
+      dataSyncScheduler.schedule(source.id, source.cacheMinutes * 60 * 1000);
+    }
+
+    // Audit event (spec §10.5 / pr-reviewer Blocker 3)
+    await auditService.log({
+      organisationId,
+      actorId: actorUserId,
+      actorType: actorUserId ? 'user' : 'system',
+      action: 'scheduled_task.data_source.created',
+      entityType: 'scheduled_task_data_source',
+      entityId: source.id,
+      metadata: {
+        scheduledTaskId,
+        name: source.name,
+        sourceType: source.sourceType,
+        loadingMode: source.loadingMode,
+      },
+    });
+
+    return source;
+  },
+
+  async updateScheduledTaskDataSource(
+    sourceId: string,
+    scheduledTaskId: string,
+    organisationId: string,
+    data: Partial<{
+      name: string;
+      description: string | null;
+      sourcePath: string;
+      sourceHeaders?: Record<string, string> | null;
+      contentType: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
+      syncMode: 'lazy' | 'proactive';
+      loadingMode: 'eager' | 'lazy';
+      priority: number;
+      maxTokenBudget: number;
+      cacheMinutes: number;
+    }>,
+    actorUserId?: string
+  ) {
+    await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+
+    const [existing] = await db
+      .select()
+      .from(agentDataSources)
+      .where(
+        and(
+          eq(agentDataSources.id, sourceId),
+          eq(agentDataSources.scheduledTaskId, scheduledTaskId),
+        )
+      );
+    if (!existing) throw { statusCode: 404, message: 'Data source not found' };
+
+    // Build the update payload as a properly-typed Drizzle partial.
+    // (pr-reviewer Major 1: previously cast to `never` which bypassed
+    // Drizzle's column type checking entirely.)
+    const update: Partial<typeof agentDataSources.$inferInsert> = { updatedAt: new Date() };
+    if (data.name !== undefined) update.name = data.name;
+    if (data.description !== undefined) update.description = data.description;
+    if (data.sourcePath !== undefined) update.sourcePath = data.sourcePath;
+    if (data.sourceHeaders !== undefined) update.sourceHeaders = data.sourceHeaders ? connectionTokenService.encryptToken(JSON.stringify(data.sourceHeaders)) : null;
+    if (data.contentType !== undefined) update.contentType = data.contentType;
+    if (data.priority !== undefined) update.priority = data.priority;
+    if (data.maxTokenBudget !== undefined) update.maxTokenBudget = data.maxTokenBudget;
+    if (data.cacheMinutes !== undefined) update.cacheMinutes = data.cacheMinutes;
+    if (data.loadingMode !== undefined) update.loadingMode = data.loadingMode;
+    if (data.syncMode !== undefined && existing.sourceType !== 'file_upload') {
+      update.syncMode = data.syncMode;
+    }
+
+    if (data.sourcePath !== undefined) {
+      dataSourceCache.delete(sourceId);
+      lastGoodContentCache.delete(sourceId);
+    }
+
+    const [updated] = await db
+      .update(agentDataSources)
+      .set(update)
+      .where(eq(agentDataSources.id, sourceId))
+      .returning();
+
+    if (updated.syncMode === 'proactive') {
+      dataSyncScheduler.schedule(updated.id, updated.cacheMinutes * 60 * 1000);
+    } else {
+      dataSyncScheduler.cancel(updated.id);
+    }
+
+    // Audit event (spec §10.5 / pr-reviewer Blocker 3)
+    await auditService.log({
+      organisationId,
+      actorId: actorUserId,
+      actorType: actorUserId ? 'user' : 'system',
+      action: 'scheduled_task.data_source.updated',
+      entityType: 'scheduled_task_data_source',
+      entityId: updated.id,
+      metadata: {
+        scheduledTaskId,
+        name: updated.name,
+        changedFields: Object.keys(data),
+      },
+    });
+
+    return updated;
+  },
+
+  async deleteScheduledTaskDataSource(
+    sourceId: string,
+    scheduledTaskId: string,
+    organisationId: string,
+    actorUserId?: string
+  ) {
+    await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+
+    const [existing] = await db
+      .select()
+      .from(agentDataSources)
+      .where(
+        and(
+          eq(agentDataSources.id, sourceId),
+          eq(agentDataSources.scheduledTaskId, scheduledTaskId),
+        )
+      );
+    if (!existing) throw { statusCode: 404, message: 'Data source not found' };
+
+    dataSyncScheduler.cancel(sourceId);
+    dataSourceCache.delete(sourceId);
+    lastGoodContentCache.delete(sourceId);
+    await db.delete(agentDataSources).where(eq(agentDataSources.id, sourceId));
+
+    // Audit event (spec §10.5 / pr-reviewer Blocker 3)
+    await auditService.log({
+      organisationId,
+      actorId: actorUserId,
+      actorType: actorUserId ? 'user' : 'system',
+      action: 'scheduled_task.data_source.deleted',
+      entityType: 'scheduled_task_data_source',
+      entityId: sourceId,
+      metadata: {
+        scheduledTaskId,
+        name: existing.name,
+        sourceType: existing.sourceType,
+      },
+    });
+
+    return { message: 'Data source removed' };
+  },
+
+  async testScheduledTaskDataSource(
+    sourceId: string,
+    scheduledTaskId: string,
+    organisationId: string
+  ) {
+    await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+
+    const [source] = await db
+      .select()
+      .from(agentDataSources)
+      .where(
+        and(
+          eq(agentDataSources.id, sourceId),
+          eq(agentDataSources.scheduledTaskId, scheduledTaskId),
+        )
+      );
+    if (!source) throw { statusCode: 404, message: 'Data source not found' };
+
+    dataSourceCache.delete(sourceId);
+
+    try {
+      const raw = await fetchSourceContent(source);
+      const content = formatContent(raw, source.contentType);
+      const tokenCount = approxTokens(content);
+
+      lastGoodContentCache.set(sourceId, content);
+      setCachedContent(sourceId, content, source.cacheMinutes);
+      await db.update(agentDataSources)
+        .set({ lastFetchedAt: new Date(), lastFetchStatus: 'ok', lastFetchError: null, updatedAt: new Date() })
+        .where(eq(agentDataSources.id, sourceId));
+
+      return {
+        ok: true,
+        tokenCount,
+        preview: content.slice(0, 500) + (content.length > 500 ? '...' : ''),
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
+      await db.update(agentDataSources)
+        .set({ lastFetchedAt: new Date(), lastFetchStatus: 'error', lastFetchError: errMsg, updatedAt: new Date() })
+        .where(eq(agentDataSources.id, sourceId));
+      return { ok: false, error: errMsg };
+    }
+  },
+
+  /**
+   * Upload a file AND create the data source row in a single atomic call.
+   * Previously the route called this and then made a second request to
+   * `addScheduledTaskDataSource` — if the second request failed, the file
+   * would orphan in S3 indefinitely. Combining the two into one service
+   * method ensures that if the DB insert fails after the upload, we
+   * best-effort clean up the S3 object before propagating the error.
+   * (pr-reviewer Major 4.)
+   *
+   * Caller passes display metadata (name / description / contentType /
+   * loadingMode / priority) so the row matches what the operator
+   * intended in the upload form.
+   */
+  async uploadScheduledTaskDataSourceFile(
+    scheduledTaskId: string,
+    organisationId: string,
+    file: Express.Multer.File,
+    metadata: {
+      name: string;
+      description?: string;
+      contentType?: 'json' | 'csv' | 'markdown' | 'text' | 'auto';
+      loadingMode?: 'eager' | 'lazy';
+      priority?: number;
+      maxTokenBudget?: number;
+    },
+    actorUserId?: string
+  ) {
+    const st = await this._getScheduledTaskOrThrow(scheduledTaskId, organisationId);
+
+    const fileId = uuidv4();
+    const storagePath = `scheduled-task-data-sources/${scheduledTaskId}/${fileId}-${file.originalname}`;
+
+    const s3 = getS3Client();
+    await s3.send(new PutObjectCommand({
+      Bucket: getBucketName(),
+      Key: storagePath,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+    }));
+
+    // From here on, if anything fails we must best-effort delete the
+    // uploaded object so it doesn't orphan.
+    try {
+      const [source] = await db
+        .insert(agentDataSources)
+        .values({
+          agentId: st.assignedAgentId,
+          scheduledTaskId,
+          name: metadata.name,
+          description: metadata.description,
+          sourceType: 'file_upload',
+          sourcePath: storagePath,
+          contentType: metadata.contentType ?? 'auto',
+          syncMode: 'lazy', // file_upload is always static
+          loadingMode: metadata.loadingMode ?? 'eager',
+          priority: metadata.priority ?? 0,
+          maxTokenBudget: metadata.maxTokenBudget ?? 8000,
+          cacheMinutes: 60,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      await auditService.log({
+        organisationId,
+        actorId: actorUserId,
+        actorType: actorUserId ? 'user' : 'system',
+        action: 'scheduled_task.data_source.created',
+        entityType: 'scheduled_task_data_source',
+        entityId: source.id,
+        metadata: {
+          scheduledTaskId,
+          name: source.name,
+          sourceType: 'file_upload',
+          loadingMode: source.loadingMode,
+          fileName: file.originalname,
+          fileSizeBytes: file.size,
+        },
+      });
+
+      return source;
+    } catch (err) {
+      // Best-effort cleanup — we don't want to fail the original error if
+      // the cleanup itself fails, so swallow any cleanup error and log it.
+      try {
+        const { DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+        await s3.send(new DeleteObjectCommand({ Bucket: getBucketName(), Key: storagePath }));
+      } catch (cleanupErr) {
+        console.error(
+          '[agentService] Failed to clean up orphaned upload after insert error:',
+          { storagePath, cleanupErr }
+        );
+      }
+      throw err;
+    }
+  },
+
+  // Note: previewScheduledTaskReassignment was removed in the pr-reviewer
+  // hardening pass. The cascade itself in scheduledTaskService.update is
+  // implemented and transactional, but the UI flow that would have called
+  // this preview endpoint was deferred — there's no agent picker in the
+  // ScheduledTaskDetailPage edit form yet. When the agent reassignment UI
+  // lands, restore this method (it was a pure read with no side effects)
+  // and re-add the GET /reassignment-preview route in scheduledTasks.ts.
 };

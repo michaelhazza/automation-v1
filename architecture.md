@@ -285,6 +285,97 @@ Processors can throw `TripWire` (from `server/lib/tripwire.ts`) to signal a retr
 
 ---
 
+## Context Data Sources
+
+Reference material attached to agents, scheduled tasks, or task instances. Loaded into the system prompt at run start, with cascading scope precedence and on-demand retrieval via the `read_data_source` skill. Migration 0078. Full spec at [`docs/cascading-context-data-sources-spec.md`](./docs/cascading-context-data-sources-spec.md).
+
+### Four scopes
+
+A single `agent_data_sources` row can be scoped one of four ways. Higher precedence wins when the same name appears across scopes.
+
+| Scope | Where attached | Precedence |
+|-------|---------------|------------|
+| **task_instance** | `task_attachments` on a fired board task (text formats only) | 0 (highest) |
+| **scheduled_task** | `agent_data_sources.scheduled_task_id` set | 1 |
+| **subaccount** | `agent_data_sources.subaccount_agent_id` set | 2 |
+| **agent** | `agent_data_sources.agent_id` only (no narrowing scope) | 3 (lowest) |
+
+A CHECK constraint on `agent_data_sources` enforces that `subaccount_agent_id` and `scheduled_task_id` are mutually exclusive — they're orthogonal scoping axes.
+
+### Eager vs lazy loading
+
+Each `agent_data_sources` row has a `loading_mode` (default `eager`):
+
+- **Eager** — content is fetched at run start and rendered into the `## Your Knowledge Base` block of the system prompt, subject to `MAX_EAGER_BUDGET` (60k tokens).
+- **Lazy** — only a manifest entry (name, scope, size) appears in the system prompt under `## Available Context Sources`. The agent fetches the actual content on demand by calling the `read_data_source` skill.
+
+Lazy mode is the scaling escape hatch for runs with many or large reference files. Manifest entries are capped at `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` (25) for prompt size; the full list is always available via `read_data_source op='list'`.
+
+### Same-name override resolution
+
+When two sources across scopes share a normalised name (lowercase, trimmed), the highest-precedence scope wins as an explicit override. The losing source is suppressed: it does not appear in the prompt, is invisible to the `read_data_source` skill, but is persisted in the run snapshot with `suppressedByOverride: true` so the debug UI can explain why it wasn't used.
+
+### Unified loader
+
+`server/services/runContextLoader.ts` is the single entry point. It:
+
+1. Pulls sources from all four scopes in one DB round-trip via `fetchDataSourcesByScope` + `loadTaskAttachmentsAsContext`
+2. Resolves scheduled task `description` → `taskInstructions` for the new system prompt layer
+3. Sorts by scope precedence then per-scope priority
+4. Assigns `orderIndex` to the full sorted pool BEFORE override suppression (so suppressed entries have stable indices)
+5. Resolves same-name overrides
+6. Splits eager / lazy
+7. Walks the eager budget upstream, marking `includedInPrompt: true/false` deterministically
+8. Caps the lazy manifest for in-prompt rendering
+
+The downstream `buildSystemPrompt` character-level truncation is now a safety net only — the upstream walk is the primary budget mechanism.
+
+### Task Instructions layer
+
+When a run is fired by a scheduled task (`triggerContext.source === 'scheduled_task'`), the scheduled task's `description` field becomes a dedicated `## Task Instructions` layer in the system prompt, placed between `## Additional Instructions` and the team roster. This lets non-developers configure project-specific reporting workflows by editing the scheduled task description in the UI — no new skill files needed.
+
+### `read_data_source` skill
+
+Single retrieval interface across all four scopes. Two ops:
+
+- `list` — returns the manifest of all active (non-suppressed) sources, including which are already in the Knowledge Base and which are lazy
+- `read` — fetches a specific source's content with optional `offset` / `limit` for chunked walks of large sources
+
+Enforced limits (in `server/config/limits.ts`):
+
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `MAX_EAGER_BUDGET` | 60000 | Total tokens in the `## Your Knowledge Base` block |
+| `MAX_READ_DATA_SOURCE_CALLS_PER_RUN` | 20 | Per-run cap on `op: 'read'` calls |
+| `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL` | 15000 | Per-call clamp on the `limit` parameter |
+| `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` | 25 | Lazy manifest entries rendered into the prompt |
+
+The skill is auto-injected onto every agent run via `agentExecutionService` step 5a — no per-agent configuration needed.
+
+### Run-time snapshot
+
+`agent_runs.context_sources_snapshot` (JSONB) captures every source considered at run start, including winners, suppressed losers, eager-but-budget-excluded, and lazy manifest entries. Each entry carries `orderIndex`, `includedInPrompt`, `suppressedByOverride`, `suppressedBy`, and `exclusionReason` for debugging. Frozen after run start; surfaced in the run trace viewer's Context Sources panel.
+
+### Permissions
+
+- `org.scheduled_tasks.data_sources.manage` — required to attach/edit/delete data sources on a scheduled task. Org Admin inherits via `Object.values(ORG_PERMISSIONS)`. Scheduled task base CRUD (create/update/delete the task itself) continues to use `org.agents.edit`.
+
+### Routes
+
+| Route | File | Purpose |
+|-------|------|---------|
+| `GET /api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources` | `scheduledTasks.ts` | List sources |
+| `POST .../data-sources` | `scheduledTasks.ts` | Create from URL |
+| `POST .../data-sources/upload` | `scheduledTasks.ts` | Multipart file upload |
+| `PATCH .../data-sources/:sourceId` | `scheduledTasks.ts` | Update |
+| `DELETE .../data-sources/:sourceId` | `scheduledTasks.ts` | Delete |
+| `POST .../data-sources/:sourceId/test` | `scheduledTasks.ts` | Test fetch |
+| `GET .../reassignment-preview?newAgentId=...` | `scheduledTasks.ts` | Cascade preview for UI confirmation when changing the assigned agent |
+
+The agent-level data source routes at `/api/agents/:id/data-sources` are unchanged.
+
+---
+
 ## Review Gates & HITL
 
 Tasks can set `reviewRequired: true`. When an agent acts on such a task, actions escalate to the review queue before executing.
