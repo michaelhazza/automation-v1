@@ -1,6 +1,6 @@
 /**
- * Integration connection routes — subaccount-scoped.
- * Manages OAuth/API key connections per subaccount.
+ * Integration connection routes.
+ * Manages OAuth/API key connections at both subaccount and org level.
  */
 
 import { Router } from 'express';
@@ -126,9 +126,12 @@ router.patch(
 
     const [updated] = await db.update(integrationConnections)
       .set(updates)
-      .where(eq(integrationConnections.id, req.params.id))
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.subaccountId, subaccount.id),
+      ))
       .returning();
-
+    if (!updated) throw { statusCode: 404, message: 'Connection not found' };
     res.json(sanitizeConnection(updated));
   })
 );
@@ -152,7 +155,10 @@ router.delete(
     // Revoke rather than hard delete — keeps audit trail
     await db.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, req.params.id));
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.subaccountId, subaccount.id),
+      ));
 
     res.json({ success: true });
   })
@@ -230,16 +236,15 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
   asyncHandler(async (req, res) => {
-    const conditions = [
-      eq(integrationConnections.organisationId, req.orgId!),
-      isNull(integrationConnections.subaccountId),
-    ];
-    if (req.query.provider) {
-      conditions.push(eq(integrationConnections.providerType, req.query.provider as string));
-    }
     const rows = await db.select()
       .from(integrationConnections)
-      .where(and(...conditions));
+      .where(and(
+        eq(integrationConnections.organisationId, req.orgId!),
+        isNull(integrationConnections.subaccountId),
+        typeof req.query.provider === 'string'
+          ? eq(integrationConnections.providerType, req.query.provider)
+          : undefined,
+      ));
     res.json(rows.map(sanitizeConnection));
   })
 );
@@ -302,8 +307,13 @@ router.patch(
 
     const [updated] = await db.update(integrationConnections)
       .set(updates)
-      .where(eq(integrationConnections.id, req.params.id))
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.organisationId, req.orgId!),
+        isNull(integrationConnections.subaccountId),
+      ))
       .returning();
+    if (!updated) throw { statusCode: 404, message: 'Connection not found' };
     res.json(sanitizeConnection(updated));
   })
 );
@@ -324,7 +334,11 @@ router.delete(
     if (!existing) throw { statusCode: 404, message: 'Connection not found' };
     await db.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, req.params.id));
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.organisationId, req.orgId!),
+        isNull(integrationConnections.subaccountId),
+      ));
     res.json({ success: true });
   })
 );
