@@ -19,7 +19,7 @@ The single most important constraint to internalise: **every step declares a `si
 |-------|------------|----------|
 | Postgres tables, columns, types, enums | `snake_case` | `playbook_runs`, `output_hash`, `playbook_run_status` |
 | TypeScript identifiers (vars, fields, fns, types) | `camelCase` (types `PascalCase`) | `playbookEngineService`, `sideEffectType`, `PlaybookStep` |
-| Step ids inside a playbook definition | `kebab_case` (lowercase, `_` allowed, kebab convention enforced by validator regex `^[a-z][a-z0-9_]*$`) | `event_basics`, `landing_page_hero` |
+| Step ids inside a playbook definition | snake_case-style (lowercase letters + digits + underscores, regex `^[a-z][a-z0-9_]*$`). The validator's rule name is historically `kebab_case` for backwards-compat, but the regex actually allows underscores and disallows hyphens. **Hyphens are NOT permitted in step ids** — they're reserved for template slugs (filenames + DB). | `event_basics`, `landing_page_hero` |
 | Template slugs (filename and DB) | `kebab-case` | `event-creation`, `monthly-newsletter` |
 | Failure reasons | `snake_case` constants in the `FailureReason` enum | `playbook_dag_invalid`, `playbook_irreversible_blocked` |
 | WebSocket event types | `colon:separated` namespaces | `playbook:step:completed`, `playbook:run:status` |

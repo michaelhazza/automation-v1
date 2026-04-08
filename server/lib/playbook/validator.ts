@@ -26,7 +26,25 @@ import type {
 import { extractReferences, TemplatingError } from './templating.js';
 
 export const MAX_DAG_DEPTH = 50;
-const KEBAB_CASE_RE = /^[a-z][a-z0-9_]*$/;
+
+// Step id format. The rule is HISTORICALLY named "kebab_case" (and the
+// rule name is preserved in the ValidationError discriminator union for
+// backwards-compat with tests + error catalogues), but the regex
+// actually allows underscores and disallows hyphens — i.e. it enforces
+// snake_case style identifiers like `event_basics`, `landing_page_hero`.
+//
+// Spec §0.1 (naming conventions table) explicitly documents this:
+//   "Step ids inside a playbook definition | kebab_case (lowercase, _
+//    allowed, kebab convention enforced by validator regex
+//    ^[a-z][a-z0-9_]*$) | event_basics, landing_page_hero"
+//
+// Template SLUGS (filename / DB) are kebab-case with hyphens — that's a
+// different namespace. Don't confuse the two.
+//
+// If you change this regex, every existing playbook breaks. Don't.
+const STEP_ID_RE = /^[a-z][a-z0-9_]*$/;
+// Backwards-compat alias.
+const KEBAB_CASE_RE = STEP_ID_RE;
 
 /**
  * Validates a playbook definition. Optionally cross-checks against the
@@ -51,13 +69,14 @@ export function validateDefinition(
     seenIds.add(step.id);
   }
 
-  // ── Rule 2: kebab_case ids ─────────────────────────────────────────────
+  // ── Rule 2: step id format (rule name "kebab_case" is historical;
+  // ──         see STEP_ID_RE comment — actually enforces snake_case)
   for (const step of def.steps) {
-    if (!KEBAB_CASE_RE.test(step.id)) {
+    if (!STEP_ID_RE.test(step.id)) {
       errors.push({
         rule: 'kebab_case',
         stepId: step.id,
-        message: `step id '${step.id}' must match ${KEBAB_CASE_RE.source}`,
+        message: `step id '${step.id}' must use lowercase letters, digits, and underscores (regex ${STEP_ID_RE.source}). Examples: event_basics, landing_page_hero. Hyphens are NOT allowed in step ids — they are reserved for template slugs (filenames + DB).`,
       });
     }
   }

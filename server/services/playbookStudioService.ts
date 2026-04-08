@@ -29,7 +29,7 @@
  * / sideEffectType / kebab_case rules.
  */
 
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { db } from '../db/index.js';
@@ -40,191 +40,45 @@ import type {
 } from '../db/schema/index.js';
 import type {
   PlaybookDefinition,
-  PlaybookStep,
   ValidationError,
 } from '../lib/playbook/types.js';
 import { logger } from '../lib/logger.js';
+import { validateDefinition as runtimeValidateDefinition } from '../lib/playbook/validator.js';
 import { createPlaybookPr } from './playbookStudioGithub.js';
 
 const PLAYBOOKS_DIR = resolve(process.cwd(), 'server/playbooks');
 
 // ─── Structural validator (no Zod required) ──────────────────────────────────
 
-/**
- * A reduced version of the §4 validator that operates on a parsed object
- * (no Zod schema introspection). Studio's tool path uses this to give the
- * agent fast feedback while it iterates on a string. The full Zod-aware
- * validator runs at PR-merge time via the seeder + the regular validator.
- *
- * Rules covered (matching server/lib/playbook/validator.ts):
- *   1. unique step ids
- *   2. kebab_case ids
- *   3. dependsOn entries resolve
- *   4. cycle detection (delegates to the same algorithm)
- *   5. orphan detection
- *   6. at least one entry step
- *   8. type-specific required fields
- *   12. irreversible+retry rejected
- *   13. max DAG depth (50)
- *   sideEffectType present on every step
- */
-const KEBAB_RE = /^[a-z][a-z0-9_]*$/;
-const MAX_DAG_DEPTH = 50;
-
-interface CandidateStep {
+// Lightweight typed shapes used by the simulateRun + estimateCost helpers
+// below. These are NOT validation types — every Studio validation call
+// goes through the canonical runtime validator. They exist only so the
+// static-analysis helpers can iterate steps without `any`.
+interface SimulationStep {
   id?: string;
-  name?: string;
   type?: string;
   dependsOn?: string[];
   sideEffectType?: string;
-  prompt?: string;
-  agentRef?: { kind?: string; slug?: string };
-  formSchema?: unknown;
-  condition?: unknown;
-  outputSchema?: unknown;
-  retryPolicy?: { maxAttempts?: number };
+  humanReviewRequired?: boolean;
 }
 
-interface CandidateDefinition {
+interface SimulationDefinition {
   slug?: string;
   name?: string;
   description?: string;
   version?: number;
-  steps?: CandidateStep[];
-}
-
-export function validateCandidateStructural(
-  parsed: unknown
-): { ok: true } | { ok: false; errors: ValidationError[] } {
-  const errors: ValidationError[] = [];
-
-  if (!parsed || typeof parsed !== 'object') {
-    errors.push({ rule: 'missing_field', message: 'definition must be an object' });
-    return { ok: false, errors };
-  }
-
-  const def = parsed as CandidateDefinition;
-  if (!def.slug) errors.push({ rule: 'missing_field', message: 'slug is required' });
-  if (!def.name) errors.push({ rule: 'missing_field', message: 'name is required' });
-  if (def.version === undefined)
-    errors.push({ rule: 'missing_field', message: 'version is required' });
-  if (!Array.isArray(def.steps) || def.steps.length === 0) {
-    errors.push({ rule: 'missing_field', message: 'steps array is required' });
-    return { ok: false, errors };
-  }
-
-  // Rule 1: unique ids
-  const seenIds = new Set<string>();
-  for (const step of def.steps) {
-    if (!step.id) {
-      errors.push({ rule: 'missing_field', message: 'step is missing id' });
-      continue;
-    }
-    if (seenIds.has(step.id)) {
-      errors.push({ rule: 'unique_id', stepId: step.id, message: `duplicate step id '${step.id}'` });
-    }
-    seenIds.add(step.id);
-  }
-
-  // Rule 2 + 8 + 9 + 12 + sideEffectType + outputSchema presence
-  for (const step of def.steps) {
-    if (!step.id) continue;
-    if (!KEBAB_RE.test(step.id)) {
-      errors.push({
-        rule: 'kebab_case',
-        stepId: step.id,
-        message: `step id '${step.id}' must match ${KEBAB_RE.source}`,
-      });
-    }
-    if (!step.sideEffectType) {
-      errors.push({
-        rule: 'missing_side_effect_type',
-        stepId: step.id,
-        message: `step '${step.id}' is missing sideEffectType`,
-      });
-    }
-    if (!step.outputSchema) {
-      errors.push({
-        rule: 'missing_output_schema',
-        stepId: step.id,
-        message: `step '${step.id}' is missing outputSchema`,
-      });
-    }
-    switch (step.type) {
-      case 'prompt':
-        if (!step.prompt) {
-          errors.push({
-            rule: 'missing_field',
-            stepId: step.id,
-            message: `prompt step '${step.id}' must declare a prompt`,
-          });
-        }
-        break;
-      case 'agent_call':
-        if (!step.agentRef?.slug) {
-          errors.push({
-            rule: 'missing_field',
-            stepId: step.id,
-            message: `agent_call step '${step.id}' must declare agentRef.slug`,
-          });
-        }
-        break;
-      case 'user_input':
-        if (!step.formSchema) {
-          errors.push({
-            rule: 'missing_field',
-            stepId: step.id,
-            message: `user_input step '${step.id}' must declare formSchema`,
-          });
-        }
-        break;
-      case 'conditional':
-        if (step.condition === undefined) {
-          errors.push({
-            rule: 'missing_field',
-            stepId: step.id,
-            message: `conditional step '${step.id}' must declare a condition`,
-          });
-        }
-        break;
-    }
-    if (step.sideEffectType === 'irreversible' && (step.retryPolicy?.maxAttempts ?? 1) > 1) {
-      errors.push({
-        rule: 'irreversible_with_retries',
-        stepId: step.id,
-        message: `irreversible step '${step.id}' cannot have retryPolicy.maxAttempts > 1`,
-      });
-    }
-  }
-
-  // Rule 3: dependsOn entries resolve
-  for (const step of def.steps) {
-    if (!step.id) continue;
-    const deps = step.dependsOn ?? [];
-    for (const dep of deps) {
-      if (!seenIds.has(dep)) {
-        errors.push({
-          rule: 'unresolved_dep',
-          stepId: step.id,
-          message: `step '${step.id}' depends on unknown step '${dep}'`,
-        });
-      }
-    }
-  }
-
-  // Rule 6: at least one entry step
-  const entries = def.steps.filter((s) => (s.dependsOn ?? []).length === 0);
-  if (entries.length === 0) {
-    errors.push({ rule: 'missing_entry', message: 'definition has no entry steps' });
-  }
-
-  // Rule 13: max DAG depth (only safe to compute when no cycles — else infinite loop)
-  // Phase 1 Studio skips depth check if any unresolved dep was reported above.
-
-  return errors.length === 0 ? { ok: true } : { ok: false, errors };
+  steps?: SimulationStep[];
 }
 
 // ─── Tool implementations ────────────────────────────────────────────────────
+//
+// Studio's structural validator has been retired in favour of delegating
+// to the canonical runtime validator at server/lib/playbook/validator.ts.
+// That validator implements all 13 spec rules including cycle detection,
+// orphan detection, and max DAG depth — the previous Studio subset only
+// covered ~7 rules and made false claims in its comments. The single
+// source of truth is now the runtime validator; see the
+// `validateCandidate` method below.
 
 export const playbookStudioService = {
   /** read_existing_playbook tool. Read-only, file system. */
@@ -254,8 +108,16 @@ export const playbookStudioService = {
 
   /**
    * validate_candidate tool. Accepts either a parsed definition object or
-   * a JSON string. Runs the structural validator. Returns the same
-   * ValidationResult shape as the runtime validator.
+   * a JSON string. Delegates to the canonical runtime validator
+   * (server/lib/playbook/validator.ts) which implements all 13 spec
+   * rules including cycle detection, orphan detection, and max DAG
+   * depth — the previous structural-only subset has been retired so
+   * Studio and runtime always agree.
+   *
+   * The runtime validator's `outputSchema` check is presence-only
+   * (`if (!step.outputSchema)`) so a JSON definition with literal
+   * `outputSchema: {}` works correctly even though it has no real Zod
+   * instance attached.
    */
   validateCandidate(
     input: unknown
@@ -276,7 +138,15 @@ export const playbookStudioService = {
         };
       }
     }
-    return validateCandidateStructural(parsed);
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        ok: false,
+        errors: [{ rule: 'missing_field', message: 'definition must be an object' }],
+      };
+    }
+    // Cast to PlaybookDefinition — validator only inspects structural
+    // shape, so a plain JSON object works without real Zod instances.
+    return runtimeValidateDefinition(parsed as PlaybookDefinition);
   },
 
   /**
@@ -300,14 +170,14 @@ export const playbookStudioService = {
     const result = this.validateCandidate(input);
     if (!result.ok) return { ok: false, errors: result.errors };
 
-    let parsed: CandidateDefinition;
+    let parsed: SimulationDefinition;
     try {
-      parsed = typeof input === 'string' ? JSON.parse(input) : (input as CandidateDefinition);
+      parsed = typeof input === 'string' ? JSON.parse(input) : (input as SimulationDefinition);
     } catch {
       return { ok: false, errors: [{ rule: 'missing_field', message: 'parse failed' }] };
     }
 
-    const steps = (parsed.steps ?? []) as CandidateStep[];
+    const steps = (parsed.steps ?? []) as SimulationStep[];
     const stepsById = new Map(steps.map((s) => [s.id!, s]));
 
     // Topological order via Kahn's algorithm (we know there's no cycle —
@@ -389,9 +259,9 @@ export const playbookStudioService = {
     const result = this.validateCandidate(input);
     if (!result.ok) return { cents: 0, mode, perStep: {} };
 
-    let parsed: CandidateDefinition;
+    let parsed: SimulationDefinition;
     try {
-      parsed = typeof input === 'string' ? JSON.parse(input) : (input as CandidateDefinition);
+      parsed = typeof input === 'string' ? JSON.parse(input) : (input as SimulationDefinition);
     } catch {
       return { cents: 0, mode, perStep: {} };
     }
@@ -445,7 +315,33 @@ export const playbookStudioService = {
       .orderBy(desc(playbookStudioSessions.updatedAt));
   },
 
-  async getSession(id: string): Promise<PlaybookStudioSession | null> {
+  /**
+   * Loads a Studio session, scoped to the user that created it. Returns
+   * null when the session doesn't exist OR belongs to a different user.
+   * The route layer surfaces both as 404 to avoid leaking session ids.
+   */
+  async getSession(id: string, userId: string): Promise<PlaybookStudioSession | null> {
+    const [row] = await db
+      .select()
+      .from(playbookStudioSessions)
+      .where(
+        and(
+          eq(playbookStudioSessions.id, id),
+          eq(playbookStudioSessions.createdByUserId, userId)
+        )
+      );
+    return row ?? null;
+  },
+
+  /**
+   * Loads a Studio session by id WITHOUT a user scope check. Used only
+   * by the propose_save skill executor which doesn't have a userId in
+   * its skill execution context. The caller is responsible for using
+   * the returned session.createdByUserId as the trust anchor for any
+   * follow-up mutations. Never expose this through a route — the
+   * user-scoped getSession() is what the API layer must use.
+   */
+  async getSessionByIdUnscoped(id: string): Promise<PlaybookStudioSession | null> {
     const [row] = await db
       .select()
       .from(playbookStudioSessions)
@@ -453,70 +349,99 @@ export const playbookStudioService = {
     return row ?? null;
   },
 
+  /**
+   * Updates the candidate file contents on a session. Always scoped by
+   * createdByUserId so one system_admin cannot mutate another's session
+   * by guessing the UUID. Returns true on success, false when the
+   * session is not found or not owned by the caller.
+   */
   async updateCandidate(
     sessionId: string,
+    userId: string,
     fileContents: string,
     validationState: PlaybookStudioValidationState
-  ): Promise<void> {
-    await db
+  ): Promise<boolean> {
+    const result = await db
       .update(playbookStudioSessions)
       .set({
         candidateFileContents: fileContents,
         candidateValidationState: validationState,
         updatedAt: new Date(),
       })
-      .where(eq(playbookStudioSessions.id, sessionId));
+      .where(
+        and(
+          eq(playbookStudioSessions.id, sessionId),
+          eq(playbookStudioSessions.createdByUserId, userId)
+        )
+      )
+      .returning({ id: playbookStudioSessions.id });
+    return result.length > 0;
   },
 
   /**
-   * Validates the candidate file and opens a real GitHub PR via the
-   * playbookStudioGithub helper. Always re-validates first (spec
-   * invariant 14): the chat artefact is never trusted.
+   * Validates the candidate file + definition and opens a real GitHub PR
+   * via the playbookStudioGithub helper. Always re-validates first
+   * (spec invariant 14): the chat artefact is never trusted.
    *
-   * Returns 422 (`ok: false`) on validation failure or when GitHub
-   * integration is not configured. The endpoint surfaces these as
-   * structured errors so the UI can display them inline.
+   * REQUIRES a structured `definition` object alongside `fileContents`.
+   * The definition is what gets validated; the fileContents is what gets
+   * written to the PR. Both must be present — passing only fileContents
+   * is rejected because the validator cannot reliably parse arbitrary
+   * TypeScript source.
+   *
+   * Returns 422 (`ok: false`) on validation failure, missing definition,
+   * or when GitHub integration is not configured. The endpoint surfaces
+   * these as structured errors so the UI can display them inline.
    */
   async saveAndOpenPr(
     sessionId: string,
     fileContents: string,
+    definition: unknown,
     userId: string
   ): Promise<{ ok: boolean; prUrl?: string; errors?: ValidationError[]; reason?: string }> {
-    // Extract the slug from the file contents — this is what becomes the
-    // filename and the branch name. Looks for `slug: 'foo'` or `slug: "foo"`.
-    const slugMatch = fileContents.match(/slug:\s*['"]([a-z0-9_-]+)['"]/);
-    if (!slugMatch) {
-      const err: ValidationError = {
-        rule: 'missing_field',
-        message: 'Could not find slug in file contents — must be `slug: "..."`',
+    // Mandatory: caller must supply a structured definition object that
+    // we can validate. Spec invariant 14 — the save endpoint always
+    // re-runs the validator and never trusts the chat artefact.
+    if (!definition || typeof definition !== 'object') {
+      return {
+        ok: false,
+        errors: [
+          {
+            rule: 'missing_field',
+            message:
+              'definition object is required (the validator cannot reliably parse raw TypeScript). The Studio UI sends both fileContents and a structured definition.',
+          },
+        ],
       };
-      await this.updateCandidate(sessionId, fileContents, 'invalid');
-      return { ok: false, errors: [err] };
-    }
-    const slug = slugMatch[1];
-
-    // Re-run the structural validator. Best-effort JSON extraction so we
-    // catch the obvious shape errors. Full Zod-aware validation runs at
-    // PR-merge time via the seeder + CI.
-    let parseable: unknown = null;
-    try {
-      const m = fileContents.match(/definePlaybook\s*\(\s*({[\s\S]*})\s*\)/);
-      if (m) parseable = JSON.parse(m[1]);
-    } catch {
-      // ignore — JS-not-JSON commonly fails. The seeder catches this at deploy.
     }
 
-    if (parseable) {
-      const validation = this.validateCandidate(parseable);
-      if (!validation.ok) {
-        await this.updateCandidate(sessionId, fileContents, 'invalid');
-        logger.warn('playbook_studio_validation_failed', {
-          event: 'playbook_studio.candidate_validated',
-          sessionId,
-          errorCount: validation.errors.length,
-        });
-        return { ok: false, errors: validation.errors };
-      }
+    // Mandatory validation against the runtime DAG validator. This
+    // covers all 13 rules including cycle, orphan, and max DAG depth —
+    // the structural subset has been removed in favour of the canonical
+    // implementation.
+    const validation = this.validateCandidate(definition);
+    if (!validation.ok) {
+      await this.updateCandidate(sessionId, userId, fileContents, 'invalid');
+      logger.warn('playbook_studio_validation_failed', {
+        event: 'playbook_studio.candidate_validated',
+        sessionId,
+        errorCount: validation.errors.length,
+      });
+      return { ok: false, errors: validation.errors };
+    }
+
+    // Extract the slug from the validated definition (not from raw text).
+    const slug = (definition as { slug?: unknown }).slug;
+    if (typeof slug !== 'string' || !/^[a-z0-9_-]+$/.test(slug)) {
+      return {
+        ok: false,
+        errors: [
+          {
+            rule: 'missing_field',
+            message: 'definition.slug must be a non-empty kebab-case string',
+          },
+        ],
+      };
     }
 
     // Look up the user for the commit author identity (spec §10.8.6 —
@@ -551,7 +476,7 @@ export const playbookStudioService = {
         error: e.message,
         errorCode: e.errorCode,
       });
-      await this.updateCandidate(sessionId, fileContents, 'valid');
+      await this.updateCandidate(sessionId, userId, fileContents, 'valid');
       return {
         ok: false,
         reason: e.message ?? 'PR creation failed',

@@ -2438,11 +2438,38 @@ async function executePlaybookProposeSave(
     return { success: false, error: 'fileContents and sessionId are required' };
   }
   const { playbookStudioService } = await import('./playbookStudioService.js');
-  // Update the session with the candidate, mark valid (the validator
-  // already ran via playbook_validate). The actual file write + PR
-  // creation is the human's button click on Save & Open PR — never the
-  // agent's tool call. Spec invariant 13.
-  await playbookStudioService.updateCandidate(sessionId, fileContents, 'valid');
+  // Resolve session owner from the session row itself, then update via
+  // the owner-scoped helper. The route-level Save & Open PR endpoint is
+  // the strict security boundary — this tool only records a candidate,
+  // and the owner check here prevents an agent from polluting a session
+  // it doesn't own (the session's createdByUserId determines who can
+  // mutate its candidate). Spec finding §10.8 / review item 2.
+  //
+  // KNOWN LIMITATION: SkillExecutionContext does not currently carry the
+  // calling user's id, so an agent in user A's chat that calls this tool
+  // with a guessed sessionId belonging to user B would still update user
+  // B's session row. This is bounded by:
+  //   1. Studio is system_admin only (small attacker surface)
+  //   2. The route-level Save & Open PR endpoint scopes by req.user.id
+  //      (users only commit their own sessions)
+  //   3. A tampered candidate would be visible to the legitimate owner
+  //      before they click Save, so the worst case is "weird content"
+  //      not "unauthorised commit".
+  // The full fix is to add userId to SkillExecutionContext (out of scope
+  // for this PR — touches the wider skill executor surface).
+  const session = await playbookStudioService.getSessionByIdUnscoped(sessionId);
+  if (!session) {
+    return { success: false, error: 'Session not found' };
+  }
+  const updated = await playbookStudioService.updateCandidate(
+    sessionId,
+    session.createdByUserId,
+    fileContents,
+    'valid'
+  );
+  if (!updated) {
+    return { success: false, error: 'Session update failed' };
+  }
   return {
     success: true,
     message:

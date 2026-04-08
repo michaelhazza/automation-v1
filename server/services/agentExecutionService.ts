@@ -455,7 +455,7 @@ export const agentExecutionService = {
       try {
         const { mcpClientManager } = await import('./mcpClientManager.js');
         const mcp = await mcpClientManager.connectForRun({
-          runId,
+          runId: run.id,
           organisationId: request.organisationId,
           agentId: request.agentId,
           subaccountId: request.subaccountId ?? null,
@@ -467,10 +467,10 @@ export const agentExecutionService = {
           const { MAX_MCP_TOOLS_PER_RUN } = await import('../config/limits.js');
           const cappedTools = mcp.tools.slice(0, MAX_MCP_TOOLS_PER_RUN);
           enhancedTools.push(...cappedTools);
-          logger.info('mcp.tools_loaded', { runId, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
+          logger.info('mcp.tools_loaded', { runId: run.id, mcpToolCount: cappedTools.length, serverCount: mcp.clients.size });
         }
       } catch (err) {
-        logger.warn('mcp.connect_failed', { runId, error: err instanceof Error ? err.message : String(err) });
+        logger.warn('mcp.connect_failed', { runId: run.id, error: err instanceof Error ? err.message : String(err) });
         // Non-fatal — agent runs without MCP tools
       }
 

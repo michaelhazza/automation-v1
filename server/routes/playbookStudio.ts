@@ -43,7 +43,7 @@ router.get(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const session = await playbookStudioService.getSession(req.params.id);
+    const session = await playbookStudioService.getSession(req.params.id, req.user!.id);
     if (!session) {
       res.status(404).json({ error: 'Session not found' });
       return;
@@ -127,14 +127,24 @@ router.post(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const { fileContents } = req.body as { fileContents?: string };
+    const { fileContents, definition } = req.body as {
+      fileContents?: string;
+      definition?: unknown;
+    };
     if (!fileContents || typeof fileContents !== 'string') {
       res.status(400).json({ error: 'fileContents is required' });
+      return;
+    }
+    if (!definition || typeof definition !== 'object') {
+      res.status(400).json({
+        error: 'definition object is required for the mandatory pre-PR validation pass',
+      });
       return;
     }
     const result = await playbookStudioService.saveAndOpenPr(
       req.params.id,
       fileContents,
+      definition,
       req.user!.id
     );
     if (!result.ok) {
@@ -160,11 +170,16 @@ router.patch(
       res.status(400).json({ error: 'fileContents is required' });
       return;
     }
-    await playbookStudioService.updateCandidate(
+    const updated = await playbookStudioService.updateCandidate(
       req.params.id,
+      req.user!.id,
       fileContents,
       validationState ?? 'unvalidated'
     );
+    if (!updated) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
     res.json({ ok: true });
   })
 );

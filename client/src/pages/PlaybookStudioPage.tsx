@@ -209,12 +209,27 @@ export default function PlaybookStudioPage(_props: { user: User }) {
       setError('Create or select a session first');
       return;
     }
+    // The save endpoint requires BOTH fileContents and a structured
+    // definition (spec invariant 14 — the validator runs against the
+    // definition, never against raw TS source). Parse the JSON pane and
+    // bail with a clear error if it's invalid.
+    let parsedDefinition: unknown;
+    try {
+      parsedDefinition = JSON.parse(definitionJson);
+    } catch (parseErr) {
+      setError(
+        `Definition JSON is invalid — fix it before saving: ${
+          parseErr instanceof Error ? parseErr.message : 'parse failed'
+        }`
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const res = await api.post(
         `/api/system/playbook-studio/sessions/${activeSessionId}/save-and-open-pr`,
-        { fileContents }
+        { fileContents, definition: parsedDefinition }
       );
       setToolResult({ kind: 'save', ok: true, ...res.data });
       await loadSessions();
