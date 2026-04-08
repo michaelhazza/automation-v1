@@ -241,7 +241,7 @@ Things to still **not** build even in Phase 2:
 
 This section is the actionable checklist for whoever picks up the "flesh out testing" ticket. It is scoped to the current-phase posture only — Phase 2 items are not included because they shouldn't be built yet.
 
-### A. New static gate scripts (14 total)
+### A. New static gate scripts (15 total)
 
 Each is a new file in `scripts/verify-*.sh`, wired into `scripts/run-all-gates.sh`. Each is <30 lines of bash, single-purpose, grep-based.
 
@@ -261,6 +261,7 @@ Each is a new file in `scripts/verify-*.sh`, wired into `scripts/run-all-gates.s
 | A12 | `verify-playbook-run-mode-enforced.sh` | 4 | Assert `playbookEngineService` branches on `runMode` per tick — grep for the four mode constants (`auto`, `supervised`, `background`, `bulk`). |
 | A13 | `verify-critique-gate-shadow-only.sh` | 5 | Assert `CRITIQUE_GATE_SHADOW_MODE = true` in `limits.ts` AND no callsite in `agentExecutionService.ts` routes agent behaviour based on the gate result (gate writes telemetry only). |
 | A14 | `verify-confidence-escape-hatch-wired.sh` | 5 | Assert the `preTool` middleware contains the confidence escape-hatch branch, `MIN_TOOL_ACTION_CONFIDENCE` is declared in `limits.ts`, and `blocked_by: 'low_confidence'` is in the `ask_clarifying_question` skill's parameter schema. |
+| A15 | `verify-universal-skills-preserved.sh` | 5 | Assert every `preCall`/`preTool`/`postCall`/`postTool` middleware that mutates `activeTools` does so via the `mutateActiveToolsPreservingUniversal()` helper. Raw mutation (direct `activeTools = activeTools.filter(...)`) is blocked. Also asserts `SerialisableMiddlewareContext` does not contain an `activeTools` field. Enforces the universal-skill runtime invariant — prevents a subtle class of bugs where a future middleware silently drops the recovery path. |
 
 **Protected tables list for A4** (derived from `server/config/rlsProtectedTables.ts` manifest, maintained per the "RLS policy ships with CREATE TABLE" rule): `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `agent_run_messages`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `task_activities`, `task_deliverables`, `audit_events`, `tool_call_security_events`, `regression_cases`, `memory_blocks`, `memory_block_attachments`.
 
@@ -353,7 +354,7 @@ Additional candidates (not counted in the 11 but worth adding if the implementer
 
 | Kind | Count |
 |---|---|
-| New static gates | 14 |
+| New static gates | 15 |
 | New unit test files | 11 |
 | New integration tests (I1-I3) | 3 |
 | New smoke tests | 1 |
@@ -362,7 +363,7 @@ Additional candidates (not counted in the 11 but worth adding if the implementer
 | New npm scripts | 1 (`test:unit`) |
 | P1.2 regression capture (passive, grows with usage) | 1 pipeline |
 
-**Total new files in the testing layer:** ~41 (14 gates + 11 unit tests + 3 integration tests + 1 smoke test + ~10 fixtures + 1 bash runner + 1 npm script change). All follow existing conventions. No new frameworks. No new dependencies beyond what's already in `package.json`.
+**Total new files in the testing layer:** ~42 (15 gates + 11 unit tests + 3 integration tests + 1 smoke test + ~10 fixtures + 1 bash runner + 1 npm script change). All follow existing conventions. No new frameworks. No new dependencies beyond what's already in `package.json`.
 
 ---
 

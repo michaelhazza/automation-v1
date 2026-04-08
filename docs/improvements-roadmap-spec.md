@@ -1138,6 +1138,17 @@ When `resumeAgentRun()` reads a checkpoint, it compares the checkpoint's `middle
 
 If a field is removed from `SerialisableMiddlewareContext`, bump `MIDDLEWARE_CONTEXT_VERSION` by 1 and mark any in-flight runs with `checkpoint.middlewareVersion < new version` as permanently non-resumable (they transition to `failed` with `failureReason: 'middleware_schema_incompatible'`). In pre-production this is acceptable; in a future stabilised phase this becomes a coordinated deployment concern.
 
+**Rule 6: `activeTools` is recomputed on resume, never serialised.**
+
+The agent's active tool list is derived state, not persistent state. It is **never** written to the checkpoint, never inherited from the `MiddlewareContext` snapshot, and never reconstructed from `agent_run_messages`. On resume, `resumeAgentRun()` recomputes the active tool set from scratch by calling `skillService.getToolsForRun()` against the `configSnapshot` read from `agent_runs`. The recomputed set is then subject to any `preCall` middleware that mutates it (topic filter in Sprint 5, future middlewares beyond).
+
+This rule exists for two reasons:
+
+- **The universal-skill runtime invariant** (see P4.1). Recomputing from `getToolsForRun()` guarantees universal skills are present at the moment of resume, because the merge happens inside `getToolsForRun()`. Serialising `activeTools` into the checkpoint would freeze a pre-universal-skill view if the platform added a new universal skill between the checkpoint write and the resume.
+- **Config-snapshot consistency.** `configSnapshot` is the source of truth for the resumed run (per "Deterministic resume — config snapshot by default" above). Everything derivable from `configSnapshot` — including the tool list — must be re-derived, not inherited. Anything else opens a window for drift between the resumed state and the snapshot that caused it.
+
+**Concrete banned pattern:** adding `activeTools: ProviderTool[]` as a field on `SerialisableMiddlewareContext`. The `verify-middleware-state-serialised.sh` gate treats this as a special case — the field must be absent or marked `// ephemeral: recomputed on resume, see Rule 6`.
+
 ### New static gate: `verify-middleware-state-serialised.sh`
 
 The gate asserts that every field on the `MiddlewareContext` runtime type has a matching field on `SerialisableMiddlewareContext`. If a developer adds a field to `MiddlewareContext` without also adding it to `SerialisableMiddlewareContext` (or documenting it as explicitly ephemeral with a `// ephemeral:` comment), the gate fails CI.
@@ -1954,6 +1965,57 @@ Narrow the agent's tool space *before* the LLM reasons, based on the intent of t
    - `search_codebase` — universal read-only retrieval.
    - `web_search` — universal read-only retrieval.
 
+   **Runtime invariant: universal fallback skills are a hard invariant at every toolset rebuild.**
+
+   Preserving universal skills through the topic filter in Sprint 5 is necessary but not sufficient. The same protection must hold at **every** moment the agent's active tool list is computed or recomputed. If a future refactor drops universal skills at any one of these points, the recovery path (`ask_clarifying_question`) silently disappears and the topic filter's preservation logic becomes worthless.
+
+   **The invariant, stated once:**
+
+   > Universal fallback skills (`ask_clarifying_question`, `read_workspace`, `search_codebase`, `web_search`, plus any future skill with `isUniversal: true`) MUST be present in the agent's `activeTools` set before every LLM call. This invariant is re-established after every toolset rebuild point, including but not limited to:
+   >
+   > 1. **Initial run dispatch** — `skillService.getToolsForRun()` merges universal skills into the effective allowlist (see merge code below).
+   > 2. **Resume from checkpoint** — `resumeAgentRun()` recomputes `activeTools` via `skillService.getToolsForRun()` against the `configSnapshot`. `activeTools` is **NEVER** serialised into the checkpoint and is **NEVER** inherited from stale state. See P2.1's checkpoint persistence contract Rule 2 for the underlying principle.
+   > 3. **Topic filter middleware (`preCall`)** — the filter narrows `activeTools` but re-injects universal skills as its final step before returning. Enforced by the P4.1 merge logic and tested by integration tests that assert universal skills survive the narrowest classification.
+   > 4. **Any future middleware that mutates `activeTools`** — any new middleware (Sprint 5+ or beyond) that touches the active tool list MUST re-merge universal skills as its final step. The static gate `verify-universal-skills-preserved.sh` (see below) blocks any middleware that mutates `activeTools` without calling the re-merge helper.
+
+   **Why this is a cross-cutting invariant, not just a P4.1 concern:**
+
+   The reviewer's failure mode is concrete: topic filter works correctly in Sprint 5, ship it, and six months later someone adds a new `preCall` middleware that narrows tools for some other reason (cost budget, per-task scoping, whatever). That new middleware doesn't know about universal skills — it just sees `activeTools` as an array and filters it. The agent silently loses its recovery path. The topic filter's preservation logic still runs but operates on an already-narrowed set.
+
+   Stating this as a runtime invariant (not a topic-filter detail) and enforcing it with a static gate prevents the drift class.
+
+   **Mutation helper — the single callsite for any middleware that touches `activeTools`:**
+
+   ```ts
+   // server/services/agentExecutionServicePure.ts
+   import { getUniversalSkillNames } from '../config/actionRegistry.js';
+
+   /**
+    * The ONE approved way for middleware to mutate activeTools. Every mutation
+    * path goes through this helper, which re-injects universal skills as its
+    * final step. The static gate verify-universal-skills-preserved.sh fails CI
+    * if any middleware in the pipeline mutates activeTools without calling this.
+    */
+   export function mutateActiveToolsPreservingUniversal(
+     current: ProviderTool[],
+     transform: (tools: ProviderTool[]) => ProviderTool[],
+     allAvailableTools: ProviderTool[],  // the full set from getToolsForRun()
+   ): ProviderTool[] {
+     const transformed = transform(current);
+     const universalNames = new Set(getUniversalSkillNames());
+     const universalTools = allAvailableTools.filter(t => universalNames.has(t.name));
+     const transformedNames = new Set(transformed.map(t => t.name));
+     // Re-inject any universal tools that the transform removed.
+     const preserved = [...transformed];
+     for (const ut of universalTools) {
+       if (!transformedNames.has(ut.name)) preserved.push(ut);
+     }
+     return preserved;
+   }
+   ```
+
+   The P4.1 topic filter middleware uses this helper. So does every future middleware that mutates `activeTools`. Raw mutation (`activeTools = activeTools.filter(...)` inside a middleware) is banned by the gate.
+
    **How universal skills interact with `subaccountAgents.skillSlugs`:**
 
    Universal skills **merge into** the agent's effective allowlist at resolution time. They do NOT override it; they do NOT require the operator to add them explicitly. The merge happens in `skillService.getToolsForRun()`:
@@ -2144,8 +2206,10 @@ The resume path from P2.1 handles the rest — it loads the checkpoint, streams 
 | `server/config/topicRegistry.ts` | **New.** Defines the topic taxonomy + keyword rules. |
 | `server/services/topicClassifier.ts` | **New.** Impure wrapper — loads org-specific classifier config if needed. |
 | `server/services/topicClassifierPure.ts` | **New.** Pure `classifyTopics(messages): { topics, confidence }`. Testable without DB. |
-| `server/services/agentExecutionService.ts` | New `preCall` middleware that implements the staged-narrowing filter (reorder on low confidence, hard-remove on high confidence) with universal-skill preservation and zero-match fallback. |
-| `server/services/skillService.ts` | Extend `getToolsForRun()` to merge `ACTION_REGISTRY.filter(a => a.isUniversal === true)` into the effective allowlist (see "Universal-skill contract" above). |
+| `server/services/agentExecutionService.ts` | New `preCall` middleware that implements the staged-narrowing filter (reorder on low confidence, hard-remove on high confidence) with universal-skill preservation and zero-match fallback. Middleware calls `mutateActiveToolsPreservingUniversal()` — never mutates `activeTools` directly. |
+| `server/services/agentExecutionServicePure.ts` | Add `mutateActiveToolsPreservingUniversal(current, transform, allAvailable)` helper — the one approved way for any middleware to mutate `activeTools` while honouring the universal-skill runtime invariant. Used by P4.1's topic filter and by any future middleware that narrows tools. |
+| `server/config/actionRegistry.ts` helpers | Add `getUniversalSkillNames(): string[]` that returns `ACTION_REGISTRY.filter(a => a.isUniversal === true).map(a => a.actionType)`. Called by `getToolsForRun()` and by the mutation helper. |
+| `server/services/skillService.ts` | Extend `getToolsForRun()` to merge `getUniversalSkillNames()` into the effective allowlist (see "Universal-skill contract" above). This is **also** the callsite that `resumeAgentRun()` calls on resume per P2.1 Rule 6 — recomputation, not deserialisation. |
 | `server/config/actionRegistry.ts` | Populate `topics` field on every entry (29 entries). Add **new entry** for `ask_clarifying_question` with `isUniversal: true`, `defaultGateLevel: 'auto'`, `isMethodology: false`, `actionCategory: 'api'`, empty `topics: []`. Also add `read_workspace`, `search_codebase`, `web_search` to the universal set (`isUniversal: true`). |
 | `server/skills/ask_clarifying_question.md` | **New skill definition file.** Methodology section documents when to use (topic-narrowed out, scope-check failed, user intent unclear). `parameterSchema = z.object({ question: z.string().min(10).max(2000), blocked_by: z.enum(['topic_filter', 'scope_check', 'no_relevant_tool', 'missing_context']).optional() })`. |
 | `server/tools/internal/askClarifyingQuestion.ts` | **New handler file.** Implements the behaviour contract above: writes to `agent_runs.summary`, appends to `agent_run_messages`, transitions status, emits WebSocket event, exits loop cleanly. |
@@ -2155,6 +2219,8 @@ The resume path from P2.1 handles the rest — it loads the checkpoint, streams 
 | `server/websocket/emitters.ts` | New event emitter `emitAwaitingClarification(runId, question, blockedBy)`. |
 | `client/src/pages/AgentRunDetailPage.tsx` (or equivalent) | Render the clarification question + a text input for the user to answer. On submit, POST to `/clarify`. |
 | `server/services/__tests__/topicClassifier.test.ts` | New unit tests for keyword classifier + confidence scoring. |
+| `server/services/__tests__/mutateActiveToolsPreservingUniversal.test.ts` | New unit tests for the mutation helper: happy path, transform that removes universal skill (re-injection), transform that adds a non-existent skill (no-op), empty `allAvailable` (helper returns `transformed` unchanged). |
+| `scripts/gates/verify-universal-skills-preserved.sh` | **New gate.** Asserts every middleware that touches `activeTools` uses the mutation helper, and that `SerialisableMiddlewareContext` has no `activeTools` field (or has it marked `// ephemeral:`). |
 | `server/services/__tests__/askClarifyingQuestion.test.ts` | New unit tests for the handler (status transitions, message append, event emission). |
 | `server/config/__tests__/universalSkills.test.ts` | New unit test asserting `skillService.getToolsForRun()` merges universal skills into every allowlist, and that the topic filter's core-fallback list matches `ACTION_REGISTRY.filter(a => a.isUniversal === true)` at construction time. |
 
@@ -2593,8 +2659,9 @@ Total new unit test files: **11**. All are small, pure-logic, and stable.
 | 4 | `verify-playbook-run-mode-enforced.sh` | `playbookEngineService` branches on `runMode` per tick. |
 | 5 | `verify-critique-gate-shadow-only.sh` | `CRITIQUE_GATE_SHADOW_MODE = true` and no callsite routes based on gate result. |
 | 5 | `verify-confidence-escape-hatch-wired.sh` | The `preTool` middleware contains the escape-hatch branch, `MIN_TOOL_ACTION_CONFIDENCE` is declared in `limits.ts`, and `blocked_by: 'low_confidence'` is in the `ask_clarifying_question` schema. |
+| 5 | `verify-universal-skills-preserved.sh` | Every `preCall` / `preTool` / `postCall` / `postTool` middleware that mutates `activeTools` does so via `mutateActiveToolsPreservingUniversal()`. Raw mutation (direct `activeTools = activeTools.filter(...)`) is blocked. Also asserts `SerialisableMiddlewareContext` does not contain an `activeTools` field (per P2.1 Rule 6). Enforces the universal-skill runtime invariant from P4.1. |
 
-Total new static gates: **14**. Each is <30 lines of bash, checks one structural invariant, near-zero maintenance.
+Total new static gates: **15**. Each is <30 lines of bash, checks one structural invariant, near-zero maintenance.
 
 The gate count grew from the initial "8" count as later spec iterations added cross-cutting contracts (Execution Model, RLS execution contract, middleware persistence contract, tool-confidence escape hatch). Each added contract brought its own enforcement gate — which is why gates are the right primary investment: they're cheap to add and each one prevents a specific class of regression.
 
