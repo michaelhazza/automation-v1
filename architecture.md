@@ -68,6 +68,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Executions | `executions.ts` |
 | Integration connections | `integrationConnections.ts` |
 | LLM usage | `llmUsage.ts` |
+| Web login connections (Reporting Agent) | `webLoginConnections.ts` |
 
 ### Shared route helpers
 
@@ -215,10 +216,32 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 29 built
 | Workspace | `read_workspace`, `write_workspace`, `read_codebase` |
 | Task management | `create_task`, `move_task`, `update_task`, `reassign_task`, `add_deliverable` |
 | Testing | `run_tests`, `run_playwright_test`, `write_tests` |
-| Code | `review_code`, `write_patch`, `search_codebase` |
-| Integration | `web_search`, `fetch_url`, `send_email` |
+| Code | `review_code`, `write_patch`, `search_codebase`, `create_pr` |
+| Integration | `web_search`, `fetch_url`, `fetch_paywalled_content`, `send_email`, `send_to_slack`, `transcribe_audio` |
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
+| Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux` |
+
+`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
+
+### Skill visibility cascade (migration 0074)
+
+Skills now use a three-state visibility cascade `system → organisation → subaccount`. At every level the owner sets `visibility`:
+
+| Value | Effect on lower tiers |
+|-------|----------------------|
+| `none` | Skill is invisible — filtered from lists entirely |
+| `basic` | Name + one-line description visible; body fields stripped |
+| `full` | Everything visible (instructions, methodology, full definition) |
+
+Helpers in `server/lib/skillVisibility.ts`:
+
+- `isVisibleToViewer()` — should this skill appear in the viewer's list?
+- `canViewContents()` — may the viewer read body fields?
+- `canManageSkill()` — separate permission check; visibility never grants edit rights.
+
+Owner-tier viewers always see `full` regardless of the visibility value. Visibility only restricts; it never expands.
 
 ### Skill executor & processor hooks
 
@@ -339,15 +362,79 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ## Migrations
 
-41 migrations (0001–0041). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
+75 migrations (0001–0075). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
-- `0042` — playbooks: templates, versions, runs, step runs (Playbooks feature)
+- `0076` — playbooks: templates, versions, runs, step runs (Playbooks feature — planned)
+- `0075` — drop stale connection unique indexes (integration connection cleanup)
+- `0074` — `skills.visibility` three-state cascade (`none` / `basic` / `full`) replacing the boolean `contentsVisible`
+- `0073` — Reporting Agent paywall workflow (web login connections, IEE artifacts/runs/steps extensions, agent run extensions)
+- `0072` — original `skills.contentsVisible` flag (superseded by 0074 three-state cascade)
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
 - `0039` — GitHub App schema
 - `0037` — workspace memory + workflow schema
 - `0036` — review queue + OAuth tables
+
+---
+
+## Shared Infrastructure (use these — do not reinvent)
+
+The following modules exist as **single-emit-point** primitives. New features must reuse them; bypassing them is a blocking issue in code review. Several are enforced by lint rules.
+
+### Retry / backoff — `server/lib/withBackoff.ts`
+
+Unified retry helper. **All external-call retries (LLM, integrations, webhooks, future engines) must go through this** rather than per-call `setTimeout`/`Math.pow` loops. Lint rule bans ad-hoc backoff outside this file.
+
+```typescript
+withBackoff({
+  label: 'whisper.transcribe',
+  isRetryable: (err) => isTransient(err),
+  maxAttempts: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 8000,
+  retryAfterMs: (err) => parseRetryAfterHeader(err),
+}, async () => callExternal())
+```
+
+Honours `Retry-After` headers, exponential backoff with full jitter, structured logging per attempt.
+
+### Run cost circuit breaker — `server/lib/runCostBreaker.ts`
+
+Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (default 100¢). Throws via the unified failure helper on overage. **Every cost-incurring boundary must call the breaker** — LLM router after each call, external integrations before each call. Prevents runaway loops from racking up real spend.
+
+### Failure helper — `shared/iee/failure.ts`
+
+**Single emit point for structured failures.** Every failure persisted to `agent_runs`, `execution_runs`, `execution_steps`, or any future run-like table must be constructed via `failure(reason, detail, metadata?)`. Inline `{ failureReason: '...' }` literals are banned by lint rule and a Zod check at the persistence boundary. Enriches metadata with `runId` + `correlationId` from AsyncLocalStorage.
+
+```typescript
+import { failure } from '../../shared/iee/failure.js';
+throw failure('cost_exceeded', 'whisper_call_blocked', { spentCents, limitCents });
+```
+
+`FailureReason` is a closed enum in `shared/iee/failureReason.ts` — adding new reasons requires a schema update.
+
+### Skill visibility — `server/lib/skillVisibility.ts`
+
+Drives whether a skill's output body is surfaced to downstream consumers (`skills.contentsVisible` flag, migration 0072). New skills decide visibility explicitly; default is hidden.
+
+### URL canonicalisation — `server/lib/canonicaliseUrl.ts`
+
+Single canonicalisation path for URLs across the system (deduplication, comparison, idempotency keys). Use it when storing or hashing URLs.
+
+### Other shared primitives
+
+| Module | Purpose |
+|--------|---------|
+| `server/lib/inlineTextWriter.ts` | Append-only text artefacts inside runs |
+| `server/lib/reportingAgentInvariant.ts` | End-of-run invariant checks (T25 pattern — assert run reached a terminal state with a structured outcome) |
+| `server/lib/reportingAgentRunHook.ts` | Reporting Agent post-run hook |
+| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + browser worker) |
+| `worker/src/browser/captureStreamingVideo.ts` | Snoop-and-refetch video downloader for the `capture_video` mode of `browserTask` (HLS / DASH support) |
+| `scripts/migrate.ts` | Custom forward-only SQL migration runner — replaces `drizzle-kit migrate` for deploys |
+| `scripts/seed-42macro-reporting-agent.ts` | Reference seeder pattern for system-managed agents + skill bundles |
+
+---
 
 ---
 
