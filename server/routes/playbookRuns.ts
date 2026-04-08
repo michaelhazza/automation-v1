@@ -84,6 +84,21 @@ router.post(
 );
 
 router.post(
+  '/api/playbook-runs/:runId/replay',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { playbookEngineService } = await import('../services/playbookEngineService.js');
+    const result = await playbookEngineService.createReplayRun(
+      req.orgId!,
+      req.params.runId,
+      req.user!.id
+    );
+    res.status(201).json(result);
+  })
+);
+
+router.post(
   '/api/playbook-runs/:runId/steps/:stepRunId/input',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),

@@ -386,6 +386,13 @@ export const playbookEngineService = {
     const resolvedInputs = step.agentInputs ?? null;
     const inputHash = resolvedInputs ? hashValue(resolvedInputs) : null;
 
+    // Replay mode early short-circuit for non-LLM step types — we read the
+    // recorded output from the source run rather than re-running them.
+    if (run.replayMode) {
+      await this.replayDispatch(run, sr, step);
+      return;
+    }
+
     switch (step.type) {
       case 'user_input': {
         await db
@@ -442,6 +449,15 @@ export const playbookEngineService = {
 
       case 'agent_call':
       case 'prompt': {
+        // §5.10 replay mode hard block — never dispatch external work for
+        // a replay run. Instead, read the stored output from the source
+        // run and write it to the replay step run directly with the
+        // _meta.isReplay envelope.
+        if (run.replayMode) {
+          await this.replayDispatch(run, sr, step);
+          return;
+        }
+
         // Real dispatch — resolve inputs via the templating module, hash
         // them, check for input-hash reuse, then enqueue onto the
         // playbook-agent-step queue. The worker creates the agent_runs row
@@ -1013,6 +1029,156 @@ export const playbookEngineService = {
       estimatedCostCents,
       cascade,
     };
+  },
+
+  // ─── Replay mode (§5.10) ──────────────────────────────────────────────────
+
+  /**
+   * Replay dispatch — looks up the same step in the source run and copies
+   * its output verbatim to the replay step run, wrapped in a `_meta`
+   * envelope marking it as replay data. Conditional steps are
+   * re-evaluated and assert determinism (same inputsHash → same result).
+   *
+   * NEVER creates an agent_runs row, NEVER calls external services. The
+   * skill executor has its own block (server/services/skillExecutor.ts)
+   * for skills not marked replaySafe — that's the second safety layer.
+   */
+  async replayDispatch(
+    run: PlaybookRun,
+    sr: PlaybookStepRun,
+    _step: PlaybookStep
+  ): Promise<void> {
+    const meta = (run.contextJson as unknown as RunContext)?._meta ?? {};
+    const sourceRunId = (meta as { replaySourceRunId?: string }).replaySourceRunId;
+    if (!sourceRunId) {
+      await this.failStepRunInternal(sr, 'replay_missing_source_run_id');
+      return;
+    }
+
+    // Find the equivalent step run in the source run.
+    const [sourceSr] = await db
+      .select()
+      .from(playbookStepRuns)
+      .where(
+        and(
+          eq(playbookStepRuns.runId, sourceRunId),
+          eq(playbookStepRuns.stepId, sr.stepId),
+          eq(playbookStepRuns.status, 'completed')
+        )
+      );
+    if (!sourceSr || sourceSr.outputJson === null) {
+      await this.failStepRunInternal(
+        sr,
+        `replay_source_step_not_completed:${sr.stepId}`
+      );
+      return;
+    }
+
+    // Wrap the original output in the _meta envelope so downstream
+    // consumers can detect replay context.
+    const replayOutput = {
+      ...(sourceSr.outputJson as Record<string, unknown>),
+      _meta: {
+        isReplay: true,
+        replaySourceRunId: sourceRunId,
+        replayedAt: new Date().toISOString(),
+        sourceStepRunId: sourceSr.id,
+      },
+    };
+
+    const replayHash = hashValue(replayOutput);
+    await this.completeStepRunInternal(sr, replayOutput, replayHash, 'replay');
+  },
+
+  /**
+   * Creates a new replay run from a source run. Clones the source run's
+   * organisationId / subaccountId / templateVersionId / context (sans steps)
+   * and inserts pending step rows for every entry step. The dispatch path
+   * picks up the rest via the engine tick loop, never creating any
+   * external side effects.
+   */
+  async createReplayRun(
+    organisationId: string,
+    sourceRunId: string,
+    userId: string
+  ): Promise<{ runId: string }> {
+    const [source] = await db
+      .select()
+      .from(playbookRuns)
+      .where(
+        and(eq(playbookRuns.id, sourceRunId), eq(playbookRuns.organisationId, organisationId))
+      );
+    if (!source) throw { statusCode: 404, message: 'Source playbook run not found' };
+
+    const def = await loadDefinitionForRun(source);
+    if (!def) {
+      throw { statusCode: 422, message: 'Source run definition not loadable' };
+    }
+
+    const startedAt = new Date();
+    const sourceCtx = source.contextJson as unknown as RunContext;
+    const replayContext: RunContext = {
+      input: sourceCtx.input,
+      subaccount: sourceCtx.subaccount,
+      org: sourceCtx.org,
+      steps: {},
+      _meta: {
+        runId: '',
+        templateVersionId: source.templateVersionId,
+        startedAt: startedAt.toISOString(),
+        resolvedAgents: sourceCtx._meta?.resolvedAgents,
+        isReplay: true,
+        replaySourceRunId: sourceRunId,
+      },
+    };
+
+    let runId!: string;
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(playbookRuns)
+        .values({
+          organisationId,
+          subaccountId: source.subaccountId,
+          templateVersionId: source.templateVersionId,
+          status: 'pending',
+          contextJson: replayContext as unknown as Record<string, unknown>,
+          contextSizeBytes: Buffer.byteLength(JSON.stringify(replayContext), 'utf8'),
+          replayMode: true,
+          startedByUserId: userId,
+          startedAt,
+        })
+        .returning();
+      runId = created.id;
+      // Patch runId into _meta
+      await tx.execute(
+        sql`UPDATE playbook_runs SET context_json = jsonb_set(context_json, '{_meta,runId}', to_jsonb(${runId}::text), true) WHERE id = ${runId}`
+      );
+      // Insert entry-step rows
+      const entries = def.steps.filter((s) => s.dependsOn.length === 0);
+      for (const step of entries) {
+        await tx.insert(playbookStepRuns).values({
+          runId,
+          stepId: step.id,
+          stepType: step.type,
+          status: 'pending',
+          sideEffectType: step.sideEffectType,
+          dependsOn: step.dependsOn,
+        });
+      }
+      await tx.execute(
+        sql`INSERT INTO playbook_run_event_sequences (run_id, last_sequence) VALUES (${runId}, 0) ON CONFLICT DO NOTHING`
+      );
+    });
+
+    logger.info('playbook_replay_run_started', {
+      event: 'run.started',
+      replay: true,
+      runId,
+      sourceRunId,
+    });
+
+    await this.enqueueTick(runId);
+    return { runId };
   },
 
   /**
