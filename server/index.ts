@@ -64,6 +64,9 @@ import systemEnginesRouter from './routes/systemEngines.js';
 import integrationConnectionsRouter from './routes/integrationConnections.js';
 import orgConnectionsRouter from './routes/orgConnections.js';
 import webLoginConnectionsRouter from './routes/webLoginConnections.js';
+import playbookTemplatesRouter from './routes/playbookTemplates.js';
+import playbookRunsRouter from './routes/playbookRuns.js';
+import playbookStudioRouter from './routes/playbookStudio.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 import subaccountEnginesRouter from './routes/subaccountEngines.js';
 import projectsRouter from './routes/projects.js';
@@ -204,6 +207,9 @@ app.use(systemEnginesRouter);
 app.use(integrationConnectionsRouter);
 app.use(orgConnectionsRouter);
 app.use(webLoginConnectionsRouter);
+app.use(playbookTemplatesRouter);
+app.use(playbookRunsRouter);
+app.use(playbookStudioRouter);
 app.use(processConnectionMappingsRouter);
 app.use(subaccountEnginesRouter);
 app.use(projectsRouter);
@@ -310,6 +316,15 @@ async function start() {
   await queueService.startMaintenanceJobs();
   await initializePageIntegrationWorker();
   await initializePaymentReconciliationJob();
+  // Playbooks engine workers (tick + watchdog cron) — spec §5.2 + §5.7
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const { playbookEngineService } = await import('./services/playbookEngineService.js');
+      await playbookEngineService.registerWorkers();
+    } catch (err) {
+      console.error('[boot] failed to register playbook engine workers', err);
+    }
+  }
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {

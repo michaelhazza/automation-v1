@@ -147,6 +147,26 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'iee-run-completed__dlq',
   },
+
+  // ── Playbooks engine (multi-step automation, migration 0075) ────
+  // Spec: tasks/playbooks-spec.md §5.6 (concurrency) + §5.7 (watchdog).
+  // Tick jobs are enqueued with singletonKey: runId so multiple step
+  // completions collapse into one tick. Watchdog runs every 60s as
+  // self-healing for missed ticks.
+  'playbook-run-tick': {
+    retryLimit: 3,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    deadLetter: 'playbook-run-tick__dlq',
+  },
+  'playbook-watchdog': {
+    retryLimit: 1,
+    retryDelay: 10,
+    retryBackoff: false,
+    expireInSeconds: 60,
+    deadLetter: 'playbook-watchdog__dlq',
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

@@ -109,7 +109,7 @@ All tables follow existing conventions: `id` (uuid pk, default `gen_random_uuid(
 - New tables only — zero changes to existing schema rows.
 - One additive column on `agent_runs`: `playbook_step_run_id uuid null`. Indexed for the engine's reverse lookup on agent run completion. No backfill required.
 - One additive column on `subaccount_agents` is **not** required — the cost breaker reads `maxCostPerRunCents` which already exists.
-- The migration is reversible via a corresponding `0075_playbooks.down.sql` that drops all new tables and the new column. Down migrations are not run in production but exist for local rollback. The repo's custom forward-only `scripts/migrate.ts` runner does not execute down migrations automatically — they are kept only for manual local rollback.
+- The migration is reversible via a corresponding `migrations/_down/0075_playbooks.sql` that drops all new tables and the new column. Down migrations live in the `_down/` subdirectory so the custom forward-only runner (`scripts/migrate.ts`, which scans top-level `migrations/*.sql` only) never picks them up. They exist only for manual local rollback during development.
 
 ### 2.0.1 Drizzle schema layout
 
@@ -2064,7 +2064,7 @@ Two new invariants extend the §5.13 list:
 - **Terminal-path failure** — diamond DAG (A → B / A → C / B+C → D); B fails with `fail_run`, run marked `failed` because D unreachable. Same DAG with B as `continue` and C succeeding → run finishes `completed_with_errors`.
 - **Approval version guard** — UI loads step at version=3, upstream edit pushes it to version=5, approve with `expectedVersion=3` returns 409.
 - **Output edit version guard** — same as above for the mid-run edit endpoint.
-- **Input hash dedup (forward-compat)** — verify `input_hash` is populated; behaviour assertion deferred to 1.5.
+- **Input hash population** — every dispatched step records a canonical `input_hash` matching the `playbookTemplatingService.hashOutput()` of its resolved inputs. (The behavioural reuse path is covered separately by the per-run input-hash reuse test below.)
 - **Cascade summary** — mid-run edit response includes correct `cascade.size` and `criticalPathLength` for a diamond invalidation.
 - **Stuck-awaiting alert** — synthetic step in `awaiting_input` for >24h is detected by watchdog and incremented in the gauge.
 - **MAX_DAG_DEPTH** — validator rejects a chain of 51 sequential steps.
@@ -2118,7 +2118,7 @@ Two new invariants extend the §5.13 list:
 8. **Phase 1 UI pages** — library, run detail, inbox.
 8.5. **Playbook Studio (§10.8)** — system-admin chat authoring UI. Order:
    a. Seed the `playbook-author` system agent + load master prompt from `server/agents/playbook-author/master-prompt.md`
-   b. Implement the four tools (`read_existing_playbook`, `validate_candidate`, `estimate_cost`, `propose_save`)
+   b. Implement the five tools (`read_existing_playbook`, `validate_candidate`, `simulate_run`, `estimate_cost`, `propose_save`)
    c. Implement `POST /api/system/playbook-studio/save-and-open-pr` (re-validates + calls GitHub MCP under human identity)
    d. Build the `/system/playbook-studio` page (reuse `AgentChatPage` component, swap right pane for read-only Monaco preview)
    e. Wire the Manage button (style preset, default `humanReviewRequired`, output mode, reference playbooks selector)

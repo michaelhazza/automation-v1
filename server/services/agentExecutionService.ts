@@ -855,6 +855,20 @@ export const agentExecutionService = {
         totalToolCalls: loopResult.totalToolCalls, totalTokens: loopResult.totalTokens,
         tasksCreated: loopResult.tasksCreated, durationMs,
       });
+
+      // Playbooks: if this agent run was dispatched by a Playbook step, route
+      // its result back to the engine so the step run can be marked completed
+      // and the next tick fired. Hook is non-blocking — failures are logged
+      // and do not affect the agent run completion.
+      try {
+        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
+        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+          ok: true,
+          output: { summary: loopResult.summary ?? '' },
+        });
+      } catch (err) {
+        console.error('[AgentExecution] playbook hook failed (non-fatal)', err);
+      }
       if (isOrgRun) {
         emitOrgUpdate(request.organisationId, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: finalStatus,
@@ -949,6 +963,18 @@ export const agentExecutionService = {
       emitAgentRunUpdate(run.id, 'agent:run:failed', {
         status: 'failed', errorMessage, durationMs,
       });
+
+      // Playbooks: route the failure to the engine so the step run is marked
+      // failed and downstream failure-policy logic runs.
+      try {
+        const { notifyPlaybookEngineOnAgentRunComplete } = await import('./playbookAgentRunHook.js');
+        await notifyPlaybookEngineOnAgentRunComplete(run.id, {
+          ok: false,
+          error: errorMessage,
+        });
+      } catch (hookErr) {
+        console.error('[AgentExecution] playbook hook failed (non-fatal)', hookErr);
+      }
       if (isOrgRun) {
         emitOrgUpdate(request.organisationId, 'live:agent_completed', {
           runId: run.id, agentId: request.agentId, status: 'failed',
