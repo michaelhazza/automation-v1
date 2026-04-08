@@ -1,9 +1,9 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { readFile } from 'fs/promises';
 import { db } from '../db/index.js';
 import { taskAttachments } from '../db/schema/index.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
+import { storageService } from '../lib/storageService.js';
 import { approxTokens } from './llmService.js';
 import type { LoadedDataSource } from './agentService.js';
 
@@ -35,8 +35,11 @@ async function readAttachmentFromStorage(
   att: typeof taskAttachments.$inferSelect
 ): Promise<string> {
   if (att.storageProvider === 'local') {
-    // Local filesystem: storageKey is a filesystem path
-    return await readFile(att.storageKey, 'utf-8');
+    // Local storage: storageKey is a logical key under the storage abstraction's
+    // base directory (e.g. `orgId/taskId/file`), not an absolute filesystem path.
+    // Resolve through storageService to match how attachmentService writes them.
+    const buf = await storageService.get(att.storageKey);
+    return buf.toString('utf-8');
   }
   // s3 / r2 via the shared storage client
   const s3 = getS3Client();

@@ -45,17 +45,22 @@ CREATE INDEX IF NOT EXISTS agent_data_sources_scheduled_task_idx
   ON agent_data_sources (scheduled_task_id)
   WHERE scheduled_task_id IS NOT NULL;
 
--- Uniqueness per scope: the triple (agent_id, scope_key, name) must be unique
--- where scope_key is effectively:
+-- Uniqueness per scope: the triple (agent_id, scope_key, normalized_name) must
+-- be unique, where scope_key is effectively:
 --   agent-scoped          → (NULL, NULL)
 --   subaccount-scoped     → (subaccount_agent_id, NULL)
 --   scheduled-task-scoped → (NULL, scheduled_task_id)
+--
+-- Name comparison is normalized via lower(trim(name)) to match the runtime
+-- override rule in runContextLoaderPure.processContextPool — otherwise rows
+-- like "Glossary" and " glossary " could both be persisted while runtime
+-- silently suppresses one of them.
 CREATE UNIQUE INDEX IF NOT EXISTS agent_data_sources_unique_per_scope_idx
   ON agent_data_sources (
     agent_id,
     COALESCE(subaccount_agent_id, '00000000-0000-0000-0000-000000000000'::uuid),
     COALESCE(scheduled_task_id, '00000000-0000-0000-0000-000000000000'::uuid),
-    name
+    (lower(trim(name)))
   )
   WHERE name IS NOT NULL;
 

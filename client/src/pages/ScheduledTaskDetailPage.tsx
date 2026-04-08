@@ -46,8 +46,6 @@ interface EditForm {
   rrule: string;
   timezone: string;
   scheduleTime: string;
-  endsAt: string | null;
-  endsAfterRuns: number | null;
 }
 
 const STATUS_CLS: Record<string, string> = {
@@ -111,8 +109,6 @@ export default function ScheduledTaskDetailPage({ user: _user }: { user: { id: s
       rrule: detail.rrule,
       timezone: detail.timezone,
       scheduleTime: detail.scheduleTime,
-      endsAt: null,
-      endsAfterRuns: null,
     });
     setEditing(true);
     setError('');

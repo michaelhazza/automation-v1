@@ -75,7 +75,14 @@ router.patch(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const updated = await scheduledTaskService.update(req.params.stId, req.orgId!, req.body);
+    // Match the create route: coerce endsAt string → Date so the driver
+    // stores a proper timestamptz. Leaving it as a string can fail the
+    // update or persist the wrong value depending on the driver.
+    const patch = { ...req.body };
+    if (patch.endsAt !== undefined && patch.endsAt !== null && typeof patch.endsAt === 'string') {
+      patch.endsAt = new Date(patch.endsAt);
+    }
+    const updated = await scheduledTaskService.update(req.params.stId, req.orgId!, patch);
     res.json(updated);
   })
 );
