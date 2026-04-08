@@ -8,7 +8,6 @@ import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEd
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
-const ConnectionsPage = lazy(() => import('./ConnectionsPage'));
 const IntegrationsAndCredentialsPage = lazy(() => import('./IntegrationsAndCredentialsPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
 
