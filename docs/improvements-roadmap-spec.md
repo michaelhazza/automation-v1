@@ -1839,7 +1839,127 @@ These items are not implementable now because they depend on signals that don't 
 
 ---
 
-## Sprint-by-sprint build order
+## Testing strategy
+
+### What actually exists today
+
+An audit of the repo shows a deliberate testing posture: heavy investment in static analysis, minimal runtime testing.
+
+| Layer | What exists | Count |
+|---|---|---|
+| **Static gate scripts** (bash, grep-based structural lints) | `scripts/verify-*.sh` — every async route uses `asyncHandler`, every org-scoped query uses `req.orgId`, every schema has `organisationId`, etc. | 24 scripts |
+| **QA spec scripts** (bash, check-list style) | `run-all-qa-tests.sh`, `run-paperclip-features-tests.sh`, `run-spec-v2-tests.sh`, `run-all-gates.sh` — 113+ lines of grep-based "does this file/field/function exist" assertions per spec chunk. | 4 scripts |
+| **Runtime unit tests** (tsx, ad-hoc assertions) | `server/lib/playbook/__tests__/playbook.test.ts`, `server/services/__tests__/runContextLoader.test.ts` | **2 files** |
+| **Frontend tests** | None. No Vitest. No Jest. No React Testing Library. No `*.test.tsx`. | 0 |
+| **API contract tests** | None. Route shape covered indirectly by static gates. | 0 |
+| **E2E tests of the app** | None. `playwright` **is** installed as a runtime dependency, but only for the IEE browser worker and for the `run_playwright_test` agent skill (which lets agents test the **customer's** app). No `playwright.config.ts` at the repo root, no `e2e/` directory, no tests of Automation OS itself. | 0 |
+
+This is a deliberate bet on **static analysis over runtime tests** and it's the right bet for a rapidly-evolving codebase. Static gates catch structural regressions without breaking when behaviour changes — runtime tests break every time a feature evolves.
+
+### Testing posture for the current phase (rapid evolution)
+
+The platform is pre-production and the feature set is still evolving rapidly. A full multi-phase testing environment (backend / frontend / API / E2E) is the wrong investment right now — tests against rapidly-evolving features become maintenance burden faster than they add safety.
+
+**The principle: invest in tests that don't break when features change, skip tests that do.**
+
+Concretely, this roadmap adopts five rules for the current phase:
+
+1. **Static gates stay the primary investment.** Every major structural change in this roadmap gets a new `verify-*.sh` script. These are cheap, fast, deterministic, and don't break when behaviour changes — they only break when structure drifts, which is exactly what should trigger a test failure. See "New static gates" below for the specific scripts per sprint.
+
+2. **Runtime unit tests are for pure logic only.** Follow the existing `*Pure.ts` + `*.test.ts` convention. Test anything that parses, normalises, compares, or transforms data. **Do not** unit-test services, routes, or middlewares — they change too often to be worth the maintenance.
+
+3. **Exactly one runtime smoke test** across the whole roadmap. A single "agent hello world" integration test that dispatches a trivial agent run against a fixture subaccount with the LLM stubbed, walks the full middleware pipeline, and asserts the run completes. <5s runtime, catches catastrophic breakage immediately, near-zero maintenance because it exercises the happy path only.
+
+4. **P1.2 regression capture is the long-game test suite.** Every HITL rejection is converted to a replayable test case automatically. Zero upfront investment; compounds with usage. This is the platform's version of property-based testing — the users generate the test oracle by correcting the agents.
+
+5. **No frontend, API, or E2E tests** written as part of this roadmap. Skip entirely. TypeScript type-checking + the static gates are the coverage for those layers during rapid evolution. Revisit in the "phase 2" posture below.
+
+### What that means concretely (per-item test plan consolidation)
+
+Every per-item `Test plan` section above is still valid — but many of them are smaller than they look once the five rules above are applied. Here is the consolidated test surface after filtering:
+
+**Pure-logic unit tests** (follow `*Pure.ts` + `*.test.ts` convention):
+
+- P0.1 Layer 3 extraction: `agentExecutionService.phase.test.ts`, `validateToolCalls.test.ts`, `middlewareContext.test.ts`
+- P0.2 Slice A: `actionRegistry.test.ts` (parses every entry as Zod, asserts shape)
+- P1.1 Layer 2: `scopeAssertion.test.ts`
+- P1.2 Capture: `regressionCapture.test.ts` (idempotency of the capture hook)
+- P2.1: `checkpoint.test.ts` (serialise/deserialise round-trip on the extracted pure helper)
+- P2.2: `reflectionLoopPure.test.ts` (`parseVerdict` regex against real `review_code` outputs)
+- P2.3 Slice A: `toolIntent.test.ts` (`extractToolIntentConfidence`)
+- P3.3: `trajectoryServicePure.test.ts` (match modes + argMatchers)
+- P4.1: `topicClassifier.test.ts` (keyword rules against representative messages)
+- P4.3: `plan.test.ts` (`parsePlan`, `isComplexRun`)
+- P4.4: `critiqueGatePure.test.ts` (result parser)
+
+Total new unit test files: **11**. All are small, pure-logic, and stable.
+
+**New static gate scripts** (bash, grep-based):
+
+| Sprint | New gate | What it checks |
+|---|---|---|
+| 1 | `verify-action-registry-zod.sh` | Every `ACTION_REGISTRY` entry uses Zod, none uses legacy `ParameterSchema` shape. |
+| 1 | `verify-pure-helper-convention.sh` | Every `*.test.ts` file has a sibling `*Pure.ts` import. |
+| 2 | `verify-rls-coverage.sh` | Every protected table (list from P1.1) has a `CREATE POLICY` in `migrations/`. |
+| 2 | `verify-scope-assertion-callsites.sh` | Every known retrieval boundary calls `assertScope()` or is on an explicit allowlist. |
+| 2 | `verify-pretool-middleware-registered.sh` | `proposeAction` is no longer called from per-case blocks in `skillExecutor.ts` — it lives in the `preTool` middleware only. |
+| 3 | `verify-reflection-middleware-registered.sh` | `reflectionLoopMiddleware` is in `pipeline.postTool`. |
+| 4 | `verify-playbook-run-mode-enforced.sh` | `playbookEngineService` branches on `runMode` per tick. |
+| 5 | `verify-critique-gate-shadow-only.sh` | `CRITIQUE_GATE_SHADOW_MODE = true` and no callsite routes based on gate result. |
+
+Total new static gates: **8**. Each is <30 lines of bash, checks one structural invariant, near-zero maintenance.
+
+**The one runtime smoke test:**
+
+- `server/services/__tests__/agentExecution.smoke.test.ts` — created in Sprint 1, exercised by every subsequent sprint. Uses the P0.1 LLM stub. Dispatches a minimal agent run against a fixture subaccount with one stub response. Asserts: run reaches `completed`, all middleware phases ran in order, no scope violations, no uncaught errors. Updated in each sprint to add one line of new-behaviour coverage (e.g. Sprint 3 adds "reflection middleware fires when `write_patch` comes before `review_code`").
+
+**What is explicitly NOT added as part of this roadmap:**
+
+- Composition tests for middleware interactions (static gate covers registration; behaviour is covered by the smoke test)
+- Frontend unit tests
+- Frontend integration tests (MSW-style)
+- React Testing Library setup
+- API contract tests (supertest or equivalent)
+- E2E tests of the Automation OS app (Playwright or otherwise)
+- Migration safety tests (no data to migrate — dev environment)
+- Performance baselines (performance doesn't matter at this stage)
+- Load tests (same reason)
+- Adversarial security tests beyond what the static gates catch (`verify-rls-coverage.sh` is the primary defence)
+- Resilience / chaos tests for P2.1 beyond the round-trip unit test
+
+Each of these is a real category that a mature testing strategy would include. They are deliberately excluded from the current phase because the cost-to-value ratio is wrong for rapidly-evolving code.
+
+### Fixture specification (minimal)
+
+One fixture set for the whole roadmap, loaded by the smoke test and referenced by any other test that needs a real-looking agent run:
+
+- **1 fixture organisation** (`fixture-org-001`)
+- **2 fixture subaccounts** under that org (`fixture-sub-001`, `fixture-sub-002`) — two, not one, so cross-tenant tests are possible
+- **1 fixture agent** per subaccount (same agent definition, linked twice) — so shared memory block tests in P4.2 have two agents to attach to
+- **1 fixture task** on `fixture-sub-001`
+- **3 fixture `review_code` outputs** (APPROVE, BLOCKED, malformed) used by P2.2 pure tests
+
+Fixtures live in `server/services/__tests__/fixtures/` and are loaded via a single helper `loadFixtures()` from the smoke test file. Nothing more elaborate until the app stabilises.
+
+### Phase 2 testing posture (once features stabilise)
+
+The trigger to move to a heavier testing posture is **per-feature, not per-calendar**: when a specific feature has been stable for 4+ weeks and is no longer evolving rapidly, it becomes a testing candidate. Not before.
+
+When features start stabilising, the plan is:
+
+1. **Frontend unit tests (React Testing Library)** for stable UI surfaces — start with Layout, auth flows, the agent edit page, anything that hasn't changed in 4+ weeks.
+2. **API contract tests (supertest)** for stable endpoints — start with auth, org management, subaccount resolution, the plumbing routes.
+3. **Real E2E tests with Playwright against critical flows** — create `e2e/` at the repo root, point a new `playwright.config.ts` at the dev server, write 5-10 tests for the flows that absolutely cannot break: login, task creation, HITL approval, triggering an agent run. Keep the count small on purpose.
+4. **Activate the P1.2 regression suite** — by then it has meaningful volume. Turn on the weekly cron from P1.2.
+5. **Performance baselines** — once performance actually matters, add baselines for the hot paths (`runAgenticLoop` iterations/second, `policyEngineService.evaluatePolicy` p99, `resolveSystemPrompt` with memory-block merge).
+6. **Frontend integration tests with MSW** — once the API surface is stable enough that mocking it isn't a daily chore.
+7. **Decide whether to introduce Vitest.** Only if the `tsx` + static-gate pattern starts genuinely breaking down — not because "proper frameworks". The current convention is fine for its job and switching costs are real.
+
+Phase 2 is **not** in this roadmap's scope. It's documented here so the decision to add it is a conscious phase transition, not a "we forgot".
+
+---
+
+
 
 Every scheduled item in one place. Each sprint is a coherent chunk of work that can be reviewed as a unit. Sprints are sized for review-ability, not calendar time — a "sprint" here is a logical grouping that can ship as 2-4 related PRs.
 
