@@ -500,7 +500,7 @@ export const skillExecutor = {
       case 'send_to_slack': {
         const { sendToSlack } = await import('./sendToSlackService.js');
         return sendToSlack(
-          input as Parameters<typeof sendToSlack>[0],
+          input as unknown as Parameters<typeof sendToSlack>[0],
           {
             runId: context.runId,
             organisationId: context.organisationId,
