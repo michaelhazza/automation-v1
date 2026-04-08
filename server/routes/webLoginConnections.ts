@@ -56,6 +56,7 @@ const updateBody = z.object({
   displayName: z.string().max(200).optional(),
   config: webLoginConfigSchema.partial().optional(),
   password: z.string().min(1).max(2048).optional(),
+  connectionStatus: z.enum(['active', 'error']).optional(),
 });
 
 const testDraftBody = z.object({
@@ -131,6 +132,7 @@ router.patch(
       displayName: parsed.displayName,
       config: parsed.config as never,
       password: parsed.password,
+      connectionStatus: parsed.connectionStatus,
     });
     if (!updated) {
       res.status(404).json({ error: 'web_login connection not found' });
