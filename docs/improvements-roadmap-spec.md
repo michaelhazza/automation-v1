@@ -587,18 +587,20 @@ This is a separate table from `actionEvents` and `auditEvents` because (a) it ha
 
 ### Risk
 
-**High.** This is the largest item in the entire spec.
+**High in terms of blast radius, low in terms of rollout cost** — this is the largest item in the spec but pre-production removes the usual rollout concerns.
 
 - RLS is global. If a policy is wrong, every query against that table from every code path returns zero rows or fails — no partial degradation.
 - The per-request `set_config` change touches every request transaction. Bug here breaks every API endpoint.
 - The middleware reorganisation in `agentExecutionService.ts` and `skillExecutor.ts` touches the hottest path in the platform.
 
-**Mitigation strategy:**
+**Mitigation strategy (pre-production):**
 
-- Land migrations one batch at a time (3 tables per migration). Verify in staging between batches.
-- Land `orgScoping` middleware as a no-op first (sets the config but no policies use it yet). Bake for one deploy. Then enable the first batch of policies.
-- Land Layer 3 (`preTool` middleware) behind a feature flag (`ROUTER_USE_UNIVERSAL_PRETOOL_INTERCEPT`) for one week before flipping to default-on.
-- Have a documented rollback procedure for each migration.
+- The `verify-rls-coverage.sh` and `verify-rls-contract-compliance.sh` gates are the primary safety net. They run in CI on every commit and block merges that break the contract.
+- The integration test `rls.context-propagation.test.ts` (I1) exercises both failure layers (Layer A throws, Layer B returns zero rows) against fixture data before any merge lands.
+- Each migration has a documented down-migration at `migrations/_down/`. Rollback is "run the down-migration, revert the commit" — no staging, no feature flag, no coordination with live traffic.
+- The `orgScoping` middleware lands first as a no-op (sets the config but no RLS policies read it yet). Any bug here surfaces before the first RLS policy exists, which means the RLS policies land against an already-tested scoping layer.
+- The three RLS migrations (0079-0081) still land sequentially in one sprint, but the sequencing is about code review clarity, not rollout safety. All three can ship in the same PR if the reviewer prefers.
+- The middleware reorganisation (Layer 3) lands without a feature flag. If it breaks, revert the commit and re-land with the fix. No partial-enable state.
 
 ### Verdict
 
@@ -610,13 +612,13 @@ Pre-production means the "staged rollout with feature flags" plan from the previ
 
 2. **Layer 2 second** (`context.assertScope()` helper + call sites at every retrieval boundary). Also no migration. Adds `scope_violation` to the `FailureReason` enum and wraps returned items in the scope assertion. Catches leaks at the context-assembly boundary before they enter the LLM window.
 
-3. **Layer 1 last** (Postgres RLS). Ships as three migrations (0079-0081) in one sprint — all three batches land together in the dev environment because there are no live users to protect against migration pauses. The order within the migrations:
+3. **Layer 1 last** (Postgres RLS). Ships as three migrations (0079-0081) in one sprint — all three land together in the dev environment because there are no live users to protect against migration pauses. The split is a code review convenience, not a rollout sequencing requirement. The order within the migrations:
 
    - 0079: `tasks`, `actions`, `agent_runs` (the highest-touched tables).
    - 0080: `review_items`, `review_audit_records`, `workspace_memories`.
    - 0081: `llm_requests`, `audit_events`, `task_activities`, `task_deliverables`.
 
-   Each migration is reviewed manually before the next one runs. The `orgScoping` middleware (setting `app.organisation_id` per request transaction) ships before 0079.
+   The `orgScoping` middleware (setting `app.organisation_id` per request transaction) ships before 0079 in the same sprint. The three migrations can ship as a single PR if the reviewer prefers — splitting is for readability.
 
 4. The `tool_call_security_events` table and its schema file ship with Layer 3 in sprint 2 (migration 0082). Every scope check writes here from the moment Layer 3 lands — there is no value in a scope check with no audit trail.
 
@@ -749,7 +751,7 @@ await regressionCaptureService.captureFromAuditRecord(auditRecord.id);
 A new CLI/CI runner `scripts/run-regression-cases.ts`:
 
 - Loads all `regression_cases` where `is_active = true`.
-- For each case: spin up a fake agent run with the materialised `input_snapshot`, inject the LLM stub from P0.1 with **a real LLM call** (no stub here — we want to know what the current model produces), let the agent emit a tool call, compare against `expected_outcome`.
+- For each case: spin up a fake agent run with the materialised `input_snapshot` using the **same harness and injection seam as P0.1's test infrastructure**, but point the router-injection slot at the **real LLM router** (`routeCall()` from `server/services/llmRouter.ts`) instead of the LLM stub. The point of the regression runner is to exercise what the current model actually produces against a known-rejected input, so stubbing the LLM would defeat the purpose. The harness provides the isolation and fixture wiring; the router provides the real output. Let the agent emit a tool call, compare against `expected_outcome`.
 - Comparison logic:
   - `should_not_propose` — pass if the agent does NOT propose the same `toolSlug` with similar args (similarity threshold defined in the case). Regression if the agent proposes anything close to `rejected_args`.
   - `should_propose_with_edits` — pass if the agent proposes the same `toolSlug` AND the args are closer to `expected_args` than to `rejected_args` (cosine or simple field-level).
@@ -937,15 +939,37 @@ interface AgentRunCheckpoint {
   totalToolCalls: number;
   totalTokensUsed: number;
   messageCursor: number;                 // last sequence_number in agent_run_messages
-  middlewareContext: SerialisableMiddlewareContext; // small — just counters, no messages
+  middlewareContext: SerialisableMiddlewareContext; // small — just counters + reflection state, no messages
   pendingToolCall?: { id: string; name: string; input: unknown }; // if interrupted mid-execute
   lastCompletedToolCallId?: string;
   resumeToken: string;                   // opaque, prevents concurrent-resume races
   configVersion: string;                 // see "Deterministic resume" below
 }
+
+interface SerialisableMiddlewareContext {
+  iteration: number;
+  tokensUsed: number;
+  toolCallsCount: number;
+  toolCallHistory: Array<{ name: string; inputHash: string; iteration: number }>;
+  // P2.2 — reflection loop state. MUST be included in the serialisable context
+  // so a resumed run honours the iteration counter and doesn't start fresh on
+  // review_code iterations. If a run is checkpointed after BLOCKED verdict 2/3
+  // and then resumed, it continues at iteration 3/3, not 1/3.
+  lastReviewCodeVerdict?: 'APPROVE' | 'BLOCKED' | null;
+  reviewCodeIterations?: number;
+  // P4.1 — preTool decision cache keyed by (runId, toolCallId). MUST be included
+  // so a resumed run doesn't double-propose actions that were already gated
+  // before the checkpoint. See P1.1 Layer 3 idempotency contract.
+  preToolDecisions?: Record<string, { decision: 'auto' | 'review' | 'block'; actionId?: string }>;
+}
 ```
 
-This shape is **bounded in size**. An iteration write is ~500 bytes regardless of run length. Row updates are cheap.
+This shape is **bounded in size**. An iteration write is ~500 bytes regardless of run length (even with reflection state and preTool decisions — these are small structures bounded by `MAX_REFLECTION_ITERATIONS = 3` and `MAX_LOOP_ITERATIONS = 25` respectively). Row updates are cheap.
+
+**Explicit coupling notes:**
+
+- **P2.2 reflection state** → P2.1 serialisation: when P2.2 ships its middleware, it MUST extend `SerialisableMiddlewareContext` with `lastReviewCodeVerdict` and `reviewCodeIterations` (as shown above). A P2.1 test (`agentExecutionService.checkpoint.test.ts`) asserts the round-trip preserves these fields. Sprint 3 landing order: P2.1 ships first (the serialisable shape with empty placeholders), then P2.2 populates the fields. Both are Sprint 3, and the dependency is one-directional (P2.2 writes into fields P2.1 already reserved).
+- **P1.1 Layer 3 preTool decision cache** → P2.1 serialisation: same pattern. The `preToolDecisions` map must round-trip across resume. P1.1 ships in Sprint 2 before P2.1, so by the time the checkpoint shape is defined the preTool contract already exists and this field can be populated from day one.
 
 **Piece 3: Pruning policy.** Both `agent_run_messages` and `agent_run_snapshots` rows cascade on `agent_runs` delete. A nightly cron `agent-run-cleanup` deletes `agent_runs` in terminal state (`completed`, `failed`, `timeout`, `cancelled`) older than 90 days (configurable per org via `organisations.run_retention_days`). See "Retention and pruning policies" cross-cutting section for the full retention table.
 
@@ -1021,15 +1045,26 @@ This is a significant behaviour change for the HITL path — it makes long-runni
 
 | File | Change |
 |---|---|
-| `migrations/0084_agent_run_checkpoint.sql` | Add `checkpoint jsonb` column to `agent_run_snapshots`. |
-| `server/db/schema/agentRunSnapshots.ts` | Add column to Drizzle schema. |
-| `server/services/agentExecutionService.ts` | Add `persistCheckpoint()` after each iteration; add `resumeAgentRun()`; refactor inner tool-call loop to one-at-a-time. |
-| `server/services/agentExecutionServicePure.ts` | Add `serialiseMiddlewareContext()` / `deserialiseMiddlewareContext()` (the pure helpers extracted in P0.1). |
-| `server/config/jobConfig.ts` | Add `agent-run-resume` job type. |
-| `server/jobs/agentRunResumeProcessor.ts` | New worker that handles `agent-run-resume` jobs. |
-| `server/services/hitlService.ts` | Refactor from `awaitDecision(promise)` to `triggerResume(runId)` on human decision. |
-| `server/services/agentRunStatusService.ts` (if not already) | Add `awaiting_review` status. |
-| `server/services/__tests__/agentExecutionService.checkpoint.test.ts` | New tests for serialise/deserialise round-trip. |
+| `migrations/0084_agent_run_checkpoint_and_messages.sql` | **New migration containing both**: (a) `ALTER TABLE agent_run_snapshots ADD COLUMN checkpoint jsonb`; (b) `CREATE TABLE agent_run_messages (...)`; (c) `ENABLE ROW LEVEL SECURITY` on `agent_run_messages`; (d) the `agent_run_messages_org_isolation` and `agent_run_messages_admin_bypass` policies; (e) the required indexes (`run_seq_idx` unique, `run_idx`). All in one SQL file so the table and its RLS policy are atomic. |
+| `migrations/_down/0084_agent_run_checkpoint_and_messages.sql` | Rollback: drop `agent_run_messages`, drop the `checkpoint` column, remove `agent_run_messages` from `rlsProtectedTables.ts` manifest — in that order. |
+| `server/db/schema/agentRunSnapshots.ts` | Add `checkpoint: jsonb('checkpoint').$type<AgentRunCheckpoint>()` column. Add deprecation comment on existing `toolCallsLog` column pointing at `agent_run_messages`. |
+| `server/db/schema/agentRunMessages.ts` | **New Drizzle schema file** mirroring the migration table definition. Exports `agentRunMessages` table + `AgentRunMessage` / `NewAgentRunMessage` inferred types. |
+| `server/db/schema/index.ts` | Re-export `agentRunMessages` and its types. |
+| `server/config/rlsProtectedTables.ts` | **New manifest file** (created in Sprint 2 with P1.1 Layer 1). Append `agent_run_messages` to the manifest in the same commit as the migration. See "Sprint sequencing for `agent_run_messages` RLS" above. |
+| `shared/iee/types.ts` (or `agentExecutionService` co-located) | Declare `AgentRunCheckpoint` TypeScript type (see "Schema additions" above for shape). |
+| `server/services/agentExecutionService.ts` | Add `persistCheckpoint()` after each iteration; add `resumeAgentRun()`; refactor inner tool-call loop to one-at-a-time execution; replace in-memory `messages` array with append-only writes to `agent_run_messages` via `agentRunMessageService`. |
+| `server/services/agentExecutionServicePure.ts` | Add `serialiseMiddlewareContext()` / `deserialiseMiddlewareContext()` (pure helpers extracted in P0.1). Must include reflection state (`lastReviewCodeVerdict`, `reviewCodeIterations`) once P2.2 has shipped — see "Reflection state in checkpoint" note in P2.2. |
+| `server/services/agentRunMessageService.ts` | **New service** for appending messages during run execution and streaming them back for replay. Exposes `appendMessage(runId, organisationId, sequence, role, content, toolCallId?)` and `streamMessages(runId, fromSequence?, toSequence?)`. Centralises the write path so the `runAgenticLoop` doesn't talk to the table directly. |
+| `server/services/toolCallsLogProjectionService.ts` | **New service** (small) that reads `agent_run_messages` at run completion and projects the tool-call subset into `agent_run_snapshots.toolCallsLog` for backward-compat UI reads. Called once per run from the completion hook. Drops the requirement that the loop maintain `toolCallsLog` inline. |
+| `server/config/jobConfig.ts` | Add `agent-run-resume` job type with `singletonKey: 'run:${runId}'` per the idempotency contract. |
+| `server/jobs/agentRunResumeProcessor.ts` | New worker that handles `agent-run-resume` jobs via `resumeAgentRun(runId, { useLatestConfig: false })`. Inherits the RLS execution contract (Path 2) via `createWorker` wrapper. |
+| `server/services/hitlService.ts` | Refactor from `awaitDecision(promise)` (blocking) to `triggerResume(runId)` (enqueues the `agent-run-resume` job on human decision). |
+| `server/services/agentRunStatusService.ts` (or wherever agent run statuses live) | Add `'awaiting_review'` status to the enum. |
+| `server/routes/agentRuns.ts` | New endpoint `POST /api/agent-runs/:id/resume?useLatestConfig=true` — admin-only, writes audit event, the only path that bypasses snapshot-by-default. |
+| `scripts/gates/verify-run-state-source-of-truth.sh` | **New gate** that fails CI if any new code reads `agent_run_snapshots.toolCallsLog` directly (except the allow-listed debug UI file). Prevents drift during the deprecation window. |
+| `server/services/__tests__/agentExecutionService.checkpoint.test.ts` | New unit tests for serialise/deserialise round-trip of `SerialisableMiddlewareContext`. |
+| `server/services/__tests__/agentRunMessageService.test.ts` | New unit tests for append-only writes and stream reads. |
+| `server/services/__tests__/agentRun.crash-resume-parity.test.ts` | Integration test **I2** from the testing strategy. Kill-point matrix, config-snapshot enforcement, HITL async resume. |
 
 ### Test plan
 
@@ -1050,12 +1085,14 @@ Sequence: P1.1 Layer 1 (RLS migrations) ships in Sprint 2, then P2.1 ships in Sp
 
 Once Sprint 2 lands, P2.1 is a single-sprint item:
 
-1. Migration 0084 adds the `checkpoint jsonb` column.
-2. `persistCheckpoint()` writes after each iteration (throttled to match the existing heartbeat).
-3. `resumeAgentRun()` reads the checkpoint and reconstructs `LoopParams`.
-4. Inner tool-call loop refactored to one-at-a-time execution.
-5. `hitlService` refactored from blocking-wait to enqueue-on-decide (new `agent-run-resume` pg-boss job).
-6. Full integration test against P0.1's harness: kill mid-iteration, restart, verify resume matches no-interrupt output byte-for-byte.
+1. Migration 0084 adds the `checkpoint jsonb` column to `agent_run_snapshots` **and** creates `agent_run_messages` with its RLS policy in the same SQL file. `rlsProtectedTables.ts` manifest appended in the same commit. Down-migration at `migrations/_down/0084_*.sql`.
+2. `agentRunMessageService` shipped first — `runAgenticLoop` cannot start writing messages until the service exists.
+3. `persistCheckpoint()` writes after each iteration (throttled to match the existing heartbeat). Writes only the lightweight checkpoint — messages already went into `agent_run_messages` via the service.
+4. `resumeAgentRun()` reads the checkpoint, streams messages from `agent_run_messages` where `sequence_number <= checkpoint.messageCursor`, reconstructs `LoopParams`.
+5. Inner tool-call loop refactored to one-at-a-time execution.
+6. `hitlService` refactored from blocking-wait to enqueue-on-decide (new `agent-run-resume` pg-boss job with `singletonKey: 'run:${runId}'`).
+7. `toolCallsLogProjectionService` runs at run completion to populate the deprecated `toolCallsLog` jsonb for backward-compat UI.
+8. Integration test **I2** (`agentRun.crash-resume-parity.test.ts`) covers: kill-point matrix at three positions, config-snapshot enforcement, HITL async resume.
 
 **The old `AGENT_RUN_CHECKPOINTING_ENABLED` feature flag is deleted from the plan.** The new behaviour ships enabled.
 
@@ -1794,26 +1831,79 @@ Three options, in order of complexity:
 
 Start with keyword rules, instrument the classifier output to telemetry, and switch to a model if data shows the rules misclassify.
 
+### `ask_clarifying_question` — behaviour contract
+
+This is a new universal skill introduced by P4.1 and it deserves its own contract since the topic-filter zero-match fallback depends on it behaving predictably.
+
+**What happens when an agent calls `ask_clarifying_question`:**
+
+1. The skill executor invokes the handler at `server/tools/internal/askClarifyingQuestion.ts`. The handler:
+   - Writes the question to `agent_runs.summary` (replacing any previous value — the last clarification wins).
+   - Appends a `tool_result` message to `agent_run_messages` with `role: 'tool_result'` and `content: { question, blocked_by }` so the clarification is part of the trajectory for replay and trajectory comparison.
+   - Transitions the agent run status from `running` to `awaiting_clarification` (new status; see status enum additions below).
+   - Emits a WebSocket event `agent:run:awaiting-clarification` with `{ runId, question, blockedBy }` on the subaccount room.
+   - Cancels any active `postTool` middleware processing for the current iteration and exits the loop cleanly (returns the equivalent of a `stop` middleware action).
+2. The return value from the skill to the LLM is `{ success: true, status: 'awaiting_clarification', question }` — the agent sees confirmation that the question was recorded.
+3. Because the loop exits after the skill fires, no further tool calls execute until the user responds.
+
+**How the user responds:**
+
+A new endpoint `POST /api/agent-runs/:id/clarify` accepts `{ answer: string }`. The handler:
+
+1. Loads the run, asserts `status === 'awaiting_clarification'`.
+2. Appends a new `role: 'user'` message to `agent_run_messages` with `content: answer`.
+3. Transitions status back to `pending`.
+4. Enqueues an `agent-run-resume` pg-boss job (reusing the P2.1 resume machinery) with `singletonKey: 'run:${runId}'`.
+
+The resume path from P2.1 handles the rest — it loads the checkpoint, streams the updated message log (now including the clarification Q&A pair), and continues the loop.
+
+**What `ask_clarifying_question` does NOT do:**
+
+- It does **not** create a `reviewItem` or consume HITL queue capacity. This is not a review gate — it's an agent-initiated clarification that doesn't need human decision-making infrastructure. It uses a lighter-weight mechanism (the clarify endpoint + WebSocket event) specifically to keep it cheap.
+- It does **not** block the whole subaccount's work. Other agents continue running. Only the specific run with `awaiting_clarification` status is paused.
+- It does **not** require a permission set entry. Universal skills are platform-level and authorised by virtue of being in `ACTION_REGISTRY` with `isUniversal: true`.
+
 ### Files to change
 
 | File | Change |
 |---|---|
-| `server/config/topicRegistry.ts` | New. Defines the topic taxonomy + keyword rules. |
-| `server/services/topicClassifier.ts` | New. Pure function `classifyTopics(messages)`. |
-| `server/services/topicClassifierPure.ts` | New. The classifier itself, testable. |
-| `server/services/agentExecutionService.ts` | New `preCall` middleware that filters `activeTools` by classified topics. |
-| `server/services/__tests__/topicClassifier.test.ts` | New unit tests. |
-| `server/config/actionRegistry.ts` | Populate `topics` field on every entry (29 entries). |
+| `server/config/topicRegistry.ts` | **New.** Defines the topic taxonomy + keyword rules. |
+| `server/services/topicClassifier.ts` | **New.** Impure wrapper — loads org-specific classifier config if needed. |
+| `server/services/topicClassifierPure.ts` | **New.** Pure `classifyTopics(messages): { topics, confidence }`. Testable without DB. |
+| `server/services/agentExecutionService.ts` | New `preCall` middleware that implements the staged-narrowing filter (reorder on low confidence, hard-remove on high confidence) with universal-skill preservation and zero-match fallback. |
+| `server/services/skillService.ts` | Extend `getToolsForRun()` to merge `ACTION_REGISTRY.filter(a => a.isUniversal === true)` into the effective allowlist (see "Universal-skill contract" above). |
+| `server/config/actionRegistry.ts` | Populate `topics` field on every entry (29 entries). Add **new entry** for `ask_clarifying_question` with `isUniversal: true`, `defaultGateLevel: 'auto'`, `isMethodology: false`, `actionCategory: 'api'`, empty `topics: []`. Also add `read_workspace`, `search_codebase`, `web_search` to the universal set (`isUniversal: true`). |
+| `server/skills/ask_clarifying_question.md` | **New skill definition file.** Methodology section documents when to use (topic-narrowed out, scope-check failed, user intent unclear). `parameterSchema = z.object({ question: z.string().min(10).max(2000), blocked_by: z.enum(['topic_filter', 'scope_check', 'no_relevant_tool', 'missing_context']).optional() })`. |
+| `server/tools/internal/askClarifyingQuestion.ts` | **New handler file.** Implements the behaviour contract above: writes to `agent_runs.summary`, appends to `agent_run_messages`, transitions status, emits WebSocket event, exits loop cleanly. |
+| `server/services/skillExecutor.ts` | Add case for `ask_clarifying_question` that dispatches to the new handler. Because the skill is `isMethodology: false` and `defaultGateLevel: 'auto'`, it flows through the standard `actionService.proposeAction` path but auto-approves instantly. |
+| `server/db/schema/agentRuns.ts` | Add `'awaiting_clarification'` to the `status` enum. |
+| `server/routes/agentRuns.ts` | New endpoint `POST /api/agent-runs/:id/clarify` per the behaviour contract. |
+| `server/websocket/emitters.ts` | New event emitter `emitAwaitingClarification(runId, question, blockedBy)`. |
+| `client/src/pages/AgentRunDetailPage.tsx` (or equivalent) | Render the clarification question + a text input for the user to answer. On submit, POST to `/clarify`. |
+| `server/services/__tests__/topicClassifier.test.ts` | New unit tests for keyword classifier + confidence scoring. |
+| `server/services/__tests__/askClarifyingQuestion.test.ts` | New unit tests for the handler (status transitions, message append, event emission). |
+| `server/config/__tests__/universalSkills.test.ts` | New unit test asserting `skillService.getToolsForRun()` merges universal skills into every allowlist, and that the topic filter's core-fallback list matches `ACTION_REGISTRY.filter(a => a.isUniversal === true)` at construction time. |
 
 ### Test plan
 
-- Unit tests for the classifier on a corpus of representative user messages.
-- Integration test: an agent with a 20-skill allowlist receives a user message about "send my client a status update", classifier returns `email` + `reporting`, filter narrows allowed tools to ~6.
-- Manual test: deliberately classify wrong (override the classifier) and verify the agent cannot use a filtered-out tool even if explicitly prompted.
+- Unit tests for the classifier on a corpus of representative user messages, including compound asks and mid-thread intent shifts.
+- Unit tests for `ask_clarifying_question` handler: asserts `summary` is updated, `agent_run_messages` row is appended, status is `awaiting_clarification`, WebSocket event fires.
+- Unit test for universal-skill merge: create an agent with a narrow allowlist, assert `getToolsForRun()` returns the allowlist ∪ universal skills.
+- Unit test for zero-match fallback: stub the classifier to return a topic with zero matching tools, assert `activeTools` narrows to universal skills only and `topic_filter_zero_match` telemetry event fires.
+- Integration test: an agent with a 20-skill allowlist receives a user message about "send my client a status update", classifier returns `email` + `reporting` with confidence 0.9, filter narrows to ~6 tools + the 4 universal skills.
+- Manual test: deliberately misclassify (override the classifier) and verify the agent calls `ask_clarifying_question` instead of silently failing.
+- Manual test: exercise the full clarify flow — agent emits question, UI shows the prompt, operator responds, run resumes and completes.
 
 ### Risk
 
-Medium. The risk is mis-classification — if the classifier wrongly excludes a tool the agent needs, the agent fails silently (the tool isn't visible, so no error path is triggered). Mitigation: log every classification with the input + selected topics + filtered toolset to telemetry. Add a static gate that asserts the classifier never produces an empty filtered set (always falls back to the unfiltered allowlist if classification confidence is low).
+Low-medium. The risk is mis-classification — if the classifier wrongly excludes tools the agent needs AND the classifier confidence is above the `HARD_REMOVAL_CONFIDENCE_THRESHOLD`, the agent's hand gets narrowed and it has to fall back to `ask_clarifying_question`. Mitigation:
+
+- Default threshold `HARD_REMOVAL_CONFIDENCE_THRESHOLD = 0.85` means keyword rules rarely trigger hard removal. Low-confidence classifications stay in soft narrowing mode and keep all tools visible.
+- `ask_clarifying_question` is always available as the escape hatch — the agent can never be left without a way to recover.
+- Every classification logs `{ topics, confidence, mode, removed, preserved_core }` to `llmRequests.metadataJson.topic_filter`. Operators can tune the threshold from this telemetry.
+- `topic_filter_zero_match` events fire loudly so operators see when the allowlist is structurally too narrow for a classified topic.
+
+**No silent-failure risk.** The old draft's concern ("the agent fails silently because the tool isn't visible") is resolved by the `ask_clarifying_question` escape hatch plus the zero-match telemetry event.
 
 ### Verdict
 
@@ -2396,7 +2486,7 @@ Every scheduled item in one place. Each sprint is a coherent chunk of work that 
 | # | Item | Notes |
 |---|---|---|
 | 20 | P4.2 | Migrations 0088 adds `memory_blocks` + `memory_block_attachments`. `memoryBlockService`. `agentService.resolveSystemPrompt()` extended. `update_memory_block` skill. Admin UI at `/admin/memory-blocks`. New agent edit tab. |
-| 21 | P4.1 | Topic taxonomy in `server/config/topicRegistry.ts`. Populate `topics` on all 29 `ACTION_REGISTRY` entries. `topicClassifier` (keyword-rule version). New `preCall` middleware filters `activeTools` by classified topics. Safety-net fall-through when classification confidence is low. |
+| 21 | P4.1 | Topic taxonomy in `server/config/topicRegistry.ts`. Populate `topics` on all 29 `ACTION_REGISTRY` entries. Add `isUniversal: true` on 4 skills (`ask_clarifying_question`, `read_workspace`, `search_codebase`, `web_search`). **New `ask_clarifying_question` skill**: `server/skills/ask_clarifying_question.md` + `server/tools/internal/askClarifyingQuestion.ts` handler + `POST /api/agent-runs/:id/clarify` endpoint + `'awaiting_clarification'` status + WebSocket emitter + client UI for the clarification prompt. `topicClassifier` (keyword-rule version) with confidence scoring. `skillService.getToolsForRun()` extended to merge universal skills. New `preCall` middleware implements staged-narrowing filter (reorder on low confidence, hard-remove above 0.85, preserve universal skills, zero-match fallback to universal-only + loud telemetry event). |
 | 22 | P4.3 | Migration 0089 adds `plan_json` to `agent_runs`. `isComplexRun()` + `parsePlan()` in pure helpers. Planning prelude in `runAgenticLoop()`. Integration with supervised mode from P3.1. New agent run detail "Plan" panel. Replanning-on-failure (one revision per run). |
 | 23 | P4.4 | `postCall` middleware phase added. Shadow-mode critique gate writes to `llmRequests.metadataJson.critique_gate_result`. Tag 3-5 high-stakes actions with `requiresCritiqueGate: true`. Telemetry dashboard query for disagreement rate by tool. **Active-mode flip is NOT in this sprint** — waits on 2-4 weeks of data. |
 
