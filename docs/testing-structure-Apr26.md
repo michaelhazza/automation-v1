@@ -136,6 +136,28 @@ The instinct behind the original question — "a full multi-phase testing enviro
 
 5. **Invest in tests that don't break when features change, skip tests that do.** This is the meta-rule. Every test decision in this phase should pass this filter.
 
+### Three mandatory integration tests — carved-out exceptions
+
+A small number of items in the improvements roadmap carry enough risk that the "skip integration tests" rule doesn't apply to them. These items share three traits: (a) they're hot-path behaviour changes, (b) the failure mode is silent correctness bugs, not loud crashes, and (c) the behaviour is inherently cross-component (unit tests cannot meaningfully cover it).
+
+For these items, add integration tests — but only these, and only because they fit the filter.
+
+| # | Test file | Sprint | Covers | Why it's an exception |
+|---|---|---|---|---|
+| **I1** | `rls.context-propagation.test.ts` | 2 (P1.1) | RLS execution contract across HTTP, background jobs, and admin bypass paths. Includes a deliberate no-context query to verify fail-closed behaviour. | RLS bugs are silent (zero-row queries instead of errors). Static gates can't catch propagation failures. |
+| **I2** | `agentRun.crash-resume-parity.test.ts` | 3 (P2.1) | Kill-point matrix (crash at 3 different points in the loop), config-snapshot enforcement on resume, HITL async resume via pg-boss job. | Checkpoint/resume correctness can't be verified by unit tests — you need a real run. Determinism bugs here are catastrophic. |
+| **I3** | `playbookBulk.parent-child-idempotency.test.ts` | 4 (P3.1) | Fan-out of bulk playbook children, child retry idempotency, parent retry idempotency, concurrency cap enforcement, partial failure handling. | Bulk dispatch has the worst failure modes in the whole roadmap (duplicate side effects on retry). Must be covered. |
+
+**Rules for these tests:**
+
+- Each is a single file, uses the existing tsx convention, uses `loadFixtures()` from section D.
+- Each uses the LLM stub from P0.1 Layer 2 — no real LLM calls.
+- Target runtime: <30 seconds per test file.
+- Filenames contain `integration` so they can be filtered if runtime becomes a concern.
+- They count in the total test surface (making it 14 unit tests + 8 gates + 1 smoke + **3 integration** + fixtures).
+
+**These three are the only integration tests in the current phase.** Any additional integration test proposal must meet the same three-trait filter (hot path + silent bug + cross-component) to be in scope.
+
 ### What to explicitly skip right now
 
 | Skip | Why |

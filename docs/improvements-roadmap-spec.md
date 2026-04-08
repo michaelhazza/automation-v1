@@ -352,15 +352,45 @@ CREATE POLICY tasks_admin_bypass ON tasks
   WITH CHECK (true);
 ```
 
-**How `app.organisation_id` is set:**
+**How `app.organisation_id` is set — execution contract:**
 
-A new middleware `server/middleware/orgScoping.ts` runs after `authenticate` and before any service calls. It executes:
+This section is now an explicit contract. Every access path must conform; anything that doesn't is a bug and gets blocked by the `verify-rls-contract-compliance.sh` gate.
+
+The propagation mechanism is:
 
 ```sql
 SELECT set_config('app.organisation_id', $1, true)
 ```
 
-with the resolved `req.orgId`. The `true` (is_local) flag scopes the setting to the current transaction, which avoids leakage between concurrent connections in a pool. Drizzle's connection pool (`postgres-js`) supports per-query session config via the `prepare: false` option, but the cleanest approach is to wrap each request in an explicit transaction. **This is the most invasive part of P1.1.**
+The `true` (is_local) flag scopes the setting to the current transaction, which avoids leakage between concurrent connections in a pool.
+
+**Contract — three access paths, all must conform:**
+
+**Path 1: HTTP requests.** A new middleware `server/middleware/orgScoping.ts` runs after `authenticate` and before any service calls. It opens an explicit Drizzle transaction for the rest of the request lifecycle, issues the `set_config` inside the transaction, and passes the transaction context down to services via AsyncLocalStorage (`server/instrumentation.ts` already owns the ALS — extend it with a `currentTx` slot). Every service-layer DB access reads the current transaction from ALS; if none is present, the access throws `failure('missing_org_context', ...)` immediately. There is no fall-through to a connection-pool acquisition. No request-scoped DB access happens outside the ALS-bound transaction.
+
+**Path 2: Background jobs (pg-boss workers).** Every handler registered via `createWorker({ queue, handler })` in `server/lib/createWorker.ts` is wrapped by `createWorker` itself with an identical tx-opening prelude. The job payload must carry `organisationId` explicitly (enforced via Zod at the `boss.send(...)` call site, per `docs/pgboss-zod-hardening-spec.md`). The wrapper reads `organisationId` from the validated payload, opens the transaction, issues `set_config`, binds it into ALS, and then invokes the job handler. This means **every new pg-boss handler added by this roadmap (`agent-run-resume`, `regression-capture`, `bulk-dispatch`, `critique-gate-shadow`) automatically inherits the RLS contract** — no per-handler wiring needed.
+
+**Path 3: System jobs (cron, migrations, admin tooling).** These do not have a natural `organisationId` and must use an explicit admin-bypass connection. A new `server/lib/adminDbConnection.ts` exports `withAdminConnection(fn)` which acquires a connection bound to a Postgres role that has `BYPASSRLS` (the role is `admin_role` referenced in the RLS policy examples). All migrations and cron jobs that legitimately need cross-org access must use this helper. The helper logs every invocation to `audit_events` with the caller's stack trace so admin-bypass usage is traceable.
+
+**Hard-failure mode: RLS-protected query with no org context.** The per-request tx wrapper is not enough on its own; a badly-written service call could still pass a DB handle around. So the RLS policies themselves include a defensive clause:
+
+```sql
+CREATE POLICY tasks_org_isolation ON tasks
+  USING (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  )
+  WITH CHECK (
+    current_setting('app.organisation_id', true) IS NOT NULL
+    AND organisation_id = current_setting('app.organisation_id', true)::uuid
+  );
+```
+
+When `app.organisation_id` is unset, **every query against a protected table returns zero rows and every write fails silently** — which sounds bad but is exactly the defensive behaviour we want: zero rows is a loud-enough signal to trigger the integration test (see Testing strategy), and writes failing are caught by `failure()` propagation.
+
+**Silent-zero-row detection:** the integration test `rls.context-propagation.test.ts` (see Testing strategy updates) deliberately runs a query against `tasks` with no org context set and asserts the result is empty — not because zero rows is the desired production behaviour, but because the test is proving that the no-context path fails closed. The same test then runs the query inside a properly-scoped transaction and asserts the expected rows come back. If either assertion fails, the contract is broken.
+
+**Non-compliant code is a blocking issue.** A new static gate `verify-rls-contract-compliance.sh` greps for raw `db.select(...)` / `db.insert(...)` calls outside services and outside the ALS wrapper, and fails CI if any appear. This is the automated enforcement of the contract.
 
 **Migration sequencing:**
 
@@ -421,17 +451,46 @@ After: The `preTool` middleware at `agentExecutionService.ts:1437` calls `action
 ```
 LLM emits tool call
   → preTool middleware
-      → actionService.proposeAction()
+      → compute decision key: (runId, toolCallId)
+      → check middleware decision cache for key
+          → if cached: return cached decision (no DB write, no duplicate proposeAction)
+      → actionService.proposeAction()   -- idempotent by (runId, toolCallId)
           → policyEngineService.evaluatePolicy()
               → if scopeRequirements present:
                     → validateScope(args, scopeRequirements, currentTenant)
                     → on fail: return { decision: 'block', reason: 'scope_violation' }
               → else: return policy decision (auto/review/block)
-      → if blocked: write security audit, return error to LLM
+      → write to middleware decision cache
+      → write to tool_call_security_events   -- dedupe by (runId, toolCallId)
+      → if blocked: return error to LLM
       → if review: hand off to existing HITL path
       → if auto: dispatch to skill executor
   → executor runs with the same args (no second validation)
 ```
+
+**Idempotency contract — mandatory:**
+
+The middleware fires once per `(runId, toolCallId)` tuple, period. This matters because:
+
+- Agent run retries re-enter the loop at the last checkpoint (P2.1) and replay the last LLM response, which means the same tool call may reach the middleware twice.
+- The pg-boss worker for `agent-run-resume` (also P2.1) may re-deliver a job after a transient failure.
+- The reflection loop middleware (P2.2) may inject a `inject_message` action that causes the preceding tool call to be re-emitted by the LLM on the next iteration — same `toolCallId`, same args.
+
+**Three layers of idempotency, all required:**
+
+1. **In-memory decision cache on `MiddlewareContext`.** A new `mwCtx.preToolDecisions: Map<string, PreToolDecision>` keyed by `toolCallId`. First middleware invocation writes to the map; subsequent invocations return the cached decision without calling `proposeAction` again.
+
+2. **`actionService.proposeAction` must be idempotent by `(runId, toolCallId)`.** Today `proposeAction` already takes an `idempotencyKey` parameter — extend it to be derived deterministically from `(runId, toolCallId, args_hash)` instead of the current `${actionType}:${runId}:${Date.now()}` timestamped shape (see `skillExecutor.ts:547`). A retry with the same `toolCallId` + same args returns the existing `action.id` instead of creating a new row. The existing `actions.idempotency_key` unique constraint enforces this at the DB level.
+
+3. **`tool_call_security_events` dedupe on write.** Add a unique index on `(agent_run_id, tool_call_id)` with `WHERE tool_call_id IS NOT NULL`. Writes use `INSERT ... ON CONFLICT DO NOTHING`. Replays don't create duplicate audit rows.
+
+**Methodology skills:**
+
+Pure-prompt methodology skills (`review_code`, `draft_architecture_plan`, `draft_tech_spec`, `review_ux`, `write_tests`, `analyse_42macro_transcript`) have no side effects and no real gating concern — they are prompt scaffolds that return structured text. Before this change they bypass `proposeAction` entirely. After this change they still bypass it, but the bypass is now **explicit policy**, not accidental:
+
+- Each methodology skill is tagged `isMethodology: true` in `ActionDefinition` (new field, added with P0.2 Slice B).
+- The `preTool` middleware checks this flag first. If `isMethodology === true`, it writes a single row to `tool_call_security_events` with `decision = 'allow'` and `reason = 'methodology_skill'`, skips `proposeAction`, and dispatches to the executor directly.
+- This preserves auditability ("every tool call was evaluated") without creating review items or consuming HITL queue capacity for prompt scaffolds.
 
 `validateScope()` reads `actionDef.scopeRequirements` from P0.2 Slice B and checks:
 
@@ -734,30 +793,83 @@ Mirror the Playbooks pattern. Three additions:
 
 #### Schema additions
 
-Add a `checkpoint` jsonb column to `agent_run_snapshots` (or create a new `agent_run_checkpoints` table — see decision below):
+**Decision: extend `agent_run_snapshots` with a lightweight checkpoint + store messages separately.**
+
+The first version of this spec planned a single `checkpoint jsonb` column holding the full message history. That design has a real problem: on a 50-iteration agent run, the checkpoint would be rewritten ~50 times with a progressively larger `messages` array, causing row bloat (Postgres rewrites the full jsonb blob on every update), write amplification, and slower reads. On long-running reporting-agent sweeps this becomes operationally ugly within days.
+
+The revised design splits the concern into three pieces:
+
+**Piece 1: Append-only message log.** New table `agent_run_messages`:
+
+```sql
+CREATE TABLE agent_run_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+  organisation_id uuid NOT NULL REFERENCES organisations(id),  -- for RLS
+  sequence_number integer NOT NULL,                            -- monotonic per run
+  role text NOT NULL CHECK (role IN ('user', 'assistant', 'tool_result')),
+  content jsonb NOT NULL,
+  tool_call_id text,                                           -- when role = 'tool_result'
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX agent_run_messages_run_seq_idx
+  ON agent_run_messages (run_id, sequence_number);
+
+CREATE INDEX agent_run_messages_run_idx
+  ON agent_run_messages (run_id, sequence_number);
+```
+
+Every iteration appends its new messages (user injection, assistant response, tool results) with monotonically incremented `sequence_number`. **Never updated after insert.** Write amplification is bounded to the size of the new message, not the full history.
+
+RLS policy ships with migration 0080 as part of P1.1 Layer 1 (add to the protected-tables list).
+
+**Piece 2: Lightweight checkpoint on `agent_run_snapshots`.**
 
 ```sql
 ALTER TABLE agent_run_snapshots
   ADD COLUMN IF NOT EXISTS checkpoint jsonb;
 ```
 
-The checkpoint shape:
+The checkpoint holds only the pointers needed to resume:
 
 ```ts
 interface AgentRunCheckpoint {
   version: 1;
-  iteration: number;
+  iteration: number;                     // current loop iteration
   totalToolCalls: number;
   totalTokensUsed: number;
-  messages: LLMMessage[];           // full conversation including tool results
-  middlewareContext: SerialisableMiddlewareContext;
-  pendingToolCalls?: Array<{ id: string; name: string; input: unknown }>; // if interrupted mid-execute
+  messageCursor: number;                 // last sequence_number in agent_run_messages
+  middlewareContext: SerialisableMiddlewareContext; // small — just counters, no messages
+  pendingToolCall?: { id: string; name: string; input: unknown }; // if interrupted mid-execute
   lastCompletedToolCallId?: string;
-  resumeToken: string;              // opaque, used to disambiguate concurrent resumes
+  resumeToken: string;                   // opaque, prevents concurrent-resume races
+  configVersion: string;                 // see "Deterministic resume" below
 }
 ```
 
-**Decision: extend `agent_run_snapshots` or create a new table?** Extend. The snapshot table already cascades on agent_run delete and is keyed by `runId` unique. Adding one column is cheaper than a new table and the read patterns are identical (always accessed by `runId`).
+This shape is **bounded in size**. An iteration write is ~500 bytes regardless of run length. Row updates are cheap.
+
+**Piece 3: Pruning policy.** Both `agent_run_messages` and `agent_run_snapshots` rows cascade on `agent_runs` delete. A nightly cron `agent-run-cleanup` deletes `agent_runs` in terminal state (`completed`, `failed`, `timeout`, `cancelled`) older than 90 days (configurable per org via `organisations.run_retention_days`). See "Retention and pruning policies" cross-cutting section for the full retention table.
+
+#### Deterministic resume — config snapshot by default
+
+**Change from the first version of this spec.** The original spec said:
+
+> Reconstructs `LoopParams` from the checkpoint + the agent's current config (NOT the configSnapshot — we want the live config because the agent may have been edited mid-pause).
+
+That was wrong. Using the live config on resume creates a real security and correctness problem:
+
+- If the agent's `additionalPrompt` was edited during the pause, the resumed run runs with instructions it wasn't authorised for at start time.
+- If a skill was added to the allowlist during the pause, the agent gains tool access mid-run and can invoke skills that were forbidden when the run started.
+- If a policy rule was edited during the pause, actions that were auto-approved at start become blocked (or vice versa).
+- Debugging a mixed-config run is almost impossible — telemetry shows two different behaviours for one run ID.
+
+**The correct default is: resume uses the `configSnapshot` captured at run start.** `agent_runs.configSnapshot` already exists for this purpose (per `server/db/schema/agentRuns.ts:47`) — the resume path reads from it, not from the live agent row.
+
+The checkpoint records `configVersion: string` (a hash of the snapshot at run start) so the resume path can assert the snapshot hasn't been tampered with between checkpoint write and resume read.
+
+**Manual override: `resumeWithLatestConfig`.** An operator endpoint `POST /api/agent-runs/:id/resume?useLatestConfig=true` is available for the specific case where an operator knows the original config was broken and wants to resume with the fixed version. This endpoint requires `system_admin` or org_admin role, writes an audit event, and is the only way to break the snapshot-by-default rule. The default `resumeAgentRun(runId)` call from the pg-boss worker **never** uses live config.
 
 #### Write path
 
@@ -780,13 +892,17 @@ await persistCheckpoint(runId, {
 
 #### Read path
 
-A new entry point `resumeAgentRun(runId)` that:
+A new entry point `resumeAgentRun(runId, { useLatestConfig = false } = {})` that:
 
-1. Loads `agent_runs` row, asserts `status = 'pending'` or `'running'`.
+1. Loads `agent_runs` row, asserts `status = 'pending'` or `'running'` or `'awaiting_review'`.
 2. Loads checkpoint from `agent_run_snapshots`. If absent, falls through to a fresh `runAgenticLoop()` (defensive — handles old runs with no checkpoint).
-3. Reconstructs `LoopParams` from the checkpoint + the agent's current config (NOT the configSnapshot — we want the live config because the agent may have been edited mid-pause).
-4. Calls `runAgenticLoop()` with `startingIteration: checkpoint.iteration + 1` and `initialMessages: checkpoint.messages`.
-5. The loop continues from where it left off.
+3. Determines the config source:
+   - **Default (`useLatestConfig = false`):** reads from `agent_runs.configSnapshot` (immutable, captured at run start). Asserts `hash(configSnapshot) === checkpoint.configVersion` — if they don't match, refuses to resume and moves the run to `failed` with `failureReason: 'config_snapshot_tamper'`.
+   - **Operator override (`useLatestConfig = true`):** reads from the live `agents` / `subaccount_agents` rows. Only callable from the audited admin endpoint. Writes an audit event before proceeding.
+4. Streams messages from `agent_run_messages` where `sequence_number <= checkpoint.messageCursor`, ordered, into the reconstructed `LoopParams.messages`.
+5. Reconstructs the `MiddlewareContext` from `checkpoint.middlewareContext` (counters and iteration only — messages are already rehydrated above).
+6. Calls `runAgenticLoop()` with `startingIteration: checkpoint.iteration + 1` and the rehydrated messages.
+7. The loop continues from where it left off.
 
 #### One-side-effect-per-iteration rule (LangGraph)
 
@@ -1447,25 +1563,60 @@ Narrow the agent's tool space *before* the LLM reasons, based on the intent of t
 
 ### Design
 
-**Three pieces:**
+**Three pieces, plus staged-narrowing behaviour for safety:**
 
-1. **Topic taxonomy.** Each `ActionDefinition` gains a `topics: string[]` field (added in P0.2 Slice B). Topics are short tags like `email`, `calendar`, `dev`, `reporting`, `intake`, `gh-integration`. A skill can belong to multiple topics. New skills declare their topics in the registry.
+1. **Topic taxonomy.** Each `ActionDefinition` gains a `topics: string[]` field (added in P0.2 Slice B). Topics are short tags like `email`, `calendar`, `dev`, `reporting`, `intake`, `gh-integration`. A skill can belong to multiple topics. New skills declare their topics in the registry. **Skills with no topics are treated as universal** (visible in every classification bucket) so unclassified skills don't accidentally disappear.
 
-2. **Intent classifier.** A small classifier — either a deterministic keyword rule, a flash-model call, or an embedding similarity match — picks 1-2 topics for the current user message. The output is `{ primaryTopic: 'reporting', secondaryTopic?: 'email' }`.
+2. **Intent classifier with confidence score.** A small classifier — keyword rules first, flash-model later if telemetry justifies — picks 1-2 topics for the current user message AND returns a `confidence: number (0.0-1.0)`. The output is `{ primaryTopic: 'reporting', secondaryTopic?: 'email', confidence: 0.85 }`.
 
-3. **Filter middleware.** A new `preCall` middleware (runs before the main LLM call) intersects the agent's allowlist with the predicted topics' skill set:
+3. **Staged narrowing — not hard removal by default.** This is the key change from the first version of this spec. The previous design said *"the filter is hard removal, not prompt instruction — the LLM cannot use a tool it doesn't see."* Hard removal is attractive in theory but carries real risk in practice:
+   - Keyword classifiers misclassify compound asks (*"check the inbox then draft a patch"* → classified as `email`, `dev` filter loses `read_inbox`).
+   - User intent shifts mid-thread (*"actually scrap that, can you write the report?"* → classifier locked in on stale intent).
+   - Core fallback tools (*`ask_clarifying_question`*, *`read_workspace`*) should never disappear regardless of intent.
+   - An agent that silently loses a tool it needs fails in a way that's very hard to debug from logs alone.
+
+   **Staged narrowing replaces hard removal as the default behaviour:**
 
    ```ts
    const allowed = saLink.skillSlugs;
-   const topicSet = await classifier.predictTopics(messages);
-   const topicSkills = ACTION_REGISTRY.filter(a =>
-     a.topics?.some(t => topicSet.includes(t))
-   ).map(a => a.actionType);
-   const filtered = allowed.filter(s => topicSkills.includes(s));
-   activeTools = activeTools.filter(t => filtered.includes(t.name));
+   const { topics, confidence } = await classifier.predictTopics(messages);
+   const topicSkills = skillsMatchingTopics(topics);
+
+   // Always present, regardless of classification:
+   const coreFallbackSkills = [
+     'ask_clarifying_question',   // must exist as a universal skill, see below
+     'read_workspace',
+     'search_codebase',
+     'web_search',                 // if in the allowlist
+   ].filter(s => allowed.includes(s));
+
+   if (confidence >= HARD_REMOVAL_CONFIDENCE_THRESHOLD) {
+     // High confidence — hard-remove non-matching tools (minus core fallbacks)
+     const keep = new Set([...topicSkills, ...coreFallbackSkills]);
+     activeTools = activeTools.filter(t => keep.has(t.name));
+   } else {
+     // Low confidence — soft narrowing: reorder + descriptions.
+     // Matching tools appear first and get "(likely relevant)" in the tool description.
+     // Non-matching tools stay visible but appear later with unchanged descriptions.
+     // No tool is removed.
+     activeTools = reorderToolsByTopicRelevance(activeTools, topicSkills, coreFallbackSkills);
+   }
    ```
 
-   The narrowed tool list is what the LLM sees. The filter is **hard removal**, not prompt instruction — the LLM cannot use a tool it doesn't see.
+   `HARD_REMOVAL_CONFIDENCE_THRESHOLD = 0.85` in `limits.ts`. A keyword classifier will rarely hit that threshold in practice — which is intentional. Hard removal should be rare and deliberate, not the default.
+
+4. **Core fallback skills — always preserved.** The `coreFallbackSkills` list above is treated as a hard invariant: no matter what the classifier says, these skills stay in `activeTools`. The list is small and stable:
+   - `ask_clarifying_question` — a new universal skill added in Sprint 5 specifically for this purpose. It lets the agent emit a clarification request when topic-narrowing has eliminated tools it needed, instead of failing silently. Its `parameterSchema` is just `{ question: string }` and it writes the question to the agent run's summary.
+   - `read_workspace` — universal context access.
+   - `search_codebase` / `web_search` — universal retrieval.
+
+   If the agent's allowlist doesn't contain one of these, it's skipped (can't force a skill into the active tool list that isn't allowed).
+
+5. **Telemetry.** Every classification writes to `llmRequests.metadataJson.topic_filter`:
+   ```json
+   { "topics": ["reporting"], "confidence": 0.72, "mode": "soft", "removed": [], "preserved_core": [...] }
+   ```
+   After the feature ships, this telemetry is the feedback loop for deciding whether to switch the classifier from keyword rules to flash-model, and whether to adjust the hard-removal threshold.
 
 #### Classifier choice
 
@@ -1913,9 +2064,47 @@ Total new static gates: **8**. Each is <30 lines of bash, checks one structural 
 
 - `server/services/__tests__/agentExecution.smoke.test.ts` — created in Sprint 1, exercised by every subsequent sprint. Uses the P0.1 LLM stub. Dispatches a minimal agent run against a fixture subaccount with one stub response. Asserts: run reaches `completed`, all middleware phases ran in order, no scope violations, no uncaught errors. Updated in each sprint to add one line of new-behaviour coverage (e.g. Sprint 3 adds "reflection middleware fires when `write_patch` comes before `review_code`").
 
+**Three mandatory integration tests** (carved out as exceptions to the "skip integration tests" rule because they cover hot-path behaviour where static gates alone are insufficient):
+
+These are the only integration tests added by this roadmap. Each targets a specific high-risk item where a silent correctness bug would cause a P0 incident and the behaviour is inherently cross-component (can't be unit-tested meaningfully).
+
+**I1: `rls.context-propagation.test.ts` (Sprint 2, ships with P1.1).**
+
+Covers the RLS execution contract end to end. Uses the existing tsx convention, loads fixtures from `loadFixtures()`, asserts the contract holds across all three access paths.
+
+Test cases:
+1. **HTTP request path.** Fake an HTTP request bound to `fixture-org-001`, call `taskService.list()`, assert only `fixture-org-001` rows come back even though the fixture DB contains rows for a second org.
+2. **Wrong-org spoof.** Same request but with `req.orgId` deliberately mutated mid-request to the second org. Assert the orgScoping middleware catches it (transaction was opened with the original org; mutation has no effect) OR the RLS policy blocks it (query returns zero rows). Either outcome is acceptable; both together is the defence-in-depth guarantee.
+3. **Missing org context.** Call a service directly without opening a transaction. Assert `failure('missing_org_context', ...)` is thrown before any DB hit.
+4. **Background job path.** Enqueue a fake pg-boss job with `{ organisationId: 'fixture-org-001' }`, run the handler, assert it can read `fixture-org-001` data and cannot read the second org's data.
+5. **Admin bypass.** Call `withAdminConnection()`, assert it can read both orgs' data, assert it writes an `audit_events` row.
+
+**I2: `agentRun.crash-resume-parity.test.ts` (Sprint 3, ships with P2.1).**
+
+Covers deterministic resume from checkpoint. Proves the crash-point doesn't matter and the resumed run produces the same output as an uninterrupted run.
+
+Test cases:
+1. **Round-trip parity.** Run a fixture agent task uninterrupted with the LLM stub, capture the final state. Run it again, force a crash (throw mid-iteration), resume from checkpoint, assert the final state is byte-equal to the uninterrupted run.
+2. **Kill-point matrix.** Run the same task three times, each crashing at a different checkpoint boundary: (a) after iteration 2, (b) after a tool call but before the next LLM call, (c) mid-`preTool` middleware execution. All three resumed runs must produce the same final state as the uninterrupted baseline.
+3. **Config-snapshot enforcement.** Run a task, pause mid-run, mutate the agent's `additionalPrompt` in the DB, resume. Assert the resume uses the snapshot (old prompt), NOT the mutated version. Assert `resumeWithLatestConfig: true` endpoint does use the new prompt and writes an audit event.
+4. **HITL async resume.** Run a task that hits a `review` gate, process exits, human approves via the API, new process picks up the `agent-run-resume` job, assert the run continues from the approved point.
+
+**I3: `playbookBulk.parent-child-idempotency.test.ts` (Sprint 4, ships with P3.1 bulk mode).**
+
+Covers the bulk-dispatch fan-out path and the retry semantics that go with it.
+
+Test cases:
+1. **Fan-out and synthesis.** Dispatch a bulk playbook against 3 fake subaccounts, assert 3 child runs are created, each independently executes its steps, synthesis step waits for all three and receives the right outputs.
+2. **Child retry idempotency.** Force one child to fail with a retryable error, let pg-boss retry, assert the child produces exactly one completed run and exactly one completion event (no duplicate side effects). Keyed on `(parent_run_id, target_subaccount_id)`.
+3. **Parent retry idempotency.** Kill the parent mid-dispatch, restart, assert the parent doesn't re-dispatch the children that were already dispatched (keyed on parent idempotency + target subaccount).
+4. **Concurrency cap.** Set `organisations.ghl_concurrency_cap = 2`, dispatch against 5 targets, assert the engine queues the third+ children until earlier ones complete. Assert no more than 2 are in-flight at any time.
+5. **Failure propagation.** Force one child to fail non-retryably, assert the parent still completes the other children and marks itself `partial` (not `failed`) with a structured summary.
+
+Each of these 3 tests is a single file, uses the existing tsx convention, uses the `loadFixtures()` helper, uses the LLM stub from P0.1 Layer 2, and targets <30 seconds runtime. They run via the same `npm run test:unit` discovery (they live under `__tests__/` like the unit tests) but are tagged `integration` in their filename so they can be filtered if runtime becomes a concern.
+
 **What is explicitly NOT added as part of this roadmap:**
 
-- Composition tests for middleware interactions (static gate covers registration; behaviour is covered by the smoke test)
+- Composition tests for middleware interactions beyond the 3 integration tests above (static gate covers registration; happy path covered by the smoke test)
 - Frontend unit tests
 - Frontend integration tests (MSW-style)
 - React Testing Library setup
@@ -1924,10 +2113,10 @@ Total new static gates: **8**. Each is <30 lines of bash, checks one structural 
 - Migration safety tests (no data to migrate — dev environment)
 - Performance baselines (performance doesn't matter at this stage)
 - Load tests (same reason)
-- Adversarial security tests beyond what the static gates catch (`verify-rls-coverage.sh` is the primary defence)
-- Resilience / chaos tests for P2.1 beyond the round-trip unit test
+- Adversarial security tests beyond what the static gates and I1 catch (`verify-rls-coverage.sh` + `I1` are the primary defence)
+- Resilience / chaos tests for P2.1 beyond I2's kill-point matrix
 
-Each of these is a real category that a mature testing strategy would include. They are deliberately excluded from the current phase because the cost-to-value ratio is wrong for rapidly-evolving code.
+Each of these is a real category that a mature testing strategy would include. They are deliberately excluded from the current phase because the cost-to-value ratio is wrong for rapidly-evolving code. The 3 integration tests above are the carved-out exceptions — targeted, bounded, and tied to items where a silent correctness bug is the failure mode.
 
 ### Fixture specification (minimal)
 
@@ -2076,4 +2265,55 @@ Items within a sprint can often run in parallel. Concretely:
 Pre-production means rollback is "delete the files / revert the migration / restore from the previous commit". There is no production database to worry about. Down-migrations exist under `migrations/_down/` per existing project convention and must be written for every forward migration in this plan. That's the full rollback story.
 
 The only item that genuinely retains a runtime switch is P4.4's `CRITIQUE_GATE_SHADOW_MODE` constant, which guards a data-collection mode and survives the pre-production simplification because it gates *behaviour* (shadow vs active), not *deployment*.
+
+### Per-item rollback notes
+
+Each migration in the plan has specific rollback caveats beyond "restore the schema". These are the ones that need explicit mention at implementation time:
+
+| Migration | Forward | Rollback caveat |
+|---|---|---|
+| 0079-0081 (RLS) | Enables RLS on 10 tables | Rollback is DROP POLICY + DISABLE ROW LEVEL SECURITY. Safe as long as no other code path assumes RLS is active. After rollback, every service must revalidate its application-layer scoping — do not assume the pre-P1.1 code path "just works" if any of the new `preTool` middleware from Layer 3 has shipped. |
+| 0082 (tool_call_security_events) | New table | Safe drop. No foreign keys point at it. |
+| 0083 (regression_cases) | New table | Safe drop. No foreign keys point at it. `regressionCaptureService` is tolerant of the table missing (no-op on missing table) so the service code can ship before or after the migration is reverted. |
+| 0084 (agent_run_snapshots.checkpoint + agent_run_messages) | New column + new table | Rollback: drop `agent_run_messages`, then `ALTER TABLE agent_run_snapshots DROP COLUMN checkpoint`. Agent runs in progress at rollback time will crash on their next iteration because the code path expects the column; ensure no runs are in flight before rolling back. |
+| 0085 (policy_rules extensions) | Add `confidence_threshold`, `guidance_text` | Safe drop of columns. Rules already in the table with populated values will lose data — export first if rules have been written. |
+| 0086 (playbook_runs.run_mode) | Add `run_mode` column | Existing runs at rollback time will all have `run_mode = 'auto'` which matches pre-P3.1 behaviour, so no data loss. Safe. |
+| 0087 (organisations.ghl_concurrency_cap) | Add column | Safe drop. |
+| 0088 (memory_blocks, memory_block_attachments) | Two new tables | Safe drop in dependency order (attachments first, then blocks). `agentService.resolveSystemPrompt()` is tolerant of missing tables (returns empty merge) so the code path can stay in place after rollback. |
+| 0089 (agent_runs.plan_json) | Add jsonb column | Safe drop. |
+
+### Job idempotency keys
+
+Every new pg-boss job added by this roadmap must declare an explicit idempotency key (pg-boss `singletonKey`) so retries don't cause duplicate work. Listed in order of roadmap appearance:
+
+| Job name | Sprint | `singletonKey` shape | Deduplication semantics |
+|---|---|---|---|
+| `agent-run-resume` | 3 (P2.1) | `run:${runId}` | Only one resume in flight per run. If the worker dies mid-resume, the restart picks up the same job. No duplicate resumes. |
+| `regression-capture` | 2 (P1.2) | `capture:${auditRecordId}` | Capture is idempotent on `review_audit_records.id`. Retries are harmless but deduplicated for cleanliness. |
+| `regression-replay` | 2 (P1.2) | `replay:${regressionCaseId}:${runDate}` | Weekly replay cron generates one job per case per week. Retries within the same day replace the existing job. |
+| `bulk-dispatch-child` | 4 (P3.1) | `bulk:${parentRunId}:${targetSubaccountId}` | Critical. Prevents duplicate children on parent retry. Enforced by pg-boss before the child handler runs. |
+| `bulk-dispatch-synthesis` | 4 (P3.1) | `bulk-synth:${parentRunId}` | One synthesis step per parent, ever. Keyed on parent run ID so retries don't re-synthesise. |
+| `critique-gate-shadow` | 5 (P4.4) | `critique:${llmRequestId}` | One shadow evaluation per LLM call. Retries are free but deduplicated. |
+| `agent-run-cleanup` | 3 (retention) | `cleanup:${date}` | One cleanup per day. Retries within the day are no-ops. |
+
+Idempotency keys are enforced at the `boss.send(...)` call site via `getJobConfig('...')` in `server/config/jobConfig.ts` (per existing pattern). The call sites for all new jobs must be linted via a new gate script `verify-job-idempotency-keys.sh` which asserts every new `boss.send('...')` in this roadmap's diff includes a `singletonKey` option.
+
+### Retention and pruning policies
+
+Three new data-producing tables need explicit retention policies. Without them they grow unbounded.
+
+| Table | Growth driver | Retention | Pruning job |
+|---|---|---|---|
+| `tool_call_security_events` | One row per tool call across the whole platform. Highest-volume new table by orders of magnitude. | **30 days by default**, configurable per org via `organisations.security_event_retention_days`. Compliance-sensitive orgs can extend up to 365 days. | `scripts/prune-security-events.ts` runs nightly as pg-boss job `security-events-cleanup` (singletonKey `prune-security:${date}`). Deletes rows older than the configured retention. |
+| `regression_cases` | One row per HITL rejection. Lower volume — scales with human review throughput. | **Indefinite for `is_active = true`**, capped at `agents.regressionCaseCap` (default 50) via eviction. Inactive cases kept for 90 days. | Eviction happens inline on `regressionCaptureService.captureFromAuditRecord()` when the cap is exceeded. Oldest `last_run_outcome = 'pass'` case is evicted first. |
+| `agent_run_messages` | Messages for every agent run. Medium volume — bounded by run count × iterations × message size. | **90 days for terminal runs** (completed/failed/timeout/cancelled), configurable per org via `organisations.run_retention_days`. Non-terminal runs are never pruned (they're the resume targets). | Cascades on `agent_runs` delete. `agent-run-cleanup` cron (pg-boss job, singletonKey `cleanup:${date}`) deletes terminal `agent_runs` older than retention window; messages cascade. |
+| `agent_run_snapshots.checkpoint` | One row per agent run (pre-existing), now with a jsonb column updated per iteration. | Same as parent `agent_runs` row. Cascades on delete. | Same cleanup job as above. |
+
+All retention configs live on the `organisations` table as new nullable integer columns with platform defaults in `server/config/limits.ts`. No new table, no new config system — retention is per-org and enforced by the cleanup jobs above.
+
+Retention-related migrations ship in the same sprints as the tables they prune:
+
+- `agent-run-cleanup` cron → Sprint 3 alongside P2.1.
+- `security-events-cleanup` cron → Sprint 2 alongside P1.1 Layer 3.
+- `regression_cases` eviction → Sprint 2 alongside P1.2 Capture.
 
