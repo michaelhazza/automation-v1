@@ -115,23 +115,6 @@ export const subaccountAgentService = {
     await db.delete(subaccountAgents).where(eq(subaccountAgents.id, link.id));
   },
 
-  async toggleActive(organisationId: string, linkId: string, isActive: boolean) {
-    const [link] = await db
-      .select()
-      .from(subaccountAgents)
-      .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)));
-
-    if (!link) throw { statusCode: 404, message: 'Agent link not found' };
-
-    const [updated] = await db
-      .update(subaccountAgents)
-      .set({ isActive, updatedAt: new Date() })
-      .where(eq(subaccountAgents.id, linkId))
-      .returning();
-
-    return updated;
-  },
-
   async getLinkById(organisationId: string, subaccountId: string, linkId: string) {
     const [row] = await db
       .select({
@@ -266,7 +249,7 @@ export const subaccountAgentService = {
     const [updated] = await db
       .update(subaccountAgents)
       .set(update)
-      .where(eq(subaccountAgents.id, linkId))
+      .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)))
       .returning();
 
     return updated;

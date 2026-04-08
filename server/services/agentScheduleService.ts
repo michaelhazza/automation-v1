@@ -307,7 +307,7 @@ export const agentScheduleService = {
           agentId: sa.agentId,
           subaccountId: sa.subaccountId,
           organisationId: sa.organisationId,
-        });
+        }, sa.scheduleTimezone ?? 'UTC');
         registered++;
       } catch (err) {
         logger.error(`[AgentScheduler] Failed to register schedule for ${sa.id}`, { error: String(err) });
@@ -359,13 +359,14 @@ export const agentScheduleService = {
   async registerSchedule(
     subaccountAgentId: string,
     cron: string,
-    data: { subaccountAgentId: string; agentId: string; subaccountId: string; organisationId: string }
+    data: { subaccountAgentId: string; agentId: string; subaccountId: string; organisationId: string },
+    tz: string = 'UTC'
   ) {
     const pgboss = await getPgBoss() as any;
     const scheduleName = `${AGENT_RUN_QUEUE}:${subaccountAgentId}`;
 
     await pgboss.schedule(scheduleName, cron, data, {
-      tz: 'UTC',
+      tz: tz || 'UTC',
     });
   },
 
@@ -432,7 +433,7 @@ export const agentScheduleService = {
         agentId: updated.agentId,
         subaccountId: updated.subaccountId,
         organisationId: updated.organisationId,
-      });
+      }, updated.scheduleTimezone ?? 'UTC');
     } else {
       await this.unregisterSchedule(updated.id);
     }

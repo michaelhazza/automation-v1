@@ -112,8 +112,10 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
         });
         setAvailableSkills(skillsRes.data ?? []);
       } catch (e: unknown) {
-        const err = e as { response?: { data?: { error?: string } }; message?: string };
-        setError(err.response?.data?.error ?? err.message ?? 'Failed to load agent configuration');
+        const err = e as { response?: { data?: { error?: { message?: string } | string } }; message?: string };
+        const apiErr = err.response?.data?.error;
+        const msg = typeof apiErr === 'string' ? apiErr : apiErr?.message;
+        setError(msg ?? err.message ?? 'Failed to load agent configuration');
       } finally {
         setLoading(false);
       }
@@ -130,8 +132,10 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       setSaved(tab);
       setTimeout(() => setSaved(null), 3000);
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } }; message?: string };
-      setSaveError(err.response?.data?.error ?? err.message ?? 'Save failed');
+      const err = e as { response?: { data?: { error?: { message?: string } | string } }; message?: string };
+      const apiErr = err.response?.data?.error;
+      const msg = typeof apiErr === 'string' ? apiErr : apiErr?.message;
+      setSaveError(msg ?? err.message ?? 'Save failed');
     } finally {
       setSaving(null);
     }

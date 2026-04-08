@@ -97,9 +97,11 @@ export const skillService = {
           instructions.push(parts.join('\n\n'));
         }
       } else {
-        // Fall back to system skills (file-based) for platform-provided skill slugs
+        // Fall back to system skills (file-based) for platform-provided skill slugs.
+        // Enforce visibility gate: skills marked `visibility: none` must never be
+        // resolvable at runtime, even if an org somehow persisted the slug.
         const systemSkill = await systemSkillService.getSkillBySlug(slug);
-        if (systemSkill) {
+        if (systemSkill && systemSkill.visibility !== 'none') {
           tools.push({
             name: systemSkill.definition.name,
             description: systemSkill.definition.description,

@@ -114,6 +114,12 @@ router.patch(
       maxLlmCallsPerRun?: number | null;
     };
 
+    // Verify linkId ownership BEFORE touching the scheduler. Without this
+    // check, a caller with access to one subaccount could supply a foreign
+    // linkId and mutate another tenant's schedule via updateSchedule() which
+    // keys by id only.
+    await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
+
     // Schedule fields go through agentScheduleService to keep BullMQ registrations in sync
     if (scheduleCron !== undefined || scheduleEnabled !== undefined || scheduleTimezone !== undefined) {
       await agentScheduleService.updateSchedule(req.params.linkId, {
@@ -156,6 +162,8 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // Verify linkId belongs to this org/subaccount before reading its data sources
+    await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
     const sources = await subaccountAgentService.listSubaccountDataSources(req.params.linkId);
     res.json(sources);
   })

@@ -30,7 +30,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import { organisations } from '../server/db/schema/organisations.js';
 import { subaccounts } from '../server/db/schema/subaccounts.js';
@@ -137,13 +137,13 @@ async function seed() {
   let existingOrgs = await db
     .select()
     .from(organisations)
-    .where(eq(organisations.slug, ORG_SLUG))
+    .where(and(eq(organisations.slug, ORG_SLUG), isNull(organisations.deletedAt)))
     .limit(1);
   if (existingOrgs.length === 0) {
     existingOrgs = await db
       .select()
       .from(organisations)
-      .where(eq(organisations.name, ORG_NAME))
+      .where(and(eq(organisations.name, ORG_NAME), isNull(organisations.deletedAt)))
       .limit(1);
   }
   const org = await upsertRow(existingOrgs, async () => {
@@ -167,13 +167,13 @@ async function seed() {
   let existingSubs = await db
     .select()
     .from(subaccounts)
-    .where(and(eq(subaccounts.organisationId, org.id), eq(subaccounts.slug, SUBACCOUNT_SLUG)))
+    .where(and(eq(subaccounts.organisationId, org.id), eq(subaccounts.slug, SUBACCOUNT_SLUG), isNull(subaccounts.deletedAt)))
     .limit(1);
   if (existingSubs.length === 0) {
     existingSubs = await db
       .select()
       .from(subaccounts)
-      .where(and(eq(subaccounts.organisationId, org.id), eq(subaccounts.name, SUBACCOUNT_NAME)))
+      .where(and(eq(subaccounts.organisationId, org.id), eq(subaccounts.name, SUBACCOUNT_NAME), isNull(subaccounts.deletedAt)))
       .limit(1);
   }
   const subaccount = await upsertRow(existingSubs, async () => {
@@ -201,13 +201,13 @@ async function seed() {
   let existingAgents = await db
     .select()
     .from(agents)
-    .where(and(eq(agents.organisationId, org.id), eq(agents.slug, AGENT_SLUG)))
+    .where(and(eq(agents.organisationId, org.id), eq(agents.slug, AGENT_SLUG), isNull(agents.deletedAt)))
     .limit(1);
   if (existingAgents.length === 0) {
     const legacyAgents = await db
       .select()
       .from(agents)
-      .where(and(eq(agents.organisationId, org.id), eq(agents.slug, LEGACY_AGENT_SLUG)))
+      .where(and(eq(agents.organisationId, org.id), eq(agents.slug, LEGACY_AGENT_SLUG), isNull(agents.deletedAt)))
       .limit(1);
     if (legacyAgents.length > 0) {
       console.log(`  ↻ migrating legacy agent slug ${LEGACY_AGENT_SLUG} → ${AGENT_SLUG}`);
