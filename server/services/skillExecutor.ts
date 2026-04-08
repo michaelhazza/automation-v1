@@ -261,6 +261,18 @@ export const skillExecutor = {
       case 'fetch_url':
         return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
 
+      // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
+      case 'playbook_read_existing':
+        return executePlaybookReadExisting(input);
+      case 'playbook_validate':
+        return executePlaybookValidate(input);
+      case 'playbook_simulate':
+        return executePlaybookSimulate(input);
+      case 'playbook_estimate_cost':
+        return executePlaybookEstimateCost(input);
+      case 'playbook_propose_save':
+        return executePlaybookProposeSave(input);
+
       // ── Review-gated skills (proposes action, does NOT execute immediately) ──
       case 'send_email':
         return proposeReviewGatedAction('send_email', input, context);
@@ -2363,5 +2375,78 @@ function executeMethodologySkill(
     skillName,
     template: scaffold.template,
     guidance: scaffold.guidance,
+  };
+}
+
+// ─── Playbook Studio tool executors ──────────────────────────────────────────
+// Spec: tasks/playbooks-spec.md §10.8.4 — the five tools the Playbook
+// Author agent calls. All five delegate to playbookStudioService.
+//
+// Dynamic-imported on first call to avoid pulling the playbook services
+// into the eager skillExecutor graph (which is loaded by every agent run).
+
+async function executePlaybookReadExisting(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const slug = String(input.slug ?? '');
+  if (!slug) return { success: false, error: 'slug is required' };
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  try {
+    return playbookStudioService.readExistingPlaybook(slug);
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function executePlaybookValidate(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const definition = input.definition;
+  if (!definition) return { success: false, error: 'definition is required' };
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  return playbookStudioService.validateCandidate(definition);
+}
+
+async function executePlaybookSimulate(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const definition = input.definition;
+  if (!definition) return { success: false, error: 'definition is required' };
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  return playbookStudioService.simulateRun(definition);
+}
+
+async function executePlaybookEstimateCost(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const definition = input.definition;
+  if (!definition) return { success: false, error: 'definition is required' };
+  const mode = (input.mode as 'optimistic' | 'pessimistic' | undefined) ?? 'pessimistic';
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  return playbookStudioService.estimateCost(definition, { mode });
+}
+
+async function executePlaybookProposeSave(
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const fileContents = String(input.fileContents ?? '');
+  const sessionId = String(input.sessionId ?? '');
+  if (!fileContents || !sessionId) {
+    return { success: false, error: 'fileContents and sessionId are required' };
+  }
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  // Update the session with the candidate, mark valid (the validator
+  // already ran via playbook_validate). The actual file write + PR
+  // creation is the human's button click on Save & Open PR — never the
+  // agent's tool call. Spec invariant 13.
+  await playbookStudioService.updateCandidate(sessionId, fileContents, 'valid');
+  return {
+    success: true,
+    message:
+      'Candidate recorded. The human admin must click Save & Open PR in the Studio UI to commit this file via their GitHub identity.',
+    sessionId,
   };
 }
