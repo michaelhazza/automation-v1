@@ -228,7 +228,7 @@ export const goalService = {
         SELECT id FROM goal_tree
       `);
 
-      const ids = (descendants.rows as Array<{ id: string }>).map((r) => r.id);
+      const ids = (descendants as unknown as Array<{ id: string }>).map((r) => r.id);
 
       if (ids.length > 0) {
         await tx.execute(sql`
@@ -269,7 +269,7 @@ export const goalService = {
     `);
 
     // Map snake_case columns from raw SQL to camelCase for API consistency
-    return (result.rows as Array<Record<string, unknown>>).map((row) => ({
+    return (result as unknown as Array<Record<string, unknown>>).map((row) => ({
       id: row.id,
       parentGoalId: row.parent_goal_id,
       title: row.title,

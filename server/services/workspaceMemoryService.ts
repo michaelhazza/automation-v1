@@ -664,7 +664,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
                 messages: [{ role: 'user', content: `Given this short task context, generate a hypothetical memory entry (2-3 sentences) that would be relevant and useful. Include specific details and terminology.\n\nTask context: "${taskContext}"\n\nRespond with only the hypothetical memory entry.` }],
                 temperature: 0.5,
                 maxTokens: HYDE_MAX_TOKENS,
-                context: { organisationId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', executionPhase: 'execution' },
+                context: { organisationId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', executionPhase: 'execution', routingMode: 'ceiling' },
               });
               const hydeText = hydeResponse?.content ?? null;
               if (hydeText) {
@@ -1121,6 +1121,7 @@ Respond with ONLY valid JSON: { "contexts": ["context for entry 1", "context for
         sourceType: 'system',
         taskType: 'context_enrichment',
         executionPhase: 'execution',
+        routingMode: 'ceiling',
       },
     });
 
