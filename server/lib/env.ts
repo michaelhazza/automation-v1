@@ -87,6 +87,14 @@ const envSchema = z.object({
   GITHUB_APP_PRIVATE_KEY: z.string().optional(), // PEM key, base64-encoded for env vars
   GITHUB_APP_SLUG: z.string().optional(),
   GITHUB_APP_WEBHOOK_SECRET: z.string().optional(),
+
+  // Playbook Studio — PR creation against the platform's own repo
+  // (spec tasks/playbooks-spec.md §10.8.6). Optional: when unset, the
+  // Save & Open PR endpoint returns a structured error explaining how
+  // to configure it. The token must have repo scope on PLAYBOOK_STUDIO_REPO.
+  PLAYBOOK_STUDIO_GITHUB_TOKEN: z.string().optional(),
+  PLAYBOOK_STUDIO_REPO: z.string().optional().default('michaelhazza/automation-v1'),
+  PLAYBOOK_STUDIO_BASE_BRANCH: z.string().optional().default('main'),
 });
 
 export const env = envSchema.parse(process.env);

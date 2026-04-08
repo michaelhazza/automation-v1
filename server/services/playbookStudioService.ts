@@ -33,7 +33,7 @@ import { eq, desc } from 'drizzle-orm';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { db } from '../db/index.js';
-import { playbookStudioSessions } from '../db/schema/index.js';
+import { playbookStudioSessions, users } from '../db/schema/index.js';
 import type {
   PlaybookStudioSession,
   PlaybookStudioValidationState,
@@ -44,6 +44,7 @@ import type {
   ValidationError,
 } from '../lib/playbook/types.js';
 import { logger } from '../lib/logger.js';
+import { createPlaybookPr } from './playbookStudioGithub.js';
 
 const PLAYBOOKS_DIR = resolve(process.cwd(), 'server/playbooks');
 
@@ -468,56 +469,102 @@ export const playbookStudioService = {
   },
 
   /**
-   * Validates the candidate file and (in Phase 1) records the would-be PR
-   * URL. Real GitHub MCP integration is wired in a follow-up commit — Phase
-   * 1 marks the session as PR-opened with a placeholder URL.
+   * Validates the candidate file and opens a real GitHub PR via the
+   * playbookStudioGithub helper. Always re-validates first (spec
+   * invariant 14): the chat artefact is never trusted.
    *
-   * The endpoint always re-runs the validator (invariant 14): the chat
-   * artefact is never trusted to be valid.
+   * Returns 422 (`ok: false`) on validation failure or when GitHub
+   * integration is not configured. The endpoint surfaces these as
+   * structured errors so the UI can display them inline.
    */
   async saveAndOpenPr(
     sessionId: string,
     fileContents: string,
     userId: string
-  ): Promise<{ ok: boolean; prUrl?: string; errors?: ValidationError[] }> {
-    // Try to extract a JSON-ish definition from the contents for the
-    // structural validator. If the contents are TS, this is best-effort —
-    // the full Zod-aware validator runs at PR-merge time via the seeder.
+  ): Promise<{ ok: boolean; prUrl?: string; errors?: ValidationError[]; reason?: string }> {
+    // Extract the slug from the file contents — this is what becomes the
+    // filename and the branch name. Looks for `slug: 'foo'` or `slug: "foo"`.
+    const slugMatch = fileContents.match(/slug:\s*['"]([a-z0-9_-]+)['"]/);
+    if (!slugMatch) {
+      const err: ValidationError = {
+        rule: 'missing_field',
+        message: 'Could not find slug in file contents — must be `slug: "..."`',
+      };
+      await this.updateCandidate(sessionId, fileContents, 'invalid');
+      return { ok: false, errors: [err] };
+    }
+    const slug = slugMatch[1];
+
+    // Re-run the structural validator. Best-effort JSON extraction so we
+    // catch the obvious shape errors. Full Zod-aware validation runs at
+    // PR-merge time via the seeder + CI.
     let parseable: unknown = null;
     try {
-      // Look for the definePlaybook(...) call body and try to parse it.
-      const match = fileContents.match(/definePlaybook\s*\(\s*({[\s\S]*})\s*\)/);
-      if (match) {
-        // The contents inside the parens are JS, not JSON, so this will
-        // commonly fail. We accept that and only block on hard parse
-        // failures from the structural validator.
-        parseable = JSON.parse(match[1]);
-      }
+      const m = fileContents.match(/definePlaybook\s*\(\s*({[\s\S]*})\s*\)/);
+      if (m) parseable = JSON.parse(m[1]);
     } catch {
-      // ignore — fall through to validator with whatever we have
+      // ignore — JS-not-JSON commonly fails. The seeder catches this at deploy.
     }
 
-    const validation = this.validateCandidate(parseable ?? fileContents);
-    if (!validation.ok) {
-      await this.updateCandidate(sessionId, fileContents, 'invalid');
-      logger.warn('playbook_studio_validation_failed', {
-        event: 'playbook_studio.candidate_validated',
-        sessionId,
-        errorCount: validation.errors.length,
+    if (parseable) {
+      const validation = this.validateCandidate(parseable);
+      if (!validation.ok) {
+        await this.updateCandidate(sessionId, fileContents, 'invalid');
+        logger.warn('playbook_studio_validation_failed', {
+          event: 'playbook_studio.candidate_validated',
+          sessionId,
+          errorCount: validation.errors.length,
+        });
+        return { ok: false, errors: validation.errors };
+      }
+    }
+
+    // Look up the user for the commit author identity (spec §10.8.6 —
+    // commit runs under the human admin's identity, never a service account).
+    const [user] = await db
+      .select({
+        firstName: users.firstName,
+        lastName: users.lastName,
+        email: users.email,
+      })
+      .from(users)
+      .where(eq(users.id, userId));
+
+    const authorName = user
+      ? `${user.firstName} ${user.lastName}`.trim()
+      : undefined;
+
+    // Open the PR via the dedicated helper. This throws structured
+    // failures we surface back to the UI.
+    let prResult: { prUrl: string; branch: string; commitSha: string };
+    try {
+      prResult = await createPlaybookPr({
+        slug,
+        fileContents,
+        authorName,
+        authorEmail: user?.email ?? undefined,
       });
-      return { ok: false, errors: validation.errors };
+    } catch (err) {
+      const e = err as { statusCode?: number; message?: string; errorCode?: string };
+      logger.warn('playbook_studio_pr_creation_failed', {
+        sessionId,
+        error: e.message,
+        errorCode: e.errorCode,
+      });
+      await this.updateCandidate(sessionId, fileContents, 'valid');
+      return {
+        ok: false,
+        reason: e.message ?? 'PR creation failed',
+        errors: [{ rule: 'missing_field', message: e.message ?? 'PR creation failed' }],
+      };
     }
 
-    // Phase 1: mark validated and record a placeholder PR URL. Real GitHub
-    // MCP integration follows in a separate commit; the trust boundary is
-    // already enforced by the validator running here.
-    const placeholderPrUrl = `pending://playbook-studio/${sessionId}`;
     await db
       .update(playbookStudioSessions)
       .set({
         candidateFileContents: fileContents,
         candidateValidationState: 'valid',
-        prUrl: placeholderPrUrl,
+        prUrl: prResult.prUrl,
         updatedAt: new Date(),
       })
       .where(eq(playbookStudioSessions.id, sessionId));
@@ -526,9 +573,11 @@ export const playbookStudioService = {
       event: 'playbook_studio.pr_opened',
       sessionId,
       userId,
-      prUrl: placeholderPrUrl,
+      prUrl: prResult.prUrl,
+      branch: prResult.branch,
+      commitSha: prResult.commitSha,
     });
 
-    return { ok: true, prUrl: placeholderPrUrl };
+    return { ok: true, prUrl: prResult.prUrl };
   },
 };
