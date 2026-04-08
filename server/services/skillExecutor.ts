@@ -58,6 +58,16 @@ export interface SkillExecutionContext {
   /** Null for org-level agent runs */
   subaccountId: string | null;
   agentId: string;
+  /**
+   * The principal that initiated this run, when known. Populated by
+   * agentExecutionService when the AgentRunRequest carries a userId.
+   * Used by user-scoped tools (e.g. Playbook Studio propose_save) to
+   * enforce ownership without trusting tool inputs. Undefined for
+   * scheduled / system runs that have no initiating user — tools that
+   * require a user MUST refuse to run when this is undefined.
+   * Review finding #3.
+   */
+  userId?: string;
   orgProcesses: Array<{ id: string; name: string; description: string | null; inputSchema: string | null }>;
   handoffDepth?: number;
   isSubAgent?: boolean;
@@ -271,7 +281,7 @@ export const skillExecutor = {
       case 'playbook_estimate_cost':
         return executePlaybookEstimateCost(input);
       case 'playbook_propose_save':
-        return executePlaybookProposeSave(input);
+        return executePlaybookProposeSave(input, context);
 
       // ── Review-gated skills (proposes action, does NOT execute immediately) ──
       case 'send_email':
@@ -2430,45 +2440,44 @@ async function executePlaybookEstimateCost(
 }
 
 async function executePlaybookProposeSave(
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
 ): Promise<unknown> {
   const fileContents = String(input.fileContents ?? '');
   const sessionId = String(input.sessionId ?? '');
   if (!fileContents || !sessionId) {
     return { success: false, error: 'fileContents and sessionId are required' };
   }
-  const { playbookStudioService } = await import('./playbookStudioService.js');
-  // Resolve session owner from the session row itself, then update via
-  // the owner-scoped helper. The route-level Save & Open PR endpoint is
-  // the strict security boundary — this tool only records a candidate,
-  // and the owner check here prevents an agent from polluting a session
-  // it doesn't own (the session's createdByUserId determines who can
-  // mutate its candidate). Spec finding §10.8 / review item 2.
-  //
-  // KNOWN LIMITATION: SkillExecutionContext does not currently carry the
-  // calling user's id, so an agent in user A's chat that calls this tool
-  // with a guessed sessionId belonging to user B would still update user
-  // B's session row. This is bounded by:
-  //   1. Studio is system_admin only (small attacker surface)
-  //   2. The route-level Save & Open PR endpoint scopes by req.user.id
-  //      (users only commit their own sessions)
-  //   3. A tampered candidate would be visible to the legitimate owner
-  //      before they click Save, so the worst case is "weird content"
-  //      not "unauthorised commit".
-  // The full fix is to add userId to SkillExecutionContext (out of scope
-  // for this PR — touches the wider skill executor surface).
-  const session = await playbookStudioService.getSessionByIdUnscoped(sessionId);
-  if (!session) {
-    return { success: false, error: 'Session not found' };
+  // Strict user-scope enforcement (review finding #3). The agent run's
+  // initiating principal MUST be present on the SkillExecutionContext;
+  // if it's missing (e.g. a scheduled / system run that has no user
+  // identity), we refuse to write to user-owned session rows.
+  // agentExecutionService populates context.userId from
+  // request.userId for user-initiated runs.
+  if (!context.userId) {
+    return {
+      success: false,
+      error:
+        'playbook_propose_save requires a user-scoped agent run. The current run has no userId on its SkillExecutionContext (likely a scheduled or system run). Studio sessions can only be modified by their owners.',
+    };
   }
+  const { playbookStudioService } = await import('./playbookStudioService.js');
+  // Use the strict user-scoped updateCandidate which checks both id
+  // AND createdByUserId. Returns false when the session doesn't exist
+  // OR isn't owned by the calling user — both surface as the same
+  // "session not owned" response so we don't leak session ids.
   const updated = await playbookStudioService.updateCandidate(
     sessionId,
-    session.createdByUserId,
+    context.userId,
     fileContents,
     'valid'
   );
   if (!updated) {
-    return { success: false, error: 'Session update failed' };
+    return {
+      success: false,
+      error:
+        'Session not found or not owned by the calling user. The agent can only update its own session.',
+    };
   }
   return {
     success: true,

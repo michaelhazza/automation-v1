@@ -146,6 +146,14 @@ export interface AgentRunRequest {
    * Spec tasks/playbooks-spec.md §5.2 / step 6 wiring.
    */
   playbookStepRunId?: string;
+  /**
+   * The principal that initiated this run, when known. Plumbed into the
+   * SkillExecutionContext so user-scoped tools (e.g. Playbook Studio
+   * propose_save) can enforce ownership without making downstream
+   * database lookups. Optional because system / scheduled runs have no
+   * initiating user. Review finding #3.
+   */
+  userId?: string;
 }
 
 export interface AgentRunResult {
@@ -1342,6 +1350,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
             organisationId: request.organisationId,
             subaccountId: request.subaccountId ?? null,
             agentId: request.agentId,
+            userId: request.userId,
             orgProcesses,
             handoffDepth: request.handoffDepth,
             isSubAgent: request.isSubAgent,

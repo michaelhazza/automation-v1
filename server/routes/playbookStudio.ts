@@ -87,6 +87,14 @@ router.post(
   asyncHandler(async (req, res) => {
     const { definition } = req.body as { definition?: unknown };
     const result = playbookStudioService.validateCandidate(definition);
+    // On success, also return the canonical hash so the UI can inject
+    // the @playbook-definition-hash magic comment into the file before
+    // saving (spec invariant 14 — definition/file consistency check).
+    if (result.ok) {
+      const definitionHash = playbookStudioService.computeDefinitionHash(definition);
+      res.json({ ...result, definitionHash });
+      return;
+    }
     res.json(result);
   })
 );

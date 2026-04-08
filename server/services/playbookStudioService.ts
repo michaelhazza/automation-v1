@@ -44,9 +44,46 @@ import type {
 } from '../lib/playbook/types.js';
 import { logger } from '../lib/logger.js';
 import { validateDefinition as runtimeValidateDefinition } from '../lib/playbook/validator.js';
+import { hashValue } from '../lib/playbook/hash.js';
 import { createPlaybookPr } from './playbookStudioGithub.js';
 
 const PLAYBOOKS_DIR = resolve(process.cwd(), 'server/playbooks');
+
+// ─── Definition/file consistency (spec invariant 14) ─────────────────────────
+//
+// The save endpoint validates a structured `definition` object then commits
+// `fileContents` to GitHub. To prevent the validate-one-thing-commit-another
+// attack, the file MUST embed a magic comment containing the canonical hash
+// of the validated definition. The save endpoint extracts the hash from the
+// file via the regex below and rejects any mismatch.
+//
+// The Studio UI computes the same hash via the validate endpoint's response
+// and auto-injects/updates this comment in the file before sending the save
+// request. The agent's propose_save tool does the same thing.
+//
+// The hash is also a permanent audit trail in git history: any reviewer can
+// see exactly which definition the committed file represents.
+const DEFINITION_HASH_COMMENT_RE = /\/\/\s*@playbook-definition-hash:\s*([a-f0-9]{64})\b/;
+const DEFINITION_HASH_COMMENT_LINE = (hash: string) => `// @playbook-definition-hash: ${hash}`;
+
+/**
+ * Computes the canonical hash of a validated definition. Same algorithm
+ * as the engine's hashValue helper — canonical JSON (key-sorted) → SHA256.
+ * Exposed for the validate endpoint so the UI can fetch and inject the
+ * magic comment.
+ */
+export function computeDefinitionHash(definition: unknown): string {
+  return hashValue(definition);
+}
+
+/**
+ * Extracts the embedded hash from a candidate file's contents. Returns
+ * null if the magic comment is missing.
+ */
+function extractDefinitionHashFromFile(fileContents: string): string | null {
+  const m = fileContents.match(DEFINITION_HASH_COMMENT_RE);
+  return m ? m[1] : null;
+}
 
 // ─── Structural validator (no Zod required) ──────────────────────────────────
 
@@ -81,6 +118,15 @@ interface SimulationDefinition {
 // `validateCandidate` method below.
 
 export const playbookStudioService = {
+  /**
+   * Computes the canonical hash of a validated definition. Re-exports
+   * the module-level helper as a method on the service object so route
+   * handlers can call it via the service singleton.
+   */
+  computeDefinitionHash(definition: unknown): string {
+    return computeDefinitionHash(definition);
+  },
+
   /** read_existing_playbook tool. Read-only, file system. */
   readExistingPlaybook(slug: string): { found: boolean; contents?: string } {
     const safeSlug = slug.replace(/[^a-z0-9_-]/g, '');
@@ -333,21 +379,9 @@ export const playbookStudioService = {
     return row ?? null;
   },
 
-  /**
-   * Loads a Studio session by id WITHOUT a user scope check. Used only
-   * by the propose_save skill executor which doesn't have a userId in
-   * its skill execution context. The caller is responsible for using
-   * the returned session.createdByUserId as the trust anchor for any
-   * follow-up mutations. Never expose this through a route — the
-   * user-scoped getSession() is what the API layer must use.
-   */
-  async getSessionByIdUnscoped(id: string): Promise<PlaybookStudioSession | null> {
-    const [row] = await db
-      .select()
-      .from(playbookStudioSessions)
-      .where(eq(playbookStudioSessions.id, id));
-    return row ?? null;
-  },
+  // (getSessionByIdUnscoped intentionally removed — review finding #3.
+  // The skill executor now uses context.userId from SkillExecutionContext
+  // and the strict updateCandidate(sessionId, userId, ...) helper.)
 
   /**
    * Updates the candidate file contents on a session. Always scoped by
@@ -399,6 +433,26 @@ export const playbookStudioService = {
     definition: unknown,
     userId: string
   ): Promise<{ ok: boolean; prUrl?: string; errors?: ValidationError[]; reason?: string }> {
+    // Load and verify the session belongs to the calling user BEFORE
+    // doing any validation or PR work. Without this guard, the endpoint
+    // would happily create a PR against a stale or non-existent session
+    // id, leaving session metadata in an inconsistent state.
+    // Review finding #2.
+    const session = await this.getSession(sessionId, userId);
+    if (!session) {
+      return {
+        ok: false,
+        reason: 'session_not_found',
+        errors: [
+          {
+            rule: 'missing_field',
+            message:
+              'Session not found or not owned by the calling user. Create or select one of your own sessions before saving.',
+          },
+        ],
+      };
+    }
+
     // Mandatory: caller must supply a structured definition object that
     // we can validate. Spec invariant 14 — the save endpoint always
     // re-runs the validator and never trusts the chat artefact.
@@ -444,6 +498,49 @@ export const playbookStudioService = {
       };
     }
 
+    // Definition/file consistency enforcement (spec invariant 14).
+    // The validated definition has a deterministic canonical hash. The
+    // file MUST embed that hash in a magic comment. If missing or
+    // mismatched, refuse to commit — this closes the validate-one-thing-
+    // commit-another attack where a caller passes a clean definition
+    // alongside malicious fileContents.
+    const expectedHash = computeDefinitionHash(definition);
+    const fileHash = extractDefinitionHashFromFile(fileContents);
+    if (!fileHash) {
+      logger.warn('playbook_studio_save_missing_definition_hash', {
+        sessionId,
+        userId,
+      });
+      return {
+        ok: false,
+        errors: [
+          {
+            rule: 'missing_field',
+            message: `fileContents must include the magic comment "${DEFINITION_HASH_COMMENT_LINE(
+              expectedHash
+            )}" so the server can verify the file matches the validated definition. The Studio UI auto-injects this on save; if you are calling the endpoint directly, add the line near the top of the file.`,
+          },
+        ],
+      };
+    }
+    if (fileHash !== expectedHash) {
+      logger.warn('playbook_studio_save_definition_hash_mismatch', {
+        sessionId,
+        userId,
+        expectedHash,
+        fileHash,
+      });
+      return {
+        ok: false,
+        errors: [
+          {
+            rule: 'missing_field',
+            message: `definition/file hash mismatch — the file's @playbook-definition-hash (${fileHash}) does not match the validated definition's hash (${expectedHash}). The fileContents you submitted does not represent the same playbook as the definition object. Re-generate the file from the validated definition before retrying.`,
+          },
+        ],
+      };
+    }
+
     // Look up the user for the commit author identity (spec §10.8.6 —
     // commit runs under the human admin's identity, never a service account).
     const [user] = await db
@@ -484,6 +581,10 @@ export const playbookStudioService = {
       };
     }
 
+    // Final session row update — scope by both sessionId AND createdByUserId
+    // (review finding #2). The earlier ownership check via getSession()
+    // already proved the user owns this session, but defence-in-depth says
+    // every persistence write should still carry the user scope.
     await db
       .update(playbookStudioSessions)
       .set({
@@ -492,7 +593,12 @@ export const playbookStudioService = {
         prUrl: prResult.prUrl,
         updatedAt: new Date(),
       })
-      .where(eq(playbookStudioSessions.id, sessionId));
+      .where(
+        and(
+          eq(playbookStudioSessions.id, sessionId),
+          eq(playbookStudioSessions.createdByUserId, userId)
+        )
+      );
 
     logger.info('playbook_studio_pr_opened', {
       event: 'playbook_studio.pr_opened',

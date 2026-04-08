@@ -43,7 +43,7 @@ interface ValidationError {
 }
 
 type ToolResult =
-  | { kind: 'validate'; ok: boolean; errors?: ValidationError[] }
+  | { kind: 'validate'; ok: boolean; errors?: ValidationError[]; definitionHash?: string }
   | {
       kind: 'simulate';
       ok: boolean;
@@ -186,6 +186,9 @@ export default function PlaybookStudioPage(_props: { user: User }) {
 
       if (kind === 'validate') {
         const res = await api.post('/api/system/playbook-studio/validate', { definition: parsed });
+        // The validate response includes a definitionHash on success;
+        // saveAndOpenPr re-runs validate to get a fresh hash anyway, so
+        // the UI just surfaces it in the result panel for transparency.
         setToolResult({ kind: 'validate', ...res.data });
       } else if (kind === 'simulate') {
         const res = await api.post('/api/system/playbook-studio/simulate', { definition: parsed });
@@ -202,6 +205,43 @@ export default function PlaybookStudioPage(_props: { user: User }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Re-runs validate against the current definition JSON. Returns the
+   * fresh canonical hash on success, null on failure (with the error
+   * surfaced via toolResult). Used by saveAndOpenPr to guarantee the
+   * hash it embeds matches the EXACT definition the server is about to
+   * validate during save — no chance of stale hash drift.
+   */
+  async function validateAndGetHash(definition: unknown): Promise<string | null> {
+    try {
+      const res = await api.post('/api/system/playbook-studio/validate', { definition });
+      if (!res.data?.ok) {
+        setToolResult({ kind: 'validate', ok: false, errors: res.data?.errors ?? [] });
+        return null;
+      }
+      const hash = res.data?.definitionHash;
+      if (typeof hash !== 'string') {
+        setError('Validate response missing definitionHash — server out of date?');
+        return null;
+      }
+      return hash;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Validation failed');
+      return null;
+    }
+  }
+
+  /**
+   * Removes any existing @playbook-definition-hash magic comment from the
+   * file contents and prepends a fresh one with the canonical hash. The
+   * server's save endpoint requires this comment to match the validated
+   * definition's hash exactly (spec invariant 14).
+   */
+  function injectDefinitionHashComment(contents: string, hash: string): string {
+    const stripped = contents.replace(/\/\/\s*@playbook-definition-hash:\s*[a-f0-9]{64}\s*\n?/g, '');
+    return `// @playbook-definition-hash: ${hash}\n${stripped}`;
   }
 
   async function saveAndOpenPr() {
@@ -227,9 +267,23 @@ export default function PlaybookStudioPage(_props: { user: User }) {
     setBusy(true);
     setError(null);
     try {
+      // Always re-validate to get a FRESH canonical hash. Stale hashes
+      // from earlier validate runs are rejected by the server even if
+      // the definition appears identical, because the server compares
+      // structurally and any whitespace tweak in the JSON pane changes
+      // the structurally-canonical hash.
+      const definitionHash = await validateAndGetHash(parsedDefinition);
+      if (!definitionHash) {
+        setBusy(false);
+        return;
+      }
+      const fileWithHash = injectDefinitionHashComment(fileContents, definitionHash);
+      // Persist the injected version locally so the user sees what was sent
+      setFileContents(fileWithHash);
+
       const res = await api.post(
         `/api/system/playbook-studio/sessions/${activeSessionId}/save-and-open-pr`,
-        { fileContents, definition: parsedDefinition }
+        { fileContents: fileWithHash, definition: parsedDefinition }
       );
       setToolResult({ kind: 'save', ok: true, ...res.data });
       await loadSessions();
