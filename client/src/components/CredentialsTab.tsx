@@ -42,7 +42,6 @@ function webLoginConfig(conn: Connection): { loginUrl?: string; username?: strin
 }
 
 interface Props {
-  user: { id: string; role: string };
   subaccountId?: string; // undefined = org-level scope
 }
 
@@ -56,6 +55,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
   const [webLoginModal, setWebLoginModal] = useState<{ conn: Connection | null } | null>(null);
   const [webLoginForm, setWebLoginForm] = useState({ label: '', loginUrl: '', username: '', password: '' });
   const [webLoginSaving, setWebLoginSaving] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   // Slack channel config modal
   const [slackConfigConn, setSlackConfigConn] = useState<Connection | null>(null);
@@ -102,6 +102,8 @@ export default function CredentialsTab({ subaccountId }: Props) {
     } else {
       load();
     }
+  // On mount only — `load` is stable for the component's lifetime since subaccountId
+  // doesn't change after mount. Intentionally not re-running on load reference changes.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch Slack channels when modal opens
@@ -116,16 +118,22 @@ export default function CredentialsTab({ subaccountId }: Props) {
       .then(r => setSlackChannels(r.data as { id: string; name: string }[]))
       .catch(() => setSlackChannels([]))
       .finally(() => setChannelsLoading(false));
-  }, [slackConfigConn?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [slackConfigConn?.id, subaccountId]);
 
   const connectSlack = async () => {
+    setError(null);
     try {
-      const returnPath = window.location.pathname + window.location.search;
-      const separator = returnPath.includes('?') ? '&' : '?';
+      // Strip OAuth callback params from current URL to prevent redirect loop
+      const cleanParams = new URLSearchParams(window.location.search);
+      cleanParams.delete('connected');
+      cleanParams.delete('error');
+      const cleanSearch = cleanParams.toString() ? `?${cleanParams.toString()}` : '';
+      const cleanPath = window.location.pathname + cleanSearch;
+      const separator = cleanSearch.includes('?') ? '&' : '?';
       const oauthParams: Record<string, string> = {
         provider: 'slack',
         scope: subaccountId ? 'subaccount' : 'org',
-        returnPath: encodeURIComponent(`${returnPath}${separator}connected=slack`),
+        returnPath: encodeURIComponent(`${cleanPath}${separator}connected=slack`),
       };
       if (subaccountId) oauthParams.subaccountId = subaccountId;
       const { data } = await api.get('/api/integrations/oauth2/auth-url', { params: oauthParams });
@@ -138,6 +146,7 @@ export default function CredentialsTab({ subaccountId }: Props) {
   const saveSlackChannel = async () => {
     if (!slackConfigConn) return;
     setSavingChannel(true);
+    setError(null);
     try {
       const url = subaccountId
         ? `/api/subaccounts/${subaccountId}/connections/${slackConfigConn.id}`
@@ -154,6 +163,8 @@ export default function CredentialsTab({ subaccountId }: Props) {
 
   const revokeConnection = async (conn: Connection) => {
     if (!confirm(`Revoke ${PROVIDER_LABELS[conn.providerType] ?? conn.providerType} connection?`)) return;
+    setRevokingId(conn.id);
+    setError(null);
     try {
       const url = subaccountId
         ? `/api/subaccounts/${subaccountId}/connections/${conn.id}`
@@ -162,15 +173,19 @@ export default function CredentialsTab({ subaccountId }: Props) {
       load();
     } catch {
       setError('Failed to revoke connection');
+    } finally {
+      setRevokingId(null);
     }
   };
 
   const openAddWebLogin = () => {
+    setError(null);
     setWebLoginForm({ label: '', loginUrl: '', username: '', password: '' });
     setWebLoginModal({ conn: null });
   };
 
   const openEditWebLogin = (conn: Connection) => {
+    setError(null);
     const cfg = webLoginConfig(conn);
     setWebLoginForm({ label: conn.label ?? '', loginUrl: cfg.loginUrl ?? '', username: cfg.username ?? '', password: '' });
     setWebLoginModal({ conn });
@@ -178,13 +193,16 @@ export default function CredentialsTab({ subaccountId }: Props) {
 
   const saveWebLogin = async () => {
     setWebLoginSaving(true);
+    setError(null);
     try {
-      const payload = {
-        label: webLoginForm.label || undefined,
-        loginUrl: webLoginForm.loginUrl,
-        username: webLoginForm.username,
-        password: webLoginForm.password || undefined,
+      const payload: Record<string, unknown> = {
+        config: {
+          loginUrl: webLoginForm.loginUrl,
+          username: webLoginForm.username,
+        },
       };
+      if (webLoginForm.label) payload.label = webLoginForm.label;
+      if (webLoginForm.password) payload.password = webLoginForm.password;
       const webLoginBase = subaccountId
         ? `/api/subaccounts/${subaccountId}/web-login-connections`
         : '/api/org/web-login-connections';
@@ -260,7 +278,8 @@ export default function CredentialsTab({ subaccountId }: Props) {
                   )}
                   <button
                     onClick={() => revokeConnection(conn)}
-                    className="text-xs text-red-400 hover:text-red-700"
+                    disabled={revokingId === conn.id}
+                    className="text-xs text-red-400 hover:text-red-700 disabled:opacity-50"
                   >
                     Revoke
                   </button>
@@ -308,7 +327,8 @@ export default function CredentialsTab({ subaccountId }: Props) {
                     </button>
                     <button
                       onClick={() => revokeConnection(conn)}
-                      className="text-xs text-red-400 hover:text-red-700"
+                      disabled={revokingId === conn.id}
+                      className="text-xs text-red-400 hover:text-red-700 disabled:opacity-50"
                     >
                       Remove
                     </button>
