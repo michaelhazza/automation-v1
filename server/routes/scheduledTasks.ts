@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { scheduledTaskService } from '../services/scheduledTaskService.js';
+import { agentService } from '../services/agentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { validateBody, validateMultipart } from '../middleware/validate.js';
+import { createDataSourceBody, updateDataSourceBody } from '../schemas/agents.js';
 
 const router = Router();
 
@@ -72,7 +75,14 @@ router.patch(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
-    const updated = await scheduledTaskService.update(req.params.stId, req.orgId!, req.body);
+    // Match the create route: coerce endsAt string → Date so the driver
+    // stores a proper timestamptz. Leaving it as a string can fail the
+    // update or persist the wrong value depending on the driver.
+    const patch = { ...req.body };
+    if (patch.endsAt !== undefined && patch.endsAt !== null && typeof patch.endsAt === 'string') {
+      patch.endsAt = new Date(patch.endsAt);
+    }
+    const updated = await scheduledTaskService.update(req.params.stId, req.orgId!, patch);
     res.json(updated);
   })
 );
@@ -116,6 +126,141 @@ router.post(
     // Fire the occurrence immediately (doesn't affect the regular schedule)
     await scheduledTaskService.fireOccurrence(req.params.stId);
     res.json({ success: true, message: 'Scheduled task triggered' });
+  })
+);
+
+// ─── Scheduled task data sources (spec §9) ──────────────────────────────────
+//
+// NOTE: The cascade preview endpoint and the in-UI agent reassignment flow
+// (spec §7.6) are deferred to a follow-up. The backend cascade itself in
+// scheduledTaskService.update IS implemented and transactional — agent
+// reassignment via API or seed script will still cascade safely. What's
+// deferred is exposing it through the detail page edit form with a UI
+// confirmation dialog. Tracked for a follow-up that adds an agent picker
+// to the edit form. (pr-reviewer Blocker 5.)
+
+// List data sources for a scheduled task
+router.get(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const list = await agentService.listScheduledTaskDataSources(
+      req.params.stId,
+      req.orgId!,
+    );
+    res.json(list);
+  })
+);
+
+// Upload a file AND create the data source row in one atomic call.
+// Multipart fields: `file` (the upload), `name`, `description?`,
+// `contentType?`, `loadingMode?`, `priority?`, `maxTokenBudget?`.
+router.post(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/upload',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
+  validateMultipart,
+  asyncHandler(async (req, res) => {
+    const files = req.files as Express.Multer.File[] | undefined;
+    if (!files || files.length === 0) {
+      res.status(400).json({ error: 'No file provided' });
+      return;
+    }
+    const body = req.body as Record<string, string | undefined>;
+    const name = body.name ?? files[0].originalname;
+    const result = await agentService.uploadScheduledTaskDataSourceFile(
+      req.params.stId,
+      req.orgId!,
+      files[0],
+      {
+        name,
+        description: body.description,
+        contentType: body.contentType as 'json' | 'csv' | 'markdown' | 'text' | 'auto' | undefined,
+        loadingMode: body.loadingMode as 'eager' | 'lazy' | undefined,
+        priority: body.priority !== undefined ? Number(body.priority) : undefined,
+        maxTokenBudget: body.maxTokenBudget !== undefined ? Number(body.maxTokenBudget) : undefined,
+      },
+      req.user?.id,
+    );
+    res.status(201).json(result);
+  })
+);
+
+// Create a data source from a URL or other remote source
+router.post(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
+  validateBody(createDataSourceBody, 'warn'),
+  asyncHandler(async (req, res) => {
+    const {
+      name, description, sourceType, sourcePath, sourceHeaders,
+      contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+    } = req.body;
+    if (!name || !sourceType || !sourcePath) {
+      res.status(400).json({ error: 'Validation failed', details: 'name, sourceType, and sourcePath are required' });
+      return;
+    }
+    const result = await agentService.addScheduledTaskDataSource(
+      req.params.stId,
+      req.orgId!,
+      {
+        name, description, sourceType, sourcePath, sourceHeaders,
+        contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
+      },
+      req.user?.id,
+    );
+    res.status(201).json(result);
+  })
+);
+
+// Update a data source
+router.patch(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/:sourceId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
+  validateBody(updateDataSourceBody, 'warn'),
+  asyncHandler(async (req, res) => {
+    const result = await agentService.updateScheduledTaskDataSource(
+      req.params.sourceId,
+      req.params.stId,
+      req.orgId!,
+      req.body,
+      req.user?.id,
+    );
+    res.json(result);
+  })
+);
+
+// Delete a data source
+router.delete(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/:sourceId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
+  asyncHandler(async (req, res) => {
+    await agentService.deleteScheduledTaskDataSource(
+      req.params.sourceId,
+      req.params.stId,
+      req.orgId!,
+      req.user?.id,
+    );
+    res.json({ success: true });
+  })
+);
+
+// Test fetch a data source
+router.post(
+  '/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources/:sourceId/test',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
+  asyncHandler(async (req, res) => {
+    const result = await agentService.testScheduledTaskDataSource(
+      req.params.sourceId,
+      req.params.stId,
+      req.orgId!,
+    );
+    res.json(result);
   })
 );
 

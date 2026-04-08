@@ -51,6 +51,8 @@ export const ORG_PERMISSIONS = {
   AGENTS_EDIT: 'org.agents.edit',
   AGENTS_DELETE: 'org.agents.delete',
   AGENTS_CHAT: 'org.agents.chat',
+  // Scheduled task data sources (migration 0078 / spec §10)
+  SCHEDULED_TASKS_DATA_SOURCES_MANAGE: 'org.scheduled_tasks.data_sources.manage',
   // Workspace
   WORKSPACE_VIEW: 'org.workspace.view',
   WORKSPACE_MANAGE: 'org.workspace.manage',
@@ -161,6 +163,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.AGENTS_EDIT,   description: 'Edit AI agents',             groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_DELETE, description: 'Delete AI agents',           groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_CHAT,   description: 'Chat with AI agents',        groupName: 'org.agents' },
+  { key: ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE,
+    description: 'Manage data sources (reference files, URLs) attached to scheduled tasks',
+    groupName: 'org.agents' },
   // org.playbooks (multi-step automation; spec §8.1)
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_READ,    description: 'View Playbook templates',                       groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },

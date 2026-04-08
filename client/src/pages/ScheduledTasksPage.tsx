@@ -29,6 +29,11 @@ const INITIAL_FORM = {
   endsAt: null as string | null, endsAfterRuns: null as number | null,
 };
 
+// The scheduled task `description` field is the full instructions /
+// briefing document that gets injected into the agent's system prompt
+// as the "Task Instructions" layer (see spec §7.2). The `brief` field
+// is a short summary shown in the task list and board card.
+
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 export default function ScheduledTasksPage({ user: _user }: { user: { id: string; role: string } }) {
@@ -123,8 +128,27 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
               </select>
             </div>
             <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1">Brief / Instructions</label>
-              <textarea value={form.brief} onChange={(e) => setForm({ ...form, brief: e.target.value })} rows={3} className={`${inputCls} resize-vertical`} placeholder="What should the agent do each time?" />
+              <label className="block text-[13px] font-medium text-slate-700 mb-1">Brief</label>
+              <textarea
+                value={form.brief}
+                onChange={(e) => setForm({ ...form, brief: e.target.value })}
+                rows={2}
+                className={`${inputCls} resize-vertical`}
+                placeholder="Short summary shown in the task list"
+              />
+            </div>
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1">Instructions</label>
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={8}
+                className={`${inputCls} resize-vertical font-mono text-[12px]`}
+                placeholder="Detailed instructions the agent follows every time this task runs. Paste the full briefing, steps, and any context the agent needs. This content is injected into the agent's system prompt at run time."
+              />
+              <div className="text-[11px] text-slate-500 mt-1">
+                This becomes the agent's <strong>Task Instructions</strong> layer in the system prompt — treat it like the "project instructions" of a Claude Project.
+              </div>
             </div>
             <div>
               <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Recurrence</label>
