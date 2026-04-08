@@ -31,6 +31,72 @@ Five rules that shape how work is sequenced in this document.
 
 ---
 
+## Execution model — at-least-once, idempotent handlers
+
+Every item in this spec that touches agent runs, pg-boss jobs, tool dispatch, or HITL resume operates under a single explicit execution model. This section establishes the contract once so every downstream item can reference it instead of restating it.
+
+### The guarantee
+
+**At-least-once execution, not exactly-once.** Any action in the system — a tool call, a pg-boss job handler, a middleware side effect, a resume after checkpoint — may be executed **more than once** as a consequence of crashes, retries, duplicate job delivery, resume paths, or middleware loops. The system does not and cannot guarantee exactly-once execution under failure, because exactly-once is not achievable across a Postgres + pg-boss boundary without two-phase commit (which we do not use).
+
+**Every side-effecting handler must be idempotent.** The burden of correctness under retry is placed on the handler, not on the orchestrator. An action handler that cannot safely run twice with the same inputs is a bug.
+
+### What this means in practice for each moving part
+
+**Tool call handlers (`skillExecutor.ts` dispatch targets):**
+
+- Must accept an `idempotencyKey` in their execution context. The key is derived deterministically from `(runId, toolCallId, args_hash)` per the P1.1 Layer 3 contract.
+- Must be safe to invoke twice with the same key. Options:
+  - **Naturally idempotent** (read-only, GET requests, queries): nothing to do.
+  - **Idempotent by key** (most write paths): the handler checks for an existing record keyed on `idempotencyKey` before creating a new one. Examples: `send_email` checks the email provider's Idempotency-Key header support; `create_task` writes with an `ON CONFLICT` on `(runId, toolCallId)`; `trigger_process` dedupes on the same key.
+  - **Irreversible and non-idempotent** (webhooks to third parties with no dedupe story): the handler MUST take a lock keyed on `idempotencyKey` via `pg_try_advisory_xact_lock(hashtext('tool:' || key)::bigint)` before the call. Second invocation with the same key sees the lock, waits for the first to finish, reads the result, returns it without re-calling. The existing `playbookEngineService` advisory-lock pattern is the reference implementation.
+- The `ActionDefinition.idempotencyStrategy` field (added to the P0.2 Slice B field list) declares which of the three categories the handler belongs to: `'read_only' | 'keyed_write' | 'locked'`. The skill executor refuses to dispatch an action whose handler doesn't declare a strategy.
+
+**pg-boss job handlers** (`agent-run-resume`, `regression-capture`, `bulk-dispatch-child`, `critique-gate-shadow`, `agent-run-cleanup`, etc.):
+
+- Already covered by the per-job `singletonKey` contract in the "Job idempotency keys" table. That contract IS this execution model, restated for the job layer.
+- pg-boss will deduplicate in-flight jobs by `singletonKey`, but two jobs can still execute sequentially on retry (first job succeeds, second is queued before the first's completion record arrives). Handlers must be idempotent against this pattern too.
+- Jobs that dispatch to tool handlers inherit the handler's idempotency strategy via the `idempotencyKey` in the job payload.
+
+**Middleware side effects** (`preCall`, `preTool`, `postCall`, `postTool` phases in `agentExecutionService.ts`):
+
+- Middleware must be pure with respect to external state except for the explicit side effects it is defined to own (writing `tool_call_security_events`, writing `llmRequests`, writing audit rows).
+- Every side-effecting middleware write must be idempotent on `(runId, iteration)` or `(runId, toolCallId)` as appropriate.
+- The P1.1 Layer 3 middleware uses `INSERT ... ON CONFLICT DO NOTHING` with a unique index on `(agent_run_id, tool_call_id)` — this is the reference pattern for middleware writes.
+
+**Checkpoint boundary semantics:**
+
+- The checkpoint from P2.1 is written **after** an iteration completes its full side-effect sequence, **not** per tool. One checkpoint per iteration.
+- "Iteration" is defined as: LLM call → zero or more tool calls executed sequentially → full response recorded in `agent_run_messages`.
+- If the process crashes **between** a tool call completing and the checkpoint being persisted, resume replays the iteration from the beginning of the tool-call loop. The handler's idempotency guarantees the side effect doesn't duplicate. The checkpoint's job is to advance the loop cursor, NOT to prevent tool re-execution.
+- If the process crashes **after** the checkpoint is persisted but **before** the next iteration begins, resume starts cleanly at the next iteration with no replay.
+- The race window between side-effect completion and checkpoint persistence is small (milliseconds) but real. It is handled by the handler's idempotency, not by tightening the window.
+
+### Required of every new action handler added by this roadmap
+
+Before an action lands in `ACTION_REGISTRY`, it must:
+
+1. Declare `idempotencyStrategy: 'read_only' | 'keyed_write' | 'locked'` on its `ActionDefinition`.
+2. Accept `idempotencyKey: string` in its execution context (passed down from the skill executor).
+3. Be safe to invoke twice with the same key, via the mechanism declared in its strategy.
+4. Have a unit test that calls the handler twice with the same key and asserts the second call produces the same result as the first with **exactly one** side effect observable externally.
+
+### New static gate
+
+A new gate script `verify-idempotency-strategy-declared.sh` fails CI if any entry in `ACTION_REGISTRY` has no `idempotencyStrategy` field. Ships in Sprint 1 alongside P0.2 Slice B.
+
+### Why this is stated as a separate section, not a per-item note
+
+Because three items (P1.1 Layer 3, P2.1, P3.1 bulk dispatch) each have their own idempotency rules that would otherwise look independent. They are not independent — they are three instantiations of the same execution model, applied to different layers. Stating the model once and referencing it from each item makes the overall contract visible and makes it harder for a future item to accidentally violate it.
+
+### What this explicitly does NOT provide
+
+- **Exactly-once delivery to third parties.** If a downstream integration (Slack, GHL, email provider) does not support idempotency keys and we can't use advisory locks for its class of call, we accept that a retry may produce a duplicate and document it on the specific action in the registry. There is no platform-level solution.
+- **Distributed transactions.** Tool execution and checkpoint persistence are not transactional. See "Checkpoint boundary semantics" above — the race is handled by handler idempotency.
+- **Compensation / saga patterns.** If step N of a multi-step workflow succeeds and step N+1 fails permanently, the platform does not automatically roll back step N. Compensation is the responsibility of the agent's prompt logic and the Playbook engine, not of individual action handlers.
+
+---
+
 ## Verdict legend
 
 Every item now uses one of three verdicts:
@@ -253,6 +319,39 @@ export interface ActionDefinition {
   /** P0.2 Slice C — extended retry behaviour. See below. */
   onFailure?: 'retry' | 'skip' | 'fail_run' | 'fallback';
   fallbackValue?: unknown;
+
+  /**
+   * Execution-model contract (see "Execution model — at-least-once, idempotent handlers"
+   * at the top of this document). Declares how the handler stays safe under retry.
+   * Required on every entry — `verify-idempotency-strategy-declared.sh` fails CI if missing.
+   * - 'read_only'  — no side effects; safe to re-run without coordination.
+   * - 'keyed_write' — writes are deduped by idempotencyKey at the DB / provider layer.
+   * - 'locked'     — handler takes a pg advisory lock keyed on idempotencyKey before the call.
+   */
+  idempotencyStrategy: 'read_only' | 'keyed_write' | 'locked';
+
+  /**
+   * P1.1 Layer 3 — flag to mark methodology skills (pure prompt scaffolds, no side effects).
+   * When true, the preTool middleware bypasses actionService.proposeAction and writes a single
+   * audit row with reason='methodology_skill'. See P1.1 Layer 3 idempotency contract.
+   */
+  isMethodology?: boolean;
+
+  /**
+   * P4.1 — universal skills are always merged into every agent's effective allowlist and
+   * always preserved through the topic filter. See P4.1 universal-skill contract.
+   */
+  isUniversal?: boolean;
+
+  /**
+   * P1.1 Layer 3 — declarative scope metadata consumed by the before-tool authorisation hook.
+   * See P1.1 Layer 3 validateScope() for the check implementation.
+   */
+  scopeRequirements?: {
+    validateSubaccountFields?: string[];
+    validateGhlLocationFields?: string[];
+    requiresUserContext?: boolean;
+  };
 }
 ```
 
@@ -947,6 +1046,14 @@ interface AgentRunCheckpoint {
 }
 
 interface SerialisableMiddlewareContext {
+  /**
+   * Version of the serialised middleware context schema. Incremented every time
+   * a field is added, removed, or changes meaning. Resume code compares this
+   * against MIDDLEWARE_CONTEXT_VERSION (in limits.ts) and refuses to resume
+   * if the checkpoint version is newer than the running code.
+   */
+  middlewareVersion: number;
+
   iteration: number;
   tokensUsed: number;
   toolCallsCount: number;
@@ -966,10 +1073,53 @@ interface SerialisableMiddlewareContext {
 
 This shape is **bounded in size**. An iteration write is ~500 bytes regardless of run length (even with reflection state and preTool decisions — these are small structures bounded by `MAX_REFLECTION_ITERATIONS = 3` and `MAX_LOOP_ITERATIONS = 25` respectively). Row updates are cheap.
 
+### Checkpoint persistence contract — the rules that govern future extensions
+
+This is the contract every future middleware author must follow. It is enforced by a new gate script `verify-middleware-state-serialised.sh`.
+
+**Rule 1: `middlewareContext` is treated as opaque and fully serialised.**
+
+The `resumeAgentRun()` path reads `middlewareContext` from the checkpoint and rehydrates it wholesale into `mwCtx`. It does NOT selectively populate fields, skip fields it doesn't recognise, or attempt to merge with defaults from the current code. The checkpoint IS the source of truth for middleware state at the checkpoint boundary.
+
+**Rule 2: No middleware state is recomputed on resume.**
+
+If a middleware maintains state across iterations (counter, cache, last-seen value, accumulated set), that state MUST live in `mwCtx` and be serialised. The alternative — recomputing the state from the message log on resume — is banned because it's (a) slow, (b) easy to get wrong when the derivation rule changes, and (c) causes non-deterministic resume when the recomputation depends on config that may have changed between run start and resume.
+
+Concrete example of the banned pattern: "on resume, iterate over `agent_run_messages` and count how many `review_code` calls have happened so far to rebuild `reviewCodeIterations`." This is banned because it couples the reflection loop's resume correctness to the message log format, and if the format changes (or the derivation misses a case), the resumed run silently loses its iteration count.
+
+**Rule 3: New middleware features must either be derivable from existing serialised state OR add new fields to the checkpoint schema (and bump `middlewareVersion`).**
+
+When a new middleware is added in a future sprint (Sprint 5's topic filter, the P4.4 critique gate, etc.), the author has two options:
+
+- **Derivable option:** prove that the new middleware's state can be reconstructed purely from fields already in `SerialisableMiddlewareContext` plus `agent_run_messages`. Document the derivation in the middleware's file header. No schema change needed.
+- **Additive option:** add new fields to `SerialisableMiddlewareContext`, bump `MIDDLEWARE_CONTEXT_VERSION` in `limits.ts` by 1, and add a migration note to the checkpoint rollback documentation.
+
+There is no "just don't serialise it, recompute on resume" third option. That is the banned pattern from Rule 2.
+
+**Rule 4: `middlewareVersion` is a forward-compatibility guard.**
+
+When `resumeAgentRun()` reads a checkpoint, it compares the checkpoint's `middlewareVersion` against the current `MIDDLEWARE_CONTEXT_VERSION` constant:
+
+- **Equal:** resume proceeds normally.
+- **Checkpoint version < current version:** the code has added new optional fields since the checkpoint was written. Resume proceeds with the new fields populated from defaults. This is the normal forward-compatibility case and it is allowed.
+- **Checkpoint version > current version:** the checkpoint was written by newer code than the currently-running code (possible if a deploy rolls back and an in-flight run resumes on the older binary). Resume refuses with `failure('middleware_version_newer_than_runtime', ...)`. The run stays in `awaiting_review` and can be resumed after the code is rolled forward again.
+
+**Rule 5: Removing or renaming a field is a breaking change.**
+
+If a field is removed from `SerialisableMiddlewareContext`, bump `MIDDLEWARE_CONTEXT_VERSION` by 1 and mark any in-flight runs with `checkpoint.middlewareVersion < new version` as permanently non-resumable (they transition to `failed` with `failureReason: 'middleware_schema_incompatible'`). In pre-production this is acceptable; in a future stabilised phase this becomes a coordinated deployment concern.
+
+### New static gate: `verify-middleware-state-serialised.sh`
+
+The gate asserts that every field on the `MiddlewareContext` runtime type has a matching field on `SerialisableMiddlewareContext`. If a developer adds a field to `MiddlewareContext` without also adding it to `SerialisableMiddlewareContext` (or documenting it as explicitly ephemeral with a `// ephemeral:` comment), the gate fails CI.
+
+Implementation: greps for the `MiddlewareContext` and `SerialisableMiddlewareContext` interfaces, extracts their fields, compares the sets, and reports any drift.
+
 **Explicit coupling notes:**
 
-- **P2.2 reflection state** → P2.1 serialisation: when P2.2 ships its middleware, it MUST extend `SerialisableMiddlewareContext` with `lastReviewCodeVerdict` and `reviewCodeIterations` (as shown above). A P2.1 test (`agentExecutionService.checkpoint.test.ts`) asserts the round-trip preserves these fields. Sprint 3 landing order: P2.1 ships first (the serialisable shape with empty placeholders), then P2.2 populates the fields. Both are Sprint 3, and the dependency is one-directional (P2.2 writes into fields P2.1 already reserved).
-- **P1.1 Layer 3 preTool decision cache** → P2.1 serialisation: same pattern. The `preToolDecisions` map must round-trip across resume. P1.1 ships in Sprint 2 before P2.1, so by the time the checkpoint shape is defined the preTool contract already exists and this field can be populated from day one.
+- **P2.2 reflection state** → P2.1 serialisation: when P2.2 ships its middleware, it MUST extend `SerialisableMiddlewareContext` with `lastReviewCodeVerdict` and `reviewCodeIterations` (as shown above), bump `MIDDLEWARE_CONTEXT_VERSION` from 1 to 2, and update the round-trip test. Sprint 3 landing order: P2.1 ships first with the initial shape, then P2.2 adds its fields as a version bump.
+- **P1.1 Layer 3 preTool decision cache** → P2.1 serialisation: P1.1 ships in Sprint 2 before P2.1, so the `preToolDecisions` field is part of the initial `middlewareVersion: 1` shape. No version bump needed.
+- **P4.1 topic filter** → P2.1 serialisation: the topic filter is stateless per-iteration (it re-classifies the user message every iteration), so it has no state to serialise. This must be documented in the middleware's file header per Rule 3's derivable-option clause.
+- **P4.4 critique gate** → P2.1 serialisation: similarly stateless per-iteration. No new serialised fields needed. Must be documented.
 
 **Piece 3: Pruning policy.** Both `agent_run_messages` and `agent_run_snapshots` rows cascade on `agent_runs` delete. A nightly cron `agent-run-cleanup` deletes `agent_runs` in terminal state (`completed`, `failed`, `timeout`, `cancelled`) older than 90 days (configurable per org via `organisations.run_retention_days`). See "Retention and pruning policies" cross-cutting section for the full retention table.
 
@@ -1820,6 +1970,96 @@ Narrow the agent's tool space *before* the LLM reasons, based on the intent of t
    { "topics": ["reporting"], "confidence": 0.72, "mode": "soft", "removed": [], "preserved_core": [...] }
    ```
    After the feature ships, this telemetry is the feedback loop for deciding whether to switch the classifier from keyword rules to flash-model, and whether to adjust the hard-removal threshold.
+
+6. **Tool-confidence escape hatch — coupling with P2.3.**
+
+   Staged narrowing + universal-skill preservation + zero-match fallback together cover most classifier failure modes, but there is one remaining edge case: the classifier picks a topic with high confidence, the narrowed toolset contains at least one matching tool, but **no candidate tool call emitted by the LLM carries enough of its own confidence** to be trusted. The LLM is technically "choosing a tool from the narrowed set" but its own uncertainty signal says it's guessing. Letting the guess through is worse than asking.
+
+   This coupling uses P2.3's `tool_intent` mechanism (from P2.3 Slice A, which ships in Sprint 3 — long before this P4.1 item in Sprint 5). Reminder of what P2.3 provides:
+
+   - Every agent is prompted to emit a `tool_intent` block before every tool call with `{ tool, confidence, reasoning }`.
+   - The `preTool` middleware already extracts the confidence value via `extractToolIntentConfidence(messages, toolName)` (pure helper in `agentExecutionServicePure.ts`).
+   - P2.3 Slice B uses that confidence to upgrade auto→review at `CONFIDENCE_GATE_THRESHOLD = 0.7`.
+
+   **P4.1 adds a second, lower threshold with a different remediation path:**
+
+   ```ts
+   // server/config/limits.ts
+   export const MIN_TOOL_ACTION_CONFIDENCE = 0.5;  // below this, force clarification instead of execution
+   ```
+
+   **Decision matrix:**
+
+   | Confidence | Behaviour |
+   |---|---|
+   | `>= 0.7` | Proceed normally. Policy engine's existing gate applies. |
+   | `>= 0.5 and < 0.7` | Proceed but policy engine upgrades auto→review (P2.3 Slice B's existing behaviour). Reviewer decides. |
+   | `< 0.5` | **Block the tool call, force `ask_clarifying_question` instead.** |
+
+   **How the block-and-force mechanism works:**
+
+   The `preTool` middleware (already modified by P1.1 Layer 3 to call `actionService.proposeAction`, already modified by P2.3 Slice B to read confidence) gets one more branch added in P4.1:
+
+   ```ts
+   // Inside preTool middleware, after P2.3's confidence extraction but before
+   // actionService.proposeAction. This branch is added by P4.1 in Sprint 5.
+   const confidence = extractToolIntentConfidence(messages, toolCall.name);
+
+   if (confidence !== undefined && confidence < MIN_TOOL_ACTION_CONFIDENCE) {
+     logTelemetry('tool_confidence_escape_hatch', {
+       runId, toolCallName: toolCall.name, confidence, threshold: MIN_TOOL_ACTION_CONFIDENCE
+     });
+
+     // Skip the proposed tool call entirely and inject a message steering the
+     // agent to ask_clarifying_question with a context prompt.
+     return {
+       action: 'skip',
+       reason: `confidence_${confidence.toFixed(2)}_below_clarification_threshold`,
+       injectMessage: `Your confidence for ${toolCall.name} was ${confidence.toFixed(2)}, below the ${MIN_TOOL_ACTION_CONFIDENCE} threshold required to execute. Call ask_clarifying_question to gather the information you need from the user before proceeding.`,
+     };
+   }
+
+   // P2.3 Slice B's upgrade logic runs here
+   // P1.1 Layer 3's proposeAction runs here
+   ```
+
+   The `skip` middleware action (added to the `preTool` middleware action union in P1.1 Layer 3) returns an error result to the LLM for the proposed tool, and `injectMessage` appends a user message telling the agent what to do next. The agent's next iteration reads the injected message and emits `ask_clarifying_question` with `blocked_by: 'low_confidence'` (a new value added to the skill's `blocked_by` enum in this sprint).
+
+   **Why this is in P4.1, not P2.3:**
+
+   P2.3's confidence gate sends the call to HITL review (human decides). P4.1's confidence gate sends the call to user clarification (user provides more context). They are different remediation paths for different failure modes:
+
+   - **HITL review** is correct when the uncertainty is about whether the action is appropriate or authorised — a human with the right context can decide. Review queue has the decision authority.
+   - **Clarification** is correct when the uncertainty is about what the user actually wants — the user is the source of truth, not the reviewer. Review queue can't answer.
+
+   Having both coexist lets each remediation fire for its right failure mode. The `MIN_TOOL_ACTION_CONFIDENCE < CONFIDENCE_GATE_THRESHOLD` ordering ensures clarification fires before review upgrade when confidence is very low — you get clarified, then if still uncertain reviewed.
+
+   **The reviewer's original scenario:**
+
+   > User asks about billing, classified as "support", only support tools remain, but correct action was "ask clarification".
+
+   Under this rule, the flow becomes:
+
+   1. Classifier confidently picks `support` topic, narrows tools to the support subset + universal skills.
+   2. LLM emits `tool_intent` for `create_support_ticket` with `confidence: 0.4` (because it's not actually sure this is the right move for a billing question).
+   3. `preTool` middleware sees confidence < 0.5, blocks the call, injects clarification prompt.
+   4. LLM next iteration calls `ask_clarifying_question` with `question: "Are you asking about a billing issue or looking for support on something else?"`.
+   5. Run pauses at `awaiting_clarification`, user responds, run resumes with the correct context.
+   6. The potentially-wrong `create_support_ticket` call never happens.
+
+   This turns the system from "best guess executor" into "safe executor with explicit uncertainty awareness", exactly as the reviewer framed it.
+
+   **Telemetry for tuning:**
+
+   Every `tool_confidence_escape_hatch` event writes to `llmRequests.metadataJson.confidence_escape_hatch` with `{ toolCallName, confidence, threshold }`. After the feature ships, this telemetry drives three decisions:
+
+   - Whether `MIN_TOOL_ACTION_CONFIDENCE = 0.5` is the right threshold (too low = unsafe, too high = annoying clarification spam).
+   - Whether the LLM's `tool_intent` confidence is calibrated (or whether we need to rescale it).
+   - Which specific tools attract disproportionately many low-confidence emissions (those tools may have unclear documentation, unclear invocation rules, or be poorly scoped).
+
+   **Gate script:**
+
+   A new static gate `verify-confidence-escape-hatch-wired.sh` asserts the `preTool` middleware contains the escape-hatch branch AND that `MIN_TOOL_ACTION_CONFIDENCE` is declared in `limits.ts` AND that `blocked_by: 'low_confidence'` is in the `ask_clarifying_question` skill's parameter schema. Ships in Sprint 5 alongside P4.1.
 
 #### Classifier choice
 
