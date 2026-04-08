@@ -86,11 +86,13 @@ export default function PlaybookStudioPage(_props: { user: User }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   // Read-only preview of the .playbook.ts file the server would commit
-  // for the current definition. Populated by the /render endpoint and
-  // refreshed whenever the definition changes. The user never edits this
-  // directly — it is the server's authoritative output.
+  // for the current definition. Populated by the /render endpoint after
+  // a successful Validate, and again by the /save-and-open-pr response.
+  // The user never edits this directly — it is the server's
+  // authoritative output. Click Validate any time to refresh it after
+  // editing the definition JSON.
   const [renderedPreview, setRenderedPreview] = useState<string>(
-    '// Server-rendered preview will appear here once the definition validates.\n'
+    '// Click Validate after editing the definition below to refresh this preview.\n'
   );
   const [definitionJson, setDefinitionJson] = useState(STARTER_DEFINITION_JSON);
   const [toolResult, setToolResult] = useState<ToolResult | null>(null);
@@ -232,14 +234,16 @@ export default function PlaybookStudioPage(_props: { user: User }) {
    * validation.
    *
    * The "preview" pane shows what the server would commit (via the
-   * /render endpoint, refreshed whenever the user updates the
-   * definition or clicks Validate).
+   * /render endpoint, refreshed by Validate clicks and by the
+   * save-and-open-pr response).
    */
 
   /**
    * Re-renders the preview pane against the current definition. Called
-   * after every successful Validate / Simulate / Estimate so the user
-   * always sees the latest server-rendered file body.
+   * after a successful Validate so the user always sees the latest
+   * server-rendered file body before they save. Simulate and Estimate
+   * do not refresh the preview because they don't change the canonical
+   * file body — only the definition does.
    */
   async function refreshPreview(definition: unknown): Promise<void> {
     try {
@@ -398,8 +402,8 @@ export default function PlaybookStudioPage(_props: { user: User }) {
         {/* Read-only preview of the file the server would commit. The
             user never edits this directly — the source of truth is the
             definition JSON pane below. The server's /render endpoint
-            populates this value via refreshPreview() after every
-            successful Validate. */}
+            populates this value after a successful Validate, and again
+            from the save-and-open-pr response. */}
         <textarea
           value={renderedPreview}
           readOnly
