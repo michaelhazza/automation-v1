@@ -389,34 +389,77 @@ export interface LoadedDataSource {
   fetchOk: boolean;
   maxTokenBudget: number;
 
-  // ─── Decisions made by loadRunContextData — populated after dedupe + budget walk ───
+  // ─── Decisions made by loadRunContextData ────────────────────────────────
+  //
+  // These fields are **optional at the type level** because `fetchDataSourcesByScope`
+  // and `loadTaskAttachmentsAsContext` return `LoadedDataSource` values with
+  // none of them set — they hand back a raw pool for the caller to process.
+  //
+  // After `loadRunContextData` runs its full pipeline (sort → assign
+  // orderIndex → suppress by override → split eager/lazy → budget walk),
+  // every source returned in `runContextData.eager`, `runContextData.manifest`,
+  // or `runContextData.suppressed` is **guaranteed** to have `orderIndex`,
+  // `includedInPrompt`, and (where applicable) `suppressedByOverride` set.
+  // Downstream code — the snapshot serialiser, the skill handler, the UI —
+  // can treat them as present.
+  //
+  // Rationale for keeping them optional on the type instead of splitting into
+  // `LoadedDataSource` + `ProcessedLoadedDataSource`: the two types would share
+  // 100% of their non-decision fields, and the split would force trivial
+  // casts at every boundary. The optional-with-invariant approach trades a
+  // small amount of type laxity for a much simpler call graph.
+
   /**
-   * Deterministic position in the final ordering (0 = first eager source loaded).
-   * Preserved across dedupe / budget walks so the snapshot can show the original
-   * pre-decision ordering.
+   * Deterministic position in the full sorted pool (0 = first).
+   *
+   * - **Before `loadRunContextData`**: undefined.
+   * - **After `loadRunContextData`**: always a non-negative integer. Assigned
+   *   in §7.1 step 5 on the full sorted pool BEFORE override suppression,
+   *   so every entry — winners, suppressed losers, eager, lazy, binary —
+   *   carries a stable index. The debug UI sorts by this field.
+   *
+   * Never null. Never -1. Never undefined after loader processing.
    */
   orderIndex?: number;
+
   /**
-   * True when this source was rendered into the system prompt.
-   * False for lazy sources, sources suppressed by same-name override,
-   * or sources dropped because the eager budget was exhausted.
+   * True when this source was rendered into the `## Your Knowledge Base`
+   * block of the system prompt.
+   *
+   * - **Before `loadRunContextData`**: undefined.
+   * - **After `loadRunContextData`**: always a boolean. False for lazy
+   *   sources (by definition), sources suppressed by same-name override,
+   *   and eager sources that exceeded `MAX_EAGER_BUDGET`.
    */
   includedInPrompt?: boolean;
+
   /**
-   * True when the source content was partially truncated by the downstream
-   * character-level budget enforcement in buildSystemPrompt. Normally false
-   * once the upstream budget walk is in place — kept as a safety-net signal.
+   * True when the downstream character-level safety net in `buildSystemPrompt`
+   * truncated this source. Normally false once the upstream budget walk is
+   * in place — kept as an observability signal for the rare case where
+   * token estimation was off and the source rendered larger than predicted.
+   *
+   * - **Before `loadRunContextData`**: undefined.
+   * - **After `loadRunContextData`**: defaults to false. May be flipped to
+   *   true by the §7.4 post-render hook.
    */
   truncated?: boolean;
+
   /**
    * True when another higher-precedence source with the same normalised name
    * won the override resolution (see §3.6). Mutually exclusive with
-   * includedInPrompt: true.
+   * `includedInPrompt: true`.
+   *
+   * - **Before `loadRunContextData`**: undefined.
+   * - **After `loadRunContextData`**: always a boolean. Entries in
+   *   `runContextData.suppressed` have this set to true.
    */
   suppressedByOverride?: boolean;
+
   /**
-   * When suppressedByOverride is true, the id of the source that won the
-   * override. Useful for the debug UI.
+   * When `suppressedByOverride` is true, the id of the source that won the
+   * override. Used by the debug UI to link the suppressed row to its winner.
+   * Undefined when `suppressedByOverride` is false.
    */
   suppressedBy?: string;
 }
@@ -1923,7 +1966,8 @@ Add a new panel below the run metadata (before or after the tool call timeline).
             .map((s) => (
               <tr key={s.id} className={rowBgClass(s)}>
                 <td className="px-3 py-2 text-[12px] text-slate-400 font-mono">
-                  {s.orderIndex >= 0 ? s.orderIndex + 1 : '—'}
+                  {/* orderIndex is guaranteed ≥ 0 on snapshot entries (§7.1 step 5) */}
+                  {s.orderIndex + 1}
                 </td>
                 <td className="px-3 py-2 text-[13px] text-slate-700">
                   {s.name}
