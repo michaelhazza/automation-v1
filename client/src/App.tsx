@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import api from './lib/api';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
@@ -33,6 +33,7 @@ const AdminAgentTemplatesPage = lazy(() => import('./pages/AdminAgentTemplatesPa
 const AdminAgentEditPage = lazy(() => import('./pages/AdminAgentEditPage'));
 const AdminSkillsPage = lazy(() => import('./pages/AdminSkillsPage'));
 const McpServersPage = lazy(() => import('./pages/McpServersPage'));
+const IntegrationsAndCredentialsPage = lazy(() => import('./pages/IntegrationsAndCredentialsPage'));
 const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
 const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
@@ -46,10 +47,12 @@ const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
 const SystemEnginesPage = lazy(() => import('./pages/SystemEnginesPage'));
-const ConnectionsPage = lazy(() => import('./pages/ConnectionsPage'));
 const SubaccountTeamPage = lazy(() => import('./pages/SubaccountTeamPage'));
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
+const PlaybooksLibraryPage = lazy(() => import('./pages/PlaybooksLibraryPage'));
+const PlaybookRunDetailPage = lazy(() => import('./pages/PlaybookRunDetailPage'));
+const PlaybookStudioPage = lazy(() => import('./pages/PlaybookStudioPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
 const OrgChartPage = lazy(() => import('./pages/OrgChartPage'));
@@ -57,13 +60,12 @@ const UsagePage = lazy(() => import('./pages/UsagePage'));
 const PageProjectsPage = lazy(() => import('./pages/PageProjectsPage'));
 const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage'));
 const JobQueueDashboardPage = lazy(() => import('./pages/JobQueueDashboardPage'));
-const OrgMemoryPage = lazy(() => import('./pages/OrgMemoryPage'));
 const AgentTriggersPage = lazy(() => import('./pages/AgentTriggersPage'));
-const OrgAgentConfigsPage = lazy(() => import('./pages/OrgAgentConfigsPage'));
 const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
-const HierarchyTemplatesPage = lazy(() => import('./pages/HierarchyTemplatesPage'));
-const ConnectorConfigsPage = lazy(() => import('./pages/ConnectorConfigsPage'));
+
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
+const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
+const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 
 function PageLoader() {
   return (
@@ -101,6 +103,11 @@ function SystemAdminGuard({ user }: { user: User | null }) {
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== 'system_admin') return <Navigate to="/" replace />;
   return <Outlet />;
+}
+
+function SubaccountIntegrationsRoute({ user }: { user: User }) {
+  const { subaccountId } = useParams<{ subaccountId: string }>();
+  return <IntegrationsAndCredentialsPage user={user} subaccountId={subaccountId} />;
 }
 
 export default function App() {
@@ -158,6 +165,8 @@ export default function App() {
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
           <Route path="/inbox" element={<InboxPage user={user!} />} />
+          <Route path="/playbooks" element={<PlaybooksLibraryPage user={user!} />} />
+          <Route path="/playbook-runs/:runId" element={<PlaybookRunDetailPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
@@ -175,9 +184,10 @@ export default function App() {
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
-            <Route path="/admin/mcp-servers" element={<McpServersPage user={user!} />} />
+            <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
+            <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
@@ -192,10 +202,10 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
             <Route path="/admin/subaccounts/:subaccountId/goals" element={<GoalsPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
-            <Route path="/admin/org-memory" element={<OrgMemoryPage />} />
-            <Route path="/admin/org-agent-configs" element={<OrgAgentConfigsPage />} />
-            <Route path="/admin/hierarchy-templates" element={<HierarchyTemplatesPage />} />
-            <Route path="/admin/connectors" element={<ConnectorConfigsPage />} />
+            <Route path="/admin/org-memory" element={<Navigate to="/admin/org-settings?tab=memory" replace />} />
+            <Route path="/admin/org-agent-configs" element={<Navigate to="/admin/agents?tab=org-execution" replace />} />
+            <Route path="/admin/hierarchy-templates" element={<Navigate to="/admin/agents?tab=team-templates" replace />} />
+            <Route path="/admin/connectors" element={<Navigate to="/admin/mcp-servers" replace />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
@@ -207,14 +217,16 @@ export default function App() {
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
+            <Route path="/system/playbook-studio" element={<PlaybookStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
+            <Route path="/system/config-templates" element={<SystemCompanyTemplatesPage user={user!} />} />
           </Route>
 
           {/* Subaccount connections */}
-          <Route path="/admin/subaccounts/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
-          <Route path="/portal/:subaccountId/connections" element={<ConnectionsPage user={user!} />} />
+          <Route path="/admin/subaccounts/:subaccountId/connections" element={<SubaccountIntegrationsRoute user={user!} />} />
+          <Route path="/portal/:subaccountId/connections" element={<SubaccountIntegrationsRoute user={user!} />} />
 
           {/* Subaccount team */}
           <Route path="/admin/subaccounts/:subaccountId/team" element={<SubaccountTeamPage user={user!} />} />

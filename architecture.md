@@ -68,6 +68,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Executions | `executions.ts` |
 | Integration connections | `integrationConnections.ts` |
 | LLM usage | `llmUsage.ts` |
+| Web login connections (Reporting Agent) | `webLoginConnections.ts` |
 
 ### Shared route helpers
 
@@ -152,6 +153,28 @@ Subaccount Agent (subaccountAgents table)
 | `parentAgentId` | agents | Org-level hierarchy parent |
 | `parentSubaccountAgentId` | subaccountAgents | Subaccount-level hierarchy parent |
 
+### Subaccount agent link overrides
+
+`subaccountAgents` is not a thin join table — it carries a full set of per-link overrides so the same org agent can behave differently in each subaccount without cloning the agent definition. Overrides are edited from `/admin/subaccounts/:subaccountId/agents/:linkId/manage` (`SubaccountAgentEditPage`), which presents four tabs: **Skills**, **Instructions**, **Budget**, **Scheduling**.
+
+| Column | Override semantics |
+|--------|--------------------|
+| `skillSlugs` | Per-link skill list. `null` means "inherit the agent's `defaultSkillSlugs`"; an array replaces it entirely. The skill picker (`SkillPickerSection`) shows org skills and system skills side by side. |
+| `customInstructions` | Appended to the agent's `additionalPrompt` at run time. Scoped per subaccount — lets an org agent speak the subaccount's language without org-wide edits. Max 10 000 chars. |
+| `tokenBudgetPerRun` / `maxToolCallsPerRun` / `timeoutSeconds` / `maxCostPerRunCents` / `maxLlmCallsPerRun` | Hard ceilings enforced by `runCostBreaker` and the execution loop. `maxCostPerRunCents` plugs into the shared cost circuit breaker (`server/lib/runCostBreaker.ts`). |
+| `heartbeatEnabled` / `heartbeatIntervalHours` / `heartbeatOffsetMinutes` | Per-subaccount schedule. Overrides the org agent's heartbeat so different clients can run at different cadences / offsets. |
+| `scheduleCron` / `scheduleEnabled` / `scheduleTimezone` | Cron-based schedule (alternative to heartbeat interval). Schedule changes go through `agentScheduleService.updateSchedule` — **never mutate these columns directly**, or the pg-boss cron registration drifts from the DB. |
+| `concurrencyPolicy` / `catchUpPolicy` / `catchUpCap` / `maxConcurrentRuns` | Concurrency and missed-run behaviour for the scheduler. |
+
+**Skill resolution cascade.** `skillService.getTools()` now falls back from the org `skills` table to `systemSkillService` (file-based system skills under `server/skills/*.md`) when a requested slug has no org-tier override. This means a subaccount link can reference system skills by slug directly without requiring an org to shadow-copy every platform skill.
+
+**Route conventions.** All subaccount agent override endpoints live in `server/routes/subaccountAgents.ts`:
+- `POST /api/subaccounts/:subaccountId/agents` — link an agent (duplicate link → `409` via `{ statusCode: 409, message }`, never a raw Postgres `23505`)
+- `GET /api/subaccounts/:subaccountId/agents/:linkId/detail` — fetch a single link (note: the `/detail` suffix avoids shadowing the `/tree` route on the same prefix)
+- `PATCH /api/subaccounts/:subaccountId/agents/:linkId` — update any subset of the override columns above; schedule fields are forwarded to `agentScheduleService` before the DB update
+
+Every override column is validated by `server/schemas/subaccountAgents.ts` (Zod) with `.partial()` on the update body, and the handler uses the `'key' in req.body` pattern so explicit `null` writes (e.g. clearing `customInstructions`) are distinguishable from "not sent".
+
 ---
 
 ## Task System
@@ -215,10 +238,32 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 29 built
 | Workspace | `read_workspace`, `write_workspace`, `read_codebase` |
 | Task management | `create_task`, `move_task`, `update_task`, `reassign_task`, `add_deliverable` |
 | Testing | `run_tests`, `run_playwright_test`, `write_tests` |
-| Code | `review_code`, `write_patch`, `search_codebase` |
-| Integration | `web_search`, `fetch_url`, `send_email` |
+| Code | `review_code`, `write_patch`, `search_codebase`, `create_pr` |
+| Integration | `web_search`, `fetch_url`, `fetch_paywalled_content`, `send_email`, `send_to_slack`, `transcribe_audio` |
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
+| Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux` |
+
+`send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
+
+### Skill visibility cascade (migration 0074)
+
+Skills now use a three-state visibility cascade `system → organisation → subaccount`. At every level the owner sets `visibility`:
+
+| Value | Effect on lower tiers |
+|-------|----------------------|
+| `none` | Skill is invisible — filtered from lists entirely |
+| `basic` | Name + one-line description visible; body fields stripped |
+| `full` | Everything visible (instructions, methodology, full definition) |
+
+Helpers in `server/lib/skillVisibility.ts`:
+
+- `isVisibleToViewer()` — should this skill appear in the viewer's list?
+- `canViewContents()` — may the viewer read body fields?
+- `canManageSkill()` — separate permission check; visibility never grants edit rights.
+
+Owner-tier viewers always see `full` regardless of the visibility value. Visibility only restricts; it never expands.
 
 ### Skill executor & processor hooks
 
@@ -339,15 +384,80 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ## Migrations
 
-41 migrations (0001–0041). Schema changes go through Drizzle migration files in `migrations/`. Never write raw SQL schema changes outside migrations.
+75 migrations (0001–0075). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
-- `0042` — playbooks: templates, versions, runs, step runs (Playbooks feature)
+- `0077` — `hierarchy_templates.system_template_id` — adds the nullable back-reference that `orgConfigService.getOperationalConfig` and `systemTemplateService.loadTemplate` already required. Closes a schema/code drift that had left the server tsc build red on main.
+- `0076` — playbooks: templates, versions, runs, step runs (Playbooks feature — shipped in PR #87)
+- `0075` — drop stale connection unique indexes (integration connection cleanup)
+- `0074` — `skills.visibility` three-state cascade (`none` / `basic` / `full`) replacing the boolean `contentsVisible`
+- `0073` — Reporting Agent paywall workflow (web login connections, IEE artifacts/runs/steps extensions, agent run extensions)
+- `0072` — original `skills.contentsVisible` flag (superseded by 0074 three-state cascade)
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
 - `0039` — GitHub App schema
 - `0037` — workspace memory + workflow schema
 - `0036` — review queue + OAuth tables
+
+---
+
+## Shared Infrastructure (use these — do not reinvent)
+
+The following modules exist as **single-emit-point** primitives. New features must reuse them; bypassing them is a blocking issue in code review. Several are enforced by lint rules.
+
+### Retry / backoff — `server/lib/withBackoff.ts`
+
+Unified retry helper. **All external-call retries (LLM, integrations, webhooks, future engines) must go through this** rather than per-call `setTimeout`/`Math.pow` loops. Lint rule bans ad-hoc backoff outside this file.
+
+```typescript
+withBackoff({
+  label: 'whisper.transcribe',
+  isRetryable: (err) => isTransient(err),
+  maxAttempts: 3,
+  baseDelayMs: 500,
+  maxDelayMs: 8000,
+  retryAfterMs: (err) => parseRetryAfterHeader(err),
+}, async () => callExternal())
+```
+
+Honours `Retry-After` headers, exponential backoff with full jitter, structured logging per attempt.
+
+### Run cost circuit breaker — `server/lib/runCostBreaker.ts`
+
+Hard ceiling on per-run spend. Reads `subaccount_agents.maxCostPerRunCents` (default 100¢). Throws via the unified failure helper on overage. **Every cost-incurring boundary must call the breaker** — LLM router after each call, external integrations before each call. Prevents runaway loops from racking up real spend.
+
+### Failure helper — `shared/iee/failure.ts`
+
+**Single emit point for structured failures.** Every failure persisted to `agent_runs`, `execution_runs`, `execution_steps`, or any future run-like table must be constructed via `failure(reason, detail, metadata?)`. Inline `{ failureReason: '...' }` literals are banned by lint rule and a Zod check at the persistence boundary. Enriches metadata with `runId` + `correlationId` from AsyncLocalStorage.
+
+```typescript
+import { failure } from '../../shared/iee/failure.js';
+throw failure('cost_exceeded', 'whisper_call_blocked', { spentCents, limitCents });
+```
+
+`FailureReason` is a closed enum in `shared/iee/failureReason.ts` — adding new reasons requires a schema update.
+
+### Skill visibility — `server/lib/skillVisibility.ts`
+
+Drives whether a skill's output body is surfaced to downstream consumers (`skills.contentsVisible` flag, migration 0072). New skills decide visibility explicitly; default is hidden.
+
+### URL canonicalisation — `server/lib/canonicaliseUrl.ts`
+
+Single canonicalisation path for URLs across the system (deduplication, comparison, idempotency keys). Use it when storing or hashing URLs.
+
+### Other shared primitives
+
+| Module | Purpose |
+|--------|---------|
+| `server/lib/inlineTextWriter.ts` | Append-only text artefacts inside runs |
+| `server/lib/reportingAgentInvariant.ts` | End-of-run invariant checks (T25 pattern — assert run reached a terminal state with a structured outcome) |
+| `server/lib/reportingAgentRunHook.ts` | Reporting Agent post-run hook |
+| `server/services/fetchPaywalledContentService.ts` | Paywall-aware fetch (uses stored web login connection + browser worker) |
+| `worker/src/browser/captureStreamingVideo.ts` | Snoop-and-refetch video downloader for the `capture_video` mode of `browserTask` (HLS / DASH support) |
+| `scripts/migrate.ts` | Custom forward-only SQL migration runner — replaces `drizzle-kit migrate` for deploys |
+| `scripts/seed-42macro-reporting-agent.ts` | Reference seeder pattern for system-managed agents + skill bundles |
+
+---
 
 ---
 
@@ -388,7 +498,7 @@ Playbook Run (playbookRuns)
 
 **Playbooks are authored at the org tier, executed at the subaccount tier.** Subaccounts never own template definitions — this avoids template drift across subaccounts. If a subaccount needs a variant, fork the template at org level and tag applicability.
 
-### Schema (migration 0042)
+### Schema (migration 0076)
 
 | Table | Purpose |
 |-------|---------|
@@ -477,25 +587,42 @@ Three layers, all required:
 
 ### Reuse of existing systems
 
-- **Agent runs** — `agent_call` step type creates an `agentRun` with `playbookStepRunId` set. The full three-tier agent model, skill system, handoff, and budget tracking are reused unchanged.
+- **Agent runs** — `agent_call` step type creates an `agentRun` with `playbookStepRunId` set (new column on `agentRuns` added alongside migration 0076). The full three-tier agent model, skill system, handoff, and budget tracking are reused unchanged. The `prompt` step type uses the same dispatch path (unified via `agent_call/prompt dispatch` in deferred #1) — a `prompt` step is a zero-skill agent call against the org's default model.
+- **Input-hash reuse** — dispatch derives an input hash per step from `(stepId, resolvedInputs)`. If a previous step run in the same run (or a prior run under the same `idempotencyKey` scope) has a matching hash and a valid output, the engine reuses the output instead of dispatching. (Deferred #1.)
 - **Review queue** — `approval` step type creates a `reviewItem`. HITL flow is unchanged.
-- **pg-boss** — engine ticks are jobs on the `playbook-run-tick` queue. Same infrastructure as heartbeats.
+- **pg-boss** — engine ticks are jobs on the `playbook-run-tick` queue. Same infrastructure as heartbeats. Job config lives in `server/config/jobConfig.ts`.
 - **Idempotency keys** — step-level agent runs use `playbook:{runId}:{stepId}:{attempt}` as the key.
-- **WebSocket rooms** — run updates broadcast on the subaccount room; a dedicated `playbook-run:{runId}` room streams per-step progress to detail UI.
+- **WebSocket rooms** — run updates broadcast on the subaccount room; a dedicated `playbook-run:{runId}` room streams per-step progress to detail UI. Emitters live in `server/websocket/emitters.ts` and `server/websocket/rooms.ts`; events cover step dispatch, step completion, approval state changes, form-input requests, and run-level state transitions. (Deferred #4.)
 - **Audit events** — run start, step completion, edits, approvals, template publish all emit audit events.
 
 ### Routes
 
 | Route | File | Purpose |
 |-------|------|---------|
-| `/api/system/playbook-templates` | `systemPlaybookTemplates.ts` | System admin CRUD on platform templates |
-| `/api/playbook-templates` | `playbookTemplates.ts` | Org CRUD, fork from system, publish version |
-| `/api/playbook-templates/:id/versions` | `playbookTemplates.ts` | List/get versions |
-| `/api/subaccounts/:subaccountId/playbook-runs` | `playbookRuns.ts` | List, start, cancel runs |
+| `/api/system/playbook-templates` | `playbookTemplates.ts` | System admin: list/read platform templates + versions |
+| `/api/system/playbook-templates/:slug` | `playbookTemplates.ts` | System admin: read a single platform template |
+| `/api/system/playbook-templates/:slug/versions` | `playbookTemplates.ts` | System admin: list versions for a platform template |
+| `/api/playbook-templates` | `playbookTemplates.ts` | Org: list templates (authored + forked) |
+| `/api/playbook-templates/:id` | `playbookTemplates.ts` | Org: read/delete a template |
+| `/api/playbook-templates/:id/versions` | `playbookTemplates.ts` | Org: list/get versions |
+| `/api/playbook-templates/fork-system` | `playbookTemplates.ts` | Org: fork a system template into the org |
+| `/api/playbook-templates/:id/publish` | `playbookTemplates.ts` | Org: publish a new immutable version |
+| `/api/subaccounts/:subaccountId/playbook-runs` | `playbookRuns.ts` | List / start runs for a subaccount |
 | `/api/playbook-runs/:runId` | `playbookRuns.ts` | Run detail, context, step runs |
+| `/api/playbook-runs/:runId/cancel` | `playbookRuns.ts` | Cancel an in-flight run |
+| `/api/playbook-runs/:runId/replay` | `playbookRuns.ts` | Replay-mode rerun (hard external block — see deferred #3) |
 | `/api/playbook-runs/:runId/steps/:stepRunId/input` | `playbookRuns.ts` | Submit form input for `user_input` step |
 | `/api/playbook-runs/:runId/steps/:stepRunId/output` | `playbookRuns.ts` | Edit a completed step's output (invalidates downstream) |
 | `/api/playbook-runs/:runId/steps/:stepRunId/approve` | `playbookRuns.ts` | Approve/reject an `approval` step |
+| `/api/system/playbook-studio/sessions` | `playbookStudio.ts` | System admin chat authoring: list/create/read sessions |
+| `/api/system/playbook-studio/sessions/:id` | `playbookStudio.ts` | Update chat-session candidate file contents |
+| `/api/system/playbook-studio/sessions/:id/save-and-open-pr` | `playbookStudio.ts` | Trust-boundary: validate + render + commit + open PR (server is the only producer of the file body) |
+| `/api/system/playbook-studio/playbooks` | `playbookStudio.ts` | List on-disk `server/playbooks/*.playbook.ts` slugs |
+| `/api/system/playbook-studio/playbooks/:slug` | `playbookStudio.ts` | Read a specific on-disk playbook file |
+| `/api/system/playbook-studio/validate` | `playbookStudio.ts` | `validate_candidate` tool — returns canonical `definitionHash` on success |
+| `/api/system/playbook-studio/simulate` | `playbookStudio.ts` | `simulate_run` tool — dry-run side-effect classification |
+| `/api/system/playbook-studio/estimate` | `playbookStudio.ts` | `estimate_cost` tool — optimistic/pessimistic cost bounds |
+| `/api/system/playbook-studio/render` | `playbookStudio.ts` | Deterministic file preview — what the save endpoint would commit |
 
 All routes follow the standard conventions: `asyncHandler`, `authenticate`, `resolveSubaccount` where applicable, org scoping via `req.orgId`, no direct `db` access, service errors as `{ statusCode, message, errorCode }`.
 
@@ -504,9 +631,13 @@ All routes follow the standard conventions: `asyncHandler`, `authenticate`, `res
 | Service | Responsibility |
 |---------|---------------|
 | `playbookTemplateService` | CRUD, fork from system, version publishing, validation of DAG (no cycles, all deps resolvable, output schemas valid) |
-| `playbookEngineService` | State machine ticks, step dispatch, context merging, downstream invalidation |
-| `playbookRunService` | Run lifecycle — start, cancel, query, surface to UI |
-| `playbookTemplatingService` | Resolves `{{ steps.x.output.y }}` expressions against run context; pure function, unit-testable |
+| `playbookEngineService` | State machine ticks, step dispatch, context merging, downstream invalidation, mid-run edit cascade with output-hash firewall |
+| `playbookRunService` | Run lifecycle — start, cancel, replay, query, surface to UI |
+| `playbookAgentRunHook` | Post-run hook that bridges `agent_call` step completion back into the engine tick |
+| `playbookStudioService` | Chat authoring back-end: sessions, `validate`/`simulate`/`estimate`/`render` tools, `saveAndOpenPr` trust boundary |
+| `playbookStudioGithub` | Real GitHub PR creation path used by `saveAndOpenPr` (deferred #5) |
+
+The templating/validator/renderer/hash primitives live under `server/lib/playbook/` (`templating.ts`, `validator.ts`, `renderer.ts`, `canonicalJson.ts`, `hash.ts`, `definePlaybook.ts`) so they can be imported by both the engine and the Studio tools without pulling in service layer state. They are pure and unit-tested (`server/lib/playbook/__tests__/playbook.test.ts`).
 
 ### Permissions
 
@@ -519,21 +650,19 @@ Integrate into the existing permission set UI.
 
 ### Client UI
 
-**Phase 1 — Run execution UI (ship with engine):**
+**Run execution UI (shipped):**
 
-- `/playbooks` — list of available templates (org + forked from system), "Start Run" picker
-- `/subaccounts/:id/playbook-runs` — list of runs for a subaccount, status + progress (e.g. 7/15)
-- `/playbook-runs/:runId` — run detail: vertical stepper showing DAG, each step expandable with inputs/output, edit button on completed steps, inline forms for `user_input` steps, approval UI for `approval` steps, live updates via WebSocket
-- "Needs your input" inbox surfacing all paused runs across subaccounts the user has access to
+- `/playbooks` — `PlaybooksLibraryPage` — list of available templates (org + forked from system), "Start Run" picker. Permission-gated on `org.agents.view` OR `org.playbook_templates.read`.
+- `/playbook-runs/:runId` — `PlaybookRunDetailPage` — run detail: vertical stepper showing DAG, each step expandable with inputs/output, edit button on completed steps, inline forms for `user_input` steps, approval UI for `approval` steps, live updates via WebSocket (deferred #4).
+- "Needs your input" is surfaced through the standard Inbox page — paused playbook runs route through `reviewItems` for approvals and through a dedicated inbox entry for `user_input` steps.
 
-**Phase 2 — Visual template builder:**
+**Playbook Studio (shipped — system-admin chat authoring):**
 
-- `/playbook-templates/:id/edit` — canvas-based DAG editor (nodes = steps, edges = dependencies)
-- Sidebar for editing each step (type, prompt, agent, input mapping, output schema)
-- Version history + diff view
-- Test-run mode against a dummy subaccount
+- `/system/playbook-studio` — `PlaybookStudioPage` — chat-driven authoring experience. Backed by the `playbook-author` system agent (`server/agents/playbook-author/master-prompt.md`) with the five `playbook_*` skills (`playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save`). Read-only file preview is rendered server-side via `/render` — the client never constructs the file body.
 
-Phase 1 ships with templates seeded from code/JSON. Phase 2 is a separate feature-coordinator pipeline.
+**Author agent (deferred #6):** The Playbook Author is a system-managed agent — cannot be edited or deleted at org tier. Seeded via `scripts/seed-playbook-author.ts`. It is the only caller of the Studio tools; org agents do not get access to Studio endpoints (blocked by `requireSystemAdmin`).
+
+**Seeded templates:** Phase 1 ships with `server/playbooks/event-creation.playbook.ts` as the reference system template. `npm run playbooks:validate` runs DAG validation on every seeded file in CI; `npm run playbooks:seed` loads them into `systemPlaybookTemplates`.
 
 ### Invariants (non-negotiable)
 
@@ -542,11 +671,15 @@ Phase 1 ships with templates seeded from code/JSON. Phase 2 is a separate featur
 - Step output is validated against `outputSchema` before merging into run context.
 - **Every step declares a `sideEffectType`.** No defaults. CI fails if any seeded playbook has a step without one.
 - Mid-run editing **never auto-re-executes `irreversible` steps** — user must explicitly opt in per step or choose skip-and-reuse.
+- **Output-hash firewall on invalidation** — when a re-executed step produces a byte-identical output (canonical-JSON hash) to the previous attempt, invalidation stops propagating. Prevents cost explosions when an "edit" is a no-op save. (Deferred #2.)
 - Templating resolver **must use `Object.create(null)` contexts** and blocklist `__proto__`/`constructor`/`prototype`. Whitelist allowed top-level prefixes (`run.input.`, `run.subaccount.`, `run.org.`, `steps.`).
 - Tick jobs **must be enqueued with `singletonKey: runId`** to prevent tick storms.
 - Tick handlers **must use the non-blocking advisory lock variant**. Blocking is forbidden.
 - Step completion + tick enqueue happen in a single DB transaction; the watchdog is the safety net, not the primary mechanism.
 - `agent_call` steps respect the full budget, handoff depth, and policy engine rules — the engine never bypasses existing guardrails.
+- **Replay mode is hard-blocked from external side effects.** When a run is started in replay mode, any step with `sideEffectType !== 'none' && sideEffectType !== 'idempotent'` is refused at dispatch — not just warned. (Deferred #3.)
+- **Playbook Studio save endpoint is the trust boundary.** The server is the only producer of the `.playbook.ts` file body: the endpoint accepts the validated `definition` object only, and deterministically renders the file via `validateAndRender`. There is no field on the endpoint that a caller can use to inject arbitrary file content. (Deferred #5, PR #87 round 3.)
+- **Definition hash is stamped into the committed file** as a `@playbook-definition-hash` magic comment so drift between the `definitionJson` and the file body is detectable post-commit.
 - Org scoping applies to templates (`organisationId`) and runs (`organisationId` via subaccount).
 
 ---

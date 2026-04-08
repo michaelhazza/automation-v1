@@ -195,7 +195,7 @@ export async function queryIeeUsage(input: QueryUsageInput): Promise<QueryUsageR
     conditions.push(inArray(ieeRuns.type, input.types));
   }
   if (input.failureReasons && input.failureReasons.length > 0) {
-    conditions.push(inArray(ieeRuns.failureReason, input.failureReasons));
+    conditions.push(inArray(ieeRuns.failureReason, input.failureReasons as never[]));
   }
   if (typeof input.minCostCents === 'number' && input.minCostCents > 0) {
     conditions.push(gte(ieeRuns.totalCostCents, input.minCostCents));

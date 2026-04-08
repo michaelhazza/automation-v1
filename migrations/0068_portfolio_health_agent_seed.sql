@@ -39,7 +39,7 @@ Focus on actionable intelligence. Flag what matters. Skip what doesn''t.',
 
 -- GHL Agency Intelligence: system hierarchy template
 INSERT INTO system_hierarchy_templates (
-  id, name, description, status,
+  id, name, description, is_published,
   required_connector_type, operational_defaults, memory_seeds_json,
   required_operator_inputs,
   created_at, updated_at
@@ -47,7 +47,7 @@ INSERT INTO system_hierarchy_templates (
   gen_random_uuid(),
   'GHL Agency Intelligence',
   'Complete intelligence template for GoHighLevel agencies managing client portfolios. Includes portfolio health monitoring, anomaly detection, churn risk scoring, and HITL-gated interventions.',
-  'published',
+  true,
   'ghl',
   '{
     "healthScoreFactors": [

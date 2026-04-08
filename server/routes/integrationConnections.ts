@@ -1,6 +1,7 @@
 /**
  * Integration connection routes — subaccount-scoped.
  * Manages OAuth/API key connections per subaccount.
+ * Org-level connection routes live in orgConnections.ts.
  */
 
 import { Router } from 'express';
@@ -126,9 +127,12 @@ router.patch(
 
     const [updated] = await db.update(integrationConnections)
       .set(updates)
-      .where(eq(integrationConnections.id, req.params.id))
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.subaccountId, subaccount.id),
+      ))
       .returning();
-
+    if (!updated) throw { statusCode: 404, message: 'Connection not found' };
     res.json(sanitizeConnection(updated));
   })
 );
@@ -152,7 +156,10 @@ router.delete(
     // Revoke rather than hard delete — keeps audit trail
     await db.update(integrationConnections)
       .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
-      .where(eq(integrationConnections.id, req.params.id));
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.subaccountId, subaccount.id),
+      ));
 
     res.json({ success: true });
   })
@@ -220,3 +227,4 @@ router.get(
 );
 
 export default router;
+

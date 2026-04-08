@@ -30,7 +30,7 @@ export const actions = pgTable(
 
     // Action definition
     actionType: text('action_type').notNull(),
-    actionCategory: text('action_category').notNull().$type<'api' | 'worker' | 'browser' | 'devops'>(),
+    actionCategory: text('action_category').notNull().$type<'api' | 'worker' | 'browser' | 'devops' | 'mcp'>(),
     isExternal: boolean('is_external').notNull().default(false),
     gateLevel: text('gate_level').notNull().$type<'auto' | 'review' | 'block'>(),
 

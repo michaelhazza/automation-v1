@@ -2,6 +2,7 @@
 name: Create Task
 description: Create a new task (card) on the workspace board.
 isActive: true
+visibility: basic
 ---
 
 ```json

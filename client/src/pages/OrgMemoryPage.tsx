@@ -31,7 +31,7 @@ const ENTRY_TYPE_CLS: Record<string, string> = {
 
 type Tab = 'summary' | 'entries';
 
-export default function OrgMemoryPage() {
+export default function OrgMemoryPage({ embedded }: { embedded?: boolean } = {}) {
   const [memory, setMemory] = useState<OrgMemory | null>(null);
   const [entries, setEntries] = useState<OrgMemoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,10 +86,12 @@ export default function OrgMemoryPage() {
 
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
-      <div className="mb-6">
-        <h1 className="text-[24px] font-bold text-slate-900 mt-0 mb-1">Organisation Memory</h1>
-        <p className="text-[14px] text-slate-500 m-0">Cross-subaccount intelligence compiled from agent runs across your organisation.</p>
-      </div>
+      {!embedded && (
+        <div className="mb-6">
+          <h1 className="text-[24px] font-bold text-slate-900 mt-0 mb-1">Organisation Memory</h1>
+          <p className="text-[14px] text-slate-500 m-0">Cross-subaccount intelligence compiled from agent runs across your organisation.</p>
+        </div>
+      )}
 
       {error && (
         <div className="px-4 py-3 bg-red-50 border border-red-200 text-red-700 rounded-lg mb-4 text-[14px] flex justify-between items-center">

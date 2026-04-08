@@ -73,23 +73,28 @@ export const subaccountAgentService = {
       .from(agents)
       .where(eq(agents.id, agentId));
 
-    const [link] = await db
-      .insert(subaccountAgents)
-      .values({
-        organisationId,
-        subaccountId,
-        agentId,
-        isActive: true,
-        skillSlugs: fullAgent?.defaultSkillSlugs ?? null,
-        heartbeatEnabled: fullAgent?.heartbeatEnabled ?? false,
-        heartbeatIntervalHours: fullAgent?.heartbeatIntervalHours ?? null,
-        heartbeatOffsetHours: fullAgent?.heartbeatOffsetHours ?? 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-
-    return link;
+    try {
+      const [link] = await db
+        .insert(subaccountAgents)
+        .values({
+          organisationId,
+          subaccountId,
+          agentId,
+          isActive: true,
+          skillSlugs: fullAgent?.defaultSkillSlugs ?? null,
+          heartbeatEnabled: fullAgent?.heartbeatEnabled ?? false,
+          heartbeatIntervalHours: fullAgent?.heartbeatIntervalHours ?? null,
+          heartbeatOffsetHours: fullAgent?.heartbeatOffsetHours ?? 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+      return link;
+    } catch (err: unknown) {
+      const e = err as { code?: string };
+      if (e.code === '23505') throw { statusCode: 409, message: 'Agent is already linked to this subaccount' };
+      throw err;
+    }
   },
 
   async unlinkAgent(organisationId: string, subaccountId: string, agentId: string) {
@@ -110,21 +115,76 @@ export const subaccountAgentService = {
     await db.delete(subaccountAgents).where(eq(subaccountAgents.id, link.id));
   },
 
-  async toggleActive(organisationId: string, linkId: string, isActive: boolean) {
-    const [link] = await db
-      .select()
+  async getLinkById(organisationId: string, subaccountId: string, linkId: string) {
+    const [row] = await db
+      .select({
+        link: subaccountAgents,
+        agentName: agents.name,
+        agentSlug: agents.slug,
+        agentDescription: agents.description,
+        agentIcon: agents.icon,
+        agentStatus: agents.status,
+        agentModelProvider: agents.modelProvider,
+        agentModelId: agents.modelId,
+        agentDefaultSkillSlugs: agents.defaultSkillSlugs,
+      })
       .from(subaccountAgents)
-      .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)));
+      .innerJoin(agents, eq(agents.id, subaccountAgents.agentId))
+      .where(
+        and(
+          eq(subaccountAgents.id, linkId),
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+        )
+      )
+      .limit(1);
 
-    if (!link) throw { statusCode: 404, message: 'Agent link not found' };
+    if (!row) throw { statusCode: 404, message: 'Agent link not found' };
 
-    const [updated] = await db
-      .update(subaccountAgents)
-      .set({ isActive, updatedAt: new Date() })
-      .where(eq(subaccountAgents.id, linkId))
-      .returning();
-
-    return updated;
+    const { link, agentName, agentSlug, agentDescription, agentIcon, agentStatus, agentModelProvider, agentModelId, agentDefaultSkillSlugs } = row;
+    return {
+      id: link.id,
+      agentId: link.agentId,
+      subaccountId: link.subaccountId,
+      organisationId: link.organisationId,
+      isActive: link.isActive,
+      parentSubaccountAgentId: link.parentSubaccountAgentId,
+      agentRole: link.agentRole,
+      agentTitle: link.agentTitle,
+      scheduleCron: link.scheduleCron,
+      scheduleEnabled: link.scheduleEnabled,
+      scheduleTimezone: link.scheduleTimezone,
+      concurrencyPolicy: link.concurrencyPolicy,
+      catchUpPolicy: link.catchUpPolicy,
+      catchUpCap: link.catchUpCap,
+      maxConcurrentRuns: link.maxConcurrentRuns,
+      heartbeatEnabled: link.heartbeatEnabled,
+      heartbeatIntervalHours: link.heartbeatIntervalHours,
+      heartbeatOffsetHours: link.heartbeatOffsetHours,
+      heartbeatOffsetMinutes: link.heartbeatOffsetMinutes,
+      tokenBudgetPerRun: link.tokenBudgetPerRun,
+      maxToolCallsPerRun: link.maxToolCallsPerRun,
+      timeoutSeconds: link.timeoutSeconds,
+      skillSlugs: link.skillSlugs,
+      customInstructions: link.customInstructions,
+      maxCostPerRunCents: link.maxCostPerRunCents,
+      maxLlmCallsPerRun: link.maxLlmCallsPerRun,
+      lastRunAt: link.lastRunAt,
+      nextRunAt: link.nextRunAt,
+      createdAt: link.createdAt,
+      updatedAt: link.updatedAt,
+      agent: {
+        id: link.agentId,
+        name: agentName,
+        slug: agentSlug,
+        description: agentDescription,
+        icon: agentIcon,
+        status: agentStatus,
+        modelProvider: agentModelProvider,
+        modelId: agentModelId,
+        defaultSkillSlugs: (agentDefaultSkillSlugs ?? []) as string[],
+      },
+    };
   },
 
   async updateLink(organisationId: string, linkId: string, data: {
@@ -135,10 +195,18 @@ export const subaccountAgentService = {
     heartbeatEnabled?: boolean;
     heartbeatIntervalHours?: number | null;
     heartbeatOffsetHours?: number;
+    heartbeatOffsetMinutes?: number;
     concurrencyPolicy?: 'skip_if_active' | 'coalesce_if_active' | 'always_enqueue';
     catchUpPolicy?: 'skip_missed' | 'enqueue_missed_with_cap';
     catchUpCap?: number;
     maxConcurrentRuns?: number;
+    skillSlugs?: string[] | null;
+    customInstructions?: string | null;
+    tokenBudgetPerRun?: number;
+    maxToolCallsPerRun?: number;
+    timeoutSeconds?: number;
+    maxCostPerRunCents?: number | null;
+    maxLlmCallsPerRun?: number | null;
   }) {
     const [link] = await db
       .select()
@@ -154,11 +222,20 @@ export const subaccountAgentService = {
     if (data.heartbeatEnabled !== undefined) update.heartbeatEnabled = data.heartbeatEnabled;
     if (data.heartbeatIntervalHours !== undefined) update.heartbeatIntervalHours = data.heartbeatIntervalHours;
     if (data.heartbeatOffsetHours !== undefined) update.heartbeatOffsetHours = data.heartbeatOffsetHours;
+    if (data.heartbeatOffsetMinutes !== undefined) update.heartbeatOffsetMinutes = data.heartbeatOffsetMinutes;
     // Concurrency policies
     if (data.concurrencyPolicy !== undefined) update.concurrencyPolicy = data.concurrencyPolicy;
     if (data.catchUpPolicy !== undefined) update.catchUpPolicy = data.catchUpPolicy;
     if (data.catchUpCap !== undefined) update.catchUpCap = data.catchUpCap;
     if (data.maxConcurrentRuns !== undefined) update.maxConcurrentRuns = data.maxConcurrentRuns;
+    // Skills, instructions, budget
+    if ('skillSlugs' in data) update.skillSlugs = data.skillSlugs ?? null;
+    if ('customInstructions' in data) update.customInstructions = data.customInstructions ?? null;
+    if (data.tokenBudgetPerRun !== undefined) update.tokenBudgetPerRun = data.tokenBudgetPerRun;
+    if (data.maxToolCallsPerRun !== undefined) update.maxToolCallsPerRun = data.maxToolCallsPerRun;
+    if (data.timeoutSeconds !== undefined) update.timeoutSeconds = data.timeoutSeconds;
+    if ('maxCostPerRunCents' in data) update.maxCostPerRunCents = data.maxCostPerRunCents ?? null;
+    if ('maxLlmCallsPerRun' in data) update.maxLlmCallsPerRun = data.maxLlmCallsPerRun ?? null;
 
     if ('parentSubaccountAgentId' in data) {
       const parentId = data.parentSubaccountAgentId;
@@ -172,7 +249,7 @@ export const subaccountAgentService = {
     const [updated] = await db
       .update(subaccountAgents)
       .set(update)
-      .where(eq(subaccountAgents.id, linkId))
+      .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)))
       .returning();
 
     return updated;

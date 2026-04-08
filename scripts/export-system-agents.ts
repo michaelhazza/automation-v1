@@ -23,10 +23,12 @@ const db = drizzle(pool);
 // ---------------------------------------------------------------------------
 
 const HEADERS = [
-  'slug', 'name', 'description', 'icon', 'masterPrompt',
-  'modelProvider', 'modelId', 'temperature', 'maxTokens',
+  'slug', 'name', 'description', 'icon', 'agentRole', 'agentTitle',
+  'masterPrompt', 'modelProvider', 'modelId', 'temperature', 'maxTokens',
   'defaultSystemSkillSlugs', 'defaultOrgSkillSlugs',
-  'defaultTokenBudget', 'defaultMaxToolCalls', 'executionMode',
+  'defaultTokenBudget', 'defaultMaxToolCalls',
+  'executionMode', 'executionScope',
+  'heartbeatEnabled', 'heartbeatIntervalHours', 'heartbeatOffsetHours', 'heartbeatOffsetMinutes',
   'isPublished', 'status', 'defaultScheduleCron',
 ];
 
@@ -66,6 +68,8 @@ async function exportAgents(outputPath: string) {
       agent.name,
       agent.description,
       agent.icon,
+      agent.agentRole,
+      agent.agentTitle,
       agent.masterPrompt,
       agent.modelProvider,
       agent.modelId,
@@ -76,6 +80,11 @@ async function exportAgents(outputPath: string) {
       agent.defaultTokenBudget,
       agent.defaultMaxToolCalls,
       agent.executionMode,
+      agent.executionScope,
+      agent.heartbeatEnabled,
+      agent.heartbeatIntervalHours,
+      agent.heartbeatOffsetHours,
+      agent.heartbeatOffsetMinutes,
       agent.isPublished,
       agent.status,
       agent.defaultScheduleCron,

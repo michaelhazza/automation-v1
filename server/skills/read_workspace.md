@@ -2,6 +2,7 @@
 name: Read Workspace
 description: Read tasks and activities from the shared board.
 isActive: true
+visibility: basic
 ---
 
 ```json

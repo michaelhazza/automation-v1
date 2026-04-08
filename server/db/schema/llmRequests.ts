@@ -131,6 +131,10 @@ export const TASK_TYPES = [
   'scheduling',
   'review',
   'general',
+  // Workspace-memory retrieval helper calls — HyDE query expansion and
+  // post-retrieval context enrichment, both issued by workspaceMemoryService.
+  'hyde_expansion',
+  'context_enrichment',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];

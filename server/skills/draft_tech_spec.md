@@ -2,6 +2,7 @@
 name: Draft Tech Spec
 description: Produces technical specification artifacts (OpenAPI, ERD, sequence diagrams) for significant API or schema changes. Invoked on Major classified tasks.
 isActive: true
+visibility: basic
 ---
 
 ```json

@@ -4,15 +4,16 @@ import api from '../lib/api';
 import { User, getActiveClientId, getActiveClientName } from '../lib/auth';
 import HeartbeatEditor from '../components/HeartbeatEditor';
 // Inline SVG icons (matching codebase convention — no lucide-react dependency)
-const Ico = ({ children, ...props }: { children: React.ReactNode } & React.SVGProps<SVGSVGElement>) => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>{children}</svg>
+const Ico = ({ children, size, ...props }: { children: React.ReactNode; size?: number } & React.SVGProps<SVGSVGElement>) => (
+  <svg width={size ?? 16} height={size ?? 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>{children}</svg>
 );
-const ZoomIn = (props: React.SVGProps<SVGSVGElement>) => <Ico {...props}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></Ico>;
-const ZoomOut = (props: React.SVGProps<SVGSVGElement>) => <Ico {...props}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></Ico>;
-const Maximize2 = (props: React.SVGProps<SVGSVGElement>) => <Ico {...props}><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></Ico>;
-const Plus = (props: React.SVGProps<SVGSVGElement>) => <Ico {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Ico>;
-const LayoutGrid = (props: React.SVGProps<SVGSVGElement>) => <Ico {...props}><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Ico>;
-const GitBranch = (props: React.SVGProps<SVGSVGElement>) => <Ico {...props}><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></Ico>;
+type IcoProps = { size?: number } & React.SVGProps<SVGSVGElement>;
+const ZoomIn = (props: IcoProps) => <Ico {...props}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></Ico>;
+const ZoomOut = (props: IcoProps) => <Ico {...props}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></Ico>;
+const Maximize2 = (props: IcoProps) => <Ico {...props}><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></Ico>;
+const Plus = (props: IcoProps) => <Ico {...props}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Ico>;
+const LayoutGrid = (props: IcoProps) => <Ico {...props}><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></Ico>;
+const GitBranch = (props: IcoProps) => <Ico {...props}><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></Ico>;
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { agentScheduleService } from '../services/agentScheduleService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
 import { linkAgentBody, updateLinkBody, createSubaccountDataSourceBody } from '../schemas/subaccountAgents.js';
@@ -34,17 +35,20 @@ router.post(
       res.status(400).json({ error: 'agentId is required' });
       return;
     }
-    try {
-      const link = await subaccountAgentService.linkAgent(req.orgId!, req.params.subaccountId, agentId);
-      res.status(201).json(link);
-    } catch (err: unknown) {
-      const e = err as { code?: string; statusCode?: number; message?: string };
-      if (e.code === '23505') {
-        res.status(409).json({ error: 'Agent is already linked to this subaccount' });
-        return;
-      }
-      throw err;
-    }
+    const link = await subaccountAgentService.linkAgent(req.orgId!, req.params.subaccountId, agentId);
+    res.status(201).json(link);
+  })
+);
+
+// Single link detail — /detail suffix prevents shadowing the /tree route below
+router.get(
+  '/api/subaccounts/:subaccountId/agents/:linkId/detail',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const link = await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
+    res.json(link);
   })
 );
 
@@ -80,8 +84,11 @@ router.patch(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const {
       isActive, parentSubaccountAgentId, agentRole, agentTitle,
-      heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours,
+      heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetHours, heartbeatOffsetMinutes,
       concurrencyPolicy, catchUpPolicy, catchUpCap, maxConcurrentRuns,
+      scheduleCron, scheduleEnabled, scheduleTimezone,
+      skillSlugs, customInstructions,
+      tokenBudgetPerRun, maxToolCallsPerRun, timeoutSeconds, maxCostPerRunCents, maxLlmCallsPerRun,
     } = req.body as {
       isActive?: boolean;
       parentSubaccountAgentId?: string | null;
@@ -90,11 +97,38 @@ router.patch(
       heartbeatEnabled?: boolean;
       heartbeatIntervalHours?: number | null;
       heartbeatOffsetHours?: number;
+      heartbeatOffsetMinutes?: number;
       concurrencyPolicy?: 'skip_if_active' | 'coalesce_if_active' | 'always_enqueue';
       catchUpPolicy?: 'skip_missed' | 'enqueue_missed_with_cap';
       catchUpCap?: number;
       maxConcurrentRuns?: number;
+      scheduleCron?: string | null;
+      scheduleEnabled?: boolean;
+      scheduleTimezone?: string;
+      skillSlugs?: string[] | null;
+      customInstructions?: string | null;
+      tokenBudgetPerRun?: number;
+      maxToolCallsPerRun?: number;
+      timeoutSeconds?: number;
+      maxCostPerRunCents?: number | null;
+      maxLlmCallsPerRun?: number | null;
     };
+
+    // Verify linkId ownership BEFORE touching the scheduler. Without this
+    // check, a caller with access to one subaccount could supply a foreign
+    // linkId and mutate another tenant's schedule via updateSchedule() which
+    // keys by id only.
+    await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
+
+    // Schedule fields go through agentScheduleService to keep BullMQ registrations in sync
+    if (scheduleCron !== undefined || scheduleEnabled !== undefined || scheduleTimezone !== undefined) {
+      await agentScheduleService.updateSchedule(req.params.linkId, {
+        ...(scheduleCron !== undefined ? { scheduleCron } : {}),
+        ...(scheduleEnabled !== undefined ? { scheduleEnabled } : {}),
+        ...(scheduleTimezone !== undefined ? { scheduleTimezone } : {}),
+      });
+    }
+
     const updated = await subaccountAgentService.updateLink(req.orgId!, req.params.linkId, {
       isActive,
       parentSubaccountAgentId,
@@ -103,10 +137,18 @@ router.patch(
       heartbeatEnabled,
       heartbeatIntervalHours,
       heartbeatOffsetHours,
+      heartbeatOffsetMinutes,
       concurrencyPolicy,
       catchUpPolicy,
       catchUpCap,
       maxConcurrentRuns,
+      ...('skillSlugs' in req.body ? { skillSlugs } : {}),
+      ...('customInstructions' in req.body ? { customInstructions } : {}),
+      tokenBudgetPerRun,
+      maxToolCallsPerRun,
+      timeoutSeconds,
+      ...('maxCostPerRunCents' in req.body ? { maxCostPerRunCents } : {}),
+      ...('maxLlmCallsPerRun' in req.body ? { maxLlmCallsPerRun } : {}),
     });
     res.json(updated);
   })
@@ -120,6 +162,8 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // Verify linkId belongs to this org/subaccount before reading its data sources
+    await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
     const sources = await subaccountAgentService.listSubaccountDataSources(req.params.linkId);
     res.json(sources);
   })

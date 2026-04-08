@@ -2,6 +2,7 @@
 name: Compute Churn Risk
 description: Evaluate churn risk signals for a subaccount and produce a risk score with intervention recommendation
 isActive: true
+visibility: basic
 ---
 
 ```json

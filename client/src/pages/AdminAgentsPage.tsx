@@ -7,6 +7,7 @@ import Modal from '../components/Modal';
 import { useSocket } from '../hooks/useSocket';
 
 const AdminAgentTemplatesPage = lazy(() => import('./AdminAgentTemplatesPage'));
+const OrgAgentConfigsPage = lazy(() => import('./OrgAgentConfigsPage'));
 
 // Live run counts per agent (polled from subaccount live-status isn't per-agent,
 // so we use a simple org-level stat to show the total running count in the header)
@@ -36,7 +37,7 @@ interface TreeNode extends Agent {
   children: TreeNode[];
 }
 
-type PageTab = 'list' | 'team-templates';
+type PageTab = 'list' | 'org-execution' | 'team-templates';
 
 const STATUS_STYLES: Record<string, string> = {
   active:   'bg-green-100 text-green-800',
@@ -115,7 +116,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : 'list';
+  const pageTab: PageTab = tabParam === 'team-templates' ? 'team-templates' : tabParam === 'org-execution' ? 'org-execution' : 'list';
   const switchTab = (tab: PageTab) => setSearchParams(tab === 'list' ? {} : { tab });
   const [agents, setAgents] = useState<Agent[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
@@ -318,7 +319,7 @@ export default function AdminAgentsPage({ user }: { user: User }) {
 
       {/* Tabs */}
       <div className="border-b border-slate-200 mb-6 flex gap-1">
-        {([['list', 'Agents'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
+        {([['list', 'Agents'], ['org-execution', 'Org Execution'], ['team-templates', 'Team Templates']] as const).map(([tab, label]) => (
           <button
             key={tab}
             onClick={() => switchTab(tab as PageTab)}
@@ -332,6 +333,13 @@ export default function AdminAgentsPage({ user }: { user: User }) {
           </button>
         ))}
       </div>
+
+      {/* Org Execution Tab */}
+      {pageTab === 'org-execution' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading org execution...</div>}>
+          <OrgAgentConfigsPage embedded />
+        </Suspense>
+      )}
 
       {/* Team Templates Tab */}
       {pageTab === 'team-templates' && (

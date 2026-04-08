@@ -609,6 +609,9 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.processes.view') && (
                 <NavItem to="/processes" icon={<Icons.automations />} label="Workflows" />
               )}
+              {(hasOrgPerm('org.agents.view') || hasOrgPerm('org.playbook_templates.read')) && (
+                <NavItem to="/playbooks" icon={<Icons.automations />} label="Playbooks" />
+              )}
               {(hasClientPerm('subaccount.workspace.manage') || hasOrgPerm('org.workspace.manage')) && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/scheduled-tasks`} icon={<Icons.scheduled />} label="Scheduled" />
               )}
@@ -658,7 +661,7 @@ export default function Layout({ user, children }: LayoutProps) {
                   to={`/agents/${a.agentId}`}
                   icon={a.agent.icon ? <span className="text-[13px] shrink-0 leading-none">{a.agent.icon}</span> : <Icons.agents />}
                   label={a.agent.name}
-                  manageTo={`/admin/agents/${a.agentId}`}
+                  manageTo={`/admin/subaccounts/${activeClientId}/agents/${a.id}/manage`}
                 />
               ))}
             </>
@@ -689,16 +692,13 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasAnyOrgPerm && (
             <>
               <NavSection label="Organisation" />
+              {(hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
               {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
               {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/org-memory" icon={<Icons.activity />} label="Org Memory" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/org-agent-configs" icon={<Icons.agents />} label="Org Agents" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/hierarchy-templates" icon={<Icons.agents />} label="Templates" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/connectors" icon={<Icons.connections />} label="Connectors" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
           )}
@@ -710,10 +710,12 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/organisations" icon={<Icons.orgs />} label="Organisations" />
               <NavItem to="/system/agents" icon={<Icons.agents />} label="Agents" />
               <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
+              <NavItem to="/system/playbook-studio" icon={<Icons.automations />} label="Playbook Studio" />
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
+              <NavItem to="/system/config-templates" icon={<Icons.agents />} label="Config Templates" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}

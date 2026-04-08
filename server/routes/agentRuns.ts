@@ -61,6 +61,10 @@ router.post(
       taskId,
       idempotencyKey: effectiveIdempotencyKey,
       triggerContext: { triggeredBy: req.user!.id, source: 'manual', executionMode: executionMode ?? 'api' },
+      // Plumb the initiating user through to SkillExecutionContext.userId
+      // so user-scoped tools (Playbook Studio propose_save) can enforce
+      // ownership. Review finding #3.
+      userId: req.user!.id,
     });
 
     res.json(result);
@@ -111,6 +115,8 @@ router.post(
       taskId,
       idempotencyKey: effectiveIdempotencyKey,
       triggerContext: { triggeredBy: req.user!.id, source: 'manual-org' },
+      // Review finding #3 — user-scoped runs carry the principal through.
+      userId: req.user!.id,
     });
 
     res.json(result);

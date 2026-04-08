@@ -62,6 +62,11 @@ export const ORG_PERMISSIONS = {
   MCP_SERVERS_MANAGE: 'org.mcp_servers.manage',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'org.billing.iee.view',
+  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
+  PLAYBOOK_TEMPLATES_READ: 'org.playbook_templates.read',
+  PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
+  PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
+  PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -99,6 +104,12 @@ export const SUBACCOUNT_PERMISSIONS = {
   REVIEW_APPROVE: 'subaccount.review.approve',
   // ── IEE — Integrated Execution Environment (rev 6 §11.5.3) ──────────────
   IEE_USAGE_VIEW: 'subaccount.billing.iee.view',
+  // ── Playbooks (multi-step automation; spec §8.1) ────────────────────────
+  PLAYBOOK_RUNS_READ: 'subaccount.playbook_runs.read',
+  PLAYBOOK_RUNS_START: 'subaccount.playbook_runs.start',
+  PLAYBOOK_RUNS_CANCEL: 'subaccount.playbook_runs.cancel',
+  PLAYBOOK_RUNS_EDIT_OUTPUT: 'subaccount.playbook_runs.edit_output',
+  PLAYBOOK_RUNS_APPROVE: 'subaccount.playbook_runs.approve',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -150,6 +161,11 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.AGENTS_EDIT,   description: 'Edit AI agents',             groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_DELETE, description: 'Delete AI agents',           groupName: 'org.agents' },
   { key: ORG_PERMISSIONS.AGENTS_CHAT,   description: 'Chat with AI agents',        groupName: 'org.agents' },
+  // org.playbooks (multi-step automation; spec §8.1)
+  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_READ,    description: 'View Playbook templates',                       groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
+  { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
@@ -189,6 +205,12 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.mcp_servers
   { key: ORG_PERMISSIONS.MCP_SERVERS_VIEW,   description: 'View MCP server configurations',              groupName: 'org.mcp_servers' },
   { key: ORG_PERMISSIONS.MCP_SERVERS_MANAGE, description: 'Create/edit/delete MCP server configurations', groupName: 'org.mcp_servers' },
+  // subaccount.playbooks (multi-step automation; spec §8.1)
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ,        description: 'View Playbook runs for this subaccount',     groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START,       description: 'Start Playbook runs and submit user input',  groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_CANCEL,      description: 'Cancel running Playbooks',                   groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.playbooks' },
+  { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_APPROVE,     description: 'Decide on Playbook approval gates',          groupName: 'subaccount.playbooks' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────

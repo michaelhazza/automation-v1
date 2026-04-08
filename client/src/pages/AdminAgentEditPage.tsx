@@ -4,17 +4,8 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { RunActivityChart } from '../components/ActivityCharts';
-
-// ─── Interfaces ─────────────────────────────────────────────────────────────
-
-interface AvailableSkill {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  skillType: 'built_in' | 'custom';
-  methodology: string | null;
-}
+import { SkillPickerSection } from '../components/SkillPickerSection';
+import type { AvailableSkill } from '../components/SkillPickerSection';
 
 interface OrgAgentOption {
   id: string;
@@ -372,7 +363,7 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       loadAgent(id);
     }
     // Load available skills for the skills picker
-    api.get('/api/skills').then(({ data }) => setAvailableSkills(data)).catch((err) => console.error('[AdminAgentEdit] Failed to fetch skills:', err));
+    api.get('/api/skills/all').then(({ data }) => setAvailableSkills(data)).catch((err) => console.error('[AdminAgentEdit] Failed to fetch skills:', err));
     // Load all org agents for the parent dropdown
     api.get('/api/agents').then(({ data }) => setAllOrgAgents(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })))).catch((err) => console.error('[AdminAgentEdit] Failed to fetch agents:', err));
   }, [id, isNew]);
@@ -1209,83 +1200,11 @@ export default function AdminAgentEditPage({ user }: { user: User }) {
       {/* ── Capabilities tab ────────────────────────────────────────────── */}
       {!isNew && agentTab === 'capabilities' && <>
       {/* ── Section: Skills ── */}
-      <div className="bg-white rounded-[10px] border border-slate-200 mb-5">
-        <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center">
-          <div>
-            <h2 className="m-0 text-[15px] font-semibold text-slate-900 inline">Skills</h2>
-            {form.defaultSkillSlugs.length > 0 && (
-              <span className="ml-2 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-[2px] rounded-full">
-                {form.defaultSkillSlugs.length} selected
-              </span>
-            )}
-            <div className="text-xs text-slate-500 mt-1">
-              Select which capabilities this agent has access to. Skills provide tools and structured methodology guidance.
-            </div>
-          </div>
-          <Link to="/admin/skills" className="text-xs text-indigo-500 no-underline font-medium whitespace-nowrap">
-            Manage Skills
-          </Link>
-        </div>
-        <div className="p-5">
-          {availableSkills.length === 0 ? (
-            <div className="text-center py-5 text-slate-500 text-[13px]">
-              No skills available. <Link to="/admin/skills/new" className="text-indigo-500">Create one</Link>
-            </div>
-          ) : (
-            <div className="grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
-              {availableSkills.map((skill) => {
-                const isSelected = form.defaultSkillSlugs.includes(skill.slug);
-                return (
-                  <button
-                    key={skill.id}
-                    onClick={() => {
-                      const slugs = isSelected
-                        ? form.defaultSkillSlugs.filter(s => s !== skill.slug)
-                        : [...form.defaultSkillSlugs, skill.slug];
-                      setForm({ ...form, defaultSkillSlugs: slugs });
-                    }}
-                    className={`flex items-start gap-2.5 px-3.5 py-3 rounded-[10px] cursor-pointer text-left transition-all duration-150 font-[inherit] border-[1.5px] ${
-                      isSelected ? 'bg-indigo-50 border-indigo-500' : 'bg-gray-50 border-slate-200'
-                    }`}
-                  >
-                    {/* Checkbox */}
-                    <div className={`w-5 h-5 rounded-md shrink-0 mt-px border-2 flex items-center justify-center transition-all duration-150 ${
-                      isSelected ? 'bg-indigo-500 border-indigo-500' : 'bg-white border-gray-300'
-                    }`}>
-                      {isSelected && (
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </div>
-                    {/* Skill info */}
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-[13px] font-semibold text-slate-900">{skill.name}</span>
-                        <span className={`text-[10px] font-semibold px-1.5 py-[1px] rounded-full ${
-                          skill.skillType === 'built_in' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'
-                        }`}>
-                          {skill.skillType === 'built_in' ? 'Built-in' : 'Custom'}
-                        </span>
-                        {skill.methodology && (
-                          <span className="text-[10px] font-medium px-1.5 py-[1px] rounded-full bg-green-100 text-green-800">
-                            Methodology
-                          </span>
-                        )}
-                      </div>
-                      {skill.description && (
-                        <div className="text-[11px] text-slate-500 line-clamp-2">
-                          {skill.description}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+      <SkillPickerSection
+        selectedSlugs={form.defaultSkillSlugs}
+        availableSkills={availableSkills}
+        onChange={(slugs) => setForm({ ...form, defaultSkillSlugs: slugs })}
+      />
 
       {/* ── Section: Data Sources ── */}
       {deleteDsId && (

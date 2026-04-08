@@ -8,17 +8,17 @@ import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEd
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
-const ConnectionsPage = lazy(() => import('./ConnectionsPage'));
+const IntegrationsAndCredentialsPage = lazy(() => import('./IntegrationsAndCredentialsPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
 
 interface Subaccount { id: string; name: string; slug: string; status: string; includeInOrgInbox: boolean; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'connections' | 'engines' | 'workflows' | 'agents' | 'categories' | 'board' | 'memory' | 'usage' | 'admin';
+type ActiveTab = 'integrations' | 'engines' | 'workflows' | 'agents' | 'categories' | 'board' | 'memory' | 'usage' | 'admin';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
-  connections: 'Connections', engines: 'Engines', workflows: 'Workflows', agents: 'Agents',
+  integrations: 'Integrations', engines: 'Engines', workflows: 'Workflows', agents: 'Agents',
   categories: 'Categories', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
 };
 
@@ -35,8 +35,8 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
   const [loading, setLoading] = useState(true);
 
   const visibleTabs: ActiveTab[] = mode === 'client'
-    ? ['connections', 'board', 'categories']
-    : ['connections', 'engines', 'workflows', 'agents', 'categories', 'board', 'memory', 'usage', 'admin'];
+    ? ['integrations', 'board', 'categories']
+    : ['integrations', 'engines', 'workflows', 'agents', 'categories', 'board', 'memory', 'usage', 'admin'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
@@ -399,10 +399,10 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         </>
       )}
 
-      {/* Connections */}
-      {activeTab === 'connections' && (
-        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading connections...</div>}>
-          <ConnectionsPage user={_user as any} embedded />
+      {/* Integrations */}
+      {activeTab === 'integrations' && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading integrations...</div>}>
+          <IntegrationsAndCredentialsPage user={_user as any} subaccountId={subaccountId} embedded />
         </Suspense>
       )}
 
@@ -672,7 +672,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     {l.agent.icon && <span className="text-lg shrink-0">{l.agent.icon}</span>}
                     <div className="min-w-0">
-                      <Link to={`/admin/agents/${l.agentId}`} className="font-medium text-slate-800 hover:text-indigo-600 no-underline transition-colors text-[14px]">{l.agent.name}</Link>
+                      <Link to={`/admin/subaccounts/${subaccountId}/agents/${l.id}/manage`} className="font-medium text-slate-800 hover:text-indigo-600 no-underline transition-colors text-[14px]">{l.agent.name}</Link>
                       {l.agent.description && <div className="text-[12px] text-slate-400 mt-0.5 truncate">{l.agent.description}</div>}
                     </div>
                     {l.agentRole && <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full shrink-0">{l.agentRole}</span>}
@@ -681,6 +681,12 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 ml-4 shrink-0">
+                    <Link
+                      to={`/admin/subaccounts/${subaccountId}/agents/${l.id}/manage`}
+                      className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-md text-[12px] font-medium transition-colors no-underline"
+                    >
+                      Manage
+                    </Link>
                     <button
                       onClick={() => handleRunAgent(l.agentId, 'api')}
                       disabled={runningAgentId === l.agentId}

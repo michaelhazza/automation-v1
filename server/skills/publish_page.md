@@ -2,6 +2,7 @@
 name: Publish Page
 description: Publish a draft page, making it publicly accessible on its subdomain.
 isActive: true
+visibility: basic
 ---
 
 ```json

@@ -299,11 +299,14 @@ export default function InboxPage({ user: _user }: { user: { id: string; role: s
       if (!item) return;
       await api.post(buildUrl('/inbox/mark-read'), { items: [{ entityType: item.type === 'review' ? 'review_item' : item.type === 'failed_run' ? 'agent_run' : 'task', entityId: item.entityId }] });
       setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, isRead: true } : i)));
-      setCounts((prev) => ({
-        ...prev,
-        all: Math.max(0, prev.all - 1),
-        [items.find((i) => i.id === itemId)?.type === 'task' ? 'tasks' : items.find((i) => i.id === itemId)?.type === 'review' ? 'reviews' : 'failed_runs']: Math.max(0, (prev as Record<string, number>)[items.find((i) => i.id === itemId)?.type === 'task' ? 'tasks' : items.find((i) => i.id === itemId)?.type === 'review' ? 'reviews' : 'failed_runs'] - 1),
-      }));
+      setCounts((prev) => {
+        const countKey: keyof InboxCounts = item.type === 'task' ? 'tasks' : item.type === 'review' ? 'reviews' : 'failed_runs';
+        return {
+          ...prev,
+          all: Math.max(0, prev.all - 1),
+          [countKey]: Math.max(0, prev[countKey] - 1),
+        };
+      });
     } catch {
       setError('Failed to mark as read.');
     } finally {
