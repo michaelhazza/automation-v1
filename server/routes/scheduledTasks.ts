@@ -6,6 +6,7 @@ import { agentService } from '../services/agentService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { validateBody, validateMultipart } from '../middleware/validate.js';
 import { createDataSourceBody, updateDataSourceBody } from '../schemas/agents.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const list = await scheduledTaskService.list(req.orgId!, req.params.subaccountId);
     res.json(list);
   })
@@ -29,6 +31,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const {
       title, description, brief, priority, assignedAgentId,
       rrule, timezone, scheduleTime, retryPolicy, tokenBudgetPerRun,
@@ -63,6 +66,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const detail = await scheduledTaskService.getDetail(req.params.stId, req.orgId!);
     res.json(detail);
   })
@@ -75,6 +79,7 @@ router.patch(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     // Match the create route: coerce endsAt string → Date so the driver
     // stores a proper timestamptz. Leaving it as a string can fail the
     // update or persist the wrong value depending on the driver.
@@ -94,6 +99,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     await scheduledTaskService.delete(req.params.stId, req.orgId!);
     res.json({ success: true });
   })
@@ -106,6 +112,7 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { isActive } = req.body;
     if (typeof isActive !== 'boolean') {
       res.status(400).json({ error: 'isActive (boolean) is required' });
@@ -123,8 +130,9 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     // Fire the occurrence immediately (doesn't affect the regular schedule)
-    await scheduledTaskService.fireOccurrence(req.params.stId);
+    await scheduledTaskService.fireOccurrence(req.params.stId, req.orgId!);
     res.json({ success: true, message: 'Scheduled task triggered' });
   })
 );
@@ -145,6 +153,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const list = await agentService.listScheduledTaskDataSources(
       req.params.stId,
       req.orgId!,
@@ -162,6 +171,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
   validateMultipart,
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const files = req.files as Express.Multer.File[] | undefined;
     if (!files || files.length === 0) {
       res.status(400).json({ error: 'No file provided' });
@@ -194,6 +204,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
   validateBody(createDataSourceBody, 'warn'),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const {
       name, description, sourceType, sourcePath, sourceHeaders,
       contentType, priority, maxTokenBudget, cacheMinutes, loadingMode,
@@ -222,6 +233,7 @@ router.patch(
   requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
   validateBody(updateDataSourceBody, 'warn'),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const result = await agentService.updateScheduledTaskDataSource(
       req.params.sourceId,
       req.params.stId,
@@ -239,6 +251,7 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     await agentService.deleteScheduledTaskDataSource(
       req.params.sourceId,
       req.params.stId,
@@ -255,6 +268,7 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SCHEDULED_TASKS_DATA_SOURCES_MANAGE),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const result = await agentService.testScheduledTaskDataSource(
       req.params.sourceId,
       req.params.stId,

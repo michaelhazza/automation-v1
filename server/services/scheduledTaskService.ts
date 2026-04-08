@@ -19,6 +19,38 @@ async function getRRule() {
   return mod.RRule ?? (mod as { default: { RRule: unknown } }).default?.RRule ?? mod;
 }
 
+// ---------------------------------------------------------------------------
+// Wall-clock → UTC conversion in a target IANA timezone, using only Intl.
+// We avoid pulling in date-fns-tz/luxon for one helper. The technique:
+//   1. Treat (y,m,d,h,mi) as if it were UTC ("naive UTC").
+//   2. Format that instant in the target timezone — the result tells us
+//      what wall-clock the naive UTC corresponds to in that zone.
+//   3. The delta between the formatted wall-clock and the naive UTC is the
+//      zone's UTC offset for that instant. Subtract it.
+// Correct across DST boundaries.
+// ---------------------------------------------------------------------------
+function zonedWallClockToUtc(
+  year: number,
+  month: number, // 1-12
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone: string
+): Date {
+  const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const parts = dtf.formatToParts(new Date(naiveUtc));
+  const get = (t: string) => Number(parts.find(p => p.type === t)!.value);
+  const projected = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  const offset = projected - naiveUtc;
+  return new Date(naiveUtc - offset);
+}
+
 export const scheduledTaskService = {
   // ─── CRUD ──────────────────────────────────────────────────────────────────
 
@@ -328,20 +360,36 @@ export const scheduledTaskService = {
       const next = rule.after(afterDate, false);
       if (!next) return null;
 
-      // Apply the time component
+      // Apply the wall-clock time component IN THE TARGET TIMEZONE.
+      // setHours() would interpret the time in the Node process's local zone,
+      // which is wrong on any host whose tz != the user's chosen tz.
       const [hours, minutes] = scheduleTime.split(':').map(Number);
-      next.setHours(hours, minutes, 0, 0);
+      let nextInTz = zonedWallClockToUtc(
+        next.getUTCFullYear(),
+        next.getUTCMonth() + 1,
+        next.getUTCDate(),
+        hours,
+        minutes,
+        timezone
+      );
 
-      // If the computed time is in the past, get the next one
-      if (next <= afterDate) {
+      // If the computed time is in the past, get the next occurrence
+      if (nextInTz <= afterDate) {
         const following = rule.after(next, false);
         if (following) {
-          following.setHours(hours, minutes, 0, 0);
-          return following;
+          nextInTz = zonedWallClockToUtc(
+            following.getUTCFullYear(),
+            following.getUTCMonth() + 1,
+            following.getUTCDate(),
+            hours,
+            minutes,
+            timezone
+          );
+          return nextInTz;
         }
       }
 
-      return next;
+      return nextInTz;
     } catch (err) {
       console.error('[ScheduledTask] Failed to compute next occurrence:', err);
       return null;
@@ -361,10 +409,16 @@ export const scheduledTaskService = {
       const dates = rule.between(now, new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000), true).slice(0, count);
 
       const [hours, minutes] = scheduleTime.split(':').map(Number);
-      return dates.map(d => {
-        d.setHours(hours, minutes, 0, 0);
-        return d;
-      });
+      return dates.map(d =>
+        zonedWallClockToUtc(
+          d.getUTCFullYear(),
+          d.getUTCMonth() + 1,
+          d.getUTCDate(),
+          hours,
+          minutes,
+          timezone
+        )
+      );
     } catch {
       return [];
     }
@@ -372,11 +426,11 @@ export const scheduledTaskService = {
 
   // ─── Fire Occurrence ───────────────────────────────────────────────────────
 
-  async fireOccurrence(scheduledTaskId: string): Promise<void> {
+  async fireOccurrence(scheduledTaskId: string, organisationId: string): Promise<void> {
     const [st] = await db
       .select()
       .from(scheduledTasks)
-      .where(eq(scheduledTasks.id, scheduledTaskId));
+      .where(and(eq(scheduledTasks.id, scheduledTaskId), eq(scheduledTasks.organisationId, organisationId)));
 
     if (!st || !st.isActive) return;
 
@@ -459,6 +513,11 @@ export const scheduledTaskService = {
         runSource: 'scheduler',
         executionMode: 'api',
         taskId: task.id,
+        // Dedupe concurrent triggers for the same occurrence (e.g. manual
+        // run-now while the scheduler also fires). The key is stable per
+        // (scheduledTask, occurrence) so a duplicate fireOccurrence is a no-op
+        // at the agent run layer.
+        idempotencyKey: `scheduled_task:${st.id}:${occurrence}`,
         triggerContext: {
           source: 'scheduled_task',
           scheduledTaskId: st.id,
@@ -539,8 +598,17 @@ export const scheduledTaskService = {
         errorMessage,
       }).where(eq(scheduledTaskRuns.id, run.id));
 
-      // Schedule retry with backoff (fire-and-forget — the scheduler will pick it up)
+      // Schedule retry with exponential backoff. `currentAttempt` is the
+      // attempt that just failed (>= 1), so `Math.pow(2, currentAttempt - 1)`
+      // yields 1, 2, 4, … on attempts 1, 2, 3 — the first retry waits
+      // exactly `backoffMinutes`, the second waits 2x, etc.
       const backoffMs = policy.backoffMinutes * 60 * 1000 * Math.pow(2, currentAttempt - 1);
+
+      // The in-process timer is the happy path. If the process restarts
+      // before the timer fires, reconcileRetryingRuns() (called from
+      // server bootstrap) will sweep `retrying` runs whose backoff has
+      // elapsed and re-queue them. Without that sweep, a restart between
+      // mark-retrying and timer-fire would strand the run permanently.
       setTimeout(() => {
         this.retryOccurrence(run.id).catch(err =>
           console.error(`[ScheduledTask] Retry failed:`, err)
@@ -614,6 +682,9 @@ export const scheduledTaskService = {
         runSource: 'scheduler',
         executionMode: 'api',
         taskId: run.taskId,
+        // Per-attempt idempotency key — prevents a double-fired retry timer
+        // (in-process + reconciliation) from creating two agent runs.
+        idempotencyKey: `scheduled_task:${st.id}:${run.occurrence}:retry:${run.attempt}`,
         triggerContext: {
           source: 'scheduled_task_retry',
           scheduledTaskId: st.id,
@@ -633,5 +704,58 @@ export const scheduledTaskService = {
       const errMsg = err instanceof Error ? err.message : String(err);
       await this.handleRunCompletion(run.id, 'failed', errMsg);
     }
+  },
+
+  // ─── Startup Reconciliation ────────────────────────────────────────────────
+  //
+  // Sweeps `retrying` runs whose backoff has elapsed and re-queues them.
+  // Called from server bootstrap to recover any retries whose in-process
+  // setTimeout was lost due to a process restart. Idempotent: re-running
+  // the sweep is safe because retryOccurrence guards on `status === 'retrying'`
+  // and the agent run idempotencyKey deduplicates duplicate retries.
+  async reconcileRetryingRuns(): Promise<{ swept: number; queued: number }> {
+    const retrying = await db
+      .select()
+      .from(scheduledTaskRuns)
+      .where(eq(scheduledTaskRuns.status, 'retrying'));
+
+    let queued = 0;
+    const now = Date.now();
+    for (const run of retrying) {
+      const [st] = await db
+        .select()
+        .from(scheduledTasks)
+        .where(eq(scheduledTasks.id, run.scheduledTaskId));
+      if (!st) continue;
+
+      const policy = (st.retryPolicy as typeof DEFAULT_RETRY_POLICY) ?? DEFAULT_RETRY_POLICY;
+      // attempt was incremented when the run was marked retrying, so the
+      // failed attempt is `attempt - 1`.
+      const failedAttempt = Math.max(1, run.attempt - 1);
+      const backoffMs = policy.backoffMinutes * 60 * 1000 * Math.pow(2, failedAttempt - 1);
+      const dueAt = (run.startedAt?.getTime() ?? run.createdAt.getTime()) + backoffMs;
+
+      if (dueAt <= now) {
+        // Backoff already elapsed — fire immediately.
+        this.retryOccurrence(run.id).catch(err =>
+          console.error('[ScheduledTask] Reconciled retry failed:', err)
+        );
+        queued++;
+      } else {
+        // Backoff still pending — re-arm an in-process timer for the remainder.
+        const remaining = dueAt - now;
+        setTimeout(() => {
+          this.retryOccurrence(run.id).catch(err =>
+            console.error('[ScheduledTask] Reconciled retry failed:', err)
+          );
+        }, remaining);
+        queued++;
+      }
+    }
+
+    if (retrying.length > 0) {
+      console.log(`[ScheduledTask] Reconciled ${retrying.length} retrying runs (${queued} re-queued)`);
+    }
+    return { swept: retrying.length, queued };
   },
 };

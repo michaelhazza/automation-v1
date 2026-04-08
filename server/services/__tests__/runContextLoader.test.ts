@@ -164,6 +164,28 @@ test('case and whitespace normalisation: "Glossary.MD" matches " glossary.md "',
   assert(result.suppressed[0].id === 'agent-g', 'agent scope should be suppressed');
 });
 
+test('all four scopes share a name: task_instance wins, others suppressed by it', () => {
+  const pool = [
+    makeSource({ id: 'agent', scope: 'agent', name: 'glossary' }),
+    makeSource({ id: 'sub', scope: 'subaccount', name: 'glossary' }),
+    makeSource({ id: 'st', scope: 'scheduled_task', name: 'glossary' }),
+    makeSource({ id: 'ti', scope: 'task_instance', name: 'glossary' }),
+  ];
+  const result = processContextPool(pool);
+  // Only the task_instance source should appear in the active eager set
+  assertEqual(result.eager.map(s => s.id), ['ti'], 'eager winners');
+  assertEqual(result.manifest.length, 0, 'manifest should be empty');
+  // The other three should all be suppressed and point at the task_instance
+  // source as the suppressedBy id.
+  const suppressedIds = result.suppressed.map(s => s.id).sort();
+  assertEqual(suppressedIds, ['agent', 'st', 'sub'], 'suppressed ids');
+  for (const s of result.suppressed) {
+    assert(s.suppressedByOverride === true, `${s.id} should be marked suppressedByOverride`);
+    assertEqual(s.suppressedBy, 'ti', `${s.id} suppressedBy`);
+    assertEqual(s.includedInPrompt, false, `${s.id} includedInPrompt`);
+  }
+});
+
 test('three scopes share a name: scheduled_task wins over subaccount and agent', () => {
   const pool = [
     makeSource({ id: 'a', scope: 'agent', name: 'styleguide.md' }),
