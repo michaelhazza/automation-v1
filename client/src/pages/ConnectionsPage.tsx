@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,15 @@ export default function ConnectionsPage({
   // Slack channel config modal
   const [slackConfigConn, setSlackConfigConn] = useState<Connection | null>(null);
   const [defaultChannel, setDefaultChannel] = useState('');
+  const [channelSearch, setChannelSearch] = useState('');
+  const [channels, setChannels] = useState<{ id: string; name: string }[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [showChannelDropdown, setShowChannelDropdown] = useState(false);
+  const channelInputRef = useRef<HTMLInputElement>(null);
+  const channelDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Confirm dialog
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
   // Generic "other" connection modal
   const [showGenericModal, setShowGenericModal] = useState(false);
@@ -144,18 +154,67 @@ export default function ConnectionsPage({
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const connected = params.get('connected');
+    const oauthError = params.get('error');
     if (connected === 'slack') {
       window.history.replaceState({}, '', location.pathname);
       load({ openSlackConfig: true });
     } else if (connected) {
-      // Other provider OAuth redirect landed on this page via returnPath
       window.history.replaceState({}, '', location.pathname);
+      load();
+    } else if (oauthError) {
+      window.history.replaceState({}, '', location.pathname);
+      setError(`Connection failed: ${oauthError.replace(/_/g, ' ')}`);
       load();
     } else {
       load();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subaccountId, location.search]);
+
+  // Fetch Slack channels from backend (decrypts token, calls conversations.list).
+  // Triggered whenever slackConfigConn is set (modal opens).
+  useEffect(() => {
+    if (!slackConfigConn) {
+      setChannels([]);
+      setChannelSearch('');
+      return;
+    }
+    setChannelSearch('');
+
+    let cancelled = false;
+    setChannelsLoading(true);
+    api
+      .get<{ id: string; name: string }[]>(
+        `/api/subaccounts/${subaccountId}/connections/${slackConfigConn.id}/slack-channels`,
+      )
+      .then(({ data }) => {
+        if (!cancelled) setChannels(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          const e = err as { response?: { status?: number; data?: unknown } };
+          console.error('[Slack channels] fetch error', e.response?.status, e.response?.data);
+          setChannels([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setChannelsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slackConfigConn?.id]);
+
+  // Close channel dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (channelDropdownRef.current && !channelDropdownRef.current.contains(e.target as Node)) {
+        setShowChannelDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // ── Slack OAuth ───────────────────────────────────────────────────────────────
 
@@ -246,8 +305,10 @@ export default function ConnectionsPage({
       setWebLoginModal(null);
       load();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error ?? 'Failed to save connection');
+      const e = err as { response?: { data?: { error?: { message?: string } | string } } };
+      const raw = e.response?.data?.error;
+      const msg = typeof raw === 'string' ? raw : (raw as { message?: string } | null)?.message;
+      setError(msg || 'Failed to save connection');
     } finally {
       setSaving(false);
     }
@@ -255,19 +316,25 @@ export default function ConnectionsPage({
 
   // ── Revoke ────────────────────────────────────────────────────────────────────
 
-  const revoke = async (conn: Connection) => {
-    if (!confirm(`Revoke "${conn.label ?? PROVIDER_LABELS[conn.providerType] ?? conn.providerType}"? This cannot be undone.`)) return;
-    setError('');
-    try {
-      if (conn.providerType === 'web_login') {
-        await api.delete(`/api/subaccounts/${subaccountId}/web-login-connections/${conn.id}`);
-      } else {
-        await api.delete(`/api/subaccounts/${subaccountId}/connections/${conn.id}`);
-      }
-      load();
-    } catch {
-      setError('Failed to revoke connection');
-    }
+  const revoke = (conn: Connection) => {
+    const label = conn.label ?? PROVIDER_LABELS[conn.providerType] ?? conn.providerType;
+    setConfirmDialog({
+      message: `Revoke "${label}"? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setError('');
+        try {
+          if (conn.providerType === 'web_login') {
+            await api.delete(`/api/subaccounts/${subaccountId}/web-login-connections/${conn.id}`);
+          } else {
+            await api.delete(`/api/subaccounts/${subaccountId}/connections/${conn.id}`);
+          }
+          load();
+        } catch {
+          setError('Failed to revoke connection');
+        }
+      },
+    });
   };
 
   // ── Generic connection ────────────────────────────────────────────────────────
@@ -340,8 +407,10 @@ export default function ConnectionsPage({
             onEditWebLogin={openWebLoginEdit}
             onConnectSlack={connectSlack}
             onConfigSlack={(c) => {
+              const ch = slackChannel(c);
               setSlackConfigConn(c);
-              setDefaultChannel(slackChannel(c) ?? '');
+              setDefaultChannel(ch ?? '');
+              setChannelSearch(ch ? ch.replace(/^#/, '') : '');
             }}
           />
         ))}
@@ -384,6 +453,7 @@ export default function ConnectionsPage({
           title={webLoginModal.conn ? 'Edit Web Login' : 'Add Web Login'}
           onClose={() => { setWebLoginModal(null); setError(''); }}
           maxWidth={480}
+          disableBackdropClose
         >
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4 text-[13px] text-red-600">
@@ -467,14 +537,62 @@ export default function ConnectionsPage({
             <label className="block text-[13px] font-medium text-slate-700">
               Default Channel
             </label>
-            <input
-              value={defaultChannel}
-              onChange={(e) => setDefaultChannel(e.target.value)}
-              placeholder="#42macro-reports"
-              className={inputCls}
-            />
+            <div className="relative mt-1" ref={channelDropdownRef}>
+              <input
+                ref={channelInputRef}
+                value={channelSearch}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setChannelSearch(val);
+                  // Keep defaultChannel in sync as a bare name; saveSlackChannel will prepend #
+                  setDefaultChannel(val ? `#${val.replace(/^#+/, '')}` : '');
+                  setShowChannelDropdown(true);
+                }}
+                onFocus={() => setShowChannelDropdown(true)}
+                placeholder={channelsLoading ? 'Loading channels...' : 'Search or type a channel name…'}
+                disabled={channelsLoading}
+                className={`${inputCls} mt-0 pr-8`}
+              />
+              {/* chevron indicator */}
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]">
+                ▾
+              </span>
+              {showChannelDropdown && !channelsLoading && (
+                <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {(() => {
+                    const q = channelSearch.toLowerCase().replace(/^#+/, '');
+                    const filtered = q
+                      ? channels.filter((ch) => ch.name.toLowerCase().includes(q))
+                      : channels;
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="px-3 py-2 text-[13px] text-slate-400">
+                          {channels.length === 0 ? 'No channels found — check bot permissions' : 'No matching channels'}
+                        </div>
+                      );
+                    }
+                    return filtered.map((ch) => (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          // Prevent input blur before the click registers
+                          e.preventDefault();
+                          setDefaultChannel(`#${ch.name}`);
+                          setChannelSearch(ch.name);
+                          setShowChannelDropdown(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-[13px] text-slate-700 hover:bg-indigo-50 cursor-pointer"
+                      >
+                        #{ch.name}
+                      </button>
+                    ));
+                  })()}
+                </div>
+              )}
+            </div>
             <p className="text-[12px] text-slate-400 mt-1.5">
-              Include the # prefix. The agent also accepts a channel override per run.
+              The agent also accepts a channel override per run.
             </p>
           </div>
           <div className="flex gap-2 justify-end">
@@ -493,6 +611,17 @@ export default function ConnectionsPage({
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* ── Confirm dialog ────────────────────────────────────────────────────── */}
+      {confirmDialog && (
+        <ConfirmDialog
+          title="Revoke Connection"
+          message={confirmDialog.message}
+          confirmLabel="Revoke"
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
       )}
 
       {/* ── Generic connection form ────────────────────────────────────────────── */}
@@ -668,7 +797,7 @@ function ConnectionCard({
           </>
         )}
         {isSlack && (
-          <div>{channel ? `Posts to ${channel}` : 'No default channel set'}</div>
+          <div>{channel ? `Default channel: ${channel}` : 'No default channel set'}</div>
         )}
         {!isWebLogin && !isSlack && (
           <div>Token: {conn.hasAccessToken ? 'Connected' : 'Not set'}</div>

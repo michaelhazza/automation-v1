@@ -97,7 +97,11 @@ router.get(
       { expiresIn: '10m' },
     );
 
-    const callbackUrl = `${env.APP_BASE_URL}/api/integrations/oauth2/callback`;
+    // OAUTH_CALLBACK_BASE_URL is the publicly reachable URL Slack will POST back to
+    // (e.g. an ngrok tunnel in local dev). APP_BASE_URL is where the browser ends up
+    // after auth (always the local frontend). They differ only in local dev.
+    const callbackBase = env.OAUTH_CALLBACK_BASE_URL || env.APP_BASE_URL;
+    const callbackUrl = `${callbackBase}/api/integrations/oauth2/callback`;
     const url = new URL(config.authUrl);
     url.searchParams.set('client_id', clientId);
     url.searchParams.set('redirect_uri', callbackUrl);
@@ -174,8 +178,10 @@ router.get(
       return res.redirect(`${appBase}${redirectBase}?error=provider_not_configured`);
     }
 
-    // Exchange authorization code for tokens
-    const callbackUrl = `${appBase}/api/integrations/oauth2/callback`;
+    // Exchange authorization code for tokens — redirect_uri must exactly match what was
+    // sent in the auth request, so use OAUTH_CALLBACK_BASE_URL here too.
+    const callbackBase = env.OAUTH_CALLBACK_BASE_URL || env.APP_BASE_URL;
+    const callbackUrl = `${callbackBase}/api/integrations/oauth2/callback`;
     const tokenBody = new URLSearchParams({
       grant_type: 'authorization_code',
       code,

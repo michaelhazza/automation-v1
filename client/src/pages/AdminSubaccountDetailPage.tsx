@@ -64,7 +64,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
         api.get(`/api/subaccounts/${subaccountId}`),
         api.get(`/api/subaccounts/${subaccountId}/categories`),
         api.get(`/api/subaccounts/${subaccountId}/processes`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch processes:', err); return { data: { linkedProcesses: [] } }; }),
-        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err) => { console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
+        api.get(`/api/subaccounts/${subaccountId}/board-config`).catch((err: { response?: { status?: number } }) => { if (err?.response?.status !== 404) console.error('[AdminSubaccountDetail] Failed to fetch board config:', err); return { data: null }; }),
       ]);
       setSa(saRes.data);
       setCategories(catRes.data);

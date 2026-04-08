@@ -758,3 +758,60 @@ Zod schemas + typed errors imported by both server and worker:
 - **`source_type='iee'` requires `iee_run_id`** — enforced by both router runtime guard and database CHECK constraint.
 - **Tenant scoping on every query** — all cost/usage queries unconditionally filter by `organisationId`. System_admin scope override is an explicit parameter, never an implicit bypass.
 - **`iee_browser` / `iee_dev` execution modes** respect existing budget reservation, policy engine, and audit event flows — IEE never bypasses platform guardrails.
+
+---
+
+## Local Development Setup
+
+**Do not use `docker compose up app` for active development.** The app image is baked at build time — source changes require a full rebuild and container restart, which makes the feedback loop unusable.
+
+### Correct local dev workflow
+
+Run the app locally, Docker only for the worker. **Open a terminal and keep it open for the session** — do not try to background these processes or manage them via Claude's bash tool (PM2 does not work reliably on Windows for this).
+
+```bash
+# 1. Stop the Docker app container (keep worker running)
+docker compose stop app
+
+# 2. Open a terminal in the project root and run:
+npm run dev
+# Keep this terminal open.
+```
+
+`npm run dev` runs two processes concurrently:
+- `dev:server` — `tsx watch server/index.ts` on port 3000 (Express + hot-restart on save)
+- `dev:client` — Vite on port 5000 with HMR (instant browser updates on save)
+
+Vite proxies all `/api`, `/health`, and `/socket.io` requests to `localhost:3000`, so the client and server share a single origin from the browser's perspective.
+
+**`tsx watch` is slow to start on first boot** (~20–30s to compile the full server). Once running, file-change restarts are fast. Do not assume it failed if there's no output for the first 30 seconds.
+
+### Ports
+
+| Port | Service |
+|------|---------|
+| 3000 | Express API server (local) |
+| 5000 | Vite dev server / frontend (local) |
+| 5432 | PostgreSQL (local, native install) |
+
+### Worker
+
+The `worker` Docker service stays in Docker permanently. It connects to the local Postgres via `host.docker.internal:5432` (already configured in `docker-compose.yml`). No changes needed there.
+
+### OAuth / ngrok
+
+Slack OAuth requires an HTTPS redirect URI. In local dev, use ngrok:
+
+```bash
+./ngrok http 3000
+```
+
+Set `OAUTH_CALLBACK_BASE_URL` in `.env` to the ngrok HTTPS URL. `APP_BASE_URL` stays as `http://localhost:5000` (where the browser lands after auth). These two vars are intentionally separate — they only diverge in local dev.
+
+### Switching machines
+
+`.env` is gitignored. Each machine needs its own `.env`. The only values that differ between machines are:
+- `OAUTH_CALLBACK_BASE_URL` — ngrok URL (regenerates each session unless you have a reserved domain)
+- `DATABASE_URL` — if Postgres is not on localhost on the other machine
+
+Everything else in `.env` is portable.
