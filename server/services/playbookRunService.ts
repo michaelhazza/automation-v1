@@ -382,6 +382,31 @@ export const playbookRunService = {
   },
 
   /**
+   * Mid-run output edit. Pure delegation to the engine which holds the
+   * cascade + side-effect safety logic. Spec §5.4 / §7.4 endpoint.
+   */
+  async editStepOutput(
+    organisationId: string,
+    runId: string,
+    stepRunId: string,
+    options: {
+      output: Record<string, unknown>;
+      confirmReversible?: string[];
+      confirmIrreversible?: string[];
+      skipAndReuse?: string[];
+      expectedVersion?: number;
+      userId: string;
+    }
+  ) {
+    return playbookEngineService.editStepOutput(
+      organisationId,
+      runId,
+      stepRunId,
+      options
+    );
+  },
+
+  /**
    * Approve, reject, or edit-and-approve a step that is awaiting_approval.
    */
   async decideApproval(

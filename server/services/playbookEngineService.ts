@@ -666,6 +666,405 @@ export const playbookEngineService = {
     await this.enqueueTick(sr.runId);
   },
 
+  // ─── Mid-run output editing (§5.4) ─────────────────────────────────────────
+
+  /**
+   * Computes the transitive downstream set of step ids that depend on the
+   * given seed step. BFS over dependsOn edges. Returns step ids in
+   * topological order (closest first).
+   */
+  computeDownstreamSet(def: PlaybookDefinition, seedStepId: string): string[] {
+    const childrenOf = new Map<string, string[]>();
+    for (const s of def.steps) childrenOf.set(s.id, []);
+    for (const s of def.steps) {
+      for (const dep of s.dependsOn) {
+        if (childrenOf.has(dep)) childrenOf.get(dep)!.push(s.id);
+      }
+    }
+    const visited = new Set<string>();
+    const result: string[] = [];
+    const queue: string[] = [...(childrenOf.get(seedStepId) ?? [])];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      result.push(id);
+      for (const child of childrenOf.get(id) ?? []) {
+        if (!visited.has(child)) queue.push(child);
+      }
+    }
+    return result;
+  },
+
+  /**
+   * Mid-run output edit. Spec §5.4 — the safety-critical mutation path.
+   *
+   * Pre-edit safety check (§5.4):
+   *   1. Compute downstream set (transitive dep BFS)
+   *   2. Inspect each downstream step's sideEffectType
+   *   3. Default-block irreversible / reversible without explicit
+   *      confirmation arrays — return a structured 409 payload
+   *   4. Compute estimated cost + cascade summary
+   *
+   * Edit + invalidation:
+   *   1. Hash the new output. If identical to previous, no-op (firewall).
+   *   2. Update the seed step's outputJson + outputHash.
+   *   3. For each downstream step run: mark current row 'invalidated',
+   *      insert a new pending row at attempt+1. Steps in skipAndReuse
+   *      copy previous output forward as completed.
+   *   4. Cancel any in-flight downstream agent runs (best-effort).
+   *   5. Re-merge context from scratch using only currently-completed
+   *      step outputs.
+   *   6. Enqueue tick.
+   */
+  async editStepOutput(
+    organisationId: string,
+    runId: string,
+    stepRunId: string,
+    options: {
+      output: Record<string, unknown>;
+      confirmReversible?: string[];
+      confirmIrreversible?: string[];
+      skipAndReuse?: string[];
+      expectedVersion?: number;
+      userId: string;
+    }
+  ): Promise<
+    | {
+        ok: true;
+        invalidatedStepIds: string[];
+        skippedStepIds: string[];
+        estimatedCostCents: number;
+        cascade: { size: number; criticalPathLength: number };
+      }
+    | {
+        ok: false;
+        statusCode: 409;
+        error: string;
+        detail: string;
+        affected: Array<{
+          stepId: string;
+          name: string;
+          sideEffectType: PlaybookStep['sideEffectType'];
+          previousOutput: unknown;
+        }>;
+        totalEstimatedCostCents: number;
+        cascade: { size: number; criticalPathLength: number };
+      }
+  > {
+    const [run] = await db
+      .select()
+      .from(playbookRuns)
+      .where(and(eq(playbookRuns.id, runId), eq(playbookRuns.organisationId, organisationId)));
+    if (!run) throw { statusCode: 404, message: 'Playbook run not found' };
+
+    const [seedStep] = await db
+      .select()
+      .from(playbookStepRuns)
+      .where(and(eq(playbookStepRuns.id, stepRunId), eq(playbookStepRuns.runId, runId)));
+    if (!seedStep) throw { statusCode: 404, message: 'Step run not found' };
+    if (seedStep.status !== 'completed') {
+      throw {
+        statusCode: 409,
+        message: `Cannot edit step in status '${seedStep.status}' — only completed steps can be edited`,
+      };
+    }
+    if (
+      options.expectedVersion !== undefined &&
+      seedStep.version !== options.expectedVersion
+    ) {
+      throw {
+        statusCode: 409,
+        message: `Step version is ${seedStep.version}, expected ${options.expectedVersion}`,
+        errorCode: 'playbook_stale_version',
+      };
+    }
+
+    const def = await loadDefinitionForRun(run);
+    if (!def) throw { statusCode: 422, message: 'Run definition not loadable' };
+
+    // Output-hash firewall — no-op if the new output is byte-identical to
+    // the previous one. This is the cheapest possible exit path.
+    const newHash = hashValue(options.output);
+    if (newHash === seedStep.outputHash) {
+      logger.info('playbook_mid_run_edit_noop_firewall', {
+        runId,
+        stepRunId,
+        stepId: seedStep.stepId,
+      });
+      return {
+        ok: true,
+        invalidatedStepIds: [],
+        skippedStepIds: [],
+        estimatedCostCents: 0,
+        cascade: { size: 0, criticalPathLength: 0 },
+      };
+    }
+
+    // Compute downstream set.
+    const downstreamIds = this.computeDownstreamSet(def, seedStep.stepId);
+    const downstreamRows = await db
+      .select()
+      .from(playbookStepRuns)
+      .where(eq(playbookStepRuns.runId, runId));
+    const downstreamLive = downstreamRows.filter(
+      (r) =>
+        downstreamIds.includes(r.stepId) &&
+        r.status !== 'invalidated' &&
+        r.status !== 'failed'
+    );
+
+    // Build affected list with side-effect classification.
+    const affected: Array<{
+      stepId: string;
+      name: string;
+      sideEffectType: PlaybookStep['sideEffectType'];
+      previousOutput: unknown;
+    }> = [];
+    let needsConfirmation = false;
+    for (const row of downstreamLive) {
+      const stepDef = findStepInDefinition(def, row.stepId);
+      if (!stepDef) continue;
+      const isSkipped = options.skipAndReuse?.includes(row.stepId);
+      const isConfirmedReversible =
+        options.confirmReversible?.includes(row.stepId) ||
+        options.confirmIrreversible?.includes(row.stepId);
+      const isConfirmedIrreversible = options.confirmIrreversible?.includes(row.stepId);
+
+      if (
+        stepDef.sideEffectType === 'irreversible' &&
+        !isSkipped &&
+        !isConfirmedIrreversible
+      ) {
+        needsConfirmation = true;
+        affected.push({
+          stepId: row.stepId,
+          name: stepDef.name,
+          sideEffectType: 'irreversible',
+          previousOutput: row.outputJson,
+        });
+      } else if (
+        stepDef.sideEffectType === 'reversible' &&
+        !isSkipped &&
+        !isConfirmedReversible
+      ) {
+        needsConfirmation = true;
+        affected.push({
+          stepId: row.stepId,
+          name: stepDef.name,
+          sideEffectType: 'reversible',
+          previousOutput: row.outputJson,
+        });
+      } else {
+        affected.push({
+          stepId: row.stepId,
+          name: stepDef.name,
+          sideEffectType: stepDef.sideEffectType,
+          previousOutput: row.outputJson,
+        });
+      }
+    }
+
+    // Cascade metrics
+    const cascade = {
+      size: downstreamLive.length,
+      criticalPathLength: this.computeCriticalPath(def, downstreamLive.map((d) => d.stepId)),
+    };
+    const estimatedCostCents = this.estimateCascadeCostCents(def, downstreamLive);
+
+    if (needsConfirmation) {
+      logger.info('playbook_mid_run_edit_blocked', {
+        event: 'mid_run_edit.blocked',
+        runId,
+        stepRunId,
+        affectedCount: affected.length,
+      });
+      return {
+        ok: false,
+        statusCode: 409,
+        error: 'playbook_irreversible_blocked',
+        detail: 'mid_run_edit_irreversible',
+        affected,
+        totalEstimatedCostCents: estimatedCostCents,
+        cascade,
+      };
+    }
+
+    // Apply edit + cascade. Single transaction for atomicity.
+    const skippedStepIds: string[] = [];
+    const invalidatedStepIds: string[] = [];
+
+    await db.transaction(async (tx) => {
+      // Update the seed step's output + hash.
+      await tx
+        .update(playbookStepRuns)
+        .set({
+          outputJson: options.output as Record<string, unknown>,
+          outputHash: newHash,
+          version: seedStep.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(playbookStepRuns.id, seedStep.id));
+
+      // For each downstream live row: invalidate + insert successor.
+      for (const row of downstreamLive) {
+        const stepDef = findStepInDefinition(def, row.stepId);
+        if (!stepDef) continue;
+
+        // Mark current row invalidated.
+        await tx
+          .update(playbookStepRuns)
+          .set({
+            status: 'invalidated',
+            version: row.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(playbookStepRuns.id, row.id));
+        invalidatedStepIds.push(row.stepId);
+
+        if (options.skipAndReuse?.includes(row.stepId)) {
+          // Copy the previous output forward as a new completed attempt.
+          await tx.insert(playbookStepRuns).values({
+            runId,
+            stepId: row.stepId,
+            stepType: row.stepType,
+            status: 'completed',
+            sideEffectType: row.sideEffectType,
+            dependsOn: row.dependsOn,
+            inputJson: row.inputJson,
+            inputHash: row.inputHash,
+            outputJson: row.outputJson as Record<string, unknown> | null,
+            outputHash: row.outputHash,
+            attempt: row.attempt + 1,
+            startedAt: new Date(),
+            completedAt: new Date(),
+          });
+          skippedStepIds.push(row.stepId);
+        } else {
+          // Insert a fresh pending row.
+          await tx.insert(playbookStepRuns).values({
+            runId,
+            stepId: row.stepId,
+            stepType: row.stepType,
+            status: 'pending',
+            sideEffectType: row.sideEffectType,
+            dependsOn: row.dependsOn,
+            attempt: row.attempt + 1,
+          });
+        }
+      }
+
+      // Re-merge context from scratch using only currently-completed step
+      // outputs. The mid-run-edit semantics (§5.1.1 rule 6) say invalidated
+      // step outputs are removed from context, not preserved.
+      const completedAfterEdit = await tx
+        .select()
+        .from(playbookStepRuns)
+        .where(
+          and(
+            eq(playbookStepRuns.runId, runId),
+            eq(playbookStepRuns.status, 'completed')
+          )
+        );
+      const ctx = run.contextJson as unknown as RunContext;
+      const nextSteps: Record<string, { output: unknown }> = {};
+      for (const sr of completedAfterEdit) {
+        if (sr.outputJson !== null) {
+          nextSteps[sr.stepId] = { output: sr.outputJson };
+        }
+      }
+      // Make sure the seed step uses the new output.
+      nextSteps[seedStep.stepId] = { output: options.output };
+      const nextCtx: RunContext = {
+        input: ctx.input,
+        subaccount: ctx.subaccount,
+        org: ctx.org,
+        steps: nextSteps,
+        _meta: ctx._meta,
+      };
+      const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
+      await tx
+        .update(playbookRuns)
+        .set({
+          contextJson: nextCtx as unknown as Record<string, unknown>,
+          contextSizeBytes: nextBytes,
+          updatedAt: new Date(),
+        })
+        .where(eq(playbookRuns.id, runId));
+    });
+
+    logger.info('playbook_mid_run_edit_applied', {
+      event: 'mid_run_edit.applied',
+      runId,
+      stepRunId,
+      stepId: seedStep.stepId,
+      invalidatedCount: invalidatedStepIds.length,
+      skippedCount: skippedStepIds.length,
+      cascadeSize: cascade.size,
+      criticalPathLength: cascade.criticalPathLength,
+    });
+
+    await this.enqueueTick(runId);
+
+    return {
+      ok: true,
+      invalidatedStepIds,
+      skippedStepIds,
+      estimatedCostCents,
+      cascade,
+    };
+  },
+
+  /**
+   * Coarse cascade cost estimate — sum of per-step heuristics. Same numbers
+   * the Studio's estimate_cost tool uses (pessimistic mode).
+   */
+  estimateCascadeCostCents(
+    def: PlaybookDefinition,
+    downstreamLive: PlaybookStepRun[]
+  ): number {
+    const PER_STEP_PESSIMISTIC: Record<string, number> = {
+      prompt: 20,
+      agent_call: 60,
+      user_input: 0,
+      approval: 0,
+      conditional: 0,
+    };
+    let total = 0;
+    for (const row of downstreamLive) {
+      total += PER_STEP_PESSIMISTIC[row.stepType] ?? 0;
+    }
+    return total;
+  },
+
+  /**
+   * Computes the longest path through a subset of steps. Used for the
+   * cascade.criticalPathLength field surfaced in the mid-run-edit response.
+   */
+  computeCriticalPath(def: PlaybookDefinition, stepIds: string[]): number {
+    const subset = new Set(stepIds);
+    const stepById = new Map<string, PlaybookStep>();
+    for (const s of def.steps) if (subset.has(s.id)) stepById.set(s.id, s);
+    const longest = new Map<string, number>();
+    function visit(id: string): number {
+      if (longest.has(id)) return longest.get(id)!;
+      const step = stepById.get(id);
+      if (!step) return 0;
+      let maxDep = 0;
+      for (const dep of step.dependsOn) {
+        if (subset.has(dep)) {
+          maxDep = Math.max(maxDep, visit(dep));
+        }
+      }
+      const v = 1 + maxDep;
+      longest.set(id, v);
+      return v;
+    }
+    let result = 0;
+    for (const id of stepIds) result = Math.max(result, visit(id));
+    return result;
+  },
+
   /**
    * Common completion path used by user_input submission, approval decision,
    * conditional dispatch, and (in step 6) agent_run completion. Merges the

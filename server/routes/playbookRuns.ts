@@ -110,6 +110,50 @@ router.post(
 );
 
 router.post(
+  '/api/playbook-runs/:runId/steps/:stepRunId/output',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { runId, stepRunId } = req.params;
+    const {
+      output,
+      confirmReversible,
+      confirmIrreversible,
+      skipAndReuse,
+      expectedVersion,
+    } = req.body as {
+      output?: Record<string, unknown>;
+      confirmReversible?: string[];
+      confirmIrreversible?: string[];
+      skipAndReuse?: string[];
+      expectedVersion?: number;
+    };
+    if (!output || typeof output !== 'object') {
+      res.status(400).json({ error: 'output is required' });
+      return;
+    }
+    const result = await playbookRunService.editStepOutput(
+      req.orgId!,
+      runId,
+      stepRunId,
+      {
+        output,
+        confirmReversible,
+        confirmIrreversible,
+        skipAndReuse,
+        expectedVersion,
+        userId: req.user!.id,
+      }
+    );
+    if ('ok' in result && !result.ok) {
+      res.status(409).json(result);
+      return;
+    }
+    res.json(result);
+  })
+);
+
+router.post(
   '/api/playbook-runs/:runId/steps/:stepRunId/approve',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
