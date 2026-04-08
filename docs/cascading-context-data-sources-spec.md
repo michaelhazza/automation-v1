@@ -189,7 +189,8 @@ This spec is complete when all of the following are true:
 - [ ] The skill respects the `loadingMode` field — reading a lazy source fetches it fresh; reading an eager source returns the already-loaded content.
 - [ ] Binary content types (non-text MIME) return a structured error, not raw bytes.
 - [ ] `read` op accepts optional `offset` (default 0) and `limit` (default `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL`) and returns the requested slice.
-- [ ] A single `read` call that would return more than `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL` tokens returns a structured error with a suggestion to use offset/limit.
+- [ ] The effective `limit` is **clamped** to `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL` — a caller passing a larger explicit value is silently reduced to the cap, NOT rejected with an error. Clamped slicing is the contract.
+- [ ] When a source is larger than the effective `limit` at the current `offset`, the response returns the slice with `nextOffset` set (non-null) and `truncated: true`, so the agent can walk the source in chunks. Only `offset < 0` or unknown `id` return structured errors.
 
 ### Routes
 - [ ] New CRUD endpoints under `/api/subaccounts/:subaccountId/scheduled-tasks/:stId/data-sources` for create (URL and file upload), list, update, delete, and test-fetch.
@@ -569,7 +570,7 @@ export async function loadTaskAttachmentsAsContext(
       // Surface in manifest only — do not attempt to load binary content.
       results.push({
         id: `task_attachment:${att.id}`,
-        scope: 'scheduled_task',  // use the "most specific" scope label for budgeting
+        scope: 'task_instance',
         name: att.fileName,
         description: `[${att.fileType}, binary — not readable in v1]`,
         content: '',
@@ -577,7 +578,7 @@ export async function loadTaskAttachmentsAsContext(
         tokenCount: 0,
         sizeBytes: att.fileSizeBytes,
         loadingMode: 'lazy',
-        priority: -1,               // highest precedence
+        priority: 0,                // scope precedence drives ordering; priority is per-scope
         fetchOk: false,
         maxTokenBudget: 0,
       });
@@ -591,7 +592,7 @@ export async function loadTaskAttachmentsAsContext(
     const content = await readAttachmentFromStorage(att);
     results.push({
       id: `task_attachment:${att.id}`,
-      scope: 'scheduled_task',     // see below
+      scope: 'task_instance',
       name: att.fileName,
       description: null,
       content,
@@ -599,7 +600,7 @@ export async function loadTaskAttachmentsAsContext(
       tokenCount: approxTokens(content),
       sizeBytes: att.fileSizeBytes,
       loadingMode: 'eager',
-      priority: -1,
+      priority: 0,
       fetchOk: true,
       maxTokenBudget: 8000,        // default, matching agent_data_sources default
     });
@@ -609,7 +610,7 @@ export async function loadTaskAttachmentsAsContext(
 }
 ```
 
-**Scope label decision:** task instance attachments are conceptually "task instance" scope — more specific than scheduled-task scope. We could add a fourth scope value `'task_instance'`, or fold them into the precedence ordering by giving them `priority: -1` (lowest number = highest precedence in the existing priority ordering). The spec uses the latter for minimal schema surface — the `LoadedDataSource.scope` literal stays at three values (`agent | subaccount | scheduled_task`) and the precedence comes from the negative priority on task-attachment rows. **Actually we should add the fourth scope value for clarity in UI display and logs.** Add `'task_instance'` to the `LoadedDataSource['scope']` union and use it for task attachments. Precedence ordering then becomes: `task_instance > scheduled_task > subaccount > agent`.
+**Scope labelling:** task instance attachments use the formal `'task_instance'` scope value (one of the four values in the `LoadedDataSource.scope` union — see §6.1). This is the scope value referenced throughout the loader, the snapshot, the debug UI, and the `read_data_source` skill. Precedence ordering: `task_instance > scheduled_task > subaccount > agent`, enforced by `scopeOrder` in §7.1 — the scope itself drives precedence, not the `priority` field. `priority: 0` on task attachments is intentional: priority is only consulted WITHIN a scope to break ties, never ACROSS scopes.
 
 ### 6.4 CRUD service methods for scheduled-task data sources
 
@@ -733,11 +734,21 @@ export async function loadRunContextData(
   };
   pool.sort(sorter);
 
-  // 5. Same-name override resolution (§3.6)
+  // 5. Assign orderIndex to the full sorted pool — BEFORE suppression
+  //    or eager/lazy splitting. This guarantees every source (winners,
+  //    losers, eager, lazy, binary) carries a stable, deterministic
+  //    orderIndex through to the snapshot. The debug UI sorts by this
+  //    field, so determinism here is a user-visible property.
+  pool.forEach((source, idx) => {
+    source.orderIndex = idx;
+  });
+
+  // 6. Same-name override resolution (§3.6)
   //    When multiple sources across scopes share the same normalised name,
   //    the first one in sort order (highest precedence) wins. Others are
   //    marked suppressedByOverride: true and included in the snapshot but
   //    excluded from both the prompt and the read_data_source skill.
+  //    orderIndex is preserved on both winners and losers from step 5.
   const normaliseName = (n: string) => n.toLowerCase().trim();
   const winnersByName = new Map<string, LoadedDataSource>();
   const suppressed: LoadedDataSource[] = [];
@@ -756,41 +767,43 @@ export async function loadRunContextData(
   }
   const activePool = pool.filter(s => !s.suppressedByOverride);
 
-  // 6. Split eager vs lazy from the active (post-dedupe) pool
+  // 7. Split eager vs lazy from the active (post-dedupe) pool
   const eager = activePool.filter(s => s.loadingMode === 'eager');
   const manifest = activePool.filter(s => s.loadingMode === 'lazy');
 
-  // 7. Pre-prompt budget enforcement — walk the eager list, accumulating
+  // 8. Pre-prompt budget enforcement — walk the eager list, accumulating
   //    tokenCount against MAX_EAGER_BUDGET. Sources that fit are marked
   //    includedInPrompt: true. Sources that don't fit stay in the list
   //    with includedInPrompt: false (so the snapshot sees them) but are
   //    excluded from the system prompt render in agentExecutionService.
+  //
+  //    orderIndex is NOT reassigned here — it was set on the full pool
+  //    in step 5 and is preserved through all subsequent filtering.
   //
   //    This replaces the old reliance on buildSystemPrompt's character-level
   //    truncation as the primary budget mechanism. The downstream truncation
   //    remains as a belt-and-braces safety net.
   const { MAX_EAGER_BUDGET } = await import('../config/limits.js');
   let accumulatedTokens = 0;
-  eager.forEach((source, idx) => {
-    source.orderIndex = idx;
+  for (const source of eager) {
     if (accumulatedTokens + source.tokenCount <= MAX_EAGER_BUDGET) {
       source.includedInPrompt = true;
       accumulatedTokens += source.tokenCount;
     } else {
       source.includedInPrompt = false;
     }
-  });
+  }
 
   // Manifest entries are never included in the Knowledge Base block (by
   // definition — they're the lazy manifest), but they do appear in the
   // system prompt as the "Available Context Sources" list. Tag them for
-  // the snapshot so debugging shows why each entry was there.
-  manifest.forEach((source, idx) => {
-    source.orderIndex = eager.length + idx;
+  // the snapshot so debugging shows why each entry was there. Again,
+  // orderIndex is preserved from step 5.
+  for (const source of manifest) {
     source.includedInPrompt = false;  // not in the Knowledge Base block
-  });
+  }
 
-  // 8. Cap the manifest length rendered INTO the prompt
+  // 9. Cap the manifest length rendered INTO the prompt
   //    (the full manifest is still available via read_data_source op='list').
   const { MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT } = await import('../config/limits.js');
   const manifestForPrompt = manifest.slice(0, MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT);
@@ -947,7 +960,12 @@ interface ContextSourceSnapshotEntry {
   tokenCount: number;
   fetchOk: boolean;
 
-  /** Position in the resolved order (0 = first) */
+  /**
+   * Position in the resolved order (0 = first). Assigned on the full sorted
+   * pool in §7.1 step 5, BEFORE override suppression, so every entry
+   * including suppressed losers carries a stable deterministic index.
+   * The debug UI sorts by this field. Always present — never -1 or null.
+   */
   orderIndex: number;
 
   /** True if this source contributed to the "## Your Knowledge Base" block */
@@ -997,7 +1015,11 @@ const snapshot: ContextSourceSnapshotEntry[] = allForSnapshot.map(s => ({
   sizeBytes: s.sizeBytes,
   tokenCount: s.tokenCount,
   fetchOk: s.fetchOk,
-  orderIndex: s.orderIndex ?? -1,
+  // orderIndex is assigned on the full sorted pool in loadRunContextData
+  // (§7.1 step 5) BEFORE override suppression, so every entry — winners,
+  // suppressed, lazy, and binary — carries a stable numeric index.
+  // Non-null assertion is safe here: the loader guarantees it.
+  orderIndex: s.orderIndex!,
   includedInPrompt: s.includedInPrompt ?? false,
   truncated: s.truncated ?? false,
   suppressedByOverride: s.suppressedByOverride ?? false,
@@ -1418,7 +1440,7 @@ case 'read_data_source': {
 
 **Design notes on the handler:**
 
-1. **Suppressed sources are invisible.** Same-name override winners push the losing source out of both `runContext.eager` and `runContext.manifest` at load time (§7.1 step 5), so `activeSources` naturally excludes them. The agent never sees a suppressed source in either `list` or `read`.
+1. **Suppressed sources are invisible.** Same-name override winners push the losing source out of both `runContext.eager` and `runContext.manifest` at load time (§7.1 step 6), so `activeSources` naturally excludes them. The agent never sees a suppressed source in either `list` or `read`.
 2. **Per-read cap is a hard ceiling, not a soft default.** Even if the caller passes `limit: 50000`, the effective limit is clamped to `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL`. This prevents the agent from attempting to dump a massive file into context in one go.
 3. **`nextOffset` continuation.** When a source is larger than the slice, the response includes `nextOffset`. The agent can make follow-up calls with that offset to walk the file in chunks. When `nextOffset` is null, the full content has been returned.
 4. **Lazy content cache.** First `read` of a lazy source populates `source.content` in the shared `runContext`. Subsequent calls (for offset walking, or for re-reading) do NOT re-fetch from storage — they slice the cached content. This matters for the call-count budget: walking a large file via multiple reads still consumes multiple `read` calls against `MAX_READ_DATA_SOURCE_CALLS_PER_RUN`, but each call only costs one S3 fetch for the first read.
@@ -1474,8 +1496,8 @@ export const MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT = 25;
 |---|---|---|
 | `MAX_READ_DATA_SOURCE_CALLS_PER_RUN` | Skill handler, top of `op: 'read'` branch | `{ ok: false, error: 'read_data_source call limit exceeded' }` |
 | `MAX_READ_DATA_SOURCE_TOKENS_PER_CALL` | Skill handler, clamps `effectiveLimit` | Slice is capped; response includes `nextOffset` for continuation |
-| `MAX_EAGER_BUDGET` | `loadRunContextData` budget walk (§7.1 step 7) | Sources beyond the budget get `includedInPrompt: false` in the snapshot |
-| `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` | `loadRunContextData` (§7.1 step 8) | Excess entries elided from the prompt with an elision note; still accessible via `op: 'list'` |
+| `MAX_EAGER_BUDGET` | `loadRunContextData` budget walk (§7.1 step 8) | Sources beyond the budget get `includedInPrompt: false` in the snapshot |
+| `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` | `loadRunContextData` (§7.1 step 9) | Excess entries elided from the prompt with an elision note; still accessible via `op: 'list'` |
 
 All four limits are system-wide constants in v1. Per-agent or per-scheduled-task overrides are out of scope and noted in §17.
 
@@ -2058,7 +2080,9 @@ Cover:
 17. **Lazy doesn't consume eager budget** — a scheduled task with one 50k lazy source does NOT reduce `accumulatedTokens`. A 50k eager source added alongside still fits inside the 60k budget.
 18. **Lazy manifest cap** — with `MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT` set to 5 via DI and 10 lazy sources attached, `manifestForPrompt.length === 5` and `manifestElidedCount === 5`. The full `manifest` still has all 10.
 19. **Snapshot shape completeness** — after `loadRunContextData` runs for a mixed scenario (eager in prompt, eager excluded, lazy, lazy elided, suppressed, binary failed), assert the snapshot includes entries for ALL of them with correct `includedInPrompt`, `suppressedByOverride`, `exclusionReason`, and `orderIndex` values.
-20. **Order index stability** — run the loader twice with the same inputs and verify the `orderIndex` on each source is identical. (Determinism check.)
+20. **Order index stability across runs** — run the loader twice with the same inputs and verify the `orderIndex` on each source is identical. (Determinism check.)
+21. **Order index assigned before suppression** — build a scenario with three sources at different scopes sharing the name `glossary.md`. Verify that all three appear in the combined snapshot (winner + two suppressed losers), and that each has a distinct, sequential `orderIndex` corresponding to its position in the full sorted pool (not just the post-suppression pool). Assert no entry has `orderIndex` undefined or -1. Assert the suppressed losers' orderIndex values are greater than the winner's.
+22. **Order index for lazy and binary entries** — verify that a mixed run with eager, lazy, and binary-unreadable task attachments assigns `orderIndex` values to all of them, with the task-instance binary attachment getting orderIndex 0 (highest precedence scope, first position in the sorted pool).
 
 **New test file:** `server/services/__tests__/agentDataSourcesScope.test.ts`
 
@@ -2310,7 +2334,7 @@ Keep them brief — one paragraph each. The spec document is the source of truth
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | Token budget exhaustion — a scheduled task with 10 eager 8KB files could blow past the 60k Knowledge Base budget and cause silent truncation of agent-level sources | Medium | Low | **Mitigated by upstream budget walk (§7.1 step 7)**. `loadRunContextData` walks the eager list deterministically, marks sources `includedInPrompt: true/false`, and persists the decision in the snapshot. Silent character-level truncation no longer happens in practice — the downstream `buildSystemPrompt` safety net is documented but rarely triggers. UI surfaces total size in the Data Sources panel and the run detail Context Sources panel shows which sources were excluded by budget. |
+| R1 | Token budget exhaustion — a scheduled task with 10 eager 8KB files could blow past the 60k Knowledge Base budget and cause silent truncation of agent-level sources | Medium | Low | **Mitigated by upstream budget walk (§7.1 step 8)**. `loadRunContextData` walks the eager list deterministically, marks sources `includedInPrompt: true/false`, and persists the decision in the snapshot. Silent character-level truncation no longer happens in practice — the downstream `buildSystemPrompt` safety net is documented but rarely triggers. UI surfaces total size in the Data Sources panel and the run detail Context Sources panel shows which sources were excluded by budget. |
 | R2 | Binary attachments mislabeled as text — a `.md` file with binary content, or a misconfigured MIME type, could crash the loader | Low | Medium | Wrap `loadTaskAttachmentsAsContext` content reads in try/catch. On any decode error, mark the attachment as `fetchOk: false` and surface it in the manifest only. Never propagate raw bytes into the prompt. |
 | R3 | Circular schema reference between `scheduledTasks.ts` and `agentDataSources.ts` | Medium | Low | The schema files already import each other transitively via the main `index.ts`. Use type-only imports where needed (`import type { ... }`) to avoid runtime circularity. |
 | R4 | Cascade-delete surprises when a scheduled task is deleted — operators may lose reference material they thought was agent-level | Low | Medium | Data source rows scoped to a scheduled task are, by definition, tied to that task's lifecycle. Cascade is correct. UI shows a confirmation dialog on scheduled task delete that explicitly lists the attached data sources ("Deleting this scheduled task will also remove 5 data sources."). |
