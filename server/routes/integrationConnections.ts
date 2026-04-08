@@ -4,13 +4,13 @@
  */
 
 import { Router } from 'express';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections } from '../db/schema/index.js';
-import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
+import { authenticate, requireSubaccountPermission, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
+import { SUBACCOUNT_PERMISSIONS, ORG_PERMISSIONS } from '../lib/permissions.js';
 import { connectionTokenService } from '../services/connectionTokenService.js';
 
 const router = Router();
@@ -219,4 +219,157 @@ router.get(
   })
 );
 
+// ── Org-level connection routes ──────────────────────────────────────────────
+// Connections where subaccountId IS NULL are org-scoped (e.g. an org-wide Slack
+// bot token rather than a per-client one). These mirror the subaccount routes
+// above but use org permission guards and filter on subaccountId IS NULL.
+
+// List org-level connections (optionally filter by ?provider=X)
+router.get(
+  '/api/org/connections',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    const conditions = [
+      eq(integrationConnections.organisationId, req.orgId!),
+      isNull(integrationConnections.subaccountId),
+    ];
+    if (req.query.provider) {
+      conditions.push(eq(integrationConnections.providerType, req.query.provider as string));
+    }
+    const rows = await db.select()
+      .from(integrationConnections)
+      .where(and(...conditions));
+    res.json(rows.map(sanitizeConnection));
+  })
+);
+
+// Create org-level connection
+router.post(
+  '/api/org/connections',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_MANAGE),
+  asyncHandler(async (req, res) => {
+    const { providerType, authType, label, displayName, configJson, accessToken, refreshToken, tokenExpiresAt, secretsRef } = req.body;
+    if (!providerType || !authType) {
+      throw { statusCode: 400, message: 'providerType and authType are required' };
+    }
+    const encryptedAccess = accessToken ? connectionTokenService.encryptToken(accessToken) : null;
+    const encryptedRefresh = refreshToken ? connectionTokenService.encryptToken(refreshToken) : null;
+    const encryptedSecret = secretsRef ? connectionTokenService.encryptToken(secretsRef) : null;
+    const [connection] = await db.insert(integrationConnections).values({
+      organisationId: req.orgId!,
+      subaccountId: null,
+      providerType,
+      authType,
+      label: label ?? null,
+      displayName: displayName ?? null,
+      configJson: configJson ?? null,
+      accessToken: encryptedAccess,
+      refreshToken: encryptedRefresh,
+      tokenExpiresAt: tokenExpiresAt ? new Date(tokenExpiresAt) : null,
+      secretsRef: encryptedSecret,
+      connectionStatus: 'active',
+    }).returning();
+    res.status(201).json(sanitizeConnection(connection));
+  })
+);
+
+// Update org-level connection
+router.patch(
+  '/api/org/connections/:id',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_MANAGE),
+  asyncHandler(async (req, res) => {
+    const [existing] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.organisationId, req.orgId!),
+        isNull(integrationConnections.subaccountId),
+      ));
+    if (!existing) throw { statusCode: 404, message: 'Connection not found' };
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (req.body.label !== undefined) updates.label = req.body.label;
+    if (req.body.displayName !== undefined) updates.displayName = req.body.displayName;
+    if (req.body.connectionStatus !== undefined) updates.connectionStatus = req.body.connectionStatus;
+    if (req.body.configJson !== undefined) updates.configJson = req.body.configJson;
+    if (req.body.accessToken) updates.accessToken = connectionTokenService.encryptToken(req.body.accessToken);
+    if (req.body.refreshToken) updates.refreshToken = connectionTokenService.encryptToken(req.body.refreshToken);
+    if (req.body.tokenExpiresAt) updates.tokenExpiresAt = new Date(req.body.tokenExpiresAt);
+    if (req.body.secretsRef) updates.secretsRef = connectionTokenService.encryptToken(req.body.secretsRef);
+
+    const [updated] = await db.update(integrationConnections)
+      .set(updates)
+      .where(eq(integrationConnections.id, req.params.id))
+      .returning();
+    res.json(sanitizeConnection(updated));
+  })
+);
+
+// Revoke org-level connection
+router.delete(
+  '/api/org/connections/:id',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_MANAGE),
+  asyncHandler(async (req, res) => {
+    const [existing] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.organisationId, req.orgId!),
+        isNull(integrationConnections.subaccountId),
+      ));
+    if (!existing) throw { statusCode: 404, message: 'Connection not found' };
+    await db.update(integrationConnections)
+      .set({ connectionStatus: 'revoked', accessToken: null, refreshToken: null, updatedAt: new Date() })
+      .where(eq(integrationConnections.id, req.params.id));
+    res.json({ success: true });
+  })
+);
+
+// Fetch Slack channel list for an org-level connection
+router.get(
+  '/api/org/connections/:id/slack-channels',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.CONNECTIONS_VIEW),
+  asyncHandler(async (req, res) => {
+    const [conn] = await db.select()
+      .from(integrationConnections)
+      .where(and(
+        eq(integrationConnections.id, req.params.id),
+        eq(integrationConnections.organisationId, req.orgId!),
+        isNull(integrationConnections.subaccountId),
+        eq(integrationConnections.providerType, 'slack'),
+      ));
+    if (!conn) throw { statusCode: 404, message: 'Slack connection not found' };
+    if (!conn.accessToken) throw { statusCode: 422, message: 'Slack connection has no token — reconnect first' };
+
+    const token = connectionTokenService.decryptToken(conn.accessToken);
+    const channels: { id: string; name: string }[] = [];
+    let cursor: string | undefined;
+    do {
+      const params = new URLSearchParams({ types: 'public_channel', exclude_archived: 'true', limit: '200' });
+      if (cursor) params.set('cursor', cursor);
+      const response = await fetch(`https://slack.com/api/conversations.list?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      const data = await response.json() as {
+        ok: boolean;
+        channels?: { id: string; name: string }[];
+        response_metadata?: { next_cursor?: string };
+        error?: string;
+      };
+      if (!data.ok) throw { statusCode: 502, message: `Slack API error: ${data.error ?? 'unknown'}` };
+      for (const ch of data.channels ?? []) channels.push({ id: ch.id, name: ch.name });
+      cursor = data.response_metadata?.next_cursor || undefined;
+    } while (cursor && channels.length < 500);
+    channels.sort((a, b) => a.name.localeCompare(b.name));
+    res.json(channels);
+  })
+);
+
 export default router;
+
