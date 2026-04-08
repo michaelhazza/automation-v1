@@ -167,6 +167,17 @@ export const JOB_CONFIG = {
     expireInSeconds: 60,
     deadLetter: 'playbook-watchdog__dlq',
   },
+  // Async dispatch queue for prompt + agent_call step types. The engine
+  // tick handler enqueues onto this; a worker picks it up and runs the
+  // existing agentExecutionService.executeRun synchronously.
+  // Spec §5.2 dispatch case + §5.5 idempotency keys.
+  'playbook-agent-step': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
+    expireInSeconds: 600,
+    deadLetter: 'playbook-agent-step__dlq',
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

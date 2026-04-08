@@ -139,6 +139,13 @@ export interface AgentRunRequest {
   orgAgentConfigId?: string;
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
+  /**
+   * Playbooks: when this agent run was dispatched by a Playbook step, the
+   * step run id is stamped onto agent_runs.playbook_step_run_id so the
+   * completion hook can route the result back to the engine.
+   * Spec tasks/playbooks-spec.md §5.2 / step 6 wiring.
+   */
+  playbookStepRunId?: string;
 }
 
 export interface AgentRunResult {
@@ -241,6 +248,7 @@ export const agentExecutionService = {
         parentRunId: request.parentRunId ?? null,
         isSubAgent: request.isSubAgent ?? false,
         parentSpawnRunId: request.parentSpawnRunId ?? null,
+        playbookStepRunId: request.playbookStepRunId ?? null,
         lastActivityAt: new Date(),
         startedAt: new Date(),
         createdAt: new Date(),

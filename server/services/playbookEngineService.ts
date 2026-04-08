@@ -38,6 +38,11 @@ import {
   playbookStepRuns,
   playbookTemplateVersions,
   systemPlaybookTemplateVersions,
+  agents,
+  systemAgents,
+  subaccountAgents,
+  organisations,
+  subaccounts,
 } from '../db/schema/index.js';
 import type {
   PlaybookRun,
@@ -45,12 +50,14 @@ import type {
 } from '../db/schema/index.js';
 import type { PlaybookDefinition, PlaybookStep, RunContext } from '../lib/playbook/types.js';
 import { hashValue } from '../lib/playbook/hash.js';
+import { renderString, resolveInputs as resolveTemplateInputs, TemplatingError } from '../lib/playbook/templating.js';
 import { logger } from '../lib/logger.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 
 const TICK_QUEUE = 'playbook-run-tick';
 const WATCHDOG_QUEUE = 'playbook-watchdog';
+const AGENT_STEP_QUEUE = 'playbook-agent-step';
 
 // ─── Engine constants (spec §1.5, §3.6, §5.2) ────────────────────────────────
 
@@ -435,30 +442,228 @@ export const playbookEngineService = {
 
       case 'agent_call':
       case 'prompt': {
-        // Phase 1 stub — the agent_run integration ships in step 6.
-        // For now we mark the step as 'running' so the route layer can
-        // observe state and the eventual integration can pick up from here.
+        // Real dispatch — resolve inputs via the templating module, hash
+        // them, check for input-hash reuse, then enqueue onto the
+        // playbook-agent-step queue. The worker creates the agent_runs row
+        // (with playbook_step_run_id set) and runs executeRun. The
+        // existing completion hook routes the result back via
+        // playbookAgentRunHook.
+
+        // Resolve templated agentInputs against the run context.
+        const ctx = run.contextJson as unknown as RunContext;
+        let resolvedAgentInputs: Record<string, unknown> = {};
+        let renderedPrompt: string | null = null;
+        try {
+          if (step.agentInputs) {
+            resolvedAgentInputs = resolveTemplateInputs(step.agentInputs, ctx);
+          }
+          if (step.prompt) {
+            renderedPrompt = renderString(step.prompt, ctx);
+          }
+        } catch (err) {
+          if (err instanceof TemplatingError) {
+            await this.failStepRunInternal(
+              sr,
+              `templating_error: ${err.reason} ('${err.expression}')`
+            );
+            return;
+          }
+          throw err;
+        }
+
+        const dispatchInputHash = hashValue({
+          agentInputs: resolvedAgentInputs,
+          prompt: renderedPrompt,
+        });
+
+        // Input-hash reuse path (§5.5) — never for irreversible steps.
+        if (step.sideEffectType !== 'irreversible') {
+          const reuse = await this.findReusableOutputForStep(
+            run.id,
+            step.id,
+            dispatchInputHash
+          );
+          if (reuse) {
+            logger.info('playbook_step_input_hash_reuse', {
+              event: 'step.completed',
+              runId: run.id,
+              stepRunId: sr.id,
+              stepId: step.id,
+              reusedFromAttempt: reuse.attempt,
+            });
+            await this.completeStepRunInternal(
+              sr,
+              reuse.output,
+              reuse.outputHash,
+              `input_hash_reuse:from_attempt_${reuse.attempt}`
+            );
+            return;
+          }
+        }
+
+        // Resolve the agent. Cached on _meta.resolvedAgents at run start
+        // (or fall back to live lookup if the cache misses).
+        const resolvedAgentId = await this.resolveAgentForStep(run, step);
+        if (!resolvedAgentId) {
+          await this.failStepRunInternal(
+            sr,
+            `agent_not_found: ${step.agentRef?.kind ?? '?'}:${step.agentRef?.slug ?? '?'}`
+          );
+          return;
+        }
+
+        // Mark the step as running and stamp inputs.
         await db
           .update(playbookStepRuns)
           .set({
             status: 'running',
-            inputJson: resolvedInputs as unknown as Record<string, unknown> | null,
-            inputHash,
+            inputJson: { agentInputs: resolvedAgentInputs, prompt: renderedPrompt } as unknown as Record<string, unknown>,
+            inputHash: dispatchInputHash,
             startedAt: new Date(),
             version: sr.version + 1,
             updatedAt: new Date(),
           })
           .where(eq(playbookStepRuns.id, sr.id));
-        logger.warn('playbook_agent_call_dispatch_stub', {
+
+        // Enqueue onto the playbook-agent-step queue. The worker creates
+        // the agent_runs row (with playbook_step_run_id) and runs
+        // executeRun synchronously. The completion hook fires when done.
+        const pgboss = (await getPgBoss()) as unknown as {
+          send: (
+            name: string,
+            data: object,
+            options?: Record<string, unknown>
+          ) => Promise<string | null>;
+        };
+        await pgboss.send(
+          AGENT_STEP_QUEUE,
+          {
+            playbookStepRunId: sr.id,
+            playbookRunId: run.id,
+            organisationId: run.organisationId,
+            subaccountId: run.subaccountId,
+            agentId: resolvedAgentId,
+            stepId: step.id,
+            attempt: sr.attempt,
+            renderedPrompt,
+            resolvedAgentInputs,
+            sideEffectType: step.sideEffectType,
+          },
+          {
+            ...getJobConfig('playbook-agent-step'),
+            singletonKey: `playbook-step:${sr.id}:${sr.attempt}`,
+            useSingletonQueue: true,
+          }
+        );
+
+        logger.info('playbook_agent_step_dispatched', {
           event: 'step.dispatched',
           runId: run.id,
           stepRunId: sr.id,
           stepId: step.id,
-          note: 'agent_call/prompt dispatch deferred to step 6 wiring',
+          resolvedAgentId,
         });
         return;
       }
     }
+  },
+
+  /**
+   * Resolves an agent_call step's agentRef to a concrete agent id.
+   * Reads the cache from `run.contextJson._meta.resolvedAgents` first;
+   * falls back to a live DB lookup. The fresh lookup is also re-verified
+   * before every dispatch (spec §3.4) so a deleted agent fails with
+   * `playbook_template_drift:agent_deleted_mid_run`.
+   */
+  async resolveAgentForStep(run: PlaybookRun, step: PlaybookStep): Promise<string | null> {
+    if (!step.agentRef?.slug) return null;
+    const slug = step.agentRef.slug;
+    const kind = step.agentRef.kind;
+
+    // Try cache first
+    const meta = (run.contextJson as unknown as RunContext)?._meta ?? {};
+    const cached = meta.resolvedAgents?.[`${kind}:${slug}`];
+
+    if (cached) {
+      // Verify the cached agent still exists (re-verification per §3.4).
+      if (kind === 'system') {
+        const [row] = await db
+          .select({ id: systemAgents.id })
+          .from(systemAgents)
+          .where(eq(systemAgents.id, cached));
+        if (row) return cached;
+      } else {
+        const [row] = await db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.id, cached));
+        if (row) return cached;
+      }
+      logger.warn('playbook_resolved_agent_missing', {
+        runId: run.id,
+        stepId: step.id,
+        cached,
+        slug,
+      });
+    }
+
+    // Fresh lookup
+    if (kind === 'system') {
+      const [row] = await db
+        .select({ id: systemAgents.id })
+        .from(systemAgents)
+        .where(eq(systemAgents.slug, slug));
+      return row?.id ?? null;
+    }
+    if (kind === 'org') {
+      const [row] = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.slug, slug), eq(agents.organisationId, run.organisationId)));
+      return row?.id ?? null;
+    }
+    return null;
+  },
+
+  /**
+   * Looks for a previous completed attempt of the same step in the same
+   * run with an identical input_hash. Returns the previous output for
+   * verbatim reuse, or null. Per spec §5.5, irreversible steps are never
+   * eligible for this path — the caller must enforce that.
+   */
+  async findReusableOutputForStep(
+    runId: string,
+    stepId: string,
+    inputHashValue: string
+  ): Promise<{ attempt: number; output: unknown; outputHash: string } | null> {
+    const rows = await db
+      .select()
+      .from(playbookStepRuns)
+      .where(
+        and(
+          eq(playbookStepRuns.runId, runId),
+          eq(playbookStepRuns.stepId, stepId),
+          eq(playbookStepRuns.status, 'completed'),
+          eq(playbookStepRuns.inputHash, inputHashValue)
+        )
+      );
+    const row = rows[0];
+    if (!row || row.outputJson === null || !row.outputHash) return null;
+    return { attempt: row.attempt, output: row.outputJson, outputHash: row.outputHash };
+  },
+
+  async failStepRunInternal(sr: PlaybookStepRun, reason: string): Promise<void> {
+    await db
+      .update(playbookStepRuns)
+      .set({
+        status: 'failed',
+        error: reason,
+        completedAt: new Date(),
+        version: sr.version + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(playbookStepRuns.id, sr.id));
+    await this.enqueueTick(sr.runId);
   },
 
   /**
@@ -693,6 +898,106 @@ export const playbookEngineService = {
       { teamSize: 1, teamConcurrency: 1 },
       async () => {
         await this.watchdogSweep();
+      }
+    );
+
+    // playbook-agent-step worker — runs the actual agent for prompt /
+    // agent_call step types. Dynamic-imported to avoid pulling
+    // agentExecutionService into the engine module's eager graph.
+    await pgboss.work(
+      AGENT_STEP_QUEUE,
+      { teamSize: 4, teamConcurrency: 1 },
+      async (job) => {
+        const data = job.data as {
+          playbookStepRunId: string;
+          playbookRunId: string;
+          organisationId: string;
+          subaccountId: string;
+          agentId: string;
+          stepId: string;
+          attempt: number;
+          renderedPrompt: string | null;
+          resolvedAgentInputs: Record<string, unknown>;
+          sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
+        };
+
+        // Re-verify the step run is still live before doing anything.
+        // If it was invalidated between enqueue and worker pickup, drop.
+        const [sr] = await db
+          .select()
+          .from(playbookStepRuns)
+          .where(eq(playbookStepRuns.id, data.playbookStepRunId));
+        if (!sr || sr.status === 'invalidated' || sr.status === 'completed') {
+          logger.info('playbook_agent_step_skipped_stale', {
+            stepRunId: data.playbookStepRunId,
+            currentStatus: sr?.status,
+          });
+          return;
+        }
+
+        try {
+          // Look up subaccountAgent linking row if any (used by agent system
+          // to scope budgets and limits to the per-client config).
+          const [saLink] = await db
+            .select()
+            .from(subaccountAgents)
+            .where(
+              and(
+                eq(subaccountAgents.agentId, data.agentId),
+                eq(subaccountAgents.subaccountId, data.subaccountId)
+              )
+            );
+
+          const idempotencyKey = `playbook:${data.playbookRunId}:${data.stepId}:${data.attempt}`;
+          const triggerContext: Record<string, unknown> = {
+            source: 'playbook',
+            playbookRunId: data.playbookRunId,
+            playbookStepRunId: data.playbookStepRunId,
+            stepId: data.stepId,
+            attempt: data.attempt,
+            agentInputs: data.resolvedAgentInputs,
+          };
+          if (data.renderedPrompt) {
+            triggerContext.prompt = data.renderedPrompt;
+          }
+
+          // Dynamic import to avoid an import cycle
+          const { agentExecutionService } = await import('./agentExecutionService.js');
+
+          await agentExecutionService.executeRun({
+            agentId: data.agentId,
+            subaccountId: data.subaccountId,
+            subaccountAgentId: saLink?.id ?? null,
+            organisationId: data.organisationId,
+            executionScope: 'subaccount',
+            runType: 'triggered',
+            runSource: 'system',
+            executionMode: 'api',
+            idempotencyKey,
+            triggerContext,
+            playbookStepRunId: data.playbookStepRunId,
+          });
+          // executeRun is synchronous (awaits the agent loop). The hook in
+          // playbookAgentRunHook fires from the success/failure paths in
+          // agentExecutionService and routes back to the engine.
+        } catch (err) {
+          logger.error('playbook_agent_step_dispatch_failed', {
+            stepRunId: data.playbookStepRunId,
+            stepId: data.stepId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          // The §5.5 hard runtime guard: irreversible steps never retry.
+          // For other types, the queue retryLimit handles transient failure.
+          if (data.sideEffectType === 'irreversible') {
+            await this.failStepRun(
+              data.playbookStepRunId,
+              'transient_error_no_retry: ' +
+                (err instanceof Error ? err.message : String(err))
+            );
+            return;
+          }
+          throw err; // bubble for queue retry
+        }
       }
     );
 

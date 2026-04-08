@@ -20,6 +20,8 @@ import {
   systemPlaybookTemplateVersions,
   organisations,
   subaccounts,
+  agents,
+  systemAgents,
 } from '../db/schema/index.js';
 import type {
   PlaybookRun,
@@ -141,6 +143,34 @@ export const playbookRunService = {
       .from(organisations)
       .where(eq(organisations.id, input.organisationId));
 
+    // Pre-resolve every agent_call step's agentRef to a concrete id and
+    // cache in _meta.resolvedAgents (spec §3.4). The engine re-verifies on
+    // each dispatch but the cache short-circuits the lookup in the common case.
+    const resolvedAgents: Record<string, string> = {};
+    for (const step of definition.steps) {
+      if (step.type !== 'agent_call' || !step.agentRef) continue;
+      const key = `${step.agentRef.kind}:${step.agentRef.slug}`;
+      if (resolvedAgents[key]) continue;
+      if (step.agentRef.kind === 'system') {
+        const [row] = await db
+          .select({ id: systemAgents.id })
+          .from(systemAgents)
+          .where(eq(systemAgents.slug, step.agentRef.slug));
+        if (row) resolvedAgents[key] = row.id;
+      } else if (step.agentRef.kind === 'org') {
+        const [row] = await db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(
+            and(
+              eq(agents.slug, step.agentRef.slug),
+              eq(agents.organisationId, input.organisationId)
+            )
+          );
+        if (row) resolvedAgents[key] = row.id;
+      }
+    }
+
     const initialContext: RunContext = {
       input: input.initialInput,
       subaccount: { id: sub.id, name: sub.name },
@@ -150,6 +180,7 @@ export const playbookRunService = {
         runId: '', // back-filled below
         templateVersionId,
         startedAt: startedAt.toISOString(),
+        resolvedAgents,
       },
     };
 
