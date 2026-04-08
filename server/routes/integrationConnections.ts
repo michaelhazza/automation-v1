@@ -242,7 +242,7 @@ router.get(
         eq(integrationConnections.organisationId, req.orgId!),
         isNull(integrationConnections.subaccountId),
         typeof req.query.provider === 'string'
-          ? eq(integrationConnections.providerType, req.query.provider)
+          ? eq(integrationConnections.providerType, req.query.provider as typeof integrationConnections.providerType._.data)
           : undefined,
       ));
     res.json(rows.map(sanitizeConnection));
