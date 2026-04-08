@@ -52,6 +52,7 @@ import type { PlaybookDefinition, PlaybookStep, RunContext } from '../lib/playbo
 import { hashValue } from '../lib/playbook/hash.js';
 import { renderString, resolveInputs as resolveTemplateInputs, TemplatingError } from '../lib/playbook/templating.js';
 import { logger } from '../lib/logger.js';
+import { emitPlaybookRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 
@@ -109,6 +110,44 @@ function computeReadySet(def: PlaybookDefinition, stepRuns: PlaybookStepRun[]): 
     if (depsMet) ready.push(step);
   }
   return ready;
+}
+
+/**
+ * Emits a structured event to both the per-run room and the subaccount-level
+ * coarse room. Spec §8.2 — wraps the existing emitter helpers which already
+ * provide the eventId / timestamp envelope.
+ */
+async function emitPlaybookEvent(
+  runId: string,
+  subaccountId: string,
+  type: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  // Allocate a per-run sequence number atomically. The DB increments
+  // last_sequence and returns the new value so client-side ordering is
+  // deterministic even if events arrive out of order.
+  let sequence = 0;
+  try {
+    const result = await db.execute(
+      sql`UPDATE playbook_run_event_sequences SET last_sequence = last_sequence + 1 WHERE run_id = ${runId} RETURNING last_sequence`
+    );
+    const row = (result as unknown as { rows?: Array<{ last_sequence: number | string }> }).rows?.[0];
+    if (row) {
+      sequence = typeof row.last_sequence === 'string' ? parseInt(row.last_sequence, 10) : row.last_sequence;
+    }
+  } catch (err) {
+    // Sequence allocation failure should never block the emit. Log + use 0.
+    logger.warn('playbook_ws_sequence_allocation_failed', {
+      runId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  emitPlaybookRunUpdate(runId, type, { ...payload, sequence });
+  // Coarse subaccount-level event for dashboard / inbox badge updates.
+  if (type === 'playbook:run:status') {
+    emitSubaccountUpdate(subaccountId, type, { runId, ...payload, sequence });
+  }
 }
 
 /** Asserts a context size is within the hard limit; throws otherwise. */
@@ -246,6 +285,9 @@ export const playbookEngineService = {
           .set({ status: 'cancelled', completedAt: new Date(), updatedAt: new Date() })
           .where(eq(playbookRuns.id, runId));
         logger.info('playbook_run_cancelled', { event: 'run.cancelled', runId });
+        await emitPlaybookEvent(runId, run.subaccountId, 'playbook:run:status', {
+          status: 'cancelled',
+        });
       }
       return;
     }
@@ -299,6 +341,11 @@ export const playbookEngineService = {
           runId,
           totalSteps: def.steps.length,
         });
+        await emitPlaybookEvent(runId, run.subaccountId, 'playbook:run:status', {
+          status: finalStatus,
+          completedSteps: completedSteps.length,
+          totalSteps: def.steps.length,
+        });
         return;
       }
 
@@ -329,6 +376,11 @@ export const playbookEngineService = {
         .update(playbookRuns)
         .set({ status: 'running', updatedAt: new Date() })
         .where(eq(playbookRuns.id, runId));
+      await emitPlaybookEvent(runId, run.subaccountId, 'playbook:run:status', {
+        status: 'running',
+        completedSteps: liveStepRuns.filter((s) => s.status === 'completed' || s.status === 'skipped').length,
+        totalSteps: def.steps.length,
+      });
     }
 
     for (const step of toDispatch) {
@@ -412,6 +464,10 @@ export const playbookEngineService = {
           stepRunId: sr.id,
           stepId: step.id,
         });
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:step:awaiting_input', {
+          stepRunId: sr.id,
+          stepId: step.id,
+        });
         return;
       }
 
@@ -430,6 +486,10 @@ export const playbookEngineService = {
         logger.info('playbook_step_awaiting_approval', {
           event: 'step.awaiting_approval',
           runId: run.id,
+          stepRunId: sr.id,
+          stepId: step.id,
+        });
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:step:awaiting_approval', {
           stepRunId: sr.id,
           stepId: step.id,
         });
@@ -578,6 +638,11 @@ export const playbookEngineService = {
           stepRunId: sr.id,
           stepId: step.id,
           resolvedAgentId,
+        });
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:step:dispatched', {
+          stepRunId: sr.id,
+          stepId: step.id,
+          stepType: step.type,
         });
         return;
       }
@@ -1298,6 +1363,13 @@ export const playbookEngineService = {
       via,
     });
 
+    await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:step:completed', {
+      stepRunId: sr.id,
+      stepId: sr.stepId,
+      output,
+      via,
+    });
+
     await this.enqueueTick(run.id);
   },
 
@@ -1349,6 +1421,17 @@ export const playbookEngineService = {
       stepId: sr.stepId,
       reason,
     });
+
+    // Look up subaccountId for the WS room
+    const [parentRun] = await db.select({ subaccountId: playbookRuns.subaccountId }).from(playbookRuns).where(eq(playbookRuns.id, sr.runId));
+    if (parentRun) {
+      await emitPlaybookEvent(sr.runId, parentRun.subaccountId, 'playbook:step:failed', {
+        stepRunId,
+        stepId: sr.stepId,
+        reason,
+      });
+    }
+
     await this.enqueueTick(sr.runId);
   },
 

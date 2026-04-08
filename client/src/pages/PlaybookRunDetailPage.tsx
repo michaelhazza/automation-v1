@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
+import { useSocketRoom } from '../hooks/useSocket';
 
 interface StepRun {
   id: string;
@@ -110,14 +111,31 @@ export default function PlaybookRunDetailPage(_props: { user: User }) {
     refresh();
   }, [refresh]);
 
-  // Phase 1 polling — replace with WebSocket subscription in step 7.
+  // WebSocket live updates. Any event triggers a full refresh — Phase 1.5
+  // can switch to applying patches in place once we have telemetry on
+  // event volume. Polling fallback (every 10s) covers reconnect gaps.
+  useSocketRoom(
+    'playbook-run',
+    runId ?? null,
+    {
+      'playbook:run:status': () => refresh(),
+      'playbook:step:dispatched': () => refresh(),
+      'playbook:step:completed': () => refresh(),
+      'playbook:step:failed': () => refresh(),
+      'playbook:step:awaiting_input': () => refresh(),
+      'playbook:step:awaiting_approval': () => refresh(),
+    },
+    refresh
+  );
+
+  // Lightweight backstop poll — covers any missed events.
   useEffect(() => {
     if (!data) return;
     const terminalStatuses = ['completed', 'completed_with_errors', 'failed', 'cancelled'];
     if (terminalStatuses.includes(data.run.status)) return;
     const id = setInterval(() => {
       refresh();
-    }, 3000);
+    }, 10000);
     return () => clearInterval(id);
   }, [data, refresh]);
 
