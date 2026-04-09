@@ -522,7 +522,9 @@ export function parsePlan(content: string | null | undefined): AgentPlan | null 
 /**
  * Determine if a run should use plan-then-execute mode.
  *
- * A run is "complex" if any of:
+ * Returns false immediately when complexityHint === 'simple' (override).
+ *
+ * Otherwise a run is "complex" if any of:
  *   - agent.complexityHint === 'complex'
  *   - User message word count > 300
  *   - Agent allowlist skill count > 15
