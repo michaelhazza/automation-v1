@@ -15,5 +15,6 @@
   "rls-contract-compliance": 31,
   "job-idempotency-keys": 0,
   "reflection-loop-wired": 0,
-  "tool-intent-convention": 0
+  "tool-intent-convention": 0,
+  "no-silent-failures": 10
 }

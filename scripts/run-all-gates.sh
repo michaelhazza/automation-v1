@@ -77,6 +77,9 @@ run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
 run_gate "$SCRIPT_DIR/verify-reflection-loop-wired.sh"
 run_gate "$SCRIPT_DIR/verify-tool-intent-convention.sh"
 
+# ── Code quality gates ──
+run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 
