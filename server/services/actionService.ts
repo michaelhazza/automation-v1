@@ -1,7 +1,7 @@
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { db } from '../db/index.js';
-import { actions, actionEvents, tasks } from '../db/schema/index.js';
+import { actions, actionEvents, tasks, workflowRuns } from '../db/schema/index.js';
 import {
   getActionDefinition,
   LEGAL_TRANSITIONS,
@@ -54,6 +54,14 @@ export interface ProposeActionInput {
   gateOverride?: 'auto' | 'review' | 'block';
   /** If the agent is working a specific task, pass its ID for gate escalation */
   taskId?: string;
+  /**
+   * Sprint 3 P2.3 — agent's self-reported tool_intent confidence (0..1).
+   * Threaded through to the policy engine which upgrades an `auto`
+   * decision to `review` when confidence is below the effective
+   * threshold. Missing / null is treated as "below threshold" (fail
+   * closed). See server/config/limits.ts → CONFIDENCE_GATE_THRESHOLD.
+   */
+  toolIntentConfidence?: number | null;
 }
 
 export interface ProposeActionResult {
@@ -317,6 +325,78 @@ export const actionService = {
   },
 
   /**
+   * List pending_approval actions enriched with workflow run context.
+   * Used by the agent inbox route.
+   */
+  async listPendingWithWorkflowContext(organisationId: string, subaccountId: string) {
+    const pendingActions = await db
+      .select()
+      .from(actions)
+      .where(
+        and(
+          eq(actions.subaccountId, subaccountId),
+          eq(actions.organisationId, organisationId),
+          eq(actions.status, 'pending_approval'),
+        ),
+      )
+      .orderBy(actions.createdAt);
+
+    if (pendingActions.length === 0) return [];
+
+    // Collect unique workflow run IDs referenced by these actions
+    const workflowRunIds = [
+      ...new Set(
+        pendingActions
+          .map((a) => {
+            const p = a.payloadJson as Record<string, unknown> | null;
+            return (p?.workflowRunId as string | undefined) ?? null;
+          })
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+
+    // Fetch workflow runs in bulk (if any)
+    const workflowRunsMap = new Map<string, typeof workflowRuns.$inferSelect>();
+    if (workflowRunIds.length > 0) {
+      const runs = await db
+        .select()
+        .from(workflowRuns)
+        .where(
+          and(
+            inArray(workflowRuns.id, workflowRunIds),
+            eq(workflowRuns.organisationId, organisationId),
+          ),
+        );
+      for (const run of runs) {
+        workflowRunsMap.set(run.id, run);
+      }
+    }
+
+    // Enrich each action with workflow context
+    return pendingActions.map((action) => {
+      const p = action.payloadJson as Record<string, unknown> | null;
+      const workflowRunId = (p?.workflowRunId as string | undefined) ?? null;
+      const workflowStepId = (p?.workflowStepId as string | undefined) ?? null;
+      const workflowRun = workflowRunId ? workflowRunsMap.get(workflowRunId) ?? null : null;
+
+      return {
+        ...action,
+        workflowContext: workflowRun
+          ? {
+              workflowRunId,
+              workflowStepId,
+              workflowType: (workflowRun.workflowDefinition as { workflowType?: string }).workflowType,
+              label: (workflowRun.workflowDefinition as { label?: string }).label ?? null,
+              currentStepIndex: workflowRun.currentStepIndex,
+              totalSteps: (workflowRun.workflowDefinition as { steps?: unknown[] }).steps?.length ?? 0,
+              workflowStatus: workflowRun.status,
+            }
+          : null,
+      };
+    });
+  },
+
+  /**
    * Get action events for audit trail.
    */
   async getActionEvents(actionId: string, organisationId: string) {
@@ -379,6 +459,7 @@ async function resolveGateLevel(
     subaccountId: input.subaccountId!,
     organisationId: input.organisationId,
     input: input.payload,
+    toolIntentConfidence: input.toolIntentConfidence,
   });
   let gate = policyDecision.decision;
 

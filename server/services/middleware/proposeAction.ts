@@ -42,6 +42,7 @@ import {
   hashActionArgs,
 } from '../actionService.js';
 import { policyEngineService } from '../policyEngineService.js';
+import { extractToolIntentConfidence } from '../agentExecutionServicePure.js';
 import type {
   PreToolMiddleware,
   PreToolResult,
@@ -279,6 +280,16 @@ export const proposeActionMiddleware: PreToolMiddleware = {
       args: toolCall.input,
     });
 
+    // Sprint 3 P2.3 — extract the agent's self-reported confidence from
+    // the last assistant text. `lastAssistantText` is stashed on mwCtx
+    // by runAgenticLoop right after the provider response is pushed to
+    // the conversation. Null result → "unknown, fail closed" — the
+    // policy engine upgrades auto → review when confidence is absent.
+    const toolIntentConfidence = extractToolIntentConfidence(
+      ctx.lastAssistantText,
+      toolCall.name,
+    );
+
     try {
       const proposed = await actionService.proposeAction({
         organisationId,
@@ -288,6 +299,7 @@ export const proposeActionMiddleware: PreToolMiddleware = {
         actionType: toolCall.name,
         idempotencyKey,
         payload: toolCall.input,
+        toolIntentConfidence,
       });
 
       // Blocked by policy engine or gate resolution

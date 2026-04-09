@@ -2,6 +2,11 @@ import { eq, and, asc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { policyRules } from '../db/schema/index.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
+import { CONFIDENCE_GATE_THRESHOLD } from '../config/limits.js';
+import {
+  applyConfidenceUpgrade,
+  selectGuidanceTexts,
+} from './policyEngineServicePure.js';
 import type { PolicyRule } from '../db/schema/policyRules.js';
 
 // ---------------------------------------------------------------------------
@@ -19,6 +24,13 @@ export interface PolicyContext {
   organisationId: string;
   /** Raw tool input — used for condition matching (e.g. amount_usd checks) */
   input?: unknown;
+  /**
+   * Sprint 3 P2.3 — agent's self-reported tool_intent confidence (0..1).
+   * When present and below the effective confidence threshold, an
+   * `auto` decision is upgraded to `review`. Missing / null is treated
+   * as "below threshold" (fail closed).
+   */
+  toolIntentConfidence?: number | null;
 }
 
 export interface PolicyDecision {
@@ -31,6 +43,12 @@ export interface PolicyDecision {
   allowedDecisions?: unknown;
   /** Rendered description_template (for reviewer UI) */
   description?: string;
+  /**
+   * Sprint 3 P2.3 — true when the decision was upgraded from `auto` to
+   * `review` by the confidence gate. Used by downstream audit/metrics
+   * to attribute the upgrade correctly.
+   */
+  upgradedByConfidence?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,24 +146,54 @@ export const policyEngineService = {
 
     for (const rule of rules) {
       if (matchesRule(rule, ctx)) {
+        const baseDecision = rule.decision as 'auto' | 'review' | 'block';
+        const upgraded = applyConfidenceUpgrade(
+          baseDecision,
+          { toolIntentConfidence: ctx.toolIntentConfidence },
+          CONFIDENCE_GATE_THRESHOLD,
+          rule.confidenceThreshold,
+        );
         return {
-          decision: rule.decision as 'auto' | 'review' | 'block',
+          decision: upgraded.decision,
           matchedRule: rule,
           timeoutSeconds: rule.timeoutSeconds ?? undefined,
           timeoutPolicy: (rule.timeoutPolicy as PolicyDecision['timeoutPolicy']) ?? undefined,
           interruptConfig: rule.interruptConfig,
           allowedDecisions: rule.allowedDecisions,
           description: renderDescription(rule.descriptionTemplate, ctx),
+          upgradedByConfidence: upgraded.upgradedByConfidence,
         };
       }
     }
 
-    // No rule matched — fall back to registry default
+    // No rule matched — fall back to registry default, still subject to
+    // the global confidence gate.
     const definition = getActionDefinition(ctx.toolSlug);
+    const fallback = definition?.defaultGateLevel ?? 'review';
+    const upgraded = applyConfidenceUpgrade(
+      fallback,
+      { toolIntentConfidence: ctx.toolIntentConfidence },
+      CONFIDENCE_GATE_THRESHOLD,
+    );
     return {
-      decision: definition?.defaultGateLevel ?? 'review',
+      decision: upgraded.decision,
       matchedRule: null,
+      upgradedByConfidence: upgraded.upgradedByConfidence,
     };
+  },
+
+  /**
+   * Sprint 3 P2.3 — returns every non-empty `guidance_text` whose rule
+   * matches the given context. The decision-time guidance middleware
+   * calls this once per tool call and injects the returned strings as
+   * `<system-reminder>` blocks just before the tool runs.
+   *
+   * Uses the same rule cache as `evaluatePolicy`, so there is no
+   * additional DB hit per tool call.
+   */
+  async getDecisionTimeGuidance(ctx: PolicyContext): Promise<string[]> {
+    const rules = await getRulesForOrg(ctx.organisationId);
+    return selectGuidanceTexts(rules, ctx, (rule, c) => matchesRule(rule, c));
   },
 
   /**

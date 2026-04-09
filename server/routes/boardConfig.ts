@@ -1,12 +1,9 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { boardService } from '../services/boardService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { db } from '../db/index.js';
-import { subaccounts } from '../db/schema/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
 
 const router = Router();
 
@@ -62,16 +59,13 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
   asyncHandler(async (req, res) => {
-    const allSubs = await db
-      .select({ id: subaccounts.id })
-      .from(subaccounts)
-      .where(and(eq(subaccounts.organisationId, req.orgId!), isNull(subaccounts.deletedAt)));
+    const subIds = await boardService.listActiveSubaccountIds(req.orgId!);
 
-    if (allSubs.length === 0) {
+    if (subIds.length === 0) {
       res.json({ pushed: 0, results: [] });
       return;
     }
-    const results = await boardService.pushOrgConfigToSubaccounts(req.orgId!, allSubs.map(s => s.id));
+    const results = await boardService.pushOrgConfigToSubaccounts(req.orgId!, subIds);
     res.json({ pushed: results.length, results });
   })
 );
@@ -81,7 +75,7 @@ router.post(
 router.get(
   '/api/subaccounts/:subaccountId/board-config',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const existingConfig = await boardService.getSubaccountBoardConfig(req.orgId!, req.params.subaccountId);

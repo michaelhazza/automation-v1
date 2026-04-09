@@ -98,7 +98,7 @@ export class EngineService {
     const [updated] = await db
       .update(workflowEngines)
       .set(update)
-      .where(eq(workflowEngines.id, id))
+      .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)))
       .returning();
 
     return {
@@ -119,7 +119,7 @@ export class EngineService {
     }
 
     const now = new Date();
-    await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(eq(workflowEngines.id, id));
+    await db.update(workflowEngines).set({ deletedAt: now, updatedAt: now }).where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)));
 
     return { message: 'Workflow engine deleted successfully' };
   }
@@ -152,7 +152,7 @@ export class EngineService {
           status: success ? 'active' : engine.status,
           updatedAt: new Date(),
         })
-        .where(eq(workflowEngines.id, id));
+        .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)));
 
       return {
         success,
@@ -164,7 +164,7 @@ export class EngineService {
       await db
         .update(workflowEngines)
         .set({ lastTestedAt: new Date(), lastTestStatus: 'failed', updatedAt: new Date() })
-        .where(eq(workflowEngines.id, id));
+        .where(and(eq(workflowEngines.id, id), eq(workflowEngines.organisationId, organisationId)));
 
       const message = err instanceof Error ? err.message : 'Connection failed';
       throw { statusCode: 503, message: `Engine connection test failed: ${message}` };

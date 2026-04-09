@@ -2,6 +2,7 @@ import { Router, raw } from 'express';
 import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
+import { asyncHandler } from '../../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ const router = Router();
  *
  * Multi-tenant: routes by team_id in payload, matching against connector config.
  */
-router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req, res) => {
+router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
   const rawBody = req.body as Buffer;
   let event: Record<string, unknown>;
 
@@ -114,6 +115,6 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), async (req
   } catch (err) {
     console.error('[Slack Webhook] Error processing event:', err instanceof Error ? err.message : err);
   }
-});
+}));
 
 export default router;

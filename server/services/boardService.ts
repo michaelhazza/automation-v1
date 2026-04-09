@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { boardTemplates, boardConfigs } from '../db/schema/index.js';
+import { boardTemplates, boardConfigs, subaccounts } from '../db/schema/index.js';
 import type { BoardColumn } from '../db/schema/boardTemplates.js';
 
 const DEFAULT_BOARD_TEMPLATE_NAME = 'Standard Board';
@@ -238,5 +238,14 @@ export const boardService = {
     });
 
     console.log('[BOARD] Default board template seeded');
+  },
+
+  /** Return all active subaccount IDs for an organisation. */
+  async listActiveSubaccountIds(organisationId: string): Promise<string[]> {
+    const rows = await db
+      .select({ id: subaccounts.id })
+      .from(subaccounts)
+      .where(and(eq(subaccounts.organisationId, organisationId), isNull(subaccounts.deletedAt)));
+    return rows.map((r) => r.id);
   },
 };

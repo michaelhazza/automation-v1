@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
 import { generateEmbedding } from '../lib/embeddings.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { MAX_SUMMARY_LENGTH, MAX_ENTRY_LIMIT, MAX_QUERY_TEXT_CHARS } from '../config/limits.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 
 const router = Router();
 
@@ -13,9 +14,10 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/memory',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const memory = await workspaceMemoryService.getMemory(req.orgId!, subaccountId);
 
     if (!memory) {
@@ -40,6 +42,7 @@ router.put(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { summary, qualityThreshold } = req.body;
 
     if (summary !== undefined && typeof summary !== 'string') {
@@ -86,6 +89,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     await workspaceMemoryService.regenerateSummary(req.orgId!, subaccountId);
 
@@ -102,6 +106,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { limit, offset } = req.query;
 
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), MAX_ENTRY_LIMIT);
@@ -124,6 +129,7 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { subaccountId, entryId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const deleted = await workspaceMemoryService.deleteEntry(entryId, req.orgId!, subaccountId);
 
     if (!deleted) {
@@ -143,6 +149,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { query } = req.body as { query?: string };
 
     if (!query || typeof query !== 'string' || query.trim().length < 3) {

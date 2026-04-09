@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
-import { eq, lt, sql } from 'drizzle-orm';
+import { eq, and, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
 import { processResolutionService } from './processResolutionService.js';
@@ -207,7 +207,10 @@ async function processExecution(executionId: string): Promise<void> {
     // Legacy path: look up engine from process snapshot
     const [legacyEngine] = await db.select()
       .from(workflowEngines)
-      .where(eq(workflowEngines.id, processSnapshot.workflowEngineId as string));
+      .where(and(
+        eq(workflowEngines.id, processSnapshot.workflowEngineId as string),
+        eq(workflowEngines.organisationId, execution.organisationId),
+      ));
 
     if (!legacyEngine) {
       await db.update(executions)
@@ -577,6 +580,21 @@ export const queueService = {
         }
       });
 
+      // Sprint 3 P2.1 Sprint 3A — agent_runs retention pruner. Admin-bypass
+      // sweep that opens its own tx via withAdminConnection. Cascade on
+      // agent_run_snapshots + agent_run_messages removes child rows.
+      await (boss as any).work('agent-run-cleanup', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAgentRunCleanupTick } = await import('../jobs/agentRunCleanupJob.js');
+          await withTimeout(runAgentRunCleanupTick().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'agent-run-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +
       // ALS context pulled from job.data.organisationId.
@@ -683,6 +701,12 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
+      // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at
+      // 04:00 UTC. Staggered out of the 03:00 slot so memory-decay has
+      // a clean shot at the same per-org row set without contending on
+      // the same connection pool — the cleanup sweep is admin-bypass +
+      // cross-org and can briefly hold longer locks.
+      await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
@@ -717,6 +741,15 @@ export const queueService = {
         const { runSecurityEventsCleanup } = await import('../jobs/securityEventsCleanupJob.js');
         runSecurityEventsCleanup().catch((err: unknown) => {
           console.error(JSON.stringify({ event: 'maintenance:security_events_cleanup_error', ...serializeError(err) }));
+        });
+      }, 24 * 60 * 60 * 1000); // daily
+
+      // Sprint 3 P2.1 Sprint 3A — agent_runs retention prune in the
+      // in-memory fallback. Admin-bypass cross-org sweep.
+      setInterval(async () => {
+        const { runAgentRunCleanupTick } = await import('../jobs/agentRunCleanupJob.js');
+        runAgentRunCleanupTick().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:agent_run_cleanup_error', ...serializeError(err) }));
         });
       }, 24 * 60 * 60 * 1000); // daily
 

@@ -71,7 +71,7 @@ export const subaccountAgentService = {
         heartbeatOffsetHours: agents.heartbeatOffsetHours,
       })
       .from(agents)
-      .where(eq(agents.id, agentId));
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
 
     try {
       const [link] = await db

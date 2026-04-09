@@ -20,6 +20,12 @@ export const organisations = pgTable(
     // Per-org override for tool_call_security_events retention. NULL uses
     // DEFAULT_SECURITY_EVENT_RETENTION_DAYS from server/config/limits.ts.
     securityEventRetentionDays: integer('security_event_retention_days'),
+    // ── Sprint 3 — P2.1 Sprint 3A ──────────────────────────────────────
+    // Per-org override for agent-run retention (agent_runs +
+    // agent_run_snapshots + agent_run_messages CASCADE). NULL uses
+    // DEFAULT_RUN_RETENTION_DAYS from server/config/limits.ts (90d).
+    // Consumed by the agent-run-cleanup cron in server/jobs/.
+    runRetentionDays: integer('run_retention_days'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

@@ -99,3 +99,6 @@ export * from './toolCallSecurityEvents';
 
 // Sprint 2 — P1.2 regression capture (migration 0083)
 export * from './regressionCases';
+
+// Sprint 3 — P2.1 Sprint 3A append-only message log (migration 0084)
+export * from './agentRunMessages';

@@ -130,7 +130,7 @@ export class ProcessService {
     const [updated] = await db
       .update(processes)
       .set(update as Parameters<typeof db.update>[0] extends unknown ? never : never)
-      .where(eq(processes.id, id))
+      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)))
       .returning();
 
     return { id: updated.id, name: updated.name, status: updated.status };
@@ -145,7 +145,7 @@ export class ProcessService {
     if (!process) throw { statusCode: 404, message: 'Process not found' };
 
     const now = new Date();
-    await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(eq(processes.id, id));
+    await db.update(processes).set({ deletedAt: now, updatedAt: now }).where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)));
     return { message: 'Process deleted successfully' };
   }
 
@@ -163,7 +163,7 @@ export class ProcessService {
     const [engine] = await db
       .select()
       .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, workflowEngineId), isNull(workflowEngines.deletedAt)));
+      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
 
     if (!engine || engine.status !== 'active') {
       throw { statusCode: 400, message: 'Process cannot be activated: engine is inactive' };
@@ -172,7 +172,7 @@ export class ProcessService {
     const [updated] = await db
       .update(processes)
       .set({ status: 'active', updatedAt: new Date() })
-      .where(eq(processes.id, id))
+      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)))
       .returning();
 
     return { id: updated.id, status: updated.status };
@@ -190,7 +190,7 @@ export class ProcessService {
     const [updated] = await db
       .update(processes)
       .set({ status: 'inactive', updatedAt: new Date() })
-      .where(eq(processes.id, id))
+      .where(and(eq(processes.id, id), eq(processes.organisationId, organisationId)))
       .returning();
 
     return { id: updated.id, status: updated.status };
@@ -210,7 +210,7 @@ export class ProcessService {
     const [engine] = await db
       .select()
       .from(workflowEngines)
-      .where(eq(workflowEngines.id, workflowEngineId));
+      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
 
     if (!engine) throw { statusCode: 503, message: 'Engine not found' };
 

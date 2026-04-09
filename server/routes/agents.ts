@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, hasOrgPermission } from '../middleware/auth.js';
 import { agentService } from '../services/agentService.js';
 import { conversationService } from '../services/conversationService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
@@ -19,8 +19,8 @@ router.get('/api/agents/tree', authenticate, requireOrgPermission(ORG_PERMISSION
 // ── Agent CRUD ─────────────────────────────────────────────────────────────
 
 router.get('/api/agents', authenticate, asyncHandler(async (req, res) => {
-  const isAdmin = req.user!.role === 'system_admin' || req.user!.role === 'org_admin';
-  const result = isAdmin
+  const canManageAgents = await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_EDIT);
+  const result = canManageAgents
     ? await agentService.listAllAgents(req.orgId!)
     : await agentService.listAgents(req.orgId!);
   res.json(result);
@@ -41,7 +41,7 @@ router.post('/api/agents', authenticate, requireOrgPermission(ORG_PERMISSIONS.AG
 router.get('/api/agents/:id', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
   const result = await agentService.getAgent(req.params.id, req.orgId!);
   // For system-managed agents, redact the system-level masterPrompt from org admins
-  if (result.isSystemManaged && req.user!.role !== 'system_admin') {
+  if (result.isSystemManaged && !(await hasOrgPermission(req, ORG_PERMISSIONS.AGENTS_EDIT))) {
     result.masterPrompt = '';
   }
   res.json(result);

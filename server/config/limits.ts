@@ -328,3 +328,45 @@ export const MAX_SECURITY_EVENT_RETENTION_DAYS = 365;
  * on agents.regression_case_cap — NULL uses this default.
  */
 export const DEFAULT_REGRESSION_CASE_CAP = 50;
+
+// ── Sprint 3 — P2.2 reflection loop enforcement ────────────────────────────
+
+/**
+ * Maximum number of `review_code` iterations before the reflection loop
+ * middleware escalates to HITL. Mirrors the prompt-level rule in
+ * `server/skills/review_code.md`. Consumed by
+ * `reflectionLoopMiddleware` in the postTool pipeline.
+ */
+export const MAX_REFLECTION_ITERATIONS = 3;
+
+// ── Sprint 3 — P2.3 confidence scoring + decision-time guidance ────────────
+
+/**
+ * Default confidence threshold below which the policy engine upgrades an
+ * `auto` decision to `review`. A policy rule can override this via
+ * `policy_rules.confidence_threshold`. When the agent's `tool_intent`
+ * confidence score is >= this value the gate level is unchanged; below
+ * triggers the upgrade. Backward-compat default when no `tool_intent`
+ * block is emitted is `confidence = 1.0` (no upgrade).
+ */
+export const CONFIDENCE_GATE_THRESHOLD = 0.7;
+
+// ── Sprint 3 — P2.1 (Sprint 3A) agent run checkpoint + cleanup ─────────────
+
+/**
+ * Default retention window (days) for terminal `agent_runs` rows. The
+ * daily `agent-run-cleanup` pg-boss job prunes terminal runs older than
+ * this (messages cascade). Per-org overrides live on
+ * organisations.run_retention_days — NULL uses this default. Non-terminal
+ * runs are never pruned (they are resume targets).
+ */
+export const DEFAULT_RUN_RETENTION_DAYS = 90;
+
+/**
+ * Serialisation version stamped on every checkpoint payload. Bumped when
+ * the shape of `SerialisableMiddlewareContext` changes in a non-backward-
+ * compatible way. Sprint 3A ships version 1 and writes the field without
+ * runtime enforcement — the forward-compat guard lands in Sprint 3B
+ * alongside the async resume refactor.
+ */
+export const MIDDLEWARE_CONTEXT_VERSION = 1;

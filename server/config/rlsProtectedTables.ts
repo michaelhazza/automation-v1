@@ -118,6 +118,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0083_regression_cases.sql',
     rationale: 'Captured HITL rejections — reveals the reviewer\'s framing of banned agent behaviours.',
   },
+  // 0084 — Sprint 3 P2.1 Sprint 3A append-only message log
+  {
+    tableName: 'agent_run_messages',
+    schemaFile: 'agentRunMessages.ts',
+    policyMigration: '0084_agent_run_checkpoint_and_messages.sql',
+    rationale: 'Per-run LLM conversation transcript — full prompts, tool inputs, tool outputs from every agent run.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

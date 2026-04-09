@@ -975,6 +975,16 @@ The capture half (migration 0083, `regressionCaptureService`, hook into `reviewS
 
 ## P2.1 — Agent run checkpoint + resume parity with Playbooks
 
+> **Sprint 3 execution note (2026-04-09):** this item is split into Sprint
+> 3A (append-only message log, lightweight checkpoint write path, resume
+> library function, config-snapshot enforcement, `agent-run-cleanup` cron)
+> and Sprint 3B (per-tool-call inner loop refactor, HITL async resume,
+> `agent-run-resume` job, `awaiting_review` status, admin resume endpoint,
+> two forward-compat gates, integration test I2). The design below is the
+> end state after both phases ship. See the Verdict subsection for the
+> phase boundary. See `tasks/sprint-3-plan.md` §1.3 for the architect-level
+> reconciliation decision.
+
 ### Goal
 
 When an agent run is interrupted (process crash, deploy, OOM, deliberate pause for HITL), it can resume from the last completed tool call instead of restarting from iteration 0. Match the behaviour Playbooks already have via `workflowRuns.checkpoint`.
@@ -1315,9 +1325,9 @@ This is a significant behaviour change for the HITL path — it makes long-runni
 | `migrations/0084_agent_run_checkpoint_and_messages.sql` (same migration) | Also adds `run_retention_days integer` column to `organisations`. See "Retention and pruning policies" — this is the canonical migration for that column. |
 | `server/db/schema/organisations.ts` | Add `runRetentionDays` nullable integer column mirroring the migration. |
 | `server/config/limits.ts` | Add `DEFAULT_RUN_RETENTION_DAYS = 90`. |
-| `scripts/prune-agent-runs.ts` | New nightly pruning job referenced from "Retention and pruning policies". Runs as pg-boss job `agent-run-cleanup` with `singletonKey: 'cleanup:${date}'`. |
-| `server/jobs/agentRunCleanupProcessor.ts` | New pg-boss worker for `agent-run-cleanup`. |
-| `server/config/jobConfig.ts` | Add `agent-run-cleanup` job type alongside `agent-run-resume`. |
+| `server/jobs/agentRunCleanupJob.ts` | **Sprint 3A.** New pg-boss worker for `agent-run-cleanup`. Runs as a daily cron (`0 3 * * *`) with `idempotencyStrategy: 'fifo'`. Uses `withAdminConnection` + `SET LOCAL ROLE admin_role` for the cross-org sweep (same pattern as `regressionReplayJob.ts`). Referenced from "Retention and pruning policies". |
+| `server/jobs/agentRunCleanupJobPure.ts` | **Sprint 3A.** Pure helper sibling containing the SQL-parameter builders and retention-window math. Unit-tested against fixed clock. |
+| `server/config/jobConfig.ts` | **Sprint 3A:** add `agent-run-cleanup` job type in Tier 3 maintenance alongside `security-events-cleanup` and `regression-replay-tick`. **Sprint 3B:** add `agent-run-resume` job type with `singletonKey: 'run:${runId}'`. |
 
 ### Test plan
 
@@ -1332,20 +1342,67 @@ Pre-production removes the rollout concern. The change to "one tool call at a ti
 
 ### Verdict
 
-**BUILD WHEN DEPENDENCY SHIPS (Sprint 3, after P1.1 lands in Sprint 2).**
+**BUILD ACROSS SPRINTS 3A AND 3B (after P1.1 lands in Sprint 2).**
 
-Sequence: P1.1 Layer 1 (RLS migrations) ships in Sprint 2, then P2.1 ships in Sprint 3. The reason to wait is still valid — checkpoints write into `agent_run_snapshots`, which P1.1 Layer 1 adds an RLS policy to, so checkpointing must respect the `app.organisation_id` setting already in place. Starting P2.1 before P1.1 means writing the checkpoint path twice.
+The original single-sprint verdict underestimated the refactor surface.
+P2.1 is split into two phases that ship in separate sessions:
 
-Once Sprint 2 lands, P2.1 is a single-sprint item:
+**Sprint 3A (ships in Sprint 3 with P2.2 and P2.3):**
 
-1. Migration 0084 adds the `checkpoint jsonb` column to `agent_run_snapshots` **and** creates `agent_run_messages` with its RLS policy in the same SQL file. `rlsProtectedTables.ts` manifest appended in the same commit. Down-migration at `migrations/_down/0084_*.sql`.
-2. `agentRunMessageService` shipped first — `runAgenticLoop` cannot start writing messages until the service exists.
-3. `persistCheckpoint()` writes **after each completed tool call** (per the authoritative rule in the Execution Model section). The call is throttled by coalescing multiple tool calls within the same millisecond into a single write — in practice tool calls take longer than that, so the throttle is rarely relevant. Writes only the lightweight checkpoint — messages already went into `agent_run_messages` via the service.
-4. `resumeAgentRun()` reads the checkpoint, streams messages from `agent_run_messages` where `sequence_number <= checkpoint.messageCursor`, reconstructs `LoopParams`.
-5. Inner tool-call loop refactored to one-at-a-time execution.
-6. `hitlService` refactored from blocking-wait to enqueue-on-decide (new `agent-run-resume` pg-boss job with `singletonKey: 'run:${runId}'`).
-7. `toolCallsLogProjectionService` runs at run completion to populate the deprecated `toolCallsLog` jsonb for backward-compat UI.
-8. Integration test **I2** (`agentRun.crash-resume-parity.test.ts`) covers: kill-point matrix at three positions, config-snapshot enforcement, HITL async resume.
+1. Migration 0084 creates `agent_run_messages` with its RLS policy in the
+   same SQL file, adds `checkpoint jsonb` to `agent_run_snapshots`, and
+   adds `run_retention_days integer` to `organisations`.
+2. `agentRunMessageService` — append-only write path. Messages from the
+   agent loop are mirrored to the new table.
+3. `SerialisableMiddlewareContext` + `AgentRunCheckpoint` types declared
+   in `server/services/middleware/types.ts`. `serialiseMiddlewareContext`
+   / `deserialiseMiddlewareContext` / `buildResumeContext` shipped as
+   pure helpers in `agentExecutionServicePure.ts`.
+4. `persistCheckpoint()` writes once per iteration (NOT per tool call —
+   see 3B) from inside `runAgenticLoop`. The write path is additive;
+   existing runs that are not aware of the checkpoint still work.
+5. `resumeAgentRun(runId)` ships as a library function that reads the
+   checkpoint, streams messages up to `messageCursor`, rehydrates `mwCtx`,
+   and resumes `runAgenticLoop` with `startingIteration = checkpoint.iteration + 1`.
+   Config-snapshot enforcement via `hash(configSnapshot) === checkpoint.configVersion`.
+6. `toolCallsLogProjectionService` writes the deprecated `toolCallsLog`
+   column at run completion for backward-compat debug UI reads.
+7. `agent-run-cleanup` pg-boss cron shipped alongside (Tier 3 maintenance,
+   `idempotencyStrategy: 'fifo'`, `withAdminConnection` + `SET LOCAL ROLE
+   admin_role`). Uses `DEFAULT_RUN_RETENTION_DAYS = 90`.
+
+**Sprint 3B (deferred to a follow-up session):**
+
+1. Per-tool-call inner loop refactor: the `for (const toolCall of
+   response.toolCalls)` loop becomes one-at-a-time with a checkpoint
+   after each completed call, narrowing the race window described in
+   the "Per-tool-call checkpoint rule" subsection above.
+2. HITL refactor from `hitlService.awaitDecision` (blocking) to
+   `hitlService.triggerResume` (enqueue-on-decide). New pg-boss job
+   `agent-run-resume` with `singletonKey: 'run:${runId}'`.
+3. `agentRunResumeProcessor` worker + `agent-run-resume` entry in
+   `server/config/jobConfig.ts`.
+4. New `awaiting_review` status on `agent_runs`. Admin-only endpoint
+   `POST /api/agent-runs/:id/resume?useLatestConfig=true` with audit
+   event on the override path.
+5. `MIDDLEWARE_CONTEXT_VERSION` forward-compat guard — on resume,
+   refuse if checkpoint version is newer than runtime.
+6. Two new gates ship in Sprint 3B:
+   - `scripts/verify-middleware-state-serialised.sh` enforces that every
+     runtime `MiddlewareContext` field has a matching serialised field
+     (or an `// ephemeral:` comment).
+   - `scripts/verify-run-state-source-of-truth.sh` fails CI when new code
+     reads `agent_run_snapshots.toolCallsLog` outside the allow-listed
+     debug UI file.
+7. Integration test I2 (`agentRun.crash-resume-parity.test.ts`) —
+   kill-point matrix, config-snapshot enforcement, HITL async resume.
+
+**Trade-off acknowledged in 3A:** a process crash mid-iteration (tool N of
+M in a multi-tool LLM response) causes resume to replay from tool 1 of
+the same iteration, not from tool N+1. This is weaker than the final
+per-tool-call rule but strictly better than today (where a crash means
+total run loss). Pre-production means no live users are exposed to the
+difference.
 
 **The old `AGENT_RUN_CHECKPOINTING_ENABLED` feature flag is deleted from the plan.** The new behaviour ships enabled.
 
@@ -1468,7 +1525,7 @@ This introduces a circular-dependency risk (`postTool` middleware ↔ `reviewSer
 
 **BUILD IN SPRINT 3.**
 
-All pieces ship together — the split between "capability" and "wiring" from the previous verdict is retired. Pre-production means the new middleware is registered and active from the moment it lands. Order within Sprint 3:
+All pieces ship together as a single synchronous `postTool` middleware. The middleware is the ONLY mechanism P2.2 adds — there is no asynchronous "reflection-tick" job, no separate service that runs on review rejection, and no delayed learning loop. If those features are wanted later, they ship as a distinct roadmap item, not as P2.2. The split between "capability" and "wiring" from the previous verdict is retired. Pre-production means the new middleware is registered and active from the moment it lands. Order within Sprint 3:
 
 1. `MAX_REFLECTION_ITERATIONS = 3` constant in `limits.ts`.
 2. `reflectionLoopPure.ts` with `parseVerdict()` + unit tests.
@@ -1591,6 +1648,12 @@ Low-medium. The confidence side is genuinely additive — agents that don't emit
 ### Verdict
 
 **BUILD IN SPRINT 3.**
+
+P2.3 in this spec is specifically the confidence-scoring + decision-time
+guidance feature set. It is NOT the policy DSL expansion (any_of / all_of /
+numeric comparators / time predicates) that is sometimes conflated with
+this item — that work does not ship in Sprint 3 and is not tracked in this
+spec. If DSL expansion is wanted, a separate roadmap item must be opened.
 
 Ships in Sprint 3 alongside P2.1 and P2.2. All three slices land together:
 
@@ -2987,8 +3050,8 @@ Three new data-producing tables need explicit retention policies. Without them t
 |---|---|---|---|
 | `tool_call_security_events` | One row per tool call across the whole platform. Highest-volume new table by orders of magnitude. | **30 days by default**, configurable per org via `organisations.security_event_retention_days`. Compliance-sensitive orgs can extend up to 365 days. | `scripts/prune-security-events.ts` runs nightly as pg-boss job `security-events-cleanup` (singletonKey `prune-security:${date}`). Deletes rows older than the configured retention. |
 | `regression_cases` | One row per HITL rejection. Lower volume — scales with human review throughput. | **Indefinite for `is_active = true`**, capped at `agents.regressionCaseCap` (default 50) via eviction. Inactive cases kept for 90 days. | Eviction happens inline on `regressionCaptureService.captureFromAuditRecord()` when the cap is exceeded. Oldest `last_run_outcome = 'pass'` case is evicted first. |
-| `agent_run_messages` | Messages for every agent run. Medium volume — bounded by run count × iterations × message size. | **90 days for terminal runs** (completed/failed/timeout/cancelled), configurable per org via `organisations.run_retention_days`. Non-terminal runs are never pruned (they're the resume targets). | Cascades on `agent_runs` delete. `agent-run-cleanup` cron (pg-boss job, singletonKey `cleanup:${date}`) deletes terminal `agent_runs` older than retention window; messages cascade. |
-| `agent_run_snapshots.checkpoint` | One row per agent run (pre-existing), now with a jsonb column updated per iteration. | Same as parent `agent_runs` row. Cascades on delete. | Same cleanup job as above. |
+| `agent_run_messages` | Messages for every agent run. Medium volume — bounded by run count × iterations × message size. | **90 days for terminal runs** (completed/failed/timeout/cancelled), configurable per org via `organisations.run_retention_days`. Non-terminal runs are never pruned (they're the resume targets). | Cascades on `agent_runs` delete. `agent-run-cleanup` cron at `server/jobs/agentRunCleanupJob.ts` (Sprint 3A, migration 0084; pg-boss job, `idempotencyStrategy: 'fifo'`) deletes terminal `agent_runs` older than retention window; messages cascade. |
+| `agent_run_snapshots.checkpoint` | One row per agent run (pre-existing), now with a jsonb column updated per iteration. | Same as parent `agent_runs` row. Cascades on delete. | Same cleanup job as above (`server/jobs/agentRunCleanupJob.ts`, Sprint 3A). |
 
 Retention config is split across two tables: org-level day-based retention (`organisations.security_event_retention_days`, `organisations.run_retention_days`) as new nullable integer columns with platform defaults in `server/config/limits.ts`; per-agent regression-case cap (`agents.regressionCaseCap`) on the `agents` table, also nullable integer with platform default in `limits.ts`. No new config table, no new config system — retention is enforced by the cleanup jobs above and the inline eviction in `regressionCaptureService`.
 
