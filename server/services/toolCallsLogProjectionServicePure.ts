@@ -124,6 +124,18 @@ export function projectToolCallsLog(
   const pendingCalls: PendingCall[] = [];
   const resultsById = new Map<string, string>();
 
+  // `assistantIndex` is a PROJECTION HEURISTIC, not a ground-truth
+  // iteration counter. The legacy toolCallsLog shape carries a zero-
+  // based `iteration` field, and in the inline writer every LLM turn
+  // bumps iteration by one before appending tool call rows. Because
+  // `agent_run_messages` captures one assistant row per LLM turn, we
+  // can reconstruct "LLM turn N" by counting assistant rows in the
+  // ordered stream. This aligns with the loop's iteration counter
+  // for every run that reaches the projection path (fresh runs and
+  // runs resumed via `resumeAgentRun`, which replays stored messages
+  // back into the same monotonically-advancing sequence). A future
+  // sprint that allows multi-assistant-message turns would need to
+  // widen this heuristic (e.g. by stamping iteration on the row itself).
   let assistantIndex = 0;
   for (const msg of sorted) {
     if (msg.role === 'assistant') {

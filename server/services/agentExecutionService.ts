@@ -27,6 +27,7 @@ import {
 import { routeCall } from './llmRouter.js';
 import type { LLMCallContext } from './llmRouter.js';
 import { env } from '../lib/env.js';
+import { getOrgScopedDb } from '../lib/orgScopedDb.js';
 import type { ProviderTool } from './providers/types.js';
 import {
   selectExecutionPhase,
@@ -1013,7 +1014,7 @@ export const agentExecutionService = {
       // Best-effort: any projection failure is logged and swallowed —
       // it must never block run completion or fail the request.
       try {
-        const projected = await projectToolCallsLogFromMessages(run.id);
+        const projected = await projectToolCallsLogFromMessages(run.id, request.organisationId);
         const inlineCount = loopResult.toolCallsLog.length;
         const projectedCount = projected.length;
         if (inlineCount !== projectedCount) {
@@ -1250,14 +1251,30 @@ export async function resumeAgentRun(
 ): Promise<ResumeAgentRunResult> {
   const { useLatestConfig = false } = options;
 
+  // MUST run inside an active withOrgTx block — we use getOrgScopedDb
+  // for every read below so a caller that forgets the surrounding
+  // transaction fails closed with `missing_org_context` instead of
+  // silently returning zero rows under RLS.
+  const tx = getOrgScopedDb('agentExecutionService.resumeAgentRun');
+
   // ── 1. Load the run row — establishes org context + config ──────
-  const [runRow] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+  // Defence-in-depth: the ALS context is the authoritative org scope
+  // for RLS, but every other read site in this service layers an
+  // explicit `organisationId` predicate on top. We cannot layer one
+  // here without the caller knowing the org, so we rely on the
+  // surrounding tx's RLS policy to keep cross-org reads from leaking.
+  const [runRow] = await tx.select().from(agentRuns).where(eq(agentRuns.id, runId));
   if (!runRow) {
     throw new Error(`resumeAgentRun: run ${runId} not found`);
   }
 
   // ── 2. Load the checkpoint ───────────────────────────────────────
-  const [snapshotRow] = await db
+  // `agent_run_snapshots` has no direct `organisation_id` column —
+  // cross-org isolation is enforced by the FK cascade from
+  // `agent_runs` (the parent row we already validated above) plus the
+  // RLS policy that joins through that FK. No explicit org filter is
+  // possible or needed here.
+  const [snapshotRow] = await tx
     .select()
     .from(agentRunSnapshots)
     .where(eq(agentRunSnapshots.runId, runId));
@@ -1283,10 +1300,18 @@ export async function resumeAgentRun(
   }
 
   // ── 4. Stream persisted messages up to the checkpoint cursor ─────
-  const messageRows = await streamAgentRunMessages(runId, {
-    fromSequence: 0,
-    toSequence: checkpoint.messageCursor,
-  });
+  // `messageCursor < 0` is the "no messages written yet" sentinel
+  // (see persistCheckpoint). Skip the stream call in that case — a
+  // range read with `toSequence = -1` would match nothing anyway, but
+  // we want the intent to be explicit so a future maintainer reading
+  // a resume trace doesn't second-guess the empty array.
+  const messageRows =
+    checkpoint.messageCursor < 0
+      ? []
+      : await streamAgentRunMessages(runId, runRow.organisationId, {
+          fromSequence: 0,
+          toSequence: checkpoint.messageCursor,
+        });
 
   // ── 5. Load the agent + saLink so we can build a live MiddlewareContext ──
   const agent = await agentService.getAgent(runRow.agentId, runRow.organisationId);
@@ -1298,10 +1323,15 @@ export async function resumeAgentRun(
   // production code path yet.
   let saLink: SubaccountAgent;
   if (runRow.subaccountAgentId) {
-    const [link] = await db
+    const [link] = await tx
       .select()
       .from(subaccountAgents)
-      .where(eq(subaccountAgents.id, runRow.subaccountAgentId));
+      .where(
+        and(
+          eq(subaccountAgents.id, runRow.subaccountAgentId),
+          eq(subaccountAgents.organisationId, runRow.organisationId),
+        ),
+      );
     if (!link) {
       throw new Error(
         `resumeAgentRun: subaccount_agent ${runRow.subaccountAgentId} not found for run ${runId}`,
@@ -1335,6 +1365,18 @@ export async function resumeAgentRun(
       maxTokens: agent.maxTokens ?? 4096,
     },
     saLink,
+    // Wall-clock state is re-initialised on every resume — the original
+    // run's startTime is meaningless on a different worker. The budget
+    // middleware uses the checkpoint's persisted tokensUsed /
+    // toolCallsCount (restored by buildResumeContext) to pick up where
+    // the original run left off against the SAME per-iteration limits.
+    //
+    // Sprint 3A stubs `tokenBudget`, `maxToolCalls`, and `timeoutMs` at
+    // neutral values because the library entry point is not yet exposed
+    // over HTTP or pg-boss. Sprint 3B re-derives them from
+    // `runRow.resolvedLimits` (or re-runs limit resolution with the
+    // live agent config) so the resumed iteration sees the same ceilings
+    // the original iteration did.
     startTime: Date.now(),
     tokenBudget: runRow.tokenBudget ?? 0,
     maxToolCalls: 0,
@@ -2048,14 +2090,21 @@ interface PersistCheckpointParams {
 
 async function persistCheckpoint(params: PersistCheckpointParams): Promise<void> {
   try {
-    // Update the counters on the context so the serialised snapshot
-    // reflects END-of-iteration state, not the start-of-iteration values
-    // assigned at the top of the loop body.
-    params.mwCtx.iteration = params.iteration;
-    params.mwCtx.tokensUsed = params.totalTokensUsed;
-    params.mwCtx.toolCallsCount = params.totalToolCalls;
+    // Build a cloned snapshot context so the live middleware context is
+    // never mutated by the checkpoint path — the resume path reads from
+    // the serialised copy, and mutating the live object here would make
+    // post-iteration middleware reason about shifted counters. The clone
+    // is shallow: MiddlewareContext values are either primitives or
+    // Maps/objects that `serialiseMiddlewareContext` already deep-copies
+    // into the JSON-safe shape.
+    const snapshotCtx: MiddlewareContext = {
+      ...params.mwCtx,
+      iteration: params.iteration,
+      tokensUsed: params.totalTokensUsed,
+      toolCallsCount: params.totalToolCalls,
+    };
 
-    const serialised = serialiseMiddlewareContext(params.mwCtx);
+    const serialised = serialiseMiddlewareContext(snapshotCtx);
 
     const checkpoint: AgentRunCheckpoint = {
       version: 1,
@@ -2064,9 +2113,12 @@ async function persistCheckpoint(params: PersistCheckpointParams): Promise<void>
       totalTokensUsed: params.totalTokensUsed,
       // A fresh run with no messages has `messageCursor = -1` because we
       // initialise the tracker to -1 and only advance it after a
-      // successful append. Clamp to 0 so the stored field always
-      // represents a valid "number of rows <= cursor" bound.
-      messageCursor: Math.max(params.messageCursor, 0),
+      // successful append. Preserve the -1 sentinel exactly — the
+      // resume path reads `messageCursor < 0` as "skip the stream
+      // altogether" (see `resumeAgentRun`). Clamping to 0 would
+      // conflate "no rows persisted" with "one row at seq 0" and
+      // cause the first persisted message to be replayed on resume.
+      messageCursor: params.messageCursor,
       middlewareContext: serialised,
       // Resume token is opaque in 3A — 3B wires the enforcement in the
       // admin resume endpoint. Use a hash of runId + iteration so the

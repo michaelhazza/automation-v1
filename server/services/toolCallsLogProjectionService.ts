@@ -24,9 +24,17 @@ import {
  * Load every message for a run and project it to the legacy
  * `toolCallsLog` array. Must be called inside an active `withOrgTx`
  * block (it reuses `streamMessages` which uses `getOrgScopedDb`).
+ *
+ * `organisationId` is a required argument and layered into the read
+ * predicate by `streamMessages` for defence-in-depth against ALS
+ * misconfiguration — the same convention every other service in the
+ * codebase uses on top of RLS.
  */
-export async function project(runId: string): Promise<ProjectedToolCallLogEntry[]> {
-  const rows = await streamMessages(runId, {});
+export async function project(
+  runId: string,
+  organisationId: string,
+): Promise<ProjectedToolCallLogEntry[]> {
+  const rows = await streamMessages(runId, organisationId, {});
   return projectToolCallsLog(
     rows.map((row) => ({
       sequenceNumber: row.sequenceNumber,

@@ -2,6 +2,7 @@ import { Router, raw } from 'express';
 import { connectorConfigService } from '../../services/connectorConfigService.js';
 import { adapters } from '../../adapters/index.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
+import { asyncHandler } from '../../lib/asyncHandler.js';
 
 const router = Router();
 
@@ -13,7 +14,7 @@ const router = Router();
  *   - Event type in X-Desk-Event header (not in payload body)
  *   - Signature in X-Desk-Signature header
  */
-router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (req, res) => {
+router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), asyncHandler(async (req, res) => {
   const rawBody = req.body as Buffer;
   let event: Record<string, unknown>;
 
@@ -97,6 +98,6 @@ router.post('/api/webhooks/teamwork', raw({ type: 'application/json' }), async (
   } catch (err) {
     console.error('[Teamwork Webhook] Error processing event:', err instanceof Error ? err.message : err);
   }
-});
+}));
 
 export default router;

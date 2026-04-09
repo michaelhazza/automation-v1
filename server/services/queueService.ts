@@ -698,8 +698,12 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
       await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
-      // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at 03:00.
-      await boss.schedule('agent-run-cleanup', '0 3 * * *', {});
+      // Sprint 3 P2.1 Sprint 3A — daily agent_runs retention prune at
+      // 04:00 UTC. Staggered out of the 03:00 slot so memory-decay has
+      // a clean shot at the same per-org row set without contending on
+      // the same connection pool — the cleanup sweep is admin-bypass +
+      // cross-org and can briefly hold longer locks.
+      await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {

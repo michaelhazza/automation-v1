@@ -162,14 +162,25 @@ export interface StreamMessagesOptions {
  * Used by the Sprint 3B resume path to rebuild the in-memory
  * conversation array; also consumed by the toolCallsLog projection
  * service at run completion.
+ *
+ * `organisationId` is a required argument for defence-in-depth: even
+ * though RLS on `agent_run_messages` already forbids cross-org reads
+ * (migration 0084), every other service in the codebase layers an
+ * explicit `organisationId` predicate on top, and we match that
+ * convention so a misconfigured ALS context cannot silently widen the
+ * read scope.
  */
 export async function streamMessages(
   runId: string,
+  organisationId: string,
   opts: StreamMessagesOptions = {},
 ): Promise<AgentRunMessage[]> {
   const tx = getOrgScopedDb('agentRunMessageService.streamMessages');
 
-  const conditions = [eq(agentRunMessages.runId, runId)];
+  const conditions = [
+    eq(agentRunMessages.runId, runId),
+    eq(agentRunMessages.organisationId, organisationId),
+  ];
   if (opts.fromSequence !== undefined) {
     conditions.push(gte(agentRunMessages.sequenceNumber, opts.fromSequence));
   }
@@ -188,10 +199,18 @@ export async function streamMessages(
  * Non-transactional peek at the highest sequence number currently
  * persisted for a run. Returns `null` if the run has no messages.
  *
- * Do NOT use this to allocate a sequence number for a write — the
- * only race-free allocator is `appendMessage`, which holds the
- * per-run sentinel lock while reading and writing. This helper exists
- * for diagnostic / admin surfaces that need the current cursor.
+ * Despite the name, this does NOT return the "next" sequence number
+ * — it returns the current MAX, which is the sequence number of the
+ * LAST row written. The Sprint 3A allocator in `appendMessage` adds
+ * one to this value under a sentinel lock to produce the next slot.
+ * The helper exists for diagnostic / admin surfaces (e.g. the run
+ * inspector) that want to display the current cursor position.
+ *
+ * Runs inside whatever org-scoped tx the caller has open —
+ * `getOrgScopedDb` enforces that. Do NOT use this to allocate a
+ * sequence number for a write: the only race-free allocator is
+ * `appendMessage`, which holds the per-run sentinel lock while
+ * reading and writing.
  */
 export async function nextSequenceNumber(runId: string): Promise<number | null> {
   const tx = getOrgScopedDb('agentRunMessageService.nextSequenceNumber');

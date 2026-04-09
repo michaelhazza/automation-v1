@@ -267,6 +267,13 @@ export interface AgentRunCheckpoint {
    * run at the moment the checkpoint was captured. The resume path
    * streams `sequence_number <= messageCursor` to rebuild the
    * in-memory messages array.
+   *
+   * A value of `-1` is the "no messages written yet" sentinel — the
+   * loop initialises the cursor to `-1` and only advances it after a
+   * successful append. The resume path treats `< 0` as "skip the
+   * stream" rather than issuing a `<= -1` range read. Do NOT clamp
+   * this to `0` at write time: that would conflate a fresh run with
+   * one that has persisted a single message at sequence 0.
    */
   messageCursor: number;
   /** Serialised middleware context (see above). */

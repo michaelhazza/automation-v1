@@ -111,7 +111,16 @@ export async function runAgentRunCleanupTick(): Promise<AgentRunCleanupSummary> 
           // `ORDER BY created_at ASC` clause ensures an org that is
           // over the cap drains deterministically across successive
           // ticks rather than leaving random holes.
-          const deleted = (await tx.execute(sql`
+          //
+          // We use RETURNING id and count the returned rows directly
+          // rather than rely on the driver-specific `rowCount` shape
+          // on the raw execute result. Drizzle's `execute` pipes the
+          // underlying pg result through verbatim; different adapter
+          // versions expose the affected-row count under `rowCount`,
+          // `rowsAffected`, or nothing at all, which is exactly the
+          // kind of drift that silently reports "0 deleted" in logs
+          // while the DELETE actually ran. RETURNING is explicit.
+          const deletedRows = (await tx.execute(sql`
             WITH victims AS (
               SELECT id
               FROM agent_runs
@@ -123,9 +132,14 @@ export async function runAgentRunCleanupTick(): Promise<AgentRunCleanupSummary> 
             )
             DELETE FROM agent_runs
             WHERE id IN (SELECT id FROM victims)
-          `)) as unknown as { count?: number };
+            RETURNING id
+          `)) as unknown as Array<{ id: string }> | { rows?: Array<{ id: string }> };
 
-          const count = typeof deleted.count === 'number' ? deleted.count : 0;
+          const count = Array.isArray(deletedRows)
+            ? deletedRows.length
+            : Array.isArray(deletedRows?.rows)
+              ? deletedRows.rows.length
+              : 0;
           results.push({
             organisationId: row.organisation_id,
             retentionDays,

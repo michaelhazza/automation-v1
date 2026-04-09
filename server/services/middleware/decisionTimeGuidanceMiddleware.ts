@@ -38,14 +38,40 @@ import type { PreToolMiddleware, PreToolResult } from './types.js';
 // ---------------------------------------------------------------------------
 // In-memory per-run guidance dedup set.
 //
-// `runAgenticLoop` already short-circuits the preTool pipeline via
-// `preToolDecisions` cache, but that only helps for `block` / `continue`
-// final states. An `inject_message` result is NOT cached as a
-// PreToolDecision (that would defeat the reason for injecting it again
-// on the next LLM turn). To prevent this middleware from injecting the
-// same guidance block on every LLM turn after an injection, we track
-// which (toolCallId, guidanceFingerprint) tuples we've already emitted
-// on this ctx's run via a WeakMap keyed by MiddlewareContext itself.
+// The intent here is "inject each matching guidance block AT MOST ONCE
+// per (run, tool call id, guidance fingerprint)". Without this guard,
+// the same policy rule would be emitted on every LLM turn where the
+// agent tries the same tool with the same input — the injection is
+// the thing that forced the retry, so it would repeat indefinitely
+// and crowd out other guidance.
+//
+// Why not use the `preToolDecisions` cache?
+//   * `runAgenticLoop` short-circuits the preTool pipeline via
+//     `preToolDecisions` only for `block` / `continue` final states.
+//     An `inject_message` result is deliberately NOT cached as a
+//     PreToolDecision — caching it would stop the second preTool pass
+//     (the one after the LLM has read the injected reminder) from
+//     actually letting the tool through.
+//
+// Why a WeakMap keyed on MiddlewareContext?
+//   * The ctx object lives exactly as long as the run. WeakMap gives
+//     us implicit GC when the run finishes (no stale state across
+//     runs), matches the lifetime we want, and avoids a global Map
+//     keyed on runId that would leak forever.
+//
+// Why include the fingerprint in the key?
+//   * Two retries of the same toolCallId can legitimately see
+//     DIFFERENT guidance — e.g. a rule set changed mid-run, or the
+//     tool input was mutated in response to an earlier injection.
+//     Keying on (toolCallId, guidanceFingerprint) lets the new
+//     guidance fire while still suppressing the exact same block
+//     from being repeated.
+//
+// Resume note: on Sprint 3B resume, `emittedPerCtx` starts empty for
+// the rehydrated ctx. This is correct — a resumed run may legitimately
+// need the guidance re-emitted at the first tool call, since the
+// previous worker's message history already carries the earlier copy
+// for the LLM but the new worker's guard set has no memory of it.
 // ---------------------------------------------------------------------------
 
 const emittedPerCtx = new WeakMap<object, Set<string>>();
