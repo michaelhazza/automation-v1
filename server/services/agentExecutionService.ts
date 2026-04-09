@@ -44,6 +44,7 @@ import {
   type MiddlewareContext,
   type MiddlewarePipeline,
 } from './middleware/index.js';
+import { isFailureError } from '../../shared/iee/failure.js';
 import { maskObservations, tagIteration } from './middleware/observationMasking.js';
 import {
   MAX_LOOP_ITERATIONS,
@@ -1492,17 +1493,55 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       mwCtx.toolCallHistory.push({ name: toolCall.name, inputHash, iteration });
 
       let resultContent: string;
-      const { result, error, retried } = await executeWithRetry(async () => {
-        return skillExecutor.execute({
-          skillName: toolCall.name,
+      let result: unknown;
+      let error: { message: string; type: string; category: string } | undefined;
+      let retried = false;
+      try {
+        const outcome = await executeWithRetry(async () => {
+          return skillExecutor.execute({
+            skillName: toolCall.name,
+            input: toolCall.input,
+            context: skillExecutionContext,
+            // Sprint 2 P1.1 Layer 3: thread the LLM tool call id into the
+            // skill executor so the per-case action wrappers build the same
+            // deterministic idempotency key as proposeActionMiddleware.
+            toolCallId: toolCall.id,
+          });
+        }, { actionType: toolCall.name });
+        result = outcome.result;
+        error = outcome.error;
+        retried = outcome.retried;
+      } catch (err) {
+        // P0.2 Slice C — onFailure: 'fail_run' throws a FailureError that
+        // propagates through executeWithRetry. Terminate the loop cleanly
+        // here rather than letting it unwind out of runAgenticLoop, so that
+        // (a) accumulated stats and toolCallsLog are preserved, (b) the
+        // executeRun finalization path runs (MCP disconnect, trace finalize,
+        // DB persist of totals), and (c) finalStatus is recorded as 'failed'.
+        // Only fail_run-sourced FailureErrors reach here (errorHandling.ts
+        // scopes its rethrow to the same marker). Any other error rethrows.
+        if (!isFailureError(err) || err.failure?.metadata?.source !== 'onFailure:fail_run') {
+          throw err;
+        }
+        const failMsg = err.failure?.failureDetail ?? err.message;
+        toolCallsLog.push({
+          tool: toolCall.name,
           input: toolCall.input,
-          context: skillExecutionContext,
-          // Sprint 2 P1.1 Layer 3: thread the LLM tool call id into the
-          // skill executor so the per-case action wrappers build the same
-          // deterministic idempotency key as proposeActionMiddleware.
-          toolCallId: toolCall.id,
+          output: JSON.stringify({
+            success: false,
+            error: failMsg,
+            failureReason: err.failure?.failureReason,
+            fail_run: true,
+          }),
+          durationMs: Date.now() - toolStart,
+          iteration,
+          retried: false,
         });
-      }, { actionType: toolCall.name });
+        finalStatus = 'failed';
+        iterationSpan.end({ output: { phase, failRun: true, tool: toolCall.name } });
+        emitLoopTermination('error', { iteration, tool: toolCall.name, totalToolCalls, reason: 'fail_run' });
+        break outerLoop;
+      }
 
       if (error) {
         resultContent = JSON.stringify({

@@ -158,7 +158,7 @@ import {
   type OnFailureDirective,
 } from './skillExecutorPure.js';
 
-function applyOnFailure(toolSlug: string, err: unknown, _input: Record<string, unknown>): unknown {
+function applyOnFailure(toolSlug: string, err: unknown): unknown {
   const actionDef = getActionDefinition(toolSlug);
   const directive: OnFailureDirective = actionDef?.onFailure ?? 'retry';
   return applyOnFailurePure(toolSlug, directive, actionDef?.fallbackValue, err);
@@ -240,7 +240,7 @@ async function runWithProcessors(
       return { success: false, error: err.reason, retryable: err.options.retry };
     }
     // Non-TripWire failure — apply the action's onFailure directive if declared.
-    return applyOnFailure(toolSlug, err, processedInput);
+    return applyOnFailure(toolSlug, err);
   }
 
   // Successful return value but the executor signalled a structured failure.
@@ -250,10 +250,9 @@ async function runWithProcessors(
     typeof result === 'object' &&
     (result as { success?: unknown }).success === false
   ) {
-    const directive = getActionDefinition(toolSlug)?.onFailure;
-    if (directive && directive !== 'retry') {
-      return applyOnFailureForStructuredFailure(toolSlug, result as Record<string, unknown>);
-    }
+    // Symmetric with the thrown-error path: the pure helper already handles
+    // 'retry' / unset by returning the result unchanged.
+    result = applyOnFailureForStructuredFailure(toolSlug, result as Record<string, unknown>);
   }
 
   // Phase 3: processOutputStep (after execute)

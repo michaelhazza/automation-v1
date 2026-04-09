@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { getActionDefinition, type RetryPolicy } from '../../config/actionRegistry.js';
+import { isFailureError } from '../../../shared/iee/failure.js';
 
 // ---------------------------------------------------------------------------
 // Error categories — mapped from retry policy strings in the action registry
@@ -131,6 +132,15 @@ export async function executeWithRetry<T>(
       const result = await fn();
       return { result, retried: attempt > 0 };
     } catch (err) {
+      // Terminal failure directive from skillExecutor onFailure dispatch —
+      // must propagate so runAgenticLoop marks the run as failed instead of
+      // feeding the error back to the LLM as a tool result. Scoped to the
+      // `onFailure:fail_run` marker set by applyOnFailurePure: ordinary
+      // FailureErrors thrown by skills (missing config, bad input, etc.)
+      // must still flow through classifyError so the LLM can recover.
+      if (isFailureError(err) && err.failure?.metadata?.source === 'onFailure:fail_run') {
+        throw err;
+      }
       lastError = classifyError(err, actionType);
 
       // Don't retry if the error is classified as non-retryable

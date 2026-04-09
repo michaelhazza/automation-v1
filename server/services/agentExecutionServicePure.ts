@@ -10,7 +10,12 @@
  *   - NO imports of db, env, or any service module with side effects.
  *   - Types-only imports from types modules are fine (they erase at runtime).
  *   - Every exported function must be referentially transparent: same inputs
- *     → same outputs, no side effects, no environment reads.
+ *     → same outputs, no environment reads, no mutation of inputs.
+ *   - Carve-out: validateToolCalls emits a single console.warn for unknown
+ *     tool-call fields. This is observational only — it does not affect the
+ *     return value — and is preserved verbatim from the original inline
+ *     implementation in runAgenticLoop. All other functions here are strictly
+ *     side-effect-free.
  *
  * If you add a function here that needs state, it belongs in
  * agentExecutionService.ts, not here. The verify-pure-helper-convention.sh

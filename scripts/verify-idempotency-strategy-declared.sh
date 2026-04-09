@@ -43,6 +43,13 @@ FILES_SCANNED=1
 # `export const ACTION_REGISTRY = {` line.
 # We use awk to find the boundaries of the const declaration and count
 # entries within it.
+#
+# NOTE: This regex requires the opening brace on the same line as the entry
+# name. If an entry is ever reformatted as `some_action:\n    {` the count
+# will under-report and the gate may pass a missing idempotencyStrategy.
+# The TS-level test in server/config/__tests__/actionRegistry.test.ts
+# enforces the same invariant robustly; this shell gate is a fast pre-commit
+# belt to the test's suspenders.
 ENTRY_COUNT=$(awk '
   /^export const ACTION_REGISTRY/ { inside=1; depth=0; next }
   inside && /^\};?$/ { inside=0 }
