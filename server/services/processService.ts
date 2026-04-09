@@ -163,7 +163,7 @@ export class ProcessService {
     const [engine] = await db
       .select()
       .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, workflowEngineId), isNull(workflowEngines.deletedAt)));
+      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
 
     if (!engine || engine.status !== 'active') {
       throw { statusCode: 400, message: 'Process cannot be activated: engine is inactive' };
@@ -210,7 +210,7 @@ export class ProcessService {
     const [engine] = await db
       .select()
       .from(workflowEngines)
-      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId)));
+      .where(and(eq(workflowEngines.id, workflowEngineId), eq(workflowEngines.organisationId, organisationId), isNull(workflowEngines.deletedAt)));
 
     if (!engine) throw { statusCode: 503, message: 'Engine not found' };
 

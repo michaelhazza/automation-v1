@@ -17,11 +17,13 @@
 import crypto from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { executionFiles, executions } from '../db/schema/index.js';
+import { executionFiles, executions, executionPayloads, users, workflowEngines } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getS3Client, getBucketName } from '../lib/storage.js';
+import { emailService } from './emailService.js';
+import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -187,6 +189,120 @@ export const webhookService = {
     }
 
     return payload;
+  },
+
+  /**
+   * Process an incoming webhook callback from an external engine.
+   * Returns a result object for the route to send as the HTTP response.
+   */
+  async processCallback(
+    executionId: string,
+    token: string | undefined,
+    callbackPayload: Record<string, unknown>,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    // 1. Look up the execution
+    const [execution] = await db
+      .select()
+      .from(executions)
+      .where(eq(executions.id, executionId));
+
+    if (!execution) {
+      return { status: 200, body: { received: true, note: 'Execution not found — already processed or invalid' } };
+    }
+
+    // 2. Verify the HMAC token using per-engine secret (falls back to global)
+    let engineHmacSecret: string | undefined;
+    if (execution.engineId) {
+      const [engine] = await db.select()
+        .from(workflowEngines)
+        .where(eq(workflowEngines.id, execution.engineId));
+      engineHmacSecret = engine?.hmacSecret;
+    }
+
+    if (!this.verifyCallbackToken(executionId, token, engineHmacSecret)) {
+      return { status: 401, body: { error: 'Invalid or missing webhook token' } };
+    }
+
+    // 3. Idempotency: if already completed/failed, still ack but skip update
+    const terminalStatuses = ['completed', 'failed', 'timeout', 'cancelled'];
+    if (terminalStatuses.includes(execution.status) && execution.callbackReceivedAt) {
+      return { status: 200, body: { received: true, note: 'Callback already processed' } };
+    }
+
+    // 4. Determine success/failure from payload heuristic
+    const isErrorPayload =
+      !!callbackPayload.error ||
+      callbackPayload.status === 'error' ||
+      callbackPayload.status === 'failed';
+
+    const now = new Date();
+    const finalStatus = isErrorPayload ? 'failed' : 'completed';
+
+    // 5. Update execution record
+    await db
+      .update(executions)
+      .set({
+        status: finalStatus,
+        outputData: isErrorPayload ? null : (callbackPayload as unknown as Record<string, unknown>),
+        errorMessage: isErrorPayload
+          ? String(callbackPayload.error ?? callbackPayload.message ?? 'External engine reported an error')
+          : null,
+        callbackReceivedAt: now,
+        completedAt: now,
+        durationMs: execution.startedAt
+          ? now.getTime() - execution.startedAt.getTime()
+          : null,
+        updatedAt: now,
+      })
+      .where(eq(executions.id, executionId));
+
+    // Store raw callback payload in execution_payloads (keeps executions lean)
+    await db
+      .insert(executionPayloads)
+      .values({ executionId, callbackPayload: callbackPayload as unknown as Record<string, unknown> })
+      .onConflictDoUpdate({
+        target: executionPayloads.executionId,
+        set: { callbackPayload: callbackPayload as unknown as Record<string, unknown> },
+      });
+
+    // 6. Emit real-time WebSocket updates
+    emitExecutionUpdate(executionId, 'execution:status', {
+      status: finalStatus,
+      outputData: isErrorPayload ? null : callbackPayload,
+      errorMessage: isErrorPayload
+        ? String(callbackPayload.error ?? callbackPayload.message ?? 'External engine reported an error')
+        : null,
+      durationMs: execution.startedAt ? now.getTime() - execution.startedAt.getTime() : null,
+    });
+    if (execution.subaccountId) {
+      emitSubaccountUpdate(execution.subaccountId, 'execution:status_changed', {
+        executionId, status: finalStatus,
+      });
+    }
+
+    // 7. Send completion notification if the user opted in
+    if (execution.notifyOnComplete && execution.triggeredByUserId) {
+      try {
+        const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
+        if (user) {
+          const [payloadRow] = await db
+            .select({ processSnapshot: executionPayloads.processSnapshot })
+            .from(executionPayloads)
+            .where(eq(executionPayloads.executionId, executionId));
+          const processName = (payloadRow?.processSnapshot as Record<string, unknown> | null)?.name as string | undefined ?? 'Process';
+          await emailService.sendExecutionCompletionEmail(
+            user.email,
+            processName,
+            executionId,
+            finalStatus,
+          );
+        }
+      } catch {
+        /* Email failures don't affect the webhook acknowledgement */
+      }
+    }
+
+    return { status: 200, body: { received: true, executionId, status: finalStatus } };
   },
 
   /**
