@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
 import { generateEmbedding } from '../lib/embeddings.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { MAX_SUMMARY_LENGTH, MAX_ENTRY_LIMIT, MAX_QUERY_TEXT_CHARS } from '../config/limits.js';
 
 const router = Router();
@@ -13,7 +13,7 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/memory',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     const memory = await workspaceMemoryService.getMemory(req.orgId!, subaccountId);

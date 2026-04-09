@@ -7,8 +7,8 @@
 
 import { Router } from 'express';
 import { eq, and, inArray } from 'drizzle-orm';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { authenticate, requireSubaccountPermission } from '../middleware/auth.js';
+import { SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
 import { actions } from '../db/schema/actions.js';
 import { workflowRuns } from '../db/schema/workflowRuns.js';
@@ -24,7 +24,7 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/agent-inbox',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.REVIEW_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.REVIEW_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     const organisationId = req.orgId!;

@@ -1,6 +1,6 @@
 import { db } from '../db/index.js';
 import { executions, executionPayloads, executionFiles, budgetReservations, workflowEngines, users } from '../db/schema/index.js';
-import { eq, lt, sql } from 'drizzle-orm';
+import { eq, and, lt, sql } from 'drizzle-orm';
 import { emailService } from './emailService.js';
 import { webhookService } from './webhookService.js';
 import { processResolutionService } from './processResolutionService.js';
@@ -207,7 +207,10 @@ async function processExecution(executionId: string): Promise<void> {
     // Legacy path: look up engine from process snapshot
     const [legacyEngine] = await db.select()
       .from(workflowEngines)
-      .where(eq(workflowEngines.id, processSnapshot.workflowEngineId as string));
+      .where(and(
+        eq(workflowEngines.id, processSnapshot.workflowEngineId as string),
+        eq(workflowEngines.organisationId, execution.organisationId),
+      ));
 
     if (!legacyEngine) {
       await db.update(executions)

@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
+import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { goalService } from '../services/goalService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -14,7 +14,7 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/goals',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);

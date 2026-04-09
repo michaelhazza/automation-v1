@@ -16,15 +16,20 @@
 
 import { Router } from 'express';
 import { eq, and, isNull } from 'drizzle-orm';
+import { z } from 'zod';
 import { db } from '../db/index.js';
 import { executions, executionPayloads, users, workflowEngines } from '../db/schema/index.js';
 import { webhookService } from '../services/webhookService.js';
 import { emailService } from '../services/emailService.js';
 import { emitExecutionUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
+import { validateBody } from '../middleware/validate.js';
+
+/** Free-form webhook callback body — external engines send arbitrary JSON. */
+const webhookCallbackBody = z.record(z.unknown());
 
 const router = Router();
 
-router.post('/api/webhooks/callback/:executionId', async (req, res) => {
+router.post('/api/webhooks/callback/:executionId', validateBody(webhookCallbackBody, 'warn'), async (req, res) => {
   const { executionId } = req.params;
   const token = req.query.token as string | undefined;
 
