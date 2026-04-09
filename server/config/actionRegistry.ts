@@ -870,13 +870,12 @@ export function getActionDefinition(actionType: string): ActionDefinition | unde
 
 /**
  * Sprint 5 P4.1 — returns the action types of all universal skills.
- * Universal skills are always merged into every agent's effective
- * allowlist and always preserved through the topic filter.
+ * Re-exports from the dependency-free universalSkills.ts so callers
+ * that already import from actionRegistry don't need to change.
  */
+export { UNIVERSAL_SKILL_NAMES } from './universalSkills.js';
 export function getUniversalSkillNames(): string[] {
-  return Object.values(ACTION_REGISTRY)
-    .filter((a) => a.isUniversal === true)
-    .map((a) => a.actionType);
+  return [...UNIVERSAL_SKILL_NAMES];
 }
 
 /** Valid action statuses for state machine enforcement */

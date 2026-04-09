@@ -1555,8 +1555,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         const planningPrompt = `You are in PLANNING mode. Output a JSON plan describing the actions you intend to take. Do NOT execute any tools yet. Your response must be a JSON object with an "actions" array where each item has "tool" (the tool name) and "reason" (why you need it).\n\nExample: { "actions": [{ "tool": "read_inbox", "reason": "Check for new emails" }, { "tool": "create_task", "reason": "File a bug for the issue found" }] }`;
 
         const planMessages: LLMMessage[] = [
-          { role: 'user', content: initialMessage },
-          { role: 'user', content: planningPrompt },
+          { role: 'user', content: `${initialMessage}\n\n${planningPrompt}` },
         ];
 
         const planResponse = await routeCall({

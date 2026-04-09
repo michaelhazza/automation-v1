@@ -386,44 +386,8 @@ router.post(
       return;
     }
 
-    // Load the run and assert it belongs to this org
-    const [run] = await db
-      .select()
-      .from(agentRuns)
-      .where(
-        and(
-          eq(agentRuns.id, runId),
-          eq(agentRuns.organisationId, req.orgId!),
-        ),
-      );
-
-    if (!run) {
-      res.status(404).json({ error: 'Run not found' });
-      return;
-    }
-
-    if (run.status !== 'awaiting_clarification') {
-      res.status(409).json({ error: `Run is not awaiting clarification (status: ${run.status})` });
-      return;
-    }
-
-    // Transition back to running
-    await db
-      .update(agentRuns)
-      .set({
-        status: 'running',
-        updatedAt: new Date(),
-      })
-      .where(eq(agentRuns.id, runId));
-
-    // Emit status update so the UI reflects the state change
-    const { emitAgentRunUpdate: emitRunUpdate } = await import('../websocket/emitters.js');
-    emitRunUpdate(runId, 'agent:run:status', {
-      status: 'running',
-      clarificationReceived: true,
-    });
-
-    res.json({ success: true, runId });
+    const result = await agentActivityService.receiveClarification(runId, req.orgId!);
+    res.json(result);
   })
 );
 

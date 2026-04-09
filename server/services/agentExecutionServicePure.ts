@@ -31,7 +31,7 @@ import type {
 import type { AgentRunRequest } from './agentExecutionService.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { MIDDLEWARE_CONTEXT_VERSION } from '../config/limits.js';
-import { getUniversalSkillNames } from '../config/actionRegistry.js';
+import { UNIVERSAL_SKILL_NAMES } from '../config/universalSkills.js';
 
 // ---------------------------------------------------------------------------
 // selectExecutionPhase — pure function that maps loop iteration state to the
@@ -456,7 +456,7 @@ export function mutateActiveToolsPreservingUniversal(
   allAvailableTools: ProviderTool[],
 ): ProviderTool[] {
   const transformed = transform(current);
-  const universalNames = new Set(getUniversalSkillNames());
+  const universalNames = new Set(UNIVERSAL_SKILL_NAMES);
   const universalTools = allAvailableTools.filter((t) => universalNames.has(t.name));
   const transformedNames = new Set(transformed.map((t) => t.name));
   // Re-inject any universal tools that the transform removed.
