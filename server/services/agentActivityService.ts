@@ -38,7 +38,7 @@ export const agentActivityService = {
       })
       .from(agentRuns)
       .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(agentRuns.createdAt))
       .limit(limit)
@@ -83,7 +83,7 @@ export const agentActivityService = {
       })
       .from(agentRuns)
       .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
       .where(and(...conditions));
 
     if (!row) throw { statusCode: 404, message: 'Agent run not found' };
@@ -206,7 +206,7 @@ export const agentActivityService = {
       })
       .from(agentRuns)
       .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
       .where(and(
         eq(agentRuns.organisationId, organisationId),
         sql`(${agentRuns.id} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentRunId} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentSpawnRunId} = ANY(${chainIds}::uuid[]))`,

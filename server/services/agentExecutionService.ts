@@ -1801,6 +1801,37 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // contract to include the full message array.
     mwCtx.lastAssistantText = response.content ?? undefined;
 
+    // ── Sprint 5 P4.4: Shadow-mode critique gate (postCall phase) ────
+    // Fires after the LLM responds but before tool calls execute.
+    // In shadow mode, results are logged but execution is never blocked.
+    if (response.toolCalls.length > 0) {
+      try {
+        const { evaluateCritiqueGate } = await import('./middleware/critiqueGate.js');
+        const critiqueResult = await evaluateCritiqueGate(
+          response.toolCalls.map((tc) => ({ name: tc.name, input: tc.input })),
+          {
+            runId,
+            organisationId: request.organisationId,
+            phase,
+            wasDowngraded: response.routing?.wasDowngraded ?? false,
+            recentMessages: messages.slice(-3).map((m) => ({
+              role: typeof m.role === 'string' ? m.role : 'user',
+              content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+            })),
+            logCritiqueResult: (result) => {
+              logger.info('critique_gate_shadow', { runId, ...result });
+            },
+          },
+        );
+        if (critiqueResult.hasSuspect) {
+          logger.warn('critique_gate_suspect', { runId, results: critiqueResult.results });
+        }
+      } catch (err) {
+        // Shadow mode: critique failures never block execution
+        logger.warn('critique_gate_error', { runId, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     // ── Execute tool calls ────────────────────────────────────────────
     const toolResults: Array<{ tool_use_id: string; content: string }> = [];
     // Sprint 2 P1.1 Layer 3 — messages queued by `inject_message` middleware
