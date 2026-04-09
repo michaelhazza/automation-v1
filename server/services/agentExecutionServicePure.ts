@@ -153,5 +153,8 @@ export function buildMiddlewareContext(
     tokenBudget: params.tokenBudget,
     maxToolCalls: params.maxToolCalls,
     timeoutMs: params.timeoutMs,
+    // Sprint 2 P1.1 Layer 3 — in-memory idempotency cache for preTool decisions.
+    // Keyed by toolCallId. Bound to the MiddlewareContext lifetime (one run).
+    preToolDecisions: new Map(),
   };
 }

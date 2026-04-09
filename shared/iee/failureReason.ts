@@ -24,6 +24,10 @@ export const FailureReason = z.enum([
   'rate_limited',       // external system returned 429 / equivalent
   'data_incomplete',    // expected data missing or malformed (e.g. transcript too short)
   'internal_error',     // bug or unexpected condition in our own code
+  // Sprint 2 — P1.1 three-layer fail-closed data isolation additions.
+  // See docs/improvements-roadmap-spec.md §P1.1 Layer 2 / Layer 3.
+  'scope_violation',    // tenant boundary crossed — organisation / subaccount mismatch
+  'missing_org_context',// RLS Layer A — service-layer DB access reached without an active org-scoped transaction
   'unknown',
 ]);
 
