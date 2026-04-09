@@ -8,18 +8,20 @@ Read this before making any backend changes. It documents the conventions, patte
 
 ```
 server/
-├── routes/          Route files — one per domain (~41 files)
-├── services/        Business logic — one per domain (~73 files)
-├── db/schema/       Drizzle ORM table definitions (~62 files)
-├── middleware/      Express middleware (auth, validation, correlation)
-├── lib/             Shared utilities (asyncHandler, permissions, logger, etc.)
-├── config/          Environment, action registry, system limits
-├── skills/          File-based skill definitions (29 built-in skills as .md files)
+├── routes/          Route files — one per domain (~67 files)
+├── services/        Business logic — one per domain (~117 files, includes *Pure.ts companions)
+├── db/schema/       Drizzle ORM table definitions (~97 files)
+├── middleware/      Express middleware (auth, validation, correlation, org scoping)
+├── lib/             Shared utilities (asyncHandler, permissions, scopeAssertion, orgScopedDb, etc.)
+├── config/          Environment, action registry, system limits, RLS manifest, topic registry
+├── skills/          File-based skill definitions (53 built-in skills as .md files)
+├── jobs/            Background jobs (cleanup, regression replay, security event pruning)
+├── tools/           Internal tool implementations (askClarifyingQuestion, readDataSource)
 └── index.ts         Express app setup, route mounting
 
 client/
-├── src/pages/       30+ page components (lazy-loaded)
-├── src/components/  Reusable UI components (~13 files)
+├── src/pages/       ~74 page components (lazy-loaded)
+├── src/components/  Reusable UI components (~21 files)
 ├── src/hooks/       useSocket.ts (WebSocket integration)
 └── src/lib/         api.ts, auth.ts, socket.ts
 ```
@@ -59,6 +61,8 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Tasks & activities | `tasks.ts` |
 | Board config | `boardConfig.ts` |
 | Workspace memory | `workspaceMemory.ts` |
+| Memory blocks | `memoryBlocks.ts` |
+| Scheduled tasks | `scheduledTasks.ts` |
 | GitHub webhook | `githubWebhook.ts` |
 | Auth | `auth.ts` |
 | Users | `users.ts` |
@@ -69,6 +73,11 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Integration connections | `integrationConnections.ts` |
 | LLM usage | `llmUsage.ts` |
 | Web login connections (Reporting Agent) | `webLoginConnections.ts` |
+| Agent inbox | `agentInbox.ts` |
+| Goals | `goals.ts` |
+| Playbook runs | `playbookRuns.ts` |
+| Playbook templates | `playbookTemplates.ts` |
+| Playbook studio | `playbookStudio.ts` |
 
 ### Shared route helpers
 
@@ -226,16 +235,42 @@ System agents generate keys automatically. External callers should provide a det
 
 ---
 
+## Agent Run Messages & Crash-Resume (Sprint 3)
+
+Migration 0084 adds `agent_run_checkpoints` and `agent_run_messages` — the infrastructure for crash-resume (Sprint 3A/3B).
+
+### Agent run messages
+
+`agent_run_messages` stores every message in the agentic loop as an append-only log with a unique `(run_id, sequence_number)` constraint. Service: `agentRunMessageService.ts` (impure, Drizzle) + `agentRunMessageServicePure.ts` (pure decision logic).
+
+Write discipline: `appendMessage()` must be called inside `withOrgTx(...)`. Acquires a row-level lock on the owning `agent_runs` row via `SELECT ... FOR UPDATE` before computing the next sequence number — cheap insurance against future multi-writer resume paths.
+
+Read: `streamMessages(runId, fromSequence?, toSequence?)` — used by Sprint 3B resume to rebuild the in-memory `messages[]` array.
+
+### Agent run cleanup
+
+`server/jobs/agentRunCleanupJob.ts` — nightly job that prunes terminal runs older than each org's retention window (`organisations.run_retention_days`, default from `DEFAULT_RUN_RETENTION_DAYS` in `server/config/limits.ts`). Cascade-protected children (`agent_run_snapshots`, `agent_run_messages`) removed by `ON DELETE CASCADE` FK. Uses `withAdminConnection` + `SET LOCAL ROLE admin_role` to bypass RLS for cross-org sweep. Pure decision logic in `agentRunCleanupJobPure.ts`.
+
+Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_detected` and `budget_exceeded` are left for manual review.
+
+### New agent fields
+
+- `agent_runs.plan` (migration 0089) — structured plan field for the agent planning phase
+- `agents.complexity_hint` (migration 0090) — agent complexity classification for execution routing
+
+---
+
 ## Skill System
 
 ### File-based definitions
 
-Skills are defined as Markdown files in `server/skills/*.md`. There are 29 built-in system skills:
+Skills are defined as Markdown files in `server/skills/*.md`. There are 53 built-in system skills:
 
 | Category | Skills |
 |----------|--------|
-| Agent collaboration | `spawn_sub_agents`, `request_approval` |
+| Agent collaboration | `spawn_sub_agents`, `request_approval`, `ask_clarifying_question` |
 | Workspace | `read_workspace`, `write_workspace`, `read_codebase` |
+| Context & Memory | `read_data_source`, `update_memory_block` |
 | Task management | `create_task`, `move_task`, `update_task`, `reassign_task`, `add_deliverable` |
 | Testing | `run_tests`, `run_playwright_test`, `write_tests` |
 | Code | `review_code`, `write_patch`, `search_codebase`, `create_pr` |
@@ -243,7 +278,8 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 29 built
 | Admin | `triage_intake`, `draft_architecture_plan`, `draft_tech_spec`, `report_bug` |
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
-| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux` |
+| Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
+| Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
 
 `send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
 
@@ -426,9 +462,95 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ---
 
+## Memory Blocks (Letta Pattern)
+
+Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple agents. Unlike workspace memory (per-subaccount, agent-written), memory blocks are admin-managed persistent context that agents can read and (if permitted) write during runs.
+
+### Schema (migration 0088)
+
+- `memory_blocks` — `name`, `content`, `ownerAgentId` (nullable), `isReadOnly`, org/subaccount scoped, soft delete
+- `memory_block_attachments` — join table linking blocks to agents with `permission` (`read` | `read_write`)
+
+### How it works
+
+1. **Read path** — `memoryBlockService.getBlocksForAgent(agentId, orgId)` loads all attached blocks in deterministic name order at run start. Cached in `MiddlewareContext`.
+2. **Write path** — `update_memory_block` skill calls `memoryBlockService.updateBlock()` — validates attachment permission, ownership, and read-only flag.
+3. **Admin CRUD** — `memoryBlocks.ts` routes: create, update, delete, attach/detach blocks to agents, list blocks.
+
+### Universal skills integration
+
+`read_data_source` and `update_memory_block` are injected into every agent run via the universal skills list in `server/config/universalSkills.ts`.
+
+---
+
+## Agent Execution Middleware Pipeline
+
+The agent execution loop runs every tool call through a three-phase middleware chain defined in `server/services/middleware/index.ts`. The pipeline is the central quality/safety filter for all agent behaviour.
+
+### Phase 1 — preCall (before the LLM call)
+
+Runs once per iteration, before the model is called:
+
+1. **contextPressureMiddleware** — monitors context window usage, triggers compaction
+2. **budgetCheckMiddleware** — enforces token/cost/call budgets
+3. **topicFilterMiddleware** (Sprint 5 P4.1) — classifies the user message by topic (keyword rules in `server/config/topicRegistry.ts`), soft-reorders or hard-removes tools to narrow the agent's action space. Universal skills (`server/config/universalSkills.ts`: `ask_clarifying_question`, `read_workspace`, `web_search`, `read_codebase`) are always re-injected after filtering.
+
+### Phase 2 — preTool (before each tool call executes)
+
+Runs per tool call, in order:
+
+1. **proposeActionMiddleware** (Sprint 2 P1.1 Layer 3) — universal authorisation hook. Evaluates the tool call against policy rules, writes to `tool_call_security_events`, blocks or allows. Decision cached on `MiddlewareContext.preToolDecisions` for replay idempotency.
+2. **confidenceEscapeMiddleware** (Sprint 5 P4.1) — if the agent's self-reported confidence is below `MIN_TOOL_ACTION_CONFIDENCE`, blocks the tool call and forces `ask_clarifying_question` instead.
+3. **toolRestrictionMiddleware** — enforces per-agent tool allowlists/blocklists.
+4. **loopDetectionMiddleware** — detects repeated identical tool calls, prevents infinite loops.
+5. **decisionTimeGuidanceMiddleware** (Sprint 3 P2.3) — when a policy rule matches and has `guidance_text` with confidence above `confidence_threshold`, injects the guidance into the tool call context. Runs last so blocked calls never receive guidance.
+
+### Phase 3 — postTool (after each tool call completes)
+
+1. **reflectionLoopMiddleware** (Sprint 3 P2.2) — enforces "no `write_patch` without prior `APPROVE` from `review_code`" contract. Escalates to HITL after `MAX_REFLECTION_ITERATIONS` blocked review attempts.
+
+### Critique gate
+
+`server/services/middleware/critiqueGate.ts` / `critiqueGatePure.ts` — separate from the pipeline, invoked at specific decision points to run a second-opinion evaluation before committing to an action. Used by the playbook step review flow.
+
+---
+
 ## Policy Engine
 
-`policyRules` table defines constraints on agent behaviour. `policyEngineService` evaluates rules during execution — can restrict actions, require escalation, or block execution. Evaluated before skill execution in the processor pipeline.
+`policyRules` table defines constraints on agent behaviour. `policyEngineService` evaluates rules during execution — can restrict actions, require escalation, or block execution. Evaluated before skill execution in the processor pipeline. Sprint 3 adds `confidence_threshold` and `guidance_text` columns (migration 0085) enabling decision-time guidance — the middleware injects guidance when a rule matches but confidence is above the threshold.
+
+---
+
+## Row-Level Security (RLS) — Three-Layer Fail-Closed Data Isolation
+
+Sprint 2 introduces a defence-in-depth data isolation model. All three layers are required; no single layer is sufficient alone.
+
+### Layer 1 — Postgres RLS policies
+
+10 tables protected (migrations 0079–0081): `tasks`, `actions`, `agent_runs`, `agent_run_snapshots`, `review_items`, `review_audit_records`, `workspace_memories`, `llm_requests`, `audit_events`. Each has a `CREATE POLICY` keyed on `current_setting('app.organisation_id', true)`.
+
+The canonical manifest lives in `server/config/rlsProtectedTables.ts`. Every new tenant-owned table must be added to this manifest in the same commit as its `CREATE POLICY` migration. CI gate `verify-rls-coverage.sh` fails if the manifest references a table without a corresponding policy in any migration.
+
+### Layer A / 1B — Service-layer org-scoped DB
+
+`server/lib/orgScopedDb.ts` — `getOrgScopedDb(source)` returns the Drizzle transaction handle from the current `withOrgTx(...)` block. Throws `failure('missing_org_context')` if called outside a transaction. This is the **first line of defence** — the intent is to catch bugs at the service layer before RLS silently returns empty result sets.
+
+Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/adminDbConnection.ts` → `withAdminConnection()` which acquires a connection bound to the `admin_role` Postgres role (BYPASSRLS) and logs every invocation to `audit_events`.
+
+### Layer 2 — Scope assertions at retrieval boundaries
+
+`server/lib/scopeAssertion.ts` — `assertScope(items, { organisationId, subaccountId? }, source)` validates that every returned row matches the expected tenant. Throws `scope_violation` failure on mismatch. Used at every boundary that loads data into an LLM context window (system prompt assembly, workspace memory, document retrieval, attachments). Pure, synchronous, side-effect-free.
+
+### Layer 3 — Tool call security events
+
+`proposeActionMiddleware` (preTool pipeline) evaluates every tool call against policy rules and writes an audit row to `tool_call_security_events` (migration 0082). High-volume, idempotent via partial unique index on `(agent_run_id, tool_call_id)`. Separate table from `audit_events` due to different write volume and retention requirements.
+
+`server/jobs/securityEventsCleanupJob.ts` prunes events beyond retention. `scripts/prune-security-events.ts` is the manual equivalent.
+
+### CI gates
+
+- `verify-rls-coverage.sh` — every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY`
+- `verify-rls-contract-compliance.sh` — verifies the three-layer contract is wired end-to-end
 
 ---
 
@@ -449,6 +571,72 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 - **`useSocket` hook** — client subscribes to subaccount-scoped room for live updates
 - **Audit events** — all significant actions logged to `auditEvents` with actor, action, resource
 - **Correlation IDs** — `correlation.ts` middleware generates per-request IDs for log tracing
+
+---
+
+## Regression Capture & Trajectory Testing
+
+### Regression capture (Sprint 2 P1.2)
+
+When a review item is rejected (human HITL rejects an agent-proposed action), the system automatically captures a regression case. Schema: `regression_cases` table (migration 0083).
+
+Flow: rejection fires a `regression-capture` pg-boss job → `regressionCaptureService` loads the rejected run state → `regressionCaptureServicePure.materialiseCapture()` builds a structured snapshot → inserts into `regression_cases`. Per-agent ring buffer caps the number of active cases (default: `DEFAULT_REGRESSION_CASE_CAP` from `server/config/limits.ts`).
+
+Best-effort: if the source run/snapshot/action was pruned before the job runs, the capture is silently skipped. Regression capture is additive, not on the critical path.
+
+`scripts/run-regression-cases.ts` replays captured cases for regression testing.
+
+### Trajectory testing (Sprint 4 P3.3)
+
+Structural comparison of agent execution trajectories against reference patterns. A trajectory is the ordered sequence of `(actionType, args)` events from an agent run.
+
+- `server/services/trajectoryService.ts` — loads trajectories from the `actions` table by `agentRunId`
+- `server/services/trajectoryServicePure.ts` — pure `compare()` and `formatDiff()` functions
+- `shared/iee/trajectorySchema.ts` — Zod schemas for `TrajectoryEvent`, `ReferenceTrajectory`, `TrajectoryDiff`
+- `tests/trajectories/*.json` — reference trajectory fixtures (e.g. `intake-triage-standard.json`, `portfolio-health-3-subaccounts.json`)
+- `scripts/run-trajectory-tests.ts` — CI-runnable trajectory test runner
+
+---
+
+## Quality Infrastructure — Static Gates & Testing Posture
+
+The codebase runs a deliberate **static-gates-over-runtime-tests** posture. 33 `verify-*.sh` scripts enforce architectural invariants at CI time. Runtime unit tests follow the pure helper convention (below). There are zero frontend/E2E tests by design at this stage.
+
+### Static gates
+
+`scripts/run-all-gates.sh` runs all 33 verify scripts in sequence and reports pass/warn/fail. Gates are classified as **Tier 1** (hard fail — blocks CI) or **Tier 2** (warning only). Key gates:
+
+| Gate | What it checks |
+|------|---------------|
+| `verify-async-handler.sh` | Every route handler uses `asyncHandler` |
+| `verify-subaccount-resolution.sh` | Every `:subaccountId` route calls `resolveSubaccount` |
+| `verify-org-scoped-writes.sh` | Service writes filter by `organisationId` |
+| `verify-no-db-in-routes.sh` | Routes never import `db` directly |
+| `verify-rls-coverage.sh` | Every `rlsProtectedTables.ts` entry has a matching `CREATE POLICY` |
+| `verify-rls-contract-compliance.sh` | Three-layer RLS contract wired end-to-end |
+| `verify-pure-helper-convention.sh` | `*Pure.ts` files have no impure imports |
+| `verify-idempotency-strategy-declared.sh` | Jobs declare idempotency strategy |
+| `verify-job-idempotency-keys.sh` | Job enqueue calls include idempotency keys |
+| `verify-action-registry-zod.sh` | Action registry entries have Zod schemas |
+| `verify-reflection-loop-wired.sh` | Reflection loop middleware is wired for review_code → write_patch |
+| `verify-tool-intent-convention.sh` | Tool calls declare intent metadata |
+
+### Pure helper convention
+
+Services with complex logic are split into an impure file (DB reads/writes) and a `*Pure.ts` companion (pure decision logic, no imports from `db/`, no side effects). The pure file is trivially unit-testable with fixture data. Gate: `verify-pure-helper-convention.sh` checks that `*Pure.ts` files have no impure imports.
+
+Examples: `agentExecutionServicePure.ts`, `regressionCaptureServicePure.ts`, `critiqueGatePure.ts`, `reflectionLoopPure.ts`, `trajectoryServicePure.ts`, `policyEngineServicePure.ts`.
+
+### Runtime tests
+
+20 test files in `server/services/__tests__/` (~4200 lines). Key coverage:
+- `agentExecution.smoke.test.ts` — end-to-end agent execution
+- `rls.context-propagation.test.ts` — iterates `rlsProtectedTables.ts` to assert Layer B holds
+- `agentExecutionServicePure.checkpoint.test.ts` — crash-resume parity
+- `policyEngineService.scopeValidation.test.ts` — scope violation detection
+- Pure helper tests: `critiqueGatePure.test.ts`, `reflectionLoopPure.test.ts`, `trajectoryServicePure.test.ts`, etc.
+
+Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for deterministic testing. `server/services/__tests__/fixtures/loadFixtures.ts` — fixture loader.
 
 ---
 
@@ -475,20 +663,29 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ## Migrations
 
-75 migrations (0001–0075). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
+92 migrations (0001–0090, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
-- `0077` — `hierarchy_templates.system_template_id` — adds the nullable back-reference that `orgConfigService.getOperationalConfig` and `systemTemplateService.loadTemplate` already required. Closes a schema/code drift that had left the server tsc build red on main.
+- `0090` — `agents.complexity_hint` — agent complexity classification for execution routing
+- `0089` — `agent_runs.plan` — structured plan field for agent run planning phase
+- `0088` — memory blocks: `memory_blocks` + `memory_block_attachments` (Letta-pattern shared context)
+- `0087` — `organisations.ghl_concurrency_cap` — per-org GoHighLevel concurrency limit
+- `0086` — `playbook_runs.run_mode` — playbook run mode (standard / replay / dry_run)
+- `0085` — `policy_rules.confidence_threshold` + `policy_rules.guidance_text` — decision-time guidance
+- `0084` — `agent_run_checkpoints` + `agent_run_messages` — crash-resume infrastructure
+- `0083` — `regression_cases` — regression capture from rejected review items
+- `0082` — `tool_call_security_events` — P1.1 Layer 3 audit trail for preTool authorisation
+- `0081` — RLS on `llm_requests`, `audit_events` (Layer 1 batch 3)
+- `0080` — RLS on `review_items`, `review_audit_records`, `workspace_memories` (Layer 1 batch 2)
+- `0079` — RLS on `tasks`, `actions`, `agent_runs`, `agent_run_snapshots` (Layer 1 batch 1)
+- `0078` — `agent_data_sources.scheduled_task_id` — context data sources for scheduled tasks
+- `0077` — `hierarchy_templates.system_template_id` — closes schema/code drift
 - `0076` — playbooks: templates, versions, runs, step runs (Playbooks feature — shipped in PR #87)
 - `0075` — drop stale connection unique indexes (integration connection cleanup)
-- `0074` — `skills.visibility` three-state cascade (`none` / `basic` / `full`) replacing the boolean `contentsVisible`
-- `0073` — Reporting Agent paywall workflow (web login connections, IEE artifacts/runs/steps extensions, agent run extensions)
-- `0072` — original `skills.contentsVisible` flag (superseded by 0074 three-state cascade)
+- `0074` — `skills.visibility` three-state cascade (`none` / `basic` / `full`)
+- `0073` — Reporting Agent paywall workflow
 - `0041` — heartbeat offset minutes (minute-precision scheduling)
 - `0040` — agent run idempotency key
-- `0039` — GitHub App schema
-- `0037` — workspace memory + workflow schema
-- `0036` — review queue + OAuth tables
 
 ---
 

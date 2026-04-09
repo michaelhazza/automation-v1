@@ -15,20 +15,19 @@ run_gate() {
   local name="${script##*/}"
   echo ""
   echo "--- Running gate: $name ---"
-  if bash "$script"; then
+  local code=0
+  bash "$script" || code=$?
+  if [ $code -eq 0 ]; then
     echo "[PASS] $name"
     PASS_COUNT=$((PASS_COUNT + 1))
+  elif [ $code -eq 1 ]; then
+    echo "[BLOCKING FAIL] $name"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  elif [ $code -eq 2 ]; then
+    echo "[WARNING] $name"
+    WARN_COUNT=$((WARN_COUNT + 1))
   else
-    local code=$?
-    if [ $code -eq 1 ]; then
-      echo "[BLOCKING FAIL] $name"
-      FAIL_COUNT=$((FAIL_COUNT + 1))
-    elif [ $code -eq 2 ]; then
-      echo "[WARNING] $name"
-      WARN_COUNT=$((WARN_COUNT + 1))
-    else
-      echo "[INFO] $name"
-    fi
+    echo "[INFO] $name"
   fi
 }
 
@@ -76,6 +75,9 @@ run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
 # ── Sprint 3 (P2.1 + P2.2 + P2.3) gates from docs/improvements-roadmap-spec.md ──
 run_gate "$SCRIPT_DIR/verify-reflection-loop-wired.sh"
 run_gate "$SCRIPT_DIR/verify-tool-intent-convention.sh"
+
+# ── Code quality gates ──
+run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
 
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
