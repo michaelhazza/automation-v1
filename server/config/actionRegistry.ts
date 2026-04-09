@@ -32,6 +32,24 @@ export interface ParameterSchema {
   additionalProperties?: boolean;
 }
 
+/**
+ * Execution-model contract for an action handler — declares how the handler
+ * stays safe under retry given the at-least-once execution guarantee. See
+ * docs/improvements-roadmap-spec.md → "Execution model — at-least-once,
+ * idempotent handlers" for the full rationale.
+ *
+ *   - 'read_only'   — no side effects; safe to re-run without any coordination.
+ *   - 'keyed_write' — writes are deduplicated by the caller-supplied
+ *                     idempotencyKey at the DB or external provider layer
+ *                     (INSERT ... ON CONFLICT DO NOTHING, Idempotency-Key
+ *                     header, etc.).
+ *   - 'locked'      — handler takes a pg advisory lock keyed on the
+ *                     idempotencyKey before the call and releases on exit.
+ *                     Used for irreversible side effects to third parties
+ *                     that have no native dedupe story.
+ */
+export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
+
 export interface ActionDefinition {
   actionType: string;
   description: string;
@@ -44,6 +62,64 @@ export interface ActionDefinition {
   parameterSchema: ParameterSchema;
   retryPolicy: RetryPolicy;
   mcp?: { annotations: McpAnnotations };
+
+  /**
+   * P0.2 Slice B — required on every entry from Sprint 1 landing onward.
+   * Enforced by verify-idempotency-strategy-declared.sh.
+   */
+  idempotencyStrategy: IdempotencyStrategy;
+
+  /**
+   * P1.1 Layer 3 — declarative scope metadata consumed by the before-tool
+   * authorisation hook. See P1.1 Layer 3 validateScope() for the check
+   * implementation. Optional — only actions that operate on tenant-scoped
+   * resources need to declare scope requirements.
+   */
+  scopeRequirements?: {
+    /** Names of arg fields that must be subaccount IDs the current tenant owns. */
+    validateSubaccountFields?: string[];
+    /** Names of arg fields that must be GHL location IDs the current tenant owns. */
+    validateGhlLocationFields?: string[];
+    /** If true, run requires `userId` in execution context (no system runs). */
+    requiresUserContext?: boolean;
+  };
+
+  /** P4.1 — topic tags for intent-based filtering. */
+  topics?: string[];
+
+  /** P4.4 — opt-in to the semantic critique gate when run via economy tier. */
+  requiresCritiqueGate?: boolean;
+
+  /**
+   * P0.2 Slice C — extended retry behaviour. Overrides retryPolicy's
+   * default fail-the-run semantics:
+   *   - 'retry'    — use withBackoff per retryPolicy (default, matches
+   *                  existing behaviour).
+   *   - 'skip'     — log the failure, return
+   *                  { success: false, skipped: true, reason } to the LLM,
+   *                  and let the agent loop continue.
+   *   - 'fail_run' — terminate the entire agent run via failure() from
+   *                  shared/iee/failure.ts.
+   *   - 'fallback' — return fallbackValue as the result instead of failing.
+   */
+  onFailure?: 'retry' | 'skip' | 'fail_run' | 'fallback';
+  fallbackValue?: unknown;
+
+  /**
+   * P1.1 Layer 3 — flag to mark methodology skills (pure prompt scaffolds,
+   * no side effects). When true, the preTool middleware bypasses
+   * actionService.proposeAction and writes a single audit row with
+   * reason='methodology_skill'. Distinct from read-only skills because
+   * methodology skills do not even read from external systems.
+   */
+  isMethodology?: boolean;
+
+  /**
+   * P4.1 — universal skills are always merged into every agent's effective
+   * allowlist and always preserved through the topic filter. See the
+   * universal-skill contract in docs/improvements-roadmap-spec.md P4.1.
+   */
+  isUniversal?: boolean;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -73,6 +149,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error', 'recipient_not_found'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -97,6 +174,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['auth_error'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
   },
   create_task: {
     actionType: 'create_task',
@@ -125,6 +203,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   move_task: {
     actionType: 'move_task',
@@ -149,6 +228,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   reassign_task: {
     actionType: 'reassign_task',
@@ -173,6 +253,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   add_deliverable: {
     actionType: 'add_deliverable',
@@ -199,6 +280,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   update_record: {
     actionType: 'update_record',
@@ -225,6 +307,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'not_found'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'keyed_write',
   },
   fetch_url: {
     actionType: 'fetch_url',
@@ -251,6 +334,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
   },
   request_approval: {
     actionType: 'request_approval',
@@ -277,6 +361,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
@@ -303,6 +388,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   search_codebase: {
@@ -330,6 +416,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   run_tests: {
@@ -354,6 +441,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'execution_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   analyze_endpoint: {
@@ -382,6 +470,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
   },
 
   report_bug: {
@@ -412,6 +501,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Dev/QA devops actions ──────────────────────────────────────────────────
@@ -442,6 +532,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['base_commit_mismatch', 'patch_size_exceeded', 'permission_failure'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'locked',
   },
 
   run_command: {
@@ -466,6 +557,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'locked',
   },
 
   create_pr: {
@@ -492,6 +584,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_failure', 'environment_failure'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
   },
 
   // ── Workflow orchestration (Phase 2) ────────────────────────────────────────
@@ -520,6 +613,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Page management actions ─────────────────────────────────────────────────
@@ -552,6 +646,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   update_page: {
@@ -581,6 +676,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   publish_page: {
@@ -606,6 +702,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Cross-Subaccount Intelligence Skills (Phase 3) ──────────────────────
@@ -621,6 +718,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { tag_filters: { type: 'string', description: 'Tag filters JSON' } }, required: [] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   read_org_insights: {
@@ -634,6 +732,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { semantic_query: { type: 'string', description: 'Semantic search query' } }, required: [] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   write_org_insight: {
@@ -647,6 +746,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { content: { type: 'string', description: 'Insight content' }, entry_type: { type: 'string', description: 'Insight type' } }, required: ['content', 'entry_type'] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   compute_health_score: {
@@ -660,6 +760,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' } }, required: ['account_id'] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   detect_anomaly: {
@@ -673,6 +774,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' }, metric_name: { type: 'string', description: 'Metric name' }, current_value: { type: 'string', description: 'Current metric value' } }, required: ['account_id', 'metric_name', 'current_value'] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   compute_churn_risk: {
@@ -686,6 +788,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' } }, required: ['account_id'] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   generate_portfolio_report: {
@@ -699,6 +802,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { reporting_period_days: { type: 'string', description: 'Days to cover' }, format: { type: 'string', description: 'Output format' } }, required: [] },
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   trigger_account_intervention: {
@@ -712,6 +816,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' }, intervention_type: { type: 'string', description: 'Intervention type' }, evidence_summary: { type: 'string', description: 'Evidence justification' } }, required: ['account_id', 'intervention_type', 'evidence_summary'] },
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
   },
 };
 
