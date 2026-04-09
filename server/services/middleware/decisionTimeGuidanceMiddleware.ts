@@ -33,6 +33,7 @@
  */
 
 import { policyEngineService } from '../policyEngineService.js';
+import { hashToolCall } from './loopDetection.js';
 import type { PreToolMiddleware, PreToolResult } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -76,13 +77,18 @@ import type { PreToolMiddleware, PreToolResult } from './types.js';
 
 const emittedPerCtx = new WeakMap<object, Set<string>>();
 
-function shouldEmit(ctxKey: object, toolCallId: string, fingerprint: string): boolean {
+function shouldEmit(ctxKey: object, toolName: string, inputHash: string, fingerprint: string): boolean {
   let set = emittedPerCtx.get(ctxKey);
   if (!set) {
     set = new Set();
     emittedPerCtx.set(ctxKey, set);
   }
-  const key = `${toolCallId}::${fingerprint}`;
+  // Key on (toolName, inputHash, fingerprint) — NOT toolCall.id, which
+  // changes on every LLM retry and would cause an infinite inject loop.
+  // Including inputHash ensures distinct calls to the same tool (e.g.
+  // two send_email calls with different recipients) each receive
+  // guidance, while retries of the exact same call are suppressed.
+  const key = `${toolName}::${inputHash}::${fingerprint}`;
   if (set.has(key)) return false;
   set.add(key);
   return true;
@@ -114,7 +120,8 @@ export const decisionTimeGuidanceMiddleware: PreToolMiddleware = {
     }
 
     const fingerprint = guidance.join('\u0000');
-    if (!shouldEmit(ctx, toolCall.id, fingerprint)) {
+    const inputHash = hashToolCall(toolCall.name, toolCall.input);
+    if (!shouldEmit(ctx, toolCall.name, inputHash, fingerprint)) {
       return { action: 'continue' };
     }
 

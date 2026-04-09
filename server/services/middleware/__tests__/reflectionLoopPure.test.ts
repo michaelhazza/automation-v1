@@ -205,18 +205,29 @@ test('write_patch after BLOCKED verdict → still blocked (reminder)', () => {
   assertEqual(result.action.kind, 'inject_message', 'action kind');
 });
 
-test('write_patch after APPROVE → continue', () => {
+test('write_patch after APPROVE → continue but consumes approval', () => {
   const result = decideReflectionAction(
     base({ toolName: 'write_patch', lastReviewCodeVerdict: 'APPROVE' }),
   );
   assertEqual(result.action.kind, 'continue', 'action kind');
+  assertEqual(result.stateDelta.lastReviewCodeVerdict, null, 'approval consumed');
 });
 
-test('create_pr without APPROVE → inject_message', () => {
+test('second write_patch after consumed approval → blocked', () => {
+  // Simulates the state after the first write_patch consumed the approval
+  const result = decideReflectionAction(
+    base({ toolName: 'write_patch', lastReviewCodeVerdict: null }),
+  );
+  assertEqual(result.action.kind, 'inject_message', 'must require fresh review');
+});
+
+test('create_pr does not require its own approval (follows write_patch)', () => {
+  // After write_patch consumes the approval, create_pr must still pass
+  // through — it opens a PR for the patch that was just approved.
   const result = decideReflectionAction(
     base({ toolName: 'create_pr', lastReviewCodeVerdict: null }),
   );
-  assertEqual(result.action.kind, 'inject_message', 'action kind');
+  assertEqual(result.action.kind, 'continue', 'create_pr should pass through');
 });
 
 test('other tools pass through unchanged', () => {

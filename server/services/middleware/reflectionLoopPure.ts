@@ -166,8 +166,13 @@ export function decideReflectionAction(
     };
   }
 
-  // ── 2. write_patch or create_pr without APPROVE ──────────────────────
-  if (toolName === 'write_patch' || toolName === 'create_pr') {
+  // ── 2. write_patch without APPROVE ────────────────────────────────────
+  // write_patch requires an APPROVE verdict, then CONSUMES it so the next
+  // write_patch in the same run must earn a fresh review. create_pr does
+  // NOT require its own approval — it opens a PR for the patch that was
+  // just approved + applied, and runs immediately after write_patch in
+  // the normal flow.
+  if (toolName === 'write_patch') {
     if (lastReviewCodeVerdict !== 'APPROVE') {
       return {
         action: {
@@ -175,11 +180,18 @@ export function decideReflectionAction(
           message:
             `Cannot submit a patch without an APPROVE verdict from ` +
             `review_code. Run review_code on your changes first, then ` +
-            `re-invoke ${toolName} after the verdict resolves to APPROVE.`,
+            `re-invoke write_patch after the verdict resolves to APPROVE.`,
         },
         stateDelta: {},
       };
     }
+    // Consume the approval so subsequent write_patch calls require a
+    // fresh review_code pass. Without this, a single APPROVE would
+    // greenlight all further patches in the same run.
+    return {
+      action: { kind: 'continue' },
+      stateDelta: { lastReviewCodeVerdict: null },
+    };
   }
 
   // ── 3. Default: continue ─────────────────────────────────────────────
