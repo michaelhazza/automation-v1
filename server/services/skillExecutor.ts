@@ -13,7 +13,7 @@ import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schem
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
 import { agentExecutionService } from './agentExecutionService.js';
-import { actionService } from './actionService.js';
+import { actionService, buildActionIdempotencyKey } from './actionService.js';
 import { executionLayerService, registerAdapter } from './executionLayerService.js';
 import { reviewService } from './reviewService.js';
 import { hitlService } from './hitlService.js';
@@ -95,12 +95,30 @@ export interface SkillExecutionContext {
    * Lives on the context so it survives across tool-call iterations.
    */
   readDataSourceCallCount?: number;
+  /**
+   * Current LLM tool call id, set by skillExecutor.execute() at the top
+   * of every dispatch. Sprint 2 P1.1 Layer 3: when present, the per-case
+   * action wrappers below use it to build a deterministic idempotency
+   * key (runId, toolCallId, args_hash) that matches the key written by
+   * proposeActionMiddleware. This makes the middleware + wrapper
+   * coexistence resolve to the same action row via the
+   * actions.idempotency_key unique constraint.
+   */
+  toolCallId?: string;
 }
 
 interface SkillExecutionParams {
   skillName: string;
   input: Record<string, unknown>;
   context: SkillExecutionContext;
+  /**
+   * Tool call ID from the LLM response. Sprint 2 P1.1 Layer 3 requires a
+   * deterministic idempotency key so the proposeActionMiddleware and the
+   * per-case action wrappers both resolve to the same action row. When
+   * omitted (legacy callers), the wrappers fall back to a non-deterministic
+   * key. The middleware + wrapper coexistence relies on this being set.
+   */
+  toolCallId?: string;
 }
 
 /**
@@ -266,7 +284,15 @@ export function setHandoffJobSender(sender: (name: string, data: object) => Prom
 
 export const skillExecutor = {
   async execute(params: SkillExecutionParams): Promise<unknown> {
-    const { skillName, input, context } = params;
+    const { skillName, input, context, toolCallId } = params;
+    // Stash the current tool call id on the context so the per-case
+    // action wrappers below can build the same deterministic idempotency
+    // key that proposeActionMiddleware wrote for this call (Sprint 2 P1.1
+    // Layer 3). Mutation is safe — the context is scoped to one run and
+    // one tool call at a time.
+    if (toolCallId !== undefined) {
+      context.toolCallId = toolCallId;
+    }
 
     // MCP tool dispatch — tool slugs start with "mcp."
     if (skillName.startsWith('mcp.') && context._mcpClients) {
@@ -617,7 +643,18 @@ async function executeWithActionAudit(
   context: SkillExecutionContext,
   executor: () => Promise<unknown>
 ): Promise<unknown> {
-  const idempotencyKey = `${actionType}:${context.runId}:${Date.now()}`;
+  // Sprint 2 P1.1 Layer 3: when a toolCallId is on the context, build a
+  // deterministic key that matches the one proposeActionMiddleware already
+  // wrote for this call. proposeAction() short-circuits on the existing
+  // row (isNew === false) and the wrapper moves on to execution. Legacy
+  // callers without a toolCallId fall back to the old timestamp key.
+  const idempotencyKey = context.toolCallId
+    ? buildActionIdempotencyKey({
+        runId: context.runId,
+        toolCallId: context.toolCallId,
+        args: input,
+      })
+    : `${actionType}:${context.runId}:${Date.now()}`;
   const pipelineSpan = createSpan('skill.pipeline.run', { skillName: actionType, gateLevel: 'auto' }, { input });
 
   try {
@@ -737,11 +774,23 @@ async function proposeReviewGatedAction(
 
   const pipelineSpan = createSpan('skill.pipeline.run', { skillName: actionType, gateLevel: 'review' }, { input });
 
-  const keyParts = [actionType, context.subaccountId ?? `org:${context.organisationId}`];
-  if (input.thread_id) keyParts.push(String(input.thread_id));
-  if (input.record_id) keyParts.push(String(input.record_id));
-  keyParts.push(String(Date.now()));
-  const idempotencyKey = keyParts.join(':');
+  // Sprint 2 P1.1 Layer 3: deterministic key matches the middleware's so
+  // both paths resolve to the same action row. Legacy fallback preserves
+  // the old per-field key for callers that still lack a toolCallId.
+  let idempotencyKey: string;
+  if (context.toolCallId) {
+    idempotencyKey = buildActionIdempotencyKey({
+      runId: context.runId,
+      toolCallId: context.toolCallId,
+      args: input,
+    });
+  } else {
+    const keyParts = [actionType, context.subaccountId ?? `org:${context.organisationId}`];
+    if (input.thread_id) keyParts.push(String(input.thread_id));
+    if (input.record_id) keyParts.push(String(input.record_id));
+    keyParts.push(String(Date.now()));
+    idempotencyKey = keyParts.join(':');
+  }
 
   try {
     const proposed = await actionService.proposeAction({

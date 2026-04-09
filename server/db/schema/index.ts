@@ -93,3 +93,9 @@ export * from './ieeArtifacts';
 // Playbooks — multi-step automation engine (migration 0076)
 export * from './playbookTemplates';
 export * from './playbookRuns';
+
+// Sprint 2 — P1.1 Layer 3 (migration 0082)
+export * from './toolCallSecurityEvents';
+
+// Sprint 2 — P1.2 regression capture (migration 0083)
+export * from './regressionCases';

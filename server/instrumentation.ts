@@ -129,3 +129,55 @@ export function bindTraceContext<T extends (...args: never[]) => unknown>(fn: T)
   if (!ctx) return fn;
   return ((...args: never[]) => traceStorage.run(ctx, () => fn(...args))) as unknown as T;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 2 P1.1 Layer 1 — org-scoped transaction slot
+//
+// Every request and every pg-boss job runs inside an explicit Drizzle
+// transaction that has issued `SELECT set_config('app.organisation_id', $1)`
+// for the current tenant. The transaction handle lives here so every
+// service-layer DB access can read it without threading it through every
+// function signature.
+//
+// If a service-layer DB helper finds no active OrgTxContext, that is a
+// Layer A contract violation and MUST throw `failure('missing_org_context')`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal shape a drizzle transaction handle satisfies — same as the
+ * top-level `db` object. We use `unknown` to avoid an import cycle with
+ * server/db/index.ts; consumers cast back to the Drizzle DB type via the
+ * `getCurrentOrgTx()` helper in server/lib/orgScopedDb.ts.
+ */
+export interface OrgTxContext {
+  /** The tenant-scoped Drizzle transaction handle. */
+  tx: unknown;
+  /** Organisation ID that `set_config('app.organisation_id', …)` was set to. */
+  organisationId: string;
+  /** Optional subaccount context, when the request/job is subaccount-scoped. */
+  subaccountId?: string | null;
+  /** Principal that initiated the work, when known (HTTP requests only). */
+  userId?: string;
+  /** Human-readable origin for debugging (e.g. "http:GET /api/tasks"). */
+  source: string;
+}
+
+const orgTxStorage = new AsyncLocalStorage<OrgTxContext>();
+
+/**
+ * Run `fn` inside an org-scoped transaction context. Typically called by
+ * `server/middleware/orgScoping.ts` for HTTP requests and by
+ * `server/lib/createWorker.ts` for pg-boss jobs.
+ */
+export async function withOrgTx<T>(ctx: OrgTxContext, fn: () => Promise<T>): Promise<T> {
+  return orgTxStorage.run(ctx, fn);
+}
+
+/**
+ * Returns the active org-scoped transaction context, or undefined when the
+ * caller is outside a `withOrgTx` block. Services that require a tx call
+ * `requireOrgTx()` instead so the missing-context failure is structured.
+ */
+export function getOrgTxContext(): OrgTxContext | undefined {
+  return orgTxStorage.getStore();
+}

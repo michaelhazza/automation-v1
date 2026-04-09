@@ -472,6 +472,48 @@ export const queueService = {
   },
 
   /**
+   * Sprint 2 P1.2 — enqueue a regression-capture job for a rejected
+   * review item. Best-effort: uses pg-boss when available, falls back
+   * to an in-process call when the backend is in-memory. Failures are
+   * logged, not rethrown — the caller (reviewService.rejectItem) must
+   * not fail the user's rejection on a capture error.
+   */
+  async enqueueRegressionCapture(params: {
+    reviewItemId: string;
+    organisationId: string;
+  }): Promise<void> {
+    try {
+      if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+        const boss = await getPgBoss();
+        await boss.send('regression-capture', params, getJobConfig('regression-capture'));
+        return;
+      }
+
+      // In-memory fallback — run the capture inline so in-memory
+      // deployments still accumulate cases. Fire-and-forget with a
+      // catch so the rejection flow never sees a capture failure.
+      const { captureRegressionFromRejection } = await import(
+        './regressionCaptureService.js'
+      );
+      captureRegressionFromRejection(params).catch((err) => {
+        console.error(
+          JSON.stringify({
+            event: 'regression_capture_inline_failed',
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      });
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: 'regression_capture_enqueue_failed',
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  },
+
+  /**
    * Start periodic maintenance jobs.
    * Uses pg-boss scheduled workers when available, otherwise falls back to
    * in-process setInterval guarded by pg advisory locks to prevent duplicate
@@ -520,6 +562,64 @@ export const queueService = {
           }
           throw err;
         }
+      });
+      // Sprint 2 P1.1 Layer 3 — tool_call_security_events retention pruner.
+      // Admin-bypass sweep that opens its own tx via withAdminConnection.
+      await (boss as any).work('maintenance:security-events-cleanup', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runSecurityEventsCleanup } = await import('../jobs/securityEventsCleanupJob.js');
+          await withTimeout(runSecurityEventsCleanup().then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:security-events-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
+      // createWorker so the handler runs inside the org-scoped tx +
+      // ALS context pulled from job.data.organisationId.
+      const { createWorker } = await import('../lib/createWorker.js');
+      await createWorker<{
+        reviewItemId: string;
+        organisationId: string;
+      }>({
+        queue: 'regression-capture',
+        boss: boss as any,
+        handler: async (job) => {
+          const { captureRegressionFromRejection } = await import(
+            './regressionCaptureService.js'
+          );
+          const result = await captureRegressionFromRejection({
+            reviewItemId: job.data.reviewItemId,
+            organisationId: job.data.organisationId,
+          });
+          console.info(
+            JSON.stringify({
+              event: 'regression_capture_done',
+              jobId: job.id,
+              status: result.status,
+              regressionCaseId: result.regressionCaseId ?? null,
+              reason: result.reason ?? null,
+            }),
+          );
+        },
+      });
+
+      // Sprint 2 P1.2 — nightly regression replay tick. Admin-bypass
+      // (cross-org sweep), so resolveOrgContext returns null and the
+      // handler uses withAdminConnection internally.
+      await createWorker<Record<string, never>>({
+        queue: 'regression-replay-tick',
+        boss: boss as any,
+        resolveOrgContext: () => null,
+        handler: async () => {
+          const { runRegressionReplayTick } = await import(
+            '../jobs/regressionReplayJob.js'
+          );
+          await runRegressionReplayTick();
+        },
       });
 
       // Workflow resume worker — DB-backed, survives process restarts
@@ -582,6 +682,8 @@ export const queueService = {
       await boss.schedule('maintenance:cleanup-execution-files',  '0 * * * *',   {});
       await boss.schedule('maintenance:cleanup-budget-reservations', '*/5 * * * *', {});
       await boss.schedule('maintenance:memory-decay', '0 3 * * *', {}); // 3am daily
+      await boss.schedule('maintenance:security-events-cleanup', '30 3 * * *', {}); // 3:30am daily
+      await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs
@@ -605,6 +707,16 @@ export const queueService = {
         const { runMemoryDecay } = await import('../jobs/memoryDecayJob.js');
         runMemoryDecay().catch((err: unknown) => {
           console.error(JSON.stringify({ event: 'maintenance:memory_decay_error', ...serializeError(err) }));
+        });
+      }, 24 * 60 * 60 * 1000); // daily
+
+      // Sprint 2 P1.1 Layer 3 — security event retention sweep in the
+      // in-memory fallback. Admin-bypass job, no advisory lock needed
+      // because there's only one instance in in-memory mode by definition.
+      setInterval(async () => {
+        const { runSecurityEventsCleanup } = await import('../jobs/securityEventsCleanupJob.js');
+        runSecurityEventsCleanup().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:security_events_cleanup_error', ...serializeError(err) }));
         });
       }, 24 * 60 * 60 * 1000); // daily
 

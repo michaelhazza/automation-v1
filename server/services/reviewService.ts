@@ -229,6 +229,16 @@ export const reviewService = {
       comment: rejectionComment,
     });
 
+    // Sprint 2 P1.2 — enqueue a regression capture. Best-effort:
+    // failures are logged by queueService, never surfaced to the
+    // user's rejection flow.
+    const { queueService } = await import('./queueService.js');
+    queueService
+      .enqueueRegressionCapture({ reviewItemId, organisationId })
+      .catch(() => {
+        /* queueService already logs */
+      });
+
     return { actionId: item.actionId };
   },
 

@@ -1,10 +1,11 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { orgUserRoles, subaccountUserAssignments, permissionSetItems } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { auditService } from '../services/auditService.js';
+import { withOrgTx } from '../instrumentation.js';
 
 export interface JwtPayload {
   id: string;
@@ -28,7 +29,34 @@ declare global {
 
 // ─── authenticate ──────────────────────────────────────────────────────────────
 
-export const authenticate = (req: Request, res: Response, next: NextFunction): void => {
+/**
+ * authenticate — verifies the JWT, sets `req.user` / `req.orgId`, then opens
+ * a request-scoped org-scoped Drizzle transaction that binds
+ * `app.organisation_id` via `set_config` and stashes the tx handle in
+ * AsyncLocalStorage for every downstream service call to read (Sprint 2
+ * P1.1 Layer 1). All service-layer DB access runs inside this tx so:
+ *
+ *   1. RLS policies observe a non-null `current_setting('app.organisation_id')`
+ *      and enforce tenant isolation at the database layer.
+ *   2. `getOrgScopedDb()` in service code returns the tx handle synchronously
+ *      without threading it through every function signature.
+ *   3. Service calls made without an active tx throw
+ *      `failure('missing_org_context')` — Layer A of the three-layer
+ *      fail-closed data isolation contract.
+ *
+ * The transaction commits when the response is flushed (res.finish / close)
+ * and rolls back if `next(err)` propagates an error out of the handler chain.
+ * Route handlers that throw are caught by `asyncHandler`, which writes a
+ * JSON error response — that counts as a clean response from the middleware's
+ * perspective, so the tx commits. Data-consistency boundaries (atomic writes
+ * across multiple tables) should use a nested `db.transaction()` call inside
+ * the service, not rely on this outer tx.
+ */
+export const authenticate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Authentication required' });
@@ -36,37 +64,87 @@ export const authenticate = (req: Request, res: Response, next: NextFunction): v
   }
 
   const token = authHeader.substring(7);
+  let payload: JwtPayload;
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    req.user = payload;
-
-    // system_admin can pass X-Organisation-Id to scope into any org.
-    if (payload.role === 'system_admin') {
-      const headerOrgId = req.headers['x-organisation-id'] as string | undefined;
-      req.orgId = headerOrgId || payload.organisationId;
-
-      if (headerOrgId && headerOrgId !== payload.organisationId) {
-        auditService.log({
-          organisationId: headerOrgId,
-          actorId: payload.id,
-          actorType: 'user',
-          action: 'cross_org_access',
-          metadata: {
-            targetOrganisationId: headerOrgId,
-            originalOrganisationId: payload.organisationId,
-            method: req.method,
-            path: req.path,
-          },
-          ipAddress: req.ip,
-        });
-      }
-    } else {
-      req.orgId = payload.organisationId;
-    }
-
-    next();
+    payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
   } catch {
     res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  req.user = payload;
+
+  // system_admin can pass X-Organisation-Id to scope into any org.
+  if (payload.role === 'system_admin') {
+    const headerOrgId = req.headers['x-organisation-id'] as string | undefined;
+    req.orgId = headerOrgId || payload.organisationId;
+
+    if (headerOrgId && headerOrgId !== payload.organisationId) {
+      auditService.log({
+        organisationId: headerOrgId,
+        actorId: payload.id,
+        actorType: 'user',
+        action: 'cross_org_access',
+        metadata: {
+          targetOrganisationId: headerOrgId,
+          originalOrganisationId: payload.organisationId,
+          method: req.method,
+          path: req.path,
+        },
+        ipAddress: req.ip,
+      });
+    }
+  } else {
+    req.orgId = payload.organisationId;
+  }
+
+  const orgId = req.orgId!;
+
+  try {
+    await db.transaction(async (tx) => {
+      // Bind app.organisation_id to the tx. `true` (is_local) scopes the
+      // setting to this transaction so it's cleared on commit/rollback and
+      // cannot leak across pool connections.
+      await tx.execute(sql`SELECT set_config('app.organisation_id', ${orgId}, true)`);
+
+      await withOrgTx(
+        {
+          tx,
+          organisationId: orgId,
+          subaccountId: (req.params?.subaccountId as string | undefined) ?? null,
+          userId: payload.id,
+          source: `http:${req.method} ${req.path}`,
+        },
+        () =>
+          new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const settle = (err?: unknown) => {
+              if (settled) return;
+              settled = true;
+              if (err) reject(err);
+              else resolve();
+            };
+
+            // Most success paths complete via res.json(...) inside
+            // asyncHandler, so we resolve on `finish`. `close` handles
+            // the client-disconnect case. `next(err)` handles errors
+            // that bypass asyncHandler (middleware-raised errors).
+            res.once('finish', () => settle());
+            res.once('close', () => settle());
+
+            next((err?: unknown) => {
+              if (err) settle(err);
+              // No err: wait for res.finish/close. The downstream middleware
+              // or route handler will write the response; the tx stays open
+              // across the entire chain.
+            });
+          }),
+      );
+    });
+  } catch (err) {
+    // Errors here come from set_config, the transaction itself, or from
+    // next(err) bubbling up via the bridge above.
+    next(err);
   }
 };
 

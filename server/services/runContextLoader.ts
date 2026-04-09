@@ -6,6 +6,7 @@ import {
   type LoadedDataSource,
 } from './agentService.js';
 import { loadTaskAttachmentsAsContext } from './taskAttachmentContextService.js';
+import { assertScopeSingle } from '../lib/scopeAssertion.js';
 import {
   processContextPool,
   resolveScheduledTaskId as resolveScheduledTaskIdPure,
@@ -87,8 +88,11 @@ export async function loadRunContextData(
   // 3. Resolve scheduled task instructions (the "Task Instructions" layer)
   let taskInstructions: string | null = null;
   if (triggerScheduledTaskId) {
-    const [st] = await db
-      .select({ description: scheduledTasks.description })
+    const [rawSt] = await db
+      .select({
+        description: scheduledTasks.description,
+        organisationId: scheduledTasks.organisationId,
+      })
       .from(scheduledTasks)
       .where(
         and(
@@ -99,6 +103,13 @@ export async function loadRunContextData(
           eq(scheduledTasks.organisationId, request.organisationId),
         )
       );
+    // P1.1 Layer 2 scope assertion — belt-and-suspenders on the scheduled
+    // task description that will land in the LLM system prompt window.
+    const st = assertScopeSingle(
+      rawSt ?? null,
+      { organisationId: request.organisationId },
+      'runContextLoader.loadRunContextData.scheduledTask',
+    );
     if (st?.description && st.description.trim().length > 0) {
       taskInstructions = st.description.trim();
     }

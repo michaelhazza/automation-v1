@@ -654,7 +654,12 @@ export const agentExecutionService = {
       }
 
       // Add workspace entities (subaccount-scoped only)
-      const entities = isOrgRun ? null : await workspaceMemoryService.getEntitiesForPrompt(request.subaccountId!);
+      const entities = isOrgRun
+        ? null
+        : await workspaceMemoryService.getEntitiesForPrompt(
+            request.subaccountId!,
+            request.organisationId,
+          );
       if (entities) {
         systemPromptParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
       }
@@ -1492,6 +1497,10 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
           skillName: toolCall.name,
           input: toolCall.input,
           context: skillExecutionContext,
+          // Sprint 2 P1.1 Layer 3: thread the LLM tool call id into the
+          // skill executor so the per-case action wrappers build the same
+          // deterministic idempotency key as proposeActionMiddleware.
+          toolCallId: toolCall.id,
         });
       }, { actionType: toolCall.name });
 

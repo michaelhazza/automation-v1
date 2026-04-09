@@ -41,6 +41,7 @@ import {
   type EntryType,
 } from '../config/limits.js';
 import { rerank } from '../lib/reranker.js';
+import { assertScope, assertScopeSingle } from '../lib/scopeAssertion.js';
 import { createHash } from 'crypto';
 
 // ---------------------------------------------------------------------------
@@ -141,7 +142,11 @@ export const workspaceMemoryService = {
           eq(workspaceMemories.subaccountId, subaccountId)
         )
       );
-    return memory ?? null;
+    return assertScopeSingle(
+      memory ?? null,
+      { organisationId, subaccountId },
+      'workspaceMemoryService.getMemory',
+    );
   },
 
   async getOrCreateMemory(organisationId: string, subaccountId: string) {
@@ -163,9 +168,12 @@ export const workspaceMemoryService = {
 
   async listEntries(
     subaccountId: string,
-    opts?: { limit?: number; offset?: number; includedInSummary?: boolean }
+    opts?: { limit?: number; offset?: number; includedInSummary?: boolean; organisationId?: string }
   ) {
     const conditions = [eq(workspaceMemoryEntries.subaccountId, subaccountId)];
+    if (opts?.organisationId) {
+      conditions.push(eq(workspaceMemoryEntries.organisationId, opts.organisationId));
+    }
     if (opts?.includedInSummary !== undefined) {
       conditions.push(eq(workspaceMemoryEntries.includedInSummary, opts.includedInSummary));
     }
@@ -173,13 +181,25 @@ export const workspaceMemoryService = {
     const limit = opts?.limit ?? DEFAULT_ENTRY_LIMIT;
     const offset = opts?.offset ?? 0;
 
-    return db
+    const rows = await db
       .select()
       .from(workspaceMemoryEntries)
       .where(and(...conditions))
       .orderBy(desc(workspaceMemoryEntries.createdAt))
       .limit(limit)
       .offset(offset);
+
+    // Only assert when the caller provided an expected organisationId.
+    // Callers that omit it are legacy single-subaccount callers; the
+    // subaccountId filter is the primary guard in that case.
+    if (opts?.organisationId) {
+      return assertScope(
+        rows,
+        { organisationId: opts.organisationId, subaccountId },
+        'workspaceMemoryService.listEntries',
+      );
+    }
+    return rows;
   },
 
   async deleteEntry(entryId: string, organisationId: string, subaccountId: string) {
@@ -890,18 +910,34 @@ If none found: { "entities": [] }`,
     }
   },
 
-  async getEntitiesForPrompt(subaccountId: string): Promise<string | null> {
-    const entities = await db
+  async getEntitiesForPrompt(
+    subaccountId: string,
+    organisationId?: string,
+  ): Promise<string | null> {
+    const conditions = [
+      eq(workspaceEntities.subaccountId, subaccountId),
+      isNull(workspaceEntities.deletedAt),
+    ];
+    if (organisationId) {
+      conditions.push(eq(workspaceEntities.organisationId, organisationId));
+    }
+
+    const rawEntities = await db
       .select()
       .from(workspaceEntities)
-      .where(
-        and(
-          eq(workspaceEntities.subaccountId, subaccountId),
-          isNull(workspaceEntities.deletedAt)
-        )
-      )
+      .where(and(...conditions))
       .orderBy(desc(workspaceEntities.mentionCount))
       .limit(MAX_PROMPT_ENTITIES);
+
+    // Scope assertion — only when caller passed orgId. Legacy callers
+    // still rely on subaccountId filtering alone until they migrate.
+    const entities = organisationId
+      ? assertScope(
+          rawEntities,
+          { organisationId, subaccountId },
+          'workspaceMemoryService.getEntitiesForPrompt',
+        )
+      : rawEntities;
 
     if (entities.length === 0) return null;
 

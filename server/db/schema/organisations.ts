@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const organisations = pgTable(
@@ -16,6 +16,10 @@ export const organisations = pgTable(
     brandColor: text('brand_color'), // hex colour e.g. '#6366f1'
     // ── Governance ────────────────────────────────────────────────────
     requireAgentApproval: boolean('require_agent_approval').notNull().default(false),
+    // ── Sprint 2 — P1.1 Layer 3 ────────────────────────────────────────
+    // Per-org override for tool_call_security_events retention. NULL uses
+    // DEFAULT_SECURITY_EVENT_RETENTION_DAYS from server/config/limits.ts.
+    securityEventRetentionDays: integer('security_event_retention_days'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

@@ -302,3 +302,29 @@ export const MCP_TOOLS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Allowed commands for stdio MCP servers */
 export const MCP_ALLOWED_COMMANDS = new Set(['npx', 'node', 'docker', 'uvx', 'python3']);
+
+// ── Sprint 2 — P1.1 Layer 3 security event retention ───────────────────────
+
+/**
+ * Default retention window (days) for tool_call_security_events rows. The
+ * nightly security-events-cleanup pg-boss job prunes rows older than this.
+ * Per-org overrides live on organisations.security_event_retention_days —
+ * NULL uses this default.
+ */
+export const DEFAULT_SECURITY_EVENT_RETENTION_DAYS = 30;
+
+/**
+ * Upper bound on per-org security event retention. Prevents an org from
+ * configuring a runaway retention window that blows up the table.
+ */
+export const MAX_SECURITY_EVENT_RETENTION_DAYS = 365;
+
+// ── Sprint 2 — P1.2 regression capture ─────────────────────────────────────
+
+/**
+ * Default cap on the number of regression_cases rows per agent. When a
+ * new case would exceed the cap the oldest `active` case is retired so
+ * the suite keeps the most recent rejections. Per-agent overrides live
+ * on agents.regression_case_cap — NULL uses this default.
+ */
+export const DEFAULT_REGRESSION_CASE_CAP = 50;

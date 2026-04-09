@@ -70,7 +70,12 @@ async function getRulesForOrg(organisationId: string): Promise<PolicyRule[]> {
 // Rule matching
 // ---------------------------------------------------------------------------
 
-function matchesRule(rule: PolicyRule, ctx: PolicyContext): boolean {
+/**
+ * Pure rule matcher. Exported for unit tests; the public API
+ * (`policyEngineService.evaluatePolicy`) remains the intended runtime
+ * entry point. Sprint 2 P1.1 guards against cross-subaccount rule leak.
+ */
+export function matchesRule(rule: PolicyRule, ctx: PolicyContext): boolean {
   // tool_slug: exact match or wildcard
   if (rule.toolSlug !== '*' && rule.toolSlug !== ctx.toolSlug) return false;
 

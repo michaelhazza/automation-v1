@@ -10,6 +10,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { approxTokens, resolveTemperature, resolveMaxTokens } from './llmService.js';
 import { emailService } from './emailService.js';
 import { env } from '../lib/env.js';
+import { assertScopeSingle } from '../lib/scopeAssertion.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // ---------------------------------------------------------------------------
@@ -627,10 +628,20 @@ export const agentService = {
   },
 
   async getAgent(id: string, organisationId: string) {
-    const [agent] = await db
+    const [rawAgent] = await db
       .select()
       .from(agents)
       .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
+
+    // P1.1 Layer 2 scope assertion — agent.additionalPrompt is merged
+    // into the LLM system prompt window, so this is a retrieval boundary
+    // that must be guarded belt-and-suspenders even though the query
+    // already filters by organisationId.
+    const agent = assertScopeSingle(
+      rawAgent ?? null,
+      { organisationId },
+      'agentService.getAgent',
+    );
 
     if (!agent) throw { statusCode: 404, message: 'Agent not found' };
 

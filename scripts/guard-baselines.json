@@ -10,5 +10,8 @@
   "input-validation": 39,
   "pure-helper-convention": 0,
   "idempotency-strategy-declared": 0,
-  "action-registry-zod": 0
+  "action-registry-zod": 0,
+  "rls-coverage": 0,
+  "rls-contract-compliance": 31,
+  "job-idempotency-keys": 0
 }
