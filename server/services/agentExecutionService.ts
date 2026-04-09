@@ -28,6 +28,11 @@ import { routeCall } from './llmRouter.js';
 import type { LLMCallContext } from './llmRouter.js';
 import { env } from '../lib/env.js';
 import type { ProviderTool } from './providers/types.js';
+import {
+  selectExecutionPhase,
+  validateToolCalls,
+  buildMiddlewareContext,
+} from './agentExecutionServicePure.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import { triggerService } from './triggerService.js';
@@ -1182,48 +1187,9 @@ interface LoopResult {
   finalStatus?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Tool call validation — lightweight checks before execution.
-// Used for cascade escalation: if economy model produces invalid tool calls,
-// we retry with the frontier (ceiling) model.
-// ---------------------------------------------------------------------------
-
-function validateToolCalls(
-  toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
-  activeTools: ProviderTool[],
-): { valid: boolean; failureReason?: string } {
-  const toolNames = new Set(activeTools.map(t => t.name));
-
-  for (const tc of toolCalls) {
-    if (!toolNames.has(tc.name)) {
-      return { valid: false, failureReason: `unknown_tool:${tc.name}` };
-    }
-
-    if (tc.input === null || typeof tc.input !== 'object') {
-      return { valid: false, failureReason: `invalid_input:${tc.name}` };
-    }
-
-    const toolDef = activeTools.find(t => t.name === tc.name);
-    if (toolDef?.input_schema?.required) {
-      for (const field of toolDef.input_schema.required) {
-        if (!(field in tc.input)) {
-          return { valid: false, failureReason: `missing_field:${tc.name}.${field}` };
-        }
-      }
-    }
-
-    // Log-only: unexpected fields (common hallucination, usually harmless)
-    if (toolDef?.input_schema?.properties) {
-      const knownFields = new Set(Object.keys(toolDef.input_schema.properties));
-      const extraFields = Object.keys(tc.input).filter(k => !knownFields.has(k));
-      if (extraFields.length > 0) {
-        console.warn(`[toolCallValidator] unexpected fields in ${tc.name}: ${extraFields.join(', ')}`);
-      }
-    }
-  }
-
-  return { valid: true };
-}
+// Tool call validation + phase selection + middleware-context construction
+// are pure helpers extracted to agentExecutionServicePure.ts per P0.1 Layer 3
+// of docs/improvements-roadmap-spec.md. Imported at the top of this file.
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
@@ -1266,20 +1232,16 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   // Throttle trace events to prevent event floods (max 2/sec)
   const traceThrottle = new TraceThrottle(runId);
 
-  const mwCtx: MiddlewareContext = {
+  const mwCtx: MiddlewareContext = buildMiddlewareContext({
     runId,
     request,
     agent,
     saLink,
-    tokensUsed: 0,
-    toolCallsCount: 0,
-    toolCallHistory: [],
-    iteration: 0,
     startTime,
     tokenBudget,
     maxToolCalls,
     timeoutMs,
-  };
+  });
 
   const initialMessage = buildInitialMessage(request);
   const messages: LLMMessage[] = [{ role: 'user', content: initialMessage }];
@@ -1347,19 +1309,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       iteration, tokensUsed: totalTokensUsed, toolCallsCount: totalToolCalls,
     });
 
-    // ── Determine execution phase for this iteration ─────────────────
-    let phase: 'planning' | 'execution' | 'synthesis';
-    if (iteration === 0) {
-      phase = 'planning';
-    } else if (previousResponseHadToolCalls) {
-      phase = 'execution';
-    } else if (totalToolCalls > 0 && !previousResponseHadToolCalls) {
-      phase = 'synthesis';
-    } else if (iteration > 0 && totalToolCalls === 0) {
-      phase = 'synthesis';
-    } else {
-      phase = 'planning';
-    }
+    // Determine execution phase for this iteration via pure helper.
+    const phase = selectExecutionPhase(iteration, previousResponseHadToolCalls, totalToolCalls);
 
     const iterationSpan = createSpan('agent.loop.iteration', {
       iteration, phase, totalToolCalls, tokensUsed: totalTokensUsed,
