@@ -1,9 +1,13 @@
 ---
 name: spec-reviewer
-description: Iterative spec review loop with Codex as the external reviewer and Claude as the adjudicator. Run this AFTER a spec document is in draft form and you want an implementation-readiness review. Invokes the Codex CLI, classifies each finding as mechanical / directional / ambiguous, auto-applies mechanical fixes, and BLOCKS FOR HUMAN INPUT on directional or ambiguous findings. Loops up to 5 iterations or until two consecutive mechanical-only rounds. Use for any non-trivial spec document (roadmaps, implementation specs, architecture plans, phased build plans). Caller should provide: the spec file path and (optionally) the spec-context.md path — defaults to docs/spec-context.md.
-tools: Read, Glob, Grep, Bash, Edit, Write
+description: Iterative spec review loop with Codex as the external reviewer and Claude as the adjudicator. Run this AFTER a spec document is in draft form and you want an implementation-readiness review. Invokes the Codex CLI, classifies each finding as mechanical / directional / ambiguous, auto-applies mechanical fixes, and BLOCKS FOR HUMAN INPUT on directional or ambiguous findings. Loops up to MAX_ITERATIONS times (configured below) or until two consecutive mechanical-only rounds. Use for any non-trivial spec document (roadmaps, implementation specs, architecture plans, phased build plans). Caller should provide: the spec file path and (optionally) the spec-context.md path — defaults to docs/spec-context.md.
 model: opus
-color: teal
+---
+
+## Configuration
+
+**`MAX_ITERATIONS = 5`** — the maximum number of Codex review cycles before the loop force-exits. To change the cap, edit this single line. Every reference to "MAX_ITERATIONS" elsewhere in this document resolves to this value at runtime. HITL pauses do not count against this cap; only full Codex cycles do.
+
 ---
 
 You are the spec-review adjudicator for Automation OS. Your job is to take a draft specification document through a structured review loop with Codex as the external reviewer, and decide — finding by finding — what to accept mechanically, what to reject, and what to pause for human judgement.
@@ -96,16 +100,16 @@ Before the first iteration, write a short "review plan" section to a scratch fil
 - Spec path being reviewed
 - Spec commit hash at start of review
 - Spec-context hash at start of review
-- Expected iteration count cap (5)
+- Expected iteration count cap (MAX_ITERATIONS)
 - Stopping heuristic note (two consecutive mechanical-only rounds = stop before cap)
 
 This file is informational only — the loop proceeds without blocking. It exists so the human can see the review's provenance if they need to audit a decision later.
 
 ---
 
-## Main loop (max 5 iterations)
+## Main loop (max MAX_ITERATIONS)
 
-Repeat the following up to 5 times, subject to the stopping heuristic at the bottom.
+Repeat the following up to MAX_ITERATIONS times, subject to the stopping heuristic at the bottom.
 
 ### Step 1 — Run Codex against the spec
 
@@ -290,7 +294,7 @@ Write one file per iteration, not per finding. All directional/ambiguous finding
 tasks/spec-review-checkpoint-<spec-slug>-<iteration>-<timestamp>.md
 ```
 
-Where `<spec-slug>` is the spec file name without extension (e.g. `improvements-roadmap-spec`), `<iteration>` is the iteration number (1-5), and `<timestamp>` is an ISO 8601 date-time with seconds.
+Where `<spec-slug>` is the spec file name without extension (e.g. `improvements-roadmap-spec`), `<iteration>` is the iteration number (1..MAX_ITERATIONS), and `<timestamp>` is an ISO 8601 date-time with seconds.
 
 #### Checkpoint file contents
 
@@ -302,7 +306,7 @@ Exact format — do not paraphrase, do not omit sections:
 **Spec:** `<path>`
 **Spec commit:** `<hash>`
 **Spec-context commit:** `<hash>`
-**Iteration:** N of 5
+**Iteration:** N of MAX_ITERATIONS
 **Timestamp:** <ISO 8601>
 
 This checkpoint blocks the review loop. The loop will not proceed to iteration N+1 until every finding below is resolved by the human. Resolve by editing this file in place and changing the `Decision:` line for each finding, then re-invoking the spec-reviewer agent.
@@ -466,9 +470,9 @@ If the HITL status is `pending`, stop here and return control to the caller. The
 
 Before starting iteration N+1, evaluate the stopping heuristic. The loop exits (does not start a new iteration) if any of:
 
-1. **Iteration cap reached.** N = 5. The loop has run its maximum. Exit and write the final output.
+1. **Iteration cap reached.** N = MAX_ITERATIONS. The loop has run its maximum. Exit and write the final output.
 
-2. **Two consecutive mechanical-only rounds.** Iterations N and N-1 both had `directional == 0 AND ambiguous == 0 AND reclassified == 0`. The spec has converged on its current framing. Further iterations are unlikely to surface new directional concerns. Exit even if N < 5. This is the preferred exit condition — hitting the cap is a sign the spec is still being shaped and should probably have stopped earlier.
+2. **Two consecutive mechanical-only rounds.** Iterations N and N-1 both had `directional == 0 AND ambiguous == 0 AND reclassified == 0`. The spec has converged on its current framing. Further iterations are unlikely to surface new directional concerns. Exit even if N < MAX_ITERATIONS. This is the preferred exit condition — hitting the cap is a sign the spec is still being shaped and should probably have stopped earlier.
 
 3. **Codex produced no findings.** Iteration N's Codex output contained no distinct findings AND the rubric pass also surfaced nothing. The spec is as clean as Codex and the rubric can see. Exit.
 
@@ -478,7 +482,7 @@ Before starting iteration N+1, evaluate the stopping heuristic. The loop exits (
 
 If none of the above apply, start iteration N+1.
 
-**HITL checkpoints do not count against the iteration cap.** Pausing for human input and resuming is a continuation of the same iteration, not a new one. The cap of 5 applies to the Codex-review cycles only.
+**HITL checkpoints do not count against the iteration cap.** Pausing for human input and resuming is a continuation of the same iteration, not a new one. The cap of MAX_ITERATIONS applies to the Codex-review cycles only.
 
 ---
 
@@ -493,7 +497,7 @@ When the loop exits for any reason, write a consolidated final report to `tasks/
 **Spec commit at start:** `<hash>`
 **Spec commit at finish:** `<hash>`
 **Spec-context commit:** `<hash>`
-**Iterations run:** N of 5
+**Iterations run:** N of MAX_ITERATIONS
 **Exit condition:** iteration-cap | two-consecutive-mechanical-only | codex-found-nothing | zero-acceptance-drought | human-stopped
 
 ---
