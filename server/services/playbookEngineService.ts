@@ -760,7 +760,7 @@ export const playbookEngineService = {
         const [row] = await db
           .select({ id: systemAgents.id })
           .from(systemAgents)
-          .where(eq(systemAgents.id, cached));
+          .where(and(eq(systemAgents.id, cached), isNull(systemAgents.deletedAt)));
         if (row) return cached;
       } else {
         const [row] = await db
@@ -782,7 +782,7 @@ export const playbookEngineService = {
       const [row] = await db
         .select({ id: systemAgents.id })
         .from(systemAgents)
-        .where(eq(systemAgents.slug, slug));
+        .where(and(eq(systemAgents.slug, slug), isNull(systemAgents.deletedAt)));
       return row?.id ?? null;
     }
     if (kind === 'org') {
