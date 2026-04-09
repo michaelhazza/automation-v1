@@ -38,7 +38,7 @@ export const agentActivityService = {
       })
       .from(agentRuns)
       .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(agentRuns.createdAt))
       .limit(limit)
@@ -83,7 +83,7 @@ export const agentActivityService = {
       })
       .from(agentRuns)
       .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
       .where(and(...conditions));
 
     if (!row) throw { statusCode: 404, message: 'Agent run not found' };
@@ -206,7 +206,7 @@ export const agentActivityService = {
       })
       .from(agentRuns)
       .innerJoin(agents, eq(agents.id, agentRuns.agentId))
-      .innerJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
+      .leftJoin(subaccounts, eq(subaccounts.id, agentRuns.subaccountId))
       .where(and(
         eq(agentRuns.organisationId, organisationId),
         sql`(${agentRuns.id} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentRunId} = ANY(${chainIds}::uuid[]) OR ${agentRuns.parentSpawnRunId} = ANY(${chainIds}::uuid[]))`,
@@ -275,5 +275,51 @@ export const agentActivityService = {
         truncationReason,
       },
     };
+  },
+
+  /**
+   * Sprint 5 P4.1 — receive a clarification response for a run that is in
+   * 'awaiting_clarification' status. Validates org scoping, transitions
+   * status back to 'running', and emits a WS event.
+   */
+  async receiveClarification(runId: string, orgId: string, message: string): Promise<{ success: true; runId: string }> {
+    const [run] = await db
+      .select()
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.id, runId),
+          eq(agentRuns.organisationId, orgId),
+        ),
+      );
+
+    if (!run) {
+      throw { statusCode: 404, message: 'Run not found' };
+    }
+
+    if (run.status !== 'awaiting_clarification') {
+      throw { statusCode: 409, message: `Run is not awaiting clarification (status: ${run.status})` };
+    }
+
+    // Store the clarification message in runMetadata so the resume path can
+    // inject it into the conversation when the agentic loop restarts.
+    const existingMetadata = (run.runMetadata ?? {}) as Record<string, unknown>;
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'running',
+        runMetadata: { ...existingMetadata, clarificationMessage: message },
+        updatedAt: new Date(),
+      })
+      .where(eq(agentRuns.id, runId));
+
+    const { emitAgentRunUpdate: emitRunUpdate } = await import('../websocket/emitters.js');
+    emitRunUpdate(runId, 'agent:run:status', {
+      status: 'running',
+      clarificationReceived: true,
+      message,
+    });
+
+    return { success: true, runId };
   },
 };

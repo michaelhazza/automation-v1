@@ -13,3 +13,4 @@ export * from './failure.js';
 export * from './observation.js';
 export * from './actionSchema.js';
 export * from './jobPayload.js';
+export * from './trajectorySchema.js';

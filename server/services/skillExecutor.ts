@@ -619,6 +619,27 @@ export const skillExecutor = {
         );
       }
 
+      // ── Sprint 5 P4.1: Clarification escape hatch ──────────────────
+      case 'ask_clarifying_question': {
+        const { executeAskClarifyingQuestion } = await import('../tools/internal/askClarifyingQuestion.js');
+        return executeAskClarifyingQuestion(input, {
+          runId: context.runId,
+          organisationId: context.organisationId,
+          subaccountId: context.subaccountId,
+        });
+      }
+
+      // ── Sprint 5 P4.2: Memory block write path ─────────────────────
+      case 'update_memory_block': {
+        const { updateBlock } = await import('./memoryBlockService.js');
+        const blockName = (input as Record<string, unknown>).block_name as string;
+        const newContent = (input as Record<string, unknown>).new_content as string;
+        if (!blockName || !newContent) {
+          return { success: false, error: 'block_name and new_content are required' };
+        }
+        return updateBlock(blockName, newContent, context.agentId, context.organisationId);
+      }
+
       default:
         return { success: false, error: `Unknown skill: ${skillName}` };
     }

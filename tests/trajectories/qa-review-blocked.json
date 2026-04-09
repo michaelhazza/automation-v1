@@ -1,0 +1,11 @@
+{
+  "name": "qa-review-blocked",
+  "description": "QA agent reviews and blocks, agent retries via reflection loop",
+  "fixtureRunId": "fixture-qa-001",
+  "matchMode": "in-order",
+  "expected": [
+    { "actionType": "review_code" },
+    { "actionType": "write_patch" },
+    { "actionType": "review_code" }
+  ]
+}

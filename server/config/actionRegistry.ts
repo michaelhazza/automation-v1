@@ -128,6 +128,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'send_email',
     description: 'Send an email via a connected email provider. Requires human approval before sending.',
     actionCategory: 'api',
+    topics: ['email'],
+    requiresCritiqueGate: true,
     isExternal: true,
     defaultGateLevel: 'review',
     createsBoardTask: true,
@@ -153,6 +155,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     description: 'Read recent emails from a connected email provider inbox.',
     actionCategory: 'api',
     isExternal: true,
+    topics: ['email'],
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['provider', 'since'],
@@ -173,6 +176,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'create_task',
     description: 'Create a new task on the board with title, description, and optional agent assignment.',
     actionCategory: 'worker',
+    topics: ['task'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -198,6 +202,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'move_task',
     description: 'Move a task to a different status column on the board.',
     actionCategory: 'worker',
+    topics: ['task'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -219,6 +224,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'reassign_task',
     description: 'Reassign a task to a different agent.',
     actionCategory: 'worker',
+    topics: ['task'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -240,6 +246,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'add_deliverable',
     description: 'Attach a deliverable (document, artifact, output) to a task.',
     actionCategory: 'worker',
+    topics: ['task'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -263,6 +270,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'update_record',
     description: 'Update a record in an external system (CRM, database, etc.) via a connected provider.',
     actionCategory: 'api',
+    topics: ['gh-integration'],
     isExternal: true,
     defaultGateLevel: 'review',
     createsBoardTask: false,
@@ -335,6 +343,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'read_codebase',
     description: 'Read the contents of a file from the project codebase.',
     actionCategory: 'devops',
+    topics: ['dev'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -374,12 +383,15 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    topics: ['dev'],
   },
 
   run_tests: {
     actionType: 'run_tests',
     description: 'Run the project test suite, optionally filtered to specific tests.',
     actionCategory: 'devops',
+    topics: ['dev'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -426,6 +438,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'report_bug',
     description: 'File a bug report with severity, reproduction steps, and expected vs actual behavior.',
     actionCategory: 'worker',
+    topics: ['dev'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: true,
@@ -455,6 +468,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'write_patch',
     description: 'Propose a code change as a unified diff. Review-gated — requires human approval before execution.',
     actionCategory: 'devops',
+    topics: ['dev'],
+    requiresCritiqueGate: true,
     isExternal: false,
     defaultGateLevel: 'review',
     createsBoardTask: false,
@@ -480,6 +495,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'run_command',
     description: 'Execute a shell command in the project environment. Review-gated for safety.',
     actionCategory: 'devops',
+    topics: ['dev'],
     isExternal: false,
     defaultGateLevel: 'review',
     createsBoardTask: false,
@@ -501,6 +517,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'create_pr',
     description: 'Create a pull request on GitHub from the current working branch.',
     actionCategory: 'devops',
+    topics: ['dev'],
+    requiresCritiqueGate: true,
     isExternal: true,
     defaultGateLevel: 'review',
     createsBoardTask: false,
@@ -628,6 +646,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'query_subaccount_cohort',
     description: 'Read aggregated board health and memory summaries across multiple subaccounts, filtered by tags.',
     actionCategory: 'worker',
+    topics: ['reporting'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -677,6 +696,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'compute_health_score',
     description: 'Calculate a composite health score (0-100) for a subaccount based on normalised metrics.',
     actionCategory: 'worker',
+    topics: ['reporting'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -693,6 +713,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'detect_anomaly',
     description: 'Compare current metrics against historical baseline and flag significant deviations.',
     actionCategory: 'worker',
+    topics: ['reporting'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -711,6 +732,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'compute_churn_risk',
     description: 'Evaluate churn risk signals for a subaccount and produce a risk score with intervention recommendation.',
     actionCategory: 'worker',
+    topics: ['reporting'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -727,6 +749,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     actionType: 'generate_portfolio_report',
     description: 'Generate a structured portfolio intelligence briefing across the entire organisation.',
     actionCategory: 'worker',
+    topics: ['reporting'],
     isExternal: false,
     defaultGateLevel: 'auto',
     createsBoardTask: false,
@@ -756,12 +779,103 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
+    topics: ['gh-integration'],
+    requiresCritiqueGate: true,
+  },
+
+  // ── Sprint 5 P4.1: Universal skills ─────────────────────────────────────
+  // These are always available to every agent regardless of allowlist.
+
+  ask_clarifying_question: {
+    actionType: 'ask_clarifying_question',
+    description: 'Ask the user a clarifying question when the agent is unsure how to proceed. Pauses the run until the user responds.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['question'],
+    parameterSchema: z.object({
+      question: z.string().min(10).max(2000).describe('The clarifying question to ask the user'),
+      blocked_by: z.enum(['topic_filter', 'scope_check', 'no_relevant_tool', 'low_confidence']).optional()
+        .describe('Why clarification is needed'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    isMethodology: false,
+    topics: [],
+  },
+
+  read_workspace: {
+    actionType: 'read_workspace',
+    description: 'Read workspace memories for a subaccount. Universal context access.',
+    actionCategory: 'api',
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['key'],
+    parameterSchema: z.object({
+      key: z.string().optional().describe('Memory key to read'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    topics: ['workspace'],
+  },
+
+  // Sprint 5 P4.2: Shared memory block write
+  update_memory_block: {
+    actionType: 'update_memory_block',
+    description: 'Update a shared memory block. Requires write permission and block ownership.',
+    actionCategory: 'worker',
+    topics: ['workspace'],
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['block_name', 'new_content'],
+    parameterSchema: z.object({
+      block_name: z.string().describe('Name of the memory block to update'),
+      new_content: z.string().max(50000).describe('New content for the block'),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  web_search: {
+    actionType: 'web_search',
+    description: 'Search the web for information. Universal read-only retrieval.',
+    actionCategory: 'api',
+    isExternal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['query'],
+    parameterSchema: z.object({
+      query: z.string().describe('Search query'),
+    }),
+    retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['transient_error'], doNotRetryOn: [] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
+    isUniversal: true,
+    topics: [],
   },
 };
 
 /** Check if an action type is known */
 export function getActionDefinition(actionType: string): ActionDefinition | undefined {
   return ACTION_REGISTRY[actionType];
+}
+
+/**
+ * Sprint 5 P4.1 — returns the action types of all universal skills.
+ * Re-exports from the dependency-free universalSkills.ts so callers
+ * that already import from actionRegistry don't need to change.
+ */
+export { UNIVERSAL_SKILL_NAMES } from './universalSkills.js';
+export function getUniversalSkillNames(): string[] {
+  return [...UNIVERSAL_SKILL_NAMES];
 }
 
 /** Valid action statuses for state machine enforcement */

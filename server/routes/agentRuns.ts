@@ -369,6 +369,31 @@ router.get(
 
 // ─── System admin: All activity across all orgs ───────────────────────────────
 
+// ─── Sprint 5 P4.1: User clarification response ─────────────────────────────
+// When an agent run is in 'awaiting_clarification', the user submits their
+// answer here. The endpoint appends a user-role message and transitions the
+// run back to 'running' so the agentic loop can resume.
+
+router.post(
+  '/api/agent-runs/:id/clarify',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const runId = req.params.id;
+    const { message } = req.body as { message?: string };
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      res.status(400).json({ error: 'message is required' });
+      return;
+    }
+
+    const result = await agentActivityService.receiveClarification(runId, req.orgId!, message);
+    res.json(result);
+  })
+);
+
+// ─── System admin: All activity across all orgs ───────────────────────────────
+
 router.get('/api/system/agent-activity', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { organisationId, subaccountId, status, limit, offset } = req.query;
 

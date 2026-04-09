@@ -21,7 +21,8 @@
     "test": "npm run test:gates && npm run test:qa && npm run test:unit",
     "test:gates": "bash scripts/run-all-gates.sh",
     "test:qa": "bash scripts/run-all-qa-tests.sh",
-    "test:unit": "bash scripts/run-all-unit-tests.sh"
+    "test:unit": "bash scripts/run-all-unit-tests.sh",
+    "test:trajectories": "tsx scripts/run-trajectory-tests.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.515.0",

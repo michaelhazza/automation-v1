@@ -370,3 +370,45 @@ export const DEFAULT_RUN_RETENTION_DAYS = 90;
  * alongside the async resume refactor.
  */
 export const MIDDLEWARE_CONTEXT_VERSION = 1;
+
+// ── Sprint 5 — P4.1 Topics → Actions deterministic filter ───────────────────
+
+/**
+ * Confidence threshold above which the topic filter performs hard removal
+ * of non-matching tools. Below this threshold, tools are soft-reordered
+ * (matching tools appear first, but all remain visible).
+ *
+ * Set conservatively high — keyword classifiers rarely hit this, which
+ * is intentional. Hard removal should be rare and deliberate.
+ */
+export const HARD_REMOVAL_CONFIDENCE_THRESHOLD = 0.85;
+
+/**
+ * Below this confidence, the preTool middleware blocks the tool call and
+ * forces `ask_clarifying_question` instead. Catches the case where the
+ * LLM is guessing which tool to use — clarification is better than a
+ * wrong execution.
+ *
+ * Decision matrix:
+ *   >= 0.7:        proceed normally (P2.3 Slice B gate still applies)
+ *   >= 0.5 < 0.7:  proceed, but policy engine upgrades auto → review
+ *   < 0.5:         block, force clarification
+ */
+export const MIN_TOOL_ACTION_CONFIDENCE = 0.5;
+
+// ── Sprint 5 — P4.3 Plan-then-execute complexity thresholds ─────────────────
+
+/** Word count threshold for triggering plan-then-execute mode. */
+export const PLAN_MODE_WORD_COUNT_THRESHOLD = 300;
+
+/** Skill count threshold for triggering plan-then-execute mode. */
+export const PLAN_MODE_SKILL_COUNT_THRESHOLD = 15;
+
+// ── Sprint 5 — P4.4 Semantic critique gate ──────────────────────────────────
+
+/**
+ * When true, the critique gate only logs disagreements to
+ * llmRequests.metadataJson without blocking. Flip to false to enable
+ * active rerouting — requires 2-4 weeks of shadow-mode data first.
+ */
+export const CRITIQUE_GATE_SHADOW_MODE = true;

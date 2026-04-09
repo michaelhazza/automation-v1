@@ -125,6 +125,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0084_agent_run_checkpoint_and_messages.sql',
     rationale: 'Per-run LLM conversation transcript — full prompts, tool inputs, tool outputs from every agent run.',
   },
+  // 0088 — Sprint 5 P4.2 shared memory blocks
+  {
+    tableName: 'memory_blocks',
+    schemaFile: 'memoryBlocks.ts',
+    policyMigration: '0088_memory_blocks.sql',
+    rationale: 'Shared named context blocks — may contain brand voice, client preferences, or SOPs.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

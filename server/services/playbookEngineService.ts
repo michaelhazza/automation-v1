@@ -55,6 +55,8 @@ import { logger } from '../lib/logger.js';
 import { emitPlaybookRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
+import type { PlaybookRunMode } from '../db/schema/playbookRuns.js';
+import { playbookStepReviewService } from './playbookStepReviewService.js';
 
 const TICK_QUEUE = 'playbook-run-tick';
 const WATCHDOG_QUEUE = 'playbook-watchdog';
@@ -121,8 +123,22 @@ async function emitPlaybookEvent(
   runId: string,
   subaccountId: string,
   type: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options?: { suppressWebSocket?: boolean }
 ): Promise<void> {
+  // Sprint 4 P3.1: background mode suppresses all mid-run events.
+  // Only final completion events (status === completed/failed/partial/cancelled)
+  // are emitted regardless of suppression.
+  if (options?.suppressWebSocket) {
+    const isFinalEvent = type === 'playbook:run:status' && (
+      payload.status === 'completed' ||
+      payload.status === 'completed_with_errors' ||
+      payload.status === 'failed' ||
+      payload.status === 'cancelled' ||
+      payload.status === 'partial'
+    );
+    if (!isFinalEvent) return;
+  }
   // Allocate a per-run sequence number atomically. The DB increments
   // last_sequence and returns the new value so client-side ordering is
   // deterministic even if events arrive out of order.
@@ -200,6 +216,44 @@ function deleteStepOutputFromContext(context: RunContext, stepId: string): RunCo
     steps: rest,
     _meta: context._meta,
   };
+}
+
+// ─── Sprint 4 P3.1: background mode helper ─────────────────────────────────
+
+/**
+ * Returns true if WebSocket updates should be suppressed for this run mode.
+ * Background mode suppresses all mid-run events — only the final
+ * completion event is emitted.
+ */
+function shouldSuppressWebSocket(runMode: string | null | undefined): boolean {
+  return runMode === 'background';
+}
+
+/**
+ * Creates pending step runs for a new playbook run. Used by bulk fan-out
+ * to initialise child runs with the same step structure as the parent.
+ * Only creates entry steps (dependsOn === []) — subsequent steps are
+ * created by the engine as dependencies complete.
+ */
+async function createStepRunsForNewRun(
+  runId: string,
+  definition: PlaybookDefinition
+): Promise<void> {
+  const entries = definition.steps.filter((s) => s.dependsOn.length === 0);
+  for (const step of entries) {
+    await db.insert(playbookStepRuns).values({
+      runId,
+      stepId: step.id,
+      stepType: step.type,
+      status: 'pending',
+      sideEffectType: step.sideEffectType,
+      dependsOn: step.dependsOn,
+    });
+  }
+  // WS event sequence row
+  await db.execute(
+    sql`INSERT INTO playbook_run_event_sequences (run_id, last_sequence) VALUES (${runId}, 0) ON CONFLICT DO NOTHING`
+  );
 }
 
 // ─── Public engine API ───────────────────────────────────────────────────────
@@ -298,6 +352,21 @@ export const playbookEngineService = {
       return;
     }
 
+    // ── Sprint 4 P3.1: bulk mode fan-out ───────────────────────────────────
+    // When runMode === 'bulk' and the run has no children yet, fan out N
+    // child runs from contextJson.bulkTargets before processing steps.
+    if (run.runMode === 'bulk' && !run.parentRunId) {
+      const handled = await this.handleBulkFanOut(run, def);
+      if (handled) return; // fan-out enqueued child ticks; parent waits
+    }
+
+    // ── Sprint 4 P3.1: bulk parent completion check ────────────────────────
+    // A bulk parent has no steps of its own — it waits for children.
+    if (run.runMode === 'bulk' && !run.parentRunId) {
+      await this.checkBulkParentCompletion(run);
+      return;
+    }
+
     const stepRunRows = await db
       .select()
       .from(playbookStepRuns)
@@ -345,7 +414,12 @@ export const playbookEngineService = {
           status: finalStatus,
           completedSteps: completedSteps.length,
           totalSteps: def.steps.length,
-        });
+        }, { suppressWebSocket: shouldSuppressWebSocket(run.runMode) });
+
+        // Sprint 4 P3.1: if this is a bulk child, re-tick the parent
+        if (run.parentRunId) {
+          await this.enqueueTick(run.parentRunId);
+        }
         return;
       }
 
@@ -442,6 +516,21 @@ export const playbookEngineService = {
     // recorded output from the source run rather than re-running them.
     if (run.replayMode) {
       await this.replayDispatch(run, sr, step);
+      return;
+    }
+
+    // ── Sprint 4 P3.1: supervised mode gate ──────────────────────────────
+    // In supervised mode, every agent_call/prompt step requires approval
+    // before dispatch. Conditional and user_input steps proceed normally.
+    if (
+      run.runMode === 'supervised' &&
+      (step.type === 'agent_call' || step.type === 'prompt') &&
+      sr.status === 'pending'
+    ) {
+      await playbookStepReviewService.requireApproval(sr, {
+        reviewKind: 'supervised_mode',
+      });
+      // Step is now awaiting_approval; tick will re-check on next pass
       return;
     }
 
@@ -671,13 +760,13 @@ export const playbookEngineService = {
         const [row] = await db
           .select({ id: systemAgents.id })
           .from(systemAgents)
-          .where(eq(systemAgents.id, cached));
+          .where(and(eq(systemAgents.id, cached), isNull(systemAgents.deletedAt)));
         if (row) return cached;
       } else {
         const [row] = await db
           .select({ id: agents.id })
           .from(agents)
-          .where(eq(agents.id, cached));
+          .where(and(eq(agents.id, cached), isNull(agents.deletedAt)));
         if (row) return cached;
       }
       logger.warn('playbook_resolved_agent_missing', {
@@ -693,14 +782,14 @@ export const playbookEngineService = {
       const [row] = await db
         .select({ id: systemAgents.id })
         .from(systemAgents)
-        .where(eq(systemAgents.slug, slug));
+        .where(and(eq(systemAgents.slug, slug), isNull(systemAgents.deletedAt)));
       return row?.id ?? null;
     }
     if (kind === 'org') {
       const [row] = await db
         .select({ id: agents.id })
         .from(agents)
-        .where(and(eq(agents.slug, slug), eq(agents.organisationId, run.organisationId)));
+        .where(and(eq(agents.slug, slug), eq(agents.organisationId, run.organisationId), isNull(agents.deletedAt)));
       return row?.id ?? null;
     }
     return null;
@@ -1094,6 +1183,215 @@ export const playbookEngineService = {
       estimatedCostCents,
       cascade,
     };
+  },
+
+  // ─── Sprint 4 P3.1: Bulk mode helpers ──────────────────────────────────────
+
+  /**
+   * Handles the bulk fan-out for a parent run. Reads `bulkTargets` from
+   * contextJson and creates one child run per target subaccount. Each child
+   * shares the same templateVersionId and runs in `auto` mode. Returns true
+   * if fan-out was performed (or already done), false if no bulkTargets.
+   */
+  async handleBulkFanOut(run: PlaybookRun, _def: PlaybookDefinition): Promise<boolean> {
+    const ctx = run.contextJson as Record<string, unknown>;
+    const bulkTargets = ctx.bulkTargets as string[] | undefined;
+    if (!bulkTargets || !Array.isArray(bulkTargets) || bulkTargets.length === 0) {
+      logger.warn('playbook_bulk_no_targets', { runId: run.id });
+      return false;
+    }
+
+    // Check if children already exist (idempotency via unique index)
+    const existingChildren = await db
+      .select({ id: playbookRuns.id, targetSubaccountId: playbookRuns.targetSubaccountId })
+      .from(playbookRuns)
+      .where(eq(playbookRuns.parentRunId, run.id));
+
+    if (existingChildren.length >= bulkTargets.length) {
+      // Fan-out already done, just check completion
+      return true;
+    }
+
+    const existingTargets = new Set(
+      existingChildren.map((c) => c.targetSubaccountId).filter(Boolean)
+    );
+
+    // Validate all target subaccounts belong to this org (prevent cross-org fan-out)
+    const validSubs = await db
+      .select({ id: subaccounts.id })
+      .from(subaccounts)
+      .where(
+        and(
+          inArray(subaccounts.id, bulkTargets),
+          eq(subaccounts.organisationId, run.organisationId),
+          isNull(subaccounts.deletedAt),
+        ),
+      );
+    const validSubIds = new Set(validSubs.map((s) => s.id));
+    const invalidTargets = bulkTargets.filter((t) => !validSubIds.has(t));
+    if (invalidTargets.length > 0) {
+      logger.warn('playbook_bulk_invalid_targets', {
+        runId: run.id,
+        invalidTargets,
+        orgId: run.organisationId,
+      });
+    }
+
+    // Mark parent as running
+    if (run.status === 'pending') {
+      await db
+        .update(playbookRuns)
+        .set({ status: 'running', startedAt: new Date(), updatedAt: new Date() })
+        .where(eq(playbookRuns.id, run.id));
+    }
+
+    // Sprint 4 P3.2: respect org-level GHL concurrency cap for bulk dispatch.
+    const [org] = await db
+      .select({ ghlConcurrencyCap: organisations.ghlConcurrencyCap })
+      .from(organisations)
+      .where(eq(organisations.id, run.organisationId));
+    const concurrencyCap = org?.ghlConcurrencyCap ?? MAX_PARALLEL_STEPS_DEFAULT;
+
+    // Count non-terminal children to enforce concurrency cap
+    const childStatuses = await db
+      .select({ id: playbookRuns.id, status: playbookRuns.status })
+      .from(playbookRuns)
+      .where(eq(playbookRuns.parentRunId, run.id));
+    const activeChildCount = childStatuses.filter(
+      (c) => !['completed', 'completed_with_errors', 'failed', 'cancelled'].includes(c.status)
+    ).length;
+    const slotsAvailable = Math.max(0, concurrencyCap - activeChildCount);
+
+    // Create child runs for each target not yet created, up to cap
+    let created = 0;
+    for (const targetId of bulkTargets) {
+      if (existingTargets.has(targetId)) continue;
+      if (!validSubIds.has(targetId)) continue; // skip targets not in this org
+      if (created >= slotsAvailable) break; // respect concurrency cap
+
+      try {
+        const [childRun] = await db
+          .insert(playbookRuns)
+          .values({
+            organisationId: run.organisationId,
+            subaccountId: targetId,
+            templateVersionId: run.templateVersionId,
+            runMode: 'auto',
+            status: 'pending',
+            contextJson: ctx,
+            parentRunId: run.id,
+            targetSubaccountId: targetId,
+            startedByUserId: run.startedByUserId,
+          })
+          .returning();
+
+        if (childRun) {
+          // Create step runs for the child
+          const def = await loadDefinitionForRun(childRun);
+          if (def) {
+            await createStepRunsForNewRun(childRun.id, def);
+          }
+          await this.enqueueTick(childRun.id);
+        }
+
+        created++;
+        logger.info('playbook_bulk_child_created', {
+          event: 'bulk.child_created',
+          parentRunId: run.id,
+          childRunId: childRun?.id,
+          targetSubaccountId: targetId,
+        });
+      } catch (err: unknown) {
+        // Unique constraint violation → already created (race condition)
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('playbook_runs_bulk_child_unique_idx')) {
+          logger.debug('playbook_bulk_child_already_exists', {
+            parentRunId: run.id,
+            targetSubaccountId: targetId,
+          });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!shouldSuppressWebSocket(run.runMode)) {
+      emitPlaybookRunUpdate(run.id, 'playbook:run:bulk_fanout', {
+        parentRunId: run.id,
+        childCount: bulkTargets.length,
+      });
+    }
+
+    return true;
+  },
+
+  /**
+   * Checks whether all children of a bulk parent have completed. If so,
+   * finalises the parent. Mixed success/failure → 'partial' status.
+   */
+  async checkBulkParentCompletion(run: PlaybookRun): Promise<void> {
+    const children = await db
+      .select()
+      .from(playbookRuns)
+      .where(eq(playbookRuns.parentRunId, run.id));
+
+    if (children.length === 0) return;
+
+    const terminal = children.filter((c) =>
+      ['completed', 'completed_with_errors', 'failed', 'cancelled'].includes(c.status)
+    );
+
+    if (terminal.length < children.length) {
+      // Still waiting for children
+      return;
+    }
+
+    // All children are terminal — determine parent status
+    const allCompleted = children.every((c) => c.status === 'completed');
+    const allFailed = children.every((c) => c.status === 'failed');
+    let parentStatus: string;
+    if (allCompleted) {
+      parentStatus = 'completed';
+    } else if (allFailed) {
+      parentStatus = 'failed';
+    } else {
+      parentStatus = 'partial';
+    }
+
+    // Collect child results
+    const bulkResults = children.map((c) => ({
+      childRunId: c.id,
+      targetSubaccountId: c.targetSubaccountId,
+      status: c.status,
+    }));
+
+    const existingContext = run.contextJson as Record<string, unknown>;
+
+    await db
+      .update(playbookRuns)
+      .set({
+        status: parentStatus as PlaybookRun['status'],
+        contextJson: { ...existingContext, bulkResults } as Record<string, unknown>,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(playbookRuns.id, run.id));
+
+    logger.info('playbook_bulk_parent_completed', {
+      event: 'bulk.parent_completed',
+      runId: run.id,
+      status: parentStatus,
+      totalChildren: children.length,
+      completedChildren: children.filter((c) => c.status === 'completed').length,
+      failedChildren: children.filter((c) => c.status === 'failed').length,
+    });
+
+    if (!shouldSuppressWebSocket(run.runMode)) {
+      emitPlaybookRunUpdate(run.id, 'playbook:run:status', {
+        status: parentStatus,
+        bulkResults,
+      });
+    }
   },
 
   // ─── Replay mode (§5.10) ──────────────────────────────────────────────────

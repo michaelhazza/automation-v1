@@ -124,6 +124,8 @@ export const playbookRunService = {
     systemTemplateSlug?: string;
     initialInput: Record<string, unknown>;
     startedByUserId: string;
+    runMode?: 'auto' | 'supervised' | 'background' | 'bulk';
+    bulkTargets?: string[];
   }): Promise<{ runId: string; status: PlaybookRunStatus }> {
     // Verify the subaccount belongs to the org.
     const [sub] = await db
@@ -189,14 +191,20 @@ export const playbookRunService = {
 
     let runId!: string;
     await db.transaction(async (tx) => {
+      // Sprint 4 P3.1: merge bulkTargets into context for bulk mode
+      const effectiveContext = input.bulkTargets
+        ? { ...initialContext, _meta: { ...initialContext._meta }, bulkTargets: input.bulkTargets }
+        : { ...initialContext, _meta: { ...initialContext._meta } };
+
       const [run] = await tx
         .insert(playbookRuns)
         .values({
           organisationId: input.organisationId,
           subaccountId: input.subaccountId,
           templateVersionId,
+          runMode: input.runMode ?? 'auto',
           status: 'pending',
-          contextJson: { ...initialContext, _meta: { ...initialContext._meta } } as unknown as Record<string, unknown>,
+          contextJson: effectiveContext as unknown as Record<string, unknown>,
           contextSizeBytes: contextBytes,
           startedByUserId: input.startedByUserId,
           startedAt,

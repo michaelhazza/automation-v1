@@ -35,7 +35,13 @@ import {
   buildMiddlewareContext,
   serialiseMiddlewareContext,
   buildResumeContext,
+  parsePlan,
+  isComplexRun,
+  mutateActiveToolsPreservingUniversal,
 } from './agentExecutionServicePure.js';
+import { reorderToolsByTopicRelevance } from './topicClassifierPure.js';
+import { HARD_REMOVAL_CONFIDENCE_THRESHOLD } from '../config/limits.js';
+import { UNIVERSAL_SKILL_NAMES } from '../config/universalSkills.js';
 import {
   appendMessage as appendAgentRunMessage,
   streamMessages as streamAgentRunMessages,
@@ -46,6 +52,7 @@ import type { AgentRunCheckpoint } from './middleware/types.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
+import * as memoryBlockService from './memoryBlockService.js';
 import { triggerService } from './triggerService.js';
 import {
   createDefaultPipeline,
@@ -65,7 +72,7 @@ import {
   MAX_CROSS_AGENT_TASKS,
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
-import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
+import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
 import { orgAgentConfigService } from './orgAgentConfigService.js';
 import { organisations } from '../db/schema/index.js';
 import { langfuse, withTrace } from '../instrumentation.js';
@@ -587,6 +594,17 @@ export const agentExecutionService = {
       // Layer 2: Org additional prompt (invisible to sub-account)
       if (agent.additionalPrompt) {
         systemPromptParts.push(`\n\n---\n## Organisation Instructions\n${agent.additionalPrompt}`);
+      }
+
+      // Layer 2a: Shared memory blocks (P4.2 — Letta pattern)
+      // Queried once at run start and cached for the run duration.
+      const memoryBlocksForPrompt = await memoryBlockService.getBlocksForAgent(
+        request.agentId,
+        request.organisationId,
+      );
+      const memoryBlocksSection = memoryBlockService.formatBlocksForPrompt(memoryBlocksForPrompt);
+      if (memoryBlocksSection) {
+        systemPromptParts.push(`\n\n---\n${memoryBlocksSection}`);
       }
 
       // Layer 2b: Org skill instructions
@@ -1401,7 +1419,7 @@ export async function resumeAgentRun(
 
 interface LoopParams {
   runId: string;
-  agent: { modelId: string; modelProvider: string; temperature: number; maxTokens: number };
+  agent: { modelId: string; modelProvider: string; temperature: number; maxTokens: number; complexityHint?: string | null };
   routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model' | 'executionPhase' | 'routingMode'>;
   systemPrompt: string;
   tools: AnthropicTool[];
@@ -1460,12 +1478,15 @@ interface LoopResult {
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
-    runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
+    runId, agent, routerCtx, systemPrompt, tools: initialTools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
     configVersion,
   } = params;
   const startingIteration = params.startingIteration ?? 0;
+
+  // Sprint 5 P4.1 — mutable tool list; topic filter may narrow it on iteration 0
+  let tools = initialTools;
 
   // Sprint 3 P2.1 Sprint 3A — highest persisted sequence_number for this run.
   // Initialised to -1 and updated after every successful appendMessage call
@@ -1525,6 +1546,73 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let lastTextContent = '';
   let previousResponseHadToolCalls = false;
 
+  // ── Sprint 5 P4.3: Planning prelude for complex runs ─────────────
+  // For runs classified as "complex", emit a planning call before the
+  // main loop. The plan is persisted to agent_runs.plan_json and
+  // injected as a system reminder so the agent stays anchored.
+  if (startingIteration === 0) {
+    const shouldPlan = isComplexRun({
+      complexityHint: agent.complexityHint ?? null,
+      messageWordCount: initialMessage.split(/\s+/).length,
+      skillCount: tools.length,
+    });
+
+    if (shouldPlan) {
+      try {
+        const planningPrompt = `You are in PLANNING mode. Output a JSON plan describing the actions you intend to take. Do NOT execute any tools yet. Your response must be a JSON object with an "actions" array where each item has "tool" (the tool name) and "reason" (why you need it).\n\nExample: { "actions": [{ "tool": "read_inbox", "reason": "Check for new emails" }, { "tool": "create_task", "reason": "File a bug for the issue found" }] }`;
+
+        const planMessages: LLMMessage[] = [
+          { role: 'user', content: `${initialMessage}\n\n${planningPrompt}` },
+        ];
+
+        const planResponse = await routeCall({
+          messages: planMessages,
+          system: systemPrompt,
+          tools: undefined, // No tools during planning
+          temperature: agent.temperature,
+          maxTokens: agent.maxTokens,
+          estimatedContextTokens: 0,
+          context: {
+            ...routerCtx,
+            taskType: 'general',
+            executionPhase: 'planning' as const,
+            provider: agent.modelProvider,
+            model: agent.modelId,
+            routingMode: 'ceiling' as const,
+          },
+        });
+
+        const planContent = planResponse.content;
+        const plan = parsePlan(planContent);
+        if (plan) {
+          // Persist the plan
+          await db
+            .update(agentRuns)
+            .set({ planJson: plan, updatedAt: new Date() })
+            .where(eq(agentRuns.id, runId));
+
+          // Emit WS event
+          emitAgentRunPlan(runId, { plan });
+
+          // Inject the plan as a system reminder in the message history
+          const planSummary = plan.actions
+            .map((a, i) => `${i + 1}. ${a.tool}${a.reason ? ` — ${a.reason}` : ''}`)
+            .join('\n');
+          messages.push({
+            role: 'user',
+            content: `<system-reminder>\nYou created this plan. Execute it step by step:\n${planSummary}\n</system-reminder>`,
+          });
+
+          // Track token usage from the planning call
+          totalTokensUsed += (planResponse.tokensIn ?? 0) + (planResponse.tokensOut ?? 0);
+        }
+      } catch (planError) {
+        // Planning failure is non-fatal — fall through to the normal loop
+        console.warn(`[P4.3] Planning prelude failed for run ${runId}:`, planError);
+      }
+    }
+  }
+
   outerLoop:
   for (let iteration = startingIteration; iteration < MAX_LOOP_ITERATIONS; iteration++) {
     mwCtx.iteration = iteration;
@@ -1577,6 +1665,36 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         logger.debug('middleware.inject_message', {
           runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
         });
+      }
+    }
+
+    // Sprint 5 P4.1 — apply topic-based tool filtering after preCall middleware.
+    // If the topic filter stashed matching skills on the context, apply the
+    // filter. Only runs on iteration 0 to avoid re-filtering on every turn.
+    if (iteration === 0) {
+      const topicClassification = (mwCtx as Record<string, unknown>)._topicClassification as
+        { confidence: number } | undefined;
+      const topicMatchingSkills = (mwCtx as Record<string, unknown>)._topicMatchingSkills as
+        string[] | undefined;
+
+      if (topicClassification && topicMatchingSkills && topicClassification.confidence >= HARD_REMOVAL_CONFIDENCE_THRESHOLD) {
+        const matchSet = new Set(topicMatchingSkills);
+        tools = mutateActiveToolsPreservingUniversal(
+          tools as unknown as ProviderTool[],
+          (t) => t.filter((tool) => matchSet.has(tool.name)),
+          tools as unknown as ProviderTool[],
+        ) as unknown as typeof tools;
+        logger.debug('topic_filter.hard_removal', {
+          runId, iteration, kept: tools.length, matchingSkills: topicMatchingSkills.length,
+        });
+      } else if (topicClassification && topicMatchingSkills && topicClassification.confidence > 0) {
+        // Soft reorder — matching tools move to front, nothing removed
+        const coreSkills = UNIVERSAL_SKILL_NAMES as unknown as string[];
+        tools = reorderToolsByTopicRelevance(
+          tools as unknown as ProviderTool[],
+          topicMatchingSkills,
+          coreSkills,
+        ) as unknown as typeof tools;
       }
     }
 
@@ -1682,6 +1800,37 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // confidence extractor) can read it without widening the middleware
     // contract to include the full message array.
     mwCtx.lastAssistantText = response.content ?? undefined;
+
+    // ── Sprint 5 P4.4: Shadow-mode critique gate (postCall phase) ────
+    // Fires after the LLM responds but before tool calls execute.
+    // In shadow mode, results are logged but execution is never blocked.
+    if (response.toolCalls.length > 0) {
+      try {
+        const { evaluateCritiqueGate } = await import('./middleware/critiqueGate.js');
+        const critiqueResult = await evaluateCritiqueGate(
+          response.toolCalls.map((tc) => ({ name: tc.name, input: tc.input })),
+          {
+            runId,
+            organisationId: request.organisationId,
+            phase,
+            wasDowngraded: response.routing?.wasDowngraded ?? false,
+            recentMessages: messages.slice(-3).map((m) => ({
+              role: typeof m.role === 'string' ? m.role : 'user',
+              content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+            })),
+            logCritiqueResult: (result) => {
+              logger.info('critique_gate_shadow', { runId, ...result });
+            },
+          },
+        );
+        if (critiqueResult.hasSuspect) {
+          logger.warn('critique_gate_suspect', { runId, results: critiqueResult.results });
+        }
+      } catch (err) {
+        // Shadow mode: critique failures never block execution
+        logger.warn('critique_gate_error', { runId, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
 
     // ── Execute tool calls ────────────────────────────────────────────
     const toolResults: Array<{ tool_use_id: string; content: string }> = [];

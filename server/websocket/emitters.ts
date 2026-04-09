@@ -134,6 +134,24 @@ export function emitOrgUpdate(
   emitToRoom(`org:${orgId}`, event, orgId, data);
 }
 
+// ─── Sprint 5 P4.1: Agent clarification events ─────────────────────────────
+
+export function emitAwaitingClarification(
+  runId: string,
+  data: { question: string; blockedBy?: string }
+): void {
+  emitToRoom(`agent-run:${runId}`, 'agent:run:awaiting-clarification', runId, data);
+}
+
+// ─── Sprint 5 P4.3: Agent plan events ───────────────────────────────────────
+
+export function emitAgentRunPlan(
+  runId: string,
+  data: { plan: unknown }
+): void {
+  emitToRoom(`agent-run:${runId}`, 'agent:run:plan', runId, data);
+}
+
 // ─── Observability exports (for health endpoint or admin) ─────────────────────
 
 export function getWebSocketStats(): { totalEventsEmitted: number; connectionCount: number } {

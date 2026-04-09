@@ -40,13 +40,27 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    const { templateId, systemTemplateSlug, input } = req.body as {
+    const { templateId, systemTemplateSlug, input, runMode, bulkTargets } = req.body as {
       templateId?: string;
       systemTemplateSlug?: string;
       input?: Record<string, unknown>;
+      runMode?: string;
+      bulkTargets?: string[];
     };
     if (!templateId && !systemTemplateSlug) {
       res.status(400).json({ error: 'templateId or systemTemplateSlug is required' });
+      return;
+    }
+    // Sprint 4 P3.1: validate runMode
+    const validModes = ['auto', 'supervised', 'background', 'bulk'];
+    const effectiveMode = runMode ?? 'auto';
+    if (!validModes.includes(effectiveMode)) {
+      res.status(400).json({ error: `runMode must be one of: ${validModes.join(', ')}` });
+      return;
+    }
+    // Bulk mode requires bulkTargets
+    if (effectiveMode === 'bulk' && (!bulkTargets || bulkTargets.length === 0)) {
+      res.status(400).json({ error: 'bulkTargets is required for bulk run mode' });
       return;
     }
     const result = await playbookRunService.startRun({
@@ -56,6 +70,8 @@ router.post(
       systemTemplateSlug,
       initialInput: input ?? {},
       startedByUserId: req.user!.id,
+      runMode: effectiveMode as 'auto' | 'supervised' | 'background' | 'bulk',
+      bulkTargets,
     });
     res.status(201).json(result);
   })

@@ -61,6 +61,10 @@ export const agents = pgTable(
     // Sprint 2 P1.2 — per-agent override for the regression suite ring
     // buffer. NULL → use DEFAULT_REGRESSION_CASE_CAP from limits.ts.
     regressionCaseCap: integer('regression_case_cap'),
+    // Sprint 5 P4.3 — explicit opt-in for plan-then-execute mode.
+    // NULL = auto-detect from heuristics; 'complex' = always plan first;
+    // 'simple' = never plan (even if heuristics trigger).
+    complexityHint: text('complexity_hint').$type<'simple' | 'complex'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
