@@ -134,36 +134,16 @@ function requireSubaccountContext(context: SkillExecutionContext, skillName: str
 //                          a stale or empty value is preferable.
 // ---------------------------------------------------------------------------
 
-import { failure, FailureError } from '../../shared/iee/failure.js';
+import {
+  applyOnFailurePure,
+  applyOnFailureForStructuredFailurePure,
+  type OnFailureDirective,
+} from './skillExecutorPure.js';
 
 function applyOnFailure(toolSlug: string, err: unknown, _input: Record<string, unknown>): unknown {
   const actionDef = getActionDefinition(toolSlug);
-  const directive = actionDef?.onFailure ?? 'retry';
-
-  switch (directive) {
-    case 'skip':
-      return {
-        success: false,
-        skipped: true,
-        reason: err instanceof Error ? err.message : String(err),
-      };
-    case 'fail_run':
-      throw new FailureError(failure(
-        'execution_error',
-        `${toolSlug}: ${err instanceof Error ? err.message : String(err)}`,
-        { toolSlug, source: 'onFailure:fail_run' },
-      ));
-    case 'fallback':
-      return {
-        success: true,
-        usedFallback: true,
-        value: actionDef?.fallbackValue,
-      };
-    case 'retry':
-    default:
-      // Propagate — let the caller's retry logic handle it.
-      throw err;
-  }
+  const directive: OnFailureDirective = actionDef?.onFailure ?? 'retry';
+  return applyOnFailurePure(toolSlug, directive, actionDef?.fallbackValue, err);
 }
 
 function applyOnFailureForStructuredFailure(
@@ -171,31 +151,8 @@ function applyOnFailureForStructuredFailure(
   result: Record<string, unknown>,
 ): unknown {
   const actionDef = getActionDefinition(toolSlug);
-  const directive = actionDef?.onFailure ?? 'retry';
-
-  switch (directive) {
-    case 'skip':
-      return {
-        success: false,
-        skipped: true,
-        reason: String(result.error ?? 'skill returned success: false'),
-      };
-    case 'fail_run':
-      throw new FailureError(failure(
-        'execution_error',
-        `${toolSlug}: ${String(result.error ?? 'structured failure')}`,
-        { toolSlug, source: 'onFailure:fail_run' },
-      ));
-    case 'fallback':
-      return {
-        success: true,
-        usedFallback: true,
-        value: actionDef?.fallbackValue,
-      };
-    case 'retry':
-    default:
-      return result; // unchanged — pass the structured failure to the caller
-  }
+  const directive: OnFailureDirective = actionDef?.onFailure ?? 'retry';
+  return applyOnFailureForStructuredFailurePure(toolSlug, directive, actionDef?.fallbackValue, result);
 }
 
 // ---------------------------------------------------------------------------

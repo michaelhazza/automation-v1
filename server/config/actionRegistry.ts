@@ -561,6 +561,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       pageType: z.enum(['website', 'landing']).describe('Type of page — website or landing page'),
       title: z.string().optional().describe('Page title'),
       html: z.string().describe('HTML content for the page (max 1 MB). Will be sanitised before storage.'),
+      meta: z.record(z.string(), z.unknown()).optional().describe('SEO and social meta fields'),
       formConfig: z.record(z.string(), z.unknown()).optional().describe('Optional form configuration for the page'),
     }),
     retryPolicy: {
