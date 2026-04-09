@@ -163,7 +163,7 @@ export async function createBlock(input: {
       name: input.name,
       content: input.content,
       ownerAgentId: input.ownerAgentId ?? null,
-      isReadOnly: input.isReadOnly ?? true,
+      isReadOnly: input.isReadOnly ?? false,
     })
     .returning();
 
@@ -232,7 +232,23 @@ export async function attachBlock(
   blockId: string,
   agentId: string,
   permission: 'read' | 'read_write',
+  orgId: string,
 ): Promise<{ id: string }> {
+  // Verify the block belongs to the caller's org before attaching
+  const [block] = await db
+    .select({ id: memoryBlocks.id })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, orgId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  if (!block) {
+    throw { statusCode: 404, message: 'Memory block not found' };
+  }
+
   const [row] = await db
     .insert(memoryBlockAttachments)
     .values({ blockId, agentId, permission })
@@ -245,7 +261,22 @@ export async function attachBlock(
   return row;
 }
 
-export async function detachBlock(blockId: string, agentId: string): Promise<boolean> {
+export async function detachBlock(blockId: string, agentId: string, orgId: string): Promise<boolean> {
+  // Verify the block belongs to the caller's org before detaching
+  const [block] = await db
+    .select({ id: memoryBlocks.id })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.id, blockId),
+        eq(memoryBlocks.organisationId, orgId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  if (!block) {
+    throw { statusCode: 404, message: 'Memory block not found' };
+  }
+
   const deleted = await db
     .delete(memoryBlockAttachments)
     .where(

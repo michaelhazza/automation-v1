@@ -48,8 +48,9 @@ export const confidenceEscapeMiddleware: PreToolMiddleware = {
 
     if (confidence < MIN_TOOL_ACTION_CONFIDENCE) {
       return {
-        action: 'block',
-        reason: `Confidence ${confidence.toFixed(2)} is below minimum ${MIN_TOOL_ACTION_CONFIDENCE}. Use ask_clarifying_question instead of guessing.`,
+        action: 'skip',
+        reason: `Confidence ${confidence.toFixed(2)} is below minimum ${MIN_TOOL_ACTION_CONFIDENCE}.`,
+        injectMessage: `Your confidence for ${toolCall.name} is too low (${confidence.toFixed(2)}). Do not guess — use the ask_clarifying_question tool to ask the user for more detail before proceeding.`,
       };
     }
 

@@ -110,7 +110,7 @@ router.post(
       return;
     }
 
-    const result = await memoryBlockService.attachBlock(req.params.id, agentId, permission);
+    const result = await memoryBlockService.attachBlock(req.params.id, agentId, permission, req.orgId!);
     res.status(201).json(result);
   })
 );
@@ -123,7 +123,7 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const { blockId, agentId } = req.params;
-    const detached = await memoryBlockService.detachBlock(blockId, agentId);
+    const detached = await memoryBlockService.detachBlock(blockId, agentId, req.orgId!);
 
     if (!detached) {
       res.status(404).json({ error: 'Attachment not found' });

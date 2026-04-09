@@ -37,7 +37,11 @@ import {
   buildResumeContext,
   parsePlan,
   isComplexRun,
+  mutateActiveToolsPreservingUniversal,
 } from './agentExecutionServicePure.js';
+import { reorderToolsByTopicRelevance } from './topicClassifierPure.js';
+import { HARD_REMOVAL_CONFIDENCE_THRESHOLD } from '../config/limits.js';
+import { UNIVERSAL_SKILL_NAMES } from '../config/universalSkills.js';
 import {
   appendMessage as appendAgentRunMessage,
   streamMessages as streamAgentRunMessages,
@@ -1474,12 +1478,15 @@ interface LoopResult {
 
 async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   const {
-    runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
+    runId, agent, routerCtx, systemPrompt, tools: initialTools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
     configVersion,
   } = params;
   const startingIteration = params.startingIteration ?? 0;
+
+  // Sprint 5 P4.1 — mutable tool list; topic filter may narrow it on iteration 0
+  let tools = initialTools;
 
   // Sprint 3 P2.1 Sprint 3A — highest persisted sequence_number for this run.
   // Initialised to -1 and updated after every successful appendMessage call
@@ -1658,6 +1665,36 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         logger.debug('middleware.inject_message', {
           runId, middleware: mw.name, iteration, tokensUsed: totalTokensUsed,
         });
+      }
+    }
+
+    // Sprint 5 P4.1 — apply topic-based tool filtering after preCall middleware.
+    // If the topic filter stashed matching skills on the context, apply the
+    // filter. Only runs on iteration 0 to avoid re-filtering on every turn.
+    if (iteration === 0) {
+      const topicClassification = (mwCtx as Record<string, unknown>)._topicClassification as
+        { confidence: number } | undefined;
+      const topicMatchingSkills = (mwCtx as Record<string, unknown>)._topicMatchingSkills as
+        string[] | undefined;
+
+      if (topicClassification && topicMatchingSkills && topicClassification.confidence >= HARD_REMOVAL_CONFIDENCE_THRESHOLD) {
+        const matchSet = new Set(topicMatchingSkills);
+        tools = mutateActiveToolsPreservingUniversal(
+          tools as unknown as ProviderTool[],
+          (t) => t.filter((tool) => matchSet.has(tool.name)),
+          tools as unknown as ProviderTool[],
+        ) as unknown as typeof tools;
+        logger.debug('topic_filter.hard_removal', {
+          runId, iteration, kept: tools.length, matchingSkills: topicMatchingSkills.length,
+        });
+      } else if (topicClassification && topicMatchingSkills && topicClassification.confidence > 0) {
+        // Soft reorder — matching tools move to front, nothing removed
+        const coreSkills = UNIVERSAL_SKILL_NAMES as unknown as string[];
+        tools = reorderToolsByTopicRelevance(
+          tools as unknown as ProviderTool[],
+          topicMatchingSkills,
+          coreSkills,
+        ) as unknown as typeof tools;
       }
     }
 

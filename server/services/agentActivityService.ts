@@ -282,7 +282,7 @@ export const agentActivityService = {
    * 'awaiting_clarification' status. Validates org scoping, transitions
    * status back to 'running', and emits a WS event.
    */
-  async receiveClarification(runId: string, orgId: string): Promise<{ success: true; runId: string }> {
+  async receiveClarification(runId: string, orgId: string, message: string): Promise<{ success: true; runId: string }> {
     const [run] = await db
       .select()
       .from(agentRuns)
@@ -301,10 +301,14 @@ export const agentActivityService = {
       throw { statusCode: 409, message: `Run is not awaiting clarification (status: ${run.status})` };
     }
 
+    // Store the clarification message in runMetadata so the resume path can
+    // inject it into the conversation when the agentic loop restarts.
+    const existingMetadata = (run.runMetadata ?? {}) as Record<string, unknown>;
     await db
       .update(agentRuns)
       .set({
         status: 'running',
+        runMetadata: { ...existingMetadata, clarificationMessage: message },
         updatedAt: new Date(),
       })
       .where(eq(agentRuns.id, runId));
@@ -313,6 +317,7 @@ export const agentActivityService = {
     emitRunUpdate(runId, 'agent:run:status', {
       status: 'running',
       clarificationReceived: true,
+      message,
     });
 
     return { success: true, runId };

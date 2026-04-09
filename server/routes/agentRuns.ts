@@ -386,7 +386,7 @@ router.post(
       return;
     }
 
-    const result = await agentActivityService.receiveClarification(runId, req.orgId!);
+    const result = await agentActivityService.receiveClarification(runId, req.orgId!, message);
     res.json(result);
   })
 );
