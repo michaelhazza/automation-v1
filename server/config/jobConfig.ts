@@ -268,6 +268,18 @@ export const JOB_CONFIG = {
     deadLetter: 'playbook-agent-step__dlq',
     idempotencyStrategy: 'singleton-key' as const, // playbook-step:<sr.id>:<attempt>
   },
+  // ── Sprint 4 P3.1: Bulk parent completion check ───────────────────────────
+  // When a bulk child completes, it enqueues a tick on the parent to
+  // check whether all children are terminal. Uses singletonKey on the
+  // parent runId so multiple child completions collapse into one check.
+  'playbook-bulk-parent-check': {
+    retryLimit: 2,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 60,
+    deadLetter: 'playbook-bulk-parent-check__dlq',
+    idempotencyStrategy: 'singleton-key' as const, // singletonKey: parentRunId
+  },
 } as const;
 
 export type JobName = keyof typeof JOB_CONFIG;

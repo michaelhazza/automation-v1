@@ -21,6 +21,8 @@ import { playbookTemplateVersions } from './playbookTemplates';
 // Playbook Runs — execution instances against a single subaccount
 // ---------------------------------------------------------------------------
 
+export type PlaybookRunMode = 'auto' | 'supervised' | 'background' | 'bulk';
+
 export type PlaybookRunStatus =
   | 'pending'
   | 'running'
@@ -30,7 +32,8 @@ export type PlaybookRunStatus =
   | 'completed_with_errors'
   | 'failed'
   | 'cancelling'
-  | 'cancelled';
+  | 'cancelled'
+  | 'partial';
 
 export const playbookRuns = pgTable(
   'playbook_runs',
@@ -45,11 +48,16 @@ export const playbookRuns = pgTable(
     templateVersionId: uuid('template_version_id')
       .notNull()
       .references(() => playbookTemplateVersions.id),
+    // Sprint 4 P3.1 — execution mode: auto (default), supervised, background, bulk
+    runMode: text('run_mode').notNull().default('auto').$type<PlaybookRunMode>(),
     status: text('status').notNull().default('pending').$type<PlaybookRunStatus>(),
     contextJson: jsonb('context_json').notNull().default({}).$type<Record<string, unknown>>(),
     contextSizeBytes: integer('context_size_bytes').notNull().default(0),
     replayMode: boolean('replay_mode').notNull().default(false),
     retainIndefinitely: boolean('retain_indefinitely').notNull().default(false),
+    // Sprint 4 P3.1 — bulk parent/child relationship
+    parentRunId: uuid('parent_run_id').references((): any => playbookRuns.id),
+    targetSubaccountId: uuid('target_subaccount_id').references(() => subaccounts.id),
     startedByUserId: uuid('started_by_user_id').references(() => users.id),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),

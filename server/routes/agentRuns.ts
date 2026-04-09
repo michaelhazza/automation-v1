@@ -369,6 +369,66 @@ router.get(
 
 // ─── System admin: All activity across all orgs ───────────────────────────────
 
+// ─── Sprint 5 P4.1: User clarification response ─────────────────────────────
+// When an agent run is in 'awaiting_clarification', the user submits their
+// answer here. The endpoint appends a user-role message and transitions the
+// run back to 'running' so the agentic loop can resume.
+
+router.post(
+  '/api/agent-runs/:id/clarify',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const runId = req.params.id;
+    const { message } = req.body as { message?: string };
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      res.status(400).json({ error: 'message is required' });
+      return;
+    }
+
+    // Load the run and assert it belongs to this org
+    const [run] = await db
+      .select()
+      .from(agentRuns)
+      .where(
+        and(
+          eq(agentRuns.id, runId),
+          eq(agentRuns.organisationId, req.orgId!),
+        ),
+      );
+
+    if (!run) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    if (run.status !== 'awaiting_clarification') {
+      res.status(409).json({ error: `Run is not awaiting clarification (status: ${run.status})` });
+      return;
+    }
+
+    // Transition back to running
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'running',
+        updatedAt: new Date(),
+      })
+      .where(eq(agentRuns.id, runId));
+
+    // Emit status update so the UI reflects the state change
+    const { emitAgentRunUpdate: emitRunUpdate } = await import('../websocket/emitters.js');
+    emitRunUpdate(runId, 'agent:run:status', {
+      status: 'running',
+      clarificationReceived: true,
+    });
+
+    res.json({ success: true, runId });
+  })
+);
+
+// ─── System admin: All activity across all orgs ───────────────────────────────
+
 router.get('/api/system/agent-activity', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { organisationId, subaccountId, status, limit, offset } = req.query;
 

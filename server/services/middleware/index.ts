@@ -6,6 +6,8 @@ import { toolRestrictionMiddleware } from './toolRestriction.js';
 import { proposeActionMiddleware } from './proposeAction.js';
 import { decisionTimeGuidanceMiddleware } from './decisionTimeGuidanceMiddleware.js';
 import { reflectionLoopMiddleware } from './reflectionLoopMiddleware.js';
+import { topicFilterMiddleware } from './topicFilterMiddleware.js';
+import { confidenceEscapeMiddleware } from './confidenceEscapeMiddleware.js';
 
 export { hashToolCall } from './loopDetection.js';
 export { classifyError, executeWithRetry } from './errorHandling.js';
@@ -27,11 +29,23 @@ export type {
 
 export function createDefaultPipeline(): MiddlewarePipeline {
   return {
-    preCall: [contextPressureMiddleware, budgetCheckMiddleware],
+    preCall: [
+      contextPressureMiddleware,
+      budgetCheckMiddleware,
+      // Sprint 5 P4.1 — topic filter runs AFTER budget/context guards so
+      // resource-exhausted runs never reach the classifier. Classifies the
+      // user message, soft-reorders or hard-removes tools by topic.
+      topicFilterMiddleware,
+    ],
     // proposeActionMiddleware runs FIRST so every tool call has a universal
     // before-tool authorisation hook (Sprint 2 P1.1 Layer 3) regardless of
     // downstream behaviour. The in-memory decision cache on
     // MiddlewareContext.preToolDecisions keeps it idempotent across replays.
+    //
+    // Sprint 5 P4.1 — confidenceEscapeMiddleware runs AFTER
+    // proposeActionMiddleware but BEFORE toolRestriction. If the agent's
+    // self-reported confidence is below MIN_TOOL_ACTION_CONFIDENCE, it
+    // blocks the tool call and forces ask_clarifying_question instead.
     //
     // Sprint 3 P2.3 — decisionTimeGuidanceMiddleware runs AFTER
     // proposeActionMiddleware so blocked calls never receive guidance
@@ -40,6 +54,7 @@ export function createDefaultPipeline(): MiddlewarePipeline {
     // would otherwise kill. This places it last in the preTool phase.
     preTool: [
       proposeActionMiddleware,
+      confidenceEscapeMiddleware,
       toolRestrictionMiddleware,
       loopDetectionMiddleware,
       decisionTimeGuidanceMiddleware,

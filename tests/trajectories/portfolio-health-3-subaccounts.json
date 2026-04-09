@@ -1,0 +1,10 @@
+{
+  "name": "portfolio-health-3-subaccounts",
+  "description": "Bulk portfolio health sweep across 3 subaccounts",
+  "fixtureRunId": "fixture-portfolio-001",
+  "matchMode": "single-tool",
+  "expected": [
+    { "actionType": "compute_health_score" },
+    { "actionType": "generate_portfolio_report" }
+  ]
+}

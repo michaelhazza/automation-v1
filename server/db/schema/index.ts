@@ -102,3 +102,7 @@ export * from './regressionCases';
 
 // Sprint 3 — P2.1 Sprint 3A append-only message log (migration 0084)
 export * from './agentRunMessages';
+
+// Sprint 5 — P4.2 shared memory blocks (migration 0088)
+export * from './memoryBlocks';
+export * from './memoryBlockAttachments';

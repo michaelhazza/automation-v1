@@ -26,6 +26,10 @@ export const organisations = pgTable(
     // DEFAULT_RUN_RETENTION_DAYS from server/config/limits.ts (90d).
     // Consumed by the agent-run-cleanup cron in server/jobs/.
     runRetentionDays: integer('run_retention_days'),
+    // ── Sprint 4 — P3.2 Portfolio Health ───────────────────────────────────
+    // Caps how many bulk-mode playbook children can run in parallel against
+    // GHL rate limits. NULL uses MAX_PARALLEL_STEPS_DEFAULT (8).
+    ghlConcurrencyCap: integer('ghl_concurrency_cap').notNull().default(5),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

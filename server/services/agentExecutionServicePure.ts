@@ -31,6 +31,7 @@ import type {
 import type { AgentRunRequest } from './agentExecutionService.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { MIDDLEWARE_CONTEXT_VERSION } from '../config/limits.js';
+import { getUniversalSkillNames } from '../config/actionRegistry.js';
 
 // ---------------------------------------------------------------------------
 // selectExecutionPhase — pure function that maps loop iteration state to the
@@ -432,4 +433,107 @@ export function buildResumeContext(
     reviewCodeIterations: rehydrated.reviewCodeIterations,
     lastAssistantText: rehydrated.lastAssistantText,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 5 P4.1 — mutateActiveToolsPreservingUniversal
+//
+// The ONE approved way for middleware to mutate activeTools. Every mutation
+// path goes through this helper, which re-injects universal skills as its
+// final step. The static gate verify-universal-skills-preserved.sh fails
+// CI if any middleware in the pipeline mutates activeTools without calling
+// this.
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply a transform to the active tools list while preserving universal
+ * skills. Any universal skill removed by the transform is re-injected
+ * from `allAvailableTools`.
+ */
+export function mutateActiveToolsPreservingUniversal(
+  current: ProviderTool[],
+  transform: (tools: ProviderTool[]) => ProviderTool[],
+  allAvailableTools: ProviderTool[],
+): ProviderTool[] {
+  const transformed = transform(current);
+  const universalNames = new Set(getUniversalSkillNames());
+  const universalTools = allAvailableTools.filter((t) => universalNames.has(t.name));
+  const transformedNames = new Set(transformed.map((t) => t.name));
+  // Re-inject any universal tools that the transform removed.
+  const preserved = [...transformed];
+  for (const ut of universalTools) {
+    if (!transformedNames.has(ut.name)) preserved.push(ut);
+  }
+  return preserved;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 5 P4.3 — plan-then-execute helpers
+// ---------------------------------------------------------------------------
+
+export interface AgentPlan {
+  actions: Array<{
+    tool: string;
+    reason?: string;
+  }>;
+}
+
+/**
+ * Parse a plan JSON from the LLM's planning output. Returns null if
+ * the content is malformed or has no actions.
+ */
+export function parsePlan(content: string | null | undefined): AgentPlan | null {
+  if (!content || typeof content !== 'string') return null;
+
+  // Try to extract JSON from the content (may be wrapped in markdown fences)
+  let jsonStr = content.trim();
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1].trim();
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (parsed && typeof parsed === 'object') {
+      // Accept both { plan: { actions: [...] } } and { actions: [...] }
+      const plan = parsed.plan ?? parsed;
+      if (plan.actions && Array.isArray(plan.actions) && plan.actions.length > 0) {
+        return { actions: plan.actions };
+      }
+    }
+  } catch {
+    // Try to find a JSON object in the text
+    const jsonMatch = content.match(/\{[\s\S]*"actions"\s*:\s*\[[\s\S]*\][\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.actions && Array.isArray(parsed.actions)) {
+          return { actions: parsed.actions };
+        }
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Determine if a run should use plan-then-execute mode.
+ *
+ * A run is "complex" if any of:
+ *   - agent.complexityHint === 'complex'
+ *   - User message word count > 300
+ *   - Agent allowlist skill count > 15
+ */
+export function isComplexRun(params: {
+  complexityHint?: string | null;
+  messageWordCount: number;
+  skillCount: number;
+}): boolean {
+  if (params.complexityHint === 'complex') return true;
+  if (params.messageWordCount > 300) return true;
+  if (params.skillCount > 15) return true;
+  return false;
 }

@@ -1,0 +1,11 @@
+{
+  "name": "intake-triage-standard",
+  "description": "Business analyst processes a standard intake item",
+  "fixtureRunId": "fixture-intake-001",
+  "matchMode": "in-order",
+  "expected": [
+    { "actionType": "read_workspace", "argMatchers": { "key": "intake_queue" } },
+    { "actionType": "triage_intake" },
+    { "actionType": "create_task", "argMatchers": { "priority": "medium" } }
+  ]
+}
