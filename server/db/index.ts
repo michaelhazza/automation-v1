@@ -13,3 +13,11 @@ export const client = postgres(connectionString, {
 export const db = drizzle(client, { schema });
 
 export type DB = typeof db;
+
+/**
+ * The transaction handle type that drizzle passes into `db.transaction()`
+ * callbacks. Used by `server/lib/orgScopedDb.ts` to type the tx slot on the
+ * AsyncLocalStorage context. Kept here (not inline in orgScopedDb.ts) to
+ * avoid an import cycle with `server/instrumentation.ts`.
+ */
+export type OrgScopedTx = Parameters<Parameters<DB['transaction']>[0]>[0];

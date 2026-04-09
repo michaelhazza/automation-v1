@@ -68,6 +68,11 @@ run_gate "$SCRIPT_DIR/verify-pure-helper-convention.sh"
 run_gate "$SCRIPT_DIR/verify-idempotency-strategy-declared.sh"
 run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
 
+# ── Sprint 2 (P1.1 + P1.2) gates from docs/improvements-roadmap-spec.md ──
+run_gate "$SCRIPT_DIR/verify-rls-coverage.sh"
+run_gate "$SCRIPT_DIR/verify-rls-contract-compliance.sh"
+run_gate "$SCRIPT_DIR/verify-job-idempotency-keys.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

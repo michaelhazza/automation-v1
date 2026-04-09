@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { taskAttachments } from '../db/schema/index.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
 import { storageService } from '../lib/storageService.js';
+import { assertScope, assertScopeSingle } from '../lib/scopeAssertion.js';
 import { approxTokens } from './llmService.js';
 import type { LoadedDataSource } from './agentService.js';
 
@@ -68,16 +69,20 @@ export async function loadTaskAttachmentsAsContext(
   taskId: string,
   organisationId: string
 ): Promise<LoadedDataSource[]> {
-  const rows = await db
-    .select()
-    .from(taskAttachments)
-    .where(
-      and(
-        eq(taskAttachments.taskId, taskId),
-        eq(taskAttachments.organisationId, organisationId),
-        isNull(taskAttachments.deletedAt),
-      )
-    );
+  const rows = assertScope(
+    await db
+      .select()
+      .from(taskAttachments)
+      .where(
+        and(
+          eq(taskAttachments.taskId, taskId),
+          eq(taskAttachments.organisationId, organisationId),
+          isNull(taskAttachments.deletedAt),
+        )
+      ),
+    { organisationId },
+    'taskAttachmentContextService.loadTaskAttachmentsAsContext',
+  );
 
   const results: LoadedDataSource[] = [];
 
@@ -148,7 +153,7 @@ export async function readTaskAttachmentContent(
   attachmentId: string,
   organisationId: string
 ): Promise<string | null> {
-  const [att] = await db
+  const [rawAtt] = await db
     .select()
     .from(taskAttachments)
     .where(
@@ -158,6 +163,11 @@ export async function readTaskAttachmentContent(
         isNull(taskAttachments.deletedAt),
       )
     );
+  const att = assertScopeSingle(
+    rawAtt ?? null,
+    { organisationId },
+    'taskAttachmentContextService.readTaskAttachmentContent',
+  );
   if (!att) return null;
   if (!isTextReadable(att.fileType, att.fileName)) return null;
 

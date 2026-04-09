@@ -44,6 +44,7 @@ import {
   type MiddlewareContext,
   type MiddlewarePipeline,
 } from './middleware/index.js';
+import { isFailureError } from '../../shared/iee/failure.js';
 import { maskObservations, tagIteration } from './middleware/observationMasking.js';
 import {
   MAX_LOOP_ITERATIONS,
@@ -654,7 +655,12 @@ export const agentExecutionService = {
       }
 
       // Add workspace entities (subaccount-scoped only)
-      const entities = isOrgRun ? null : await workspaceMemoryService.getEntitiesForPrompt(request.subaccountId!);
+      const entities = isOrgRun
+        ? null
+        : await workspaceMemoryService.getEntitiesForPrompt(
+            request.subaccountId!,
+            request.organisationId,
+          );
       if (entities) {
         systemPromptParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
       }
@@ -1381,16 +1387,57 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
 
     // ── Execute tool calls ────────────────────────────────────────────
     const toolResults: Array<{ tool_use_id: string; content: string }> = [];
+    // Sprint 2 P1.1 Layer 3 — messages queued by `inject_message` middleware
+    // decisions or `skip { injectMessage }` side channels. Flushed to the
+    // conversation immediately after the tool_results batch for this iteration.
+    const pendingInjectedMessages: string[] = [];
 
     for (const toolCall of response.toolCalls) {
       // Pre-tool middleware
       let skipTool = false;
       for (const mw of pipeline.preTool) {
-        const result = mw.execute(mwCtx, { name: toolCall.name, input: toolCall.input });
+        const result = await mw.execute(mwCtx, {
+          id: toolCall.id,
+          name: toolCall.name,
+          input: toolCall.input,
+        });
         if (result.action === 'skip') {
           toolResults.push({
             tool_use_id: toolCall.id,
             content: JSON.stringify({ success: false, error: result.reason }),
+          });
+          if (result.injectMessage) {
+            pendingInjectedMessages.push(result.injectMessage);
+          }
+          createEvent('agent.middleware.decision', {
+            middlewareName: mw.name, decision: 'skip', reason: result.reason, iteration,
+          });
+          skipTool = true;
+          break;
+        }
+        if (result.action === 'block') {
+          toolResults.push({
+            tool_use_id: toolCall.id,
+            content: JSON.stringify({ success: false, error: result.reason, blocked: true }),
+          });
+          createEvent('agent.middleware.decision', {
+            middlewareName: mw.name, decision: 'block', reason: result.reason, iteration,
+          });
+          skipTool = true;
+          break;
+        }
+        if (result.action === 'inject_message') {
+          // Emit a neutral skipped-tool result so every tool_use has a matching
+          // tool_result in the next LLM request, then queue the injected
+          // message to be appended after the tool_results batch for this
+          // iteration.
+          toolResults.push({
+            tool_use_id: toolCall.id,
+            content: JSON.stringify({ success: false, error: 'middleware_injected_message', skipped: true }),
+          });
+          pendingInjectedMessages.push(result.message);
+          createEvent('agent.middleware.decision', {
+            middlewareName: mw.name, decision: 'inject_message', iteration,
           });
           skipTool = true;
           break;
@@ -1446,13 +1493,55 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       mwCtx.toolCallHistory.push({ name: toolCall.name, inputHash, iteration });
 
       let resultContent: string;
-      const { result, error, retried } = await executeWithRetry(async () => {
-        return skillExecutor.execute({
-          skillName: toolCall.name,
+      let result: unknown;
+      let error: { message: string; type: string; category: string } | undefined;
+      let retried = false;
+      try {
+        const outcome = await executeWithRetry(async () => {
+          return skillExecutor.execute({
+            skillName: toolCall.name,
+            input: toolCall.input,
+            context: skillExecutionContext,
+            // Sprint 2 P1.1 Layer 3: thread the LLM tool call id into the
+            // skill executor so the per-case action wrappers build the same
+            // deterministic idempotency key as proposeActionMiddleware.
+            toolCallId: toolCall.id,
+          });
+        }, { actionType: toolCall.name });
+        result = outcome.result;
+        error = outcome.error;
+        retried = outcome.retried;
+      } catch (err) {
+        // P0.2 Slice C — onFailure: 'fail_run' throws a FailureError that
+        // propagates through executeWithRetry. Terminate the loop cleanly
+        // here rather than letting it unwind out of runAgenticLoop, so that
+        // (a) accumulated stats and toolCallsLog are preserved, (b) the
+        // executeRun finalization path runs (MCP disconnect, trace finalize,
+        // DB persist of totals), and (c) finalStatus is recorded as 'failed'.
+        // Only fail_run-sourced FailureErrors reach here (errorHandling.ts
+        // scopes its rethrow to the same marker). Any other error rethrows.
+        if (!isFailureError(err) || err.failure?.metadata?.source !== 'onFailure:fail_run') {
+          throw err;
+        }
+        const failMsg = err.failure?.failureDetail ?? err.message;
+        toolCallsLog.push({
+          tool: toolCall.name,
           input: toolCall.input,
-          context: skillExecutionContext,
+          output: JSON.stringify({
+            success: false,
+            error: failMsg,
+            failureReason: err.failure?.failureReason,
+            fail_run: true,
+          }),
+          durationMs: Date.now() - toolStart,
+          iteration,
+          retried: false,
         });
-      }, { actionType: toolCall.name });
+        finalStatus = 'failed';
+        iterationSpan.end({ output: { phase, failRun: true, tool: toolCall.name } });
+        emitLoopTermination('error', { iteration, tool: toolCall.name, totalToolCalls, reason: 'fail_run' });
+        break outerLoop;
+      }
 
       if (error) {
         resultContent = JSON.stringify({
@@ -1524,6 +1613,14 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
         content: tr.content,
       })),
     }, iteration));
+
+    // Sprint 2 P1.1 Layer 3 — drain any messages queued by middleware decisions
+    // (`inject_message` action, or `skip { injectMessage }`). Appended as
+    // additional user messages after the tool_results batch so they reach the
+    // next LLM call.
+    for (const injected of pendingInjectedMessages) {
+      messages.push({ role: 'user', content: injected });
+    }
 
     iterationSpan.end({ output: { phase, toolCallsThisIteration: response.toolCalls?.length ?? 0 } });
 

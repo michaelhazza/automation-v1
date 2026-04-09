@@ -3,6 +3,7 @@ import { contextPressureMiddleware } from './contextPressure.js';
 import { budgetCheckMiddleware } from './budgetCheck.js';
 import { loopDetectionMiddleware } from './loopDetection.js';
 import { toolRestrictionMiddleware } from './toolRestriction.js';
+import { proposeActionMiddleware } from './proposeAction.js';
 
 export { hashToolCall } from './loopDetection.js';
 export { classifyError, executeWithRetry } from './errorHandling.js';
@@ -25,7 +26,11 @@ export type {
 export function createDefaultPipeline(): MiddlewarePipeline {
   return {
     preCall: [contextPressureMiddleware, budgetCheckMiddleware],
-    preTool: [toolRestrictionMiddleware, loopDetectionMiddleware],
+    // proposeActionMiddleware runs FIRST so every tool call has a universal
+    // before-tool authorisation hook (Sprint 2 P1.1 Layer 3) regardless of
+    // downstream behaviour. The in-memory decision cache on
+    // MiddlewareContext.preToolDecisions keeps it idempotent across replays.
+    preTool: [proposeActionMiddleware, toolRestrictionMiddleware, loopDetectionMiddleware],
     postTool: [],
   };
 }

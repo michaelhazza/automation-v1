@@ -1,6 +1,7 @@
 ---
 name: spec-reviewer
 description: Iterative spec review loop with Codex as the external reviewer and Claude as the adjudicator. Run this AFTER a spec document is in draft form and you want an implementation-readiness review. Invokes the Codex CLI, classifies each finding as mechanical / directional / ambiguous, auto-applies mechanical fixes, and BLOCKS FOR HUMAN INPUT on directional or ambiguous findings. Loops up to MAX_ITERATIONS times (configured below) or until two consecutive mechanical-only rounds. Use for any non-trivial spec document (roadmaps, implementation specs, architecture plans, phased build plans). Caller should provide: the spec file path and (optionally) the spec-context.md path — defaults to docs/spec-context.md.
+tools: Bash, Read, Glob, Grep, Edit, Write
 model: opus
 ---
 

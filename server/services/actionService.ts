@@ -1,4 +1,5 @@
 import { eq, and, desc, sql } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { db } from '../db/index.js';
 import { actions, actionEvents, tasks } from '../db/schema/index.js';
 import {
@@ -7,6 +8,33 @@ import {
   type ActionStatus,
 } from '../config/actionRegistry.js';
 import { policyEngineService } from './policyEngineService.js';
+
+// ---------------------------------------------------------------------------
+// Deterministic idempotency keys — P1.1 Layer 3 contract
+//
+// Built from (runId, toolCallId, args_hash) so a replay of the same tool
+// call (after pg-boss redelivery, reflection-loop re-emission, or agent
+// resume from checkpoint) resolves to the same action row via the
+// actions.idempotency_key unique constraint.
+//
+// Callers that lack a toolCallId (legacy, non-middleware code paths) should
+// pass a stable synthetic key — e.g. actionType + a stable business key.
+// ---------------------------------------------------------------------------
+
+export function hashActionArgs(args: Record<string, unknown>): string {
+  // Canonicalise: sort keys alphabetically to make the hash order-independent.
+  const canonical = JSON.stringify(args, Object.keys(args).sort());
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+}
+
+export function buildActionIdempotencyKey(params: {
+  runId: string;
+  toolCallId: string;
+  args: Record<string, unknown>;
+}): string {
+  const argsHash = hashActionArgs(params.args);
+  return `${params.runId}:${params.toolCallId}:${argsHash}`;
+}
 
 // ---------------------------------------------------------------------------
 // Action Service — create, validate, and transition actions

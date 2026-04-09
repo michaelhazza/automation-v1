@@ -165,6 +165,21 @@ test('cycle warning flag not set initially', () => {
   assert(ctx._cycleWarningIssued === undefined, '_cycleWarningIssued should be undefined');
 });
 
+// ── Sprint 2 P1.1 Layer 3 — preToolDecisions cache ─────────────────
+test('preToolDecisions initialised as empty Map', () => {
+  const ctx = buildMiddlewareContext(makeParams());
+  assert(ctx.preToolDecisions instanceof Map, 'preToolDecisions should be a Map');
+  assert(ctx.preToolDecisions.size === 0, 'preToolDecisions should be empty');
+});
+
+test('mutating preToolDecisions does not affect later calls', () => {
+  const params = makeParams();
+  const ctx1 = buildMiddlewareContext(params);
+  ctx1.preToolDecisions.set('tc1', { action: 'continue' });
+  const ctx2 = buildMiddlewareContext(params);
+  assert(ctx2.preToolDecisions.size === 0, 'ctx2 preToolDecisions still empty');
+});
+
 // ── Purity check ───────────────────────────────────────────────────
 test('two calls with the same params produce structurally equal contexts', () => {
   const params = makeParams();

@@ -9,7 +9,7 @@ export const toolRestrictionMiddleware: PreToolMiddleware = {
 
   execute(
     ctx: MiddlewareContext,
-    toolCall: { name: string; input: Record<string, unknown> }
+    toolCall: { id: string; name: string; input: Record<string, unknown> }
   ): PreToolResult {
     const allowedSlugs = ctx.saLink.allowedSkillSlugs as string[] | null;
 

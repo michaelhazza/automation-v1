@@ -58,6 +58,9 @@ export const agents = pgTable(
     maxConcurrentRuns: integer('max_concurrent_runs').notNull().default(1),
     // Lifecycle
     status: text('status').notNull().default('draft').$type<'draft' | 'active' | 'inactive'>(),
+    // Sprint 2 P1.2 — per-agent override for the regression suite ring
+    // buffer. NULL → use DEFAULT_REGRESSION_CASE_CAP from limits.ts.
+    regressionCaseCap: integer('regression_case_cap'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
