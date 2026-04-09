@@ -600,11 +600,11 @@ Structural comparison of agent execution trajectories against reference patterns
 
 ## Quality Infrastructure — Static Gates & Testing Posture
 
-The codebase runs a deliberate **static-gates-over-runtime-tests** posture. 32 `verify-*.sh` scripts enforce architectural invariants at CI time. Runtime unit tests follow the pure helper convention (below). There are zero frontend/E2E tests by design at this stage.
+The codebase runs a deliberate **static-gates-over-runtime-tests** posture. 33 `verify-*.sh` scripts enforce architectural invariants at CI time. Runtime unit tests follow the pure helper convention (below). There are zero frontend/E2E tests by design at this stage.
 
 ### Static gates
 
-`scripts/run-all-gates.sh` runs all 32 verify scripts in sequence and reports pass/warn/fail. Gates are classified as **Tier 1** (hard fail — blocks CI) or **Tier 2** (warning only). Key gates:
+`scripts/run-all-gates.sh` runs all 33 verify scripts in sequence and reports pass/warn/fail. Gates are classified as **Tier 1** (hard fail — blocks CI) or **Tier 2** (warning only). Key gates:
 
 | Gate | What it checks |
 |------|---------------|

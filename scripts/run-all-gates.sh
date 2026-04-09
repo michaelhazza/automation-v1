@@ -15,20 +15,19 @@ run_gate() {
   local name="${script##*/}"
   echo ""
   echo "--- Running gate: $name ---"
-  if bash "$script"; then
+  local code=0
+  bash "$script" || code=$?
+  if [ $code -eq 0 ]; then
     echo "[PASS] $name"
     PASS_COUNT=$((PASS_COUNT + 1))
+  elif [ $code -eq 1 ]; then
+    echo "[BLOCKING FAIL] $name"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  elif [ $code -eq 2 ]; then
+    echo "[WARNING] $name"
+    WARN_COUNT=$((WARN_COUNT + 1))
   else
-    local code=$?
-    if [ $code -eq 1 ]; then
-      echo "[BLOCKING FAIL] $name"
-      FAIL_COUNT=$((FAIL_COUNT + 1))
-    elif [ $code -eq 2 ]; then
-      echo "[WARNING] $name"
-      WARN_COUNT=$((WARN_COUNT + 1))
-    else
-      echo "[INFO] $name"
-    fi
+    echo "[INFO] $name"
   fi
 }
 

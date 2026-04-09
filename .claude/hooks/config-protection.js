@@ -28,6 +28,7 @@ const PROTECTED_BASENAMES = [
   /^prettier\.config\.[cm]?[jt]s$/,
   /^biome\.json$/,
   /^\.editorconfig$/,
+  /^package\.json$/,            // protects scripts section from being weakened
 ];
 
 // Full path patterns (relative to project root) for additional protection.
@@ -70,10 +71,10 @@ process.stdin.on('end', () => {
     const message = [
       `BLOCKED by config-protection: ${toolName} to "${basename}" is not allowed.`,
       ``,
-      `Tooling configuration files (tsconfig, eslint, biome, prettier) are`,
-      `protected. Modifying them to make a failing check pass violates the`,
-      `project rule: "Never skip a failing check. Never suppress warnings`,
-      `to make a check pass."`,
+      `Tooling configuration files (tsconfig, eslint, biome, prettier,`,
+      `package.json) are protected. Modifying them to make a failing check`,
+      `pass violates the project rule: "Never skip a failing check. Never`,
+      `suppress warnings to make a check pass."`,
       ``,
       `Instead:`,
       `  - Fix the actual code that is causing the check to fail.`,
@@ -92,21 +93,29 @@ process.stdin.on('end', () => {
 });
 
 /**
- * Attempt to convert an absolute path to a project-relative path.
- * Returns null if the path doesn't appear to be inside the project.
+ * Convert an absolute path to a project-relative path.
+ * Uses CLAUDE_PROJECT_DIR if available, otherwise falls back to heuristics.
+ * Returns null if the path can't be resolved.
  */
 function toRelativePath(absPath) {
   if (!absPath) return null;
-  // Look for common project root markers in the path.
+
+  // Preferred: use CLAUDE_PROJECT_DIR (set by Claude Code for hook commands).
+  const projectDir = process.env.CLAUDE_PROJECT_DIR;
+  if (projectDir && absPath.startsWith(projectDir)) {
+    let rel = absPath.slice(projectDir.length);
+    if (rel.startsWith('/')) rel = rel.slice(1);
+    return rel;
+  }
+
+  // Fallback: look for known top-level directories in the path.
   const markers = ['/server/', '/client/', '/worker/', '/scripts/', '/migrations/'];
   for (const marker of markers) {
     const idx = absPath.indexOf(marker);
     if (idx !== -1) {
-      return absPath.slice(idx + 1); // e.g. "server/tsconfig.json"
+      return absPath.slice(idx + 1);
     }
   }
-  // Fallback: strip everything up to and including the last known project dir.
-  const parts = absPath.split('/');
-  // Return just the basename-level match for safety.
+
   return null;
 }

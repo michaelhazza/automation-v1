@@ -1,3 +1,4 @@
+// guard-ignore-file: no-silent-failures reason="empty catches are in inline browser JS template literals, not server-side code"
 /**
  * Public page serving routes.
  *
