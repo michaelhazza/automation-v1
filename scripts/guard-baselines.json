@@ -7,5 +7,8 @@
   "org-id-source": 3,
   "permission-scope": 15,
   "rate-limiting": 5,
-  "input-validation": 39
+  "input-validation": 39,
+  "pure-helper-convention": 0,
+  "idempotency-strategy-declared": 0,
+  "action-registry-zod": 0
 }

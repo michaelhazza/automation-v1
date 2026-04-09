@@ -11,6 +11,7 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { ACTION_REGISTRY, type ParameterSchema } from '../config/actionRegistry.js';
 import { skillExecutor } from '../services/skillExecutor.js';
 import { systemSkillService, type SystemSkill } from '../services/systemSkillService.js';
@@ -112,7 +113,10 @@ export async function buildMcpServer(context: {
     if (allowlist && !allowlist.has(slug)) continue;
 
     const annotations = def.mcp?.annotations;
-    const zodSchema = parameterSchemaToZod(def.parameterSchema);
+    // After P0.2 Slice A, def.parameterSchema is already a z.ZodObject — no
+    // conversion needed. parameterSchemaToZod() is still used below for the
+    // legacy system-skill .md path.
+    const zodSchema = def.parameterSchema;
 
     server.tool(
       slug,
@@ -231,7 +235,10 @@ export async function buildMcpServer(context: {
           category: def.actionCategory,
           isExternal: def.isExternal,
           defaultGateLevel: def.defaultGateLevel,
-          parameterSchema: def.parameterSchema,
+          // After P0.2 Slice A, def.parameterSchema is a z.ZodObject. Serialise
+          // it to JSON Schema for the catalogue resource so MCP clients see the
+          // same shape they did before the conversion.
+          parameterSchema: zodToJsonSchema(def.parameterSchema, { target: 'jsonSchema7' }),
           annotations: def.mcp?.annotations ?? null,
         }));
 

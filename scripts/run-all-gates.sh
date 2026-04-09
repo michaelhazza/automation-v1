@@ -63,6 +63,11 @@ run_gate "$SCRIPT_DIR/verify-permission-scope.sh"
 run_gate "$SCRIPT_DIR/verify-rate-limiting.sh"
 run_gate "$SCRIPT_DIR/verify-input-validation.sh"
 
+# ── Sprint 1 (P0.1 + P0.2) gates from docs/improvements-roadmap-spec.md ──
+run_gate "$SCRIPT_DIR/verify-pure-helper-convention.sh"
+run_gate "$SCRIPT_DIR/verify-idempotency-strategy-declared.sh"
+run_gate "$SCRIPT_DIR/verify-action-registry-zod.sh"
+
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="
 

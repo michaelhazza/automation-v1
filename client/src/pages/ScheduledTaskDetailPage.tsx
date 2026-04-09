@@ -89,9 +89,12 @@ export default function ScheduledTaskDetailPage({ user: _user }: { user: { id: s
       try {
         const res = await api.get('/api/my-permissions');
         const perms: string[] = res.data?.permissions ?? [];
+        // The migration backfills `org.scheduled_tasks.data_sources.manage`
+        // for everyone who already had `org.agents.edit`, so checking only
+        // the dedicated key is sufficient and avoids permanently coupling
+        // two unrelated permission keys.
         setCanManageDataSources(
           perms.includes('org.scheduled_tasks.data_sources.manage')
-          || perms.includes('org.agents.edit')
         );
       } catch {
         setCanManageDataSources(false);

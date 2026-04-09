@@ -1,3 +1,4 @@
+import { z } from 'zod';
 // ---------------------------------------------------------------------------
 // Action Type Registry — central definition of all action types
 // Phase 1: TypeScript config object. Phase 2: promotes to DB table.
@@ -32,6 +33,24 @@ export interface ParameterSchema {
   additionalProperties?: boolean;
 }
 
+/**
+ * Execution-model contract for an action handler — declares how the handler
+ * stays safe under retry given the at-least-once execution guarantee. See
+ * docs/improvements-roadmap-spec.md → "Execution model — at-least-once,
+ * idempotent handlers" for the full rationale.
+ *
+ *   - 'read_only'   — no side effects; safe to re-run without any coordination.
+ *   - 'keyed_write' — writes are deduplicated by the caller-supplied
+ *                     idempotencyKey at the DB or external provider layer
+ *                     (INSERT ... ON CONFLICT DO NOTHING, Idempotency-Key
+ *                     header, etc.).
+ *   - 'locked'      — handler takes a pg advisory lock keyed on the
+ *                     idempotencyKey before the call and releases on exit.
+ *                     Used for irreversible side effects to third parties
+ *                     that have no native dedupe story.
+ */
+export type IdempotencyStrategy = 'read_only' | 'keyed_write' | 'locked';
+
 export interface ActionDefinition {
   actionType: string;
   description: string;
@@ -41,9 +60,67 @@ export interface ActionDefinition {
   createsBoardTask: boolean;
   /** @deprecated Use parameterSchema instead. Kept for backward compat. */
   payloadFields: string[];
-  parameterSchema: ParameterSchema;
+  parameterSchema: z.ZodObject<z.ZodRawShape>;
   retryPolicy: RetryPolicy;
   mcp?: { annotations: McpAnnotations };
+
+  /**
+   * P0.2 Slice B — required on every entry from Sprint 1 landing onward.
+   * Enforced by verify-idempotency-strategy-declared.sh.
+   */
+  idempotencyStrategy: IdempotencyStrategy;
+
+  /**
+   * P1.1 Layer 3 — declarative scope metadata consumed by the before-tool
+   * authorisation hook. See P1.1 Layer 3 validateScope() for the check
+   * implementation. Optional — only actions that operate on tenant-scoped
+   * resources need to declare scope requirements.
+   */
+  scopeRequirements?: {
+    /** Names of arg fields that must be subaccount IDs the current tenant owns. */
+    validateSubaccountFields?: string[];
+    /** Names of arg fields that must be GHL location IDs the current tenant owns. */
+    validateGhlLocationFields?: string[];
+    /** If true, run requires `userId` in execution context (no system runs). */
+    requiresUserContext?: boolean;
+  };
+
+  /** P4.1 — topic tags for intent-based filtering. */
+  topics?: string[];
+
+  /** P4.4 — opt-in to the semantic critique gate when run via economy tier. */
+  requiresCritiqueGate?: boolean;
+
+  /**
+   * P0.2 Slice C — extended retry behaviour. Overrides retryPolicy's
+   * default fail-the-run semantics:
+   *   - 'retry'    — use withBackoff per retryPolicy (default, matches
+   *                  existing behaviour).
+   *   - 'skip'     — log the failure, return
+   *                  { success: false, skipped: true, reason } to the LLM,
+   *                  and let the agent loop continue.
+   *   - 'fail_run' — terminate the entire agent run via failure() from
+   *                  shared/iee/failure.ts.
+   *   - 'fallback' — return fallbackValue as the result instead of failing.
+   */
+  onFailure?: 'retry' | 'skip' | 'fail_run' | 'fallback';
+  fallbackValue?: unknown;
+
+  /**
+   * P1.1 Layer 3 — flag to mark methodology skills (pure prompt scaffolds,
+   * no side effects). When true, the preTool middleware bypasses
+   * actionService.proposeAction and writes a single audit row with
+   * reason='methodology_skill'. Distinct from read-only skills because
+   * methodology skills do not even read from external systems.
+   */
+  isMethodology?: boolean;
+
+  /**
+   * P4.1 — universal skills are always merged into every agent's effective
+   * allowlist and always preserved through the topic filter. See the
+   * universal-skill contract in docs/improvements-roadmap-spec.md P4.1.
+   */
+  isUniversal?: boolean;
 }
 
 export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
@@ -55,17 +132,13 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: true,
     payloadFields: ['to', 'subject', 'body', 'thread_id', 'provider'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        to: { type: 'string', description: 'Recipient email address' },
-        subject: { type: 'string', description: 'Email subject line' },
-        body: { type: 'string', description: 'Email body content (plain text or HTML)' },
-        thread_id: { type: 'string', description: 'Thread ID to reply within an existing conversation (optional)' },
-        provider: { type: 'string', description: 'Email provider to use (e.g. "gmail", "outlook"). Defaults to the configured default.' },
-      },
-      required: ['to', 'subject', 'body'],
-    },
+    parameterSchema: z.object({
+      to: z.string().describe('Recipient email address'),
+      subject: z.string().describe('Email subject line'),
+      body: z.string().describe('Email body content (plain text or HTML)'),
+      thread_id: z.string().optional().describe('Thread ID to reply within an existing conversation (optional)'),
+      provider: z.string().optional().describe('Email provider to use (e.g. "gmail", "outlook"). Defaults to the configured default.'),
+    }),
     retryPolicy: {
       maxRetries: 3,
       strategy: 'exponential_backoff',
@@ -73,6 +146,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'auth_error', 'recipient_not_found'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
   },
   read_inbox: {
     actionType: 'read_inbox',
@@ -82,14 +156,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['provider', 'since'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        provider: { type: 'string', description: 'Email provider to read from (e.g. "gmail", "outlook")' },
-        since: { type: 'string', description: 'ISO 8601 timestamp — only return emails after this date' },
-      },
-      required: ['provider'],
-    },
+    parameterSchema: z.object({
+      provider: z.string().describe('Email provider to read from (e.g. "gmail", "outlook")'),
+      since: z.string().optional().describe('ISO 8601 timestamp — only return emails after this date'),
+    }),
     retryPolicy: {
       maxRetries: 3,
       strategy: 'exponential_backoff',
@@ -97,6 +167,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['auth_error'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
   },
   create_task: {
     actionType: 'create_task',
@@ -106,18 +177,14 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'brief', 'status', 'priority', 'assigned_agent_id'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Short title for the work item' },
-        description: { type: 'string', description: 'Human-readable description visible in the task card' },
-        brief: { type: 'string', description: 'Self-contained instructions for the agent picking up this task' },
-        status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Initial status (default: todo)' },
-        priority: { type: 'string', enum: ['low', 'normal', 'high', 'urgent'], description: 'Task priority (default: normal)' },
-        assigned_agent_id: { type: 'string', description: 'Agent ID to assign the task to' },
-      },
-      required: ['title'],
-    },
+    parameterSchema: z.object({
+      title: z.string().describe('Short title for the work item'),
+      description: z.string().optional().describe('Human-readable description visible in the task card'),
+      brief: z.string().optional().describe('Self-contained instructions for the agent picking up this task'),
+      status: z.enum(['backlog', 'todo', 'in_progress', 'review', 'done']).optional().describe('Initial status (default: todo)'),
+      priority: z.enum(['low', 'normal', 'high', 'urgent']).optional().describe('Task priority (default: normal)'),
+      assigned_agent_id: z.string().optional().describe('Agent ID to assign the task to'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -125,6 +192,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   move_task: {
     actionType: 'move_task',
@@ -134,14 +202,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['task_id', 'status'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'string', description: 'The ID of the task to move' },
-        status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'], description: 'Target status column' },
-      },
-      required: ['task_id', 'status'],
-    },
+    parameterSchema: z.object({
+      task_id: z.string().describe('The ID of the task to move'),
+      status: z.enum(['backlog', 'todo', 'in_progress', 'review', 'done']).describe('Target status column'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -149,6 +213,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   reassign_task: {
     actionType: 'reassign_task',
@@ -158,14 +223,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['task_id', 'assigned_agent_id'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'string', description: 'The ID of the task to reassign' },
-        assigned_agent_id: { type: 'string', description: 'The agent ID to assign the task to' },
-      },
-      required: ['task_id', 'assigned_agent_id'],
-    },
+    parameterSchema: z.object({
+      task_id: z.string().describe('The ID of the task to reassign'),
+      assigned_agent_id: z.string().describe('The agent ID to assign the task to'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -173,6 +234,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   add_deliverable: {
     actionType: 'add_deliverable',
@@ -182,16 +244,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['task_id', 'title', 'content', 'deliverable_type'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'string', description: 'The ID of the task to attach the deliverable to' },
-        title: { type: 'string', description: 'Title of the deliverable' },
-        content: { type: 'string', description: 'Content of the deliverable (text, markdown, or JSON)' },
-        deliverable_type: { type: 'string', enum: ['document', 'code', 'report', 'screenshot', 'other'], description: 'Type of deliverable' },
-      },
-      required: ['task_id', 'title', 'content'],
-    },
+    parameterSchema: z.object({
+      task_id: z.string().describe('The ID of the task to attach the deliverable to'),
+      title: z.string().describe('Title of the deliverable'),
+      content: z.string().describe('Content of the deliverable (text, markdown, or JSON)'),
+      deliverable_type: z.enum(['document', 'code', 'report', 'screenshot', 'other']).optional().describe('Type of deliverable'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -199,6 +257,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
   update_record: {
     actionType: 'update_record',
@@ -208,16 +267,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['provider', 'record_type', 'record_id', 'fields'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        provider: { type: 'string', description: 'Integration provider (e.g. "hubspot", "salesforce")' },
-        record_type: { type: 'string', description: 'Type of record to update (e.g. "contact", "deal")' },
-        record_id: { type: 'string', description: 'The ID of the record to update' },
-        fields: { type: 'object', description: 'Key-value pairs of fields to update' },
-      },
-      required: ['provider', 'record_type', 'record_id', 'fields'],
-    },
+    parameterSchema: z.object({
+      provider: z.string().describe('Integration provider (e.g. "hubspot", "salesforce")'),
+      record_type: z.string().describe('Type of record to update (e.g. "contact", "deal")'),
+      record_id: z.string().describe('The ID of the record to update'),
+      fields: z.record(z.string(), z.unknown()).describe('Key-value pairs of fields to update'),
+    }),
     retryPolicy: {
       maxRetries: 3,
       strategy: 'exponential_backoff',
@@ -225,6 +280,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error', 'not_found'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'keyed_write',
   },
   fetch_url: {
     actionType: 'fetch_url',
@@ -234,16 +290,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['url', 'method', 'headers', 'body'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'The URL to fetch' },
-        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], description: 'HTTP method (default: GET)' },
-        headers: { type: 'object', description: 'Optional HTTP headers as key-value pairs' },
-        body: { type: 'string', description: 'Optional request body (for POST/PUT/PATCH)' },
-      },
-      required: ['url'],
-    },
+    parameterSchema: z.object({
+      url: z.string().describe('The URL to fetch'),
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional().describe('HTTP method (default: GET)'),
+      headers: z.record(z.string(), z.unknown()).optional().describe('Optional HTTP headers as key-value pairs'),
+      body: z.string().optional().describe('Optional request body (for POST/PUT/PATCH)'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -251,6 +303,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
   },
   request_approval: {
     actionType: 'request_approval',
@@ -260,16 +313,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'context', 'options'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Short title for the approval request' },
-        description: { type: 'string', description: 'What needs to be approved and why' },
-        context: { type: 'string', description: 'Additional context for the reviewer' },
-        options: { type: 'array', description: 'List of options for the reviewer to choose from', items: { type: 'string' } },
-      },
-      required: ['title', 'description'],
-    },
+    parameterSchema: z.object({
+      title: z.string().describe('Short title for the approval request'),
+      description: z.string().describe('What needs to be approved and why'),
+      context: z.string().optional().describe('Additional context for the reviewer'),
+      options: z.array(z.string()).optional().describe('List of options for the reviewer to choose from'),
+    }),
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -277,6 +326,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
@@ -289,13 +339,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['file_path'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: 'Path to the file to read, relative to project root' },
-      },
-      required: ['file_path'],
-    },
+    parameterSchema: z.object({
+      file_path: z.string().describe('Path to the file to read, relative to project root'),
+    }),
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -303,6 +349,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   search_codebase: {
@@ -313,16 +360,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['query', 'search_type', 'file_pattern', 'max_results'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query — text to find in the codebase' },
-        search_type: { type: 'string', enum: ['content', 'filename'], description: 'Search by file content or filename (default: content)' },
-        file_pattern: { type: 'string', description: 'Glob pattern to filter files (e.g. "**/*.ts")' },
-        max_results: { type: 'number', description: 'Maximum results to return (default: 20)' },
-      },
-      required: ['query'],
-    },
+    parameterSchema: z.object({
+      query: z.string().describe('Search query — text to find in the codebase'),
+      search_type: z.enum(['content', 'filename']).optional().describe('Search by file content or filename (default: content)'),
+      file_pattern: z.string().optional().describe('Glob pattern to filter files (e.g. "**/*.ts")'),
+      max_results: z.number().optional().describe('Maximum results to return (default: 20)'),
+    }),
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -330,6 +373,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   run_tests: {
@@ -340,13 +384,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['test_filter'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        test_filter: { type: 'string', description: 'Filter to run specific tests (e.g. test name pattern or file path)' },
-      },
-      required: [],
-    },
+    parameterSchema: z.object({
+      test_filter: z.string().optional().describe('Filter to run specific tests (e.g. test name pattern or file path)'),
+    }),
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -354,6 +394,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'execution_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   analyze_endpoint: {
@@ -364,17 +405,13 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['url', 'method', 'headers', 'body', 'expected_status'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'The endpoint URL to test' },
-        method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], description: 'HTTP method (default: GET)' },
-        headers: { type: 'object', description: 'HTTP headers as key-value pairs' },
-        body: { type: 'string', description: 'Request body (for POST/PUT/PATCH)' },
-        expected_status: { type: 'number', description: 'Expected HTTP status code for validation' },
-      },
-      required: ['url'],
-    },
+    parameterSchema: z.object({
+      url: z.string().describe('The endpoint URL to test'),
+      method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional().describe('HTTP method (default: GET)'),
+      headers: z.record(z.string(), z.unknown()).optional().describe('HTTP headers as key-value pairs'),
+      body: z.string().optional().describe('Request body (for POST/PUT/PATCH)'),
+      expected_status: z.number().optional().describe('Expected HTTP status code for validation'),
+    }),
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -382,6 +419,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
   },
 
   report_bug: {
@@ -392,19 +430,15 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: true,
     payloadFields: ['title', 'description', 'severity', 'confidence', 'steps_to_reproduce', 'expected_behavior', 'actual_behavior'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Short, descriptive bug title' },
-        description: { type: 'string', description: 'Detailed description of the bug' },
-        severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Bug severity' },
-        confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Confidence that this is a real bug' },
-        steps_to_reproduce: { type: 'string', description: 'Step-by-step reproduction instructions' },
-        expected_behavior: { type: 'string', description: 'What should happen' },
-        actual_behavior: { type: 'string', description: 'What actually happens' },
-      },
-      required: ['title', 'description', 'severity'],
-    },
+    parameterSchema: z.object({
+      title: z.string().describe('Short, descriptive bug title'),
+      description: z.string().describe('Detailed description of the bug'),
+      severity: z.enum(['low', 'medium', 'high', 'critical']).describe('Bug severity'),
+      confidence: z.enum(['low', 'medium', 'high']).optional().describe('Confidence that this is a real bug'),
+      steps_to_reproduce: z.string().optional().describe('Step-by-step reproduction instructions'),
+      expected_behavior: z.string().optional().describe('What should happen'),
+      actual_behavior: z.string().optional().describe('What actually happens'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'fixed',
@@ -412,6 +446,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Dev/QA devops actions ──────────────────────────────────────────────────
@@ -424,17 +459,13 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['file', 'diff', 'reasoning', 'base_commit', 'intent'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        file: { type: 'string', description: 'Path to the file to modify, relative to projectRoot' },
-        diff: { type: 'string', description: 'Unified diff (--- / +++ / @@ format). Must be minimal and targeted.' },
-        base_commit: { type: 'string', description: 'The git commit hash this diff is based on' },
-        intent: { type: 'string', enum: ['feature', 'bugfix', 'refactor', 'test', 'config'], description: 'Type of change' },
-        reasoning: { type: 'string', description: 'Why this change is needed. The reviewer sees this field and the diff.' },
-      },
-      required: ['file', 'diff', 'base_commit', 'reasoning'],
-    },
+    parameterSchema: z.object({
+      file: z.string().describe('Path to the file to modify, relative to projectRoot'),
+      diff: z.string().describe('Unified diff (--- / +++ / @@ format). Must be minimal and targeted.'),
+      base_commit: z.string().describe('The git commit hash this diff is based on'),
+      intent: z.enum(['feature', 'bugfix', 'refactor', 'test', 'config']).optional().describe('Type of change'),
+      reasoning: z.string().describe('Why this change is needed. The reviewer sees this field and the diff.'),
+    }),
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -442,6 +473,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['base_commit_mismatch', 'patch_size_exceeded', 'permission_failure'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'locked',
   },
 
   run_command: {
@@ -452,13 +484,9 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['command'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'The shell command to execute' },
-      },
-      required: ['command'],
-    },
+    parameterSchema: z.object({
+      command: z.string().describe('The shell command to execute'),
+    }),
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -466,6 +494,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['permission_failure', 'validation_failure'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'locked',
   },
 
   create_pr: {
@@ -476,15 +505,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['title', 'description', 'branch'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'Pull request title' },
-        description: { type: 'string', description: 'Pull request body/description (markdown)' },
-        branch: { type: 'string', description: 'Source branch name' },
-      },
-      required: ['title', 'branch'],
-    },
+    parameterSchema: z.object({
+      title: z.string().describe('Pull request title'),
+      description: z.string().optional().describe('Pull request body/description (markdown)'),
+      branch: z.string().describe('Source branch name'),
+    }),
     retryPolicy: {
       maxRetries: 2,
       strategy: 'exponential_backoff',
@@ -492,6 +517,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_failure', 'environment_failure'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
   },
 
   // ── Workflow orchestration (Phase 2) ────────────────────────────────────────
@@ -504,15 +530,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['worker_agent_slug', 'task_description', 'context'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        worker_agent_slug: { type: 'string', description: 'Slug of the worker agent to assign the task to' },
-        task_description: { type: 'string', description: 'Description of the task for the worker agent' },
-        context: { type: 'string', description: 'Additional context or instructions for the worker' },
-      },
-      required: ['worker_agent_slug', 'task_description'],
-    },
+    parameterSchema: z.object({
+      worker_agent_slug: z.string().describe('Slug of the worker agent to assign the task to'),
+      task_description: z.string().describe('Description of the task for the worker agent'),
+      context: z.string().optional().describe('Additional context or instructions for the worker'),
+    }),
     retryPolicy: {
       maxRetries: 1,
       strategy: 'fixed',
@@ -520,6 +542,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: ['validation_error'],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Page management actions ─────────────────────────────────────────────────
@@ -532,19 +555,15 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: true,
     payloadFields: ['projectId', 'slug', 'pageType', 'title', 'html', 'meta', 'formConfig'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        projectId: { type: 'string', description: 'ID of the page project to create the page in' },
-        slug: { type: 'string', description: 'URL slug for the page (must be unique within the project)' },
-        pageType: { type: 'string', enum: ['website', 'landing'], description: 'Type of page — website or landing page' },
-        title: { type: 'string', description: 'Page title' },
-        html: { type: 'string', description: 'HTML content for the page (max 1 MB). Will be sanitised before storage.' },
-        meta: { type: 'object', properties: { title: {}, description: {}, ogImage: {}, canonicalUrl: {}, noIndex: {} }, description: 'SEO and social meta fields' },
-        formConfig: { type: 'object', description: 'Optional form configuration for the page' },
-      },
-      required: ['projectId', 'slug', 'pageType', 'html'],
-    },
+    parameterSchema: z.object({
+      projectId: z.string().describe('ID of the page project to create the page in'),
+      slug: z.string().describe('URL slug for the page (must be unique within the project)'),
+      pageType: z.enum(['website', 'landing']).describe('Type of page — website or landing page'),
+      title: z.string().optional().describe('Page title'),
+      html: z.string().describe('HTML content for the page (max 1 MB). Will be sanitised before storage.'),
+      meta: z.record(z.string(), z.unknown()).optional().describe('SEO and social meta fields'),
+      formConfig: z.record(z.string(), z.unknown()).optional().describe('Optional form configuration for the page'),
+    }),
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -552,6 +571,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   update_page: {
@@ -562,18 +582,14 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: true,
     payloadFields: ['pageId', 'projectId', 'html', 'meta', 'formConfig', 'changeNote'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        pageId: { type: 'string', description: 'ID of the page to update' },
-        projectId: { type: 'string', description: 'ID of the project the page belongs to' },
-        html: { type: 'string', description: 'Updated HTML content (max 1 MB). Will be sanitised before storage.' },
-        meta: { type: 'object', description: 'Updated SEO and social meta fields' },
-        formConfig: { type: 'object', description: 'Updated form configuration' },
-        changeNote: { type: 'string', description: 'Brief note describing the change (stored with the version snapshot)' },
-      },
-      required: ['pageId', 'projectId'],
-    },
+    parameterSchema: z.object({
+      pageId: z.string().describe('ID of the page to update'),
+      projectId: z.string().describe('ID of the project the page belongs to'),
+      html: z.string().optional().describe('Updated HTML content (max 1 MB). Will be sanitised before storage.'),
+      meta: z.record(z.string(), z.unknown()).optional().describe('Updated SEO and social meta fields'),
+      formConfig: z.record(z.string(), z.unknown()).optional().describe('Updated form configuration'),
+      changeNote: z.string().optional().describe('Brief note describing the change (stored with the version snapshot)'),
+    }),
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -581,6 +597,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   publish_page: {
@@ -591,14 +608,10 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: true,
     payloadFields: ['pageId', 'projectId'],
-    parameterSchema: {
-      type: 'object',
-      properties: {
-        pageId: { type: 'string', description: 'ID of the page to publish' },
-        projectId: { type: 'string', description: 'ID of the project the page belongs to' },
-      },
-      required: ['pageId', 'projectId'],
-    },
+    parameterSchema: z.object({
+      pageId: z.string().describe('ID of the page to publish'),
+      projectId: z.string().describe('ID of the project the page belongs to'),
+    }),
     retryPolicy: {
       maxRetries: 0,
       strategy: 'none',
@@ -606,6 +619,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       doNotRetryOn: [],
     },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   // ── Cross-Subaccount Intelligence Skills (Phase 3) ──────────────────────
@@ -618,9 +632,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['tag_filters'],
-    parameterSchema: { type: 'object', properties: { tag_filters: { type: 'string', description: 'Tag filters JSON' } }, required: [] },
+    parameterSchema: z.object({
+      tag_filters: z.string().optional().describe('Tag filters JSON'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   read_org_insights: {
@@ -631,9 +648,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: [],
-    parameterSchema: { type: 'object', properties: { semantic_query: { type: 'string', description: 'Semantic search query' } }, required: [] },
+    parameterSchema: z.object({
+      semantic_query: z.string().optional().describe('Semantic search query'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   write_org_insight: {
@@ -644,9 +664,13 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['content', 'entry_type'],
-    parameterSchema: { type: 'object', properties: { content: { type: 'string', description: 'Insight content' }, entry_type: { type: 'string', description: 'Insight type' } }, required: ['content', 'entry_type'] },
+    parameterSchema: z.object({
+      content: z.string().describe('Insight content'),
+      entry_type: z.string().describe('Insight type'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
   },
 
   compute_health_score: {
@@ -657,9 +681,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['account_id'],
-    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' } }, required: ['account_id'] },
+    parameterSchema: z.object({
+      account_id: z.string().describe('Canonical account ID'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   detect_anomaly: {
@@ -670,9 +697,14 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['account_id', 'metric_name', 'current_value'],
-    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' }, metric_name: { type: 'string', description: 'Metric name' }, current_value: { type: 'string', description: 'Current metric value' } }, required: ['account_id', 'metric_name', 'current_value'] },
+    parameterSchema: z.object({
+      account_id: z.string().describe('Canonical account ID'),
+      metric_name: z.string().describe('Metric name'),
+      current_value: z.string().describe('Current metric value'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   compute_churn_risk: {
@@ -683,9 +715,12 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: ['account_id'],
-    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' } }, required: ['account_id'] },
+    parameterSchema: z.object({
+      account_id: z.string().describe('Canonical account ID'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   generate_portfolio_report: {
@@ -696,9 +731,13 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'auto',
     createsBoardTask: false,
     payloadFields: [],
-    parameterSchema: { type: 'object', properties: { reporting_period_days: { type: 'string', description: 'Days to cover' }, format: { type: 'string', description: 'Output format' } }, required: [] },
+    parameterSchema: z.object({
+      reporting_period_days: z.string().optional().describe('Days to cover'),
+      format: z.string().optional().describe('Output format'),
+    }),
     retryPolicy: { maxRetries: 1, strategy: 'fixed', retryOn: ['db_error'], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
   },
 
   trigger_account_intervention: {
@@ -709,9 +748,14 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['account_id', 'intervention_type', 'evidence_summary'],
-    parameterSchema: { type: 'object', properties: { account_id: { type: 'string', description: 'Canonical account ID' }, intervention_type: { type: 'string', description: 'Intervention type' }, evidence_summary: { type: 'string', description: 'Evidence justification' } }, required: ['account_id', 'intervention_type', 'evidence_summary'] },
+    parameterSchema: z.object({
+      account_id: z.string().describe('Canonical account ID'),
+      intervention_type: z.string().describe('Intervention type'),
+      evidence_summary: z.string().describe('Evidence justification'),
+    }),
     retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
     mcp: { annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
   },
 };
 

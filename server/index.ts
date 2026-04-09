@@ -332,6 +332,14 @@ async function start() {
       console.error('[boot] failed to register playbook engine workers', err);
     }
   }
+  // Reconcile any scheduled-task runs left in `retrying` from a previous
+  // process — their in-process retry timer was lost on restart.
+  try {
+    const { scheduledTaskService } = await import('./services/scheduledTaskService.js');
+    await scheduledTaskService.reconcileRetryingRuns();
+  } catch (err) {
+    console.error('[boot] scheduled task retry reconciliation failed', err);
+  }
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {
