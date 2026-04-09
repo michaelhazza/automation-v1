@@ -116,6 +116,89 @@ function requireSubaccountContext(context: SkillExecutionContext, skillName: str
 }
 
 // ---------------------------------------------------------------------------
+// onFailure dispatch (P0.2 Slice C of docs/improvements-roadmap-spec.md)
+//
+// When a skill handler throws or returns { success: false, ... }, look up
+// the action definition's `onFailure` directive and dispatch:
+//
+//   - 'retry' (default)  — propagate the original error / failure object
+//                          unchanged. Caller is responsible for retry logic
+//                          (withBackoff / TripWire / agent loop).
+//   - 'skip'             — return { success: false, skipped: true, reason }
+//                          to the LLM. The agent loop continues without the
+//                          result. Used for non-essential reads.
+//   - 'fail_run'         — terminate the entire agent run via the closed
+//                          FailureReason enum. Caller catches via FailureError.
+//   - 'fallback'         — return actionDef.fallbackValue as the result
+//                          instead of failing. Used for read-only tools where
+//                          a stale or empty value is preferable.
+// ---------------------------------------------------------------------------
+
+import { failure, FailureError } from '../../shared/iee/failure.js';
+
+function applyOnFailure(toolSlug: string, err: unknown, _input: Record<string, unknown>): unknown {
+  const actionDef = getActionDefinition(toolSlug);
+  const directive = actionDef?.onFailure ?? 'retry';
+
+  switch (directive) {
+    case 'skip':
+      return {
+        success: false,
+        skipped: true,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    case 'fail_run':
+      throw new FailureError(failure(
+        'execution_error',
+        `${toolSlug}: ${err instanceof Error ? err.message : String(err)}`,
+        { toolSlug, source: 'onFailure:fail_run' },
+      ));
+    case 'fallback':
+      return {
+        success: true,
+        usedFallback: true,
+        value: actionDef?.fallbackValue,
+      };
+    case 'retry':
+    default:
+      // Propagate — let the caller's retry logic handle it.
+      throw err;
+  }
+}
+
+function applyOnFailureForStructuredFailure(
+  toolSlug: string,
+  result: Record<string, unknown>,
+): unknown {
+  const actionDef = getActionDefinition(toolSlug);
+  const directive = actionDef?.onFailure ?? 'retry';
+
+  switch (directive) {
+    case 'skip':
+      return {
+        success: false,
+        skipped: true,
+        reason: String(result.error ?? 'skill returned success: false'),
+      };
+    case 'fail_run':
+      throw new FailureError(failure(
+        'execution_error',
+        `${toolSlug}: ${String(result.error ?? 'structured failure')}`,
+        { toolSlug, source: 'onFailure:fail_run' },
+      ));
+    case 'fallback':
+      return {
+        success: true,
+        usedFallback: true,
+        value: actionDef?.fallbackValue,
+      };
+    case 'retry':
+    default:
+      return result; // unchanged — pass the structured failure to the caller
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Per-tool processor hooks registry
 // Maps action type slug → ProcessorHooks (input/output transform pipeline)
 // ---------------------------------------------------------------------------
@@ -173,7 +256,7 @@ async function runWithProcessors(
     }
   }
 
-  // Execute
+  // Execute — dispatch on actionDef.onFailure (P0.2 Slice C) for failures.
   let result: unknown;
   try {
     result = await executor(processedInput);
@@ -181,7 +264,21 @@ async function runWithProcessors(
     if (err instanceof TripWire) {
       return { success: false, error: err.reason, retryable: err.options.retry };
     }
-    throw err;
+    // Non-TripWire failure — apply the action's onFailure directive if declared.
+    return applyOnFailure(toolSlug, err, processedInput);
+  }
+
+  // Successful return value but the executor signalled a structured failure.
+  // Apply onFailure here too so 'skip' / 'fallback' fire on either error path.
+  if (
+    result !== null &&
+    typeof result === 'object' &&
+    (result as { success?: unknown }).success === false
+  ) {
+    const directive = getActionDefinition(toolSlug)?.onFailure;
+    if (directive && directive !== 'retry') {
+      return applyOnFailureForStructuredFailure(toolSlug, result as Record<string, unknown>);
+    }
   }
 
   // Phase 3: processOutputStep (after execute)
