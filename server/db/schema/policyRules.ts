@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, real, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 
@@ -38,6 +38,17 @@ export const policyRules = pgTable(
 
     timeoutSeconds: integer('timeout_seconds'),
     timeoutPolicy: text('timeout_policy').$type<'auto_reject' | 'auto_approve' | 'escalate'>(),
+
+    // Sprint 3 P2.3 — per-rule confidence gate override. NULL falls back to
+    // CONFIDENCE_GATE_THRESHOLD in server/config/limits.ts. When a matching
+    // rule produces an `auto` decision but the agent's tool_intent confidence
+    // is below this threshold, the decision is upgraded to `review`.
+    confidenceThreshold: real('confidence_threshold'),
+    // Sprint 3 P2.3 — situational guidance injected as a <system-reminder>
+    // block by decisionTimeGuidanceMiddleware the moment a matching tool is
+    // about to be called. Replaces "front-load everything in the master
+    // prompt" with targeted, context-aware instructions.
+    guidanceText: text('guidance_text'),
 
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

@@ -54,6 +54,14 @@ export interface ProposeActionInput {
   gateOverride?: 'auto' | 'review' | 'block';
   /** If the agent is working a specific task, pass its ID for gate escalation */
   taskId?: string;
+  /**
+   * Sprint 3 P2.3 — agent's self-reported tool_intent confidence (0..1).
+   * Threaded through to the policy engine which upgrades an `auto`
+   * decision to `review` when confidence is below the effective
+   * threshold. Missing / null is treated as "below threshold" (fail
+   * closed). See server/config/limits.ts → CONFIDENCE_GATE_THRESHOLD.
+   */
+  toolIntentConfidence?: number | null;
 }
 
 export interface ProposeActionResult {
@@ -379,6 +387,7 @@ async function resolveGateLevel(
     subaccountId: input.subaccountId!,
     organisationId: input.organisationId,
     input: input.payload,
+    toolIntentConfidence: input.toolIntentConfidence,
   });
   let gate = policyDecision.decision;
 

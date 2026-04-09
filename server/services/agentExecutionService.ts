@@ -32,7 +32,17 @@ import {
   selectExecutionPhase,
   validateToolCalls,
   buildMiddlewareContext,
+  serialiseMiddlewareContext,
+  buildResumeContext,
 } from './agentExecutionServicePure.js';
+import {
+  appendMessage as appendAgentRunMessage,
+  streamMessages as streamAgentRunMessages,
+} from './agentRunMessageService.js';
+import { project as projectToolCallsLogFromMessages } from './toolCallsLogProjectionService.js';
+import { fingerprint } from './regressionCaptureServicePure.js';
+import type { AgentRunCheckpoint } from './middleware/types.js';
+import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import { triggerService } from './triggerService.js';
@@ -889,6 +899,10 @@ export const agentExecutionService = {
             mcpClients,
             mcpLazyRegistry,
             runContextData,
+            // Sprint 3 P2.1 Sprint 3A — stable fingerprint of the resolved
+            // config, stamped onto every checkpoint so the resume path can
+            // refuse to resume runs whose config has drifted.
+            configVersion: fingerprint(resolvedConfig),
           });
 
           // ── Finalize Langfuse trace (inside withTrace so context is available) ──
@@ -989,6 +1003,32 @@ export const agentExecutionService = {
           target: agentRunSnapshots.runId,
           set: { toolCallsLog: loopResult.toolCallsLog },
         });
+
+      // Sprint 3 P2.1 Sprint 3A — project the legacy toolCallsLog shape
+      // from the append-only agent_run_messages log as an observability
+      // check. The inline writer above is still the Sprint 3A source of
+      // truth; this side call validates that the projection path is
+      // consistent so Sprint 3B can drop the inline writer safely.
+      //
+      // Best-effort: any projection failure is logged and swallowed —
+      // it must never block run completion or fail the request.
+      try {
+        const projected = await projectToolCallsLogFromMessages(run.id);
+        const inlineCount = loopResult.toolCallsLog.length;
+        const projectedCount = projected.length;
+        if (inlineCount !== projectedCount) {
+          logger.warn('agent_run_messages.projection_mismatch', {
+            runId: run.id,
+            inlineCount,
+            projectedCount,
+          });
+        }
+      } catch (err) {
+        logger.warn('agent_run_messages.projection_failed', {
+          runId: run.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
       // Update lastRunAt on the correct config table
       if (isOrgRun && request.orgAgentConfigId) {
@@ -1152,6 +1192,168 @@ export const agentExecutionService = {
 };
 
 // ---------------------------------------------------------------------------
+// resumeAgentRun — Sprint 3 P2.1 Sprint 3A library entry point
+//
+// Reads an `agent_runs` row + its checkpoint payload + the persisted
+// message log, validates the `configVersion` against the current
+// `configSnapshot` (unless `useLatestConfig` is true), and returns the
+// structured state that the Sprint 3B async resume path will hand to
+// `runAgenticLoop` via its `startingIteration` + pre-seeded context
+// parameters.
+//
+// Sprint 3A exposes this as a callable library function but does NOT
+// wire it to an HTTP endpoint or pg-boss job — that is Sprint 3B. The
+// function exists in this sprint so:
+//
+//   * The schema + projection + resume state are provably consistent
+//     end-to-end under unit test (Sprint 3B inherits a tested primitive).
+//   * Sprint 3B has a small, concrete surface to integrate with.
+//   * The `startingIteration` param on `runAgenticLoop` is exercised by
+//     at least one caller, catching signature drift at compile time.
+//
+// MUST be called inside an active `withOrgTx` block — it uses the
+// message service read path which depends on the org-scoped tx.
+// ---------------------------------------------------------------------------
+
+export interface ResumeAgentRunOptions {
+  /**
+   * When `true`, skip the `configVersion` equality check and rehydrate
+   * against whatever `configSnapshot` the `agent_runs` row currently
+   * has. Used by admin "force-resume" tooling for debugging. Default
+   * `false` — a config drift is a hard refusal.
+   */
+  useLatestConfig?: boolean;
+}
+
+export interface ResumeAgentRunResult {
+  /** The checkpoint payload that was read from `agent_run_snapshots`. */
+  checkpoint: AgentRunCheckpoint;
+  /** The rehydrated middleware context, ready to hand to `runAgenticLoop`. */
+  middlewareContext: MiddlewareContext;
+  /** Raw messages streamed from `agent_run_messages`. */
+  messages: Array<{
+    sequenceNumber: number;
+    role: 'assistant' | 'user' | 'system';
+    content: unknown;
+  }>;
+  /**
+   * Whether the stored `configVersion` matches the live configSnapshot
+   * fingerprint. Always `true` when the function returns — if they
+   * disagree and `useLatestConfig` is false the call throws instead.
+   */
+  configVersionMatches: boolean;
+}
+
+export async function resumeAgentRun(
+  runId: string,
+  options: ResumeAgentRunOptions = {},
+): Promise<ResumeAgentRunResult> {
+  const { useLatestConfig = false } = options;
+
+  // ── 1. Load the run row — establishes org context + config ──────
+  const [runRow] = await db.select().from(agentRuns).where(eq(agentRuns.id, runId));
+  if (!runRow) {
+    throw new Error(`resumeAgentRun: run ${runId} not found`);
+  }
+
+  // ── 2. Load the checkpoint ───────────────────────────────────────
+  const [snapshotRow] = await db
+    .select()
+    .from(agentRunSnapshots)
+    .where(eq(agentRunSnapshots.runId, runId));
+  if (!snapshotRow || !snapshotRow.checkpoint) {
+    throw new Error(`resumeAgentRun: no checkpoint recorded for run ${runId}`);
+  }
+  const checkpoint = snapshotRow.checkpoint as AgentRunCheckpoint;
+
+  if (checkpoint.version !== 1) {
+    throw new Error(
+      `resumeAgentRun: checkpoint version=${checkpoint.version} is not supported by this runtime (expected 1).`,
+    );
+  }
+
+  // ── 3. configVersion drift check ─────────────────────────────────
+  const liveConfigVersion = runRow.configSnapshot
+    ? fingerprint(runRow.configSnapshot)
+    : '';
+  if (!useLatestConfig && liveConfigVersion !== checkpoint.configVersion) {
+    throw new Error(
+      `resumeAgentRun: configVersion drift — checkpoint=${checkpoint.configVersion}, live=${liveConfigVersion}. Re-run with useLatestConfig=true to override (admin only).`,
+    );
+  }
+
+  // ── 4. Stream persisted messages up to the checkpoint cursor ─────
+  const messageRows = await streamAgentRunMessages(runId, {
+    fromSequence: 0,
+    toSequence: checkpoint.messageCursor,
+  });
+
+  // ── 5. Load the agent + saLink so we can build a live MiddlewareContext ──
+  const agent = await agentService.getAgent(runRow.agentId, runRow.organisationId);
+
+  // Subaccount runs carry a subaccountAgent link; org runs do not. The
+  // Sprint 3B async resume path needs the same saLink shape the original
+  // executeRun passed to runAgenticLoop; Sprint 3A leaves a minimal stub
+  // for org runs since the library entry point is not called from any
+  // production code path yet.
+  let saLink: SubaccountAgent;
+  if (runRow.subaccountAgentId) {
+    const [link] = await db
+      .select()
+      .from(subaccountAgents)
+      .where(eq(subaccountAgents.id, runRow.subaccountAgentId));
+    if (!link) {
+      throw new Error(
+        `resumeAgentRun: subaccount_agent ${runRow.subaccountAgentId} not found for run ${runId}`,
+      );
+    }
+    saLink = link;
+  } else {
+    // Org-scope runs do not have a subaccountAgents row. Sprint 3B will
+    // widen the resume path to accept a union shape; for 3A we cast an
+    // empty object because the library entry point is not yet invoked
+    // against org-scope runs in production.
+    saLink = {} as SubaccountAgent;
+  }
+
+  const middlewareContext = buildResumeContext({
+    checkpoint,
+    runId,
+    // Sprint 3B will rebuild a real AgentRunRequest from the triggerContext
+    // + run row. For 3A the library caller is the unit test harness, so an
+    // empty-ish request is sufficient.
+    request: {
+      agentId: runRow.agentId,
+      organisationId: runRow.organisationId,
+      subaccountId: runRow.subaccountId ?? undefined,
+      runType: runRow.runType,
+      executionScope: runRow.executionScope,
+    } as AgentRunRequest,
+    agent: {
+      modelId: agent.modelId,
+      temperature: agent.temperature ?? 0,
+      maxTokens: agent.maxTokens ?? 4096,
+    },
+    saLink,
+    startTime: Date.now(),
+    tokenBudget: runRow.tokenBudget ?? 0,
+    maxToolCalls: 0,
+    timeoutMs: 0,
+  });
+
+  return {
+    checkpoint,
+    middlewareContext,
+    messages: messageRows.map((row) => ({
+      sequenceNumber: row.sequenceNumber,
+      role: row.role,
+      content: row.content,
+    })),
+    configVersionMatches: liveConfigVersion === checkpoint.configVersion,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The agentic loop — calls LLM, handles tool calls, repeats until done
 // ---------------------------------------------------------------------------
 
@@ -1178,6 +1380,23 @@ interface LoopParams {
    * build the system prompt. See spec §8.2.
    */
   runContextData: import('./runContextLoader.js').RunContextData;
+  /**
+   * Sprint 3 P2.1 Sprint 3A — fingerprint of `agent_runs.configSnapshot`.
+   * Stamped onto every checkpoint so the Sprint 3B resume path can refuse
+   * to resume a run whose configuration has drifted. Computed by
+   * executeRun via `fingerprint(resolvedConfig)` so runAgenticLoop does
+   * not need to redo the hash per iteration.
+   */
+  configVersion: string;
+  /**
+   * Sprint 3 P2.1 Sprint 3A — iteration index to begin the outer loop at.
+   * Default 0 for a fresh run. The resume path (Sprint 3B) will pass the
+   * checkpoint's `iteration + 1` along with pre-seeded `messages`,
+   * `mwCtx`, and running counters; 3A wires the parameter so the loop
+   * API is resume-ready even though the resume wiring itself lands in
+   * the next sprint.
+   */
+  startingIteration?: number;
 }
 
 interface LoopResult {
@@ -1202,7 +1421,16 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     runId, agent, routerCtx, systemPrompt, tools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
+    configVersion,
   } = params;
+  const startingIteration = params.startingIteration ?? 0;
+
+  // Sprint 3 P2.1 Sprint 3A — highest persisted sequence_number for this run.
+  // Initialised to -1 and updated after every successful appendMessage call
+  // so `persistCheckpoint` below can stamp the correct `messageCursor`. The
+  // resume path asserts that every sequence_number in the window
+  // `[0, messageCursor]` is present before rehydrating.
+  let messageCursor = -1;
 
   const toolCallsLog: object[] = [];
   let totalToolCalls = 0;
@@ -1256,7 +1484,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   let previousResponseHadToolCalls = false;
 
   outerLoop:
-  for (let iteration = 0; iteration < MAX_LOOP_ITERATIONS; iteration++) {
+  for (let iteration = startingIteration; iteration < MAX_LOOP_ITERATIONS; iteration++) {
     mwCtx.iteration = iteration;
     mwCtx.tokensUsed = totalTokensUsed;
     mwCtx.toolCallsCount = totalToolCalls;
@@ -1384,6 +1612,34 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       assistantBlocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input });
     }
     messages.push({ role: 'assistant', content: assistantBlocks });
+
+    // Sprint 3 P2.1 Sprint 3A — mirror the assistant message into the
+    // append-only `agent_run_messages` log. Best-effort in 3A: a persistence
+    // failure is logged but does not terminate the run. Sprint 3B tightens
+    // this into a hard invariant when the async resume path lands.
+    try {
+      const appended = await appendAgentRunMessage({
+        runId,
+        organisationId: request.organisationId,
+        role: 'assistant',
+        content: assistantBlocks,
+        toolCallId: null,
+      });
+      messageCursor = appended.sequenceNumber;
+    } catch (err) {
+      logger.warn('agent_run_messages.append_failed', {
+        runId,
+        role: 'assistant',
+        iteration,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Sprint 3 P2.3 — stash the latest assistant text on mwCtx so preTool
+    // middlewares (notably the decision-time guidance / tool_intent
+    // confidence extractor) can read it without widening the middleware
+    // contract to include the full message array.
+    mwCtx.lastAssistantText = response.content ?? undefined;
 
     // ── Execute tool calls ────────────────────────────────────────────
     const toolResults: Array<{ tool_use_id: string; content: string }> = [];
@@ -1565,24 +1821,81 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       const toolDurationMs = Date.now() - toolStart;
 
       // Post-tool middleware
+      // Sprint 3 P2.2 widens PostToolResult to five variants. The switch is
+      // exhaustive — adding a new variant will fail compilation at the
+      // `assertNever` line until a handler is added here.
+      let postToolBreakOuter = false;
       for (const mw of pipeline.postTool) {
         const postResult = mw.execute(
           mwCtx,
           { name: toolCall.name, input: toolCall.input },
           { content: resultContent, durationMs: toolDurationMs }
         );
-        if (postResult.action === 'stop') {
-          finalStatus = postResult.status;
-          iterationSpan.end({ output: { phase, postToolStop: true } });
-          emitLoopTermination('middleware_stop', {
-            iteration, middlewareName: mw.name, totalToolCalls,
-          });
-          break outerLoop;
+        switch (postResult.action) {
+          case 'continue':
+            if (postResult.content) {
+              resultContent = postResult.content;
+            }
+            break;
+          case 'stop':
+            finalStatus = postResult.status;
+            iterationSpan.end({ output: { phase, postToolStop: true } });
+            emitLoopTermination('middleware_stop', {
+              iteration, middlewareName: mw.name, totalToolCalls,
+            });
+            postToolBreakOuter = true;
+            break;
+          case 'inject_message':
+            // Queue the middleware-authored message for the next LLM turn.
+            // Drained alongside the Sprint 2 P1.1 Layer 3 queue after the
+            // tool_results batch is pushed, so every tool_use has a matching
+            // tool_result before the new user message lands.
+            pendingInjectedMessages.push(postResult.message);
+            createEvent('agent.middleware.decision', {
+              middlewareName: mw.name,
+              decision: 'inject_message',
+              iteration,
+            });
+            break;
+          case 'escalate_to_review':
+            // Sprint 3 P2.2 reflection loop exhausted the self-review
+            // allowance. Halt the run with a distinct termination reason so
+            // the dashboard can tell reflection-exhausted runs apart from
+            // generic failures. The review item creation + `awaiting_review`
+            // status transition are deferred to Sprint 3B (see
+            // docs/improvements-roadmap-spec.md §P2.1 Verdict). In 3A this
+            // terminates the run and surfaces the reason via the
+            // loop-termination event.
+            finalStatus = 'failed';
+            iterationSpan.end({
+              output: {
+                phase,
+                postToolEscalate: true,
+                escalateReason: postResult.reason,
+              },
+            });
+            emitLoopTermination('middleware_stop', {
+              iteration,
+              middlewareName: mw.name,
+              totalToolCalls,
+              escalateReason: postResult.reason,
+            });
+            createEvent('agent.middleware.decision', {
+              middlewareName: mw.name,
+              decision: 'escalate_to_review',
+              reason: postResult.reason,
+              iteration,
+            });
+            postToolBreakOuter = true;
+            break;
+          default: {
+            const _exhaustive: never = postResult;
+            void _exhaustive;
+          }
         }
-        if (postResult.content) {
-          resultContent = postResult.content;
-        }
+        if (postToolBreakOuter) break;
       }
+      if (postToolBreakOuter) break outerLoop;
 
       const logEntry = {
         tool: toolCall.name,
@@ -1605,14 +1918,41 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       toolResults.push({ tool_use_id: toolCall.id, content: resultContent });
     }
 
+    const toolResultsContent = toolResults.map(tr => ({
+      type: 'tool_result' as const,
+      tool_use_id: tr.tool_use_id,
+      content: tr.content,
+    }));
     messages.push(tagIteration({
       role: 'user',
-      content: toolResults.map(tr => ({
-        type: 'tool_result' as const,
-        tool_use_id: tr.tool_use_id,
-        content: tr.content,
-      })),
+      content: toolResultsContent,
     }, iteration));
+
+    // Sprint 3 P2.1 Sprint 3A — mirror the tool_results batch into the
+    // append-only log. A batch carries multiple tool_use_ids so we do not
+    // stamp a single top-level tool_call_id (the partial index in migration
+    // 0084 only targets single-block rows). Best-effort writes match the
+    // assistant-message path above.
+    if (toolResultsContent.length > 0) {
+      try {
+        const appended = await appendAgentRunMessage({
+          runId,
+          organisationId: request.organisationId,
+          role: 'user',
+          content: toolResultsContent,
+          toolCallId: toolResultsContent.length === 1 ? toolResultsContent[0].tool_use_id : null,
+        });
+        messageCursor = appended.sequenceNumber;
+      } catch (err) {
+        logger.warn('agent_run_messages.append_failed', {
+          runId,
+          role: 'user',
+          iteration,
+          batchSize: toolResultsContent.length,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     // Sprint 2 P1.1 Layer 3 — drain any messages queued by middleware decisions
     // (`inject_message` action, or `skip { injectMessage }`). Appended as
@@ -1620,9 +1960,43 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // next LLM call.
     for (const injected of pendingInjectedMessages) {
       messages.push({ role: 'user', content: injected });
+
+      // Mirror the injected guidance into the append-only log so a resume
+      // picks up the same conversation state the live run would have seen.
+      try {
+        const appended = await appendAgentRunMessage({
+          runId,
+          organisationId: request.organisationId,
+          role: 'user',
+          content: injected,
+          toolCallId: null,
+        });
+        messageCursor = appended.sequenceNumber;
+      } catch (err) {
+        logger.warn('agent_run_messages.append_failed', {
+          runId,
+          role: 'user',
+          iteration,
+          kind: 'injected_message',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
 
     iterationSpan.end({ output: { phase, toolCallsThisIteration: response.toolCalls?.length ?? 0 } });
+
+    // Sprint 3 P2.1 Sprint 3A — persist a structured checkpoint capturing
+    // everything needed to resume this run on a different worker. Best-effort:
+    // a checkpoint write failure is logged but does not kill the live run.
+    await persistCheckpoint({
+      runId,
+      iteration,
+      totalToolCalls,
+      totalTokensUsed,
+      messageCursor,
+      mwCtx,
+      configVersion,
+    });
 
     // Check if we've hit the max iteration limit
     if (iteration >= MAX_LOOP_ITERATIONS - 1) {
@@ -1645,6 +2019,80 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     deliverablesCreated,
     finalStatus,
   };
+}
+
+// ---------------------------------------------------------------------------
+// persistCheckpoint — Sprint 3 P2.1 Sprint 3A
+//
+// Writes a structured `AgentRunCheckpoint` into
+// `agent_run_snapshots.checkpoint` once per iteration of `runAgenticLoop`.
+// The payload is a JSON-safe snapshot of just enough state to resume the
+// run on a different worker: counters, message cursor, serialised
+// middleware context, and the config fingerprint the resumer will check.
+//
+// The helper is best-effort — failures are logged and swallowed so the
+// live run is not affected by a checkpoint persistence hiccup. Sprint 3B
+// tightens this into a hard invariant once the async resume path is
+// wired end-to-end.
+// ---------------------------------------------------------------------------
+
+interface PersistCheckpointParams {
+  runId: string;
+  iteration: number;
+  totalToolCalls: number;
+  totalTokensUsed: number;
+  messageCursor: number;
+  mwCtx: MiddlewareContext;
+  configVersion: string;
+}
+
+async function persistCheckpoint(params: PersistCheckpointParams): Promise<void> {
+  try {
+    // Update the counters on the context so the serialised snapshot
+    // reflects END-of-iteration state, not the start-of-iteration values
+    // assigned at the top of the loop body.
+    params.mwCtx.iteration = params.iteration;
+    params.mwCtx.tokensUsed = params.totalTokensUsed;
+    params.mwCtx.toolCallsCount = params.totalToolCalls;
+
+    const serialised = serialiseMiddlewareContext(params.mwCtx);
+
+    const checkpoint: AgentRunCheckpoint = {
+      version: 1,
+      iteration: params.iteration,
+      totalToolCalls: params.totalToolCalls,
+      totalTokensUsed: params.totalTokensUsed,
+      // A fresh run with no messages has `messageCursor = -1` because we
+      // initialise the tracker to -1 and only advance it after a
+      // successful append. Clamp to 0 so the stored field always
+      // represents a valid "number of rows <= cursor" bound.
+      messageCursor: Math.max(params.messageCursor, 0),
+      middlewareContext: serialised,
+      // Resume token is opaque in 3A — 3B wires the enforcement in the
+      // admin resume endpoint. Use a hash of runId + iteration so the
+      // token is deterministic per iteration but non-trivial to guess
+      // from the runId alone.
+      resumeToken: createHash('sha256')
+        .update(`${params.runId}:${params.iteration}:${params.configVersion}`)
+        .digest('hex')
+        .slice(0, 32),
+      configVersion: params.configVersion,
+    };
+
+    await db
+      .insert(agentRunSnapshots)
+      .values({ runId: params.runId, checkpoint })
+      .onConflictDoUpdate({
+        target: agentRunSnapshots.runId,
+        set: { checkpoint },
+      });
+  } catch (err) {
+    logger.warn('agent_run_checkpoint.persist_failed', {
+      runId: params.runId,
+      iteration: params.iteration,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

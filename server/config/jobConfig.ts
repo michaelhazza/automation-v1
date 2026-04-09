@@ -134,6 +134,15 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     idempotencyStrategy: 'fifo' as const,
   },
+  // Sprint 3 P2.1 Sprint 3A — prune terminal agent_runs (and their
+  // cascade-linked agent_run_snapshots + agent_run_messages rows) per
+  // organisations.run_retention_days. Admin-bypass job (cross-org
+  // sweep). Each tick re-reads the current DB state so duplicate
+  // deliveries are a no-op; idempotencyStrategy: 'fifo'.
+  'agent-run-cleanup': {
+    expireInSeconds: 600,
+    idempotencyStrategy: 'fifo' as const,
+  },
   // Sprint 2 P1.2 — capture a regression_cases row when a human rejects
   // a review item. Best-effort: retries twice then gives up (skipped
   // cases are OK — regression capture is additive, not critical path).

@@ -14,6 +14,7 @@
  */
 
 import { matchesRule } from '../policyEngineService.js';
+import { applyConfidenceUpgrade } from '../policyEngineServicePure.js';
 import type { PolicyRule } from '../../db/schema/policyRules.js';
 
 let passed = 0;
@@ -55,6 +56,10 @@ function rule(partial: Partial<PolicyRule> = {}): PolicyRule {
     descriptionTemplate: null,
     timeoutSeconds: null,
     timeoutPolicy: null,
+    // Sprint 3 P2.3 — nullable columns default to null so existing tests
+    // stay unaffected by the schema extension.
+    confidenceThreshold: null,
+    guidanceText: null,
     isActive: true,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -207,6 +212,74 @@ test('subaccount mismatch short-circuits even if conditions would match', () => 
     ),
     'subaccount gate beats condition match',
   );
+});
+
+// ── Sprint 3 P2.3 confidence gate + guidance field compatibility ─────────
+test('rule with confidenceThreshold populated still matches on scope', () => {
+  // The confidence threshold has zero effect on matchesRule — it's
+  // applied after the first-match loop by applyConfidenceUpgrade. This
+  // test locks in that invariant: populating the new column must not
+  // change the matcher's behaviour.
+  const r = rule({ confidenceThreshold: 0.85 });
+  assert(
+    matchesRule(r, {
+      toolSlug: 'send_email',
+      subaccountId: SUB_X,
+      organisationId: ORG_A,
+    }),
+    'matcher ignores confidenceThreshold',
+  );
+});
+
+test('rule with guidanceText populated still matches on scope', () => {
+  // Same invariant for guidanceText — it is consumed by
+  // selectGuidanceTexts, not by matchesRule.
+  const r = rule({ guidanceText: 'Remember to verify the recipient.' });
+  assert(
+    matchesRule(r, {
+      toolSlug: 'send_email',
+      subaccountId: SUB_X,
+      organisationId: ORG_A,
+    }),
+    'matcher ignores guidanceText',
+  );
+});
+
+test('confidence gate upgrades auto rule when agent confidence is low', () => {
+  // Composition check: a matched auto rule combined with a
+  // below-threshold confidence ends up as review.
+  const r = rule({ decision: 'auto' });
+  assert(
+    matchesRule(r, {
+      toolSlug: 'send_email',
+      subaccountId: SUB_X,
+      organisationId: ORG_A,
+    }),
+    'rule matches',
+  );
+  const upgraded = applyConfidenceUpgrade(
+    r.decision as 'auto',
+    { toolIntentConfidence: 0.4 },
+    0.7,
+    r.confidenceThreshold,
+  );
+  assert(upgraded.decision === 'review', 'auto must upgrade to review');
+  assert(upgraded.upgradedByConfidence === true, 'upgrade flag set');
+});
+
+test('per-rule confidence override overrides the global default', () => {
+  // Rule-specific threshold 0.95 beats the global 0.7 — confidence of
+  // 0.8 is now below the effective threshold and the auto decision is
+  // upgraded to review.
+  const r = rule({ decision: 'auto', confidenceThreshold: 0.95 });
+  const upgraded = applyConfidenceUpgrade(
+    r.decision as 'auto',
+    { toolIntentConfidence: 0.8 },
+    0.7,
+    r.confidenceThreshold,
+  );
+  assert(upgraded.decision === 'review', 'per-rule override upgrades');
+  assert(upgraded.effectiveThreshold === 0.95, 'effective threshold reported');
 });
 
 console.log('');

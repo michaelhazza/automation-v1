@@ -280,6 +280,57 @@ export async function callAnthropic(params: {
 // Build the formatted system prompt including data source context
 // ---------------------------------------------------------------------------
 
+// Sprint 3 P2.3 — `tool_intent` convention.
+//
+// Every tool call the agent emits must be preceded by a `<tool_intent>`
+// block in the assistant message so the confidence gate in
+// `policyEngineService.evaluatePolicy` can upgrade low-confidence `auto`
+// decisions to `review`. The snippet below is appended to every system
+// prompt built by `buildSystemPrompt`. It is intentionally short —
+// P2.3's thesis is that targeted decision-time guidance beats a bloated
+// master prompt, so this is the minimum viable contract: format,
+// placement, consequence of omission.
+//
+// The parser `extractToolIntentConfidence` in
+// `agentExecutionServicePure.ts` treats a missing or malformed block as
+// "unknown confidence" → auto-upgrade to review (fail closed).
+const TOOL_INTENT_CONVENTION_SNIPPET = `
+
+---
+## Tool-Intent Convention
+
+Before every tool call you emit, include a \`<tool_intent>\` block in the
+same assistant message declaring your self-reported confidence for the
+call on a 0..1 scale. Format:
+
+\`\`\`
+<tool_intent>
+{ "tool": "<tool_slug>", "confidence": 0.0-1.0, "reason": "<one sentence>" }
+</tool_intent>
+\`\`\`
+
+For plans that chain multiple tools, emit an array inside the same
+block. The LAST \`<tool_intent>\` block in your message is authoritative
+(you may revise mid-reasoning).
+
+Confidence scoring rubric:
+- 0.9–1.0 — you have verified every input, the tool is well understood,
+  and there is a strong precedent for this action in the conversation.
+- 0.7–0.89 — you are confident but some input was inferred rather than
+  explicitly stated.
+- 0.5–0.69 — you are proceeding on assumptions that a reviewer should
+  sanity-check.
+- Below 0.5 — you are guessing; this should almost never be combined
+  with an \`auto\`-gated tool.
+
+Omitting the block, malformed JSON, or a missing \`confidence\` field
+causes the platform to treat the call as "unknown confidence" and route
+it through human review regardless of the policy rule's default. This is
+a fail-closed safety rail — it is not a punishment for sloppy output,
+it is how the system protects users when it does not know what you
+know.
+`;
+
 export function buildSystemPrompt(
   masterPrompt: string,
   dataSourceContents: Array<{ name: string; description: string | null; content: string; contentType: string }>,
@@ -315,6 +366,11 @@ export function buildSystemPrompt(
     }
     parts.push('\nUse the `trigger_process` tool to execute any of these. Always explain what you\'re about to do before triggering.\n');
   }
+
+  // Sprint 3 P2.3 — append the tool_intent convention to every system
+  // prompt. Kept at the end so the operator's master prompt retains
+  // primacy over the convention snippet for human readability.
+  parts.push(TOOL_INTENT_CONVENTION_SNIPPET);
 
   return parts.join('');
 }
