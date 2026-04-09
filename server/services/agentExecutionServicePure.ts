@@ -532,6 +532,7 @@ export function isComplexRun(params: {
   messageWordCount: number;
   skillCount: number;
 }): boolean {
+  if (params.complexityHint === 'simple') return false;
   if (params.complexityHint === 'complex') return true;
   if (params.messageWordCount > 300) return true;
   if (params.skillCount > 15) return true;

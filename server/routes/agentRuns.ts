@@ -377,6 +377,7 @@ router.get(
 router.post(
   '/api/agent-runs/:id/clarify',
   authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
     const runId = req.params.id;
     const { message } = req.body as { message?: string };

@@ -104,9 +104,9 @@ test('isComplexRun: returns false for simple runs', () => {
   assertEqual(isComplexRun({ complexityHint: null, messageWordCount: 50, skillCount: 5 }), false, 'simple run');
 });
 
-test('isComplexRun: simple hint does not override high word count (handled by caller)', () => {
-  // isComplexRun only checks for 'complex'; 'simple' override is in the caller
-  assertEqual(isComplexRun({ complexityHint: 'simple', messageWordCount: 350, skillCount: 5 }), true, 'simple hint with high words');
+test('isComplexRun: simple hint suppresses planning even with high word count', () => {
+  assertEqual(isComplexRun({ complexityHint: 'simple', messageWordCount: 350, skillCount: 5 }), false, 'simple hint overrides high words');
+  assertEqual(isComplexRun({ complexityHint: 'simple', messageWordCount: 10, skillCount: 20 }), false, 'simple hint overrides high skills');
 });
 
 test('isComplexRun: respects word count threshold boundary', () => {

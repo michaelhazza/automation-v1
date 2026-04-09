@@ -766,7 +766,7 @@ export const playbookEngineService = {
         const [row] = await db
           .select({ id: agents.id })
           .from(agents)
-          .where(eq(agents.id, cached));
+          .where(and(eq(agents.id, cached), isNull(agents.deletedAt)));
         if (row) return cached;
       }
       logger.warn('playbook_resolved_agent_missing', {
@@ -789,7 +789,7 @@ export const playbookEngineService = {
       const [row] = await db
         .select({ id: agents.id })
         .from(agents)
-        .where(and(eq(agents.slug, slug), eq(agents.organisationId, run.organisationId)));
+        .where(and(eq(agents.slug, slug), eq(agents.organisationId, run.organisationId), isNull(agents.deletedAt)));
       return row?.id ?? null;
     }
     return null;
@@ -1216,6 +1216,27 @@ export const playbookEngineService = {
       existingChildren.map((c) => c.targetSubaccountId).filter(Boolean)
     );
 
+    // Validate all target subaccounts belong to this org (prevent cross-org fan-out)
+    const validSubs = await db
+      .select({ id: subaccounts.id })
+      .from(subaccounts)
+      .where(
+        and(
+          inArray(subaccounts.id, bulkTargets),
+          eq(subaccounts.organisationId, run.organisationId),
+          isNull(subaccounts.deletedAt),
+        ),
+      );
+    const validSubIds = new Set(validSubs.map((s) => s.id));
+    const invalidTargets = bulkTargets.filter((t) => !validSubIds.has(t));
+    if (invalidTargets.length > 0) {
+      logger.warn('playbook_bulk_invalid_targets', {
+        runId: run.id,
+        invalidTargets,
+        orgId: run.organisationId,
+      });
+    }
+
     // Mark parent as running
     if (run.status === 'pending') {
       await db
@@ -1245,6 +1266,7 @@ export const playbookEngineService = {
     let created = 0;
     for (const targetId of bulkTargets) {
       if (existingTargets.has(targetId)) continue;
+      if (!validSubIds.has(targetId)) continue; // skip targets not in this org
       if (created >= slotsAvailable) break; // respect concurrency cap
 
       try {
