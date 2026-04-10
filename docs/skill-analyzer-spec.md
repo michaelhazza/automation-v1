@@ -53,12 +53,14 @@ A four-phase feature delivering:
 
 | Classification | Meaning | Recommended Action |
 |----------------|---------|-------------------|
-| `DUPLICATE` | Same skill, different words | Skip import |
+| `DUPLICATE` | Equivalent skill already in library (exact match or semantically identical) | Skip import |
 | `IMPROVEMENT` | Incoming skill does everything the existing one does, but better | Replace existing |
-| `PARTIAL_OVERLAP` | Shared purpose but different scope or approach | Human decision: merge, keep both, or pick one |
-| `DISTINCT` | Genuinely novel skill with no existing equivalent | Import as new |
+| `PARTIAL_OVERLAP` | Shared purpose but different scope or approach | Human decision: approve to import as new skill (keeps both), reject to skip, or defer |
+| `DISTINCT` | No close match found in the existing library (similarity below threshold to best match) | Import as new |
 
-### Cost Model
+### Cost Model (research snapshot — not an implementation contract)
+
+*Estimates from April 2026 research. Actual costs depend on model pricing, prompt caching hit rates, and input sizes.*
 
 | Scale | Embedding Cost | LLM Cost | Time | Total |
 |-------|---------------|----------|------|-------|
@@ -90,13 +92,13 @@ The following findings from the research phase directly shaped the architecture:
 
 1. **Anthropic has no embedding API.** OpenAI `text-embedding-3-small` at $0.02/MTok is the right choice. Already integrated in `server/lib/embeddings.ts`.
 
-2. **In-memory cosine similarity is sufficient.** 600 vectors of 1536 dimensions = 3.6 MB memory. 90,000 pairwise comparisons complete in under 2 seconds. No vector database needed for batch comparison.
+2. **In-memory cosine similarity is sufficient for batch comparison.** 600 vectors of 1536 dimensions = 3.6 MB memory. 90,000 pairwise comparisons complete in under 2 seconds. No pgvector similarity queries needed — all comparison is done in-memory. The `skill_embeddings` table with `vector(1536)` is used only as a content-addressed cache to avoid re-embedding unchanged skills, not for database-side similarity search.
 
 3. **Three-band threshold minimises LLM calls.** Pairs above 0.92 similarity are likely duplicates (quick confirmation). Pairs between 0.60–0.92 are ambiguous (full analysis). Pairs below 0.60 are distinct (no LLM call). This cuts LLM usage by 60–80%.
 
 4. **Prompt caching saves 90% on classification calls.** The system prompt, rubric, and few-shot examples are identical across all comparison calls. Only the two skill documents change. Anthropic's prompt caching reduces input cost to 0.1x on cache hits with a 5-minute TTL.
 
-5. **No platform has solved skill deduplication.** LangChain Hub, OpenAI GPT Store, CrewAI — none do automated duplicate detection. The hybrid approach (content hash → embedding similarity → LLM judgment) is state of the art.
+5. **No platform has solved skill deduplication (as of April 2026 research).** LangChain Hub, OpenAI GPT Store, CrewAI — none do automated duplicate detection. The hybrid approach (content hash → embedding similarity → LLM judgment) was the best available pattern at time of research.
 
 6. **Content-addressed embedding cache** avoids re-embedding unchanged skills. SHA-256 of normalized content as the cache key means the same skill content always maps to the same embedding, regardless of source.
 
@@ -142,9 +144,9 @@ The pipeline takes 1–10 minutes. pg-boss is already the standard for async wor
 
 The UI polls `GET /api/skill-analyzer/jobs/:id` every 2 seconds. The pipeline has 6 coarse phases — frequent real-time updates are unnecessary. This is consistent with how other wizard-style flows in the codebase handle async jobs. WebSocket rooms are reserved for multi-user real-time features (task boards, run viewers).
 
-### AD6: Permission gated by existing `org.agents.edit`
+### AD6: Permission gated by existing `ORG_PERMISSIONS.AGENTS_EDIT`
 
-The skill analyzer modifies the skill library. The existing `org.agents.edit` permission already gates skill management. No new permission needed.
+The skill analyzer modifies the skill library. The existing `ORG_PERMISSIONS.AGENTS_EDIT` permission (serialized as `org.agents.edit`) already gates skill management. No new permission needed. All references to permissions in this spec use the constant name `ORG_PERMISSIONS.AGENTS_EDIT` from `server/config/permissions.ts`.
 
 ### AD7: GitHub access via unauthenticated REST API
 
@@ -184,7 +186,9 @@ CREATE TABLE skill_analyzer_jobs (
   exact_duplicate_count integer DEFAULT 0,
   comparison_count      integer DEFAULT 0,
 
-  -- Raw parsed candidates (JSONB array for replay/debug)
+  -- Parsed candidates (JSONB array, immutable after creation)
+  -- For paste/upload: populated synchronously in createJob() before enqueueing
+  -- For github: populated by the background worker during Stage 1
   parsed_candidates     jsonb,
 
   created_at            timestamptz NOT NULL DEFAULT now(),
@@ -201,7 +205,7 @@ CREATE INDEX skill_analyzer_jobs_active_idx
 
 ### Table: `skill_analyzer_results`
 
-One row per candidate-to-library-skill comparison result. Child of `skill_analyzer_jobs`.
+One row per candidate-to-library-skill comparison result (candidate-match pair). A single candidate may produce multiple rows when classified as `PARTIAL_OVERLAP` with multiple matches (up to 3). For `DUPLICATE`, `IMPROVEMENT`, and `DISTINCT` classifications, each candidate produces exactly one row. Child of `skill_analyzer_jobs`.
 
 ```sql
 CREATE TABLE skill_analyzer_results (
@@ -221,11 +225,11 @@ CREATE TABLE skill_analyzer_results (
   -- Classification
   classification            text NOT NULL
     CHECK (classification IN ('DUPLICATE', 'IMPROVEMENT', 'PARTIAL_OVERLAP', 'DISTINCT')),
-  confidence                real NOT NULL,
-  similarity_score          real,
+  confidence                real,       -- LLM classifier confidence (0.0–1.0). Null for deterministic stages (exact hash match, distinct band).
+  similarity_score          real,       -- Cosine similarity to matched library skill (0.0–1.0). Always populated when a match exists.
   classification_reasoning  text,
 
-  -- Diff data for side-by-side UI
+  -- Diff data for side-by-side UI (DiffSummary type — see Service Layer)
   diff_summary              jsonb,
 
   -- User action
@@ -236,7 +240,9 @@ CREATE TABLE skill_analyzer_results (
   -- Execution outcome
   execution_result          text CHECK (execution_result IN ('created', 'updated', 'skipped', 'failed')),
   execution_error           text,
-  resulting_skill_id        uuid,
+  result_target_type        text CHECK (result_target_type IN ('org_skill', 'system_skill', 'none')),
+  resulting_skill_id        uuid,                -- populated for org_skill creates/updates
+  resulting_system_skill_slug text,              -- populated for system_skill updates
 
   created_at                timestamptz NOT NULL DEFAULT now()
 );
@@ -267,12 +273,29 @@ CREATE INDEX skill_embeddings_source_idx
   ON skill_embeddings (source_type, source_identifier);
 ```
 
-**Notes:**
-- `content_hash` is SHA-256 of normalized skill content (lowercase, stripped whitespace, sorted JSON keys)
+**Notes on `parsed_candidates` (on `skill_analyzer_jobs`):**
+- `parsed_candidates` is a JSONB array of `PersistedCandidate` objects (see below). It is immutable after Stage 1 completes — no subsequent stage may modify, reorder, or remove entries.
+- `candidate_index` on result rows corresponds to the array index in `parsed_candidates`. Because the array is immutable, indices are stable across retries and UI refreshes.
+- The UI diff view and execution step reconstruct candidate data by reading `parsed_candidates[candidate_index]` from the job row.
+
+**`PersistedCandidate` type (stored in `parsed_candidates` JSONB):**
+```typescript
+interface PersistedCandidate extends ParsedSkill {
+  /** Populated during Stage 1 for intra-batch duplicates. */
+  duplicateOfIndex?: number;     // index of the representative candidate this is a duplicate of
+  occurrenceCount?: number;      // how many times this content appeared in the import batch (set on representative only)
+}
+```
+Intra-batch deduplication is performed during Stage 1 (before the array is frozen). Duplicate entries remain in the array with `duplicateOfIndex` set, preserving index stability. Only entries without `duplicateOfIndex` proceed to Stage 2+. Entries with `duplicateOfIndex` are not stored in `skill_analyzer_results` — they are surfaced only via the job-level `exact_duplicate_count` and via the `occurrenceCount` on the representative candidate.
+
+**Intra-batch duplicates are not stored in `skill_analyzer_results`.** The results table only models comparisons against the existing library. Intra-batch duplicate provenance is tracked entirely within `parsed_candidates` via `duplicateOfIndex`.
+
+**Notes on `skill_embeddings`:**
+- `content_hash` is SHA-256 of normalized skill content (see `normalizeForHash` in Service Layer for exact per-field normalization rules)
 - `source_type` distinguishes system skills (slug-identified), org skills (UUID-identified), and import candidates (`job:{jobId}:idx:{n}`)
 - The unique index on `content_hash` means identical content is never embedded twice
 - The `vector(1536)` column uses the same Drizzle `customType` pattern as `workspace_memories`
-- `source_type` and `source_identifier` are **debugging/provenance only**. Because the table upserts on `content_hash`, these columns reflect the last writer — if the same content exists as both a system skill and an org skill, whichever was stored last wins. Do not use these columns for source-filtered queries.
+- `source_type` and `source_identifier` are **debugging/provenance only**. The upsert uses `ON CONFLICT (content_hash) DO UPDATE SET source_type = EXCLUDED.source_type, source_identifier = EXCLUDED.source_identifier` — provenance reflects the last writer. If the same content exists as both a system skill and an org skill, whichever was stored last wins. Do not use these columns for source-filtered queries.
 
 ### Drizzle Schema Patterns
 
@@ -287,6 +310,50 @@ All three exported from `server/db/schema/index.ts`.
 ---
 
 ## Service Layer
+
+### Shared Types
+
+Defined in `server/services/skillAnalyzerServicePure.ts` (pure types, no runtime dependencies):
+
+```typescript
+/** Summary of a library skill for comparison. Includes content fields for prompts and diffs. */
+interface LibrarySkillSummary {
+  id: string | null;           // UUID for org skills, null for system skills
+  slug: string;
+  name: string;
+  type: 'system' | 'org';
+  description: string;
+  definition: object | null;
+  instructions: string | null;
+  methodology: string | null;
+}
+
+/** LLM classification response shape. */
+interface ClassificationResult {
+  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+  confidence: number;          // 0.0–1.0
+  reasoning: string;
+}
+
+/** Structural diff for side-by-side UI view. Stored in diff_summary JSONB column. */
+interface DiffSummary {
+  addedFields: string[];       // fields present in candidate but not in library skill
+  removedFields: string[];     // fields present in library skill but not in candidate
+  changedFields: string[];     // fields present in both but with different content
+}
+
+/** Job row shape (Drizzle select type from skillAnalyzerJobs). */
+type SkillAnalyzerJob = typeof skillAnalyzerJobs.$inferSelect;
+
+/** Result row shape (Drizzle select type from skillAnalyzerResults). */
+type SkillAnalyzerResult = typeof skillAnalyzerResults.$inferSelect;
+
+/** Source metadata shape — discriminated union by source_type. */
+type SourceMetadata =
+  | { charCount: number }                                  // paste
+  | { fileName: string; fileType: string; fileSize: number } // upload
+  | { url: string; branch?: string; path?: string };        // github
+```
 
 ### Service: `skillEmbeddingService`
 
@@ -332,7 +399,8 @@ export interface ParsedSkill {
   name: string;
   slug: string;
   description: string;
-  definition: object | null;   // Anthropic tool JSON schema
+  definition: object | null;   // Anthropic tool JSON schema (same shape as existing skills:
+                               // { name, description, input_schema: { type, properties, required } })
   instructions: string | null;
   methodology: string | null;
   rawSource: string;           // Original text for diff display
@@ -341,7 +409,10 @@ export interface ParsedSkill {
 // Pure functions (skillParserServicePure.ts)
 export const skillParserServicePure = {
   /** Parse free-text paste into one or more skills.
-   *  Splits on '---' separators and attempts to parse each block. */
+   *  Splits on '\n---\n' (triple-dash on its own line with blank lines or start/end of string).
+   *  Distinguished from YAML frontmatter delimiters by requiring the separator to appear
+   *  BETWEEN complete skill blocks (not at the top of a block). First block may start with
+   *  frontmatter '---' which is consumed by the YAML parser, not the splitter. */
   parseFromText(text: string): ParsedSkill[];
 
   /** Parse a single .md file (YAML frontmatter + JSON definition + markdown body) */
@@ -354,7 +425,11 @@ export const skillParserServicePure = {
   slugify(name: string): string;
 
   /** Normalize skill content for hashing.
-   *  Lowercase, strip whitespace, sort JSON keys deterministically. */
+   *  Per-field normalization:
+   *  - name, slug: trim, lowercase
+   *  - description, instructions, methodology: trim leading/trailing whitespace, collapse repeated internal whitespace to single space (case-preserved — do not lowercase free text)
+   *  - definition: JSON.stringify with sorted keys (deterministic serialization)
+   *  Concatenates all normalized fields in fixed order separated by '\0'. */
   normalizeForHash(skill: ParsedSkill): string;
 };
 
@@ -374,7 +449,15 @@ export const skillParserService = {
 
 **GitHub fetch flow:** Extract owner/repo/path from URL → `GET /repos/{owner}/{repo}/contents/{path}` → filter `.md` and `.json` files → fetch each file's `download_url` → parse with the appropriate pure function. Retries via `withBackoff` (`server/lib/withBackoff.ts`) on rate limits and transient errors.
 
-**Zip handling:** Use `yauzl` (or Node.js built-in `zlib` for `.gz`) to extract files → parse each → clean up temp files. Max upload size: 50 MB.
+**Supported GitHub URL patterns:**
+- `https://github.com/{owner}/{repo}` — fetches from repo root, default branch
+- `https://github.com/{owner}/{repo}/tree/{branch}/{path}` — fetches from specific branch/path
+
+**Branch/path parsing:** For `/tree/{branch}/{path}` URLs, the parser extracts `owner` and `repo` from the first two path segments after `github.com/`, then resolves `{branch}` by calling `GET /repos/{owner}/{repo}/branches` and matching the longest prefix of the remaining path against known branch names. This handles branch names containing slashes (e.g. `feature/skill-import`). If no branch matches, fall back to the repo's default branch and treat the full remaining path as a directory path.
+
+**Unsupported (error with descriptive message):** blob URLs (single-file links), private repos (no auth token), directories requiring pagination (>1000 files — GitHub API limitation). Subdirectories within the target path are not traversed recursively; only top-level `.md` and `.json` files are fetched.
+
+**Zip handling:** Use `yauzl` to extract `.zip` files → parse each contained `.md`/`.json` file → clean up temp files. Max upload size: 50 MB per file.
 
 ### Service: `skillAnalyzerServicePure`
 
@@ -387,7 +470,9 @@ export const skillAnalyzerServicePure = {
   /** SHA-256 hash of normalized skill content */
   contentHash(normalizedContent: string): string;
 
-  /** Cosine similarity (dot product for pre-normalized OpenAI embeddings).
+  /** Cosine similarity via dot product. OpenAI text-embedding-3-small returns
+   *  L2-normalized vectors by default (documented in OpenAI API reference), so
+   *  dot product equals cosine similarity. No additional normalization needed.
    *  Returns 0.0–1.0. */
   cosineSimilarity(a: number[], b: number[]): number;
 
@@ -412,25 +497,47 @@ export const skillAnalyzerServicePure = {
 
   /** Compute all pairwise similarities between candidates and library.
    *  Returns sorted by similarity (highest first).
-   *  For each candidate, only the best match is returned. */
+   *  For candidates whose best match is in the 'likely_duplicate' band: returns only the single best match (top-1).
+   *  For candidates whose best match is in the 'ambiguous' band: returns up to 3 matches where similarity >= 0.60.
+   *  Each candidate-match pair produces one entry in the returned array.
+   *  Candidates in the 'distinct' band produce one entry with null library fields. */
   computeBestMatches(
     candidateEmbeddings: Array<{ index: number; embedding: number[] }>,
-    libraryEmbeddings: Array<{ id: string; slug: string; name: string; embedding: number[] }>
+    libraryEmbeddings: Array<{ id: string | null; slug: string; name: string; type: 'system' | 'org'; embedding: number[] }>
   ): Array<{
     candidateIndex: number;
     libraryId: string | null;
     librarySlug: string | null;
     libraryName: string | null;
+    libraryType: 'system' | 'org' | null;  // null when band is 'distinct' (no match)
     similarity: number;
     band: 'likely_duplicate' | 'ambiguous' | 'distinct';
   }>;
 
+  /** Resolve the file path for a system skill by slug.
+   *  Returns the absolute path to `server/skills/{slug}.md`.
+   *  Pure function — does not check file existence. */
+  resolveSystemSkillPath(slug: string): string;
+
+  /** Determine whether an IMPROVEMENT match targets an org skill or a system skill.
+   *  Returns 'org' if matched_skill_id is set, 'system' if matched_system_skill_slug is set.
+   *  Throws if neither is set (invalid state). */
+  resolveImprovementTarget(result: {
+    matchedSkillId: string | null;
+    matchedSystemSkillSlug: string | null;
+  }): 'org' | 'system';
+
   /** Generate a structural diff summary between two skills.
-   *  Used for the side-by-side UI view. */
+   *  Used for the side-by-side UI view. Returns DiffSummary. */
   generateDiffSummary(
     candidate: ParsedSkill,
     librarySkill: LibrarySkillSummary
-  ): { addedFields: string[]; removedFields: string[]; changedFields: string[] };
+  ): DiffSummary;
+
+  /** Resolve a unique slug for a new skill, avoiding conflicts with existing slugs.
+   *  If candidateSlug is unused, returns it unchanged. Otherwise appends '-imported',
+   *  then '-imported-2', etc. Pure function. */
+  resolveUniqueSlug(candidateSlug: string, existingSlugs: Set<string>): string;
 };
 ```
 
@@ -446,10 +553,11 @@ export const skillAnalyzerService = {
   createJob(params: {
     organisationId: string;
     userId: string;
-    sourceType: 'paste' | 'upload' | 'github';
-    sourceMetadata: Record<string, unknown>;
-    rawInput: string | Express.Multer.File[];
-  }): Promise<{ jobId: string }>;
+  } & (
+    | { sourceType: 'paste'; text: string }
+    | { sourceType: 'upload'; files: Express.Multer.File[] }
+    | { sourceType: 'github'; url: string }
+  )): Promise<{ id: string; status: string; createdAt: Date }>;
 
   /** Get job status and results. */
   getJob(jobId: string, organisationId: string): Promise<{
@@ -479,7 +587,10 @@ export const skillAnalyzerService = {
     action: 'approved' | 'rejected' | 'skipped';
   }): Promise<void>;
 
-  /** Execute all approved actions (create/update skills in the library). */
+  /** Execute all approved actions (create/update skills in the library).
+   *  Only processes rows where action_taken='approved' AND execution_result IS NULL.
+   *  Repeat calls are idempotent — already-executed rows are skipped.
+   *  Once a row has any execution_result, its action_taken becomes immutable (PATCH returns 409). */
   executeApproved(params: {
     jobId: string;
     organisationId: string;
@@ -514,7 +625,12 @@ pg-boss job handler. Registered via `createWorker()` (`server/lib/createWorker.t
 
 ```typescript
 /** Process a skill analyzer job through all pipeline stages.
- *  Idempotent: deletes existing results before re-processing on retry.
+ *  Idempotent: deletes existing results at the START of processing (before Stage 1)
+ *  so stale partial results from a prior crashed run are cleared before any new work begins.
+ *  **Guard:** if any result row for this job has a non-null `execution_result`, the job
+ *  must NOT be reprocessed — the handler throws immediately with "Cannot reprocess job
+ *  after execution has occurred." This prevents discarding the execution ledger while
+ *  underlying skills remain created/updated.
  *  Updates job status and progress_pct at each stage transition.
  *  Max 1 retry with 5-minute delay on crash. */
 export async function processSkillAnalyzerJob(jobId: string): Promise<void>;
@@ -557,8 +673,9 @@ Creates a new job and enqueues it for background processing.
 
 **Validation:**
 - Paste: minimum 10 characters
-- GitHub: valid URL matching `github.com/{owner}/{repo}` pattern
-- Upload: `.md`, `.json`, `.zip` files only, max 50 MB total
+- GitHub: valid URL matching `github.com/{owner}/{repo}` or `github.com/{owner}/{repo}/tree/{branch}/{path}` pattern
+- Upload: `.md`, `.json`, `.zip` files only, max 50 MB per file
+- All sources: maximum 500 parsed candidates per job. If parsing produces more than 500 candidates, the job creation fails with a descriptive error. This bounds `parsed_candidates` JSONB size and API response payloads.
 
 #### `GET /api/skill-analyzer/jobs` — List jobs
 
@@ -588,7 +705,19 @@ Creates a new job and enqueues it for background processing.
 **Response:** `200 OK`
 ```json
 {
-  "job": { /* full job object */ },
+  "job": {
+    "id": "uuid",
+    "sourceType": "paste",
+    "status": "completed",
+    "progressPct": 100,
+    "progressMessage": null,
+    "candidateCount": 12,
+    "exactDuplicateCount": 2,
+    "comparisonCount": 10,
+    "parsedCandidates": [ /* PersistedCandidate[] — included in full, used by diff view and execution step */ ],
+    "createdAt": "...",
+    "completedAt": "..."
+  },
   "results": [
     {
       "id": "uuid",
@@ -642,18 +771,26 @@ Applies all approved recommendations to the skill library.
 ```
 
 **Execution logic per classification:**
-- `DISTINCT` (approved) → `skillService.createSkill()` with candidate data as a new org skill
-- `IMPROVEMENT` (approved) → `skillService.updateSkill()` on the matched skill with candidate's improved fields
-- `PARTIAL_OVERLAP` (approved) → `skillService.createSkill()` as a new skill (keeps both)
-- `DUPLICATE` (approved) → no-op (skip import, logged as `skipped`)
+- `DISTINCT` (approved) → `skillService.createSkill()` with candidate data as a new org skill. Sets `result_target_type` to `'org_skill'` and `resulting_skill_id` to the new skill's UUID.
+- `IMPROVEMENT` (approved, matched org skill — `matched_skill_id` is set) → `skillService.updateSkill()` on the matched org skill: full replacement of `description`, `definition`, `instructions`, and `methodology` fields from the candidate. The existing skill's `id`, `slug`, `organisationId`, and `createdAt` are preserved. Validation (Zod schema) runs on the merged result before persisting. Sets `result_target_type` to `'org_skill'` and `resulting_skill_id` to the updated skill's UUID.
+- `IMPROVEMENT` (approved, matched system skill — `matched_system_skill_slug` is set) → Update the system skill `.md` file on disk at `server/skills/{matched_system_skill_slug}.md`. After writing, call `systemSkillService.invalidateCache()` to force the in-memory cache to reload. System skills inherit to orgs and subaccounts automatically, so the update propagates without additional steps. Note: this modifies git-tracked source files at runtime — in pre-production this is expected (changes are committed manually). Sets `result_target_type` to `'system_skill'` and `resulting_system_skill_slug` to the matched slug. `resulting_skill_id` stays null.
+- `PARTIAL_OVERLAP` (approved) → `skillService.createSkill()` as a new skill (keeps both the candidate and the matched library skill). **Multi-match dedup:** if a candidate has multiple approved `PARTIAL_OVERLAP` rows, only the first approved row triggers `createSkill()`. Subsequent approved rows for the same candidate index set `execution_result` to `'skipped'` with `execution_error` "Candidate already created from another approved match." Sets `result_target_type` to `'org_skill'`.
+- `DUPLICATE` (approved) → no-op (user confirmed it's a duplicate; no skill created/updated, `execution_result` set to `skipped`, `result_target_type` set to `'none'`). Note: `action_taken='skipped'` means the user deferred a decision, which is distinct from `execution_result='skipped'` meaning no mutation was performed.
+
+**Slug conflict resolution:** When creating a new org skill (`DISTINCT` or `PARTIAL_OVERLAP` approved), the candidate slug may conflict with an existing org skill or with another approved candidate in the same batch. Resolution: use the candidate slug if unused, otherwise append `-imported`, then `-imported-2`, etc. Slug resolution is performed by a pure helper `resolveUniqueSlug(candidateSlug, existingSlugs)` in `skillAnalyzerServicePure.ts`.
+
+**Action immutability after execution:** Once a result row has any `execution_result` value (including `'skipped'` or `'failed'`), its `action_taken` field becomes immutable. The `PATCH .../results/:resultId` endpoint returns `409 Conflict` if the row already has an `execution_result`.
+
+**`systemSkillService.invalidateCache()`:** New method on the existing `systemSkillService`. Clears the in-memory skill cache so the next `listActiveSkills()` or `getBySlug()` call re-reads `.md` files from disk. No parameters, no return value. Safe to call multiple times.
 
 ### Multer Configuration
 
-For file upload endpoint:
+For file upload endpoint. **Lifecycle:** Multer writes to `data/uploads/`, the route handler parses files synchronously into `parsed_candidates`, then deletes all temp files before enqueueing the pg-boss job. Uploaded files do not persist beyond the synchronous parse step.
+
 ```typescript
 multer({
   dest: 'data/uploads/',
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB per file
   fileFilter: (req, file, cb) => {
     const allowed = ['.md', '.json', '.zip'];
     cb(null, allowed.some(ext => file.originalname.endsWith(ext)));
@@ -667,29 +804,32 @@ multer({
 
 The `processSkillAnalyzerJob` handler executes six sequential stages. Each stage updates the job's `status`, `progress_pct`, and `progress_message`.
 
+**Note on parsing split:** For paste/upload sources, parsing and validation happen synchronously in the route handler (`createJob`). This means: (a) parse errors return 400 immediately, (b) uploaded temp files are cleaned up before the response, and (c) the pg-boss job is only created if parsing succeeds. For GitHub sources, parsing happens in the background worker during Stage 1 because it involves network I/O. This means GitHub jobs have higher latency before `candidate_count` is known, and parse errors surface as job failures rather than 400s.
+
 ### Stage 1: Parse (0% → 10%)
 
 **Status:** `parsing`
 
-1. Load the raw input from `parsed_candidates` (stored at job creation) or from the source (file/GitHub)
-2. Call the appropriate parser: `parseFromPaste()`, `parseUploadedFiles()`, or `parseFromGitHub()`
-3. Normalize each parsed skill into the `ParsedSkill` shape
-4. Store `parsed_candidates` as JSONB on the job row
-5. Update `candidate_count`
+1. For paste/upload sources: `parsed_candidates` was already populated synchronously at job creation time (parsing happens in the route handler before enqueueing, so uploaded files don't need to persist). For GitHub sources: call `parseFromGitHub()` now and store results.
+2. Normalize each parsed skill into the `ParsedSkill` shape (if not already normalized at creation time)
+3. **Intra-batch deduplication:** Compute content hashes for all candidates. Identify duplicates within the batch (same content hash). For each group of duplicates, keep the first occurrence as the representative and mark subsequent occurrences with `duplicateOfIndex` pointing to the representative's index. Set `occurrenceCount` on the representative. This reuses the existing hashing infrastructure with zero additional complexity.
+4. Store `parsed_candidates` as a JSONB array of `PersistedCandidate` on the job row (immutable after this point — the JSONB array is the canonical source for all subsequent stages). Entries with `duplicateOfIndex` are excluded from all subsequent pipeline stages.
+5. Update `candidate_count` (total parsed, including duplicates) and `exact_duplicate_count` (intra-batch duplicates only at this point; library duplicates added in Stage 2)
 
-**Failure mode:** If zero skills are parsed, set status to `failed` with message "No valid skill definitions found in the provided input."
+**Failure mode:** If zero skills are parsed, set status to `failed` with message "No valid skill definitions found in the provided input." Note: for paste/upload sources, parsing failure is reported synchronously as a 400 from the route handler (before the job is created). For GitHub sources, parsing failure sets the job status to `failed`.
 
 ### Stage 2: Hash (10% → 20%)
 
 **Status:** `hashing`
 
-1. For each candidate, compute `contentHash(normalizeForHash(skill))`
+1. For each non-duplicate candidate (entries without `duplicateOfIndex`), compute `contentHash(normalizeForHash(skill))`
 2. Load all existing library skills (system via `systemSkillService.listActiveSkills()` + org via `skillService.listSkills(orgId)`)
 3. Compute content hashes for library skills
-4. Compare: any candidate whose hash matches a library skill is classified as `DUPLICATE` with confidence 1.0 immediately
-5. Update `exact_duplicate_count`
+4. Compare: any candidate whose hash matches a library skill is classified as `DUPLICATE` with `confidence` null (deterministic, no LLM) and `similarity_score` 1.0 immediately. **Precedence:** if a candidate's hash matches both an org skill and a system skill, prefer the org skill as the recorded match (org-local match is more relevant for user action).
+5. Update `exact_duplicate_count` (includes both intra-batch duplicates from Stage 1 and exact matches against library skills)
+6. Set `classification_reasoning` for exact duplicates to: "Exact content match — normalized content is identical to the existing skill."
 
-**Output:** Two lists — exact-match duplicates (done) and remaining candidates (proceed to embedding).
+**Output:** Two lists — exact-match duplicates (done) and remaining unique candidates (proceed to embedding).
 
 ### Stage 3: Embed (20% → 40%)
 
@@ -701,17 +841,23 @@ The `processSkillAnalyzerJob` handler executes six sequential stages. Each stage
 4. Store new embeddings via `skillEmbeddingService.storeBatch()`
 5. Progress updates at each batch completion
 
-**Failure mode:** If the OpenAI API is unavailable, log a warning and classify all remaining candidates as needing LLM review (skip to Stage 5 with all pairs in the `ambiguous` band).
+**Library skill content retention:** Stage 2 loads full library skill data (via `systemSkillService` and `skillService`) as `LibrarySkillSummary` objects (including description, definition, instructions, methodology). This full content is held in memory through Stages 3–5 for use in prompt construction (`buildClassificationPrompt`) and diff generation (`generateDiffSummary`). The `computeBestMatches` function only receives embeddings and identifiers for performance, but the caller retains the full `LibrarySkillSummary` map keyed by `id`/`slug` for later lookup.
+
+**Failure mode:** If the OpenAI API is unavailable after retry, set the job status to `failed` with message "Embedding API unavailable — cannot compute skill similarity. Retry later." Skipping embeddings is not viable because Stage 4 requires embeddings to compute best matches, and sending all candidates against all library skills to the LLM would be prohibitively expensive.
 
 ### Stage 4: Compare (40% → 60%)
 
 **Status:** `comparing`
 
 1. Call `computeBestMatches(candidateEmbeddings, libraryEmbeddings)`
-2. For each candidate, find the single best-matching library skill
-3. Classify each pair into a band: `likely_duplicate` (>0.92), `ambiguous` (0.60–0.92), `distinct` (<0.60)
-4. Candidates in the `distinct` band are classified as `DISTINCT` with the similarity score as confidence
-5. Update `comparison_count`
+2. For each candidate, find the best-matching library skill(s):
+   - If the best match is in the `likely_duplicate` band (>0.92): return only that single best match (top-1)
+   - If the best match is in the `ambiguous` band (0.60–0.92): return up to 3 matches where similarity >= 0.60, each as a separate candidate-match pair. This enables multi-match comparison for `PARTIAL_OVERLAP` results.
+   - If all matches are in the `distinct` band (<0.60): return one entry with null library fields
+3. Candidates in the `distinct` band are classified as `DISTINCT` with `confidence` set to null (deterministic classification, no LLM involved) and `similarity_score` set to the best match score. Set `classification_reasoning` to: "Low similarity to all existing skills — no close match found (best similarity: {score})."
+4. Update `comparison_count`
+
+**Multi-match note:** A candidate that partially overlaps 3 library skills produces 3 result rows in `skill_analyzer_results`. The UI groups these under the candidate name (see Step 3: Results). The user can approve/reject each match independently. For `DUPLICATE` and `IMPROVEMENT` classifications (produced by the LLM in Stage 5), only the single best match is kept even if multiple ambiguous-band pairs were sent for classification.
 
 **Output:** Pairs to send to LLM (`likely_duplicate` + `ambiguous` bands) and pairs already classified (`distinct` band).
 
@@ -721,7 +867,7 @@ The `processSkillAnalyzerJob` handler executes six sequential stages. Each stage
 
 1. For each pair in the `likely_duplicate` or `ambiguous` band:
    a. Build the classification prompt via `buildClassificationPrompt()`
-   b. Call Claude Haiku via `anthropicAdapter` with prompt caching enabled, wrapped in `withBackoff` for transient failures
+   b. Call Claude Haiku via `anthropicAdapter` with prompt caching enabled (system prompt block marked with `cache_control: { type: 'ephemeral' }` per Anthropic API — the adapter already supports this via the `system` parameter accepting `TextBlockParam[]`), wrapped in `withBackoff` for transient failures
    c. Parse the response via `parseClassificationResponse()`
    d. Generate `diffSummary` via `generateDiffSummary()`
 2. Concurrency: `p-limit(5)` — max 5 parallel LLM calls
@@ -740,15 +886,20 @@ z.object({
 })
 ```
 
-**Failure mode:** If an individual LLM call fails after retry, classify that pair as `DISTINCT` with confidence 0.3 and note "Classification failed — manual review recommended" in the reasoning field.
+**Failure mode:** If an individual LLM call fails after retry, mark that pair as failed. Failure handling is candidate-scoped, not pair-scoped: after all pairs for a candidate are classified, if all pairs failed, emit one synthetic `PARTIAL_OVERLAP` row for the best-similarity pair with confidence 0.3 and reasoning "Classification failed — manual review recommended." If some pairs succeeded and some failed, drop the failed pairs and keep only the successful classifications.
+
+**Reduction step (after classification, before result insertion):** For each candidate with multiple classified pairs, apply the following reduction:
+1. If any pair classified as `DUPLICATE` or `IMPROVEMENT`, keep exactly one row: highest `confidence`, then highest `similarity_score`, then deterministic slug sort as tie-break. Discard remaining pairs for that candidate.
+2. If all pairs classified as `PARTIAL_OVERLAP`, keep all rows (up to 3).
+3. If a mix of `PARTIAL_OVERLAP` and `DISTINCT`, keep only the `PARTIAL_OVERLAP` rows.
+4. Emit `DISTINCT` (one row, null library fields) only if no non-distinct classification exists for that candidate.
 
 ### Stage 6: Write Results (90% → 100%)
 
 **Status:** `completed`
 
-1. Delete any existing results for this job (idempotent retry support)
-2. Insert all `skill_analyzer_results` rows (exact duplicates from Stage 2 + distinct from Stage 4 + LLM-classified from Stage 5)
-3. Set job status to `completed`, `progress_pct` to 100, `completed_at` to now
+1. Insert all `skill_analyzer_results` rows (exact duplicates from Stage 2 + distinct from Stage 4 + reduced LLM-classified from Stage 5). Note: existing results were already deleted at the start of processing for idempotent retry support.
+2. Set job status to `completed`, `progress_pct` to 100, `completed_at` to now
 
 ---
 
@@ -756,7 +907,7 @@ z.object({
 
 ### Route
 
-`/admin/skill-analyzer` — lazy-loaded page, gated by `org.agents.edit` permission.
+`/admin/skill-analyzer` — lazy-loaded page, gated by `ORG_PERMISSIONS.AGENTS_EDIT`.
 
 ### Component Structure
 
@@ -775,7 +926,7 @@ SkillAnalyzerPage.tsx              — page wrapper, job list + "New Analysis" b
 Three tabs: **Paste**, **Upload**, **GitHub URL**.
 
 - **Paste tab:** Textarea (min 10 chars). Accepts one or more skill definitions separated by `---`. Placeholder text shows the expected `.md` format.
-- **Upload tab:** File dropzone accepting `.md`, `.json`, `.zip`. Shows file list with names and sizes after selection. Max 50 MB total.
+- **Upload tab:** File dropzone accepting `.md`, `.json`, `.zip`. Shows file list with names and sizes after selection. Max 50 MB per file (matches server-side Multer limit).
 - **GitHub tab:** URL input with validation feedback. Accepts URLs in the format `https://github.com/{owner}/{repo}` or `https://github.com/{owner}/{repo}/tree/{branch}/{path}`.
 
 Submit button creates the job via `POST /api/skill-analyzer/jobs`. On success, transitions to Step 2.
@@ -803,7 +954,7 @@ Four collapsible sections, one per classification, each with a count badge:
 |---------|--------|---------------|
 | DUPLICATE | Red/muted | Collapsed (low priority — usually skip) |
 | IMPROVEMENT | Blue | Expanded (high value — usually approve) |
-| PARTIAL_OVERLAP | Amber | Expanded (needs human judgment) |
+| PARTIAL_OVERLAP | Amber | Expanded (needs human judgment). Candidates with multiple matches are grouped under the candidate name; each match is shown as a sub-card with its own approve/reject/skip actions. |
 | DISTINCT (New) | Green | Expanded (usually approve) |
 
 Each result card shows:
@@ -849,7 +1000,7 @@ Job ID stored in URL query parameter (`?jobId=xyz`) so the page survives browser
 
 ### Navigation Entry Point
 
-Add "Skill Analyzer" to the admin navigation under the Skills section, gated by `org.agents.edit` permission from `/api/my-permissions`. Visible as a secondary action alongside the existing skill management page.
+Add "Skill Analyzer" to the admin navigation under the Skills section, gated by `ORG_PERMISSIONS.AGENTS_EDIT` from `/api/my-permissions`. Visible as a secondary action alongside the existing skill management page.
 
 ### Loading, Empty, and Error States
 
@@ -902,6 +1053,9 @@ Seven chunks, ordered so each is independently buildable and testable.
 - `server/services/skillParserServicePure.ts`
 - `server/services/skillParserService.ts`
 
+**Modify:**
+- `package.json` — add `yauzl` dependency (zip extraction for `.zip` uploads)
+
 **Verify:** Parses existing `server/skills/*.md` files correctly. Handles multi-skill paste (separated by `---`). Handles malformed input (skips, doesn't crash). Slug generation handles edge cases.
 
 **Depends on:** Nothing (standalone parsing logic).
@@ -935,11 +1089,12 @@ Seven chunks, ordered so each is independently buildable and testable.
 
 **Create:**
 - `server/routes/skillAnalyzer.ts`
+- `scripts/verify-skill-analyzer-service-pattern.sh`
 
 **Modify:**
 - `server/index.ts` — import and mount router at `/api/skill-analyzer`
 
-**Verify:** Auth gate (401 without token). Permission gate (403 without AGENTS_EDIT). Org scoping (user from org A cannot access org B's jobs). File upload with valid/invalid types. GitHub URL validation.
+**Verify:** Auth gate (401 without token). Permission gate (403 without AGENTS_EDIT). Org scoping (user from org A cannot access org B's jobs). File upload with valid/invalid types. GitHub URL validation. Static gate passes.
 
 **Depends on:** Chunk 5.
 
@@ -956,7 +1111,7 @@ Seven chunks, ordered so each is independently buildable and testable.
 
 **Modify:**
 - `client/src/App.tsx` — add lazy import + route for `/admin/skill-analyzer`
-- Navigation component — add nav item gated by `org.agents.edit`
+- `client/src/components/Layout.tsx` — add nav item gated by `ORG_PERMISSIONS.AGENTS_EDIT`
 
 **Verify:** Lazy loading works. Permission gating hides nav item for unprivileged users. Polling stops on unmount. Diff view handles null fields.
 
@@ -966,7 +1121,7 @@ Seven chunks, ordered so each is independently buildable and testable.
 
 ## File Inventory
 
-### New Files (17)
+### New Files (19)
 
 | File | Purpose |
 |------|---------|
@@ -986,9 +1141,11 @@ Seven chunks, ordered so each is independently buildable and testable.
 | `client/src/components/skill-analyzer/SkillAnalyzerImportStep.tsx` | Import step |
 | `client/src/components/skill-analyzer/SkillAnalyzerProcessingStep.tsx` | Processing step |
 | `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Results step |
+| `client/src/components/skill-analyzer/SkillAnalyzerDiffView.tsx` | Side-by-side skill comparison |
 | `client/src/components/skill-analyzer/SkillAnalyzerExecuteStep.tsx` | Execute step |
+| `scripts/verify-skill-analyzer-service-pattern.sh` | Static gate — service pattern and route conventions |
 
-### Modified Files (6)
+### Modified Files (7)
 
 | File | Change |
 |------|--------|
@@ -997,7 +1154,8 @@ Seven chunks, ordered so each is independently buildable and testable.
 | `server/index.ts` | Mount router + register pg-boss worker |
 | `server/config/jobConfig.ts` | Add `skill-analyzer` queue entry |
 | `client/src/App.tsx` | Add lazy import + route |
-| `client/src/components/Layout.tsx` | Add nav item gated by `org.agents.edit` |
+| `client/src/components/Layout.tsx` | Add nav item gated by `ORG_PERMISSIONS.AGENTS_EDIT` |
+| `package.json` | Add `p-limit` and `yauzl` dependencies |
 
 ---
 
@@ -1012,11 +1170,11 @@ Contains:
 
 **Prerequisites:** pgvector extension already loaded (`db-init/01-extensions.sql`).
 
-**No RLS policies** for v1 — these tables are org-scoped via service-layer filtering, consistent with other non-tenant-data tables like `playbook_templates`. Service-layer org-scoping via `organisationId` filtering is the sole tenant isolation mechanism for v1 — all `skillAnalyzerService` queries must include this filter.
+**No RLS policies** for v1 — these tables are tenant-scoped (`organisation_id` on jobs, results joined through jobs) but use service-layer org filtering as the sole tenant isolation mechanism, consistent with the pre-production posture. All `skillAnalyzerService` queries for `skill_analyzer_jobs` must filter by `organisationId`. All queries for `skill_analyzer_results` must join through `skill_analyzer_jobs` and filter by `organisation_id` there — results have no direct `organisation_id` column. RLS policies can be added when the codebase moves to production.
 
 **New dependencies:**
 - `p-limit` — lightweight concurrency limiter for parallel LLM calls. Zero transitive dependencies.
-- `yauzl` — zip file extraction for `.zip` uploads (referenced in Chunk 3, `skillParserService.ts`). If only `.gz` single-file archives are needed, Node.js built-in `zlib` suffices and `yauzl` can be dropped.
+- `yauzl` — zip file extraction for `.zip` uploads (referenced in Chunk 3, `skillParserService.ts`).
 
 **Environment variables:** None new. Uses existing `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
@@ -1039,11 +1197,11 @@ Following the `*Pure.ts` + `*.test.ts` convention:
 | Test File | Covers |
 |-----------|--------|
 | `server/services/__tests__/skillParserServicePure.test.ts` | Markdown parsing, JSON parsing, multi-skill paste splitting, slug generation, content normalization |
-| `server/services/__tests__/skillAnalyzerServicePure.test.ts` | Cosine similarity, band classification thresholds, content hashing determinism, LLM prompt construction, classification response parsing, diff summary generation |
+| `server/services/__tests__/skillAnalyzerServicePure.test.ts` | Cosine similarity, band classification thresholds, content hashing determinism, LLM prompt construction, classification response parsing, diff summary generation, system skill file-path resolution (`resolveSystemSkillPath`), IMPROVEMENT execution decision logic (org skill vs system skill branch selection) |
 
 ### Smoke Test Extension
 
-Add one assertion to the existing `agentExecution.smoke.test.ts` if the skill analyzer service is used by agents. Otherwise, no smoke test changes — the analyzer is a user-facing feature, not part of the agent execution pipeline.
+No smoke test changes in v1. The skill analyzer is a user-facing import/review workflow, not part of the agent execution pipeline. It does not interact with agent runs, tool calls, or the execution loop.
 
 ### Manual Testing Checklist
 
