@@ -66,6 +66,7 @@ const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
+const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 
 function PageLoader() {
   return (
@@ -184,6 +185,7 @@ export default function App() {
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
+            <Route path="/admin/skill-analyzer" element={<SkillAnalyzerPage user={user!} />} />
             <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
