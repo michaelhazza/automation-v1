@@ -136,16 +136,18 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       methodology: s.methodology,
       isSystem: true,
     })),
-    ...orgSkills.map((s) => ({
-      id: s.id,
-      slug: s.slug,
-      name: s.name,
-      description: s.description ?? '',
-      definition: s.definition as object | null,
-      instructions: s.instructions,
-      methodology: s.methodology,
-      isSystem: false,
-    })),
+    ...orgSkills
+      .filter((s: { skillType?: string }) => s.skillType !== 'built_in')
+      .map((s) => ({
+        id: s.id,
+        slug: s.slug,
+        name: s.name,
+        description: s.description ?? '',
+        definition: s.definition as object | null,
+        instructions: s.instructions,
+        methodology: s.methodology,
+        isSystem: false,
+      })),
   ];
 
   // Compute candidate hashes
@@ -361,6 +363,28 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       similarity: 0.75, // midpoint of ambiguous band
       band: 'ambiguous' as const,
     }));
+  }
+
+  // Ensure candidates whose embeddings failed are treated as ambiguous rather than silently dropped.
+  // Try to find a tentative library match by slug so the LLM can properly classify them.
+  const matchedIndices = new Set(bestMatches.map((m) => m.candidateIndex));
+  for (const { index, candidate } of remainingCandidates) {
+    if (!matchedIndices.has(index)) {
+      // Find best slug/name match from library for LLM classification
+      const slugMatch = librarySkills.find((lib) => lib.slug === candidate.slug);
+      const nameMatch = !slugMatch ? librarySkills.find((lib) =>
+        lib.name.toLowerCase() === candidate.name.toLowerCase()
+      ) : null;
+      const tentativeMatch = slugMatch ?? nameMatch ?? null;
+      bestMatches.push({
+        candidateIndex: index,
+        libraryId: tentativeMatch?.id ?? null,
+        librarySlug: tentativeMatch?.slug ?? null,
+        libraryName: tentativeMatch?.name ?? null,
+        similarity: 0.75,
+        band: 'ambiguous' as const,
+      });
+    }
   }
 
   const distinctResults = bestMatches.filter((m) => m.band === 'distinct');

@@ -186,7 +186,9 @@ export async function executeApproved(params: {
 
   const { job, results } = await getJob(jobId, organisationId);
 
-  const approved = results.filter((r) => r.actionTaken === 'approved');
+  const approved = results.filter(
+    (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed')
+  );
   const parsedCandidates = (job.parsedCandidates as unknown[]) || [];
 
   let created = 0;
