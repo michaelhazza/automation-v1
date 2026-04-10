@@ -40,6 +40,8 @@ Invoke this skill after a BA spec has been approved (status: `spec-approved`). T
 
 Only accept the **latest approved spec version**. If the `spec_reference_id` passed to this skill does not match the most recent approved spec in workspace memory for this task, reject the invocation and surface an error -- do not derive tests from a stale or superseded spec.
 
+**Implementation note (MVP):** Spec-version enforcement is prompt-based at this stage. The runtime does not independently validate that the provided `spec_reference_id` is the latest approved version -- the agent is responsible for reading workspace memory to confirm this before invoking the skill. Server-side enforcement of the latest-spec constraint is a Phase 2 hardening item.
+
 Every Gherkin AC in the spec must produce at least one test case. Negative scenario ACs produce separate test case entries -- they are never treated as variations of a positive case.
 
 After generating the manifest, write it to workspace memory under `test_manifest:[task_id]`, including the `spec_reference_id` it was derived from. When `report_bug` fires during test execution, it must reference both the test case ID and the originating AC ID so every bug is traceable back to the BA spec.

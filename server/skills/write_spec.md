@@ -73,7 +73,6 @@ spec_reference_id: SPEC-[task_id]-v[N]
 state: pending_review
 submitted_at: [ISO timestamp]
 review_item_id: [returned by the HITL queue on submission]
-task_version: [the board task's current updatedAt timestamp at submission time]
 ```
 
 **State rules:**
@@ -82,7 +81,7 @@ task_version: [the board task's current updatedAt timestamp at submission time]
 - `rejected`: read rejection feedback, increment version, re-draft, re-submit.
 - `expired`: a pending spec that has not received a human response within 48 hours. The agent must re-surface it via `request_approval` rather than silently waiting.
 
-**Task change invalidation:** On receiving an approval callback, compare the stored `task_version` against the board task's current `updatedAt`. If they differ, reject the approval, notify the human, and return the spec to `drafting` state -- the brief may have changed and the spec must be re-evaluated.
+**Task change invalidation (Phase 2):** In the current implementation, there is no server-side check that validates the task brief has not changed between spec submission and approval. The agent should re-read the task before re-drafting after rejection and flag significant scope changes to the human reviewer as part of the `reasoning` field. Server-enforced `task_version` comparison will be added in a later phase.
 
 ### Spec Reference ID
 
