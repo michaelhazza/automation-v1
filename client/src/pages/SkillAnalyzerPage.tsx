@@ -60,8 +60,8 @@ export default function SkillAnalyzerPage({ user: _user }: { user: User }) {
     try {
       const res = await api.get('/api/system/skill-analyser/jobs?limit=20');
       setJobs(res.data.jobs || []);
-    } catch {
-      // non-fatal
+    } catch (err) {
+      console.error('[SkillAnalyzer] Failed to load jobs:', err);
     } finally {
       setLoading(false);
     }

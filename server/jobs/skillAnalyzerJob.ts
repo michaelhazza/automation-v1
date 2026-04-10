@@ -540,7 +540,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       classification: 'DUPLICATE',
       confidence: 1.0,
       similarityScore: 1.0,
-      classificationReasoning: 'Exact content match (hash collision).',
+      classificationReasoning: 'Exact content match (identical content hash).',
       diffSummary: null,
     });
   }
@@ -572,7 +572,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateName: r.candidate.name,
       candidateSlug: r.candidate.slug,
       matchedSkillId: r.libraryId ?? undefined,
-      matchedSystemSkillSlug: r.librarySlug ?? undefined,
+      // Only set for system skills (id === null). Org skills are identified by matchedSkillId.
+      matchedSystemSkillSlug: (r.libraryId === null && r.librarySlug != null) ? r.librarySlug : undefined,
       matchedSkillName: r.libraryName ?? undefined,
       classification: r.classification,
       confidence: r.confidence,

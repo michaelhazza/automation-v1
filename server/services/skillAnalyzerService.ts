@@ -56,7 +56,7 @@ export async function createJob(params: {
 
   // Enqueue pg-boss job
   const boss = await getPgBoss();
-  await boss.send('skill-analyzer', { jobId, organisationId }, {
+  await boss.send('skill-analyzer', { jobId }, {
     singletonKey: undefined,
   });
 
