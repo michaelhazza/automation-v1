@@ -1,7 +1,15 @@
 import path from 'path';
+import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
+import crypto from 'crypto';
+import dns from 'dns/promises';
+import { isIP } from 'net';
 import yauzl from 'yauzl';
 import { withBackoff } from '../lib/withBackoff.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOAD_DIR = path.resolve(__dirname, '../../data/uploads');
 import {
   parseMarkdownFile,
   parseJsonFile,
@@ -216,16 +224,20 @@ function toDirectDownloadUrl(url: string): string {
 
   // Dropbox: change dl=0 → dl=1, or append dl=1
   if (url.includes('dropbox.com')) {
-    const u = new URL(url);
-    u.searchParams.set('dl', '1');
-    return u.toString();
+    try {
+      const u = new URL(url);
+      u.searchParams.set('dl', '1');
+      return u.toString();
+    } catch { return url; }
   }
 
   // OneDrive/SharePoint: append download=1
   if (url.includes('1drv.ms') || url.includes('sharepoint.com') || url.includes('onedrive.live.com')) {
-    const u = new URL(url);
-    u.searchParams.set('download', '1');
-    return u.toString();
+    try {
+      const u = new URL(url);
+      u.searchParams.set('download', '1');
+      return u.toString();
+    } catch { return url; }
   }
 
   // Box: https://app.box.com/s/{id} → https://app.box.com/shared/static/{id}
@@ -241,6 +253,66 @@ function toDirectDownloadUrl(url: string): string {
   }
 
   return url;
+}
+
+// ---------------------------------------------------------------------------
+// SSRF protection — block requests to private/loopback/metadata IPs
+// ---------------------------------------------------------------------------
+
+/** Check if an IP address is in a private, loopback, or link-local range. */
+function isPrivateIp(ip: string): boolean {
+  // IPv4
+  const v4Parts = ip.split('.').map(Number);
+  if (v4Parts.length === 4 && v4Parts.every((n) => n >= 0 && n <= 255)) {
+    if (v4Parts[0] === 127) return true;                                    // 127.0.0.0/8
+    if (v4Parts[0] === 10) return true;                                     // 10.0.0.0/8
+    if (v4Parts[0] === 172 && v4Parts[1] >= 16 && v4Parts[1] <= 31) return true; // 172.16.0.0/12
+    if (v4Parts[0] === 192 && v4Parts[1] === 168) return true;              // 192.168.0.0/16
+    if (v4Parts[0] === 169 && v4Parts[1] === 254) return true;              // 169.254.0.0/16 (link-local / IMDS)
+    if (v4Parts[0] === 0) return true;                                      // 0.0.0.0/8
+  }
+
+  // IPv6
+  const lower = ip.toLowerCase();
+  if (lower === '::1') return true;                                         // loopback
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true;        // fc00::/7 (unique local)
+  if (lower.startsWith('fe80')) return true;                                // fe80::/10 (link-local)
+
+  return false;
+}
+
+/** Resolve hostname and verify it does not point to a private IP. Throws on violation. */
+async function assertPublicUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+  const hostname = parsed.hostname;
+
+  // If hostname is already an IP literal, check directly
+  if (isIP(hostname)) {
+    if (isPrivateIp(hostname)) {
+      throw { statusCode: 400, message: 'Download URL resolves to a private or reserved IP address.' };
+    }
+    return;
+  }
+
+  // Resolve DNS and check all returned addresses
+  try {
+    const addresses = await dns.resolve4(hostname).catch(() => [] as string[]);
+    const addresses6 = await dns.resolve6(hostname).catch(() => [] as string[]);
+    const all = [...addresses, ...addresses6];
+
+    if (all.length === 0) {
+      throw { statusCode: 400, message: `Cannot resolve hostname: ${hostname}` };
+    }
+
+    for (const addr of all) {
+      if (isPrivateIp(addr)) {
+        throw { statusCode: 400, message: 'Download URL resolves to a private or reserved IP address.' };
+      }
+    }
+  } catch (err) {
+    if (typeof err === 'object' && err !== null && 'statusCode' in err) throw err;
+    throw { statusCode: 400, message: `DNS resolution failed for ${hostname}` };
+  }
 }
 
 /** Detect file type from URL path, Content-Type header, or content inspection. */
@@ -289,6 +361,9 @@ function detectFileType(
 async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
   const directUrl = toDirectDownloadUrl(url);
 
+  // SSRF protection: verify the URL resolves to a public IP before fetching
+  await assertPublicUrl(directUrl);
+
   const response = await withBackoff(
     () =>
       fetch(directUrl, {
@@ -308,7 +383,10 @@ async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
       maxAttempts: 3,
       correlationId: url,
       runId: url,
-      isRetryable: (err: Error) => err.message.includes('502') || err.message.includes('503'),
+      isRetryable: (err: unknown) => {
+        const e = err as { statusCode?: number };
+        return e?.statusCode === 502 || e?.statusCode === 503;
+      },
     }
   );
 
@@ -324,8 +402,8 @@ async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
 
   if (fileType === 'zip') {
     // Write to temp file and use existing zip parser
-    const tmpPath = path.join('data/uploads', `download-${Date.now()}.zip`);
-    await fs.mkdir(path.dirname(tmpPath), { recursive: true });
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+    const tmpPath = path.join(UPLOAD_DIR, `download-${crypto.randomUUID()}.zip`);
     await fs.writeFile(tmpPath, buffer);
     try {
       return await parseZipFile(tmpPath);

@@ -6,7 +6,7 @@ import SkillAnalyzerWizard from '../components/skill-analyzer/SkillAnalyzerWizar
 
 interface JobSummary {
   id: string;
-  sourceType: 'paste' | 'upload' | 'github';
+  sourceType: 'paste' | 'upload' | 'github' | 'download';
   status: string;
   progressPct: number;
   candidateCount: number | null;

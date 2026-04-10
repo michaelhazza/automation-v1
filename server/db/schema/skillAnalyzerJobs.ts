@@ -30,9 +30,10 @@ export const skillAnalyzerJobs = pgTable(
       .notNull()
       .$type<'paste' | 'upload' | 'github' | 'download'>(),
     sourceMetadata: jsonb('source_metadata').notNull().default({}),
-    // paste:  { charCount: number }
-    // upload: { fileName: string, fileType: string, fileSize: number }
-    // github: { url: string, branch?: string, path?: string }
+    // paste:    { charCount: number }
+    // upload:   { fileName: string, fileType: string, fileSize: number }
+    // github:   { url: string, branch?: string, path?: string }
+    // download: { url: string }
 
     // Processing state
     status: text('status')

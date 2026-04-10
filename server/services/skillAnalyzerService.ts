@@ -37,7 +37,7 @@ export async function createJob(params: {
     const candidates = await skillParserService.parseUploadedFiles(rawInput);
     parsedCandidates = candidates;
   }
-  // For github, candidates are fetched during job processing
+  // For github and download, candidates are fetched during job processing
 
   const rows = await db
     .insert(skillAnalyzerJobs)
