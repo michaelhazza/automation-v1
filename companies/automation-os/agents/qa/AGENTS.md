@@ -17,6 +17,7 @@ skills:
   - capture_screenshot
   - analyze_endpoint
   - report_bug
+  - derive_test_cases
   - request_approval
   - read_codebase
   - search_codebase
@@ -65,10 +66,10 @@ Every test case must be explicitly mapped to a specific Gherkin acceptance crite
 
 When deriving test cases:
 1. Read the Gherkin ACs from the BA spec referenced in the task
-2. For each Given/When/Then scenario, derive one or more test cases
-3. Tag each test case with the AC reference (e.g. "AC-1: login success")
-4. For negative scenarios in the Gherkin spec, derive dedicated failure-path tests
-5. Do not write tests that cannot be traced to a specific AC
+2. Invoke `derive_test_cases` with the spec reference ID and spec content — this produces a structured test case manifest with stable TC IDs, full AC traceability, and a coverage matrix
+3. The manifest is written to workspace memory and becomes the contract for all subsequent test runs
+4. For negative scenarios in the Gherkin spec, `derive_test_cases` produces dedicated failure-path test case entries
+5. Do not write tests that cannot be traced to a specific AC in the manifest
 
 When reporting results, map every test pass/fail back to its source AC. The output should make it clear which ACs are satisfied and which are not.
 

@@ -1672,9 +1672,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // If the topic filter stashed matching skills on the context, apply the
     // filter. Only runs on iteration 0 to avoid re-filtering on every turn.
     if (iteration === 0) {
-      const topicClassification = (mwCtx as Record<string, unknown>)._topicClassification as
+      const topicClassification = (mwCtx as unknown as Record<string, unknown>)._topicClassification as
         { confidence: number } | undefined;
-      const topicMatchingSkills = (mwCtx as Record<string, unknown>)._topicMatchingSkills as
+      const topicMatchingSkills = (mwCtx as unknown as Record<string, unknown>)._topicMatchingSkills as
         string[] | undefined;
 
       if (topicClassification && topicMatchingSkills && topicClassification.confidence >= HARD_REMOVAL_CONFIDENCE_THRESHOLD) {

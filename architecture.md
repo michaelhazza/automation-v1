@@ -14,7 +14,7 @@ server/
 ├── middleware/      Express middleware (auth, validation, correlation, org scoping)
 ├── lib/             Shared utilities (asyncHandler, permissions, scopeAssertion, orgScopedDb, etc.)
 ├── config/          Environment, action registry, system limits, RLS manifest, topic registry
-├── skills/          File-based skill definitions (53 built-in skills as .md files)
+├── skills/          File-based skill definitions (91 built-in skills as .md files)
 ├── jobs/            Background jobs (cleanup, regression replay, security event pruning)
 ├── tools/           Internal tool implementations (askClarifyingQuestion, readDataSource)
 └── index.ts         Express app setup, route mounting
@@ -264,7 +264,7 @@ Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_d
 
 ### File-based definitions
 
-Skills are defined as Markdown files in `server/skills/*.md`. There are 53 built-in system skills:
+Skills are defined as Markdown files in `server/skills/*.md`. There are 91 built-in system skills:
 
 | Category | Skills |
 |----------|--------|

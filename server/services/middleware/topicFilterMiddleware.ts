@@ -68,8 +68,8 @@ export const topicFilterMiddleware: PreCallMiddleware = {
 
     // Store classification on context for downstream use (preTool confidence escape)
     // Use runMetadata-style stashing on the context object (duck-typed extension)
-    (ctx as Record<string, unknown>)._topicClassification = classification;
-    (ctx as Record<string, unknown>)._topicMatchingSkills = matchingSkills;
+    (ctx as unknown as Record<string, unknown>)._topicClassification = classification;
+    (ctx as unknown as Record<string, unknown>)._topicMatchingSkills = matchingSkills;
 
     if (classification.confidence >= HARD_REMOVAL_CONFIDENCE_THRESHOLD) {
       // Hard removal mode: filter to matching skills + universals only.
