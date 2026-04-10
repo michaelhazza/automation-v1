@@ -5,28 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "add_deliverable",
-  "description": "Attach a deliverable to a task. Use this to submit your work output — reports, drafts, analysis, recommendations.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_id": { "type": "string", "description": "The ID of the task to attach the deliverable to" },
-      "title": { "type": "string", "description": "Title of the deliverable" },
-      "deliverable_type": { "type": "string", "description": "Type: \"artifact\" (text content), \"url\" (link), \"file\" (file reference)" },
-      "description": { "type": "string", "description": "The deliverable content." }
-    },
-    "required": ["task_id", "title", "deliverable_type", "description"]
-  }
-}
-```
+## Parameters
+
+- task_id: string (required) — The ID of the task to attach the deliverable to
+- title: string (required) — Title of the deliverable
+- deliverable_type: string (required) — Type: "artifact" (text content), "url" (link), "file" (file reference)
+- description: string (required) — The deliverable content.
 
 ## Instructions
 
 When you complete work, always attach the output as a deliverable so it can be reviewed. Add the deliverable before moving the task to review. Each deliverable should be complete and stand alone.
-
-## Methodology
 
 ### Deliverable Types
 - **artifact**: Full text content (reports, analysis, drafts). Content goes in the description field.

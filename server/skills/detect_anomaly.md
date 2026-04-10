@@ -5,30 +5,11 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "detect_anomaly",
-  "description": "Compare a current metric value for a subaccount against its historical baseline and identify statistically significant deviations. Writes an AnomalyEvent record if anomaly detected.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "account_id": {
-        "type": "string",
-        "description": "The canonical account ID to check"
-      },
-      "metric_name": {
-        "type": "string",
-        "description": "The metric to check (e.g. 'health_score', 'contact_growth', 'pipeline_value')"
-      },
-      "current_value": {
-        "type": "number",
-        "description": "The current value of the metric"
-      }
-    },
-    "required": ["account_id", "metric_name", "current_value"]
-  }
-}
-```
+## Parameters
+
+- account_id: string (required) — The canonical account ID to check
+- metric_name: string (required) — The metric to check (e.g. 'health_score', 'contact_growth', 'pipeline_value')
+- current_value: number (required) — The current value of the metric
 
 ## Instructions
 

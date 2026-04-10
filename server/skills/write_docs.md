@@ -5,42 +5,14 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "write_docs",
-  "description": "Apply an approved documentation update to the connected documentation system. This is a review-gated action — it enters the approval queue and does NOT write immediately. A human must approve before any documentation content is modified.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "page_id": {
-        "type": "string",
-        "description": "The ID of the documentation page to update"
-      },
-      "page_title": {
-        "type": "string",
-        "description": "Human-readable page title — shown in the review item"
-      },
-      "full_updated_content": {
-        "type": "string",
-        "description": "The complete updated page content — the result of applying all approved changes from propose_doc_update"
-      },
-      "change_summary": {
-        "type": "string",
-        "description": "Brief summary of what changed (e.g. 'Updated API endpoint in Step 3, removed deprecated warning')"
-      },
-      "source_proposal_id": {
-        "type": "string",
-        "description": "The ID of the propose_doc_update action that was approved — for traceability"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this update is being applied — should reference the approved proposal. Shown to the reviewer."
-      }
-    },
-    "required": ["page_title", "full_updated_content", "change_summary", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- page_id: string — The ID of the documentation page to update
+- page_title: string (required) — Human-readable page title — shown in the review item
+- full_updated_content: string (required) — The complete updated page content — the result of applying all approved changes from propose_doc_update
+- change_summary: string (required) — Brief summary of what changed (e.g. 'Updated API endpoint in Step 3, removed deprecated warning')
+- source_proposal_id: string — The ID of the propose_doc_update action that was approved — for traceability
+- reasoning: string (required) — Why this update is being applied — should reference the approved proposal. Shown to the reviewer.
 
 ## Instructions
 
@@ -49,8 +21,6 @@ Invoke this skill only after `propose_doc_update` has been approved. The `full_u
 This is a review-gated action. This is the second approval gate in the documentation update workflow (propose → approve → write → approve → live). Both gates are required.
 
 **MVP stub:** Documentation write APIs not yet connected. On approval, logs the update record and returns `pending_integration` status.
-
-## Methodology
 
 ### Pre-Submission Rules
 

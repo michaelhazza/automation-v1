@@ -5,26 +5,10 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "update_memory_block",
-  "description": "Update the content of a shared memory block. Only works if the current agent owns the block and has read_write permission. Use this to persist learned context that other agents attached to the same block will see on their next run.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "block_name": {
-        "type": "string",
-        "description": "The name of the memory block to update (e.g. 'brand_voice', 'client_context')"
-      },
-      "new_content": {
-        "type": "string",
-        "description": "The new content for the memory block. Replaces the entire block content."
-      }
-    },
-    "required": ["block_name", "new_content"]
-  }
-}
-```
+## Parameters
+
+- block_name: string (required) — The name of the memory block to update (e.g. 'brand_voice', 'client_context')
+- new_content: string (required) — The new content for the memory block. Replaces the entire block content.
 
 ## Instructions
 

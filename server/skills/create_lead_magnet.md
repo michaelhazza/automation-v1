@@ -5,51 +5,16 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "create_lead_magnet",
-  "description": "Produce a complete lead magnet asset from a brief — checklist, template, mini-guide, or scorecard. Returns the full asset content ready for human review and design hand-off. Review-gated — the asset enters the approval queue before being used in any campaign.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "asset_type": {
-        "type": "string",
-        "enum": ["checklist", "template", "mini_guide", "scorecard", "swipe_file"],
-        "description": "The type of lead magnet to produce"
-      },
-      "topic": {
-        "type": "string",
-        "description": "The specific topic or problem the lead magnet addresses"
-      },
-      "target_audience": {
-        "type": "string",
-        "description": "Who this lead magnet is for: persona, industry, seniority level, or job function"
-      },
-      "value_promise": {
-        "type": "string",
-        "description": "The specific outcome the reader gets from this asset (e.g. 'In 10 minutes, you will have a complete onboarding email sequence')"
-      },
-      "brand_voice": {
-        "type": "string",
-        "description": "Brand voice guidelines"
-      },
-      "campaign_context": {
-        "type": "string",
-        "description": "Optional: the campaign or landing page this lead magnet will support"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: product context, ICP, content library"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this lead magnet is being created — the campaign goal or strategic reason. Shown to the reviewer."
-      }
-    },
-    "required": ["asset_type", "topic", "target_audience", "value_promise", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- asset_type: enum[checklist, template, mini_guide, scorecard, swipe_file] (required) — The type of lead magnet to produce
+- topic: string (required) — The specific topic or problem the lead magnet addresses
+- target_audience: string (required) — Who this lead magnet is for: persona, industry, seniority level, or job function
+- value_promise: string (required) — The specific outcome the reader gets from this asset (e.g. 'In 10 minutes, you will have a complete onboarding email sequence')
+- brand_voice: string — Brand voice guidelines
+- campaign_context: string — Optional: the campaign or landing page this lead magnet will support
+- workspace_context: string — Workspace memory: product context, ICP, content library
+- reasoning: string (required) — Why this lead magnet is being created — the campaign goal or strategic reason. Shown to the reviewer.
 
 ## Instructions
 
@@ -58,8 +23,6 @@ Invoke this skill when the Content/SEO Agent needs to produce a lead magnet asse
 This is a review-gated action. The human reviewer approves the content before it is attached to any campaign or landing page.
 
 Do not fabricate statistics, case study results, or proprietary frameworks unless sourced from `workspace_context`.
-
-## Methodology
 
 ### Asset Structure by Type
 

@@ -6,7 +6,7 @@
  *
  *   none   — skill is invisible to lower tiers (filtered out of lists)
  *   basic  — name + one-line description visible only; body stripped
- *   full   — everything visible (instructions, methodology, definition)
+ *   full   — everything visible (instructions, definition)
  *
  * Two predicates kept intentionally distinct from `canManageSkill`:
  *  - isVisibleToViewer():  may the viewer SEE the skill in lists at all
@@ -54,8 +54,7 @@ export function isSkillVisibleToViewer(skill: SkillVisibilityInput, viewer: Skil
 }
 
 /**
- * May the viewer read the full skill body (instructions, methodology,
- * tool definition)?
+ * May the viewer read the full skill body (instructions, tool definition)?
  *
  *  - Owner tier always yes.
  *  - Lower tiers: only when visibility === 'full'. The 'basic' state shows

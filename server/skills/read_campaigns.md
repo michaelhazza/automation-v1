@@ -5,40 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "read_campaigns",
-  "description": "Retrieve current campaign data from the connected ads platform. Returns campaign names, status, budget allocations, spend to date, and key performance indicators for one or more campaigns. Used by the Ads Management Agent before making bid, budget, or copy changes.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platform": {
-        "type": "string",
-        "enum": ["google_ads", "meta_ads", "linkedin_ads"],
-        "description": "The ads platform to read campaigns from"
-      },
-      "campaign_ids": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Optional list of specific campaign IDs to retrieve. If omitted, returns all active campaigns."
-      },
-      "include_ad_groups": {
-        "type": "boolean",
-        "description": "Whether to include ad group breakdown within each campaign. Default false."
-      },
-      "date_from": {
-        "type": "string",
-        "description": "Start date for performance metrics (ISO 8601 YYYY-MM-DD). Defaults to last 7 days."
-      },
-      "date_to": {
-        "type": "string",
-        "description": "End date for performance metrics (ISO 8601 YYYY-MM-DD). Defaults to today."
-      }
-    },
-    "required": ["platform"]
-  }
-}
-```
+## Parameters
+
+- platform: enum[google_ads, meta_ads, linkedin_ads] (required) — The ads platform to read campaigns from
+- campaign_ids: string — JSON array of string values. Optional list of specific campaign IDs to retrieve. If omitted, returns all active campaigns.
+- include_ad_groups: boolean — Whether to include ad group breakdown within each campaign. Default false.
+- date_from: string — Start date for performance metrics (ISO 8601 YYYY-MM-DD). Defaults to last 7 days.
+- date_to: string — End date for performance metrics (ISO 8601 YYYY-MM-DD). Defaults to today.
 
 ## Instructions
 
@@ -47,8 +20,6 @@ Invoke this skill at the start of any Ads Management Agent run that requires kno
 **MVP stub:** The ads platform API integrations are not yet connected. This skill returns a structured stub response so downstream skills can handle data unavailability gracefully rather than failing.
 
 Validate `date_from` and `date_to` before returning. If `date_from` > `date_to`, return a validation error.
-
-## Methodology
 
 ### Data Schema
 

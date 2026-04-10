@@ -5,24 +5,10 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "playbook_estimate_cost",
-  "description": "Estimate the cost of a playbook run in cents. Defaults to mode='pessimistic' which assumes max-token output per LLM step and all conditional branches taken — this is what you should surface to the human admin so they don't get unpleasant surprises in production. Pass mode='optimistic' for a separate best-case comparison number.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "definition": { "type": "object" },
-      "mode": {
-        "type": "string",
-        "enum": ["optimistic", "pessimistic"],
-        "description": "Default 'pessimistic'."
-      }
-    },
-    "required": ["definition"]
-  }
-}
-```
+## Parameters
+
+- definition: string (required) — JSON object.
+- mode: enum[optimistic, pessimistic] — Default 'pessimistic'.
 
 ## Instructions
 

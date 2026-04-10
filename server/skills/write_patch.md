@@ -5,29 +5,17 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "write_patch",
-  "description": "Propose a code change as a unified diff. This is a review-gated action — it enters the HITL approval queue and does NOT execute immediately. A human must approve it before it is applied. Requires a valid DEC with safeMode disabled.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "file": { "type": "string", "description": "Path to the file to modify, relative to projectRoot" },
-      "diff": { "type": "string", "description": "Unified diff (--- / +++ / @@ format). Must be minimal and targeted." },
-      "base_commit": { "type": "string", "description": "The git commit hash this diff is based on. Read from executionSnapshot.baseCommit — do not run a shell command to obtain it." },
-      "intent": { "type": "string", "description": "Type of change: feature, bugfix, refactor, test, config" },
-      "reasoning": { "type": "string", "description": "Why this change is needed. The human reviewer sees only this field and the diff." }
-    },
-    "required": ["file", "diff", "base_commit", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- file: string (required) — Path to the file to modify, relative to projectRoot
+- diff: string (required) — Unified diff (--- / +++ / @@ format). Must be minimal and targeted.
+- base_commit: string (required) — The git commit hash this diff is based on. Read from executionSnapshot.baseCommit — do not run a shell command to obtain it.
+- intent: string — Type of change: feature, bugfix, refactor, test, config
+- reasoning: string (required) — Why this change is needed. The human reviewer sees only this field and the diff.
 
 ## Instructions
 
 Always read the target file with `read_codebase` before proposing a patch. Get `base_commit` from `executionSnapshot.baseCommit` — never from a shell command. Keep patches small and focused on one logical concern. Human approval is required before execution.
-
-## Methodology
 
 ### Patch Constraints
 - Max files per patch: 5

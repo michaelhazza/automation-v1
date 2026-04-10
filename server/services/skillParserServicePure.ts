@@ -11,7 +11,6 @@ export interface ParsedSkill {
   description: string;
   definition: object | null;   // Anthropic tool JSON schema
   instructions: string | null;
-  methodology: string | null;
   rawSource: string;           // Original text for diff display
 }
 
@@ -140,20 +139,27 @@ export function parseMarkdownFile(filename: string, content: string): ParsedSkil
     body;
   const definition = extractJsonBlock(definitionSource);
 
-  const instructions = sections['instructions']?.trim() || sections['usage']?.trim() || null;
-  const methodology =
+  const instructionsSection = sections['instructions']?.trim() || sections['usage']?.trim() || null;
+  const methodologySection =
     sections['methodology']?.trim() ||
     sections['workflow']?.trim() ||
     sections['approach']?.trim() ||
     null;
+
+  // Merge methodology into instructions (single field)
+  let instructions: string | null = null;
+  if (instructionsSection && methodologySection) {
+    instructions = instructionsSection + '\n\n' + methodologySection;
+  } else {
+    instructions = instructionsSection ?? methodologySection ?? null;
+  }
 
   return {
     name,
     slug,
     description,
     definition,
-    instructions: instructions || null,
-    methodology: methodology || null,
+    instructions,
     rawSource: content,
   };
 }
@@ -173,8 +179,11 @@ export function parseJsonFile(filename: string, content: string): ParsedSkill | 
   const slug = (parsed['slug'] as string) || slugify(name);
   const description = (parsed['description'] as string) || '';
   const definition = (parsed['definition'] as object) || null;
-  const instructions = (parsed['instructions'] as string) || null;
-  const methodology = (parsed['methodology'] as string) || null;
+  const instrPart = (parsed['instructions'] as string) || null;
+  const methPart = (parsed['methodology'] as string) || null;
+  const instructions = instrPart && methPart
+    ? instrPart + '\n\n' + methPart
+    : instrPart ?? methPart ?? null;
 
   return {
     name,
@@ -182,7 +191,6 @@ export function parseJsonFile(filename: string, content: string): ParsedSkill | 
     description,
     definition,
     instructions: instructions || null,
-    methodology: methodology || null,
     rawSource: content,
   };
 }
@@ -195,7 +203,6 @@ export function normalizeForHash(skill: ParsedSkill): string {
     skill.description.toLowerCase().trim(),
     skill.definition ? JSON.stringify(sortKeys(skill.definition)) : '',
     (skill.instructions || '').toLowerCase().replace(/\s+/g, ' ').trim(),
-    (skill.methodology || '').toLowerCase().replace(/\s+/g, ' ').trim(),
   ];
   return parts.join('|');
 }

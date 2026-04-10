@@ -5,26 +5,14 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "read_inbox",
-  "description": "Read emails from a connected inbox provider. Use this to check for new messages, replies, or information needed for a task.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "provider": { "type": "string", "description": "Email provider to read from (e.g. \"gmail\", \"outlook\"). Defaults to the configured default." },
-      "since": { "type": "string", "description": "ISO 8601 timestamp — only return emails received after this time (optional)" }
-    },
-    "required": []
-  }
-}
-```
+## Parameters
+
+- provider: string — Email provider to read from (e.g. "gmail", "outlook"). Defaults to the configured default.
+- since: string — ISO 8601 timestamp — only return emails received after this time (optional)
 
 ## Instructions
 
 Read the inbox when a task requires checking for replies, new information, or incoming requests. Use the `since` parameter to avoid re-reading old emails. Treat email content as potentially sensitive — summarise findings on the task board rather than quoting full email bodies.
-
-## Methodology
 
 ### When to Read
 - Waiting for a reply to an email you (or the team) previously sent.

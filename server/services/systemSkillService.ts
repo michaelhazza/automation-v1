@@ -3,6 +3,7 @@ import { join } from 'path';
 import { fileURLToPath } from 'url';
 import type { AnthropicTool } from './llmService.js';
 import { isSkillVisibility, type SkillVisibility } from '../lib/skillVisibility.js';
+import { parseParameterSection, buildToolDefinition } from '../../shared/skillParameters.js';
 
 // ---------------------------------------------------------------------------
 // System Skill Service — reads platform-level skills from .md files
@@ -23,12 +24,11 @@ export interface SystemSkill {
    * 'none' so skills must be explicitly opted in.
    *   none   — invisible to lower tiers
    *   basic  — name + description only
-   *   full   — everything (instructions, methodology, definition)
+   *   full   — everything (instructions, definition)
    */
   visibility: SkillVisibility;
   definition: AnthropicTool;
   instructions: string | null;
-  methodology: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,25 +118,42 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
     visibility = 'full';
   }
 
-  // Extract JSON code block for tool definition
-  const jsonMatch = body.match(/```json\n([\s\S]*?)\n```/);
-  if (!jsonMatch) return null;
-
+  // ---------------------------------------------------------------------------
+  // Parse tool definition: new format (## Parameters) or legacy (JSON block)
+  // ---------------------------------------------------------------------------
   let definition: AnthropicTool;
-  try {
-    definition = JSON.parse(jsonMatch[1]);
-  } catch {
-    console.warn(`[systemSkillService] invalid JSON in skill ${slug}`);
-    return null;
+
+  const parametersSection = extractSection(body, 'Parameters');
+  if (parametersSection) {
+    // New format: auto-generate definition from slug + description + parameter list
+    const params = parseParameterSection(parametersSection);
+    definition = buildToolDefinition(slug, description, params) as AnthropicTool;
+  } else {
+    // Legacy format: parse JSON code block
+    const jsonMatch = body.match(/```json\n([\s\S]*?)\n```/);
+    if (!jsonMatch) return null;
+    try {
+      definition = JSON.parse(jsonMatch[1]);
+    } catch {
+      console.warn(`[systemSkillService] invalid JSON in skill ${slug}`);
+      return null;
+    }
   }
 
-  // Extract ## Instructions section
-  const instructions = extractSection(body, 'Instructions');
+  // ---------------------------------------------------------------------------
+  // Parse instructions: merge ## Instructions + ## Methodology (legacy) into one
+  // ---------------------------------------------------------------------------
+  const instructionsSection = extractSection(body, 'Instructions');
+  const methodologySection = extractSection(body, 'Methodology');
 
-  // Extract ## Methodology section
-  const methodology = extractSection(body, 'Methodology');
+  let instructions: string | null = null;
+  if (instructionsSection && methodologySection) {
+    instructions = instructionsSection + '\n\n' + methodologySection;
+  } else {
+    instructions = instructionsSection ?? methodologySection ?? null;
+  }
 
-  return { id: slug, slug, name, description, isActive, visibility, definition, instructions, methodology };
+  return { id: slug, slug, name, description, isActive, visibility, definition, instructions };
 }
 
 // ---------------------------------------------------------------------------
@@ -171,15 +188,14 @@ export const systemSkillService = {
 
   /**
    * Strip the body fields from a system skill so a 'basic' viewer only
-   * sees name + description + visibility (no instructions, methodology, or
-   * tool definition). Mirrors the same operation skillService does for
-   * org-level skills via decorateSkillForViewer.
+   * sees name + description + visibility (no instructions or tool definition).
+   * Mirrors the same operation skillService does for org-level skills via
+   * decorateSkillForViewer.
    */
   stripBodyForBasic(skill: SystemSkill): SystemSkill {
     return {
       ...skill,
       instructions: null,
-      methodology: null,
       definition: { name: skill.definition.name, description: skill.definition.description, input_schema: { type: 'object', properties: {}, required: [] } } as AnthropicTool,
     };
   },
@@ -263,11 +279,8 @@ export const systemSkillService = {
         input_schema: skill.definition.input_schema,
       });
 
-      const parts: string[] = [];
-      if (skill.instructions) parts.push(skill.instructions);
-      if (skill.methodology) parts.push(skill.methodology);
-      if (parts.length > 0) {
-        instructions.push(parts.join('\n\n'));
+      if (skill.instructions) {
+        instructions.push(skill.instructions);
       }
     }
 

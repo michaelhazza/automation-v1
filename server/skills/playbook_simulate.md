@@ -5,22 +5,9 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "playbook_simulate",
-  "description": "Run static analysis over a candidate playbook definition. Returns the topological order of steps, max parallelism (the largest concurrent step count any tick will see), critical path length (longest chain through the DAG), and counts of irreversible / reversible / human-review steps. Use this to describe the run shape to the human admin in plain English before saving.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "definition": {
-        "type": "object",
-        "description": "The candidate playbook definition object."
-      }
-    },
-    "required": ["definition"]
-  }
-}
-```
+## Parameters
+
+- definition: string (required) — JSON object. The candidate playbook definition object.
 
 ## Instructions
 

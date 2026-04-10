@@ -15,7 +15,6 @@ interface Skill {
   isActive: boolean;
   visibility: SkillVisibility;
   canManageSkill?: boolean;
-  methodology: string | null;
   instructions: string | null;
   createdAt: string;
 }

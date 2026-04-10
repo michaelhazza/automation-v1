@@ -5,66 +5,24 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_followup",
-  "description": "Draft a contextually personalised follow-up email for a stale CRM deal or at-risk account. Uses deal stage, last activity, contact name, and deal context to produce a timely and relevant message. Output goes to human review before sending via send_email.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "contact_name": {
-        "type": "string",
-        "description": "Contact first name for personalisation"
-      },
-      "contact_email": {
-        "type": "string",
-        "description": "Contact email address"
-      },
-      "deal_name": {
-        "type": "string",
-        "description": "Name or description of the deal being followed up on"
-      },
-      "deal_stage": {
-        "type": "string",
-        "description": "Current pipeline stage of the deal"
-      },
-      "last_activity": {
-        "type": "string",
-        "description": "Description of the last activity (e.g. 'demo call on 2026-03-10', 'proposal sent on 2026-02-28')"
-      },
-      "days_since_activity": {
-        "type": "number",
-        "description": "Number of days since the last activity"
-      },
-      "follow_up_goal": {
-        "type": "string",
-        "description": "What this follow-up should achieve: schedule_next_step, get_feedback, re_engage, confirm_close_date"
-      },
-      "brand_voice": {
-        "type": "string",
-        "description": "Brand voice guidelines"
-      },
-      "agent_name": {
-        "type": "string",
-        "description": "Name to sign the email with"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: product context, sales process notes, known objections"
-      }
-    },
-    "required": ["contact_name", "contact_email", "deal_stage", "last_activity", "follow_up_goal"]
-  }
-}
-```
+## Parameters
+
+- contact_name: string (required) — Contact first name for personalisation
+- contact_email: string (required) — Contact email address
+- deal_name: string — Name or description of the deal being followed up on
+- deal_stage: string (required) — Current pipeline stage of the deal
+- last_activity: string (required) — Description of the last activity (e.g. 'demo call on 2026-03-10', 'proposal sent on 2026-02-28')
+- days_since_activity: number — Number of days since the last activity
+- follow_up_goal: string (required) — What this follow-up should achieve: schedule_next_step, get_feedback, re_engage, confirm_close_date
+- brand_voice: string — Brand voice guidelines
+- agent_name: string — Name to sign the email with
+- workspace_context: string — Workspace memory: product context, sales process notes, known objections
 
 ## Instructions
 
 Invoke this skill when `analyse_pipeline` identifies a stale deal requiring follow-up. The draft output goes to human review before being sent via `send_email`.
 
 Do not fabricate deal details, product promises, or previous conversation content not in the input. If `last_activity` is vague, draft a generic but relevant re-engagement rather than inventing context.
-
-## Methodology
 
 ### Follow-Up Construction Rules
 

@@ -136,7 +136,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       description: s.description,
       definition: s.definition as object | null,
       instructions: s.instructions,
-      methodology: s.methodology,
       isSystem: true,
     })),
     ...orgSkills
@@ -148,8 +147,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         description: s.description ?? '',
         definition: s.definition as object | null,
         instructions: s.instructions,
-        methodology: s.methodology,
-        isSystem: false,
+          isSystem: false,
       })),
   ];
 
@@ -167,7 +165,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       description: lib.description,
       definition: lib.definition,
       instructions: lib.instructions,
-      methodology: lib.methodology,
       rawSource: '',
     };
     const hash = skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(libAsCandidate));
@@ -202,8 +199,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         description: candidate.description,
         definition: candidate.definition,
         instructions: candidate.instructions,
-        methodology: candidate.methodology,
-        isSystem: false,
+          isSystem: false,
       }});
     } else {
       seenCandidateHashes.set(hash, i);
@@ -251,7 +247,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     const libAsCandidate: ParsedSkill = {
       name: lib.name, slug: lib.slug, description: lib.description,
       definition: lib.definition, instructions: lib.instructions,
-      methodology: lib.methodology, rawSource: '',
+      rawSource: '',
     };
     const hash = skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(libAsCandidate));
     return {
@@ -333,7 +329,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       const libAsCandidate: ParsedSkill = {
         name: lib.name, slug: lib.slug, description: lib.description,
         definition: lib.definition, instructions: lib.instructions,
-        methodology: lib.methodology, rawSource: '',
+        rawSource: '',
       };
       const hash = skillParserServicePure.contentHash(skillParserServicePure.normalizeForHash(libAsCandidate));
       const embedding = cachedEmbeddings.get(hash);

@@ -104,11 +104,12 @@ test('parseMarkdownFile: parses instructions section', () => {
   assert(skill!.instructions!.includes('Step 1'), 'instructions content');
 });
 
-test('parseMarkdownFile: parses methodology section', () => {
+test('parseMarkdownFile: merges methodology into instructions', () => {
   const skill = parseMarkdownFile('web-search.md', SAMPLE_MD);
   assert(skill !== null, 'should parse successfully');
-  assert(skill!.methodology !== null, 'should have methodology');
-  assert(skill!.methodology!.includes('Phase 1'), 'methodology content');
+  assert(skill!.instructions !== null, 'should have instructions');
+  assert(skill!.instructions!.includes('Phase 1'), 'methodology content merged into instructions');
+  assert(skill!.instructions!.includes('Step 1'), 'original instructions preserved');
 });
 
 test('parseMarkdownFile: returns null if no name', () => {
@@ -144,7 +145,6 @@ test('parseJsonFile: parses standard JSON skill definition', () => {
     description: 'A JSON skill',
     definition: { name: 'json_skill', description: 'Does things', input_schema: {} },
     instructions: 'Do this.',
-    methodology: null,
   });
   const result = parseJsonFile('json-skill.json', json);
   assert(result !== null, 'should parse successfully');
@@ -212,7 +212,6 @@ test('normalizeForHash: same content normalizes identically', () => {
     description: 'Searches the web',
     definition: { name: 'web_search', input_schema: {} },
     instructions: 'Step 1.',
-    methodology: null,
     rawSource: 'Different raw source text',
   };
   const norm1 = normalizeForHash(skill);
@@ -224,12 +223,12 @@ test('normalizeForHash: different definition keys produce same hash (sorted)', (
   const skill1 = {
     name: 'Test', slug: 'test', description: 'Test',
     definition: { b: 2, a: 1 },  // keys in different order
-    instructions: null, methodology: null, rawSource: '',
+    instructions: null, rawSource: '',
   };
   const skill2 = {
     name: 'Test', slug: 'test', description: 'Test',
     definition: { a: 1, b: 2 },  // keys in different order
-    instructions: null, methodology: null, rawSource: '',
+    instructions: null, rawSource: '',
   };
   assertEqual(normalizeForHash(skill1), normalizeForHash(skill2), 'JSON key order should not matter');
 });

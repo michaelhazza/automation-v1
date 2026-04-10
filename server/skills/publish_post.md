@@ -5,48 +5,15 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "publish_post",
-  "description": "Submit an approved social media post for publishing or scheduling. This is a review-gated action — it enters the approval queue and does NOT execute immediately. A human must approve it before the post goes live. Supports immediate publishing and scheduled publishing.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platform": {
-        "type": "string",
-        "enum": ["twitter", "linkedin", "instagram", "facebook"],
-        "description": "Target publishing platform"
-      },
-      "post_content": {
-        "type": "string",
-        "description": "The final approved post copy (from draft_post output, post human review)"
-      },
-      "schedule_at": {
-        "type": "string",
-        "description": "ISO 8601 datetime to schedule the post (e.g. 2026-04-15T09:00:00Z). If omitted, publishes immediately upon approval."
-      },
-      "media_urls": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Optional list of media attachment URLs (images, video). Must be accessible to the platform integration."
-      },
-      "hashtags_in_comment": {
-        "type": "boolean",
-        "description": "Instagram only: post hashtags in the first comment rather than the caption. Default false."
-      },
-      "campaign_tag": {
-        "type": "string",
-        "description": "Optional campaign identifier for analytics grouping"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this post is being published now: campaign context, timing rationale, approval chain summary. Shown to the human reviewer."
-      }
-    },
-    "required": ["platform", "post_content", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- platform: enum[twitter, linkedin, instagram, facebook] (required) — Target publishing platform
+- post_content: string (required) — The final approved post copy (from draft_post output, post human review)
+- schedule_at: string — ISO 8601 datetime to schedule the post (e.g. 2026-04-15T09:00:00Z). If omitted, publishes immediately upon approval.
+- media_urls: string — JSON array of string values. Optional list of media attachment URLs (images, video). Must be accessible to the platform integration.
+- hashtags_in_comment: boolean — Instagram only: post hashtags in the first comment rather than the caption. Default false.
+- campaign_tag: string — Optional campaign identifier for analytics grouping
+- reasoning: string (required) — Why this post is being published now: campaign context, timing rationale, approval chain summary. Shown to the human reviewer.
 
 ## Instructions
 
@@ -59,8 +26,6 @@ On approval: the post is submitted to the connected platform integration. If `sc
 On rejection: read the rejection feedback, revise the post content if needed (re-invoke `draft_post`), or surface the rejection to the requesting agent.
 
 **MVP note:** The platform integration (API calls to Twitter/LinkedIn/Instagram/Facebook) is a stub at this stage. The approval workflow is fully wired; the actual publish call will be implemented when the social media API integrations are connected. On approval, the executor logs the intended publish action and returns a `pending_integration` status.
-
-## Methodology
 
 ### Pre-Submission Checklist
 

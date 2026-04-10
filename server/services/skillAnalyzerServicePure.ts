@@ -13,7 +13,6 @@ export interface LibrarySkillSummary {
   description: string;
   definition: object | null;
   instructions: string | null;
-  methodology: string | null;
   isSystem: boolean;
 }
 
@@ -106,7 +105,7 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 
 **DUPLICATE** — The skills are functionally identical. Same purpose, same approach, same scope. Different wording is acceptable; the underlying capability is the same. Recommended action: skip the incoming skill.
 
-**IMPROVEMENT** — The incoming skill does everything the existing one does, but better. It may have a cleaner definition, better instructions, more complete methodology, or improved structure. The existing skill should be replaced. Recommended action: replace existing with incoming.
+**IMPROVEMENT** — The incoming skill does everything the existing one does, but better. It may have a cleaner definition, better instructions, or improved structure. The existing skill should be replaced. Recommended action: replace existing with incoming.
 
 **PARTIAL_OVERLAP** — The skills share a common purpose but differ in scope, approach, or specialization. Both have value. Neither fully replaces the other. Recommended action: human decision required (merge, keep both, or pick one).
 
@@ -169,7 +168,6 @@ export function buildClassificationPrompt(
     description: candidate.description,
     definition: candidate.definition,
     instructions: candidate.instructions,
-    methodology: candidate.methodology,
   });
 
   const librarySummary = formatSkillForPrompt('EXISTING SKILL (LIBRARY)', {
@@ -178,7 +176,6 @@ export function buildClassificationPrompt(
     description: librarySkill.description,
     definition: librarySkill.definition,
     instructions: librarySkill.instructions,
-    methodology: librarySkill.methodology,
   });
 
   const bandHint =
@@ -199,7 +196,6 @@ function formatSkillForPrompt(
     description: string;
     definition: object | null;
     instructions: string | null;
-    methodology: string | null;
   }
 ): string {
   const parts = [`## ${label}`, `**Name:** ${skill.name}`, `**Slug:** ${skill.slug}`];
@@ -215,12 +211,7 @@ function formatSkillForPrompt(
 
   if (skill.instructions) {
     parts.push('**Instructions:**');
-    parts.push(skill.instructions.slice(0, 1500)); // truncate for token efficiency
-  }
-
-  if (skill.methodology) {
-    parts.push('**Methodology:**');
-    parts.push(skill.methodology.slice(0, 1000)); // truncate for token efficiency
+    parts.push(skill.instructions.slice(0, 2500)); // truncate for token efficiency
   }
 
   return parts.join('\n');
@@ -279,7 +270,6 @@ export function generateDiffSummary(
     ['description', candidate.description, librarySkill.description],
     ['definition', candidate.definition, librarySkill.definition],
     ['instructions', candidate.instructions, librarySkill.instructions],
-    ['methodology', candidate.methodology, librarySkill.methodology],
   ];
 
   for (const [field, candidateVal, libraryVal] of fields) {

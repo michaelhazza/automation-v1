@@ -5,25 +5,13 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "read_codebase",
-  "description": "Read a file from the project codebase. Use this to understand existing code before proposing changes. Always read before writing patches.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "file_path": { "type": "string", "description": "Relative path to the file from the project root (e.g. \"src/services/userService.ts\")" }
-    },
-    "required": ["file_path"]
-  }
-}
-```
+## Parameters
+
+- file_path: string (required) — Relative path to the file from the project root (e.g. "src/services/userService.ts")
 
 ## Instructions
 
 Always read the relevant files before proposing any code changes. Understand the existing patterns, conventions, and dependencies before writing a patch. You cannot read files outside the configured project root.
-
-## Methodology
 
 ### Phase 1: Entry Points
 Start by reading the files most directly related to the task. Identify the correct module, class, or function that needs to change.

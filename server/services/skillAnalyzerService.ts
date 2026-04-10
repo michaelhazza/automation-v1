@@ -203,7 +203,6 @@ export async function executeApproved(params: {
       description: string;
       definition: object | null;
       instructions: string | null;
-      methodology: string | null;
     } | undefined;
 
     if (!candidate) {
@@ -242,7 +241,6 @@ export async function executeApproved(params: {
           description: candidate.description,
           definition: candidate.definition ?? {},
           instructions: candidate.instructions ?? undefined,
-          methodology: candidate.methodology ?? undefined,
         });
 
         await db
@@ -258,7 +256,6 @@ export async function executeApproved(params: {
           description: candidate.description,
           definition: candidate.definition ?? {},
           instructions: candidate.instructions ?? undefined,
-          methodology: candidate.methodology ?? undefined,
         });
 
         await db

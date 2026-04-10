@@ -176,7 +176,6 @@ const makeCandidate = (overrides: Partial<ParsedSkill> = {}): ParsedSkill => ({
   description: 'Does something',
   definition: { type: 'object' },
   instructions: 'Step 1. Do it.',
-  methodology: null,
   rawSource: '',
   ...overrides,
 });
@@ -188,7 +187,6 @@ const makeLibrary = (overrides: Partial<LibrarySkillSummary> = {}): LibrarySkill
   description: 'Does something',
   definition: { type: 'object' },
   instructions: 'Step 1. Do it.',
-  methodology: null,
   isSystem: false,
   ...overrides,
 });
@@ -199,12 +197,12 @@ test('generateDiffSummary: identical skills → empty diff', () => {
   assert(diff.addedFields.length === 0 || diff.changedFields.includes('name'), 'name should be in changedFields');
 });
 
-test('generateDiffSummary: candidate has methodology, library does not → added', () => {
+test('generateDiffSummary: candidate has instructions, library does not → added', () => {
   const diff = generateDiffSummary(
-    makeCandidate({ methodology: 'Phase 1: ...' }),
-    makeLibrary({ methodology: null })
+    makeCandidate({ instructions: 'Phase 1: ...' }),
+    makeLibrary({ instructions: null })
   );
-  assert(diff.addedFields.includes('methodology'), 'methodology should be in addedFields');
+  assert(diff.addedFields.includes('instructions'), 'instructions should be in addedFields');
 });
 
 test('generateDiffSummary: library has instructions, candidate does not → removed', () => {

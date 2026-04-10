@@ -5,53 +5,16 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "update_copy",
-  "description": "Upload approved ad copy to the connected ads platform. This is a review-gated action — it enters the approval queue and does NOT apply immediately. A human must approve it before the copy change is submitted to the platform.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platform": {
-        "type": "string",
-        "enum": ["google_ads", "meta_ads", "linkedin_ads"],
-        "description": "The ads platform"
-      },
-      "campaign_id": {
-        "type": "string",
-        "description": "Campaign ID to update copy for"
-      },
-      "campaign_name": {
-        "type": "string",
-        "description": "Human-readable campaign name — shown in the review item"
-      },
-      "ad_group_id": {
-        "type": "string",
-        "description": "Optional: ad group ID if updating at ad group level"
-      },
-      "ad_format": {
-        "type": "string",
-        "enum": ["responsive_search_ad", "display_ad", "social_feed_ad", "sponsored_content"],
-        "description": "The ad format being updated"
-      },
-      "copy_content": {
-        "type": "object",
-        "description": "The approved copy fields to upload. Structure depends on ad_format — include headlines, descriptions, CTA as key-value pairs.",
-        "additionalProperties": true
-      },
-      "replace_existing": {
-        "type": "boolean",
-        "description": "If true, replaces all existing copy. If false, adds as a new variant alongside existing copy. Default false."
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this copy change is being made — test hypothesis or performance issue being addressed. Shown to the reviewer."
-      }
-    },
-    "required": ["platform", "campaign_id", "campaign_name", "ad_format", "copy_content", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- platform: enum[google_ads, meta_ads, linkedin_ads] (required) — The ads platform
+- campaign_id: string (required) — Campaign ID to update copy for
+- campaign_name: string (required) — Human-readable campaign name — shown in the review item
+- ad_group_id: string — Optional: ad group ID if updating at ad group level
+- ad_format: enum[responsive_search_ad, display_ad, social_feed_ad, sponsored_content] (required) — The ad format being updated
+- copy_content: string (required) — JSON object. The approved copy fields to upload. Structure depends on ad_format — include headlines, descriptions, CTA as key-value pairs.
+- replace_existing: boolean — If true, replaces all existing copy. If false, adds as a new variant alongside existing copy. Default false.
+- reasoning: string (required) — Why this copy change is being made — test hypothesis or performance issue being addressed. Shown to the reviewer.
 
 ## Instructions
 
@@ -62,8 +25,6 @@ This is a review-gated action. The reviewer sees the full proposed copy, the cam
 If `replace_existing` is true, the reviewer is shown what is being replaced alongside the new copy — make sure this is surfaced clearly in the review item.
 
 **MVP stub:** Platform write APIs not yet connected. On approval, the executor logs the intended change and returns `pending_integration` status.
-
-## Methodology
 
 ### Pre-Submission Rules
 

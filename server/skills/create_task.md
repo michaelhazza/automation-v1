@@ -5,30 +5,18 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "create_task",
-  "description": "Create a new task (board card). Use this when you identify new work that needs to be done, or when you want to assign a task to another agent.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "title": { "type": "string", "description": "Short title for the work item" },
-      "description": { "type": "string", "description": "Detailed description of what needs to be done" },
-      "brief": { "type": "string", "description": "Brief/instructions for the assigned agent" },
-      "priority": { "type": "string", "description": "Priority level: \"low\", \"normal\", \"high\", \"urgent\" (default: \"normal\")" },
-      "status": { "type": "string", "description": "Initial board column: \"inbox\", \"todo\", \"assigned\" (default: \"inbox\")" },
-      "assigned_agent_id": { "type": "string", "description": "ID of the agent to assign this work to (optional)" }
-    },
-    "required": ["title"]
-  }
-}
-```
+## Parameters
+
+- title: string (required) — Short title for the work item
+- description: string — Detailed description of what needs to be done
+- brief: string — Brief/instructions for the assigned agent
+- priority: string — Priority level: "low", "normal", "high", "urgent" (default: "normal")
+- status: string — Initial board column: "inbox", "todo", "assigned" (default: "inbox")
+- assigned_agent_id: string — ID of the agent to assign this work to (optional)
 
 ## Instructions
 
 Check for duplicates before creating a task. Each task should have a single clear outcome. If you know which agent should handle a task, assign it and include a detailed brief so the agent can start with no additional context.
-
-## Methodology
 
 ### Task Quality Checklist
 1. **Clear title**: Short, specific, action-oriented.

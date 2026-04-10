@@ -5,39 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "audit_seo",
-  "description": "Audit a page or content piece for on-page SEO issues and opportunities. Returns a prioritised list of findings (critical, high, medium, low) with specific actionable recommendations. Covers title tags, meta descriptions, heading structure, keyword usage, content quality signals, and internal linking.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "page_url": {
-        "type": "string",
-        "description": "URL of the page to audit (if the page is live)"
-      },
-      "page_content": {
-        "type": "string",
-        "description": "Raw page content (HTML or plain text) if the page is not live or URL is not accessible"
-      },
-      "target_keyword": {
-        "type": "string",
-        "description": "The primary keyword this page should rank for"
-      },
-      "page_type": {
-        "type": "string",
-        "enum": ["blog_post", "landing_page", "product_page", "homepage", "other"],
-        "description": "The type of page being audited"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: domain authority context, content strategy, internal link structure overview"
-      }
-    },
-    "required": ["target_keyword"]
-  }
-}
-```
+## Parameters
+
+- page_url: string — URL of the page to audit (if the page is live)
+- page_content: string — Raw page content (HTML or plain text) if the page is not live or URL is not accessible
+- target_keyword: string (required) — The primary keyword this page should rank for
+- page_type: enum[blog_post, landing_page, product_page, homepage, other] — The type of page being audited
+- workspace_context: string — Workspace memory: domain authority context, content strategy, internal link structure overview
 
 ## Instructions
 
@@ -46,8 +20,6 @@ Invoke this skill when the Content/SEO Agent needs to evaluate existing content 
 Use `web_search` to look up the live page if `page_url` is provided and the content is not already in context.
 
 Do not fabricate audit findings. Only report issues that are verifiable from the provided content.
-
-## Methodology
 
 ### Audit Checklist
 
@@ -99,24 +71,31 @@ Audit Date: [ISO date]
 Overall Score: [0-100]
 
 ## Summary
+
 [2-3 sentences: overall state, biggest wins, blocking issues]
 
 ## Critical Issues
+
 - [Issue]: [specific detail] → Fix: [specific recommendation]
 
 ## High Priority
+
 - [Issue]: [detail] → Fix: [recommendation]
 
 ## Medium Priority
+
 - [Issue]: [detail] → Fix: [recommendation]
 
 ## Low Priority / Enhancements
+
 - [Issue/opportunity]: [recommendation]
 
 ## Quick Wins
+
 [Top 3 fixes that will have the most immediate impact — for when time is limited]
 
 ## Notes
+
 [Any assumptions made, elements that could not be verified from the provided content]
 ```
 

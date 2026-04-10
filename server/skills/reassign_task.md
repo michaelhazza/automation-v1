@@ -5,27 +5,15 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "reassign_task",
-  "description": "Reassign an existing task to another agent to continue working on it. This wakes the target agent to start working immediately.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_id": { "type": "string", "description": "ID of the task to reassign" },
-      "assigned_agent_id": { "type": "string", "description": "ID of the agent to assign the task to" },
-      "handoff_context": { "type": "string", "description": "Context for the next agent — what you did, what they should do next" }
-    },
-    "required": ["task_id", "assigned_agent_id"]
-  }
-}
-```
+## Parameters
+
+- task_id: string (required) — ID of the task to reassign
+- assigned_agent_id: string (required) — ID of the agent to assign the task to
+- handoff_context: string — Context for the next agent — what you did, what they should do next
 
 ## Instructions
 
 You can reassign tasks to other agents on your team. Always provide handoff context describing what you did, key findings, and what the next agent should do. Only reassign when you need a different specialist to continue; log blockers instead of reassigning when stuck.
-
-## Methodology
 
 ### When to Reassign
 - You completed work within your expertise and a different specialist should continue.

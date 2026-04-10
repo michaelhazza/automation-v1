@@ -5,46 +5,19 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "review_ux",
-  "description": "Perform a UX review on a task with user-facing UI changes. Starts with the user's job-to-be-done, surfaces assumptions, and produces findings ranked by priority. Invoke after architecture planning and before implementation on any UI-affecting task.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_description": {
-        "type": "string",
-        "description": "Board task title and full description"
-      },
-      "ba_spec_reference": {
-        "type": "string",
-        "description": "The BA requirements spec and Gherkin ACs"
-      },
-      "architecture_plan": {
-        "type": "string",
-        "description": "The architecture plan, specifically the UI-touching chunks"
-      },
-      "tech_stack": {
-        "type": "string",
-        "description": "Frontend framework, component library, and design conventions from workspace memory"
-      },
-      "ui_description": {
-        "type": "string",
-        "description": "Description of the UI changes being made — screens, flows, components"
-      }
-    },
-    "required": ["task_description", "ba_spec_reference", "architecture_plan", "tech_stack", "ui_description"]
-  }
-}
-```
+## Parameters
+
+- task_description: string (required) — Board task title and full description
+- ba_spec_reference: string (required) — The BA requirements spec and Gherkin ACs
+- architecture_plan: string (required) — The architecture plan, specifically the UI-touching chunks
+- tech_stack: string (required) — Frontend framework, component library, and design conventions from workspace memory
+- ui_description: string (required) — Description of the UI changes being made — screens, flows, components
 
 ## Instructions
 
 Invoke this skill on any task that produces user-facing UI changes: new screens, modified flows, new forms, modals, or interactive components. Skip for API-only changes, backend bug fixes, or documentation-only changes. If uncertain, invoke — the cost of an unnecessary UX review is low.
 
 Read the findings and apply high-priority items before proceeding to implementation. Note unresolved UX findings for the human reviewer in the patch submission.
-
-## Methodology
 
 ### Step 0: Job-to-be-Done (always do this first)
 
@@ -100,27 +73,34 @@ Touch target adequacy, layout at small viewport, mobile-first concerns.
 **Date:** [ISO date]
 
 ## Step 0: Job-to-be-Done
+
 **User's core problem:** [in user language]
 **Decision the UI helps the user make:** [specific]
 **User's mental model:** [how the user thinks about this domain]
 **Mental model match:** [ALIGNED | MISALIGNED]
 
 ## Assumptions Surfaced
+
 [3-5 assumptions, each with Status and Risk if wrong]
 
 ## Findings
+
 ### High Priority
 ### Medium Priority
 ### Low Priority
 
 ## Accessibility Notes
+
 ## Copy and Micro-interactions
+
 ## Mobile Considerations
 
 ## Scope Recommendation
+
 **Ship now:** [minimum lovable]
 **Polish later:** [deferrable items]
 
 ## Review Verdict
+
 [UX-APPROVED | NEEDS-CHANGES — list specific items if NEEDS-CHANGES]
 ```

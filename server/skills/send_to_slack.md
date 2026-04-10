@@ -5,44 +5,14 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "send_to_slack",
-  "description": "Post a message to a Slack channel via the configured Slack integration. Supports markdown text and optional file attachments. Channel defaults to the integration's configured default. Idempotent within an agent run via deterministic post-hash dedup — calling twice with semantically identical input is a no-op.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "message": {
-        "type": "string",
-        "description": "Message text. Slack mrkdwn supported. This is the text that will be hashed for dedup."
-      },
-      "channel": {
-        "type": "string",
-        "description": "Channel name (#name) or ID. Defaults to the integration's configured default channel if omitted."
-      },
-      "bodyText": {
-        "type": "string",
-        "description": "Full report body to persist as a deliverable BEFORE the Slack post. Required if attachments are not used. Spec T18."
-      },
-      "filename": {
-        "type": "string",
-        "description": "Filename for the attached deliverable. Used in dedup hash and Slack file upload."
-      },
-      "taskId": {
-        "type": "string",
-        "format": "uuid",
-        "description": "Optional task ID to attach the persisted deliverable to."
-      },
-      "onDuplicate": {
-        "type": "string",
-        "enum": ["skip", "force"],
-        "description": "Behaviour when a previous post in this run had the same post hash. Default 'skip'."
-      }
-    },
-    "required": ["message"]
-  }
-}
-```
+## Parameters
+
+- message: string (required) — Message text. Slack mrkdwn supported. This is the text that will be hashed for dedup.
+- channel: string — Channel name (#name) or ID. Defaults to the integration's configured default channel if omitted.
+- bodyText: string — Full report body to persist as a deliverable BEFORE the Slack post. Required if attachments are not used. Spec T18.
+- filename: string — Filename for the attached deliverable. Used in dedup hash and Slack file upload.
+- taskId: string — Optional task ID to attach the persisted deliverable to.
+- onDuplicate: enum[skip, force] — Behaviour when a previous post in this run had the same post hash. Default 'skip'.
 
 ## Instructions
 

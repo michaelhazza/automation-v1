@@ -5,44 +5,14 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "update_financial_record",
-  "description": "Write a financial record update to the connected accounting system — budget entries, forecast adjustments, or annotating existing records. This is a review-gated action — it enters the approval queue and does NOT execute immediately. A human must approve before any financial data is written.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "record_type": {
-        "type": "string",
-        "enum": ["budget_entry", "forecast_adjustment", "expense_note", "revenue_note"],
-        "description": "Type of financial record to update"
-      },
-      "record_id": {
-        "type": "string",
-        "description": "ID of the record to update in the accounting system (if updating existing)"
-      },
-      "record_description": {
-        "type": "string",
-        "description": "Human-readable description of what record is being updated — shown in the review item"
-      },
-      "updates": {
-        "type": "object",
-        "description": "Fields to write: amounts, notes, dates, category assignments",
-        "additionalProperties": true
-      },
-      "period": {
-        "type": "string",
-        "description": "The financial period this update applies to (e.g. '2026-Q1', '2026-03')"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this record is being updated — the analysis finding or instruction that triggered this. Shown to the reviewer."
-      }
-    },
-    "required": ["record_type", "record_description", "updates", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- record_type: enum[budget_entry, forecast_adjustment, expense_note, revenue_note] (required) — Type of financial record to update
+- record_id: string — ID of the record to update in the accounting system (if updating existing)
+- record_description: string (required) — Human-readable description of what record is being updated — shown in the review item
+- updates: string (required) — JSON object. Fields to write: amounts, notes, dates, category assignments
+- period: string — The financial period this update applies to (e.g. '2026-Q1', '2026-03')
+- reasoning: string (required) — Why this record is being updated — the analysis finding or instruction that triggered this. Shown to the reviewer.
 
 ## Instructions
 
@@ -51,8 +21,6 @@ Invoke this skill when `analyse_financials` produces a finding that requires a d
 This is a review-gated action. Financial record changes require human oversight — the reviewer sees the exact field changes and the reasoning before approving.
 
 **MVP stub:** Accounting system write APIs not yet connected. On approval, logs the intended change and returns `pending_integration` status.
-
-## Methodology
 
 ### Pre-Submission Rules
 

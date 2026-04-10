@@ -5,27 +5,15 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "create_pr",
-  "description": "Create a GitHub pull request from the current task branch. Use this after all patches for a task are applied and tests pass. Requires human approval.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "title": { "type": "string", "description": "Pull request title (clear, specific, action-oriented)" },
-      "description": { "type": "string", "description": "Pull request description — what changed, why, and how to test it" },
-      "branch": { "type": "string", "description": "Branch name to create the PR from. If omitted, uses the current task branch." }
-    },
-    "required": ["title", "description"]
-  }
-}
-```
+## Parameters
+
+- title: string (required) — Pull request title (clear, specific, action-oriented)
+- description: string (required) — Pull request description — what changed, why, and how to test it
+- branch: string — Branch name to create the PR from. If omitted, uses the current task branch.
 
 ## Instructions
 
 Create a pull request only after all patches for the task have been applied and tests pass. The PR title should be clear and action-oriented. The description must explain what changed, why, and include testing instructions. Human approval is required before the PR is created.
-
-## Methodology
 
 ### Prerequisites
 Before creating a PR:

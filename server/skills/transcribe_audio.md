@@ -5,35 +5,11 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "transcribe_audio",
-  "description": "Converts an audio or video file into a text transcript via the OpenAI Whisper API. Pass either executionArtifactId (preferred — references a prior IEE artifact) or audioUrl. Returns the transcript plus a new artifact ID for downstream skills. Cached by content hash so retries reuse prior results.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "executionArtifactId": {
-        "type": "string",
-        "format": "uuid",
-        "description": "ID of an iee_artifacts row produced by a prior step in the same agent run."
-      },
-      "audioUrl": {
-        "type": "string",
-        "format": "uri",
-        "description": "HTTPS URL to an audio/video file. Used if executionArtifactId is not provided."
-      },
-      "language": {
-        "type": "string",
-        "description": "Optional ISO-639-1 language code (e.g. 'en'). Defaults to auto-detect."
-      }
-    },
-    "anyOf": [
-      { "required": ["executionArtifactId"] },
-      { "required": ["audioUrl"] }
-    ]
-  }
-}
-```
+## Parameters
+
+- executionArtifactId: string — ID of an iee_artifacts row produced by a prior step in the same agent run.
+- audioUrl: string — HTTPS URL to an audio/video file. Used if executionArtifactId is not provided.
+- language: string — Optional ISO-639-1 language code (e.g. 'en'). Defaults to auto-detect.
 
 ## Instructions
 

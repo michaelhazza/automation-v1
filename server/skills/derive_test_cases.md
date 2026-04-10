@@ -5,34 +5,12 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "derive_test_cases",
-  "description": "Derive a structured test case manifest from the Gherkin acceptance criteria in an approved BA spec. Each test case traces to its source AC ID and produces a testable contract: preconditions, action, and assertion. The manifest is written to workspace memory and becomes the contract for all subsequent test runs.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "spec_reference_id": {
-        "type": "string",
-        "description": "The spec reference ID (e.g. SPEC-task-42-v1) to derive test cases from"
-      },
-      "spec_content": {
-        "type": "string",
-        "description": "The full approved BA spec content including all Gherkin ACs"
-      },
-      "task_id": {
-        "type": "string",
-        "description": "The board task ID this test manifest belongs to"
-      },
-      "tech_context": {
-        "type": "string",
-        "description": "Technical context from workspace memory or codebase: API routes, DB schema, auth patterns relevant to writing concrete test setups. Omit if not available."
-      }
-    },
-    "required": ["spec_reference_id", "spec_content", "task_id"]
-  }
-}
-```
+## Parameters
+
+- spec_reference_id: string (required) — The spec reference ID (e.g. SPEC-task-42-v1) to derive test cases from
+- spec_content: string (required) — The full approved BA spec content including all Gherkin ACs
+- task_id: string (required) — The board task ID this test manifest belongs to
+- tech_context: string — Technical context from workspace memory or codebase: API routes, DB schema, auth patterns relevant to writing concrete test setups. Omit if not available.
 
 ## Instructions
 
@@ -47,8 +25,6 @@ Every Gherkin AC in the spec must produce at least one test case. Negative scena
 After generating the manifest, write it to workspace memory under `test_manifest:[task_id]`, including the `spec_reference_id` it was derived from. When `report_bug` fires during test execution, it must reference both the test case ID and the originating AC ID so every bug is traceable back to the BA spec.
 
 **Manifest invalidation:** If the BA spec is superseded (a new approved version exists), the existing test manifest is automatically stale. The QA Agent must re-invoke `derive_test_cases` with the new spec reference before resuming test execution. Running tests against a stale manifest is a traceability violation.
-
-## Methodology
 
 ### AC Extraction
 
@@ -128,6 +104,7 @@ Priority: must | should | could
 | AC-2.2 | — | negative | untestable: [reason] |
 
 ## Untestable ACs (if any)
+
 - AC-X.Y: [reason the AC cannot be converted to a test case]
   Recommendation: [what the BA should clarify or revise]
 ```

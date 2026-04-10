@@ -5,28 +5,16 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "search_codebase",
-  "description": "Search the project codebase for files, symbols, or text patterns. Use this to locate where functionality lives before reading or patching files.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "query": { "type": "string", "description": "The search term, symbol name, or text pattern to search for" },
-      "search_type": { "type": "string", "description": "Type of search: \"text\" (full text grep), \"file\" (filename match), \"symbol\" (class/function names). Default: \"text\"" },
-      "file_pattern": { "type": "string", "description": "Glob pattern to restrict search to certain files (e.g. \"*.ts\", \"src/**/*.tsx\")" },
-      "max_results": { "type": "number", "description": "Maximum results to return (default 20)" }
-    },
-    "required": ["query"]
-  }
-}
-```
+## Parameters
+
+- query: string (required) — The search term, symbol name, or text pattern to search for
+- search_type: string — Type of search: "text" (full text grep), "file" (filename match), "symbol" (class/function names). Default: "text"
+- file_pattern: string — Glob pattern to restrict search to certain files (e.g. "*.ts", "src/**/*.tsx")
+- max_results: number — Maximum results to return (default 20)
 
 ## Instructions
 
 Use search_codebase to find where functionality lives before reading files. Search for the class, function, or concept you need to change, then read the specific files. This is faster than reading files blindly.
-
-## Methodology
 
 ### Search Strategy
 1. **Symbol search first**: Search for the class or function name with `search_type: "symbol"` to find exact definitions.

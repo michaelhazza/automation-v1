@@ -5,56 +5,17 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_ad_copy",
-  "description": "Draft ad copy variants for a specified campaign and platform. Returns headlines, descriptions, and calls-to-action formatted to platform spec. Output is ready for human review before being submitted via update_copy. Does not upload — use update_copy for that.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "campaign_name": {
-        "type": "string",
-        "description": "Name of the campaign this copy is for"
-      },
-      "platform": {
-        "type": "string",
-        "enum": ["google_ads", "meta_ads", "linkedin_ads"],
-        "description": "Target ads platform"
-      },
-      "ad_format": {
-        "type": "string",
-        "enum": ["responsive_search_ad", "display_ad", "social_feed_ad", "sponsored_content"],
-        "description": "The ad format — determines copy structure and character limits"
-      },
-      "brief": {
-        "type": "string",
-        "description": "What the ad should communicate: offer, value proposition, audience, key differentiator"
-      },
-      "existing_copy": {
-        "type": "string",
-        "description": "Optional: current ad copy to replace or improve. Include to signal this is a copy test iteration."
-      },
-      "performance_context": {
-        "type": "string",
-        "description": "Optional: performance notes from analyse_performance — e.g. low CTR, which headline underperformed"
-      },
-      "brand_voice": {
-        "type": "string",
-        "description": "Brand voice guidelines: tone, vocabulary preferences, phrases to avoid"
-      },
-      "landing_page_url": {
-        "type": "string",
-        "description": "The landing page URL this ad will point to — informs CTA and message alignment"
-      },
-      "variants_requested": {
-        "type": "number",
-        "description": "Number of copy variants to produce (default 3, max 5)"
-      }
-    },
-    "required": ["campaign_name", "platform", "ad_format", "brief"]
-  }
-}
-```
+## Parameters
+
+- campaign_name: string (required) — Name of the campaign this copy is for
+- platform: enum[google_ads, meta_ads, linkedin_ads] (required) — Target ads platform
+- ad_format: enum[responsive_search_ad, display_ad, social_feed_ad, sponsored_content] (required) — The ad format — determines copy structure and character limits
+- brief: string (required) — What the ad should communicate: offer, value proposition, audience, key differentiator
+- existing_copy: string — Optional: current ad copy to replace or improve. Include to signal this is a copy test iteration.
+- performance_context: string — Optional: performance notes from analyse_performance — e.g. low CTR, which headline underperformed
+- brand_voice: string — Brand voice guidelines: tone, vocabulary preferences, phrases to avoid
+- landing_page_url: string — The landing page URL this ad will point to — informs CTA and message alignment
+- variants_requested: number — Number of copy variants to produce (default 3, max 5)
 
 ## Instructions
 
@@ -63,8 +24,6 @@ Invoke this skill when performance analysis recommends a copy test, or when new 
 Do not fabricate product claims, statistics, or offers not present in the brief or workspace context. Insert `[VERIFY]` placeholders for any claim that must be confirmed.
 
 Produce the number of variants specified (`variants_requested`), defaulting to 3. Each variant must be meaningfully different — not minor word substitutions. Vary the hook, value proposition angle, or CTA across variants.
-
-## Methodology
 
 ### Platform Copy Specs
 
@@ -121,6 +80,7 @@ Hypothesis: [What this variant tests or why it should outperform existing]
 ---
 
 ## Variant 2
+
 ...
 
 ---

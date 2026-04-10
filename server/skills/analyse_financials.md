@@ -5,46 +5,19 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "analyse_financials",
-  "description": "Analyse revenue and expense data from read_revenue and read_expenses to produce a structured financial summary. Returns key ratios (gross margin, operating margin, burn rate), trend observations, anomalies, and prioritised recommendations. Used by the Finance Agent before drafting reports.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "revenue_data": {
-        "type": "string",
-        "description": "Structured revenue data from read_revenue — include all figures and period details"
-      },
-      "expense_data": {
-        "type": "string",
-        "description": "Structured expense data from read_expenses — include all categories and totals"
-      },
-      "financial_targets": {
-        "type": "string",
-        "description": "Target KPIs from workspace memory: target margins, budget ceilings, runway targets"
-      },
-      "analysis_period": {
-        "type": "string",
-        "description": "Human-readable period label (e.g. 'Q1 2026', 'March 2026')"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: business model (SaaS/services/product), funding stage, known cost drivers, seasonality"
-      }
-    },
-    "required": ["revenue_data", "expense_data"]
-  }
-}
-```
+## Parameters
+
+- revenue_data: string (required) — Structured revenue data from read_revenue — include all figures and period details
+- expense_data: string (required) — Structured expense data from read_expenses — include all categories and totals
+- financial_targets: string — Target KPIs from workspace memory: target margins, budget ceilings, runway targets
+- analysis_period: string — Human-readable period label (e.g. 'Q1 2026', 'March 2026')
+- workspace_context: string — Workspace memory: business model (SaaS/services/product), funding stage, known cost drivers, seasonality
 
 ## Instructions
 
 Invoke this skill after both `read_revenue` and `read_expenses` return data for the same period. If either returns a stub response, note data unavailability in the analysis and do not fabricate figures.
 
 Do not invent financial targets if `financial_targets` is not provided — note the absence and apply no benchmark comparisons. Do not extrapolate or project beyond the data provided unless explicitly asked.
-
-## Methodology
 
 ### Key Ratios
 
@@ -85,6 +58,7 @@ Generated At: [ISO timestamp]
 Data Quality: [complete | partial — [list what's missing] | stub — no live data]
 
 ## Executive Summary
+
 [3–4 sentences: financial health, biggest positive, biggest concern, one priority action]
 
 ## Key Metrics
@@ -98,20 +72,25 @@ Data Quality: [complete | partial — [list what's missing] | stub — no live d
 | Burn Rate | [amount/month] | | |
 
 ## Revenue Analysis
+
 [2–3 observations on revenue composition, growth, and concentration]
 
 ## Expense Analysis
+
 [2–3 observations on cost structure, largest categories, and trends]
 
 ## Anomalies
+
 - [anomaly: description and magnitude]
 - [None detected]
 
 ## Recommendations
+
 1. [Highest priority action — specific, not generic]
 2. [Second priority]
 
 ## Caveats
+
 - [Data gaps, assumptions, or limitations]
 ```
 

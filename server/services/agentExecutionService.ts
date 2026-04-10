@@ -520,11 +520,8 @@ export const agentExecutionService = {
             description: readDataSourceSkill.definition.description,
             input_schema: readDataSourceSkill.definition.input_schema,
           });
-          if (readDataSourceSkill.instructions || readDataSourceSkill.methodology) {
-            const parts: string[] = [];
-            if (readDataSourceSkill.instructions) parts.push(readDataSourceSkill.instructions);
-            if (readDataSourceSkill.methodology) parts.push(readDataSourceSkill.methodology);
-            systemSkillInstructions.push(parts.join('\n\n'));
+          if (readDataSourceSkill.instructions) {
+            systemSkillInstructions.push(readDataSourceSkill.instructions);
           }
         }
       }

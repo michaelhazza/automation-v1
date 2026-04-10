@@ -5,22 +5,9 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "compute_health_score",
-  "description": "Compute a composite health score for a subaccount based on its normalised metrics (contacts, opportunities, conversations, revenue). Returns a score 0-100 with factor breakdown, trend direction, and confidence level. Writes a HealthSnapshot record.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "account_id": {
-        "type": "string",
-        "description": "The canonical account ID to score"
-      }
-    },
-    "required": ["account_id"]
-  }
-}
-```
+## Parameters
+
+- account_id: string (required) — The canonical account ID to score
 
 ## Instructions
 
