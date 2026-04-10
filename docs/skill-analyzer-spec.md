@@ -371,7 +371,7 @@ export const skillParserService = {
 };
 ```
 
-**GitHub fetch flow:** Extract owner/repo/path from URL → `GET /repos/{owner}/{repo}/contents/{path}` → filter `.md` and `.json` files → fetch each file's `download_url` → parse with the appropriate pure function. Retries with exponential backoff on rate limits.
+**GitHub fetch flow:** Extract owner/repo/path from URL → `GET /repos/{owner}/{repo}/contents/{path}` → filter `.md` and `.json` files → fetch each file's `download_url` → parse with the appropriate pure function. Retries via `withBackoff` (`server/lib/withBackoff.ts`) on rate limits and transient errors.
 
 **Zip handling:** Use `yauzl` (or Node.js built-in `zlib` for `.gz`) to extract files → parse each → clean up temp files. Max upload size: 50 MB.
 
@@ -509,7 +509,7 @@ export async function generateEmbeddings(
 
 ### Job Handler: `server/jobs/skillAnalyzerJob.ts`
 
-pg-boss job handler. Registered at server boot alongside existing workers.
+pg-boss job handler. Registered via `createWorker()` (`server/lib/createWorker.ts`) at server boot alongside existing workers. The `skill-analyzer` queue must be added to `server/config/jobConfig.ts` with retry/timeout/expiry settings. The job payload must include `organisationId` so `createWorker`'s org-context resolver opens an org-scoped transaction automatically.
 
 ```typescript
 /** Process a skill analyzer job through all pipeline stages.
@@ -720,7 +720,7 @@ The `processSkillAnalyzerJob` handler executes six sequential stages. Each stage
 
 1. For each pair in the `likely_duplicate` or `ambiguous` band:
    a. Build the classification prompt via `buildClassificationPrompt()`
-   b. Call Claude Haiku via `anthropicAdapter` with prompt caching enabled
+   b. Call Claude Haiku via `anthropicAdapter` with prompt caching enabled, wrapped in `withBackoff` for transient failures
    c. Parse the response via `parseClassificationResponse()`
    d. Generate `diffSummary` via `generateDiffSummary()`
 2. Concurrency: `p-limit(5)` — max 5 parallel LLM calls
@@ -921,7 +921,8 @@ Seven chunks, ordered so each is independently buildable and testable.
 - `server/jobs/skillAnalyzerJob.ts`
 
 **Modify:**
-- `server/index.ts` — register pg-boss worker for `skill-analyzer` queue
+- `server/index.ts` — register pg-boss worker for `skill-analyzer` queue via `createWorker()`
+- `server/config/jobConfig.ts` — add `skill-analyzer` queue entry with retry/timeout settings
 
 **Add dependency:** `p-limit` to `package.json`
 
@@ -964,7 +965,7 @@ Seven chunks, ordered so each is independently buildable and testable.
 
 ## File Inventory
 
-### New Files (16)
+### New Files (17)
 
 | File | Purpose |
 |------|---------|
@@ -983,16 +984,19 @@ Seven chunks, ordered so each is independently buildable and testable.
 | `client/src/components/skill-analyzer/SkillAnalyzerWizard.tsx` | Wizard container |
 | `client/src/components/skill-analyzer/SkillAnalyzerImportStep.tsx` | Import step |
 | `client/src/components/skill-analyzer/SkillAnalyzerProcessingStep.tsx` | Processing step |
-| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Results + diff + execute |
+| `client/src/components/skill-analyzer/SkillAnalyzerResultsStep.tsx` | Results step |
+| `client/src/components/skill-analyzer/SkillAnalyzerExecuteStep.tsx` | Execute step |
 
-### Modified Files (4)
+### Modified Files (6)
 
 | File | Change |
 |------|--------|
 | `server/db/schema/index.ts` | Add 3 new schema exports |
 | `server/lib/embeddings.ts` | Add `generateEmbeddings()` batch function |
 | `server/index.ts` | Mount router + register pg-boss worker |
+| `server/config/jobConfig.ts` | Add `skill-analyzer` queue entry |
 | `client/src/App.tsx` | Add lazy import + route |
+| `client/src/components/Layout.tsx` | Add nav item gated by `org.agents.edit` |
 
 ---
 
@@ -1009,7 +1013,9 @@ Contains:
 
 **No RLS policies** for v1 — these tables are org-scoped via service-layer filtering, consistent with other non-tenant-data tables like `playbook_templates`.
 
-**New dependency:** `p-limit` — lightweight concurrency limiter for parallel LLM calls. Zero transitive dependencies.
+**New dependencies:**
+- `p-limit` — lightweight concurrency limiter for parallel LLM calls. Zero transitive dependencies.
+- `yauzl` — zip file extraction for `.zip` uploads (referenced in Chunk 3, `skillParserService.ts`). If only `.gz` single-file archives are needed, Node.js built-in `zlib` suffices and `yauzl` can be dropped.
 
 **Environment variables:** None new. Uses existing `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`.
 
