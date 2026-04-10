@@ -67,8 +67,18 @@ async function parseZipFile(filePath: string): Promise<ParsedSkill[]> {
             return;
           }
 
+          const MAX_ENTRY_BYTES = 10 * 1024 * 1024; // 10 MB per entry
+          let entryBytes = 0;
           const chunks: Buffer[] = [];
-          readStream.on('data', (chunk) => chunks.push(chunk as Buffer));
+          readStream.on('data', (chunk) => {
+            entryBytes += (chunk as Buffer).length;
+            if (entryBytes > MAX_ENTRY_BYTES) {
+              readStream.destroy();
+              zipfile.readEntry();
+              return;
+            }
+            chunks.push(chunk as Buffer);
+          });
           readStream.on('end', () => {
             const content = Buffer.concat(chunks).toString('utf8');
             const filename = path.basename(entry.fileName);
@@ -118,7 +128,7 @@ function parseGithubUrl(url: string): {
  *  Uses GitHub REST API (unauthenticated, 60 req/hr per IP). */
 async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
   const parsed = parseGithubUrl(url);
-  if (!parsed) throw new Error(`Invalid GitHub URL: ${url}`);
+  if (!parsed) throw { statusCode: 400, message: `Invalid GitHub URL: ${url}` };
 
   const { owner, repo, branch, repoPath } = parsed;
   const contentsUrl = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${repoPath}?ref=${branch}`;
@@ -131,7 +141,8 @@ async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
       }).then(async (res) => {
         if (!res.ok) {
           const body = await res.text();
-          throw new Error(`GitHub API error ${res.status}: ${body.slice(0, 200)}`);
+          const statusCode = res.status === 403 || res.status === 429 ? 429 : 502;
+          throw Object.assign(new Error(`GitHub fetch failed (${res.status}): ${body.slice(0, 200)}`), { statusCode });
         }
         return res;
       }),
@@ -151,7 +162,7 @@ async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
   }>;
 
   if (!Array.isArray(entries)) {
-    throw new Error('GitHub API returned non-array response — URL may point to a file, not a directory.');
+    throw { statusCode: 400, message: 'GitHub API returned non-array response — URL may point to a file, not a directory.' };
   }
 
   const skillFiles = entries.filter(

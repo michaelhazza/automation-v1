@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { skillEmbeddings } from '../db/schema/index.js';
 
@@ -38,8 +38,8 @@ export const skillEmbeddingService = {
       .onConflictDoUpdate({
         target: skillEmbeddings.contentHash,
         set: {
-          sourceType: params.sourceType,
-          sourceIdentifier: params.sourceIdentifier,
+          sourceType: sql`excluded.source_type`,
+          sourceIdentifier: sql`excluded.source_identifier`,
         },
       });
   },
@@ -80,8 +80,8 @@ export const skillEmbeddingService = {
       .onConflictDoUpdate({
         target: skillEmbeddings.contentHash,
         set: {
-          sourceType: skillEmbeddings.sourceType,
-          sourceIdentifier: skillEmbeddings.sourceIdentifier,
+          sourceType: sql`excluded.source_type`,
+          sourceIdentifier: sql`excluded.source_identifier`,
         },
       });
   },

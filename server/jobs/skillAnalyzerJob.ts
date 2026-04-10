@@ -462,9 +462,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         }
 
         const finalResult = classificationResult ?? {
-          classification: 'DISTINCT' as const,
+          classification: 'PARTIAL_OVERLAP' as const,
           confidence: 0.3,
-          reasoning: 'Classification failed — manual review recommended.',
+          reasoning: 'LLM classification failed — defaulting to PARTIAL_OVERLAP for human review.',
         };
 
         const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
@@ -558,9 +558,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       diffSummary: r.diffSummary ?? undefined,
     });
   }
-
-  // Idempotent: delete existing results first (retry safety) — via service
-  await clearResultsForJob(jobId);
 
   // Insert via service (avoids direct db import in jobs)
   await insertResults(resultRows);

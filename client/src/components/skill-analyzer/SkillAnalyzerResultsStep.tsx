@@ -79,9 +79,11 @@ function DiffView({ result }: { result: AnalysisResult }) {
 
 function ResultCard({
   result,
+  jobId,
   onActionChange,
 }: {
   result: AnalysisResult;
+  jobId: string;
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
 }) {
   const [showDiff, setShowDiff] = useState(false);
@@ -90,10 +92,10 @@ function ResultCard({
     const next = result.actionTaken === action ? null : action;
     try {
       if (next) {
-        await api.patch(`/api/skill-analyzer/jobs/${result.id.split(':')[0]}/results/${result.id}`, { action: next });
+        await api.patch(`/api/skill-analyzer/jobs/${jobId}/results/${result.id}`, { action: next });
       } else {
         // Sending 'skipped' as a neutral reset
-        await api.patch(`/api/skill-analyzer/jobs/${result.id.split(':')[0]}/results/${result.id}`, { action: 'skipped' });
+        await api.patch(`/api/skill-analyzer/jobs/${jobId}/results/${result.id}`, { action: 'skipped' });
       }
       onActionChange(result.id, next);
     } catch {
@@ -242,6 +244,7 @@ function ResultSection({
             <ResultCard
               key={r.id}
               result={r}
+              jobId={jobId}
               onActionChange={onActionChange}
             />
           ))}

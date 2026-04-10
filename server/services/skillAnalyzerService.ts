@@ -224,7 +224,16 @@ export async function executeApproved(params: {
         continue;
       }
 
-      if (result.classification === 'IMPROVEMENT' && result.matchedSkillId) {
+      if (result.classification === 'IMPROVEMENT' && !result.matchedSkillId) {
+        // System skill match — cannot update system skills (no DB id)
+        errors.push({ resultId: result.id, error: 'Cannot update a system skill — approve as DISTINCT to create an org-level override instead.' });
+        failed++;
+        await db
+          .update(skillAnalyzerResults)
+          .set({ executionResult: 'failed', executionError: 'Cannot update system skills; re-approve as DISTINCT to create an org override.' })
+          .where(eq(skillAnalyzerResults.id, result.id));
+        continue;
+      } else if (result.classification === 'IMPROVEMENT' && result.matchedSkillId) {
         // Update the matched org skill
         await skillService.updateSkill(result.matchedSkillId, organisationId, {
           name: candidate.name,

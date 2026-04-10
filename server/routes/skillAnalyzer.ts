@@ -14,7 +14,12 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const allowed = ['.md', '.json', '.zip'];
     const isAllowed = allowed.some((ext) => file.originalname.toLowerCase().endsWith(ext));
-    cb(null, isAllowed);
+    if (isAllowed) {
+      cb(null, true);
+    } else {
+      const ext = file.originalname.includes('.') ? file.originalname.split('.').pop() : '(none)';
+      cb(new Error(`Unsupported file type: .${ext}. Accepted: .md, .json, .zip`));
+    }
   },
 });
 
