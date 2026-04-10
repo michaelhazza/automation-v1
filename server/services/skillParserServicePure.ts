@@ -91,7 +91,8 @@ export function parseFromText(text: string): ParsedSkill[] {
   // A frontmatter opener: a line that is exactly '---' whose next line starts
   // with a YAML key (e.g. 'name: ...'). This distinguishes it from closing
   // '---' delimiters and bare content-separator '---' lines.
-  const lines = text.split('\n');
+  const normalized = text.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
   const blockStarts: number[] = [];
   let charOffset = 0;
 
@@ -104,15 +105,15 @@ export function parseFromText(text: string): ParsedSkill[] {
 
   if (blockStarts.length === 0) {
     // No frontmatter opener found — attempt to parse whole text as one skill
-    const skill = parseMarkdownFile('paste', text);
+    const skill = parseMarkdownFile('paste', normalized);
     return skill ? [skill] : [];
   }
 
   const results: ParsedSkill[] = [];
   for (let i = 0; i < blockStarts.length; i++) {
     const start = blockStarts[i];
-    const end = blockStarts[i + 1] ?? text.length;
-    const block = text.slice(start, end).trim();
+    const end = blockStarts[i + 1] ?? normalized.length;
+    const block = normalized.slice(start, end).trim();
     if (block.length >= 10) {
       const skill = parseMarkdownFile('paste', block);
       if (skill) results.push(skill);
