@@ -46,6 +46,11 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'publish_page': return executePublishPage(payload, context);
     case 'write_spec': return executeWriteSpecApproved(payload, context);
     case 'publish_post': return executePublishPostApproved(payload, context);
+    case 'update_bid': return executeAdsActionApproved('update_bid', payload, context);
+    case 'update_copy': return executeAdsActionApproved('update_copy', payload, context);
+    case 'pause_campaign': return executeAdsActionApproved('pause_campaign', payload, context);
+    case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
+    case 'update_crm': return executeCrmUpdateApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -625,6 +630,95 @@ export const skillExecutor = {
           message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
         }));
       }
+
+      // ── Ads Management Agent skills ──────────────────────────────────────
+
+      case 'read_campaigns': {
+        // Auto-gated stub — ads platform integrations not yet wired
+        const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
+        const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        if (adsDateFrom && adsDateTo && adsDateFrom > adsDateTo) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_campaigns', input, context, async () => ({
+          status: 'stub',
+          platform: adsPlatform,
+          date_from: adsDateFrom,
+          date_to: adsDateTo,
+          campaigns: [],
+          message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
+        }));
+      }
+
+      case 'analyse_performance':
+        return executeMethodologySkill('analyse_performance', input, {
+          template: {
+            period: '',
+            campaignsAnalysed: 0,
+            executiveSummary: '',
+            campaigns: [],
+            anomalies: [],
+            rankedActions: [],
+            caveats: [],
+          },
+          guidance: 'Follow the analyse_performance methodology in your skill context. Analyse the campaign data from read_campaigns, identify underperformers and anomalies, and produce ranked recommendations (pause, reduce_bid, increase_budget, test_copy, monitor).',
+        });
+
+      case 'draft_ad_copy':
+        return executeMethodologySkill('draft_ad_copy', input, {
+          template: {
+            campaignName: '',
+            platform: '',
+            adFormat: '',
+            variants: [],
+            copyNotes: '',
+            verifyItems: [],
+          },
+          guidance: 'Follow the draft_ad_copy methodology in your skill context. Produce the requested number of meaningfully different ad copy variants within platform character limits. State the test hypothesis for each variant. Use [VERIFY] for unconfirmed claims.',
+        });
+
+      case 'update_bid':
+        return proposeReviewGatedAction('update_bid', input, context);
+
+      case 'update_copy':
+        return proposeReviewGatedAction('update_copy', input, context);
+
+      case 'pause_campaign':
+        return proposeReviewGatedAction('pause_campaign', input, context);
+
+      case 'increase_budget':
+        return proposeReviewGatedAction('increase_budget', input, context);
+
+      // ── Email Outreach Agent skills ──────────────────────────────────────
+
+      case 'enrich_contact': {
+        // Auto-gated stub — enrichment integration not yet wired
+        const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
+        return executeWithActionAudit('enrich_contact', input, context, async () => ({
+          status: 'stub',
+          contact: enrichEmail,
+          matched: false,
+          fields: {},
+          message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
+        }));
+      }
+
+      case 'draft_sequence':
+        return executeMethodologySkill('draft_sequence', input, {
+          template: {
+            contactEmail: '',
+            goal: '',
+            steps: [],
+            draftingNotes: '',
+            unresolvedTokens: [],
+            verifyItems: [],
+          },
+          guidance: 'Follow the draft_sequence methodology in your skill context. Produce a multi-step outreach sequence with distinct purpose per step. Use enrichment data for personalisation if available; fall back to generic copy if enrichment is a stub. Flag all [VERIFY] items and unresolved personalisation tokens.',
+        });
+
+      case 'update_crm':
+        return proposeReviewGatedAction('update_crm', input, context);
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -1314,6 +1408,100 @@ async function executePublishPostApproved(
     scheduled_for: scheduleAt,
     campaign_tag: campaignTag,
     message: `Publish approved for ${platform}. Platform integration not yet connected — action logged. When integration is live, this will ${scheduleAt ? `schedule the post for ${scheduleAt}` : 'publish immediately'}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeAdsActionApproved — MVP stub for ads platform write actions.
+// Platform APIs are not yet connected. Logs intended action and returns
+// pending_integration status. Handles: update_bid, update_copy,
+// pause_campaign, increase_budget.
+// ---------------------------------------------------------------------------
+
+async function executeAdsActionApproved(
+  actionType: string,
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const platform = String(payload.platform ?? '');
+  const campaignId = String(payload.campaign_id ?? '');
+  const campaignName = String(payload.campaign_name ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!platform) return { success: false, error: 'platform is required' };
+  if (!campaignId) return { success: false, error: 'campaign_id is required' };
+
+  if (context.taskId) {
+    try {
+      const logMsg = [
+        `ADS_ACTION_APPROVED:${actionType}`,
+        `platform: ${platform}`,
+        `campaign_id: ${campaignId}`,
+        `campaign: ${campaignName}`,
+        `reasoning: ${reasoning}`,
+      ].join('\n');
+
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: logMsg,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    action_type: actionType,
+    platform,
+    campaign_id: campaignId,
+    status: 'pending_integration',
+    message: `${actionType} approved for campaign ${campaignName} on ${platform}. Platform integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeCrmUpdateApproved — MVP stub for update_crm worker handler.
+// CRM write APIs not yet connected. Logs intended field changes.
+// ---------------------------------------------------------------------------
+
+async function executeCrmUpdateApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const recordType = String(payload.record_type ?? '');
+  const recordId = String(payload.record_id ?? '');
+  const recordIdentifier = String(payload.record_identifier ?? '');
+  const updates = payload.updates as Record<string, unknown> ?? {};
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!recordType) return { success: false, error: 'record_type is required' };
+  if (!recordId) return { success: false, error: 'record_id is required' };
+
+  if (context.taskId) {
+    try {
+      const fieldsUpdated = Object.keys(updates).join(', ');
+      const logMsg = [
+        `CRM_UPDATE_APPROVED:${recordType}:${recordId}`,
+        `identifier: ${recordIdentifier}`,
+        `fields: ${fieldsUpdated}`,
+        `reasoning: ${reasoning}`,
+      ].join('\n');
+
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: logMsg,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    record_type: recordType,
+    record_id: recordId,
+    fields_updated: Object.keys(updates),
+    status: 'pending_integration',
+    message: `CRM update approved for ${recordType} ${recordIdentifier}. Integration not yet connected — action logged.`,
   };
 }
 
