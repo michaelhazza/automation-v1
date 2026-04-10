@@ -1,11 +1,15 @@
 import { pgTable, uuid, text, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { organisations } from './organisations';
 import { tasks } from './tasks';
 
 export const taskDeliverables = pgTable(
   'task_deliverables',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id')
+      .notNull()
+      .references(() => organisations.id),
     taskId: uuid('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
@@ -22,6 +26,7 @@ export const taskDeliverables = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
+    orgIdx: index('task_deliverables_org_idx').on(table.organisationId),
     taskIdx: index('task_deliverables_task_idx').on(table.taskId).where(sql`${table.deletedAt} IS NULL`),
   })
 );

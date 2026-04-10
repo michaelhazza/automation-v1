@@ -1104,7 +1104,7 @@ async function executeWriteWorkspace(
   if (!message) return { success: false, error: 'message is required' };
 
   try {
-    const activity = await taskService.addActivity(taskId, {
+    const activity = await taskService.addActivity(taskId, context.organisationId, {
       activityType,
       message,
       agentId: context.agentId,
@@ -1311,14 +1311,14 @@ async function executeAddDeliverable(
   if (!title) return { success: false, error: 'title is required' };
 
   try {
-    const deliverable = await taskService.addDeliverable(taskId, {
+    const deliverable = await taskService.addDeliverable(taskId, context.organisationId, {
       deliverableType,
       title,
       description: description || undefined,
     });
 
     // Also log an activity
-    await taskService.addActivity(taskId, {
+    await taskService.addActivity(taskId, context.organisationId, {
       activityType: 'deliverable_added',
       message: `Deliverable added: "${title}"`,
       agentId: context.agentId,
@@ -1464,7 +1464,7 @@ async function executeUpdateTask(
   try {
     const updated = await taskService.updateTask(taskId, context.organisationId, update);
 
-    await taskService.addActivity(taskId, {
+    await taskService.addActivity(taskId, context.organisationId, {
       activityType: 'note',
       message: `Updated by agent: ${reasoning}`,
       agentId: context.agentId,
@@ -1526,7 +1526,7 @@ async function executeReassignTask(
       updatedAt: new Date(),
     }).where(eq(tasks.id, taskId));
 
-    await taskService.addActivity(taskId, {
+    await taskService.addActivity(taskId, context.organisationId, {
       activityType: 'assigned',
       message: `Reassigned to ${assignedAgentIds.length} agent${assignedAgentIds.length > 1 ? 's' : ''}${handoffContext ? ` — ${handoffContext}` : ''}`,
       agentId: context.agentId,
@@ -2194,7 +2194,7 @@ async function executeReportBug(
       }
     );
 
-    await taskService.addActivity(task.id, {
+    await taskService.addActivity(task.id, context.organisationId, {
       activityType: 'note',
       message: `Bug reported by QA agent — severity: ${severity}, confidence: ${(confidence * 100).toFixed(0)}%`,
       agentId: context.agentId,

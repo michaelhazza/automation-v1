@@ -121,6 +121,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const activities = await taskService.listActivities(req.params.itemId, req.orgId!);
     res.json(activities);
   })
@@ -132,6 +133,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   validateBody(createActivityBody, 'warn'),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { activityType, message, agentId, metadata } = req.body as {
       activityType?: string; message?: string; agentId?: string; metadata?: Record<string, unknown>;
     };
@@ -139,7 +141,7 @@ router.post(
       res.status(400).json({ error: 'activityType and message are required' });
       return;
     }
-    const activity = await taskService.addActivity(req.params.itemId, {
+    const activity = await taskService.addActivity(req.params.itemId, req.orgId!, {
       activityType: activityType as any, message, agentId, userId: req.user!.id, metadata,
     });
     res.status(201).json(activity);
@@ -151,7 +153,8 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
-    const deliverables = await taskService.listDeliverables(req.params.itemId);
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const deliverables = await taskService.listDeliverables(req.params.itemId, req.orgId!);
     res.json(deliverables);
   })
 );
@@ -162,6 +165,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   validateBody(createDeliverableBody, 'warn'),
   asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { deliverableType, title, path, description } = req.body as {
       deliverableType?: string; title?: string; path?: string; description?: string;
     };
@@ -169,7 +173,7 @@ router.post(
       res.status(400).json({ error: 'deliverableType and title are required' });
       return;
     }
-    const deliverable = await taskService.addDeliverable(req.params.itemId, {
+    const deliverable = await taskService.addDeliverable(req.params.itemId, req.orgId!, {
       deliverableType: deliverableType as any, title, path, description,
     });
     res.status(201).json(deliverable);
@@ -181,7 +185,8 @@ router.delete(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_MANAGE),
   asyncHandler(async (req, res) => {
-    await taskService.deleteDeliverable(req.params.delivId);
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    await taskService.deleteDeliverable(req.params.delivId, req.orgId!);
     res.json({ message: 'Deliverable deleted' });
   })
 );

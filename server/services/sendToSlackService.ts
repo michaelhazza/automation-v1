@@ -130,6 +130,7 @@ export async function sendToSlack(
     const [created] = await db
       .insert(taskDeliverables)
       .values({
+        organisationId: ctx.organisationId,
         taskId: input.taskId,
         deliverableType: 'file',
         title: input.filename ?? 'Slack post',
