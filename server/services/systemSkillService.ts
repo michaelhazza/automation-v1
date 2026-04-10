@@ -68,6 +68,21 @@ async function loadSkills(): Promise<Map<string, SystemSkill>> {
   return map;
 }
 
+/** Extract a markdown section by heading. Returns content between `## Heading`
+ *  and the next `## ` heading or end of string. Returns null if section missing. */
+function extractSection(body: string, heading: string): string | null {
+  const marker = `## ${heading}\n`;
+  const start = body.indexOf(marker);
+  if (start === -1) return null;
+  const contentStart = start + marker.length;
+  const nextHeading = body.indexOf('\n## ', contentStart);
+  const content = nextHeading === -1
+    ? body.slice(contentStart)
+    : body.slice(contentStart, nextHeading);
+  const trimmed = content.trim();
+  return trimmed || null;
+}
+
 /** Parse a skill .md file into a SystemSkill record */
 function parseSkillFile(slug: string, raw: string): SystemSkill | null {
   // Normalize Windows CRLF → LF before any regex matching
@@ -116,12 +131,10 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
   }
 
   // Extract ## Instructions section
-  const instructionsMatch = body.match(/^## Instructions\n([\s\S]*?)(?=^## |\s*$)/m);
-  const instructions = instructionsMatch ? instructionsMatch[1].trim() : null;
+  const instructions = extractSection(body, 'Instructions');
 
   // Extract ## Methodology section
-  const methodologyMatch = body.match(/^## Methodology\n([\s\S]*?)(?=^## |\s*$)/m);
-  const methodology = methodologyMatch ? methodologyMatch[1].trim() : null;
+  const methodology = extractSection(body, 'Methodology');
 
   return { id: slug, slug, name, description, isActive, visibility, definition, instructions, methodology };
 }
