@@ -38,9 +38,13 @@ visibility: basic
 
 Invoke this skill after a BA spec has been approved (status: `spec-approved`). The output is the test case manifest that all subsequent QA activities reference. Without this manifest, test runs lack formal linkage to acceptance criteria.
 
-Every Gherkin AC in the spec must produce at least one test case. Negative scenario ACs produce separate test case entries — they are never treated as variations of a positive case.
+Only accept the **latest approved spec version**. If the `spec_reference_id` passed to this skill does not match the most recent approved spec in workspace memory for this task, reject the invocation and surface an error -- do not derive tests from a stale or superseded spec.
 
-After generating the manifest, write it to workspace memory. When `report_bug` fires during test execution, it must reference both the test case ID and the originating AC ID so every bug is traceable back to the BA spec.
+Every Gherkin AC in the spec must produce at least one test case. Negative scenario ACs produce separate test case entries -- they are never treated as variations of a positive case.
+
+After generating the manifest, write it to workspace memory under `test_manifest:[task_id]`, including the `spec_reference_id` it was derived from. When `report_bug` fires during test execution, it must reference both the test case ID and the originating AC ID so every bug is traceable back to the BA spec.
+
+**Manifest invalidation:** If the BA spec is superseded (a new approved version exists), the existing test manifest is automatically stale. The QA Agent must re-invoke `derive_test_cases` with the new spec reference before resuming test execution. Running tests against a stale manifest is a traceability violation.
 
 ## Methodology
 
@@ -77,6 +81,8 @@ The sequential number is zero-padded to 3 digits for consistent sorting.
 ```
 TEST CASE MANIFEST
 Spec Reference: [spec_reference_id]
+Spec Version: [e.g. v1 — from the spec_reference_id]
+Manifest Valid For: [spec_reference_id] only — regenerate if spec is superseded
 Task: [task_id]
 Date: [ISO date]
 Total Test Cases: [count]
@@ -158,8 +164,10 @@ If a bug is discovered outside the manifest (exploratory testing), it should sti
 ### Quality Checklist
 
 Before writing the manifest to workspace memory:
+- The `spec_reference_id` matches the latest approved spec for this task
 - Every AC in the spec has at least one corresponding test case (or is explicitly flagged as untestable)
 - Every test case has a stable TC ID in the correct format
+- The manifest header includes `Spec Reference` and `Manifest Valid For` fields
 - The coverage matrix is complete and accurate
 - No test case depends on another test case having run first
 - Preconditions are specific enough to set up programmatically

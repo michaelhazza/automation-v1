@@ -56,14 +56,42 @@ If the spec contains HIGH-risk open questions, set `has_high_risk_questions` to 
 
 ## Methodology
 
+### Spec Lifecycle State Machine
+
+A spec moves through the following states. The agent must track and respect this state at all times:
+
+```
+drafting → pending_review → approved
+                         ↘ rejected → (re-draft → pending_review)
+                         ↘ expired  → (re-submit or escalate)
+```
+
+On submission, write the following record to workspace memory under the key `spec_submission:[task_id]`:
+
+```
+spec_reference_id: SPEC-[task_id]-v[N]
+state: pending_review
+submitted_at: [ISO timestamp]
+review_item_id: [returned by the HITL queue on submission]
+task_version: [the board task's current updatedAt timestamp at submission time]
+```
+
+**State rules:**
+- `pending_review`: spec is in the queue. No new submission for this task until this is resolved.
+- `approved`: spec is written to `workspace_memories`. Dev Agent and QA Agent may proceed.
+- `rejected`: read rejection feedback, increment version, re-draft, re-submit.
+- `expired`: a pending spec that has not received a human response within 48 hours. The agent must re-surface it via `request_approval` rather than silently waiting.
+
+**Task change invalidation:** On receiving an approval callback, compare the stored `task_version` against the board task's current `updatedAt`. If they differ, reject the approval, notify the human, and return the spec to `drafting` state -- the brief may have changed and the spec must be re-evaluated.
+
 ### Spec Reference ID
 
-On submission, the system generates a stable spec reference ID in the format `SPEC-[task_id]-[version]` (e.g. `SPEC-task-42-v1`). This ID is used by:
+On submission, assign a stable spec reference ID in the format `SPEC-[task_id]-v[N]` (e.g. `SPEC-task-42-v1`). This ID is used by:
 - The Dev Agent to retrieve the approved spec from workspace memory
 - The QA Agent to trace test cases back to the originating spec
 - The `derive_test_cases` skill to link Gherkin ACs to test case IDs
 
-If a spec is revised after rejection, the version increments (v2, v3). Maximum 3 revision rounds before escalating via `request_approval`.
+If a spec is revised after rejection, increment the version (v2, v3). Maximum 3 revision rounds before escalating via `request_approval`.
 
 ### Review Item Presentation
 
@@ -101,8 +129,13 @@ When the human rejects the spec:
 3. Submit a revised spec with an incremented version number
 4. If rejected twice for the same task, escalate via `request_approval` with the rejection history
 
-### Idempotency
+### Idempotency and Uniqueness
 
-Before submitting, check workspace memory for an existing spec submission for this task:
-- If a pending (unapproved) spec exists for this task, do not submit a duplicate — update the existing submission instead
-- If an approved spec exists and you are submitting a revision, increment the version number and note the revision reason
+Before submitting, read the `spec_submission:[task_id]` key from workspace memory:
+
+- **State is `pending_review`**: do not submit a duplicate. Surface the existing pending spec to the human via `request_approval` if it appears stalled (submitted more than 48 hours ago without resolution).
+- **State is `approved`**: an approved spec must be explicitly superseded before a new version is submitted. Write `state: superseded` to the existing record, then submit the new version. The QA Agent must regenerate its test manifest when a spec is superseded.
+- **No record exists**: proceed with v1 submission.
+- **State is `rejected` or `expired`**: proceed with revised submission at incremented version.
+
+Never silently overwrite a pending or approved spec record.

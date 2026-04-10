@@ -36,9 +36,11 @@ visibility: basic
 
 ## Instructions
 
-Invoke this skill when a board task needs a formal requirements spec before development can begin. The output is a structured object that the downstream `write_spec` skill packages into the HITL review queue — do not produce free text.
+Invoke this skill when a board task needs a formal requirements spec before development can begin. The output uses a **structured template** with fixed named sections and stable AC IDs — not free prose. Every field must appear in its designated position so `write_spec` can package it and `derive_test_cases` can parse it without re-interpretation.
 
 If the brief is too ambiguous to produce a complete spec, do not generate an incomplete spec. Instead, return a `clarification_required` response listing the blocking questions with risk rankings. Use `ask_clarifying_question` to surface those questions formally.
+
+**Clarification SLA:** If blocking questions have been surfaced and no human response is received within 48 hours, escalate via `request_approval` with the full list of unanswered questions and the assumption the agent would proceed under for each. Do not wait indefinitely. If the human explicitly authorises proceeding under stated assumptions, document each assumption in the spec's Traceability section and mark it `[ASSUMED]`.
 
 Every acceptance criterion must be traceable to the brief input. Do not invent requirements that are not implied by the brief. If a requirement seems necessary but is not stated, list it as an open question rather than including it as an AC.
 
@@ -71,11 +73,12 @@ As a [role], I want [capability] so that [benefit].
 
 ### Gherkin Acceptance Criteria
 
-Each user story must have at least two Gherkin ACs: one positive (happy path) and one negative (error/edge case).
+Each user story must have at least one core happy-path AC. Negative ACs are required where a failure mode materially affects **UX, data integrity, authentication, billing, or safety**. Do not manufacture negatives to meet a quota -- write them where they protect against real harm or user confusion.
 
 Format:
 ```
 AC-[story_number].[ac_number]: [short description]
+Type: positive | negative
 
 Given [precondition]
 When [action]
@@ -84,10 +87,11 @@ Then [expected outcome]
 
 Rules:
 - Each AC has a stable ID in the format `AC-X.Y` (story number . AC number)
-- Given/When/Then blocks must be specific enough for the QA Agent to derive test cases
-- Negative scenarios test boundary conditions, invalid inputs, unauthorised access, and error states
+- Given/When/Then blocks must be specific enough for the QA Agent to derive test cases without interpretation
+- Negative ACs must cover: invalid inputs, unauthorised access, boundary conditions, and failure states where a silent failure or misleading response would harm the user
 - Do not combine multiple assertions in a single Then block — split into separate ACs
 - If a scenario involves state changes, include a verification step in the Then block
+- Low-risk negatives (purely cosmetic edge cases) belong in Open Questions, not ACs
 
 ### Open Questions
 
@@ -166,10 +170,12 @@ Status: blocked-on-clarification
 
 Before returning the output:
 - Every user story satisfies INVEST criteria
-- Every story has at least one positive and one negative Gherkin AC
-- Every AC has a stable ID (AC-X.Y format)
+- Every story has at least one happy-path AC
+- Every story affecting UX, data, auth, billing, or safety has at least one negative AC
+- Every AC has a stable ID (AC-X.Y format) and a Type field (positive / negative)
 - Every AC is traceable to a specific part of the brief
 - Open questions are ranked by risk
-- No requirements were invented — everything traces to the brief or is flagged as an assumption
+- No requirements were invented — everything traces to the brief or is flagged as `[ASSUMED]`
 - Definition of Done is specific to this task, not generic
-- Given/When/Then blocks are specific enough for test case derivation
+- Given/When/Then blocks are specific enough for test case derivation without interpretation
+- If blocking questions remain unanswered after 48 hours, escalation path is triggered
