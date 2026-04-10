@@ -52,6 +52,8 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
     case 'update_crm': return executeCrmUpdateApproved(payload, context);
     case 'update_record': return executeFinancialRecordUpdateApproved(payload, context);
+    case 'create_lead_magnet': return executeLeadMagnetApproved(payload, context);
+    case 'deliver_report': return executeDeliverReportApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -810,6 +812,64 @@ export const skillExecutor = {
           },
           guidance: 'Follow the synthesise_voc methodology in your skill context. Extract recurring themes from the VoC data, compute sentiment breakdown, and answer any focus questions explicitly. Do not fabricate quotes — paraphrase only from the actual voc_data input.',
         });
+
+      // ── Content/SEO Agent skills ─────────────────────────────────────────
+
+      case 'draft_content':
+        return executeMethodologySkill('draft_content', input, {
+          template: {
+            contentType: '',
+            title: '',
+            primaryKeyword: '',
+            wordCount: 0,
+            body: '',
+            draftingNotes: '',
+            verifyItems: [],
+            todoItems: [],
+          },
+          guidance: 'Follow the draft_content methodology in your skill context. Produce a structured draft for the requested content type within the target word count. Apply brand voice, include SEO recommendations if a primary keyword is provided, and mark unverifiable claims with [VERIFY].',
+        });
+
+      case 'audit_seo':
+        return executeMethodologySkill('audit_seo', input, {
+          template: {
+            page: '',
+            targetKeyword: '',
+            overallScore: 0,
+            summary: '',
+            criticalIssues: [],
+            highPriority: [],
+            mediumPriority: [],
+            lowPriority: [],
+            quickWins: [],
+            notes: '',
+          },
+          guidance: 'Follow the audit_seo methodology in your skill context. Evaluate the page content against the on-page SEO checklist, score based on findings, and produce a prioritised list of specific recommendations.',
+        });
+
+      case 'create_lead_magnet':
+        return proposeReviewGatedAction('create_lead_magnet', input, context);
+
+      // ── Client Reporting Agent skills ────────────────────────────────────
+
+      case 'draft_report':
+        return executeMethodologySkill('draft_report', input, {
+          template: {
+            reportType: '',
+            clientName: '',
+            reportingPeriod: '',
+            executiveSummary: [],
+            sections: [],
+            recommendations: [],
+            draftingNotes: '',
+            verifyItems: [],
+            todoItems: [],
+          },
+          guidance: 'Follow the draft_report methodology in your skill context. Produce a structured client-facing report from the provided data sections. Lead each section with the key finding, compare to targets where available, and write recommendations specific to this client\'s data.',
+        });
+
+      case 'deliver_report':
+        return proposeReviewGatedAction('deliver_report', input, context);
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -1632,6 +1692,84 @@ async function executeFinancialRecordUpdateApproved(
     fields_written: Object.keys(updates),
     status: 'pending_integration',
     message: `Financial record update approved (${recordType}: ${recordDescription}). Accounting integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeLeadMagnetApproved — MVP stub for create_lead_magnet worker handler.
+// ---------------------------------------------------------------------------
+
+async function executeLeadMagnetApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const assetType = String(payload.asset_type ?? '');
+  const topic = String(payload.topic ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!assetType) return { success: false, error: 'asset_type is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `LEAD_MAGNET_APPROVED:${assetType}\ntopic: ${topic}\nreasoning: ${reasoning}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    asset_type: assetType,
+    topic,
+    status: 'approved',
+    message: `Lead magnet approved (${assetType}: ${topic}). Attach to task deliverables via add_deliverable.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeDeliverReportApproved — MVP stub for deliver_report worker handler.
+// ---------------------------------------------------------------------------
+
+async function executeDeliverReportApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const reportTitle = String(payload.report_title ?? '');
+  const clientName = String(payload.client_name ?? '');
+  const clientEmail = String(payload.client_email ?? '');
+  const deliveryChannel = String(payload.delivery_channel ?? 'email');
+  const reportingPeriod = payload.reporting_period ? String(payload.reporting_period) : null;
+
+  if (!reportTitle) return { success: false, error: 'report_title is required' };
+  if (!clientEmail) return { success: false, error: 'client_email is required' };
+
+  const deliveredAt = new Date().toISOString();
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: [
+          `REPORT_DELIVERED:${reportTitle}`,
+          `client: ${clientName} <${clientEmail}>`,
+          `channel: ${deliveryChannel}`,
+          reportingPeriod ? `period: ${reportingPeriod}` : '',
+          `delivered_at: ${deliveredAt}`,
+        ].filter(Boolean).join('\n'),
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    client_name: clientName,
+    delivery_channel: deliveryChannel,
+    delivered_at: deliveredAt,
+    status: 'pending_integration',
+    message: `Report delivery approved for ${clientName} via ${deliveryChannel}. Delivery integration not yet connected — action logged.`,
   };
 }
 

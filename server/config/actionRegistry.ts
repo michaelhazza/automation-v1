@@ -1251,6 +1251,66 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Content/SEO + Client Reporting — review-gated ────────────────────────
+
+  create_lead_magnet: {
+    actionType: 'create_lead_magnet',
+    description: 'Produce a complete lead magnet asset (checklist, template, mini-guide, scorecard). Review-gated — requires human approval before use in campaigns.',
+    actionCategory: 'worker',
+    topics: ['content'],
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['asset_type', 'topic', 'target_audience', 'value_promise', 'reasoning'],
+    parameterSchema: z.object({
+      asset_type: z.enum(['checklist', 'template', 'mini_guide', 'scorecard', 'swipe_file']).describe('The type of lead magnet to produce'),
+      topic: z.string().describe('The topic or problem the lead magnet addresses'),
+      target_audience: z.string().describe('Who this lead magnet is for'),
+      value_promise: z.string().describe('The specific outcome the reader gets'),
+      brand_voice: z.string().optional().describe('Brand voice guidelines'),
+      campaign_context: z.string().optional().describe('The campaign this lead magnet supports'),
+      workspace_context: z.string().optional().describe('Workspace context'),
+      reasoning: z.string().describe('Why this asset is being created — shown to the reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  deliver_report: {
+    actionType: 'deliver_report',
+    description: 'Deliver an approved client report via the configured delivery channel. Review-gated — requires human approval before the report is sent to the client.',
+    actionCategory: 'api',
+    topics: ['reporting'],
+    isExternal: true,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['report_title', 'client_name', 'client_email', 'report_content', 'delivery_channel', 'reasoning'],
+    parameterSchema: z.object({
+      report_title: z.string().describe('Title of the report being delivered'),
+      client_name: z.string().describe('Client name'),
+      client_email: z.string().describe('Client email address'),
+      report_content: z.string().describe('The full approved report content'),
+      delivery_channel: z.enum(['email', 'shared_link', 'portal']).describe('How to deliver the report'),
+      cover_message: z.string().optional().describe('Optional cover email message'),
+      reporting_period: z.string().optional().describe('The reporting period for the email subject'),
+      reasoning: z.string().describe('Context for the reviewer — NOT sent to the client'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
+  },
 };
 
 /** Check if an action type is known */
