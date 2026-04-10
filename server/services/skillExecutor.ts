@@ -44,6 +44,19 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'create_page': return executeCreatePage(payload, context);
     case 'update_page': return executeUpdatePage(payload, context);
     case 'publish_page': return executePublishPage(payload, context);
+    case 'write_spec': return executeWriteSpecApproved(payload, context);
+    case 'publish_post': return executePublishPostApproved(payload, context);
+    case 'update_bid': return executeAdsActionApproved('update_bid', payload, context);
+    case 'update_copy': return executeAdsActionApproved('update_copy', payload, context);
+    case 'pause_campaign': return executeAdsActionApproved('pause_campaign', payload, context);
+    case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
+    case 'update_crm': return executeCrmUpdateApproved(payload, context);
+    case 'update_financial_record': return executeFinancialRecordUpdateApproved(payload, context);
+    case 'create_lead_magnet': return executeLeadMagnetApproved(payload, context);
+    case 'deliver_report': return executeDeliverReportApproved(payload, context);
+    case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
+    case 'propose_doc_update': return executeDocProposalApproved(payload, context);
+    case 'write_docs': return executeWriteDocsApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -511,6 +524,443 @@ export const skillExecutor = {
           guidance: 'Follow the test authorship methodology in your context. For each scenario, write the test case and submit via write_patch.',
         });
 
+      // ── BA / QA MVP skills ───────────────────────────────────────────────
+
+      case 'draft_requirements':
+        return executeMethodologySkill('draft_requirements', input, {
+          template: {
+            taskId: '',
+            status: 'draft',
+            userStories: [],
+            openQuestions: [],
+            definitionOfDone: [],
+            traceability: [],
+          },
+          guidance: 'Follow the draft_requirements methodology in your skill context. Produce a structured requirements spec with INVEST user stories, Gherkin ACs (AC-X.Y format, Type: positive/negative), ranked open questions, and a Definition of Done. If the brief is too ambiguous, return a clarification_required response instead of a partial spec.',
+        });
+
+      case 'derive_test_cases':
+        return executeMethodologySkill('derive_test_cases', input, {
+          template: {
+            specReferenceId: '',
+            manifestValidFor: '',
+            taskId: '',
+            testCases: [],
+            coverageMatrix: [],
+            untestableAcs: [],
+          },
+          guidance: 'Follow the derive_test_cases methodology in your skill context. For each Gherkin AC in the spec, produce a test case with a stable TC-[task_id]-NNN ID, preconditions, action, and expected result. Write the completed manifest to workspace memory via write_workspace.',
+        });
+
+      case 'write_spec':
+        return proposeReviewGatedAction('write_spec', input, context);
+
+      // ── Support Agent skills ─────────────────────────────────────────────
+
+      case 'classify_email':
+        return executeMethodologySkill('classify_email', input, {
+          template: {
+            emailReference: '',
+            primaryIntent: '',
+            urgency: '',
+            sentiment: '',
+            routingAction: '',
+            isAutomated: false,
+            keySignals: [],
+            classificationNotes: '',
+            suggestedReplyTone: '',
+          },
+          guidance: 'Follow the classify_email methodology in your skill context. Classify the email by intent category, urgency, sentiment, and routing action. Return the structured classification result.',
+        });
+
+      case 'draft_reply':
+        return executeMethodologySkill('draft_reply', input, {
+          template: {
+            to: '',
+            subject: '',
+            confidence: '',
+            routingAction: '',
+            body: '',
+            confidenceFlags: [],
+            draftingNotes: '',
+          },
+          guidance: 'Follow the draft_reply methodology in your skill context. Use the classification output and knowledge base context to draft a concise, on-brand reply. If routing_action is escalate, return an escalation response instead of a draft.',
+        });
+
+      case 'search_knowledge_base': {
+        // Auto-gated stub — integration not yet wired
+        const searchQuery = typeof input.query === 'string' ? input.query : '';
+        const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
+        return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          query: searchQuery,
+          intent_category: searchCategory ?? null,
+          results: [],
+          message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
+        }));
+      }
+
+      // ── Social Media Agent skills ────────────────────────────────────────
+
+      case 'draft_post':
+        return executeMethodologySkill('draft_post', input, {
+          template: {
+            brief: '',
+            platforms: [],
+            brandVoice: '',
+            drafts: {},
+            sharedNotes: '',
+            verifyItems: [],
+          },
+          guidance: 'Follow the draft_post methodology in your skill context. Produce platform-specific post variants for each requested platform, respecting character limits, hashtag strategies, and brand voice. Flag any claims that need verification with [VERIFY] placeholders.',
+        });
+
+      case 'publish_post':
+        return proposeReviewGatedAction('publish_post', input, context);
+
+      case 'read_analytics': {
+        // Auto-gated stub — platform integrations not yet wired
+        const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
+        const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        // Validate date range
+        if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_analytics', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          platforms: analyticsplatforms,
+          date_from: dateFrom,
+          date_to: dateTo,
+          results: [],
+          message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
+        }));
+      }
+
+      // ── Ads Management Agent skills ──────────────────────────────────────
+
+      case 'read_campaigns': {
+        // Auto-gated stub — ads platform integrations not yet wired
+        const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
+        const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_campaigns', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          platform: adsPlatform,
+          date_from: adsDateFrom,
+          date_to: adsDateTo,
+          campaigns: [],
+          message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
+        }));
+      }
+
+      case 'analyse_performance':
+        return executeMethodologySkill('analyse_performance', input, {
+          template: {
+            period: '',
+            campaignsAnalysed: 0,
+            executiveSummary: '',
+            campaigns: [],
+            anomalies: [],
+            rankedActions: [],
+            caveats: [],
+          },
+          guidance: 'Follow the analyse_performance methodology in your skill context. Analyse the campaign data from read_campaigns, identify underperformers and anomalies, and produce ranked recommendations (pause, reduce_bid, increase_budget, test_copy, monitor).',
+        });
+
+      case 'draft_ad_copy':
+        return executeMethodologySkill('draft_ad_copy', input, {
+          template: {
+            campaignName: '',
+            platform: '',
+            adFormat: '',
+            variants: [],
+            copyNotes: '',
+            verifyItems: [],
+          },
+          guidance: 'Follow the draft_ad_copy methodology in your skill context. Produce the requested number of meaningfully different ad copy variants within platform character limits. State the test hypothesis for each variant. Use [VERIFY] for unconfirmed claims.',
+        });
+
+      case 'update_bid':
+        return proposeReviewGatedAction('update_bid', input, context);
+
+      case 'update_copy':
+        return proposeReviewGatedAction('update_copy', input, context);
+
+      case 'pause_campaign':
+        return proposeReviewGatedAction('pause_campaign', input, context);
+
+      case 'increase_budget':
+        return proposeReviewGatedAction('increase_budget', input, context);
+
+      // ── Email Outreach Agent skills ──────────────────────────────────────
+
+      case 'enrich_contact': {
+        // Auto-gated stub — enrichment integration not yet wired
+        const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
+        return executeWithActionAudit('enrich_contact', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          contact: enrichEmail,
+          matched: false,
+          fields: {},
+          message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
+        }));
+      }
+
+      case 'draft_sequence':
+        return executeMethodologySkill('draft_sequence', input, {
+          template: {
+            contactEmail: '',
+            goal: '',
+            steps: [],
+            draftingNotes: '',
+            unresolvedTokens: [],
+            verifyItems: [],
+          },
+          guidance: 'Follow the draft_sequence methodology in your skill context. Produce a multi-step outreach sequence with distinct purpose per step. Use enrichment data for personalisation if available; fall back to generic copy if enrichment is a stub. Flag all [VERIFY] items and unresolved personalisation tokens.',
+        });
+
+      case 'update_crm':
+        return proposeReviewGatedAction('update_crm', input, context);
+
+      // ── Finance Agent skills ─────────────────────────────────────────────
+
+      case 'read_revenue': {
+        const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        if (revDateFrom && revDateTo && new Date(revDateFrom) > new Date(revDateTo)) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_revenue', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          date_from: revDateFrom,
+          date_to: revDateTo,
+          total_revenue: null,
+          message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
+        }));
+      }
+
+      case 'read_expenses': {
+        const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        if (expDateFrom && expDateTo && new Date(expDateFrom) > new Date(expDateTo)) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_expenses', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          date_from: expDateFrom,
+          date_to: expDateTo,
+          total_expenses: null,
+          message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
+        }));
+      }
+
+      case 'analyse_financials':
+        return executeMethodologySkill('analyse_financials', input, {
+          template: {
+            period: '',
+            dataQuality: '',
+            executiveSummary: '',
+            keyMetrics: {},
+            revenueAnalysis: '',
+            expenseAnalysis: '',
+            anomalies: [],
+            recommendations: [],
+            caveats: [],
+          },
+          guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
+        });
+
+      case 'update_financial_record':
+        return proposeReviewGatedAction('update_financial_record', input, context);
+
+      // ── Strategic Intelligence Agent skills ──────────────────────────────
+
+      case 'generate_competitor_brief':
+        return executeMethodologySkill('generate_competitor_brief', input, {
+          template: {
+            competitor: '',
+            researchDate: '',
+            executiveSummary: '',
+            productAndPricing: {},
+            recentDevelopments: [],
+            strengths: [],
+            weaknesses: [],
+            competitiveImplications: '',
+            sources: [],
+            gaps: [],
+          },
+          guidance: 'Follow the generate_competitor_brief methodology in your skill context. Use web_search to retrieve current competitor pricing, product info, and recent news. Do not rely on training data for facts that change frequently. Mark unverifiable claims with [VERIFY].',
+        });
+
+      case 'synthesise_voc':
+        return executeMethodologySkill('synthesise_voc', input, {
+          template: {
+            sources: [],
+            period: '',
+            dataPoints: 0,
+            executiveSummary: '',
+            sentimentBreakdown: {},
+            topThemes: [],
+            topPraise: [],
+            topPainPoints: [],
+            featureRequests: [],
+            churnSignals: [],
+            focusQuestionAnswers: [],
+            strategicImplications: [],
+            dataCaveats: [],
+          },
+          guidance: 'Follow the synthesise_voc methodology in your skill context. Extract recurring themes from the VoC data, compute sentiment breakdown, and answer any focus questions explicitly. Do not fabricate quotes — paraphrase only from the actual voc_data input.',
+        });
+
+      // ── Content/SEO Agent skills ─────────────────────────────────────────
+
+      case 'draft_content':
+        return executeMethodologySkill('draft_content', input, {
+          template: {
+            contentType: '',
+            title: '',
+            primaryKeyword: '',
+            wordCount: 0,
+            body: '',
+            draftingNotes: '',
+            verifyItems: [],
+            todoItems: [],
+          },
+          guidance: 'Follow the draft_content methodology in your skill context. Produce a structured draft for the requested content type within the target word count. Apply brand voice, include SEO recommendations if a primary keyword is provided, and mark unverifiable claims with [VERIFY].',
+        });
+
+      case 'audit_seo':
+        return executeMethodologySkill('audit_seo', input, {
+          template: {
+            page: '',
+            targetKeyword: '',
+            overallScore: 0,
+            summary: '',
+            criticalIssues: [],
+            highPriority: [],
+            mediumPriority: [],
+            lowPriority: [],
+            quickWins: [],
+            notes: '',
+          },
+          guidance: 'Follow the audit_seo methodology in your skill context. Evaluate the page content against the on-page SEO checklist, score based on findings, and produce a prioritised list of specific recommendations.',
+        });
+
+      case 'create_lead_magnet':
+        return proposeReviewGatedAction('create_lead_magnet', input, context);
+
+      // ── Client Reporting Agent skills ────────────────────────────────────
+
+      case 'draft_report':
+        return executeMethodologySkill('draft_report', input, {
+          template: {
+            reportType: '',
+            clientName: '',
+            reportingPeriod: '',
+            executiveSummary: [],
+            sections: [],
+            recommendations: [],
+            draftingNotes: '',
+            verifyItems: [],
+            todoItems: [],
+          },
+          guidance: 'Follow the draft_report methodology in your skill context. Produce a structured client-facing report from the provided data sections. Lead each section with the key finding, compare to targets where available, and write recommendations specific to this client\'s data.',
+        });
+
+      case 'deliver_report':
+        return proposeReviewGatedAction('deliver_report', input, context);
+
+      // ── Onboarding Agent skills ──────────────────────────────────────────
+
+      case 'configure_integration':
+        return proposeReviewGatedAction('configure_integration', input, context);
+
+      // ── CRM/Pipeline Agent skills ────────────────────────────────────────
+
+      case 'read_crm': {
+        // Auto-gated stub — CRM integration not yet wired
+        const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
+        return executeWithActionAudit('read_crm', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          query_type: crmQueryType,
+          records: [],
+          message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
+        }));
+      }
+
+      case 'analyse_pipeline':
+        return executeMethodologySkill('analyse_pipeline', input, {
+          template: {
+            period: '',
+            dataQuality: '',
+            executiveSummary: '',
+            keyMetrics: {},
+            stageBreakdown: [],
+            staleDeals: [],
+            rankedActions: [],
+            caveats: [],
+          },
+          guidance: 'Follow the analyse_pipeline methodology in your skill context. Compute pipeline velocity, stage conversion, and stale deal metrics from the CRM data. Identify deals requiring follow-up and produce ranked actions.',
+        });
+
+      case 'draft_followup':
+        return executeMethodologySkill('draft_followup', input, {
+          template: {
+            contactEmail: '',
+            dealName: '',
+            goal: '',
+            subject: '',
+            body: '',
+            draftingNotes: '',
+          },
+          guidance: 'Follow the draft_followup methodology in your skill context. Draft a short (3–5 sentence) follow-up email referencing the last activity. Match tone to days-since-activity. Include a single, clear CTA matching the follow_up_goal.',
+        });
+
+      case 'detect_churn_risk':
+        return executeMethodologySkill('detect_churn_risk', input, {
+          template: {
+            accountsAnalysed: 0,
+            atRiskAccounts: [],
+            healthyAccounts: [],
+            summary: '',
+            caveats: [],
+          },
+          guidance: 'Follow the detect_churn_risk methodology in your skill context. Score each account based on engagement, commercial, and relationship signals. Never assign HIGH or CRITICAL risk without 2+ supporting signals. Produce specific recommended interventions per at-risk account.',
+        });
+
+      // ── Knowledge Management Agent skills ────────────────────────────────
+
+      case 'read_docs': {
+        // Auto-gated stub — documentation integration not yet wired
+        const docPageId = typeof input.page_id === 'string' ? input.page_id : '';
+        const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
+        return executeWithActionAudit('read_docs', input, context, async () => ({
+          status: 'stub',
+          dataAvailability: 'stub' as const,
+          page_id: docPageId,
+          page_title: docPageTitle,
+          content: null,
+          message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
+        }));
+      }
+
+      case 'propose_doc_update':
+        return proposeReviewGatedAction('propose_doc_update', input, context);
+
+      case 'write_docs':
+        return proposeReviewGatedAction('write_docs', input, context);
+
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
         const { executeAssignTask } = await import('../tools/internal/assignTask.js');
@@ -625,7 +1075,7 @@ export const skillExecutor = {
         return executeAskClarifyingQuestion(input, {
           runId: context.runId,
           organisationId: context.organisationId,
-          subaccountId: context.subaccountId,
+          subaccountId: context.subaccountId ?? undefined,
         });
       }
 
@@ -1090,6 +1540,448 @@ function serializeTask(item: Record<string, unknown>): Record<string, unknown> {
 
 // ---------------------------------------------------------------------------
 // Write Workspace (add activity)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// write_spec — post-approval executor
+// Writes the approved spec to workspace memory and marks the task spec-approved.
+// ---------------------------------------------------------------------------
+
+async function executeWriteSpecApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const taskId = String(payload.task_id ?? '');
+  const specContent = String(payload.spec_content ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+  const storiesCount = Number(payload.user_stories_count ?? 0);
+  const acCount = Number(payload.ac_count ?? 0);
+
+  if (!taskId) return { success: false, error: 'task_id is required' };
+  if (!specContent) return { success: false, error: 'spec_content is required' };
+
+  // Build a stable spec reference ID so QA / Dev can retrieve this spec by key.
+  // Pattern: SPEC-<taskId>-v<N> — we derive N from activity count to ensure
+  // monotonically increasing version without a dedicated DB column.
+  let version = 1;
+  try {
+    const existing = await taskService.listActivities(taskId, context.organisationId);
+    const priorSpecs = existing.filter((a: { activityType: string; message: string }) =>
+      a.activityType === 'note' && a.message.startsWith('SPEC_APPROVED:')
+    );
+    version = priorSpecs.length + 1;
+  } catch { /* treat as first version */ }
+
+  const specReferenceId = `SPEC-${taskId}-v${version}`;
+
+  try {
+    // 1. Write the spec to workspace memory as a structured activity.
+    await taskService.addActivity(taskId, context.organisationId, {
+      activityType: 'note',
+      message: `SPEC_APPROVED:${specReferenceId}\n\n${specContent}`,
+      agentId: context.agentId,
+    });
+
+    // 2. Write a human-readable summary activity for the board.
+    await taskService.addActivity(taskId, context.organisationId, {
+      activityType: 'completed',
+      message: `Requirements spec approved.\nReference: ${specReferenceId}\nStories: ${storiesCount} | ACs: ${acCount}\nReasoning: ${reasoning}`,
+      agentId: context.agentId,
+    });
+
+    // 3. Advance task status to spec-approved.
+    await taskService.updateTask(taskId, context.organisationId, { status: 'spec-approved' });
+
+    return {
+      success: true,
+      spec_reference_id: specReferenceId,
+      task_id: taskId,
+      message: `Spec ${specReferenceId} approved and written to workspace memory. Task status updated to spec-approved.`,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to persist approved spec: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// executePublishPostApproved — MVP stub for the publish_post worker handler.
+// Platform API integrations are not yet wired. Logs the intended publish action
+// and returns pending_integration status.
+// ---------------------------------------------------------------------------
+
+async function executePublishPostApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const platform = String(payload.platform ?? '');
+  const postContent = String(payload.post_content ?? '');
+  const scheduleAt = payload.schedule_at ? String(payload.schedule_at) : null;
+  const campaignTag = payload.campaign_tag ? String(payload.campaign_tag) : null;
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!platform) return { success: false, error: 'platform is required' };
+  if (!postContent) return { success: false, error: 'post_content is required' };
+
+  // Log publish action to workspace memory if a taskId is available
+  if (context.taskId) {
+    try {
+      const logMsg = [
+        `PUBLISH_POST_APPROVED:${platform}`,
+        `campaign: ${campaignTag ?? 'none'}`,
+        scheduleAt ? `scheduled: ${scheduleAt}` : 'publish: immediate',
+        `reasoning: ${reasoning}`,
+        `---\n${postContent}`,
+      ].join('\n');
+
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: logMsg,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal — log failure does not block publish response */ }
+  }
+
+  return {
+    success: true,
+    platform,
+    publish_status: 'pending_integration',
+    scheduled_for: scheduleAt,
+    campaign_tag: campaignTag,
+    message: `Publish approved for ${platform}. Platform integration not yet connected — action logged. When integration is live, this will ${scheduleAt ? `schedule the post for ${scheduleAt}` : 'publish immediately'}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeAdsActionApproved — MVP stub for ads platform write actions.
+// Platform APIs are not yet connected. Logs intended action and returns
+// pending_integration status. Handles: update_bid, update_copy,
+// pause_campaign, increase_budget.
+// ---------------------------------------------------------------------------
+
+async function executeAdsActionApproved(
+  actionType: string,
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const platform = String(payload.platform ?? '');
+  const campaignId = String(payload.campaign_id ?? '');
+  const campaignName = String(payload.campaign_name ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!platform) return { success: false, error: 'platform is required' };
+  if (!campaignId) return { success: false, error: 'campaign_id is required' };
+
+  if (context.taskId) {
+    try {
+      const logMsg = [
+        `ADS_ACTION_APPROVED:${actionType}`,
+        `platform: ${platform}`,
+        `campaign_id: ${campaignId}`,
+        `campaign: ${campaignName}`,
+        `reasoning: ${reasoning}`,
+      ].join('\n');
+
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: logMsg,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    action_type: actionType,
+    platform,
+    campaign_id: campaignId,
+    status: 'pending_integration',
+    message: `${actionType} approved for campaign ${campaignName} on ${platform}. Platform integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeCrmUpdateApproved — MVP stub for update_crm worker handler.
+// CRM write APIs not yet connected. Logs intended field changes.
+// ---------------------------------------------------------------------------
+
+async function executeCrmUpdateApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const recordType = String(payload.record_type ?? '');
+  const recordId = String(payload.record_id ?? '');
+  const recordIdentifier = String(payload.record_identifier ?? '');
+  const updates = payload.updates as Record<string, unknown> ?? {};
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!recordType) return { success: false, error: 'record_type is required' };
+  if (!recordId) return { success: false, error: 'record_id is required' };
+
+  if (context.taskId) {
+    try {
+      const fieldsUpdated = Object.keys(updates).join(', ');
+      const logMsg = [
+        `CRM_UPDATE_APPROVED:${recordType}:${recordId}`,
+        `identifier: ${recordIdentifier}`,
+        `fields: ${fieldsUpdated}`,
+        `reasoning: ${reasoning}`,
+      ].join('\n');
+
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: logMsg,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    record_type: recordType,
+    record_id: recordId,
+    fields_updated: Object.keys(updates),
+    status: 'pending_integration',
+    message: `CRM update approved for ${recordType} ${recordIdentifier}. Integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeFinancialRecordUpdateApproved — MVP stub for update_financial_record.
+// ---------------------------------------------------------------------------
+
+async function executeFinancialRecordUpdateApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const recordType = String(payload.record_type ?? '');
+  const recordDescription = String(payload.record_description ?? '');
+  const updates = payload.updates as Record<string, unknown> ?? {};
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!recordType) return { success: false, error: 'record_type is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: [
+          `FINANCIAL_RECORD_UPDATE_APPROVED:${recordType}`,
+          `description: ${recordDescription}`,
+          `fields: ${Object.keys(updates).join(', ')}`,
+          `reasoning: ${reasoning}`,
+        ].join('\n'),
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    record_type: recordType,
+    fields_written: Object.keys(updates),
+    status: 'pending_integration',
+    message: `Financial record update approved (${recordType}: ${recordDescription}). Accounting integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeLeadMagnetApproved — MVP stub for create_lead_magnet worker handler.
+// ---------------------------------------------------------------------------
+
+async function executeLeadMagnetApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const assetType = String(payload.asset_type ?? '');
+  const topic = String(payload.topic ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!assetType) return { success: false, error: 'asset_type is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `LEAD_MAGNET_APPROVED:${assetType}\ntopic: ${topic}\nreasoning: ${reasoning}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    asset_type: assetType,
+    topic,
+    status: 'approved',
+    message: `Lead magnet approved (${assetType}: ${topic}). Attach to task deliverables via add_deliverable.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeDeliverReportApproved — MVP stub for deliver_report worker handler.
+// ---------------------------------------------------------------------------
+
+async function executeDeliverReportApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const reportTitle = String(payload.report_title ?? '');
+  const clientName = String(payload.client_name ?? '');
+  const clientEmail = String(payload.client_email ?? '');
+  const deliveryChannel = String(payload.delivery_channel ?? 'email');
+  const reportingPeriod = payload.reporting_period ? String(payload.reporting_period) : null;
+
+  if (!reportTitle) return { success: false, error: 'report_title is required' };
+  if (!clientEmail) return { success: false, error: 'client_email is required' };
+
+  const deliveredAt = new Date().toISOString();
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: [
+          `REPORT_DELIVERED:${reportTitle}`,
+          `client: ${clientName} <${clientEmail}>`,
+          `channel: ${deliveryChannel}`,
+          reportingPeriod ? `period: ${reportingPeriod}` : '',
+          `delivered_at: ${deliveredAt}`,
+        ].filter(Boolean).join('\n'),
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    client_name: clientName,
+    delivery_channel: deliveryChannel,
+    delivered_at: deliveredAt,
+    status: 'pending_integration',
+    message: `Report delivery approved for ${clientName} via ${deliveryChannel}. Delivery integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeConfigureIntegrationApproved — MVP stub for configure_integration.
+// ---------------------------------------------------------------------------
+
+/** Redact fields whose keys match common credential patterns before storage. */
+const SENSITIVE_KEY_PATTERN = /(^|_)(key|secret|token|password|credential|auth|bearer)|api_key|client_secret|access_token|refresh_token/i;
+
+function redactSensitiveFields(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) {
+      result[key] = '[REDACTED]';
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      result[key] = redactSensitiveFields(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+async function executeConfigureIntegrationApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const integrationType = String(payload.integration_type ?? '');
+  const providerName = String(payload.provider_name ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+  const configuration = (payload.configuration as Record<string, unknown>) ?? {};
+
+  if (!integrationType) return { success: false, error: 'integration_type is required' };
+  if (!providerName) return { success: false, error: 'provider_name is required' };
+
+  // Redact sensitive fields before any storage
+  const redactedConfig = redactSensitiveFields(configuration);
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `INTEGRATION_APPROVED:${integrationType}:${providerName}\nreasoning: ${reasoning}\nconfig: ${JSON.stringify(redactedConfig)}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    integration_type: integrationType,
+    provider_name: providerName,
+    configuration: redactedConfig,
+    status: 'pending_integration',
+    message: `Integration configuration approved (${integrationType}: ${providerName}). Integration storage not yet connected — configuration logged with credentials redacted.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeDocProposalApproved — signals approval of propose_doc_update.
+// The actual write is performed by a subsequent write_docs call.
+// ---------------------------------------------------------------------------
+
+async function executeDocProposalApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const pageTitle = String(payload.page_title ?? '');
+  const changeType = String(payload.change_type ?? '');
+  const changesCount = Array.isArray(payload.proposed_changes) ? payload.proposed_changes.length : 0;
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `DOC_PROPOSAL_APPROVED:${pageTitle}\nchange_type: ${changeType}\nchanges: ${changesCount}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    page_title: pageTitle,
+    changes_approved: changesCount,
+    message: `Doc update proposal approved for "${pageTitle}". Invoke write_docs with the full updated content to apply the changes.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeWriteDocsApproved — MVP stub for write_docs worker handler.
+// ---------------------------------------------------------------------------
+
+async function executeWriteDocsApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const pageTitle = String(payload.page_title ?? '');
+  const changeSummary = String(payload.change_summary ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!pageTitle) return { success: false, error: 'page_title is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `DOCS_WRITE_APPROVED:${pageTitle}\nchange_summary: ${changeSummary}\nreasoning: ${reasoning}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    page_title: pageTitle,
+    status: 'pending_integration',
+    message: `Documentation write approved for "${pageTitle}". Documentation integration not yet connected — update logged.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 
 async function executeWriteWorkspace(
