@@ -5,50 +5,20 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "review_code",
-  "description": "Perform a structured self-review on all changed files before submitting a patch. Checks for SOLID violations, security issues, correctness bugs, convention violations, architecture plan compliance, and Gherkin AC coverage. Always invoke before write_patch.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "changed_files": {
-        "type": "string",
-        "description": "All files modified or created during implementation, with their content or diffs"
-      },
-      "architecture_plan": {
-        "type": "string",
-        "description": "The architecture plan the implementation was supposed to follow"
-      },
-      "ba_spec_reference": {
-        "type": "string",
-        "description": "The BA requirements spec for checking AC coverage. Omit if not available."
-      },
-      "gherkin_acs": {
-        "type": "string",
-        "description": "Gherkin acceptance criteria to verify coverage against. Omit if not available."
-      },
-      "tech_stack": {
-        "type": "string",
-        "description": "Framework conventions, error handling patterns, auth middleware, test conventions"
-      },
-      "ux_review_findings": {
-        "type": "string",
-        "description": "UX review findings to verify were addressed. Omit if no UX review was performed."
-      }
-    },
-    "required": ["changed_files", "architecture_plan", "tech_stack"]
-  }
-}
-```
+## Parameters
+
+- changed_files: string (required) — All files modified or created during implementation, with their content or diffs
+- architecture_plan: string (required) — The architecture plan the implementation was supposed to follow
+- ba_spec_reference: string — The BA requirements spec for checking AC coverage. Omit if not available.
+- gherkin_acs: string — Gherkin acceptance criteria to verify coverage against. Omit if not available.
+- tech_stack: string (required) — Framework conventions, error handling patterns, auth middleware, test conventions
+- ux_review_findings: string — UX review findings to verify were addressed. Omit if no UX review was performed.
 
 ## Instructions
 
 Always invoke this skill before submitting any patch via `write_patch`. No patch is submitted without a self-review pass. If the verdict is BLOCKED, fix blocking issues and re-invoke. Maximum 3 self-review iterations before escalating to human.
 
 The self-review report is included in the patch submission so the human reviewer sees the diff, the architecture plan, and the self-review findings in one place.
-
-## Methodology
 
 ### Blocking Issues (must fix before submitting)
 
@@ -112,26 +82,33 @@ If a UX review was performed, confirm each high-priority finding was addressed o
 **Files reviewed:** [list of all changed files]
 
 ## Blocking Issues
+
 [If none: "No blocking issues found."]
 [For each: File, Issue (name the principle/concern), Fix (concrete change)]
 
 ## Strong Recommendations
+
 [Each: file, issue, recommendation]
 
 ## Non-Blocking Notes
+
 [Informational items for human reviewer]
 
 ## Architecture Plan Compliance
+
 **Deviations from plan:** [list with reasons]
 **Plan gaps encountered:** [any gaps handled during implementation]
 
 ## Gherkin AC Coverage
+
 [For each AC: summary, COVERED|PARTIALLY COVERED|NOT COVERED, notes]
 
 ## UX Findings Addressed
+
 [If applicable: each finding and confirmation]
 
 ## Verdict
+
 [APPROVE — no blocking issues, ready for human review]
 [BLOCKED — N blocking issues listed above, fixing before resubmitting]
 ```

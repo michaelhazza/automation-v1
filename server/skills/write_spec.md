@@ -5,46 +5,15 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "write_spec",
-  "description": "Submit a requirements specification to the HITL review queue for human approval. This is a review-gated action — it enters the approval queue and does NOT execute immediately. A human must approve it before it becomes the authoritative spec. On approval, writes the spec to workspace_memories and updates the board task status to spec-approved.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_id": {
-        "type": "string",
-        "description": "The board task ID this spec belongs to"
-      },
-      "spec_content": {
-        "type": "string",
-        "description": "The full requirements spec output from draft_requirements"
-      },
-      "user_stories_count": {
-        "type": "number",
-        "description": "Number of user stories in the spec"
-      },
-      "ac_count": {
-        "type": "number",
-        "description": "Total number of acceptance criteria across all stories"
-      },
-      "open_questions_count": {
-        "type": "number",
-        "description": "Number of open questions, broken down by risk level"
-      },
-      "has_high_risk_questions": {
-        "type": "boolean",
-        "description": "Whether the spec contains HIGH-risk open questions that may block implementation"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Summary of the spec scope, key decisions made during drafting, and any assumptions. The human reviewer sees this alongside the spec."
-      }
-    },
-    "required": ["task_id", "spec_content", "user_stories_count", "ac_count", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- task_id: string (required) — The board task ID this spec belongs to
+- spec_content: string (required) — The full requirements spec output from draft_requirements
+- user_stories_count: number (required) — Number of user stories in the spec
+- ac_count: number (required) — Total number of acceptance criteria across all stories
+- open_questions_count: number — Number of open questions, broken down by risk level
+- has_high_risk_questions: boolean — Whether the spec contains HIGH-risk open questions that may block implementation
+- reasoning: string (required) — Summary of the spec scope, key decisions made during drafting, and any assumptions. The human reviewer sees this alongside the spec.
 
 ## Instructions
 
@@ -53,8 +22,6 @@ Invoke this skill after `draft_requirements` produces a complete spec. This is t
 Do not invoke this skill if `draft_requirements` returned a `clarification_required` response — resolve the blocking questions via `ask_clarifying_question` first, then re-draft.
 
 If the spec contains HIGH-risk open questions, set `has_high_risk_questions` to true. The review item should prominently flag this so the human can address them during review rather than discovering them downstream.
-
-## Methodology
 
 ### Spec Lifecycle State Machine
 

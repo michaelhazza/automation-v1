@@ -5,42 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "generate_competitor_brief",
-  "description": "Research a competitor and produce a structured intelligence brief: product positioning, pricing, recent moves (funding, launches, partnerships), strengths, weaknesses, and strategic implications. Uses web_search to verify current information. Returns a structured brief for use in strategy documents and VoC synthesis.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "competitor_name": {
-        "type": "string",
-        "description": "Name of the competitor to research"
-      },
-      "competitor_url": {
-        "type": "string",
-        "description": "Competitor website URL — used to anchor web searches"
-      },
-      "research_focus": {
-        "type": "array",
-        "items": {
-          "type": "string",
-          "enum": ["pricing", "product_features", "positioning", "recent_news", "customer_reviews", "team_and_funding"]
-        },
-        "description": "Specific areas to focus the research. If omitted, covers all areas."
-      },
-      "our_positioning": {
-        "type": "string",
-        "description": "Our product's positioning and value proposition — used to frame the competitive comparison"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: ICP, target market, known competitive dynamics, prior briefs on this competitor"
-      }
-    },
-    "required": ["competitor_name"]
-  }
-}
-```
+## Parameters
+
+- competitor_name: string (required) — Name of the competitor to research
+- competitor_url: string — Competitor website URL — used to anchor web searches
+- research_focus: string — JSON array of string values. Specific areas to focus the research. If omitted, covers all areas.
+- our_positioning: string — Our product's positioning and value proposition — used to frame the competitive comparison
+- workspace_context: string — Workspace memory: ICP, target market, known competitive dynamics, prior briefs on this competitor
 
 ## Instructions
 
@@ -51,8 +22,6 @@ Run at least 2 web searches: one for the competitor's current product/pricing pa
 Do not fabricate competitive intelligence. If information cannot be verified via web search, mark it as `unverified` and note the source gap. Use `[VERIFY]` for claims that need more recent data.
 
 The brief is intelligence, not opinion. Present findings as factual observations, not strategic recommendations — those belong in a separate analysis layer.
-
-## Methodology
 
 ### Research Checklist
 
@@ -102,6 +71,7 @@ Focus Areas: [list]
 ---
 
 ## Executive Summary
+
 [3–4 sentences: who they are, what they do, and the most important strategic implication]
 
 ## Product & Pricing
@@ -119,24 +89,30 @@ Target Segment: [description]
 Key Messages: [list]
 
 ## Recent Developments
+
 - [date]: [event — funding, launch, partnership, etc.]
 - [Unverified / no recent news found]
 
 ## Strengths
+
 - [strength]: [evidence]
 
 ## Weaknesses
+
 - [weakness]: [evidence from reviews or gaps]
 
 ## Competitive Implications
+
 [How does this competitor compare to our positioning? Where do we win, where do we lose?]
 Only include if our_positioning was provided — otherwise omit this section.
 
 ## Sources
+
 - [URL]: [what was retrieved]
 - [URL]: [what was retrieved]
 
 ## Gaps
+
 - [Any research_focus area where data could not be verified]
 ```
 

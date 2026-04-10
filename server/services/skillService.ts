@@ -90,11 +90,8 @@ export const skillService = {
           });
         }
 
-        const parts: string[] = [];
-        if (skill.instructions) parts.push(skill.instructions);
-        if (skill.methodology) parts.push(skill.methodology);
-        if (parts.length > 0) {
-          instructions.push(parts.join('\n\n'));
+        if (skill.instructions) {
+          instructions.push(skill.instructions);
         }
       } else {
         // Fall back to system skills (file-based) for platform-provided skill slugs.
@@ -107,11 +104,8 @@ export const skillService = {
             description: systemSkill.definition.description,
             input_schema: systemSkill.definition.input_schema,
           });
-          const parts: string[] = [];
-          if (systemSkill.instructions) parts.push(systemSkill.instructions);
-          if (systemSkill.methodology) parts.push(systemSkill.methodology);
-          if (parts.length > 0) {
-            instructions.push(parts.join('\n\n'));
+          if (systemSkill.instructions) {
+            instructions.push(systemSkill.instructions);
           }
         }
       }
@@ -129,7 +123,6 @@ export const skillService = {
     description?: string;
     definition: object;
     instructions?: string;
-    methodology?: string;
   }) {
     const [skill] = await db
       .insert(skills)
@@ -141,7 +134,6 @@ export const skillService = {
         skillType: 'custom',
         definition: data.definition,
         instructions: data.instructions ?? null,
-        methodology: data.methodology ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
@@ -155,7 +147,6 @@ export const skillService = {
     description: string;
     definition: object;
     instructions: string;
-    methodology: string;
     isActive: boolean;
     visibility: SkillVisibility;
   }>) {
@@ -172,7 +163,6 @@ export const skillService = {
     if (data.description !== undefined) update.description = data.description;
     if (data.definition !== undefined) update.definition = data.definition;
     if (data.instructions !== undefined) update.instructions = data.instructions;
-    if (data.methodology !== undefined) update.methodology = data.methodology;
     if (data.isActive !== undefined) update.isActive = data.isActive;
     if (data.visibility !== undefined) {
       if (!isSkillVisibility(data.visibility)) {
@@ -283,11 +273,11 @@ export const skillService = {
         .where(and(isNull(skills.organisationId), eq(skills.slug, def.slug)));
 
       if (existing.length > 0) {
-        // Update existing built-in skill with latest methodology (if changed)
+        // Update existing built-in skill with latest instructions (if changed)
         const current = existing[0];
-        if (current.methodology !== (def.methodology ?? null)) {
+        if (current.instructions !== (def.instructions ?? null)) {
           await db.update(skills).set({
-            methodology: def.methodology ?? null,
+            instructions: def.instructions ?? null,
             updatedAt: new Date(),
           }).where(eq(skills.id, current.id));
         }
@@ -302,7 +292,6 @@ export const skillService = {
         skillType: 'built_in',
         definition: def.definition,
         instructions: def.instructions,
-        methodology: def.methodology ?? null,
         isActive: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -333,8 +322,9 @@ function getBuiltInSkillDefinitions() {
           required: ['query'],
         },
       },
-      instructions: 'You have access to web search. Use it to find current information, verify facts, research competitors, or gather data that may not be in your training data.',
-      methodology: `## Web Search Methodology
+      instructions: `You have access to web search. Use it to find current information, verify facts, research competitors, or gather data that may not be in your training data.
+
+## Web Search Methodology
 
 ### Phase 1: Broad Scan
 Start with a broad query to understand the landscape. Use general terms first to identify what information is available and what angles exist. Request 5-10 results to get a representative spread.
@@ -374,8 +364,9 @@ Cross-reference key claims across multiple search results. If a critical fact ap
           required: [],
         },
       },
-      instructions: 'You can read the shared board to see what tasks exist, their status, and what other agents have been working on. Check the board regularly to stay coordinated with the team.',
-      methodology: `## Read Workspace Methodology
+      instructions: `You can read the shared board to see what tasks exist, their status, and what other agents have been working on. Check the board regularly to stay coordinated with the team.
+
+## Read Workspace Methodology
 
 ### Phase 1: Orientation
 At the start of every run, read the board without filters to understand the current state. Look at task distribution across columns, identify what has changed since your last run, and note any urgent or blocked items.
@@ -414,8 +405,9 @@ Look for patterns across the board:
           required: ['task_id', 'activity_type', 'message'],
         },
       },
-      instructions: 'Always log your progress and findings to tasks so other agents and the team can see what you have done.',
-      methodology: `## Write Workspace Methodology
+      instructions: `Always log your progress and findings to tasks so other agents and the team can see what you have done.
+
+## Write Workspace Methodology
 
 ### When to Write
 - **Progress**: Log meaningful progress updates as you work, not just at the end. Other agents and team members monitor the activity feed.
@@ -451,8 +443,7 @@ Look for patterns across the board:
           required: ['task_id', 'process_name', 'input_data', 'reason'],
         },
       },
-      instructions: null,
-      methodology: `## Trigger Process Methodology
+      instructions: `## Trigger Process Methodology
 
 ### Before Triggering
 1. Confirm the process is the right one for this situation. Read the process name and description carefully.
@@ -485,8 +476,9 @@ Look for patterns across the board:
           required: ['title'],
         },
       },
-      instructions: 'You can create new tasks to assign work, track new tasks, or flag issues for the team.',
-      methodology: `## Create Task Methodology
+      instructions: `You can create new tasks to assign work, track new tasks, or flag issues for the team.
+
+## Create Task Methodology
 
 ### Task Quality Checklist
 Before creating a task, verify it meets these criteria:
@@ -517,8 +509,9 @@ Before creating a task, verify it meets these criteria:
           required: ['task_id', 'status'],
         },
       },
-      instructions: 'Move tasks through the board as you work on them. Move to "in_progress" when starting, "review" when done and ready for human review.',
-      methodology: `## Move Task Methodology
+      instructions: `Move tasks through the board as you work on them. Move to "in_progress" when starting, "review" when done and ready for human review.
+
+## Move Task Methodology
 
 ### Status Transitions
 Follow these standard workflow transitions:
@@ -553,8 +546,9 @@ Follow these standard workflow transitions:
           required: ['task_id', 'title', 'deliverable_type', 'description'],
         },
       },
-      instructions: 'When you complete work, always attach the output as a deliverable so it can be reviewed. Put the full content in the description field.',
-      methodology: `## Add Deliverable Methodology
+      instructions: `When you complete work, always attach the output as a deliverable so it can be reviewed. Put the full content in the description field.
+
+## Add Deliverable Methodology
 
 ### Deliverable Types
 Choose the correct type for your output:
@@ -589,8 +583,9 @@ Choose the correct type for your output:
           required: ['task_id', 'assigned_agent_id'],
         },
       },
-      instructions: 'You can reassign tasks to other agents on your team. Use this when you have completed your part of a task and another agent should continue. Always provide handoff context explaining what you did and what the next agent should do.',
-      methodology: `## Task Reassignment Methodology
+      instructions: `You can reassign tasks to other agents on your team. Use this when you have completed your part of a task and another agent should continue. Always provide handoff context explaining what you did and what the next agent should do.
+
+## Task Reassignment Methodology
 
 ### When to Reassign
 - You have completed the work within your expertise and a different specialist should continue
@@ -639,8 +634,9 @@ Good: "Completed competitor analysis: found 3 competitors with new pricing. Key 
           required: ['sub_tasks'],
         },
       },
-      instructions: 'You can spawn 2-3 sub-agents to work on tasks in parallel. Use this when a task can be split into independent pieces that benefit from simultaneous execution. Results from all sub-agents will be returned to you for synthesis.',
-      methodology: `## Sub-Agent Spawning Methodology
+      instructions: `You can spawn 2-3 sub-agents to work on tasks in parallel. Use this when a task can be split into independent pieces that benefit from simultaneous execution. Results from all sub-agents will be returned to you for synthesis.
+
+## Sub-Agent Spawning Methodology
 
 ### When to Spawn
 - The task involves researching multiple independent topics (e.g. "research competitors X, Y, Z")

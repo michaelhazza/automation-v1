@@ -5,45 +5,14 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "triage_intake",
-  "description": "Capture ideas, bugs, and feature requests into the task board, or triage the untriaged backlog queue. In capture mode: turn raw input into a structured board task. In triage mode: assess untriaged items and suggest dispositions (Defer, Assess, Schedule, Close).",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "mode": {
-        "type": "string",
-        "enum": ["capture", "triage"],
-        "description": "capture: fast intake of a single idea/bug. triage: work the untriaged backlog queue."
-      },
-      "raw_input": {
-        "type": "string",
-        "description": "The raw text of the idea, bug, or feature request. Required in capture mode."
-      },
-      "input_type": {
-        "type": "string",
-        "enum": ["idea", "bug", "chore"],
-        "description": "Classification of the input. Required in capture mode."
-      },
-      "source": {
-        "type": "string",
-        "description": "Where this came from: human, support-agent, ba-agent, orchestrator, etc. Required in capture mode."
-      },
-      "related_task_id": {
-        "type": "string",
-        "description": "If this is related to an existing board task. Optional."
-      },
-      "scope": {
-        "type": "string",
-        "enum": ["all", "single"],
-        "description": "In triage mode: 'all' to process the full untriaged queue, 'single' with related_task_id for a specific item."
-      }
-    },
-    "required": ["mode"]
-  }
-}
-```
+## Parameters
+
+- mode: enum[capture, triage] (required) — capture: fast intake of a single idea/bug. triage: work the untriaged backlog queue.
+- raw_input: string — The raw text of the idea, bug, or feature request. Required in capture mode.
+- input_type: enum[idea, bug, chore] — Classification of the input. Required in capture mode.
+- source: string — Where this came from: human, support-agent, ba-agent, orchestrator, etc. Required in capture mode.
+- related_task_id: string — If this is related to an existing board task. Optional.
+- scope: enum[all, single] — In triage mode: 'all' to process the full untriaged queue, 'single' with related_task_id for a specific item.
 
 ## Instructions
 
@@ -52,8 +21,6 @@ Use this skill to capture and route incoming ideas or bugs. The Orchestrator inv
 **Capture mode** is always fast and context-free. Create the task and confirm. Do not assess value or feasibility during capture.
 
 **Triage mode** involves judgment. Scan the backlog, assess each item, and suggest a disposition. Reserve "Assess" (send to BA) for items where the decision is genuinely unclear or potentially high-impact.
-
-## Methodology
 
 ### Capture Mode: Ideas and Feature Requests
 

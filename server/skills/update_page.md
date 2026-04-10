@@ -5,30 +5,18 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "update_page",
-  "description": "Update an existing page's HTML content, meta tags, or form configuration. A version snapshot is saved automatically before each update.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "pageId": { "type": "string", "description": "ID of the page to update" },
-      "projectId": { "type": "string", "description": "ID of the project the page belongs to" },
-      "html": { "type": "string", "description": "New HTML content for the page body" },
-      "meta": { "type": "object", "description": "Updated SEO and social meta fields" },
-      "formConfig": { "type": "object", "description": "Updated form configuration" },
-      "changeNote": { "type": "string", "description": "Brief note explaining what changed (saved with version history)" }
-    },
-    "required": ["pageId", "projectId"]
-  }
-}
-```
+## Parameters
+
+- pageId: string (required) — ID of the page to update
+- projectId: string (required) — ID of the project the page belongs to
+- html: string — New HTML content for the page body
+- meta: string — JSON object. Updated SEO and social meta fields
+- formConfig: string — JSON object. Updated form configuration
+- changeNote: string — Brief note explaining what changed (saved with version history)
 
 ## Instructions
 
 When updating a page, always include a `changeNote` explaining what changed and why. Version history is saved automatically before each update, so changes can be reviewed or rolled back.
-
-## Methodology
 
 ### Update Checklist
 1. **Include a change note**: Every update should have a clear `changeNote` (e.g., "Updated hero CTA copy" or "Fixed mobile layout issue").

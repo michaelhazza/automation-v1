@@ -5,26 +5,14 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "publish_page",
-  "description": "Publish a draft page to make it publicly accessible. This action goes through human review by default.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "pageId": { "type": "string", "description": "ID of the page to publish" },
-      "projectId": { "type": "string", "description": "ID of the project the page belongs to" }
-    },
-    "required": ["pageId", "projectId"]
-  }
-}
-```
+## Parameters
+
+- pageId: string (required) — ID of the page to publish
+- projectId: string (required) — ID of the project the page belongs to
 
 ## Instructions
 
 Publishing makes a page publicly accessible on its project's subdomain. This action requires human review before execution. Use the preview URL to verify the page looks correct before requesting publication.
-
-## Methodology
 
 ### Pre-Publish Checklist
 1. **Preview first**: Always review the page via its preview URL before publishing.

@@ -5,52 +5,14 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "propose_doc_update",
-  "description": "Propose a specific change to an existing documentation page. Returns a diff-style proposal showing what would change and why. Review-gated — a human must approve before write_docs is invoked to apply the change.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "page_id": {
-        "type": "string",
-        "description": "The ID of the documentation page to update"
-      },
-      "page_title": {
-        "type": "string",
-        "description": "Human-readable page title — shown in the review item"
-      },
-      "current_content": {
-        "type": "string",
-        "description": "The current page content from read_docs — required to produce a meaningful diff"
-      },
-      "proposed_changes": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "section": { "type": "string" },
-            "current_text": { "type": "string" },
-            "proposed_text": { "type": "string" },
-            "change_reason": { "type": "string" }
-          }
-        },
-        "description": "List of specific changes: each with the section, current text, proposed text, and reason"
-      },
-      "change_type": {
-        "type": "string",
-        "enum": ["correction", "update", "addition", "removal", "restructure"],
-        "description": "The type of change being proposed"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this update is needed — the trigger (stale info, new feature, user feedback). Shown to the reviewer."
-      }
-    },
-    "required": ["page_title", "current_content", "proposed_changes", "change_type", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- page_id: string — The ID of the documentation page to update
+- page_title: string (required) — Human-readable page title — shown in the review item
+- current_content: string (required) — The current page content from read_docs — required to produce a meaningful diff
+- proposed_changes: string (required) — JSON array of objects, each with keys: "section" (string), "current_text" (string), "proposed_text" (string), "change_reason" (string). List of specific changes: each with the section, current text, proposed text, and reason
+- change_type: enum[correction, update, addition, removal, restructure] (required) — The type of change being proposed
+- reasoning: string (required) — Why this update is needed — the trigger (stale info, new feature, user feedback). Shown to the reviewer.
 
 ## Instructions
 
@@ -59,8 +21,6 @@ Invoke this skill after `read_docs` to propose a documentation change. The propo
 Never propose a doc update without first reading the current content via `read_docs`. Proposing changes to content you haven't read risks introducing conflicts or overwriting accurate information.
 
 This is a review-gated action. The reviewer sees the full diff (current vs proposed) for each changed section.
-
-## Methodology
 
 ### Pre-Submission Rules
 

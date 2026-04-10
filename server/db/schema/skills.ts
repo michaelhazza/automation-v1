@@ -24,15 +24,13 @@ export const skills = pgTable(
     skillType: text('skill_type').notNull().default('built_in').$type<'built_in' | 'custom'>(),
     // The Anthropic tool definition (name, description, input_schema)
     definition: jsonb('definition').notNull(),
-    // Markdown instructions injected into the agent's system prompt when this skill is active
+    // Markdown instructions injected into the agent's system prompt when this skill is active.
+    // Contains all guidance: workflow phases, decision rules, quality criteria.
     instructions: text('instructions'),
-    // Extended methodology document — structured workflow phases, decision trees,
-    // quality criteria, and common mistakes. Injected after instructions for richer guidance.
-    methodology: text('methodology'),
     isActive: boolean('is_active').notNull().default(true),
     // Three-state cascade visibility for lower tiers (org→subaccount,
     // system→org). 'none' = invisible; 'basic' = name + description only;
-    // 'full' = everything (instructions, methodology, definition).
+    // 'full' = everything (instructions, definition).
     // Defaults to 'none' so skills must be explicitly opted in.
     // Migration 0074 / spec round 4.
     visibility: text('visibility').notNull().default('none').$type<'none' | 'basic' | 'full'>(),

@@ -5,56 +5,15 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_report",
-  "description": "Draft a client-facing performance report from structured data inputs (analytics, financials, campaign metrics). Returns a formatted report with executive summary, section narratives, data tables, and visualisation placeholders. Output goes to human review before delivery via deliver_report.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "report_type": {
-        "type": "string",
-        "enum": ["monthly_performance", "campaign_summary", "quarterly_review", "financial_summary", "custom"],
-        "description": "The type of report to produce"
-      },
-      "client_name": {
-        "type": "string",
-        "description": "Client or account name — used in the report header and personalisation"
-      },
-      "reporting_period": {
-        "type": "string",
-        "description": "The period being reported on (e.g. 'March 2026', 'Q1 2026')"
-      },
-      "data_sections": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "section_name": { "type": "string" },
-            "data": { "type": "string" },
-            "context": { "type": "string" }
-          }
-        },
-        "description": "Each section has a name, structured data (from analytics/finance skills), and optional context notes"
-      },
-      "targets": {
-        "type": "string",
-        "description": "KPI targets for this client — used to calculate vs-target comparisons"
-      },
-      "narrative_tone": {
-        "type": "string",
-        "enum": ["consultative", "data_driven", "positive", "candid"],
-        "description": "Tone for the report narrative. Default: consultative."
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: client context, account history, known sensitivities, prior reports"
-      }
-    },
-    "required": ["report_type", "client_name", "reporting_period", "data_sections"]
-  }
-}
-```
+## Parameters
+
+- report_type: enum[monthly_performance, campaign_summary, quarterly_review, financial_summary, custom] (required) — The type of report to produce
+- client_name: string (required) — Client or account name — used in the report header and personalisation
+- reporting_period: string (required) — The period being reported on (e.g. 'March 2026', 'Q1 2026')
+- data_sections: string (required) — JSON array of objects, each with keys: "section_name" (string), "data" (string), "context" (string). Each section has a name, structured data (from analytics/finance skills), and optional context notes
+- targets: string — KPI targets for this client — used to calculate vs-target comparisons
+- narrative_tone: enum[consultative, data_driven, positive, candid] — Tone for the report narrative. Default: consultative.
+- workspace_context: string — Workspace memory: client context, account history, known sensitivities, prior reports
 
 ## Instructions
 
@@ -63,8 +22,6 @@ Invoke this skill after all data has been retrieved and analysed (via analytics,
 The report output goes to human review. After approval, `deliver_report` handles delivery to the client.
 
 Do not fabricate data, targets, or period-over-period comparisons. If targets are not provided, omit vs-target comparisons and note this.
-
-## Methodology
 
 ### Report Structure
 

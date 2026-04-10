@@ -5,28 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "trigger_process",
-  "description": "Trigger an automation process/workflow. Use this when you need to execute a specific automation.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_id": { "type": "string", "description": "The ID of the process to trigger" },
-      "process_name": { "type": "string", "description": "The human-readable name of the process" },
-      "input_data": { "type": "string", "description": "JSON string of input data to pass to the task." },
-      "reason": { "type": "string", "description": "Brief explanation of why you are triggering this task" }
-    },
-    "required": ["task_id", "process_name", "input_data", "reason"]
-  }
-}
-```
+## Parameters
+
+- task_id: string (required) — The ID of the process to trigger
+- process_name: string (required) — The human-readable name of the process
+- input_data: string (required) — JSON string of input data to pass to the task.
+- reason: string (required) — Brief explanation of why you are triggering this task
 
 ## Instructions
 
 Trigger automation processes when the task requires it. Confirm the process is the right one, validate your input data, and document your reasoning. Never trigger the same process twice for the same reason.
-
-## Methodology
 
 ### Before Triggering
 1. Confirm the process is the right one. Read the name and description carefully.

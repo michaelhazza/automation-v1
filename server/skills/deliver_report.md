@@ -5,51 +5,16 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "deliver_report",
-  "description": "Deliver an approved client report via the configured delivery channel. This is a review-gated action — it enters the approval queue and does NOT send immediately. A human must approve before the report is delivered to the client.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "report_title": {
-        "type": "string",
-        "description": "Title of the report being delivered"
-      },
-      "client_name": {
-        "type": "string",
-        "description": "Client name"
-      },
-      "client_email": {
-        "type": "string",
-        "description": "Client email address for delivery"
-      },
-      "report_content": {
-        "type": "string",
-        "description": "The full approved report content from draft_report"
-      },
-      "delivery_channel": {
-        "type": "string",
-        "enum": ["email", "shared_link", "portal"],
-        "description": "How to deliver the report. Default: email."
-      },
-      "cover_message": {
-        "type": "string",
-        "description": "Optional cover email message to accompany the report. Keep brief — 2–3 sentences."
-      },
-      "reporting_period": {
-        "type": "string",
-        "description": "The reporting period — used in the email subject line"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Context for the reviewer: what changed since last report, any sensitivities to note. Shown to the reviewer, NOT to the client."
-      }
-    },
-    "required": ["report_title", "client_name", "client_email", "report_content", "delivery_channel", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- report_title: string (required) — Title of the report being delivered
+- client_name: string (required) — Client name
+- client_email: string (required) — Client email address for delivery
+- report_content: string (required) — The full approved report content from draft_report
+- delivery_channel: enum[email, shared_link, portal] (required) — How to deliver the report. Default: email.
+- cover_message: string — Optional cover email message to accompany the report. Keep brief — 2–3 sentences.
+- reporting_period: string — The reporting period — used in the email subject line
+- reasoning: string (required) — Context for the reviewer: what changed since last report, any sensitivities to note. Shown to the reviewer, NOT to the client.
 
 ## Instructions
 
@@ -58,8 +23,6 @@ Invoke this skill only after `draft_report` has produced a report that has been 
 This is a review-gated action. The reviewer sees the full report content, the delivery channel, the cover message, and the reasoning before approving. The client does not receive anything until approval.
 
 **MVP stub:** Delivery integrations (email via send_email, portal upload) are not yet wired as a unified report delivery flow. On approval, the executor logs the delivery action and returns `pending_integration` status. For email delivery, the calling agent should also invoke `send_email` with the report as an attachment or body.
-
-## Methodology
 
 ### Pre-Submission Rules
 

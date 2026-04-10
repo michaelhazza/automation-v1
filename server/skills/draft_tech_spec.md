@@ -5,50 +5,20 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_tech_spec",
-  "description": "Produce technical specification artifacts for API or schema changes. Outputs OpenAPI spec updates, database ERD diffs, and sequence diagrams as needed. Invoked on Major classified tasks or any task with new endpoints or schema changes.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "architecture_plan": {
-        "type": "string",
-        "description": "The approved architecture plan from draft_architecture_plan"
-      },
-      "ba_spec_reference": {
-        "type": "string",
-        "description": "The approved BA requirements spec"
-      },
-      "gherkin_acs": {
-        "type": "string",
-        "description": "Acceptance criteria the API must support"
-      },
-      "existing_api_spec": {
-        "type": "string",
-        "description": "Current OpenAPI spec from workspace memory or docs. Omit if not available."
-      },
-      "existing_schema": {
-        "type": "string",
-        "description": "Current database schema (Drizzle schema file content)"
-      },
-      "tech_stack": {
-        "type": "string",
-        "description": "Framework, ORM, error handling conventions, auth middleware patterns"
-      }
-    },
-    "required": ["architecture_plan", "ba_spec_reference", "gherkin_acs", "existing_schema", "tech_stack"]
-  }
-}
-```
+## Parameters
+
+- architecture_plan: string (required) — The approved architecture plan from draft_architecture_plan
+- ba_spec_reference: string (required) — The approved BA requirements spec
+- gherkin_acs: string (required) — Acceptance criteria the API must support
+- existing_api_spec: string — Current OpenAPI spec from workspace memory or docs. Omit if not available.
+- existing_schema: string (required) — Current database schema (Drizzle schema file content)
+- tech_stack: string (required) — Framework, ORM, error handling conventions, auth middleware patterns
 
 ## Instructions
 
 Invoke this skill on Major classified tasks where new API endpoints, endpoint contract changes, or database schema changes are involved. The output becomes the build contract alongside the BA requirements spec. The Dev Agent references it during implementation. The QA Agent uses the API spec to validate response shapes.
 
 After producing the spec, submit it via `request_approval`. Do not begin coding until the spec is approved. Maximum 3 revision rounds before escalating to human.
-
-## Methodology
 
 ### When to Invoke
 

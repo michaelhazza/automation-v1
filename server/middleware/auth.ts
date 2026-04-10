@@ -132,12 +132,7 @@ export const authenticate = async (
             res.once('finish', () => settle());
             res.once('close', () => settle());
 
-            next((err?: unknown) => {
-              if (err) settle(err);
-              // No err: wait for res.finish/close. The downstream middleware
-              // or route handler will write the response; the tx stays open
-              // across the entire chain.
-            });
+            next();
           }),
       );
     });

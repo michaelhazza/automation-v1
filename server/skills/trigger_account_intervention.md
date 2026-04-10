@@ -5,40 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "trigger_account_intervention",
-  "description": "Propose an intervention for a subaccount based on intelligence findings. ALWAYS requires human approval before execution. Submit the proposal with evidence — execution proceeds only after HITL gate approval.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "account_id": {
-        "type": "string",
-        "description": "The canonical account ID to intervene on"
-      },
-      "intervention_type": {
-        "type": "string",
-        "enum": ["check_in_sequence", "campaign_pause", "internal_alert", "account_manager_notification", "client_communication_draft"],
-        "description": "Type of intervention to propose"
-      },
-      "evidence_summary": {
-        "type": "string",
-        "description": "Summary of the evidence justifying this intervention (anomalies, health scores, patterns)"
-      },
-      "recommended_action": {
-        "type": "string",
-        "description": "Specific recommended action text for the human reviewer"
-      },
-      "urgency": {
-        "type": "string",
-        "enum": ["low", "medium", "high", "critical"],
-        "description": "Urgency level of the intervention"
-      }
-    },
-    "required": ["account_id", "intervention_type", "evidence_summary"]
-  }
-}
-```
+## Parameters
+
+- account_id: string (required) — The canonical account ID to intervene on
+- intervention_type: enum[check_in_sequence, campaign_pause, internal_alert, account_manager_notification, client_communication_draft] (required) — Type of intervention to propose
+- evidence_summary: string (required) — Summary of the evidence justifying this intervention (anomalies, health scores, patterns)
+- recommended_action: string — Specific recommended action text for the human reviewer
+- urgency: enum[low, medium, high, critical] — Urgency level of the intervention
 
 ## Instructions
 

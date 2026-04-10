@@ -5,31 +5,19 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "create_page",
-  "description": "Create a new page in a page project. The page is created as a draft and must be published separately.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "projectId": { "type": "string", "description": "ID of the page project to create the page in" },
-      "slug": { "type": "string", "description": "URL slug for the page (lowercase, hyphens only)" },
-      "pageType": { "type": "string", "enum": ["website", "landing"], "description": "Type of page: 'website' for general content, 'landing' for conversion-focused pages" },
-      "title": { "type": "string", "description": "Page title (used in <title> tag and meta)" },
-      "html": { "type": "string", "description": "HTML content for the page body" },
-      "meta": { "type": "object", "description": "SEO and social meta fields (title, description, ogImage, etc.)" },
-      "formConfig": { "type": "object", "description": "Optional form configuration for lead capture on landing pages" }
-    },
-    "required": ["projectId", "slug", "pageType", "html"]
-  }
-}
-```
+## Parameters
+
+- projectId: string (required) — ID of the page project to create the page in
+- slug: string (required) — URL slug for the page (lowercase, hyphens only)
+- pageType: enum[website, landing] (required) — Type of page: 'website' for general content, 'landing' for conversion-focused pages
+- title: string — Page title (used in <title> tag and meta)
+- html: string (required) — HTML content for the page body
+- meta: string — JSON object. SEO and social meta fields (title, description, ogImage, etc.)
+- formConfig: string — JSON object. Optional form configuration for lead capture on landing pages
 
 ## Instructions
 
 Create pages that are well-structured, accessible, and optimised for their purpose. HTML is sanitized automatically — focus on clean semantic markup rather than worrying about XSS.
-
-## Methodology
 
 ### Page Creation Checklist
 1. **Choose the right page type**: Use "landing" for single-purpose conversion pages. Use "website" for general content pages.

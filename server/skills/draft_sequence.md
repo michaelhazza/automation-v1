@@ -5,60 +5,18 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_sequence",
-  "description": "Draft a multi-step email outreach sequence for a contact or contact segment. Uses enrichment data, ICP (ideal customer profile), and workspace context to produce personalised subject lines and email bodies for each step. Returns the full sequence ready for human review before sending.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "contact_email": {
-        "type": "string",
-        "description": "Primary contact email address"
-      },
-      "contact_name": {
-        "type": "string",
-        "description": "Contact first name for personalisation"
-      },
-      "enrichment_data": {
-        "type": "string",
-        "description": "Output from enrich_contact — job title, seniority, company, industry, etc."
-      },
-      "sequence_goal": {
-        "type": "string",
-        "description": "The objective of the sequence: book a demo, schedule a call, download a resource, etc."
-      },
-      "steps": {
-        "type": "number",
-        "description": "Number of emails in the sequence (default 3, max 6)"
-      },
-      "step_delays": {
-        "type": "array",
-        "items": { "type": "number" },
-        "description": "Days between steps (e.g. [0, 3, 7] means: day 0, day 3, day 7). Must have length = steps - 1."
-      },
-      "value_proposition": {
-        "type": "string",
-        "description": "The core value proposition to communicate across the sequence"
-      },
-      "brand_voice": {
-        "type": "string",
-        "description": "Brand voice guidelines: tone, vocabulary preferences, phrases to avoid"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: product context, ICP, known pain points, case studies, social proof"
-      },
-      "personalisation_level": {
-        "type": "string",
-        "enum": ["high", "medium", "generic"],
-        "description": "How personalised to make the copy. High = uses enrichment data heavily. Generic = no personalisation tokens."
-      }
-    },
-    "required": ["contact_email", "sequence_goal", "value_proposition"]
-  }
-}
-```
+## Parameters
+
+- contact_email: string (required) — Primary contact email address
+- contact_name: string — Contact first name for personalisation
+- enrichment_data: string — Output from enrich_contact — job title, seniority, company, industry, etc.
+- sequence_goal: string (required) — The objective of the sequence: book a demo, schedule a call, download a resource, etc.
+- steps: number — Number of emails in the sequence (default 3, max 6)
+- step_delays: string — JSON array of number values. Days between steps (e.g. [0, 3, 7] means: day 0, day 3, day 7). Must have length = steps - 1.
+- value_proposition: string (required) — The core value proposition to communicate across the sequence
+- brand_voice: string — Brand voice guidelines: tone, vocabulary preferences, phrases to avoid
+- workspace_context: string — Workspace memory: product context, ICP, known pain points, case studies, social proof
+- personalisation_level: enum[high, medium, generic] — How personalised to make the copy. High = uses enrichment data heavily. Generic = no personalisation tokens.
 
 ## Instructions
 
@@ -67,8 +25,6 @@ Invoke this skill after `enrich_contact` (or with available CRM data if enrichme
 Do not fabricate case studies, statistics, or social proof. Use only data from `workspace_context` or `value_proposition`. Insert `[VERIFY]` for any claim that needs confirmation.
 
 If `enrichment_data` is a stub response (integration not configured), default to `personalisation_level: generic` regardless of the requested level. Note this in the drafting notes.
-
-## Methodology
 
 ### Sequence Structure
 

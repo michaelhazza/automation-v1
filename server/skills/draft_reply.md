@@ -5,58 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_reply",
-  "description": "Draft a customer support reply based on a classified inbound email. Uses the classification output (intent, urgency, tone) and optional knowledge base context to produce a ready-to-review response. Returns the draft body, subject line, and a confidence score.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "email_subject": {
-        "type": "string",
-        "description": "Subject line of the inbound email being replied to"
-      },
-      "email_body": {
-        "type": "string",
-        "description": "Full body of the inbound email"
-      },
-      "sender_name": {
-        "type": "string",
-        "description": "Sender display name for personalised greeting"
-      },
-      "classification": {
-        "type": "object",
-        "description": "Output from classify_email: { intent, urgency, sentiment, routing_action, suggested_reply_tone }",
-        "properties": {
-          "intent": { "type": "string" },
-          "urgency": { "type": "string" },
-          "sentiment": { "type": "string" },
-          "routing_action": { "type": "string" },
-          "suggested_reply_tone": { "type": "string" }
-        },
-        "required": ["intent", "urgency", "sentiment", "routing_action"]
-      },
-      "knowledge_base_context": {
-        "type": "string",
-        "description": "Relevant knowledge base articles or FAQ content retrieved by search_knowledge_base. Include full article text where available."
-      },
-      "thread_history": {
-        "type": "string",
-        "description": "Prior messages in the thread for context (oldest first). Omit if first message."
-      },
-      "agent_name": {
-        "type": "string",
-        "description": "Name to sign the reply with (e.g. 'Support Team', 'Sarah from Support')"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: brand voice guidelines, escalation contacts, SLA commitments, product name."
-      }
-    },
-    "required": ["email_subject", "email_body", "classification"]
-  }
-}
-```
+## Parameters
+
+- email_subject: string (required) — Subject line of the inbound email being replied to
+- email_body: string (required) — Full body of the inbound email
+- sender_name: string — Sender display name for personalised greeting
+- classification: string (required) — JSON object with keys: "intent" (string), "urgency" (string), "sentiment" (string), "routing_action" (string), "suggested_reply_tone" (string). Output from classify_email: { intent, urgency, sentiment, routing_action, suggested_reply_tone }
+- knowledge_base_context: string — Relevant knowledge base articles or FAQ content retrieved by search_knowledge_base. Include full article text where available.
+- thread_history: string — Prior messages in the thread for context (oldest first). Omit if first message.
+- agent_name: string — Name to sign the reply with (e.g. 'Support Team', 'Sarah from Support')
+- workspace_context: string — Workspace memory: brand voice guidelines, escalation contacts, SLA commitments, product name.
 
 ## Instructions
 
@@ -69,8 +27,6 @@ If `routing_action` is `no_action` (automated or spam), return a no-draft respon
 If `knowledge_base_context` is not provided, note this in the `confidence_flags` field — the reply may need human review to verify accuracy.
 
 Never invent product features, pricing, SLA terms, or policy details that are not present in the knowledge base context or workspace context. If unsure, add a placeholder like `[VERIFY: insert correct refund policy here]` and flag it in confidence_flags.
-
-## Methodology
 
 ### Reply Construction Rules
 

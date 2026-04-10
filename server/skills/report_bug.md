@@ -5,31 +5,19 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "report_bug",
-  "description": "Create a structured bug task on the workspace board with severity, confidence score, and reproduction steps. Use this for every confirmed defect — do not mention bugs only in notes.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "title": { "type": "string", "description": "Short, specific bug title (e.g. 'POST /api/users returns 500 when email is missing')" },
-      "description": { "type": "string", "description": "Summary of the defect and its impact" },
-      "severity": { "type": "string", "description": "critical (crash/data loss/security), high (core feature broken, no workaround), medium (partial breakage, workaround exists), low (cosmetic/edge case)" },
-      "confidence": { "type": "number", "description": "Your confidence this is a real bug, 0.0-1.0 (e.g. 0.95 for confirmed, 0.6 for suspected)" },
-      "steps_to_reproduce": { "type": "string", "description": "Numbered list of exact reproduction steps" },
-      "expected_behavior": { "type": "string", "description": "What should happen" },
-      "actual_behavior": { "type": "string", "description": "What actually happens (include error messages, status codes, stack traces)" }
-    },
-    "required": ["title", "severity", "confidence"]
-  }
-}
-```
+## Parameters
+
+- title: string (required) — Short, specific bug title (e.g. 'POST /api/users returns 500 when email is missing')
+- description: string — Summary of the defect and its impact
+- severity: string (required) — critical (crash/data loss/security), high (core feature broken, no workaround), medium (partial breakage, workaround exists), low (cosmetic/edge case)
+- confidence: number (required) — Your confidence this is a real bug, 0.0-1.0 (e.g. 0.95 for confirmed, 0.6 for suspected)
+- steps_to_reproduce: string — Numbered list of exact reproduction steps
+- expected_behavior: string — What should happen
+- actual_behavior: string — What actually happens (include error messages, status codes, stack traces)
 
 ## Instructions
 
 File a `report_bug` for every confirmed defect — never describe bugs only in a `write_workspace` note. After filing a critical or high severity bug, the QA confidence score is automatically capped at 0.79 and `resultStatus` must be `failed` — do not override this. Set confidence honestly based on direct observation.
-
-## Methodology
 
 ### Confidence Hard Cap Rule
 If any `critical` or `high` severity bug is filed for this run:

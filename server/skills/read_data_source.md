@@ -5,37 +5,12 @@ isActive: true
 visibility: full
 ---
 
-```json
-{
-  "name": "read_data_source",
-  "description": "Access the context data sources attached to this run. Use op='list' to see what's available (including sources already loaded in the Knowledge Base and lazy sources you haven't read yet). Use op='read' with a source id to fetch content. For sources larger than the per-call token cap, use the offset and limit parameters to walk the content in chunks. Lazy sources are only loaded into your context when you explicitly read them — use this to pull in large reference files on demand without bloating the system prompt.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "op": {
-        "type": "string",
-        "enum": ["list", "read"],
-        "description": "Operation to perform. 'list' returns the manifest of available sources. 'read' fetches the content of a single source by id."
-      },
-      "id": {
-        "type": "string",
-        "description": "Required when op='read'. The opaque id of the source to read (obtained from op='list')."
-      },
-      "offset": {
-        "type": "integer",
-        "minimum": 0,
-        "description": "Optional when op='read'. Starting character offset into the source content (default 0). Use with 'limit' to walk large sources in chunks."
-      },
-      "limit": {
-        "type": "integer",
-        "minimum": 1,
-        "description": "Optional when op='read'. Maximum number of tokens to return in a single read (default is the system per-read cap, approximately 15000 tokens). If the source is larger than this at the current offset, the response includes 'nextOffset' so you can continue."
-      }
-    },
-    "required": ["op"]
-  }
-}
-```
+## Parameters
+
+- op: enum[list, read] (required) — Operation to perform. 'list' returns the manifest of available sources. 'read' fetches the content of a single source by id.
+- id: string — Required when op='read'. The opaque id of the source to read (obtained from op='list').
+- offset: integer — Optional when op='read'. Starting character offset into the source content (default 0). Use with 'limit' to walk large sources in chunks.
+- limit: integer — Optional when op='read'. Maximum number of tokens to return in a single read (default is the system per-read cap, approximately 15000 tokens). If the source is larger than this at the current offset, the response includes 'nextOffset' so you can continue.
 
 ## Instructions
 
@@ -70,8 +45,6 @@ For most sources under 15k tokens you can ignore `offset` and `limit` entirely �
 - **Binary attachments cannot be read in v1.** If the manifest shows `[binary — not readable]`, the file exists but you cannot access its contents through this skill. Tell the user if the binary attachment is critical.
 - **Be conservative with large sources.** If a lazy source is over 20KB, consider whether you really need it before fetching — it will consume your context budget.
 - **Per-read size limit enforced.** A single `read` call returns at most ~15000 tokens. Larger sources require multiple reads via `offset` + `limit`, or a smarter approach (skim the list first, read only the most relevant source).
-
-## Methodology
 
 ### Phase 1: Discovery
 

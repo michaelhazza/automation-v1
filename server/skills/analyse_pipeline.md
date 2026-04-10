@@ -5,40 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "analyse_pipeline",
-  "description": "Analyse CRM pipeline data from read_crm to produce a pipeline health report: velocity metrics, stage conversion rates, stale deal identification, win rate trends, and close date forecast accuracy. Returns ranked actions for the CRM/Pipeline Agent.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "pipeline_data": {
-        "type": "string",
-        "description": "Structured CRM data from read_crm — include all deal records, stages, values, and activity dates"
-      },
-      "pipeline_targets": {
-        "type": "string",
-        "description": "Target pipeline KPIs from workspace memory: target close rate, average sales cycle, target pipeline value"
-      },
-      "analysis_period": {
-        "type": "string",
-        "description": "Human-readable period being analysed"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: sales process stages, typical deal sizes, known seasonal patterns, team context"
-      }
-    },
-    "required": ["pipeline_data"]
-  }
-}
-```
+## Parameters
+
+- pipeline_data: string (required) — Structured CRM data from read_crm — include all deal records, stages, values, and activity dates
+- pipeline_targets: string — Target pipeline KPIs from workspace memory: target close rate, average sales cycle, target pipeline value
+- analysis_period: string — Human-readable period being analysed
+- workspace_context: string — Workspace memory: sales process stages, typical deal sizes, known seasonal patterns, team context
 
 ## Instructions
 
 Invoke this skill after `read_crm` returns pipeline data. If the CRM returns a stub response, note data unavailability and do not fabricate pipeline metrics.
-
-## Methodology
 
 ### Metrics to Compute
 
@@ -69,6 +45,7 @@ Generated At: [ISO timestamp]
 Data Quality: [complete | stub — no live data]
 
 ## Executive Summary
+
 [3–4 sentences: pipeline health, close date forecast, biggest risk]
 
 ## Key Metrics
@@ -81,16 +58,20 @@ Data Quality: [complete | stub — no live data]
 | Avg Sales Cycle | [days] | | |
 
 ## Stage Breakdown
+
 [Table of stage → deal count, total value, avg days in stage]
 
 ## Stale Deals ([count])
+
 - [Deal Name] — [stage] — [days since last activity] — Owner: [name]
 
 ## Ranked Actions
+
 1. [Follow up on specific stale deal] — [rationale]
 2. [Stage coaching needed for X deals stuck in Y stage]
 
 ## Caveats
+
 - [Data gaps, assumptions]
 ```
 

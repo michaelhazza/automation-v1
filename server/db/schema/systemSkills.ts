@@ -15,10 +15,9 @@ export const systemSkills = pgTable('system_skills', {
 
   // The Anthropic tool definition (name, description, input_schema)
   definition: jsonb('definition').notNull(),
-  // Markdown instructions injected into the agent's system prompt
+  // Markdown instructions injected into the agent's system prompt.
+  // Contains all guidance: workflow phases, decision rules, quality criteria.
   instructions: text('instructions'),
-  // Extended methodology document
-  methodology: text('methodology'),
 
   isActive: boolean('is_active').notNull().default(true),
 

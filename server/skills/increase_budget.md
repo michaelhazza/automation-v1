@@ -5,51 +5,16 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "increase_budget",
-  "description": "Propose a budget increase for a high-performing campaign on the connected ads platform. This is a block-gated action — it ALWAYS enters the approval queue and is NEVER executed automatically. A human must explicitly approve before spend limits are raised.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platform": {
-        "type": "string",
-        "enum": ["google_ads", "meta_ads", "linkedin_ads"],
-        "description": "The ads platform"
-      },
-      "campaign_id": {
-        "type": "string",
-        "description": "Campaign ID to increase budget for"
-      },
-      "campaign_name": {
-        "type": "string",
-        "description": "Human-readable campaign name — shown in the review item"
-      },
-      "current_daily_budget": {
-        "type": "string",
-        "description": "Current daily budget (e.g. '£50/day')"
-      },
-      "proposed_daily_budget": {
-        "type": "string",
-        "description": "Proposed new daily budget"
-      },
-      "change_percentage": {
-        "type": "number",
-        "description": "Percentage increase (e.g. 20 for +20%)"
-      },
-      "performance_evidence": {
-        "type": "string",
-        "description": "Data from analyse_performance justifying the increase: ROAS, CPA, spend cap frequency, conversion volume"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Full reasoning for the budget increase recommendation — shown to the reviewer"
-      }
-    },
-    "required": ["platform", "campaign_id", "campaign_name", "current_daily_budget", "proposed_daily_budget", "change_percentage", "performance_evidence", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- platform: enum[google_ads, meta_ads, linkedin_ads] (required) — The ads platform
+- campaign_id: string (required) — Campaign ID to increase budget for
+- campaign_name: string (required) — Human-readable campaign name — shown in the review item
+- current_daily_budget: string (required) — Current daily budget (e.g. '£50/day')
+- proposed_daily_budget: string (required) — Proposed new daily budget
+- change_percentage: number (required) — Percentage increase (e.g. 20 for +20%)
+- performance_evidence: string (required) — Data from analyse_performance justifying the increase: ROAS, CPA, spend cap frequency, conversion volume
+- reasoning: string (required) — Full reasoning for the budget increase recommendation — shown to the reviewer
 
 ## Instructions
 
@@ -58,8 +23,6 @@ Invoke this skill only when `analyse_performance` returns an `increase_budget` r
 **This skill is block-gated.** Budget increases directly affect spend. A human must approve every increase — the action will never execute automatically.
 
 **MVP stub:** Platform write APIs not yet connected. On approval, logs the intended change and returns `pending_integration` status.
-
-## Methodology
 
 ### Pre-Submission Rules
 

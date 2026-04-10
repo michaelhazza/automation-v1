@@ -66,6 +66,7 @@ const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
+const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 
 function PageLoader() {
   return (
@@ -217,6 +218,7 @@ export default function App() {
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
+            <Route path="/system/skill-analyser" element={<SkillAnalyzerPage user={user!} />} />
             <Route path="/system/playbook-studio" element={<PlaybookStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />

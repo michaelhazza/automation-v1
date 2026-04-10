@@ -5,40 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "synthesise_voc",
-  "description": "Synthesise Voice of Customer (VoC) data from multiple sources into a structured insight report. Identifies recurring themes, sentiment patterns, top praise and pain points, and strategic implications. Used by the Strategic Intelligence Agent to inform product strategy and competitive positioning.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "voc_data": {
-        "type": "string",
-        "description": "Raw VoC data to synthesise: customer reviews, interview transcripts, support ticket themes, NPS responses, or survey results. Include source labels for each batch of data."
-      },
-      "data_sources": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "List of data sources included (e.g. ['G2 reviews', 'customer interviews', 'NPS verbatims'])"
-      },
-      "analysis_period": {
-        "type": "string",
-        "description": "The period the data covers (e.g. 'Q1 2026', 'last 90 days')"
-      },
-      "focus_questions": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Optional: specific questions to answer with the synthesis (e.g. 'Why do customers churn?', 'What is the top feature request?')"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: product overview, ICP, known pain points from prior syntheses, strategic priorities"
-      }
-    },
-    "required": ["voc_data"]
-  }
-}
-```
+## Parameters
+
+- voc_data: string (required) — Raw VoC data to synthesise: customer reviews, interview transcripts, support ticket themes, NPS responses, or survey results. Include source labels for each batch of data.
+- data_sources: string — JSON array of string values. List of data sources included (e.g. ['G2 reviews', 'customer interviews', 'NPS verbatims'])
+- analysis_period: string — The period the data covers (e.g. 'Q1 2026', 'last 90 days')
+- focus_questions: string — JSON array of string values. Optional: specific questions to answer with the synthesis (e.g. 'Why do customers churn?', 'What is the top feature request?')
+- workspace_context: string — Workspace memory: product overview, ICP, known pain points from prior syntheses, strategic priorities
 
 ## Instructions
 
@@ -49,8 +22,6 @@ Do not fabricate customer quotes or sentiment. Every insight must be traceable t
 If `focus_questions` are provided, address each explicitly in the output — do not bury the answers in the general themes section.
 
 When data spans multiple sources, note inter-source consistency or conflicts (e.g. "G2 reviews praise X, but NPS verbatims cite X as a pain point").
-
-## Methodology
 
 ### Theme Extraction
 
@@ -83,9 +54,11 @@ Data Points: [approximate count of individual feedback pieces]
 Generated: [ISO date]
 
 ## Executive Summary
+
 [3–4 sentences: overall sentiment, strongest signal, most urgent action implied]
 
 ## Sentiment Breakdown
+
 Positive: ~[%]
 Negative: ~[%]
 Neutral/Mixed: ~[%]
@@ -102,18 +75,22 @@ Representative Quotes:
 ### Theme 2: ...
 
 ## Top Praise Areas
+
 1. [What customers consistently say is excellent]
 2. ...
 
 ## Top Pain Points
+
 1. [What customers consistently say is broken or missing]
 2. ...
 
 ## Feature Requests (if present)
+
 1. [Most requested feature or change]
 2. ...
 
 ## Churn Signals (if present)
+
 1. [Most cited churn reason]
 2. ...
 
@@ -124,9 +101,11 @@ Representative Quotes:
 A: [answer drawn from data]
 
 ## Strategic Implications
+
 [3–5 bullet points: what this data means for product, positioning, or operations]
 
 ## Data Caveats
+
 - [Source biases: e.g. "G2 data skews toward power users"]
 - [Coverage gaps: e.g. "No enterprise customer feedback in this dataset"]
 - [Time range: [any caveats about freshness]]

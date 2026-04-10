@@ -5,42 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "enrich_contact",
-  "description": "Retrieve enrichment data for a contact (job title, company, industry, seniority, LinkedIn URL) from the connected data enrichment provider and write it back to the CRM contact record. Used by the Email Outreach Agent before drafting personalised sequences.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "contact_email": {
-        "type": "string",
-        "description": "Contact email address to enrich"
-      },
-      "contact_name": {
-        "type": "string",
-        "description": "Contact full name if available — improves match accuracy"
-      },
-      "company_name": {
-        "type": "string",
-        "description": "Company name if available — improves match accuracy"
-      },
-      "crm_contact_id": {
-        "type": "string",
-        "description": "CRM contact ID to write enriched data back to"
-      },
-      "fields_requested": {
-        "type": "array",
-        "items": {
-          "type": "string",
-          "enum": ["job_title", "seniority", "company", "industry", "company_size", "linkedin_url", "phone", "location"]
-        },
-        "description": "Specific fields to enrich. If omitted, returns all available fields."
-      }
-    },
-    "required": ["contact_email"]
-  }
-}
-```
+## Parameters
+
+- contact_email: string (required) — Contact email address to enrich
+- contact_name: string — Contact full name if available — improves match accuracy
+- company_name: string — Company name if available — improves match accuracy
+- crm_contact_id: string — CRM contact ID to write enriched data back to
+- fields_requested: string — JSON array of string values. Specific fields to enrich. If omitted, returns all available fields.
 
 ## Instructions
 
@@ -49,8 +20,6 @@ Invoke this skill before drafting a personalised email sequence when contact dat
 **MVP stub:** The data enrichment integration is not yet connected. Returns a structured stub response. Downstream `draft_sequence` should handle missing enrichment data by using generic personalisation rather than failing.
 
 If `crm_contact_id` is provided and the integration is live, write the enriched fields back to the CRM contact record automatically. This is a write side effect — log it in the response so the calling agent is aware.
-
-## Methodology
 
 ### Data Schema
 

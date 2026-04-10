@@ -5,44 +5,14 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "update_crm",
-  "description": "Write contact or deal updates to the connected CRM. This is a review-gated action — it enters the approval queue and does NOT execute immediately. A human must approve before any CRM data is modified.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "record_type": {
-        "type": "string",
-        "enum": ["contact", "deal", "company"],
-        "description": "The type of CRM record to update"
-      },
-      "record_id": {
-        "type": "string",
-        "description": "The CRM record ID to update"
-      },
-      "record_identifier": {
-        "type": "string",
-        "description": "Human-readable identifier (email, deal name, company name) — shown in the review item"
-      },
-      "updates": {
-        "type": "object",
-        "description": "Key-value pairs of CRM fields to update. Keys are CRM field names, values are the new values.",
-        "additionalProperties": true
-      },
-      "update_reason": {
-        "type": "string",
-        "description": "Why these fields are being updated — the agent action or signal that triggered this update"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Full reasoning for the update — shown to the human reviewer alongside the field changes"
-      }
-    },
-    "required": ["record_type", "record_id", "record_identifier", "updates", "update_reason", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- record_type: enum[contact, deal, company] (required) — The type of CRM record to update
+- record_id: string (required) — The CRM record ID to update
+- record_identifier: string (required) — Human-readable identifier (email, deal name, company name) — shown in the review item
+- updates: string (required) — JSON object. Key-value pairs of CRM fields to update. Keys are CRM field names, values are the new values.
+- update_reason: string (required) — Why these fields are being updated — the agent action or signal that triggered this update
+- reasoning: string (required) — Full reasoning for the update — shown to the human reviewer alongside the field changes
 
 ## Instructions
 
@@ -53,8 +23,6 @@ This is a review-gated action. The reviewer sees the exact field changes before 
 **MVP stub:** CRM write APIs not yet connected. On approval, logs the intended changes and returns `pending_integration` status.
 
 Never write sensitive or inferred data to the CRM without explicit user instruction. Enrichment data that was written via `enrich_contact` does not need a separate `update_crm` call — that write is handled by the enrichment skill directly.
-
-## Methodology
 
 ### Pre-Submission Rules
 

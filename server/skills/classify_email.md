@@ -5,42 +5,14 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "classify_email",
-  "description": "Analyse an inbound email and return a structured classification: intent category, urgency level, sentiment, and suggested routing action. Used by the Support Agent to triage inbound messages before drafting a reply or escalating.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "email_subject": {
-        "type": "string",
-        "description": "Subject line of the inbound email"
-      },
-      "email_body": {
-        "type": "string",
-        "description": "Full body text of the inbound email"
-      },
-      "sender_email": {
-        "type": "string",
-        "description": "Sender email address"
-      },
-      "sender_name": {
-        "type": "string",
-        "description": "Sender display name if available"
-      },
-      "thread_history": {
-        "type": "string",
-        "description": "Prior messages in the thread (oldest first, newest last). Omit if this is the first message in the thread."
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Relevant workspace memory: product context, known customer segments, escalation policies, known issue categories."
-      }
-    },
-    "required": ["email_subject", "email_body", "sender_email"]
-  }
-}
-```
+## Parameters
+
+- email_subject: string (required) — Subject line of the inbound email
+- email_body: string (required) — Full body text of the inbound email
+- sender_email: string (required) — Sender email address
+- sender_name: string — Sender display name if available
+- thread_history: string — Prior messages in the thread (oldest first, newest last). Omit if this is the first message in the thread.
+- workspace_context: string — Relevant workspace memory: product context, known customer segments, escalation policies, known issue categories.
 
 ## Instructions
 
@@ -51,8 +23,6 @@ Do not fabricate classification categories. Use only the taxonomy defined in the
 If `thread_history` is provided, treat the email as a continuation. Prior context should inform urgency and intent — a polite first message in a thread marked `critical` downstream should still inherit that context.
 
 Never include the sender's personal information in classification notes beyond what is necessary to explain the routing decision.
-
-## Methodology
 
 ### Intent Categories
 

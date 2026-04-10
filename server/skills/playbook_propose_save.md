@@ -5,26 +5,10 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "playbook_propose_save",
-  "description": "Record a validated playbook DEFINITION as the current Studio session's candidate. The server validates and renders the .playbook.ts file deterministically — the agent does not supply file contents (closes the validate-one-thing-commit-another attack). The human admin then reviews the rendered file in the Studio preview pane and clicks 'Save & Open PR' in the UI to actually create the PR. THIS TOOL DOES NOT WRITE ANY FILE OR CREATE ANY GIT ACTIVITY.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "definition": {
-        "type": "object",
-        "description": "The complete validated playbook definition object — the same shape playbook_validate returns ok for. Must include slug, name, version, and a steps array."
-      },
-      "sessionId": {
-        "type": "string",
-        "description": "The Studio session id this candidate belongs to."
-      }
-    },
-    "required": ["definition", "sessionId"]
-  }
-}
-```
+## Parameters
+
+- definition: string (required) — JSON object. The complete validated playbook definition object — the same shape playbook_validate returns ok for. Must include slug, name, version, and a steps array.
+- sessionId: string (required) — The Studio session id this candidate belongs to.
 
 ## Instructions
 

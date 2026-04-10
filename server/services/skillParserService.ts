@@ -1,0 +1,503 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
+import crypto from 'crypto';
+import dns from 'dns/promises';
+import { isIP } from 'net';
+import yauzl from 'yauzl';
+import { withBackoff } from '../lib/withBackoff.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOAD_DIR = path.resolve(__dirname, '../../data/uploads');
+import {
+  parseMarkdownFile,
+  parseJsonFile,
+  parseFromText,
+  ParsedSkill,
+} from './skillParserServicePure.js';
+
+// ---------------------------------------------------------------------------
+// Skill Parser Service — Impure wrappers (file I/O, GitHub fetch)
+// ---------------------------------------------------------------------------
+
+const GITHUB_API_BASE = 'https://api.github.com';
+const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Parse uploaded files (handles .md, .json, .zip). */
+async function parseUploadedFiles(files: Express.Multer.File[]): Promise<ParsedSkill[]> {
+  const skills: ParsedSkill[] = [];
+
+  for (const file of files) {
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (ext === '.zip') {
+      const zipSkills = await parseZipFile(file.path);
+      skills.push(...zipSkills);
+    } else if (ext === '.md') {
+      const content = await fs.readFile(file.path, 'utf8');
+      const skill = parseMarkdownFile(file.originalname, content);
+      if (skill) skills.push(skill);
+    } else if (ext === '.json') {
+      const content = await fs.readFile(file.path, 'utf8');
+      const skill = parseJsonFile(file.originalname, content);
+      if (skill) skills.push(skill);
+    }
+
+    // Clean up temp file
+    await fs.unlink(file.path).catch(() => { /* ignore cleanup errors */ });
+  }
+
+  return skills;
+}
+
+/** Extract and parse skills from a zip file. */
+async function parseZipFile(filePath: string): Promise<ParsedSkill[]> {
+  return new Promise((resolve, reject) => {
+    const skills: ParsedSkill[] = [];
+
+    yauzl.open(filePath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+
+      zipfile.readEntry();
+
+      zipfile.on('entry', (entry) => {
+        const ext = path.extname(entry.fileName).toLowerCase();
+
+        if (entry.fileName.endsWith('/') || (ext !== '.md' && ext !== '.json')) {
+          zipfile.readEntry();
+          return;
+        }
+
+        zipfile.openReadStream(entry, (streamErr, readStream) => {
+          if (streamErr) {
+            zipfile.readEntry();
+            return;
+          }
+
+          const MAX_ENTRY_BYTES = 10 * 1024 * 1024; // 10 MB per entry
+          let entryBytes = 0;
+          const chunks: Buffer[] = [];
+          readStream.on('data', (chunk) => {
+            entryBytes += (chunk as Buffer).length;
+            if (entryBytes > MAX_ENTRY_BYTES) {
+              readStream.destroy();
+              zipfile.readEntry();
+              return;
+            }
+            chunks.push(chunk as Buffer);
+          });
+          readStream.on('end', () => {
+            const content = Buffer.concat(chunks).toString('utf8');
+            const filename = path.basename(entry.fileName);
+
+            const skill =
+              ext === '.md'
+                ? parseMarkdownFile(filename, content)
+                : parseJsonFile(filename, content);
+
+            if (skill) skills.push(skill);
+            zipfile.readEntry();
+          });
+          readStream.on('error', () => zipfile.readEntry());
+        });
+      });
+
+      zipfile.on('end', () => resolve(skills));
+      zipfile.on('error', reject);
+    });
+  });
+}
+
+/** Parse GitHub URL to extract owner/repo/branch/path components. */
+function parseGithubUrl(url: string): {
+  owner: string;
+  repo: string;
+  branch: string;
+  repoPath: string;
+} | null {
+  // Supports:
+  //   https://github.com/{owner}/{repo}
+  //   https://github.com/{owner}/{repo}/tree/{branch}/{path}
+  const match = url.match(
+    /^https:\/\/github\.com\/([^/]+)\/([^/]+)(?:\/tree\/([^/]+)(?:\/(.+))?)?/
+  );
+  if (!match) return null;
+
+  return {
+    owner: match[1],
+    repo: match[2],
+    branch: match[3] || 'main',
+    repoPath: match[4] || '',
+  };
+}
+
+/** Fetch and parse skills from a GitHub repo URL.
+ *  Uses GitHub REST API (unauthenticated, 60 req/hr per IP). */
+async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
+  const parsed = parseGithubUrl(url);
+  if (!parsed) throw { statusCode: 400, message: `Invalid GitHub URL: ${url}` };
+
+  const { owner, repo, branch, repoPath } = parsed;
+  const contentsUrl = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${repoPath}?ref=${branch}`;
+
+  // Fetch directory listing
+  const dirResponse = await withBackoff(
+    () =>
+      fetch(contentsUrl, {
+        headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'automation-v1/skill-analyzer' },
+      }).then(async (res) => {
+        if (!res.ok) {
+          const body = await res.text();
+          const statusCode = res.status === 403 || res.status === 429 ? 429 : 502;
+          throw Object.assign(new Error(`GitHub fetch failed (${res.status}): ${body.slice(0, 200)}`), { statusCode });
+        }
+        return res;
+      }),
+    {
+      label: 'github-dir-listing',
+      maxAttempts: 3,
+      correlationId: url,
+      runId: url,
+      isRetryable: (err: Error) => err.message.includes('429') || err.message.includes('503'),
+    }
+  );
+
+  const entries = await dirResponse.json() as Array<{
+    name: string;
+    type: string;
+    download_url: string | null;
+  }>;
+
+  if (!Array.isArray(entries)) {
+    throw { statusCode: 400, message: 'GitHub API returned non-array response — URL may point to a file, not a directory.' };
+  }
+
+  const skillFiles = entries.filter(
+    (e) => e.type === 'file' && (e.name.endsWith('.md') || e.name.endsWith('.json')) && e.download_url
+  );
+
+  const skills: ParsedSkill[] = [];
+
+  for (const file of skillFiles) {
+    const content = await withBackoff(
+      () =>
+        fetch(file.download_url!).then(async (res) => {
+          if (!res.ok) throw new Error(`Failed to fetch ${file.name}: ${res.status}`);
+          return res.text();
+        }),
+      {
+        label: `github-file-${file.name}`,
+        maxAttempts: 3,
+        correlationId: url,
+        runId: url,
+        isRetryable: (err: Error) => err.message.includes('429') || err.message.includes('503'),
+      }
+    );
+
+    const ext = path.extname(file.name).toLowerCase();
+    const skill =
+      ext === '.md'
+        ? parseMarkdownFile(file.name, content)
+        : parseJsonFile(file.name, content);
+
+    if (skill) skills.push(skill);
+  }
+
+  return skills;
+}
+
+// ---------------------------------------------------------------------------
+// Download URL support — fetch a file from any HTTP(S) URL
+// Handles Google Drive, Dropbox, OneDrive sharing links, plus plain URLs.
+// ---------------------------------------------------------------------------
+
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Convert common cloud-sharing URLs to direct download links. */
+function toDirectDownloadUrl(url: string): string {
+  // Google Drive: https://drive.google.com/file/d/{id}/view  →  export download
+  const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (gdriveMatch) {
+    return `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+  }
+
+  // Dropbox: change dl=0 → dl=1, or append dl=1
+  if (url.includes('dropbox.com')) {
+    try {
+      const u = new URL(url);
+      u.searchParams.set('dl', '1');
+      return u.toString();
+    } catch { return url; }
+  }
+
+  // OneDrive/SharePoint: append download=1
+  if (url.includes('1drv.ms') || url.includes('sharepoint.com') || url.includes('onedrive.live.com')) {
+    try {
+      const u = new URL(url);
+      u.searchParams.set('download', '1');
+      return u.toString();
+    } catch { return url; }
+  }
+
+  // Box: https://app.box.com/s/{id} → https://app.box.com/shared/static/{id}
+  const boxMatch = url.match(/app\.box\.com\/s\/([a-zA-Z0-9]+)/);
+  if (boxMatch) {
+    return `https://app.box.com/shared/static/${boxMatch[1]}`;
+  }
+
+  // GitHub blob URLs → raw.githubusercontent.com
+  const ghBlobMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)/);
+  if (ghBlobMatch) {
+    return `https://raw.githubusercontent.com/${ghBlobMatch[1]}/${ghBlobMatch[2]}/${ghBlobMatch[3]}`;
+  }
+
+  return url;
+}
+
+// ---------------------------------------------------------------------------
+// SSRF protection — block requests to private/loopback/metadata IPs
+// ---------------------------------------------------------------------------
+
+/** Check if an IP address is in a private, loopback, or link-local range. */
+function isPrivateIp(ip: string): boolean {
+  // Handle IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  const normalizedIp = mapped ? mapped[1] : ip;
+
+  // IPv4
+  const v4Parts = normalizedIp.split('.').map(Number);
+  if (v4Parts.length === 4 && v4Parts.every((n) => n >= 0 && n <= 255)) {
+    if (v4Parts[0] === 127) return true;                                    // 127.0.0.0/8
+    if (v4Parts[0] === 10) return true;                                     // 10.0.0.0/8
+    if (v4Parts[0] === 172 && v4Parts[1] >= 16 && v4Parts[1] <= 31) return true; // 172.16.0.0/12
+    if (v4Parts[0] === 192 && v4Parts[1] === 168) return true;              // 192.168.0.0/16
+    if (v4Parts[0] === 169 && v4Parts[1] === 254) return true;              // 169.254.0.0/16 (link-local / IMDS)
+    if (v4Parts[0] === 0) return true;                                      // 0.0.0.0/8
+  }
+
+  // IPv6
+  const lower = normalizedIp.toLowerCase();
+  if (lower === '::1') return true;                                         // loopback
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true;        // fc00::/7 (unique local)
+  if (lower.startsWith('fe80')) return true;                                // fe80::/10 (link-local)
+
+  return false;
+}
+
+/** Resolve hostname and verify it does not point to a private IP. Throws on violation. */
+async function assertPublicUrl(url: string): Promise<void> {
+  const parsed = new URL(url);
+  const hostname = parsed.hostname;
+
+  // If hostname is already an IP literal, check directly
+  if (isIP(hostname)) {
+    if (isPrivateIp(hostname)) {
+      throw { statusCode: 400, message: 'Download URL resolves to a private or reserved IP address.' };
+    }
+    return;
+  }
+
+  // Resolve DNS and check all returned addresses
+  try {
+    const addresses = await dns.resolve4(hostname).catch(() => [] as string[]);
+    const addresses6 = await dns.resolve6(hostname).catch(() => [] as string[]);
+    const all = [...addresses, ...addresses6];
+
+    if (all.length === 0) {
+      throw { statusCode: 400, message: `Cannot resolve hostname: ${hostname}` };
+    }
+
+    for (const addr of all) {
+      if (isPrivateIp(addr)) {
+        throw { statusCode: 400, message: 'Download URL resolves to a private or reserved IP address.' };
+      }
+    }
+  } catch (err) {
+    if (typeof err === 'object' && err !== null && 'statusCode' in err) throw err;
+    throw { statusCode: 400, message: `DNS resolution failed for ${hostname}` };
+  }
+}
+
+/** Detect file type from URL path, Content-Type header, or content inspection. */
+function detectFileType(
+  url: string,
+  contentType: string | null,
+  buffer: Buffer
+): 'zip' | 'md' | 'json' {
+  // Check URL extension first
+  const urlPath = new URL(url).pathname.toLowerCase();
+  if (urlPath.endsWith('.zip')) return 'zip';
+  if (urlPath.endsWith('.md')) return 'md';
+  if (urlPath.endsWith('.json')) return 'json';
+
+  // Check Content-Type header
+  if (contentType) {
+    const ct = contentType.toLowerCase();
+    if (ct.includes('zip') || ct.includes('octet-stream')) {
+      // Check ZIP magic bytes: PK\x03\x04
+      if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+        return 'zip';
+      }
+      if (ct.includes('zip')) return 'zip';
+    }
+    if (ct.includes('json')) return 'json';
+    if (ct.includes('markdown') || ct.includes('text/plain') || ct.includes('text/x-markdown')) {
+      // Heuristic: check if content looks like JSON
+      const text = buffer.toString('utf8', 0, Math.min(100, buffer.length)).trim();
+      if (text.startsWith('{') || text.startsWith('[')) return 'json';
+      return 'md';
+    }
+  }
+
+  // Magic bytes for ZIP
+  if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+    return 'zip';
+  }
+
+  // Content-based heuristic
+  const text = buffer.toString('utf8', 0, Math.min(200, buffer.length)).trim();
+  if (text.startsWith('{') || text.startsWith('[')) return 'json';
+  return 'md'; // default to markdown
+}
+
+const MAX_REDIRECTS = 5;
+
+/** Fetch a URL following redirects manually, validating each hop against SSRF. */
+async function safeFetch(url: string): Promise<Response> {
+  let currentUrl = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicUrl(currentUrl);
+
+    const response = await fetch(currentUrl, {
+      headers: { 'User-Agent': 'automation-v1/skill-analyzer' },
+      redirect: 'manual',
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw { statusCode: 502, message: `Redirect with no Location header at hop ${hop + 1}.` };
+      }
+      // Resolve relative redirect URLs
+      currentUrl = new URL(location, currentUrl).toString();
+
+      // Require HTTPS on redirect targets
+      if (!currentUrl.startsWith('https://')) {
+        throw { statusCode: 400, message: 'Redirect target must use HTTPS.' };
+      }
+      continue;
+    }
+
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(`Download failed (${response.status}): ${(await response.text()).slice(0, 200)}`),
+        { statusCode: response.status >= 500 ? 502 : 400 }
+      );
+    }
+
+    return response;
+  }
+
+  throw { statusCode: 400, message: `Too many redirects (>${MAX_REDIRECTS}).` };
+}
+
+/** Read a response body with a streaming size limit to prevent memory exhaustion. */
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  // Fast pre-check via Content-Length (not trusted for enforcement, but avoids wasted work)
+  const contentLength = parseInt(response.headers.get('content-length') || '', 10);
+  if (contentLength > maxBytes) {
+    throw { statusCode: 400, message: `File too large (${Math.round(contentLength / (1024 * 1024))} MB). Maximum is ${maxBytes / (1024 * 1024)} MB.` };
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw { statusCode: 502, message: 'Response has no readable body.' };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        throw { statusCode: 400, message: `Downloaded file exceeds ${maxBytes / (1024 * 1024)} MB limit.` };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks);
+}
+
+/** Download and parse skills from an arbitrary HTTP(S) URL. */
+async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
+  const directUrl = toDirectDownloadUrl(url);
+
+  // Require HTTPS
+  if (!directUrl.startsWith('https://')) {
+    throw { statusCode: 400, message: 'Download URL must use HTTPS.' };
+  }
+
+  const response = await withBackoff(
+    () => safeFetch(directUrl),
+    {
+      label: 'download-url-fetch',
+      maxAttempts: 3,
+      correlationId: url,
+      runId: url,
+      isRetryable: (err: unknown) => {
+        const e = err as { statusCode?: number };
+        return e?.statusCode === 502 || e?.statusCode === 503;
+      },
+    }
+  );
+
+  const buffer = await readBodyWithLimit(response, MAX_DOWNLOAD_BYTES);
+
+  const contentType = response.headers.get('content-type');
+  const fileType = detectFileType(directUrl, contentType, buffer);
+
+  if (fileType === 'zip') {
+    // Write to temp file and use existing zip parser
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+    const tmpPath = path.join(UPLOAD_DIR, `download-${crypto.randomUUID()}.zip`);
+    await fs.writeFile(tmpPath, buffer);
+    try {
+      return await parseZipFile(tmpPath);
+    } finally {
+      await fs.unlink(tmpPath).catch(() => {});
+    }
+  }
+
+  // Single file — derive a filename from the URL
+  const urlFilename = path.basename(new URL(directUrl).pathname) || 'downloaded-skill';
+  const content = buffer.toString('utf8');
+
+  if (fileType === 'json') {
+    const skill = parseJsonFile(urlFilename.endsWith('.json') ? urlFilename : `${urlFilename}.json`, content);
+    return skill ? [skill] : [];
+  }
+
+  // Markdown or unknown — try markdown parse, fall back to paste parse
+  const skill = parseMarkdownFile(urlFilename.endsWith('.md') ? urlFilename : `${urlFilename}.md`, content);
+  if (skill) return [skill];
+
+  // If single-file markdown parse didn't find a skill, try paste parse (handles multi-skill separator)
+  const pasteResults = parseFromText(content);
+  return pasteResults;
+}
+
+export const skillParserService = {
+  parseUploadedFiles,
+  parseFromGitHub,
+  parseFromDownloadUrl,
+  parseFromPaste: parseFromText,
+};

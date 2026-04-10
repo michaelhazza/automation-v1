@@ -5,22 +5,9 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "playbook_read_existing",
-  "description": "Load the contents of an existing playbook file from server/playbooks/<slug>.playbook.ts. Returns the full TypeScript source. Use this when you want to reference the structural pattern of an existing playbook before drafting a new one. The slug must match an existing file (use playbook_list_existing to discover available slugs).",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "slug": {
-        "type": "string",
-        "description": "The kebab-case slug of the playbook to load (e.g. 'event-creation')"
-      }
-    },
-    "required": ["slug"]
-  }
-}
-```
+## Parameters
+
+- slug: string (required) — The kebab-case slug of the playbook to load (e.g. 'event-creation')
 
 ## Instructions
 

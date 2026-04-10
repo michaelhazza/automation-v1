@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -12,7 +12,6 @@ interface SystemSkill {
   description: string | null;
   isActive: boolean;
   visibility: SkillVisibility;
-  methodology: string | null;
   instructions: string | null;
   createdAt: string;
 }
@@ -71,17 +70,25 @@ export default function SystemSkillsPage({ user }: { user: User }) {
     <>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Skills</h1>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Skills <span className="text-[16px] font-normal text-slate-400">({skills.length})</span></h1>
           <p className="text-slate-500 mt-2 mb-0 text-[14px]">
             Platform-level skills that handle task board interactions and core agent capabilities. These are automatically attached to system agents and hidden from organisation admins.
           </p>
         </div>
-        <button
-          onClick={() => navigate('/system/skills/new')}
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
-        >
-          + New System Skill
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/system/skill-analyser')}
+            className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
+          >
+            Analyser
+          </button>
+          <button
+            onClick={() => navigate('/system/skills/new')}
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
+          >
+            + New System Skill
+          </button>
+        </div>
       </div>
 
       {deleteId && (
@@ -113,7 +120,7 @@ export default function SystemSkillsPage({ user }: { user: User }) {
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Name</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Slug</th>
-                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Methodology</th>
+                <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Instructions</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]">Active</th>
                 <th className="px-4 py-3 text-left font-semibold text-slate-700 text-[13px]" title="Cascade visibility to org and subaccount admins. None = hidden. Basic = name + description only. Full = entire skill body.">Visibility</th>
                 <th className="px-4 py-3 text-right font-semibold text-slate-700 text-[13px]">Actions</th>
@@ -130,10 +137,10 @@ export default function SystemSkillsPage({ user }: { user: User }) {
                     <code className="text-[12px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{skill.slug}</code>
                   </td>
                   <td className="px-4 py-3">
-                    {skill.methodology ? (
-                      <span className="text-[12px] text-green-800 bg-green-100 px-2 py-0.5 rounded">Has methodology</span>
+                    {skill.instructions ? (
+                      <span className="text-[12px] text-green-800 bg-green-100 px-2 py-0.5 rounded">Has instructions</span>
                     ) : (
-                      <span className="text-[12px] text-orange-800 bg-orange-50 px-2 py-0.5 rounded">No methodology</span>
+                      <span className="text-[12px] text-orange-800 bg-orange-50 px-2 py-0.5 rounded">No instructions</span>
                     )}
                   </td>
                   <td className="px-4 py-3">

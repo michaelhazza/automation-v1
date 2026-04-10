@@ -5,22 +5,9 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "compute_churn_risk",
-  "description": "Evaluate behavioural signals for a subaccount and produce a churn risk score (0-100) with primary risk drivers and recommended intervention type.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "account_id": {
-        "type": "string",
-        "description": "The canonical account ID to evaluate"
-      }
-    },
-    "required": ["account_id"]
-  }
-}
-```
+## Parameters
+
+- account_id: string (required) — The canonical account ID to evaluate
 
 ## Instructions
 

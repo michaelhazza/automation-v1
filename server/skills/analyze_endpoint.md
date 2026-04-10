@@ -5,29 +5,17 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "analyze_endpoint",
-  "description": "Probe an API endpoint to verify it responds correctly. Check status codes, response shapes, latency, and contract compliance.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "url": { "type": "string", "description": "The full URL to probe (e.g. \"http://localhost:3000/api/users\")" },
-      "method": { "type": "string", "description": "HTTP method: \"GET\", \"POST\", \"PUT\", \"PATCH\", \"DELETE\" (default: \"GET\")" },
-      "headers": { "type": "object", "description": "Request headers as key-value pairs (optional)" },
-      "body": { "type": "object", "description": "Request body for POST/PUT/PATCH requests (optional)" },
-      "expected_status": { "type": "number", "description": "Expected HTTP status code (default: 200)" }
-    },
-    "required": ["url"]
-  }
-}
-```
+## Parameters
+
+- url: string (required) — The full URL to probe (e.g. "http://localhost:3000/api/users")
+- method: string — HTTP method: "GET", "POST", "PUT", "PATCH", "DELETE" (default: "GET")
+- headers: string — JSON object. Request headers as key-value pairs (optional)
+- body: string — JSON object. Request body for POST/PUT/PATCH requests (optional)
+- expected_status: number — Expected HTTP status code (default: 200)
 
 ## Instructions
 
 Use analyze_endpoint to verify API contracts after code changes. Check that status codes, response shapes, and latency meet expectations. Report failures as bugs using report_bug.
-
-## Methodology
 
 ### What to Check
 1. **Status code**: Does the response match `expected_status`?

@@ -5,34 +5,12 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "analyse_performance",
-  "description": "Analyse campaign performance data from read_campaigns to surface insights, identify underperformers, and produce ranked recommendations. Returns a structured analysis with trend observations, anomaly flags, and prioritised actions (bid adjustments, budget reallocations, copy tests, or pauses).",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "campaign_data": {
-        "type": "string",
-        "description": "Structured campaign data output from read_campaigns — include all metrics, spend, and status fields"
-      },
-      "performance_targets": {
-        "type": "string",
-        "description": "Target KPIs from workspace memory: target CPA, target ROAS, CTR benchmarks, budget ceilings per campaign"
-      },
-      "analysis_period": {
-        "type": "string",
-        "description": "Human-readable period being analysed (e.g. 'last 7 days', 'Q1 2026') for report headers"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: active campaigns, recent changes (bids, copy, budget), known seasonality"
-      }
-    },
-    "required": ["campaign_data"]
-  }
-}
-```
+## Parameters
+
+- campaign_data: string (required) — Structured campaign data output from read_campaigns — include all metrics, spend, and status fields
+- performance_targets: string — Target KPIs from workspace memory: target CPA, target ROAS, CTR benchmarks, budget ceilings per campaign
+- analysis_period: string — Human-readable period being analysed (e.g. 'last 7 days', 'Q1 2026') for report headers
+- workspace_context: string — Workspace memory: active campaigns, recent changes (bids, copy, budget), known seasonality
 
 ## Instructions
 
@@ -41,8 +19,6 @@ Invoke this skill after `read_campaigns` returns data. Pass the raw campaign dat
 If `campaign_data` contains a stub response (integration not configured), return a structured stub-aware analysis noting that no data is available — do not fabricate performance insights.
 
 Do not make bid or budget recommendations that would exceed the ceilings in `performance_targets`. If targets are not provided, note this in the caveats section and apply conservative defaults.
-
-## Methodology
 
 ### Analysis Framework
 
@@ -78,6 +54,7 @@ Campaigns Analysed: [count]
 Generated At: [ISO timestamp]
 
 ## Executive Summary
+
 [2-3 sentences: overall health, biggest opportunity, biggest risk]
 
 ## Campaign Breakdown
@@ -93,14 +70,17 @@ Recommendation: [tier] — [specific action]
 [Repeat for each campaign]
 
 ## Anomalies
+
 - [Campaign]: [metric] changed [+/-N%] day-over-day — investigate before adjusting
 - [No anomalies detected]
 
 ## Ranked Actions
+
 1. [Highest priority] — [campaign name] — [action type] — [rationale]
 2. ...
 
 ## Caveats
+
 - [Any missing data, stub responses, or assumptions]
 - [Any targets not provided — conservative defaults applied]
 ```

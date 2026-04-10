@@ -5,52 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_content",
-  "description": "Draft long-form content (blog posts, landing pages, case studies, whitepapers) from a content brief. Returns a structured draft with section headings, body copy, and inline SEO recommendations. Does not publish — use publish_post or a CMS integration for that.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "content_type": {
-        "type": "string",
-        "enum": ["blog_post", "landing_page", "case_study", "whitepaper", "email_newsletter"],
-        "description": "The type of content to draft"
-      },
-      "brief": {
-        "type": "string",
-        "description": "The content brief: topic, target audience, goal, key messages, desired length, tone"
-      },
-      "primary_keyword": {
-        "type": "string",
-        "description": "The primary SEO keyword this content should rank for"
-      },
-      "secondary_keywords": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Supporting keywords to weave into the content naturally"
-      },
-      "target_word_count": {
-        "type": "number",
-        "description": "Target word count. Defaults by content type: blog_post=1200, landing_page=600, case_study=800, whitepaper=2000, email_newsletter=400."
-      },
-      "brand_voice": {
-        "type": "string",
-        "description": "Brand voice guidelines: tone, vocabulary, phrases to avoid"
-      },
-      "source_material": {
-        "type": "string",
-        "description": "Optional: research, data, or existing content to draw from"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Workspace memory: product details, ICP, brand positioning, content library references"
-      }
-    },
-    "required": ["content_type", "brief"]
-  }
-}
-```
+## Parameters
+
+- content_type: enum[blog_post, landing_page, case_study, whitepaper, email_newsletter] (required) — The type of content to draft
+- brief: string (required) — The content brief: topic, target audience, goal, key messages, desired length, tone
+- primary_keyword: string — The primary SEO keyword this content should rank for
+- secondary_keywords: string — JSON array of string values. Supporting keywords to weave into the content naturally
+- target_word_count: number — Target word count. Defaults by content type: blog_post=1200, landing_page=600, case_study=800, whitepaper=2000, email_newsletter=400.
+- brand_voice: string — Brand voice guidelines: tone, vocabulary, phrases to avoid
+- source_material: string — Optional: research, data, or existing content to draw from
+- workspace_context: string — Workspace memory: product details, ICP, brand positioning, content library references
 
 ## Instructions
 
@@ -59,8 +23,6 @@ Invoke this skill when the Content/SEO Agent needs to produce a long-form draft.
 Do not fabricate statistics, case study results, or customer quotes. Use only data from `source_material` or `workspace_context`. Insert `[VERIFY]` for any factual claim that requires checking.
 
 If `primary_keyword` is provided, follow the SEO optimisation guidelines below. If not, produce the draft without SEO recommendations and note this in the drafting notes.
-
-## Methodology
 
 ### Content Structure by Type
 

@@ -5,27 +5,10 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "ask_clarifying_question",
-  "description": "Pause the current run and ask the user a clarifying question. Use this when you are unsure which action to take, the user's request is ambiguous, or your confidence in the correct tool is low. The run will pause until the user responds.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "question": {
-        "type": "string",
-        "description": "The clarifying question to ask the user. Be specific about what you need to know."
-      },
-      "blocked_by": {
-        "type": "string",
-        "enum": ["topic_filter", "scope_check", "no_relevant_tool", "low_confidence"],
-        "description": "Why clarification is needed. Helps the system track clarification patterns."
-      }
-    },
-    "required": ["question"]
-  }
-}
-```
+## Parameters
+
+- question: string (required) — The clarifying question to ask the user. Be specific about what you need to know.
+- blocked_by: enum[topic_filter, scope_check, no_relevant_tool, low_confidence] — Why clarification is needed. Helps the system track clarification patterns.
 
 ## Instructions
 

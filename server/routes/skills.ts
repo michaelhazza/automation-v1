@@ -63,7 +63,6 @@ router.get('/api/skills/all', authenticate, asyncHandler(async (req, res) => {
       skillType: 'built_in' as const,
       definition: stripped.definition,
       instructions: stripped.instructions,
-      methodology: stripped.methodology,
       isActive: stripped.isActive,
       visibility: stripped.visibility,
       createdAt: null,
@@ -120,12 +119,12 @@ router.patch(
 // ─── Create custom skill (org-level) ─────────────────────────────────────────
 
 router.post('/api/skills', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res) => {
-  const { name, slug, description, definition, instructions, methodology } = req.body;
+  const { name, slug, description, definition, instructions } = req.body;
   if (!name || !slug || !definition) {
     res.status(400).json({ error: 'name, slug, and definition are required' });
     return;
   }
-  const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions, methodology });
+  const skill = await skillService.createSkill(req.orgId!, { name, slug, description, definition, instructions });
   res.status(201).json(skill);
 }));
 

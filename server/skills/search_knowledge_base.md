@@ -5,38 +5,17 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "search_knowledge_base",
-  "description": "Search the workspace knowledge base for articles, FAQs, and documentation relevant to a query. Returns ranked results with excerpts and source references. Used by the Support Agent to ground replies in accurate product knowledge before drafting.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "query": {
-        "type": "string",
-        "description": "The search query — typically the customer's issue or question in natural language"
-      },
-      "intent_category": {
-        "type": "string",
-        "description": "Optional: the email intent category from classify_email (e.g. technical_support, billing_dispute). Narrows the search scope."
-      },
-      "max_results": {
-        "type": "number",
-        "description": "Maximum number of results to return. Defaults to 5. Max 10."
-      }
-    },
-    "required": ["query"]
-  }
-}
-```
+## Parameters
+
+- query: string (required) — The search query — typically the customer's issue or question in natural language
+- intent_category: string — Optional: the email intent category from classify_email (e.g. technical_support, billing_dispute). Narrows the search scope.
+- max_results: number — Maximum number of results to return. Defaults to 5. Max 10.
 
 ## Instructions
 
 Invoke this skill between `classify_email` and `draft_reply` to retrieve grounding content for the reply. Pass the full search results as `knowledge_base_context` to `draft_reply`.
 
 This skill is a stub at MVP. The runtime implementation will integrate with the workspace's configured knowledge base source (e.g. Notion, Confluence, Intercom Articles, or a vector search index). Until the integration is wired, the skill returns a structured stub response indicating the knowledge base is not yet configured, so the Support Agent knows to flag the reply as `confidence: low`.
-
-## Methodology
 
 ### Search Strategy
 
@@ -67,15 +46,18 @@ Results Found: [count]
 Search Timestamp: [ISO timestamp]
 
 ## Result 1 — [Article Title]
+
 Relevance: [score]
 Source: [URL or document reference]
 Excerpt:
 > [300-character excerpt of the most relevant passage]
 
 ## Result 2 — [Article Title]
+
 ...
 
 ## No Results
+
 [If no results found: "No knowledge base articles matched this query. The reply should be flagged for human review."]
 ```
 

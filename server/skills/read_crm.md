@@ -5,44 +5,18 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "read_crm",
-  "description": "Retrieve contact, deal, or pipeline data from the connected CRM. Returns structured records for downstream pipeline analysis, churn detection, and follow-up drafting. Used by the CRM/Pipeline Agent before running analysis or drafting communications.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "query_type": {
-        "type": "string",
-        "enum": ["contacts", "deals", "pipeline_summary", "churned_accounts", "stale_deals"],
-        "description": "The type of CRM data to retrieve"
-      },
-      "filters": {
-        "type": "object",
-        "description": "Filter criteria: stage, owner, date_range, deal_value_min, deal_value_max, last_activity_days",
-        "additionalProperties": true
-      },
-      "limit": {
-        "type": "number",
-        "description": "Maximum records to return (default 50, max 200)"
-      },
-      "include_activity_history": {
-        "type": "boolean",
-        "description": "Whether to include recent activity history per record. Default false."
-      }
-    },
-    "required": ["query_type"]
-  }
-}
-```
+## Parameters
+
+- query_type: enum[contacts, deals, pipeline_summary, churned_accounts, stale_deals] (required) — The type of CRM data to retrieve
+- filters: string — JSON object. Filter criteria: stage, owner, date_range, deal_value_min, deal_value_max, last_activity_days
+- limit: number — Maximum records to return (default 50, max 200)
+- include_activity_history: boolean — Whether to include recent activity history per record. Default false.
 
 ## Instructions
 
 Invoke this skill at the start of any CRM/Pipeline Agent run that requires contact or deal data. Pass the results to `analyse_pipeline`, `detect_churn_risk`, or `draft_followup` as structured input.
 
 **MVP stub:** CRM read APIs not yet connected. Returns structured stub response. Downstream skills should handle data unavailability gracefully.
-
-## Methodology
 
 ### Data Schema
 

@@ -235,6 +235,19 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const, // one per iee_run terminal
   },
 
+  // ── Skill Analyzer (migration 0092) ─────────────────────────────
+  // One-shot: one job per analysis session. Retry safety handled by the
+  // handler itself (deletes results before re-processing). Max 1 retry
+  // with 5-minute delay — long enough for transient API failures to clear.
+  'skill-analyzer': {
+    retryLimit: 1,
+    retryDelay: 300,
+    retryBackoff: false,
+    expireInSeconds: 900,
+    deadLetter: 'skill-analyzer__dlq',
+    idempotencyStrategy: 'one-shot' as const,
+  },
+
   // ── Playbooks engine (multi-step automation, migration 0076) ────
   // Spec: tasks/playbooks-spec.md §5.6 (concurrency) + §5.7 (watchdog).
   // Tick jobs are enqueued with singletonKey: runId so multiple step

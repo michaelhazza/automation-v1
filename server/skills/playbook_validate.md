@@ -5,22 +5,9 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "playbook_validate",
-  "description": "Validate a candidate playbook definition against the §4 DAG validator. Checks unique step ids, kebab_case ids, dependsOn resolution, cycle detection, orphan detection, missing entry steps, type-specific required fields, missing outputSchema, missing sideEffectType, irreversible+retries combinations, and max DAG depth. Returns { ok: true } on success or { ok: false, errors: [...] } with a structured error list.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "definition": {
-        "type": "object",
-        "description": "The candidate playbook definition object — must contain at least slug, name, version, and a steps array."
-      }
-    },
-    "required": ["definition"]
-  }
-}
-```
+## Parameters
+
+- definition: string (required) — JSON object. The candidate playbook definition object — must contain at least slug, name, version, and a steps array.
 
 ## Instructions
 

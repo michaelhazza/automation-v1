@@ -5,39 +5,11 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "query_subaccount_cohort",
-  "description": "Read aggregated board health and memory summaries across multiple subaccounts in the organisation. Filter by user-defined tags (e.g. vertical, region, tier). Returns summaries and metrics — not raw subaccount data. Only available to org-level agents.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "tag_filters": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "key": { "type": "string", "description": "Tag key (e.g. 'vertical', 'region')" },
-            "value": { "type": "string", "description": "Tag value (e.g. 'dental', 'northeast')" }
-          },
-          "required": ["key", "value"]
-        },
-        "description": "Filter subaccounts by these tags (AND logic — all must match). Empty array returns all subaccounts."
-      },
-      "subaccount_ids": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Explicit subaccount IDs to include (alternative to tag_filters)"
-      },
-      "metric_focus": {
-        "type": "string",
-        "enum": ["all", "health", "activity", "pipeline"],
-        "description": "Focus area for metrics. Defaults to 'all'."
-      }
-    }
-  }
-}
-```
+## Parameters
+
+- tag_filters: string — JSON array of objects, each with keys: "key" (string), "value" (string). Filter subaccounts by these tags (AND logic — all must match). Empty array returns all subaccounts.
+- subaccount_ids: string — JSON array of string values. Explicit subaccount IDs to include (alternative to tag_filters)
+- metric_focus: enum[all, health, activity, pipeline] — Focus area for metrics. Defaults to 'all'.
 
 ## Instructions
 

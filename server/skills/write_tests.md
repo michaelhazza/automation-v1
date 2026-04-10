@@ -5,32 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "write_tests",
-  "description": "Write new test cases or update existing tests for a given module or feature. Produces a write_patch targeting the test file. Always reads existing tests and the production code first.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "module": { "type": "string", "description": "The module, route, or feature under test (e.g. 'server/services/taskService.ts')" },
-      "test_type": { "type": "string", "description": "Type of tests to write: 'unit', 'integration', 'e2e', or 'smoke'" },
-      "scenarios": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Specific scenarios or acceptance criteria to cover (e.g. ['creates task with correct priority', 'rejects missing title with 400'])"
-      },
-      "reasoning": { "type": "string", "description": "Why these tests are needed and what gap they fill" }
-    },
-    "required": ["module", "test_type", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- module: string (required) — The module, route, or feature under test (e.g. 'server/services/taskService.ts')
+- test_type: string (required) — Type of tests to write: 'unit', 'integration', 'e2e', or 'smoke'
+- scenarios: string — JSON array of string values. Specific scenarios or acceptance criteria to cover (e.g. ['creates task with correct priority', 'rejects missing title with 400'])
+- reasoning: string (required) — Why these tests are needed and what gap they fill
 
 ## Instructions
 
 Always read the production module AND any existing test file before writing tests. Follow the existing test framework and patterns — do not introduce a new test runner. Submit tests as a `write_patch`. Tests must be runnable via the project's `testCommand`.
-
-## Methodology
 
 ### Pre-flight
 1. `search_codebase` for the module path to confirm it exists.

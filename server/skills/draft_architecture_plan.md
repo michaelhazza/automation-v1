@@ -5,47 +5,15 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_architecture_plan",
-  "description": "Produce a structured architecture plan for an implementation task. Invoke this before writing any code on Standard, Significant, or Major classified tasks. Outputs a plan document with implementation chunks, contracts, failure modes, and open questions.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_description": {
-        "type": "string",
-        "description": "The board task title and full description"
-      },
-      "ba_spec_reference": {
-        "type": "string",
-        "description": "Reference ID of the approved BA requirements spec from workspace_memories. Omit if not available."
-      },
-      "gherkin_acs": {
-        "type": "string",
-        "description": "The Gherkin acceptance criteria from the BA spec. Omit if not available."
-      },
-      "qa_bug_report": {
-        "type": "string",
-        "description": "QA bug report for the task including reproduction steps. Omit if not available."
-      },
-      "codebase_context": {
-        "type": "string",
-        "description": "Relevant file paths, function signatures, and patterns read from the codebase before invocation"
-      },
-      "tech_stack": {
-        "type": "string",
-        "description": "Stack conventions from workspace memory: framework, ORM, routing patterns, error handling, auth middleware"
-      },
-      "classification": {
-        "type": "string",
-        "enum": ["standard", "significant", "major"],
-        "description": "Task complexity classification. Standard: 2-5 files. Significant: schema/API changes. Major: new domain or cross-cutting."
-      }
-    },
-    "required": ["task_description", "codebase_context", "tech_stack", "classification"]
-  }
-}
-```
+## Parameters
+
+- task_description: string (required) — The board task title and full description
+- ba_spec_reference: string — Reference ID of the approved BA requirements spec from workspace_memories. Omit if not available.
+- gherkin_acs: string — The Gherkin acceptance criteria from the BA spec. Omit if not available.
+- qa_bug_report: string — QA bug report for the task including reproduction steps. Omit if not available.
+- codebase_context: string (required) — Relevant file paths, function signatures, and patterns read from the codebase before invocation
+- tech_stack: string (required) — Stack conventions from workspace memory: framework, ORM, routing patterns, error handling, auth middleware
+- classification: enum[standard, significant, major] (required) — Task complexity classification. Standard: 2-5 files. Significant: schema/API changes. Major: new domain or cross-cutting.
 
 ## Instructions
 
@@ -56,8 +24,6 @@ For **Significant** tasks: produce the plan and submit it via `request_approval`
 For **Major** tasks: produce the plan and submit it via `request_approval`. Also invoke `draft_tech_spec` before coding.
 
 If you cannot produce a complete plan due to missing or ambiguous requirements, output a PLAN_GAP report instead. Write it to the board task as a comment, update task status to `blocked`, and stop.
-
-## Methodology
 
 ### Engineering Standards
 
@@ -96,11 +62,13 @@ If you cannot produce a complete plan due to missing or ambiguous requirements, 
 **Date:** [ISO date]
 
 ## Architecture Notes
+
 [Key decisions, patterns selected with rationale, trade-offs considered.
 Call out specific design patterns only where they solve a real problem.
 Apply SOLID principles explicitly: name the principle and explain its application.]
 
 ## Implementation Plan
+
 [Ordered list of implementation chunks. Each chunk must be:]
 [- Achievable in a single focused session]
 [- Independently testable]
@@ -114,9 +82,11 @@ Apply SOLID principles explicitly: name the principle and explain its applicatio
 **Dependencies:** [other chunks this depends on, if any]
 
 ## Open Questions
+
 [Ranked: HIGH (blocks implementation), MEDIUM (can be resolved post-build), LOW (edge case)]
 
 ## Not In Scope
+
 [Explicit statement of what this plan does not cover]
 ```
 

@@ -5,39 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "request_approval",
-  "description": "Escalate a decision or action to a human operator for review and approval. Use this when autonomous resolution is not possible. This is a review-gated action — it queues for human attention and does not execute immediately.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "title": { "type": "string", "description": "Short title describing what needs approval" },
-      "description": { "type": "string", "description": "Detailed description of the situation and what you are requesting" },
-      "context": { "type": "string", "description": "Full context the human needs to decide: what you tried, what failed, why you need input, what happens with each option" },
-      "options": {
-        "type": "array",
-        "description": "Possible options for the human to choose from",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string", "description": "Short label for this option" },
-            "description": { "type": "string", "description": "What this option means and its consequences" }
-          },
-          "required": ["label"]
-        }
-      }
-    },
-    "required": ["title", "description", "context"]
-  }
-}
-```
+## Parameters
+
+- title: string (required) — Short title describing what needs approval
+- description: string (required) — Detailed description of the situation and what you are requesting
+- context: string (required) — Full context the human needs to decide: what you tried, what failed, why you need input, what happens with each option
+- options: string — JSON array of objects, each with keys: "label" (string), "description" (string). Possible options for the human to choose from
 
 ## Instructions
 
 Use `request_approval` when autonomous resolution is genuinely not possible. Always include full context — the reviewer may not have been following your progress. Provide clear options to make the decision as easy as possible. This call blocks the current task until a human responds.
-
-## Methodology
 
 ### Escalation Hierarchy
 Escalation is a 4-level system. Move to the next level only when the current level cannot resolve the issue:

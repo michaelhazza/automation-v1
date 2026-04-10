@@ -6,7 +6,6 @@ export interface AvailableSkill {
   slug: string;
   description: string | null;
   skillType: 'built_in' | 'custom';
-  methodology: string | null;
 }
 
 export function SkillPickerSection({

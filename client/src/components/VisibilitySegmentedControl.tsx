@@ -6,7 +6,7 @@
  *
  *   None  — invisible to lower tiers
  *   Basic — name + one-line description only
- *   Full  — everything (instructions, methodology, definition)
+ *   Full  — everything (instructions, definition)
  *
  * Designed as a compact pill-style segmented control with a coloured dot
  * for the active state. Optimised for use inside dense table rows: ~140px

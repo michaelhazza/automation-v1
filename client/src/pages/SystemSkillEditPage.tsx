@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import ParameterBuilder from '../components/ParameterBuilder';
 
 interface SkillForm {
   name: string;
   slug: string;
   description: string;
   instructions: string;
-  methodology: string;
   definition: string;
   isActive: boolean;
 }
@@ -18,7 +18,6 @@ const EMPTY_FORM: SkillForm = {
   slug: '',
   description: '',
   instructions: '',
-  methodology: '',
   definition: JSON.stringify({
     name: '',
     description: '',
@@ -74,7 +73,6 @@ export default function SystemSkillEditPage({ user }: { user: User }) {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState('');
   const [saveError, setSaveError] = useState('');
-  const [methodologyPreview, setMethodologyPreview] = useState(false);
 
   const loadSkill = async (skillId: string) => {
     try {
@@ -84,7 +82,6 @@ export default function SystemSkillEditPage({ user }: { user: User }) {
         slug: data.slug ?? '',
         description: data.description ?? '',
         instructions: data.instructions ?? '',
-        methodology: data.methodology ?? '',
         definition: JSON.stringify(data.definition, null, 2),
         isActive: data.isActive,
       });
@@ -104,13 +101,16 @@ export default function SystemSkillEditPage({ user }: { user: User }) {
     if (!form.name.trim()) { setSaveError('Name is required.'); return; }
     if (!form.slug.trim()) { setSaveError('Slug is required.'); return; }
 
-    let definition: object;
+    let definition: Record<string, unknown>;
     try {
       definition = JSON.parse(form.definition);
     } catch {
       setSaveError('Tool definition must be valid JSON.');
       return;
     }
+    // Keep name/description in sync with the form fields
+    definition.name = form.slug;
+    definition.description = form.description;
 
     setSaving(true);
     try {
@@ -119,7 +119,6 @@ export default function SystemSkillEditPage({ user }: { user: User }) {
         slug: form.slug,
         description: form.description || null,
         instructions: form.instructions || null,
-        methodology: form.methodology || null,
         definition,
         isActive: form.isActive,
       };
@@ -215,68 +214,24 @@ export default function SystemSkillEditPage({ user }: { user: User }) {
         </Field>
       </SectionCard>
 
-      <SectionCard title="Tool Definition" subtitle="The Anthropic tool schema that defines the function the agent can call. Must include name, description, and input_schema.">
-        <Field label="Definition (JSON)" hint="Follows the Anthropic tool_use format: { name, description, input_schema }">
-          <textarea
-            value={form.definition}
-            onChange={(e) => setForm({ ...form, definition: e.target.value })}
-            className={`${monoTextareaCls} min-h-[200px]`}
-            placeholder='{ "name": "...", "description": "...", "input_schema": { "type": "object", "properties": {}, "required": [] } }'
-          />
-        </Field>
+      <SectionCard title="Parameters" subtitle="Define the input parameters this skill accepts. The tool definition JSON is auto-generated from the slug, description, and parameters below.">
+        <ParameterBuilder
+          definitionJson={form.definition}
+          slug={form.slug}
+          description={form.description}
+          onChange={(definitionJson) => setForm({ ...form, definition: definitionJson })}
+        />
       </SectionCard>
 
-      <SectionCard title="Instructions" subtitle="Short guidance injected into the agent's system prompt. Tells the agent when and why to use this skill.">
-        <Field label="Instructions" hint="One or two sentences. This appears alongside the tool definition in the prompt.">
+      <SectionCard title="Instructions" subtitle="All guidance for the agent: when to use this skill, workflow phases, decision rules, quality criteria. Written in Markdown.">
+        <Field label="Instructions (Markdown)" hint="This is injected into the agent's system prompt alongside the tool definition. Include everything the agent needs to use this skill well.">
           <textarea
             value={form.instructions}
             onChange={(e) => setForm({ ...form, instructions: e.target.value })}
-            className={`${textareaCls} min-h-[80px]`}
-            placeholder="e.g. Use this skill to analyse property listings and identify pricing opportunities..."
+            className={`${monoTextareaCls} min-h-[300px]`}
+            placeholder={`When to use this skill, workflow phases, decision rules, quality criteria, common mistakes to avoid...`}
           />
         </Field>
-      </SectionCard>
-
-      <SectionCard
-        title="Methodology"
-        subtitle="The structured workflow document that guides how the agent uses this skill. Include phases, decision rules, quality criteria, and common mistakes. Written in Markdown."
-      >
-        <div className="flex gap-2 mb-3">
-          <button
-            onClick={() => setMethodologyPreview(false)}
-            className={`px-3 py-1 border border-slate-200 rounded-md text-[12px] cursor-pointer font-medium transition-colors ${!methodologyPreview ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => setMethodologyPreview(true)}
-            className={`px-3 py-1 border border-slate-200 rounded-md text-[12px] cursor-pointer font-medium transition-colors ${methodologyPreview ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
-          >
-            Preview
-          </button>
-        </div>
-
-        {!methodologyPreview ? (
-          <Field label="Methodology (Markdown)" hint="Write the full workflow: phases, decision trees, quality criteria, common mistakes. This is what makes the skill powerful.">
-            <textarea
-              value={form.methodology}
-              onChange={(e) => setForm({ ...form, methodology: e.target.value })}
-              className={`${monoTextareaCls} min-h-[300px]`}
-              placeholder={`## Skill Methodology\n\n### Phase 1: ...\nDescribe the first phase.\n\n### Decision Rules\n- **When to use**: ...\n\n### Quality Bar\n- What does "good" look like?`}
-            />
-          </Field>
-        ) : (
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-5 text-[13px] leading-relaxed text-slate-800 min-h-[200px] whitespace-pre-wrap">
-            {form.methodology || <span className="text-slate-400 italic">No methodology written yet.</span>}
-          </div>
-        )}
-
-        {!form.methodology && (
-          <div className="mt-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-[12px] text-amber-800 leading-relaxed">
-            <strong>Tip:</strong> Skills without a methodology still work, but agents won&apos;t have structured guidance on <em>how</em> to use the tool effectively.
-            A good methodology includes workflow phases, decision rules for when to use the skill, quality criteria, and common mistakes to avoid.
-          </div>
-        )}
       </SectionCard>
 
       {!isNew && (

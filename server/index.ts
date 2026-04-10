@@ -99,6 +99,7 @@ import pageRoutesRouter from './routes/pageRoutes.js';
 import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
+import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
@@ -242,6 +243,7 @@ app.use(publicFormSubmissionRouter);
 app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
+app.use(skillAnalyzerRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -332,6 +334,19 @@ async function start() {
       await playbookEngineService.registerWorkers();
     } catch (err) {
       console.error('[boot] failed to register playbook engine workers', err);
+    }
+  }
+  // Skill Analyzer worker (migration 0092)
+  if (env.JOB_QUEUE_BACKEND === 'pg-boss') {
+    try {
+      const boss = await getPgBoss();
+      const { processSkillAnalyzerJob } = await import('./jobs/skillAnalyzerJob.js');
+      await boss.work('skill-analyzer', async (job) => {
+        const { jobId } = job.data as { jobId: string };
+        await processSkillAnalyzerJob(jobId);
+      });
+    } catch (err) {
+      console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
   // Reconcile any scheduled-task runs left in `retrying` from a previous

@@ -5,37 +5,18 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "run_playwright_test",
-  "description": "Run a Playwright end-to-end test file (or a specific test within it) against a running application. Returns pass/fail counts, full output, and duration. Subject to the same maxTestRunsPerTask limit as run_tests.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "test_file": { "type": "string", "description": "Path to the Playwright test file, relative to projectRoot (e.g. 'e2e/auth.spec.ts')" },
-      "test_name": { "type": "string", "description": "Optional: a grep pattern to run only specific tests within the file (e.g. 'login success')" },
-      "base_url": { "type": "string", "description": "Optional: override the base URL for this test run. Defaults to playwright.baseUrl in devContext." },
-      "reasoning": { "type": "string", "description": "Why this E2E test is being run — which Gherkin ACs it covers." }
-    },
-    "required": ["test_file", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- test_file: string (required) — Path to the Playwright test file, relative to projectRoot (e.g. 'e2e/auth.spec.ts')
+- test_name: string — Optional: a grep pattern to run only specific tests within the file (e.g. 'login success')
+- base_url: string — Optional: override the base URL for this test run. Defaults to playwright.baseUrl in devContext.
+- reasoning: string (required) — Why this E2E test is being run — which Gherkin ACs it covers.
 
 ## Instructions
 
 Use `run_playwright_test` to execute end-to-end browser-level test scenarios that `run_tests` (unit/integration) cannot cover: full user flows, multi-step form submissions, navigation, and interactions that depend on a running browser and real UI rendering.
 
 The test runs via `npx playwright test <test_file>`. The `PLAYWRIGHT_BASE_URL` and `BASE_URL` environment variables are set from the `base_url` input so `playwright.config.ts` can pick them up.
-
-## Prerequisites
-
-- `playwright.baseUrl` configured in devContext settings
-- Application running at that URL
-- Browser binaries installed: `npx playwright install chromium`
-- Playwright test files exist in the project (typically under `e2e/` or `tests/`)
-
-## Methodology
 
 ### Pre-flight
 1. Confirm the application is running at `base_url` using `analyze_endpoint` on the root path
@@ -53,6 +34,13 @@ The test runs via `npx playwright test <test_file>`. The `PLAYWRIGHT_BASE_URL` a
 3. For APP BUGS: call `report_bug` with the failure output as `evidence`
 4. For TEST BUGS: fix the test file, re-run
 5. For ENVIRONMENT issues (port not running, browser crash): log and escalate
+
+## Prerequisites
+
+- `playwright.baseUrl` configured in devContext settings
+- Application running at that URL
+- Browser binaries installed: `npx playwright install chromium`
+- Playwright test files exist in the project (typically under `e2e/` or `tests/`)
 
 ## Decision Rules
 

@@ -5,34 +5,12 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_requirements",
-  "description": "Produce a structured requirements specification from a board task brief. Outputs user stories in INVEST format, Gherkin acceptance criteria with Given/When/Then blocks (including negative scenarios), a ranked list of open questions, and a Definition of Done checklist. If the brief is too ambiguous to spec, returns a structured clarification-required response instead.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_id": {
-        "type": "string",
-        "description": "The board task ID this spec is being drafted for"
-      },
-      "task_brief": {
-        "type": "string",
-        "description": "The full board task title, description, and any attached context"
-      },
-      "workspace_context": {
-        "type": "string",
-        "description": "Relevant workspace memory entries: active directives, domain constraints, prior specs for related features"
-      },
-      "codebase_context": {
-        "type": "string",
-        "description": "Relevant codebase patterns, existing API contracts, or schema structures that constrain the requirements. Omit if not applicable."
-      }
-    },
-    "required": ["task_id", "task_brief"]
-  }
-}
-```
+## Parameters
+
+- task_id: string (required) — The board task ID this spec is being drafted for
+- task_brief: string (required) — The full board task title, description, and any attached context
+- workspace_context: string — Relevant workspace memory entries: active directives, domain constraints, prior specs for related features
+- codebase_context: string — Relevant codebase patterns, existing API contracts, or schema structures that constrain the requirements. Omit if not applicable.
 
 ## Instructions
 
@@ -43,8 +21,6 @@ If the brief is too ambiguous to produce a complete spec, do not generate an inc
 **Clarification SLA:** If blocking questions have been surfaced and no human response is received within 48 hours, escalate via `request_approval` with the full list of unanswered questions and the assumption the agent would proceed under for each. Do not wait indefinitely. If the human explicitly authorises proceeding under stated assumptions, document each assumption in the spec's Traceability section and mark it `[ASSUMED]`.
 
 Every acceptance criterion must be traceable to the brief input. Do not invent requirements that are not implied by the brief. If a requirement seems necessary but is not stated, list it as an open question rather than including it as an AC.
-
-## Methodology
 
 ### Input Analysis
 
@@ -130,17 +106,20 @@ Then [error handling or rejection behaviour]
 ...
 
 ## Open Questions
+
 1. [HIGH] [question] — blocks: [which story/AC is affected]
 2. [MEDIUM] [question]
 3. [LOW] [question]
 
 ## Definition of Done
+
 - [ ] All positive-path ACs pass in QA
 - [ ] All negative-path ACs pass in QA
 - [ ] No high-severity bugs open against this spec
 - [ ] [Additional DoD items specific to this task]
 
 ## Traceability
+
 Brief section → Story mapping:
 - "[quoted brief excerpt]" → Story N
 ```
@@ -155,6 +134,7 @@ Task: [task_id]
 Status: blocked-on-clarification
 
 ## Blocking Questions
+
 1. [HIGH] [specific question]
    Impact: [which part of the spec cannot be written without this answer]
    Assumption if proceeding: [what would be assumed — stated so the human can correct it]
@@ -163,6 +143,7 @@ Status: blocked-on-clarification
    ...
 
 ## Partial Spec (if any stories are unambiguous)
+
 [Include any stories that can be written regardless of the blocking questions]
 ```
 

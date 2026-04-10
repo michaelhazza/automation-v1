@@ -5,56 +5,17 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "update_bid",
-  "description": "Propose a bid adjustment for a campaign or ad group on the connected ads platform. This is a review-gated action — it enters the approval queue and does NOT apply immediately. A human must approve it before the bid change is sent to the platform.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platform": {
-        "type": "string",
-        "enum": ["google_ads", "meta_ads", "linkedin_ads"],
-        "description": "The ads platform"
-      },
-      "campaign_id": {
-        "type": "string",
-        "description": "Campaign ID to adjust the bid for"
-      },
-      "campaign_name": {
-        "type": "string",
-        "description": "Human-readable campaign name — shown in the review item"
-      },
-      "ad_group_id": {
-        "type": "string",
-        "description": "Optional: ad group ID if adjusting at ad group level rather than campaign level"
-      },
-      "current_bid": {
-        "type": "string",
-        "description": "Current bid or target CPA/ROAS value (e.g. '£2.50 CPC', 'Target CPA: £45', 'Target ROAS: 3.5×')"
-      },
-      "proposed_bid": {
-        "type": "string",
-        "description": "Proposed new bid or target value (same format as current_bid)"
-      },
-      "change_direction": {
-        "type": "string",
-        "enum": ["increase", "decrease"],
-        "description": "Whether this is an increase or decrease"
-      },
-      "change_percentage": {
-        "type": "number",
-        "description": "Percentage change (e.g. 15 for +15% or -15%)"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this bid change is recommended — data-driven rationale from analyse_performance. Shown to the reviewer."
-      }
-    },
-    "required": ["platform", "campaign_id", "campaign_name", "current_bid", "proposed_bid", "change_direction", "change_percentage", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- platform: enum[google_ads, meta_ads, linkedin_ads] (required) — The ads platform
+- campaign_id: string (required) — Campaign ID to adjust the bid for
+- campaign_name: string (required) — Human-readable campaign name — shown in the review item
+- ad_group_id: string — Optional: ad group ID if adjusting at ad group level rather than campaign level
+- current_bid: string (required) — Current bid or target CPA/ROAS value (e.g. '£2.50 CPC', 'Target CPA: £45', 'Target ROAS: 3.5×')
+- proposed_bid: string (required) — Proposed new bid or target value (same format as current_bid)
+- change_direction: enum[increase, decrease] (required) — Whether this is an increase or decrease
+- change_percentage: number (required) — Percentage change (e.g. 15 for +15% or -15%)
+- reasoning: string (required) — Why this bid change is recommended — data-driven rationale from analyse_performance. Shown to the reviewer.
 
 ## Instructions
 
@@ -65,8 +26,6 @@ This is a review-gated action. The change enters the HITL approval queue. A huma
 **MVP stub:** The ads platform write APIs are not yet connected. On approval, the executor logs the intended change and returns `pending_integration` status. When integrations are live, the approved bid is submitted to the platform.
 
 On rejection: read the feedback and decide whether to re-propose with adjusted parameters or surface the rejection to the requesting agent.
-
-## Methodology
 
 ### Pre-Submission Rules
 

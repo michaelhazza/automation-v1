@@ -5,25 +5,13 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "run_command",
-  "description": "Execute a shell command in the project root directory. This action requires human approval. Only commands on the allowedCommands whitelist will be executed.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "command": { "type": "string", "description": "The shell command to execute (e.g. \"git rev-parse HEAD\", \"npm run build\", \"git status\")" }
-    },
-    "required": ["command"]
-  }
-}
-```
+## Parameters
+
+- command: string (required) — The shell command to execute (e.g. "git rev-parse HEAD", "npm run build", "git status")
 
 ## Instructions
 
 Use run_command to execute necessary shell operations such as fetching the current commit hash, checking git status, or running build commands. Human approval is required. Only whitelisted commands will execute — do not attempt commands outside the allowed list.
-
-## Methodology
 
 ### Common Use Cases
 - `git rev-parse HEAD` — get current commit hash before writing a patch.

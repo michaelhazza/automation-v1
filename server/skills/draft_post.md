@@ -5,54 +5,16 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "draft_post",
-  "description": "Draft social media post copy for one or more platforms based on a content brief. Returns platform-specific variants (character counts, hashtag strategies, and tone) ready for human review before publishing. Does not publish — use publish_post for that.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "brief": {
-        "type": "string",
-        "description": "The content brief: topic, goal, key messages, call to action. Be specific about what the post should communicate."
-      },
-      "platforms": {
-        "type": "array",
-        "items": {
-          "type": "string",
-          "enum": ["twitter", "linkedin", "instagram", "facebook"]
-        },
-        "description": "Target platforms. Each gets a platform-specific variant."
-      },
-      "brand_voice": {
-        "type": "string",
-        "description": "Brand voice guidelines: tone (e.g. professional, playful, direct), vocabulary preferences, phrases to avoid."
-      },
-      "source_material": {
-        "type": "string",
-        "description": "Optional source content to draw from: blog post, press release, product update, or customer story."
-      },
-      "campaign_context": {
-        "type": "string",
-        "description": "Optional: current campaign name, theme, or hashtag to align the post with."
-      },
-      "target_audience": {
-        "type": "string",
-        "description": "Who the post is for: persona description, industry, seniority level, or interest group."
-      },
-      "include_hashtags": {
-        "type": "boolean",
-        "description": "Whether to include hashtag suggestions. Default true."
-      },
-      "include_emoji": {
-        "type": "boolean",
-        "description": "Whether to include emoji. Default follows brand_voice; set explicitly to override."
-      }
-    },
-    "required": ["brief", "platforms"]
-  }
-}
-```
+## Parameters
+
+- brief: string (required) — The content brief: topic, goal, key messages, call to action. Be specific about what the post should communicate.
+- platforms: string (required) — JSON array of string values. Target platforms. Each gets a platform-specific variant.
+- brand_voice: string — Brand voice guidelines: tone (e.g. professional, playful, direct), vocabulary preferences, phrases to avoid.
+- source_material: string — Optional source content to draw from: blog post, press release, product update, or customer story.
+- campaign_context: string — Optional: current campaign name, theme, or hashtag to align the post with.
+- target_audience: string — Who the post is for: persona description, industry, seniority level, or interest group.
+- include_hashtags: boolean — Whether to include hashtag suggestions. Default true.
+- include_emoji: boolean — Whether to include emoji. Default follows brand_voice; set explicitly to override.
 
 ## Instructions
 
@@ -63,8 +25,6 @@ Do not fabricate statistics, product claims, or customer quotes. If the brief re
 If `platforms` includes multiple entries, produce a separate variant for each platform. Do not produce one generic post and apply minor edits — each variant must be optimised for the platform's format, audience behaviour, and character constraints.
 
 If `brand_voice` is not provided, apply a professional and direct default tone and note this in the output.
-
-## Methodology
 
 ### Platform Constraints
 

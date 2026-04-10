@@ -5,26 +5,14 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "run_tests",
-  "description": "Execute the project test suite using the DEC testCommand. An optional test_filter narrows execution to specific tests. Subject to maxTestRunsPerTask cost limit.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "test_filter": { "type": "string", "description": "Optional filter to run specific tests (passed as argument to testCommand, e.g. '--grep login', '--testNamePattern auth')" },
-      "reason": { "type": "string", "description": "Brief explanation of why you are running tests at this point (for audit trail)" }
-    },
-    "required": []
-  }
-}
-```
+## Parameters
+
+- test_filter: string — Optional filter to run specific tests (passed as argument to testCommand, e.g. '--grep login', '--testNamePattern auth')
+- reason: string — Brief explanation of why you are running tests at this point (for audit trail)
 
 ## Instructions
 
 Run the full suite at the start of any QA task to establish a baseline. After each patch is applied, run a scoped test using `test_filter` to detect regressions early. Never run tests in a loop — respect `maxTestRunsPerTask`. If the limit is reached, force `resultStatus = failed` and escalate via `request_approval`.
-
-## Methodology
 
 ### Phase 1: Baseline Run
 At the start of a QA task, run the full suite without a filter. Record total test count, pass rate, and any pre-existing failures. This is the lifecycle baseline. Write the `initialBaselineFingerprint` to `qa_intelligence` if this is the first QA run for this task (never overwrite on subsequent runs).

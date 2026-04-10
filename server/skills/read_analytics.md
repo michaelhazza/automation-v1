@@ -5,46 +5,13 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "read_analytics",
-  "description": "Retrieve social media performance metrics for one or more platforms and a specified time period. Returns structured engagement data (impressions, reach, engagement rate, follower growth, top posts) for use in performance analysis and content strategy decisions.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platforms": {
-        "type": "array",
-        "items": {
-          "type": "string",
-          "enum": ["twitter", "linkedin", "instagram", "facebook"]
-        },
-        "description": "Platforms to retrieve analytics for"
-      },
-      "date_from": {
-        "type": "string",
-        "description": "Start date in ISO 8601 format (YYYY-MM-DD)"
-      },
-      "date_to": {
-        "type": "string",
-        "description": "End date in ISO 8601 format (YYYY-MM-DD). Defaults to today."
-      },
-      "metrics": {
-        "type": "array",
-        "items": {
-          "type": "string",
-          "enum": ["impressions", "reach", "engagement_rate", "clicks", "follower_growth", "top_posts", "post_count"]
-        },
-        "description": "Specific metrics to retrieve. If omitted, returns all available metrics."
-      },
-      "campaign_tag": {
-        "type": "string",
-        "description": "Optional: filter results to posts tagged with this campaign identifier"
-      }
-    },
-    "required": ["platforms", "date_from"]
-  }
-}
-```
+## Parameters
+
+- platforms: string (required) — JSON array of string values. Platforms to retrieve analytics for
+- date_from: string (required) — Start date in ISO 8601 format (YYYY-MM-DD)
+- date_to: string — End date in ISO 8601 format (YYYY-MM-DD). Defaults to today.
+- metrics: string — JSON array of string values. Specific metrics to retrieve. If omitted, returns all available metrics.
+- campaign_tag: string — Optional: filter results to posts tagged with this campaign identifier
 
 ## Instructions
 
@@ -53,8 +20,6 @@ Invoke this skill to retrieve performance data before running analysis or genera
 **MVP stub:** The platform API integrations are not yet connected. This skill returns a structured stub response that downstream skills can recognise and handle. When the integrations are live, the stub is replaced with real API calls.
 
 Validate that `date_from` is not in the future. Validate that `date_to` >= `date_from`. If either check fails, return a validation error rather than a stub response.
-
-## Methodology
 
 ### Data Schema
 

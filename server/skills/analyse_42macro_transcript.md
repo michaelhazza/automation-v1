@@ -29,30 +29,11 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "analyse_42macro_transcript",
-  "description": "Convert a 42 Macro video transcript (or 42 Macro written research note) into a three-tier markdown analysis (Dashboard / Executive Summary / Full Analysis) using the 42 Macro GRID / Dr. Mo / KISS portfolio framework. Plain-language only.\n\nUSE THIS LENS WHEN: the source is anything from 42macro.com or app.42macro.com (weekly videos, research notes, members-area uploads). Do not use it for non-42-Macro macro content; produce a generic summary instead.\n\nUPSTREAM RECIPE — how to acquire and convert the source before calling this skill:\n\n  1. fetch_paywalled_content\n       webLoginConnectionId:   the \"42 Macro paywall login\" web_login connection on this subaccount\n       contentUrl:             the 42 Macro page for the latest video (e.g. https://app.42macro.com/video/around_the_horn_weekly)\n       intent:                 \"download_latest\"\n       allowedDomains:         [\"42macro.com\", \"app.42macro.com\"]\n       expectedArtifactKind:   \"video\"\n       expectedMimeTypePrefix: \"video/\"\n       captureMode:            \"capture_video\"\n     If the call returns { noNewContent: true } the dedup fingerprint matched — emit `done` immediately, do NOT continue.\n\n  2. transcribe_audio\n       executionArtifactId:    the artifactId returned from step 1\n\n  3. analyse_42macro_transcript  ← THIS SKILL\n       transcript:             the transcript text from step 2\n       sourceTitle:            the video title (best guess from the page)\n       sourceDate:             today's date in YYYY-MM-DD\n\n  4. publish via send_to_slack / send_email / add_deliverable as instructed.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "transcript": {
-        "type": "string",
-        "description": "Full transcript or research-note text to analyse."
-      },
-      "sourceTitle": {
-        "type": "string",
-        "description": "Optional title of the source document, used to derive the filename (YYYYMMDD_Report_Name.md)."
-      },
-      "sourceDate": {
-        "type": "string",
-        "description": "Optional ISO date (YYYY-MM-DD) of the source document. Used as YYYYMMDD prefix in the filename."
-      }
-    },
-    "required": ["transcript"]
-  }
-}
-```
+## Parameters
+
+- transcript: string (required) — Full transcript or research-note text to analyse.
+- sourceTitle: string — Optional title of the source document, used to derive the filename (YYYYMMDD_Report_Name.md).
+- sourceDate: string — Optional ISO date (YYYY-MM-DD) of the source document. Used as YYYYMMDD prefix in the filename.
 
 ## Instructions
 

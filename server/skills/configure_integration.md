@@ -5,41 +5,13 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "configure_integration",
-  "description": "Guide the configuration of a workspace integration — validate required settings, produce a structured configuration record, and submit for human approval before any credentials or settings are persisted. Review-gated — never stores integration credentials without explicit approval.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "integration_type": {
-        "type": "string",
-        "enum": ["crm", "email_provider", "google_ads", "meta_ads", "linkedin_ads", "accounting", "knowledge_base", "social_media"],
-        "description": "The type of integration to configure"
-      },
-      "provider_name": {
-        "type": "string",
-        "description": "The specific provider (e.g. 'Salesforce', 'HubSpot', 'Gmail', 'Xero', 'Notion')"
-      },
-      "configuration": {
-        "type": "object",
-        "description": "Integration settings provided by the onboarding flow: API keys, OAuth tokens, account IDs, webhook URLs. Sensitive fields should be masked in the review item.",
-        "additionalProperties": true
-      },
-      "validation_checks": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "Checks to run before submission: ['api_key_format', 'required_fields_present', 'account_id_format']. Omit to skip validation."
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Why this integration is being configured — the onboarding step or user instruction. Shown to the reviewer."
-      }
-    },
-    "required": ["integration_type", "provider_name", "configuration", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- integration_type: enum[crm, email_provider, google_ads, meta_ads, linkedin_ads, accounting, knowledge_base, social_media] (required) — The type of integration to configure
+- provider_name: string (required) — The specific provider (e.g. 'Salesforce', 'HubSpot', 'Gmail', 'Xero', 'Notion')
+- configuration: string (required) — JSON object. Integration settings provided by the onboarding flow: API keys, OAuth tokens, account IDs, webhook URLs. Sensitive fields should be masked in the review item.
+- validation_checks: string — JSON array of string values. Checks to run before submission: ['api_key_format', 'required_fields_present', 'account_id_format']. Omit to skip validation.
+- reasoning: string (required) — Why this integration is being configured — the onboarding step or user instruction. Shown to the reviewer.
 
 ## Instructions
 
@@ -50,8 +22,6 @@ This is a review-gated action. The reviewer sees the integration type, provider,
 **MVP stub:** The integration storage backend is not yet connected. On approval, the executor logs the configuration record and returns `pending_integration` status.
 
 Never log or surface API keys or OAuth tokens in plain text in task activities or review items. Mask all credential fields as `[REDACTED]` in the review presentation.
-
-## Methodology
 
 ### Pre-Submission Validation
 

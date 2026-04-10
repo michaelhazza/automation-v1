@@ -5,27 +5,15 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "write_workspace",
-  "description": "Add a progress note or activity entry to an existing task. Use this to log what you have done, share findings, or update the team.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "task_id": { "type": "string", "description": "The ID of the task to add an activity to" },
-      "activity_type": { "type": "string", "description": "Type of activity: \"progress\", \"note\", \"completed\", \"blocked\"" },
-      "message": { "type": "string", "description": "The activity message content" }
-    },
-    "required": ["task_id", "activity_type", "message"]
-  }
-}
-```
+## Parameters
+
+- task_id: string (required) — The ID of the task to add an activity to
+- activity_type: string (required) — Type of activity: "progress", "note", "completed", "blocked"
+- message: string (required) — The activity message content
 
 ## Instructions
 
 Always log your progress and findings to tasks so other agents and the team can see what you have done. Be specific and actionable — include data and evidence, not just conclusions. Log one activity per logical step, not a single batch at the end.
-
-## Methodology
 
 ### When to Write
 - **Progress**: Log meaningful progress updates as you work, not just at the end.

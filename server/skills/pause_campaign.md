@@ -5,44 +5,14 @@ isActive: true
 visibility: none
 ---
 
-```json
-{
-  "name": "pause_campaign",
-  "description": "Propose pausing a campaign on the connected ads platform. This is a block-gated action — it ALWAYS enters the approval queue and is NEVER executed automatically. A human must explicitly approve before the campaign is paused.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "platform": {
-        "type": "string",
-        "enum": ["google_ads", "meta_ads", "linkedin_ads"],
-        "description": "The ads platform"
-      },
-      "campaign_id": {
-        "type": "string",
-        "description": "Campaign ID to pause"
-      },
-      "campaign_name": {
-        "type": "string",
-        "description": "Human-readable campaign name — shown in the review item"
-      },
-      "pause_reason": {
-        "type": "string",
-        "enum": ["underperformance", "budget_exhausted", "campaign_ended", "manual_override"],
-        "description": "The reason for pausing"
-      },
-      "performance_evidence": {
-        "type": "string",
-        "description": "Data from analyse_performance that justifies the pause: specific metrics, thresholds exceeded, duration of underperformance"
-      },
-      "reasoning": {
-        "type": "string",
-        "description": "Full reasoning for the pause recommendation — shown to the reviewer alongside the performance evidence"
-      }
-    },
-    "required": ["platform", "campaign_id", "campaign_name", "pause_reason", "performance_evidence", "reasoning"]
-  }
-}
-```
+## Parameters
+
+- platform: enum[google_ads, meta_ads, linkedin_ads] (required) — The ads platform
+- campaign_id: string (required) — Campaign ID to pause
+- campaign_name: string (required) — Human-readable campaign name — shown in the review item
+- pause_reason: enum[underperformance, budget_exhausted, campaign_ended, manual_override] (required) — The reason for pausing
+- performance_evidence: string (required) — Data from analyse_performance that justifies the pause: specific metrics, thresholds exceeded, duration of underperformance
+- reasoning: string (required) — Full reasoning for the pause recommendation — shown to the reviewer alongside the performance evidence
 
 ## Instructions
 
@@ -53,8 +23,6 @@ Invoke this skill only when `analyse_performance` returns a `pause` recommendati
 Pausing a campaign stops all spend and impression delivery immediately. This is a significant action — underscore the performance evidence clearly so the reviewer can validate it quickly.
 
 **MVP stub:** Platform write APIs not yet connected. On approval, the executor logs the intended pause and returns `pending_integration` status.
-
-## Methodology
 
 ### Pre-Submission Rules
 

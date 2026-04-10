@@ -5,30 +5,18 @@ isActive: true
 visibility: basic
 ---
 
-```json
-{
-  "name": "read_workspace",
-  "description": "Read tasks (board cards) and their activities from the shared board. Use this to see what work exists, what other agents have done, and what needs attention.",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "status": { "type": "string", "description": "Filter by board column status (e.g. \"inbox\", \"todo\", \"assigned\", \"in_progress\", \"review\", \"done\")" },
-      "assigned_to_me": { "type": "boolean", "description": "If true, only return tasks assigned to you" },
-      "parent_task_id": { "type": "string", "description": "Filter by parent task ID to retrieve all subtasks of a specific parent. Use this when evaluating whether all subtasks of a decomposed task are complete." },
-      "task_id": { "type": "string", "description": "Retrieve a single specific task by ID, including its full description and brief." },
-      "limit": { "type": "number", "description": "Maximum tasks to return (default 20)" },
-      "include_activities": { "type": "boolean", "description": "If true, include recent activity log for each task (default false)" }
-    },
-    "required": []
-  }
-}
-```
+## Parameters
+
+- status: string — Filter by board column status (e.g. "inbox", "todo", "assigned", "in_progress", "review", "done")
+- assigned_to_me: boolean — If true, only return tasks assigned to you
+- parent_task_id: string — Filter by parent task ID to retrieve all subtasks of a specific parent. Use this when evaluating whether all subtasks of a decomposed task are complete.
+- task_id: string — Retrieve a single specific task by ID, including its full description and brief.
+- limit: number — Maximum tasks to return (default 20)
+- include_activities: boolean — If true, include recent activity log for each task (default false)
 
 ## Instructions
 
 Check the board regularly to stay coordinated with the team. Use `assigned_to_me: true` to see your workload, and include activities only for tasks you plan to act on. Always read before writing to avoid duplicates.
-
-## Methodology
 
 ### Phase 1: Orientation
 At the start of every run, read the board without filters to understand the current state. Look at task distribution across columns, identify what has changed since your last run, and note any urgent or blocked items.
