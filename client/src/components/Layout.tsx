@@ -697,7 +697,6 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
-              {hasOrgPerm('org.agents.edit') && <NavItem to="/admin/skill-analyzer" icon={<Icons.skills />} label="Skill Analyzer" />}
               {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}

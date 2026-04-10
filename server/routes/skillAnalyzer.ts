@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { skillAnalyzerService } from '../services/skillAnalyzerService.js';
 
 const router = Router();
@@ -23,16 +22,16 @@ const upload = multer({
   },
 });
 
-// All routes require authentication + org.agents.edit permission
+// All routes require authentication + system admin
 router.use(authenticate);
-router.use(requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT));
+router.use(requireSystemAdmin);
 
 // ---------------------------------------------------------------------------
-// POST /api/skill-analyzer/jobs — Create analysis job
+// POST /api/system/skill-analyser/jobs — Create analysis job
 // ---------------------------------------------------------------------------
 
 router.post(
-  '/api/skill-analyzer/jobs',
+  '/api/system/skill-analyser/jobs',
   upload.array('files'),
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
@@ -100,11 +99,11 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// GET /api/skill-analyzer/jobs — List jobs
+// GET /api/system/skill-analyser/jobs — List jobs
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/api/skill-analyzer/jobs',
+  '/api/system/skill-analyser/jobs',
   asyncHandler(async (req, res) => {
     const orgId = req.orgId!;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
@@ -117,11 +116,11 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// GET /api/skill-analyzer/jobs/:jobId — Get job with results
+// GET /api/system/skill-analyser/jobs/:jobId — Get job with results
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/api/skill-analyzer/jobs/:jobId',
+  '/api/system/skill-analyser/jobs/:jobId',
   asyncHandler(async (req, res) => {
     const { job, results } = await skillAnalyzerService.getJob(
       req.params.jobId,
@@ -133,11 +132,11 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// PATCH /api/skill-analyzer/jobs/:jobId/results/:resultId — Set action
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId — Set action
 // ---------------------------------------------------------------------------
 
 router.patch(
-  '/api/skill-analyzer/jobs/:jobId/results/:resultId',
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId',
   asyncHandler(async (req, res) => {
     const { action } = req.body as { action: string };
 
@@ -158,11 +157,11 @@ router.patch(
 );
 
 // ---------------------------------------------------------------------------
-// POST /api/skill-analyzer/jobs/:jobId/results/bulk-action — Bulk action
+// POST /api/system/skill-analyser/jobs/:jobId/results/bulk-action — Bulk action
 // ---------------------------------------------------------------------------
 
 router.post(
-  '/api/skill-analyzer/jobs/:jobId/results/bulk-action',
+  '/api/system/skill-analyser/jobs/:jobId/results/bulk-action',
   asyncHandler(async (req, res) => {
     const { resultIds, action } = req.body as { resultIds: string[]; action: string };
 
@@ -187,11 +186,11 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// POST /api/skill-analyzer/jobs/:jobId/execute — Execute approved actions
+// POST /api/system/skill-analyser/jobs/:jobId/execute — Execute approved actions
 // ---------------------------------------------------------------------------
 
 router.post(
-  '/api/skill-analyzer/jobs/:jobId/execute',
+  '/api/system/skill-analyser/jobs/:jobId/execute',
   asyncHandler(async (req, res) => {
     const result = await skillAnalyzerService.executeApproved({
       jobId: req.params.jobId,

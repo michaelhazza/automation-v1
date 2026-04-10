@@ -185,7 +185,6 @@ export default function App() {
             <Route path="/admin/agents/:id" element={<AdminAgentEditPage user={user!} />} />
             <Route path="/admin/agent-templates" element={<AdminAgentTemplatesPage user={user!} />} />
             <Route path="/admin/skills" element={<AdminSkillsPage user={user!} />} />
-            <Route path="/admin/skill-analyzer" element={<SkillAnalyzerPage user={user!} />} />
             <Route path="/admin/mcp-servers" element={<IntegrationsAndCredentialsPage user={user!} />} />
             <Route path="/admin/skills/:id" element={<AdminSkillEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/agents" element={<Navigate to={`/admin/subaccounts`} replace />} />
@@ -219,6 +218,7 @@ export default function App() {
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
             <Route path="/system/agents/:id" element={<SystemAgentEditPage user={user!} />} />
             <Route path="/system/skills" element={<SystemSkillsPage user={user!} />} />
+            <Route path="/system/skill-analyser" element={<SkillAnalyzerPage user={user!} />} />
             <Route path="/system/playbook-studio" element={<PlaybookStudioPage user={user!} />} />
             <Route path="/system/skills/:id" element={<SystemSkillEditPage user={user!} />} />
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />

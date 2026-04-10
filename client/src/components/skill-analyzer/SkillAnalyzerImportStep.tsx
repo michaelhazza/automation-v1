@@ -56,7 +56,7 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
           setError('Paste text must be at least 10 characters.');
           return;
         }
-        const res = await api.post('/api/skill-analyzer/jobs', {
+        const res = await api.post('/api/system/skill-analyser/jobs', {
           sourceType: 'paste',
           text: pasteText,
         });
@@ -72,7 +72,7 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
         for (const f of files) {
           formData.append('files', f);
         }
-        const res = await api.post('/api/skill-analyzer/jobs', formData, {
+        const res = await api.post('/api/system/skill-analyser/jobs', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
         jobId = res.data.id;
@@ -82,7 +82,7 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
           setError('Please enter a valid GitHub URL (https://github.com/{owner}/{repo}).');
           return;
         }
-        const res = await api.post('/api/skill-analyzer/jobs', {
+        const res = await api.post('/api/system/skill-analyser/jobs', {
           sourceType: 'github',
           url: githubUrl.trim(),
         });

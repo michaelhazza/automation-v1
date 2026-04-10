@@ -35,7 +35,7 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
     setError(null);
     setExecuting(true);
     try {
-      const res = await api.post(`/api/skill-analyzer/jobs/${job.id}/execute`);
+      const res = await api.post(`/api/system/skill-analyser/jobs/${job.id}/execute`);
       onExecuted(res.data as ExecuteResult);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string };

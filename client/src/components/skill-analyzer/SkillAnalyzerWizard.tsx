@@ -76,7 +76,7 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
 
   async function loadJob(jobId: string) {
     try {
-      const res = await api.get(`/api/skill-analyzer/jobs/${jobId}`);
+      const res = await api.get(`/api/system/skill-analyser/jobs/${jobId}`);
       const { job: j, results: r } = res.data;
       setJob(j);
       setResults(r);

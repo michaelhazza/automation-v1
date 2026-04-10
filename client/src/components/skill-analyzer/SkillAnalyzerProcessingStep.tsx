@@ -29,7 +29,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
 
     intervalRef.current = setInterval(async () => {
       try {
-        const res = await api.get(`/api/skill-analyzer/jobs/${jobId}`);
+        const res = await api.get(`/api/system/skill-analyser/jobs/${jobId}`);
         const { job: j, results: r } = res.data as { job: AnalysisJob; results: AnalysisResult[] };
         setCurrentJob(j);
 

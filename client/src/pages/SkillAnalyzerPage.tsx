@@ -58,7 +58,7 @@ export default function SkillAnalyzerPage({ user: _user }: { user: User }) {
   async function loadJobs() {
     setLoading(true);
     try {
-      const res = await api.get('/api/skill-analyzer/jobs?limit=20');
+      const res = await api.get('/api/system/skill-analyser/jobs?limit=20');
       setJobs(res.data.jobs || []);
     } catch {
       // non-fatal
@@ -96,7 +96,7 @@ export default function SkillAnalyzerPage({ user: _user }: { user: User }) {
     <div className="max-w-4xl mx-auto px-6 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Skill Analyzer</h1>
+          <h1 className="text-xl font-semibold text-slate-900">Skill Analyser</h1>
           <p className="text-sm text-slate-500 mt-0.5">
             Import skills from external sources and compare them against your library.
           </p>

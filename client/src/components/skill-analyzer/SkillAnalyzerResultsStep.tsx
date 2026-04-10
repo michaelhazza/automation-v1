@@ -92,10 +92,10 @@ function ResultCard({
     const next = result.actionTaken === action ? null : action;
     try {
       if (next) {
-        await api.patch(`/api/skill-analyzer/jobs/${jobId}/results/${result.id}`, { action: next });
+        await api.patch(`/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`, { action: next });
       } else {
         // Sending 'skipped' as a neutral reset
-        await api.patch(`/api/skill-analyzer/jobs/${jobId}/results/${result.id}`, { action: 'skipped' });
+        await api.patch(`/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`, { action: 'skipped' });
       }
       onActionChange(result.id, next);
     } catch {
@@ -268,7 +268,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     if (ids.length === 0) return;
 
     try {
-      await api.post(`/api/skill-analyzer/jobs/${job.id}/results/bulk-action`, {
+      await api.post(`/api/system/skill-analyser/jobs/${job.id}/results/bulk-action`, {
         resultIds: ids,
         action,
       });
