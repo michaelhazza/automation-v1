@@ -337,6 +337,35 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
+  // ── BA Spec submission — review-gated, writes approved spec to workspace memory ──
+
+  write_spec: {
+    actionType: 'write_spec',
+    description: 'Submit a requirements specification to the HITL review queue. On approval, writes the spec to workspace memory and marks the task spec-approved.',
+    actionCategory: 'worker',
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['task_id', 'spec_content', 'user_stories_count', 'ac_count', 'has_high_risk_questions', 'reasoning'],
+    parameterSchema: z.object({
+      task_id: z.string().describe('The board task ID this spec belongs to'),
+      spec_content: z.string().describe('The full requirements spec from draft_requirements'),
+      user_stories_count: z.number().describe('Number of user stories in the spec'),
+      ac_count: z.number().describe('Total number of acceptance criteria'),
+      open_questions_count: z.number().optional().describe('Number of open questions'),
+      has_high_risk_questions: z.boolean().optional().describe('Whether the spec contains HIGH-risk open questions'),
+      reasoning: z.string().describe('Scope decisions and assumptions — shown to the human reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
+
   // ── Dev/QA read-only skills (auto-gated, audit trail only) ────────────────
 
   read_codebase: {

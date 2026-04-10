@@ -44,6 +44,7 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'create_page': return executeCreatePage(payload, context);
     case 'update_page': return executeUpdatePage(payload, context);
     case 'publish_page': return executePublishPage(payload, context);
+    case 'write_spec': return executeWriteSpecApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -510,6 +511,37 @@ export const skillExecutor = {
           },
           guidance: 'Follow the test authorship methodology in your context. For each scenario, write the test case and submit via write_patch.',
         });
+
+      // ── BA / QA MVP skills ───────────────────────────────────────────────
+
+      case 'draft_requirements':
+        return executeMethodologySkill('draft_requirements', input, {
+          template: {
+            taskId: '',
+            status: 'draft',
+            userStories: [],
+            openQuestions: [],
+            definitionOfDone: [],
+            traceability: [],
+          },
+          guidance: 'Follow the draft_requirements methodology in your skill context. Produce a structured requirements spec with INVEST user stories, Gherkin ACs (AC-X.Y format, Type: positive/negative), ranked open questions, and a Definition of Done. If the brief is too ambiguous, return a clarification_required response instead of a partial spec.',
+        });
+
+      case 'derive_test_cases':
+        return executeMethodologySkill('derive_test_cases', input, {
+          template: {
+            specReferenceId: '',
+            manifestValidFor: '',
+            taskId: '',
+            testCases: [],
+            coverageMatrix: [],
+            untestableAcs: [],
+          },
+          guidance: 'Follow the derive_test_cases methodology in your skill context. For each Gherkin AC in the spec, produce a test case with a stable TC-[task_id]-NNN ID, preconditions, action, and expected result. Write the completed manifest to workspace memory via write_workspace.',
+        });
+
+      case 'write_spec':
+        return proposeReviewGatedAction('write_spec', input, context);
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -1090,6 +1122,70 @@ function serializeTask(item: Record<string, unknown>): Record<string, unknown> {
 
 // ---------------------------------------------------------------------------
 // Write Workspace (add activity)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// write_spec — post-approval executor
+// Writes the approved spec to workspace memory and marks the task spec-approved.
+// ---------------------------------------------------------------------------
+
+async function executeWriteSpecApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const taskId = String(payload.task_id ?? '');
+  const specContent = String(payload.spec_content ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+  const storiesCount = Number(payload.user_stories_count ?? 0);
+  const acCount = Number(payload.ac_count ?? 0);
+
+  if (!taskId) return { success: false, error: 'task_id is required' };
+  if (!specContent) return { success: false, error: 'spec_content is required' };
+
+  // Build a stable spec reference ID so QA / Dev can retrieve this spec by key.
+  // Pattern: SPEC-<taskId>-v<N> — we derive N from activity count to ensure
+  // monotonically increasing version without a dedicated DB column.
+  let version = 1;
+  try {
+    const existing = await taskService.listActivities(taskId, context.organisationId);
+    const priorSpecs = existing.filter((a: { activityType: string; message: string }) =>
+      a.activityType === 'note' && a.message.startsWith('SPEC_APPROVED:')
+    );
+    version = priorSpecs.length + 1;
+  } catch { /* treat as first version */ }
+
+  const specReferenceId = `SPEC-${taskId}-v${version}`;
+
+  try {
+    // 1. Write the spec to workspace memory as a structured activity.
+    await taskService.addActivity(taskId, context.organisationId, {
+      activityType: 'note',
+      message: `SPEC_APPROVED:${specReferenceId}\n\n${specContent}`,
+      agentId: context.agentId,
+    });
+
+    // 2. Write a human-readable summary activity for the board.
+    await taskService.addActivity(taskId, context.organisationId, {
+      activityType: 'completed',
+      message: `Requirements spec approved.\nReference: ${specReferenceId}\nStories: ${storiesCount} | ACs: ${acCount}\nReasoning: ${reasoning}`,
+      agentId: context.agentId,
+    });
+
+    // 3. Advance task status to spec-approved.
+    await taskService.updateTask(taskId, context.organisationId, { status: 'spec-approved' });
+
+    return {
+      success: true,
+      spec_reference_id: specReferenceId,
+      task_id: taskId,
+      message: `Spec ${specReferenceId} approved and written to workspace memory. Task status updated to spec-approved.`,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to persist approved spec: ${errMsg}` };
+  }
+}
+
 // ---------------------------------------------------------------------------
 
 async function executeWriteWorkspace(
