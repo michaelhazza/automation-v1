@@ -18,6 +18,8 @@ skills:
   - draft_content
   - audit_seo
   - create_lead_magnet
+  - update_page
+  - publish_page
   - move_task
   - update_task
   - add_deliverable
