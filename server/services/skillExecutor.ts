@@ -54,6 +54,9 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'update_record': return executeFinancialRecordUpdateApproved(payload, context);
     case 'create_lead_magnet': return executeLeadMagnetApproved(payload, context);
     case 'deliver_report': return executeDeliverReportApproved(payload, context);
+    case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
+    case 'propose_doc_update': return executeDocProposalApproved(payload, context);
+    case 'write_docs': return executeWriteDocsApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -870,6 +873,85 @@ export const skillExecutor = {
 
       case 'deliver_report':
         return proposeReviewGatedAction('deliver_report', input, context);
+
+      // ── Onboarding Agent skills ──────────────────────────────────────────
+
+      case 'configure_integration':
+        return proposeReviewGatedAction('configure_integration', input, context);
+
+      // ── CRM/Pipeline Agent skills ────────────────────────────────────────
+
+      case 'read_crm': {
+        // Auto-gated stub — CRM integration not yet wired
+        const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
+        return executeWithActionAudit('read_crm', input, context, async () => ({
+          status: 'stub',
+          query_type: crmQueryType,
+          records: [],
+          message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
+        }));
+      }
+
+      case 'analyse_pipeline':
+        return executeMethodologySkill('analyse_pipeline', input, {
+          template: {
+            period: '',
+            dataQuality: '',
+            executiveSummary: '',
+            keyMetrics: {},
+            stageBreakdown: [],
+            staleDeals: [],
+            rankedActions: [],
+            caveats: [],
+          },
+          guidance: 'Follow the analyse_pipeline methodology in your skill context. Compute pipeline velocity, stage conversion, and stale deal metrics from the CRM data. Identify deals requiring follow-up and produce ranked actions.',
+        });
+
+      case 'draft_followup':
+        return executeMethodologySkill('draft_followup', input, {
+          template: {
+            contactEmail: '',
+            dealName: '',
+            goal: '',
+            subject: '',
+            body: '',
+            draftingNotes: '',
+          },
+          guidance: 'Follow the draft_followup methodology in your skill context. Draft a short (3–5 sentence) follow-up email referencing the last activity. Match tone to days-since-activity. Include a single, clear CTA matching the follow_up_goal.',
+        });
+
+      case 'detect_churn_risk':
+        return executeMethodologySkill('detect_churn_risk', input, {
+          template: {
+            accountsAnalysed: 0,
+            atRiskAccounts: [],
+            healthyAccounts: [],
+            summary: '',
+            caveats: [],
+          },
+          guidance: 'Follow the detect_churn_risk methodology in your skill context. Score each account based on engagement, commercial, and relationship signals. Never assign HIGH or CRITICAL risk without 2+ supporting signals. Produce specific recommended interventions per at-risk account.',
+        });
+
+      // ── Knowledge Management Agent skills ────────────────────────────────
+
+      case 'read_docs': {
+        // Auto-gated stub — documentation integration not yet wired
+        const docPageId = typeof input.page_id === 'string' ? input.page_id : '';
+        const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
+        return executeWithActionAudit('read_docs', input, context, async () => ({
+          status: 'stub',
+          page_id: docPageId,
+          page_title: docPageTitle,
+          content: null,
+          message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
+        }));
+      }
+
+      case 'propose_doc_update':
+        return proposeReviewGatedAction('propose_doc_update', input, context);
+
+      case 'write_docs':
+        return proposeReviewGatedAction('write_docs', input, context);
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -1770,6 +1852,103 @@ async function executeDeliverReportApproved(
     delivered_at: deliveredAt,
     status: 'pending_integration',
     message: `Report delivery approved for ${clientName} via ${deliveryChannel}. Delivery integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeConfigureIntegrationApproved — MVP stub for configure_integration.
+// ---------------------------------------------------------------------------
+
+async function executeConfigureIntegrationApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const integrationType = String(payload.integration_type ?? '');
+  const providerName = String(payload.provider_name ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!integrationType) return { success: false, error: 'integration_type is required' };
+  if (!providerName) return { success: false, error: 'provider_name is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `INTEGRATION_APPROVED:${integrationType}:${providerName}\nreasoning: ${reasoning}\n[credentials redacted]`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    integration_type: integrationType,
+    provider_name: providerName,
+    status: 'pending_integration',
+    message: `Integration configuration approved (${integrationType}: ${providerName}). Integration storage not yet connected — configuration logged with credentials redacted.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeDocProposalApproved — signals approval of propose_doc_update.
+// The actual write is performed by a subsequent write_docs call.
+// ---------------------------------------------------------------------------
+
+async function executeDocProposalApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const pageTitle = String(payload.page_title ?? '');
+  const changeType = String(payload.change_type ?? '');
+  const changesCount = Array.isArray(payload.proposed_changes) ? payload.proposed_changes.length : 0;
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `DOC_PROPOSAL_APPROVED:${pageTitle}\nchange_type: ${changeType}\nchanges: ${changesCount}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    page_title: pageTitle,
+    changes_approved: changesCount,
+    message: `Doc update proposal approved for "${pageTitle}". Invoke write_docs with the full updated content to apply the changes.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeWriteDocsApproved — MVP stub for write_docs worker handler.
+// ---------------------------------------------------------------------------
+
+async function executeWriteDocsApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const pageTitle = String(payload.page_title ?? '');
+  const changeSummary = String(payload.change_summary ?? '');
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!pageTitle) return { success: false, error: 'page_title is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: `DOCS_WRITE_APPROVED:${pageTitle}\nchange_summary: ${changeSummary}\nreasoning: ${reasoning}`,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    page_title: pageTitle,
+    status: 'pending_integration',
+    message: `Documentation write approved for "${pageTitle}". Documentation integration not yet connected — update logged.`,
   };
 }
 

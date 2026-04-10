@@ -1311,6 +1311,147 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
     idempotencyStrategy: 'locked',
   },
+
+  // ── Onboarding Agent — review-gated ─────────────────────────────────────
+
+  configure_integration: {
+    actionType: 'configure_integration',
+    description: 'Guide configuration of a workspace integration and submit for human approval. Review-gated — never stores credentials without approval.',
+    actionCategory: 'worker',
+    topics: ['onboarding'],
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['integration_type', 'provider_name', 'configuration', 'reasoning'],
+    parameterSchema: z.object({
+      integration_type: z.enum(['crm', 'email_provider', 'google_ads', 'meta_ads', 'linkedin_ads', 'accounting', 'knowledge_base', 'social_media']).describe('The type of integration to configure'),
+      provider_name: z.string().describe('The specific provider name'),
+      configuration: z.record(z.unknown()).describe('Integration settings — sensitive fields masked in review'),
+      validation_checks: z.array(z.string()).optional().describe('Pre-submission validation checks to run'),
+      reasoning: z.string().describe('Why this integration is being configured — shown to the reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  // ── CRM/Pipeline Agent — auto-gated stub ─────────────────────────────────
+
+  read_crm: {
+    actionType: 'read_crm',
+    description: 'Retrieve contact, deal, or pipeline data from the connected CRM for analysis.',
+    actionCategory: 'api',
+    topics: ['crm'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['query_type', 'filters', 'limit', 'include_activity_history'],
+    parameterSchema: z.object({
+      query_type: z.enum(['contacts', 'deals', 'pipeline_summary', 'churned_accounts', 'stale_deals']).describe('The type of CRM data to retrieve'),
+      filters: z.record(z.unknown()).optional().describe('Filter criteria: stage, owner, date_range, deal_value_min, deal_value_max, last_activity_days'),
+      limit: z.number().optional().describe('Maximum records to return (default 50, max 200)'),
+      include_activity_history: z.boolean().optional().describe('Include recent activity history per record'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  // ── Knowledge Management Agent — auto-gated stub + review-gated ──────────
+
+  read_docs: {
+    actionType: 'read_docs',
+    description: 'Retrieve documentation pages or sections from the connected documentation source.',
+    actionCategory: 'api',
+    topics: ['knowledge'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['page_id', 'page_title', 'section', 'include_metadata'],
+    parameterSchema: z.object({
+      page_id: z.string().optional().describe('The ID or path of the documentation page to retrieve'),
+      page_title: z.string().optional().describe('Human-readable page title for search-based retrieval'),
+      section: z.string().optional().describe('Specific section or heading to retrieve'),
+      include_metadata: z.boolean().optional().describe('Include page metadata. Default true.'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'page_not_found'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  propose_doc_update: {
+    actionType: 'propose_doc_update',
+    description: 'Propose a specific change to an existing documentation page. Review-gated — requires human approval before write_docs is invoked.',
+    actionCategory: 'worker',
+    topics: ['knowledge'],
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['page_title', 'current_content', 'proposed_changes', 'change_type', 'reasoning'],
+    parameterSchema: z.object({
+      page_id: z.string().optional().describe('The ID of the documentation page to update'),
+      page_title: z.string().describe('Human-readable page title'),
+      current_content: z.string().describe('Current page content from read_docs'),
+      proposed_changes: z.array(z.object({
+        section: z.string(),
+        current_text: z.string(),
+        proposed_text: z.string(),
+        change_reason: z.string(),
+      })).describe('List of specific changes'),
+      change_type: z.enum(['correction', 'update', 'addition', 'removal', 'restructure']).describe('The type of change'),
+      reasoning: z.string().describe('Why this update is needed — shown to the reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  write_docs: {
+    actionType: 'write_docs',
+    description: 'Apply an approved documentation update to the connected documentation system. Review-gated — requires human approval before any content is written.',
+    actionCategory: 'api',
+    topics: ['knowledge'],
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['page_title', 'full_updated_content', 'change_summary', 'reasoning'],
+    parameterSchema: z.object({
+      page_id: z.string().optional().describe('The ID of the documentation page to update'),
+      page_title: z.string().describe('Human-readable page title'),
+      full_updated_content: z.string().describe('The complete updated page content'),
+      change_summary: z.string().describe('Brief summary of what changed'),
+      source_proposal_id: z.string().optional().describe('ID of the approved propose_doc_update action'),
+      reasoning: z.string().describe('Why this update is being applied — shown to the reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
 };
 
 /** Check if an action type is known */
