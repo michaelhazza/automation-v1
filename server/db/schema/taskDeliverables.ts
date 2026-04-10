@@ -26,7 +26,6 @@ export const taskDeliverables = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
-    orgIdx: index('task_deliverables_org_idx').on(table.organisationId),
     taskIdx: index('task_deliverables_task_idx').on(table.taskId).where(sql`${table.deletedAt} IS NULL`),
   })
 );

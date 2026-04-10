@@ -26,7 +26,6 @@ export const taskActivities = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    orgIdx: index('task_activities_org_idx').on(table.organisationId),
     taskIdx: index('task_activities_task_idx').on(table.taskId),
     taskCreatedIdx: index('task_activities_task_created_idx').on(table.taskId, table.createdAt),
     agentIdx: index('task_activities_agent_idx').on(table.agentId),

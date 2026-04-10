@@ -255,7 +255,7 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
       task_id: z.string().describe('The ID of the task to attach the deliverable to'),
       title: z.string().describe('Title of the deliverable'),
       content: z.string().describe('Content of the deliverable (text, markdown, or JSON)'),
-      deliverable_type: z.enum(['document', 'code', 'report', 'screenshot', 'other']).optional().describe('Type of deliverable'),
+      deliverable_type: z.enum(['file', 'url', 'artifact']).optional().describe('Type of deliverable'),
     }),
     retryPolicy: {
       maxRetries: 2,
@@ -1062,11 +1062,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   pause_campaign: {
     actionType: 'pause_campaign',
-    description: 'Propose pausing a campaign on the connected ads platform. Block-gated — ALWAYS requires explicit human approval. Never auto-executes.',
+    description: 'Propose pausing a campaign on the connected ads platform. Review-gated — requires human approval before execution.',
     actionCategory: 'api',
     topics: ['ads'],
     isExternal: true,
-    defaultGateLevel: 'block',
+    defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_id', 'campaign_name', 'pause_reason', 'performance_evidence', 'reasoning'],
     parameterSchema: z.object({
@@ -1089,11 +1089,11 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
 
   increase_budget: {
     actionType: 'increase_budget',
-    description: 'Propose a budget increase for a high-performing campaign. Block-gated — ALWAYS requires explicit human approval. Never auto-executes.',
+    description: 'Propose a budget increase for a high-performing campaign. Review-gated — requires human approval before execution.',
     actionCategory: 'api',
     topics: ['ads'],
     isExternal: true,
-    defaultGateLevel: 'block',
+    defaultGateLevel: 'review',
     createsBoardTask: false,
     payloadFields: ['platform', 'campaign_id', 'campaign_name', 'current_daily_budget', 'proposed_daily_budget', 'change_percentage', 'performance_evidence', 'reasoning'],
     parameterSchema: z.object({
@@ -1225,8 +1225,8 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'read_only',
   },
 
-  update_record: {
-    actionType: 'update_record',
+  update_financial_record: {
+    actionType: 'update_financial_record',
     description: 'Write a financial record update to the connected accounting system. Review-gated — requires human approval before execution.',
     actionCategory: 'api',
     topics: ['finance'],
@@ -1452,6 +1452,50 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Methodology skills (pure prompt scaffolds, no side effects) ──────────
+  // These entries enable the isMethodology fast-path in the preTool middleware,
+  // which bypasses full action proposal and writes a lightweight audit row.
+
+  ...Object.fromEntries(([
+    ['draft_architecture_plan', 'Produce a structured architecture plan for a feature or subsystem.', ['dev']],
+    ['draft_tech_spec', 'Produce a structured technical specification for a feature.', ['dev']],
+    ['review_ux', 'Review a UI flow for usability issues and produce recommendations.', ['dev']],
+    ['review_code', 'Review code for bugs, quality issues, and adherence to conventions.', ['dev']],
+    ['write_tests', 'Generate test cases and test code for a given implementation.', ['dev']],
+    ['draft_requirements', 'Draft structured requirements from a feature description.', ['dev']],
+    ['derive_test_cases', 'Derive test cases from a requirements specification.', ['dev']],
+    ['classify_email', 'Classify an inbound email by intent, urgency, and routing action.', ['support']],
+    ['draft_reply', 'Draft a reply to a classified inbound email.', ['support']],
+    ['draft_post', 'Draft social media post variants for one or more platforms.', ['social']],
+    ['analyse_performance', 'Analyse ads campaign performance and produce ranked recommendations.', ['ads']],
+    ['draft_ad_copy', 'Draft ad copy variants for a given campaign and platform.', ['ads']],
+    ['draft_sequence', 'Draft a multi-step email outreach sequence.', ['email']],
+    ['analyse_financials', 'Analyse revenue and expense data to produce a financial summary.', ['finance']],
+    ['generate_competitor_brief', 'Research and produce a structured competitor intelligence brief.', ['strategy']],
+    ['synthesise_voc', 'Synthesise voice-of-customer themes from collected feedback.', ['strategy']],
+    ['draft_content', 'Draft long-form content (blog post, landing page, guide).', ['content']],
+    ['audit_seo', 'Audit a page for on-page SEO issues and produce prioritised recommendations.', ['content']],
+    ['draft_report', 'Draft a structured client-facing report from data sections.', ['reporting']],
+    ['analyse_pipeline', 'Analyse CRM pipeline data for velocity, conversion, and stale deals.', ['crm']],
+    ['draft_followup', 'Draft a follow-up email for a CRM deal or contact.', ['crm']],
+    ['detect_churn_risk', 'Score accounts for churn risk based on engagement and commercial signals.', ['crm']],
+    ['analyse_42macro_transcript', 'Analyse a 42 Macro transcript into a structured research report.', ['analysis']],
+  ] as [string, string, string[]][]).map(([name, desc, topics]) => [name, {
+    actionType: name,
+    description: desc,
+    actionCategory: 'worker' as const,
+    topics,
+    isExternal: false,
+    isMethodology: true,
+    defaultGateLevel: 'auto' as const,
+    createsBoardTask: false,
+    payloadFields: [],
+    parameterSchema: z.object({}),
+    retryPolicy: { maxRetries: 0, strategy: 'none' as const, retryOn: [] as string[], doNotRetryOn: [] as string[] },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only' as const,
+  }])),
 };
 
 /** Check if an action type is known */
@@ -1464,7 +1508,8 @@ export function getActionDefinition(actionType: string): ActionDefinition | unde
  * Re-exports from the dependency-free universalSkills.ts so callers
  * that already import from actionRegistry don't need to change.
  */
-export { UNIVERSAL_SKILL_NAMES } from './universalSkills.js';
+import { UNIVERSAL_SKILL_NAMES } from './universalSkills.js';
+export { UNIVERSAL_SKILL_NAMES };
 export function getUniversalSkillNames(): string[] {
   return [...UNIVERSAL_SKILL_NAMES];
 }

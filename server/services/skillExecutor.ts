@@ -51,7 +51,7 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'pause_campaign': return executeAdsActionApproved('pause_campaign', payload, context);
     case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
     case 'update_crm': return executeCrmUpdateApproved(payload, context);
-    case 'update_record': return executeFinancialRecordUpdateApproved(payload, context);
+    case 'update_financial_record': return executeFinancialRecordUpdateApproved(payload, context);
     case 'create_lead_magnet': return executeLeadMagnetApproved(payload, context);
     case 'deliver_report': return executeDeliverReportApproved(payload, context);
     case 'configure_integration': return executeConfigureIntegrationApproved(payload, context);
@@ -593,6 +593,7 @@ export const skillExecutor = {
         const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
         return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           query: searchQuery,
           intent_category: searchCategory ?? null,
           results: [],
@@ -624,11 +625,12 @@ export const skillExecutor = {
         const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
         const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
         // Validate date range
-        if (dateFrom && dateTo && dateFrom > dateTo) {
+        if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
           return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
         }
         return executeWithActionAudit('read_analytics', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           platforms: analyticsplatforms,
           date_from: dateFrom,
           date_to: dateTo,
@@ -644,11 +646,12 @@ export const skillExecutor = {
         const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
         const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
         const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        if (adsDateFrom && adsDateTo && adsDateFrom > adsDateTo) {
+        if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
           return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
         }
         return executeWithActionAudit('read_campaigns', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           platform: adsPlatform,
           date_from: adsDateFrom,
           date_to: adsDateTo,
@@ -703,6 +706,7 @@ export const skillExecutor = {
         const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
         return executeWithActionAudit('enrich_contact', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           contact: enrichEmail,
           matched: false,
           fields: {},
@@ -731,11 +735,12 @@ export const skillExecutor = {
       case 'read_revenue': {
         const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
         const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        if (revDateFrom && revDateTo && revDateFrom > revDateTo) {
+        if (revDateFrom && revDateTo && new Date(revDateFrom) > new Date(revDateTo)) {
           return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
         }
         return executeWithActionAudit('read_revenue', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           date_from: revDateFrom,
           date_to: revDateTo,
           total_revenue: null,
@@ -746,11 +751,12 @@ export const skillExecutor = {
       case 'read_expenses': {
         const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
         const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        if (expDateFrom && expDateTo && expDateFrom > expDateTo) {
+        if (expDateFrom && expDateTo && new Date(expDateFrom) > new Date(expDateTo)) {
           return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
         }
         return executeWithActionAudit('read_expenses', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           date_from: expDateFrom,
           date_to: expDateTo,
           total_expenses: null,
@@ -774,8 +780,8 @@ export const skillExecutor = {
           guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
         });
 
-      case 'update_record':
-        return proposeReviewGatedAction('update_record', input, context);
+      case 'update_financial_record':
+        return proposeReviewGatedAction('update_financial_record', input, context);
 
       // ── Strategic Intelligence Agent skills ──────────────────────────────
 
@@ -886,6 +892,7 @@ export const skillExecutor = {
         const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
         return executeWithActionAudit('read_crm', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           query_type: crmQueryType,
           records: [],
           message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
@@ -940,6 +947,7 @@ export const skillExecutor = {
         const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
         return executeWithActionAudit('read_docs', input, context, async () => ({
           status: 'stub',
+          dataAvailability: 'stub' as const,
           page_id: docPageId,
           page_title: docPageTitle,
           content: null,
@@ -1067,7 +1075,7 @@ export const skillExecutor = {
         return executeAskClarifyingQuestion(input, {
           runId: context.runId,
           organisationId: context.organisationId,
-          subaccountId: context.subaccountId,
+          subaccountId: context.subaccountId ?? undefined,
         });
       }
 
@@ -1739,7 +1747,7 @@ async function executeCrmUpdateApproved(
 }
 
 // ---------------------------------------------------------------------------
-// executeFinancialRecordUpdateApproved — MVP stub for update_record.
+// executeFinancialRecordUpdateApproved — MVP stub for update_financial_record.
 // ---------------------------------------------------------------------------
 
 async function executeFinancialRecordUpdateApproved(
@@ -1859,6 +1867,23 @@ async function executeDeliverReportApproved(
 // executeConfigureIntegrationApproved — MVP stub for configure_integration.
 // ---------------------------------------------------------------------------
 
+/** Redact fields whose keys match common credential patterns before storage. */
+const SENSITIVE_KEY_PATTERN = /(^|_)(key|secret|token|password|credential|auth|bearer)|api_key|client_secret|access_token|refresh_token/i;
+
+function redactSensitiveFields(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) {
+      result[key] = '[REDACTED]';
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      result[key] = redactSensitiveFields(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 async function executeConfigureIntegrationApproved(
   payload: Record<string, unknown>,
   context: SkillExecutionContext
@@ -1866,15 +1891,19 @@ async function executeConfigureIntegrationApproved(
   const integrationType = String(payload.integration_type ?? '');
   const providerName = String(payload.provider_name ?? '');
   const reasoning = String(payload.reasoning ?? '');
+  const configuration = (payload.configuration as Record<string, unknown>) ?? {};
 
   if (!integrationType) return { success: false, error: 'integration_type is required' };
   if (!providerName) return { success: false, error: 'provider_name is required' };
+
+  // Redact sensitive fields before any storage
+  const redactedConfig = redactSensitiveFields(configuration);
 
   if (context.taskId) {
     try {
       await taskService.addActivity(context.taskId, context.organisationId, {
         activityType: 'note',
-        message: `INTEGRATION_APPROVED:${integrationType}:${providerName}\nreasoning: ${reasoning}\n[credentials redacted]`,
+        message: `INTEGRATION_APPROVED:${integrationType}:${providerName}\nreasoning: ${reasoning}\nconfig: ${JSON.stringify(redactedConfig)}`,
         agentId: context.agentId,
       });
     } catch { /* non-fatal */ }
@@ -1884,6 +1913,7 @@ async function executeConfigureIntegrationApproved(
     success: true,
     integration_type: integrationType,
     provider_name: providerName,
+    configuration: redactedConfig,
     status: 'pending_integration',
     message: `Integration configuration approved (${integrationType}: ${providerName}). Integration storage not yet connected — configuration logged with credentials redacted.`,
   };

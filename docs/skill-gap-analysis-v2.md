@@ -448,7 +448,7 @@ The verbatim phrases output is the primary value for downstream agents. Authenti
 | `analyse_financials` | **MISSING** | auto |
 | `read_workspace` | EXISTS | auto |
 | `write_workspace` | EXISTS | auto |
-| `update_record` | **MISSING** | review |
+| `update_financial_record` | **MISSING** | review |
 | `create_task` | EXISTS | auto |
 | `update_memory_block` | EXISTS -- NOT ASSIGNED | auto |
 
@@ -486,7 +486,7 @@ Internal reasoning skill. Takes `read_revenue` and `read_expenses` outputs and p
 
 Key design principle: anomaly detection thresholds must be configurable via workspace memory, not hardcoded. An agency's definition of "unusual charge" depends on their scale and cost structure. The skill reads threshold configuration from a memory block before running its analysis, and flags any expense that deviates beyond the configured threshold.
 
-#### `update_record` (review gate)
+#### `update_financial_record` (review gate)
 
 Proposes corrections to miscategorised expenses. The review item must include:
 
@@ -910,7 +910,7 @@ Skills should be specced in phase order, and within each phase: integration adap
 | 5 | `draft_post`, `publish_post` (merged), `read_analytics` | Phase 3 Social Media agent |
 | 6 | All 7 Ads Management skills | Phase 3 -- most complex single-agent set |
 | 7 | `enrich_contact`, `draft_sequence`, `update_crm` | Phase 3 Email Outreach |
-| 8 | `read_revenue`, `read_expenses`, `analyse_financials`, `update_record` | Phase 4 Finance |
+| 8 | `read_revenue`, `read_expenses`, `analyse_financials`, `update_financial_record` | Phase 4 Finance |
 | 9 | `generate_competitor_brief`, `synthesise_voc` | Phase 4 Strategic Intelligence -- write before Content/SEO agent because their output feeds `draft_content` and `draft_ad_copy` |
 | 10 | `draft_content`, `audit_seo`, `create_lead_magnet`, resolve publish_content question | Phase 4 Content/SEO -- spec `draft_content` after Agent 9 skills are defined so the VOC memory block schema is known |
 | 11 | `draft_report`, `deliver_report` | Phase 5 Client Reporting |
@@ -928,7 +928,7 @@ Of the 41 new skills (up from 36 in v1.0), approximately 14 are integration adap
 
 - `read_campaigns`, `update_bid`, `update_copy`, `pause_campaign`, `increase_budget` (ads platforms)
 - `read_analytics`, `publish_post` (social platforms)
-- `read_revenue`, `read_expenses`, `update_record` (payment / accounting platforms)
+- `read_revenue`, `read_expenses`, `update_financial_record` (payment / accounting platforms)
 - `enrich_contact` (contact enrichment platforms)
 - `read_crm`, `update_crm` (CRM platforms)
 - `configure_integration` (integration management)

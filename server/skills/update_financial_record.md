@@ -1,5 +1,5 @@
 ---
-name: Update Record
+name: Update Financial Record
 description: Writes a financial record update (budget entry, forecast adjustment, or note) to the connected accounting system. Review-gated — requires human approval before execution.
 isActive: true
 visibility: none
@@ -7,7 +7,7 @@ visibility: none
 
 ```json
 {
-  "name": "update_record",
+  "name": "update_financial_record",
   "description": "Write a financial record update to the connected accounting system — budget entries, forecast adjustments, or annotating existing records. This is a review-gated action — it enters the approval queue and does NOT execute immediately. A human must approve before any financial data is written.",
   "input_schema": {
     "type": "object",

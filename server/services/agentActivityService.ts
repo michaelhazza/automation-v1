@@ -1,6 +1,6 @@
-import { eq, and, desc, gte, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, gte, sql, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentRuns, agents, subaccounts, taskActivities } from '../db/schema/index.js';
+import { agentRuns, agents, subaccounts, tasks, taskActivities } from '../db/schema/index.js';
 
 const MAX_CHAIN_NODES = 50;
 
@@ -139,15 +139,28 @@ export const agentActivityService = {
   }) {
     const limit = Math.min(params.limit ?? 30, 100);
 
-    // Get activities that were created by agents, scoped to org
-    return db
+    const conditions: ReturnType<typeof eq>[] = [
+      eq(taskActivities.organisationId, params.organisationId),
+      isNotNull(taskActivities.agentId),
+      isNull(tasks.deletedAt),
+    ];
+
+    // Scope to subaccount via the tasks table when requested
+    const query = db
       .select({
         activity: taskActivities,
         agentName: agents.name,
       })
       .from(taskActivities)
-      .innerJoin(agents, eq(agents.id, taskActivities.agentId))
-      .where(eq(taskActivities.organisationId, params.organisationId))
+      .leftJoin(agents, eq(agents.id, taskActivities.agentId))
+      .innerJoin(tasks, eq(tasks.id, taskActivities.taskId));
+
+    if (params.subaccountId) {
+      conditions.push(eq(tasks.subaccountId, params.subaccountId));
+    }
+
+    return query
+      .where(and(...conditions))
       .orderBy(desc(taskActivities.createdAt))
       .limit(limit);
   },
@@ -197,6 +210,11 @@ export const agentActivityService = {
     const rootRunId = chainIds[0] ?? runId;
 
     // Walk DOWN: get all descendants of runs in the chain
+    // Guard: if chainIds is empty, skip the query entirely
+    if (chainIds.length === 0) {
+      return { runs: [], metadata: { rootRunId: runId, totalNodes: 0, isComplete: !truncated, truncated, truncationReason } };
+    }
+
     const descendantRows = await db
       .select({
         run: agentRuns,
