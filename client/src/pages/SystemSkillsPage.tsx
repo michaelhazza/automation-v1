@@ -71,7 +71,7 @@ export default function SystemSkillsPage({ user }: { user: User }) {
     <>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Skills</h1>
+          <h1 className="text-[28px] font-bold text-slate-800 m-0">System Skills <span className="text-[16px] font-normal text-slate-400">({skills.length})</span></h1>
           <p className="text-slate-500 mt-2 mb-0 text-[14px]">
             Platform-level skills that handle task board interactions and core agent capabilities. These are automatically attached to system agents and hidden from organisation admins.
           </p>
