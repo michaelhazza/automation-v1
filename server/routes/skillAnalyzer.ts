@@ -70,9 +70,9 @@ router.post(
       };
     } else if (sourceType === 'download') {
       const url = req.body.url as string;
-      if (!url || !/^https?:\/\/.+/.test(url)) {
+      if (!url || !/^https:\/\/.+/.test(url)) {
         return res.status(400).json({
-          error: 'Invalid download URL. Must be a valid HTTP or HTTPS URL.',
+          error: 'Invalid download URL. Must be a valid HTTPS URL.',
         });
       }
       rawInput = url;

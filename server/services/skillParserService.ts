@@ -261,8 +261,12 @@ function toDirectDownloadUrl(url: string): string {
 
 /** Check if an IP address is in a private, loopback, or link-local range. */
 function isPrivateIp(ip: string): boolean {
+  // Handle IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  const normalizedIp = mapped ? mapped[1] : ip;
+
   // IPv4
-  const v4Parts = ip.split('.').map(Number);
+  const v4Parts = normalizedIp.split('.').map(Number);
   if (v4Parts.length === 4 && v4Parts.every((n) => n >= 0 && n <= 255)) {
     if (v4Parts[0] === 127) return true;                                    // 127.0.0.0/8
     if (v4Parts[0] === 10) return true;                                     // 10.0.0.0/8
@@ -273,7 +277,7 @@ function isPrivateIp(ip: string): boolean {
   }
 
   // IPv6
-  const lower = ip.toLowerCase();
+  const lower = normalizedIp.toLowerCase();
   if (lower === '::1') return true;                                         // loopback
   if (lower.startsWith('fc') || lower.startsWith('fd')) return true;        // fc00::/7 (unique local)
   if (lower.startsWith('fe80')) return true;                                // fe80::/10 (link-local)
@@ -320,7 +324,7 @@ function detectFileType(
   url: string,
   contentType: string | null,
   buffer: Buffer
-): 'zip' | 'md' | 'json' | 'unknown' {
+): 'zip' | 'md' | 'json' {
   // Check URL extension first
   const urlPath = new URL(url).pathname.toLowerCase();
   if (urlPath.endsWith('.zip')) return 'zip';
@@ -357,27 +361,93 @@ function detectFileType(
   return 'md'; // default to markdown
 }
 
+const MAX_REDIRECTS = 5;
+
+/** Fetch a URL following redirects manually, validating each hop against SSRF. */
+async function safeFetch(url: string): Promise<Response> {
+  let currentUrl = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicUrl(currentUrl);
+
+    const response = await fetch(currentUrl, {
+      headers: { 'User-Agent': 'automation-v1/skill-analyzer' },
+      redirect: 'manual',
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw { statusCode: 502, message: `Redirect with no Location header at hop ${hop + 1}.` };
+      }
+      // Resolve relative redirect URLs
+      currentUrl = new URL(location, currentUrl).toString();
+
+      // Require HTTPS on redirect targets
+      if (!currentUrl.startsWith('https://')) {
+        throw { statusCode: 400, message: 'Redirect target must use HTTPS.' };
+      }
+      continue;
+    }
+
+    if (!response.ok) {
+      throw Object.assign(
+        new Error(`Download failed (${response.status}): ${(await response.text()).slice(0, 200)}`),
+        { statusCode: response.status >= 500 ? 502 : 400 }
+      );
+    }
+
+    return response;
+  }
+
+  throw { statusCode: 400, message: `Too many redirects (>${MAX_REDIRECTS}).` };
+}
+
+/** Read a response body with a streaming size limit to prevent memory exhaustion. */
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
+  // Fast pre-check via Content-Length (not trusted for enforcement, but avoids wasted work)
+  const contentLength = parseInt(response.headers.get('content-length') || '', 10);
+  if (contentLength > maxBytes) {
+    throw { statusCode: 400, message: `File too large (${Math.round(contentLength / (1024 * 1024))} MB). Maximum is ${maxBytes / (1024 * 1024)} MB.` };
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw { statusCode: 502, message: 'Response has no readable body.' };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        throw { statusCode: 400, message: `Downloaded file exceeds ${maxBytes / (1024 * 1024)} MB limit.` };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks);
+}
+
 /** Download and parse skills from an arbitrary HTTP(S) URL. */
 async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
   const directUrl = toDirectDownloadUrl(url);
 
-  // SSRF protection: verify the URL resolves to a public IP before fetching
-  await assertPublicUrl(directUrl);
+  // Require HTTPS
+  if (!directUrl.startsWith('https://')) {
+    throw { statusCode: 400, message: 'Download URL must use HTTPS.' };
+  }
 
   const response = await withBackoff(
-    () =>
-      fetch(directUrl, {
-        headers: { 'User-Agent': 'automation-v1/skill-analyzer' },
-        redirect: 'follow',
-      }).then(async (res) => {
-        if (!res.ok) {
-          throw Object.assign(
-            new Error(`Download failed (${res.status}): ${(await res.text()).slice(0, 200)}`),
-            { statusCode: res.status >= 500 ? 502 : 400 }
-          );
-        }
-        return res;
-      }),
+    () => safeFetch(directUrl),
     {
       label: 'download-url-fetch',
       maxAttempts: 3,
@@ -390,12 +460,7 @@ async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
     }
   );
 
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  if (buffer.length > MAX_DOWNLOAD_BYTES) {
-    throw { statusCode: 400, message: `Downloaded file exceeds ${MAX_DOWNLOAD_BYTES / (1024 * 1024)} MB limit.` };
-  }
+  const buffer = await readBodyWithLimit(response, MAX_DOWNLOAD_BYTES);
 
   const contentType = response.headers.get('content-type');
   const fileType = detectFileType(directUrl, contentType, buffer);

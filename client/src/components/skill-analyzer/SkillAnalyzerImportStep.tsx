@@ -79,8 +79,8 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
         jobId = res.data.id;
         jobData = res.data;
       } else if (tab === 'download') {
-        if (!/^https?:\/\/.+/.test(downloadUrl.trim())) {
-          setError('Please enter a valid HTTP or HTTPS URL.');
+        if (!/^https:\/\/.+/.test(downloadUrl.trim())) {
+          setError('Please enter a valid HTTPS URL.');
           return;
         }
         const res = await api.post('/api/system/skill-analyser/jobs', {
@@ -115,7 +115,7 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
     (tab === 'paste' && pasteText.trim().length >= 10) ||
     (tab === 'upload' && files.length > 0) ||
     (tab === 'github' && /^https:\/\/github\.com\/[^/]+\/[^/]+/.test(githubUrl.trim())) ||
-    (tab === 'download' && /^https?:\/\/.+/.test(downloadUrl.trim()));
+    (tab === 'download' && /^https:\/\/.+/.test(downloadUrl.trim()));
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6">
@@ -232,7 +232,7 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
             type="url"
             value={downloadUrl}
             onChange={(e) => setDownloadUrl(e.target.value)}
-            placeholder="https://example.com/skills.zip"
+            placeholder="https://drive.google.com/file/d/.../view"
             className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-slate-700 placeholder:text-slate-300"
           />
           <p className="text-xs text-slate-400 mt-1">
