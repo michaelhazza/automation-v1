@@ -1170,6 +1170,87 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Finance Agent — auto-gated stubs + review-gated ─────────────────────
+
+  read_revenue: {
+    actionType: 'read_revenue',
+    description: 'Retrieve revenue data from the connected accounting or billing system for a specified period.',
+    actionCategory: 'api',
+    topics: ['finance'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['date_from', 'date_to', 'breakdown_by', 'include_comparison', 'currency'],
+    parameterSchema: z.object({
+      date_from: z.string().describe('Start date in ISO 8601 format (YYYY-MM-DD)'),
+      date_to: z.string().optional().describe('End date in ISO 8601 format. Defaults to today.'),
+      breakdown_by: z.enum(['product', 'customer', 'channel', 'geography', 'none']).optional().describe('Revenue breakdown dimension'),
+      include_comparison: z.boolean().optional().describe('Include period-over-period comparison'),
+      currency: z.string().optional().describe('ISO 4217 currency code'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  read_expenses: {
+    actionType: 'read_expenses',
+    description: 'Retrieve expense data from the connected accounting system for a specified period.',
+    actionCategory: 'api',
+    topics: ['finance'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['date_from', 'date_to', 'categories', 'include_comparison', 'currency'],
+    parameterSchema: z.object({
+      date_from: z.string().describe('Start date in ISO 8601 format (YYYY-MM-DD)'),
+      date_to: z.string().optional().describe('End date in ISO 8601 format. Defaults to today.'),
+      categories: z.array(z.string()).optional().describe('Expense categories to filter by'),
+      include_comparison: z.boolean().optional().describe('Include period-over-period comparison'),
+      currency: z.string().optional().describe('ISO 4217 currency code'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  update_record: {
+    actionType: 'update_record',
+    description: 'Write a financial record update to the connected accounting system. Review-gated — requires human approval before execution.',
+    actionCategory: 'api',
+    topics: ['finance'],
+    isExternal: false,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['record_type', 'record_description', 'updates', 'period', 'reasoning'],
+    parameterSchema: z.object({
+      record_type: z.enum(['budget_entry', 'forecast_adjustment', 'expense_note', 'revenue_note']).describe('Type of financial record to update'),
+      record_id: z.string().optional().describe('ID of the record to update in the accounting system'),
+      record_description: z.string().describe('Human-readable description of what is being updated'),
+      updates: z.record(z.unknown()).describe('Fields to write: amounts, notes, dates, category assignments'),
+      period: z.string().optional().describe('The financial period this update applies to'),
+      reasoning: z.string().describe('Why this record is being updated — shown to the reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'keyed_write',
+  },
 };
 
 /** Check if an action type is known */

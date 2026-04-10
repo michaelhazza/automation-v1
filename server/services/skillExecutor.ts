@@ -51,6 +51,7 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'pause_campaign': return executeAdsActionApproved('pause_campaign', payload, context);
     case 'increase_budget': return executeAdsActionApproved('increase_budget', payload, context);
     case 'update_crm': return executeCrmUpdateApproved(payload, context);
+    case 'update_record': return executeFinancialRecordUpdateApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -719,6 +720,96 @@ export const skillExecutor = {
 
       case 'update_crm':
         return proposeReviewGatedAction('update_crm', input, context);
+
+      // ── Finance Agent skills ─────────────────────────────────────────────
+
+      case 'read_revenue': {
+        const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        if (revDateFrom && revDateTo && revDateFrom > revDateTo) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_revenue', input, context, async () => ({
+          status: 'stub',
+          date_from: revDateFrom,
+          date_to: revDateTo,
+          total_revenue: null,
+          message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
+        }));
+      }
+
+      case 'read_expenses': {
+        const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        if (expDateFrom && expDateTo && expDateFrom > expDateTo) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_expenses', input, context, async () => ({
+          status: 'stub',
+          date_from: expDateFrom,
+          date_to: expDateTo,
+          total_expenses: null,
+          message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
+        }));
+      }
+
+      case 'analyse_financials':
+        return executeMethodologySkill('analyse_financials', input, {
+          template: {
+            period: '',
+            dataQuality: '',
+            executiveSummary: '',
+            keyMetrics: {},
+            revenueAnalysis: '',
+            expenseAnalysis: '',
+            anomalies: [],
+            recommendations: [],
+            caveats: [],
+          },
+          guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
+        });
+
+      case 'update_record':
+        return proposeReviewGatedAction('update_record', input, context);
+
+      // ── Strategic Intelligence Agent skills ──────────────────────────────
+
+      case 'generate_competitor_brief':
+        return executeMethodologySkill('generate_competitor_brief', input, {
+          template: {
+            competitor: '',
+            researchDate: '',
+            executiveSummary: '',
+            productAndPricing: {},
+            recentDevelopments: [],
+            strengths: [],
+            weaknesses: [],
+            competitiveImplications: '',
+            sources: [],
+            gaps: [],
+          },
+          guidance: 'Follow the generate_competitor_brief methodology in your skill context. Use web_search to retrieve current competitor pricing, product info, and recent news. Do not rely on training data for facts that change frequently. Mark unverifiable claims with [VERIFY].',
+        });
+
+      case 'synthesise_voc':
+        return executeMethodologySkill('synthesise_voc', input, {
+          template: {
+            sources: [],
+            period: '',
+            dataPoints: 0,
+            executiveSummary: '',
+            sentimentBreakdown: {},
+            topThemes: [],
+            topPraise: [],
+            topPainPoints: [],
+            featureRequests: [],
+            churnSignals: [],
+            focusQuestionAnswers: [],
+            strategicImplications: [],
+            dataCaveats: [],
+          },
+          guidance: 'Follow the synthesise_voc methodology in your skill context. Extract recurring themes from the VoC data, compute sentiment breakdown, and answer any focus questions explicitly. Do not fabricate quotes — paraphrase only from the actual voc_data input.',
+        });
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -1502,6 +1593,45 @@ async function executeCrmUpdateApproved(
     fields_updated: Object.keys(updates),
     status: 'pending_integration',
     message: `CRM update approved for ${recordType} ${recordIdentifier}. Integration not yet connected — action logged.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// executeFinancialRecordUpdateApproved — MVP stub for update_record.
+// ---------------------------------------------------------------------------
+
+async function executeFinancialRecordUpdateApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const recordType = String(payload.record_type ?? '');
+  const recordDescription = String(payload.record_description ?? '');
+  const updates = payload.updates as Record<string, unknown> ?? {};
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!recordType) return { success: false, error: 'record_type is required' };
+
+  if (context.taskId) {
+    try {
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: [
+          `FINANCIAL_RECORD_UPDATE_APPROVED:${recordType}`,
+          `description: ${recordDescription}`,
+          `fields: ${Object.keys(updates).join(', ')}`,
+          `reasoning: ${reasoning}`,
+        ].join('\n'),
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  return {
+    success: true,
+    record_type: recordType,
+    fields_written: Object.keys(updates),
+    status: 'pending_integration',
+    message: `Financial record update approved (${recordType}: ${recordDescription}). Accounting integration not yet connected — action logged.`,
   };
 }
 
