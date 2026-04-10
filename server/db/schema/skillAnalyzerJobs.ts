@@ -28,7 +28,7 @@ export const skillAnalyzerJobs = pgTable(
     // Source metadata
     sourceType: text('source_type')
       .notNull()
-      .$type<'paste' | 'upload' | 'github'>(),
+      .$type<'paste' | 'upload' | 'github' | 'download'>(),
     sourceMetadata: jsonb('source_metadata').notNull().default({}),
     // paste:  { charCount: number }
     // upload: { fileName: string, fileType: string, fileSize: number }

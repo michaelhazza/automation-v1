@@ -19,7 +19,7 @@ export type SkillAnalyzerJobStatus =
 export async function createJob(params: {
   organisationId: string;
   userId: string;
-  sourceType: 'paste' | 'upload' | 'github';
+  sourceType: 'paste' | 'upload' | 'github' | 'download';
   sourceMetadata: Record<string, unknown>;
   rawInput: string | Express.Multer.File[];
 }): Promise<{ jobId: string }> {

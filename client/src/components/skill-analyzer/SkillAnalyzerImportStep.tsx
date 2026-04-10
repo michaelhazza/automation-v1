@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import api from '../../lib/api';
 import type { AnalysisJob } from './SkillAnalyzerWizard';
 
-type Tab = 'paste' | 'upload' | 'github';
+type Tab = 'paste' | 'upload' | 'github' | 'download';
 
 interface Props {
   onJobCreated: (jobId: string, job: AnalysisJob) => void;
@@ -12,13 +12,14 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
   const [tab, setTab] = useState<Tab>('paste');
   const [pasteText, setPasteText] = useState('');
   const [githubUrl, setGithubUrl] = useState('');
+  const [downloadUrl, setDownloadUrl] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const TABS: Tab[] = ['paste', 'upload', 'github'];
-  const tabLabels: Record<Tab, string> = { paste: 'Paste', upload: 'Upload', github: 'GitHub URL' };
+  const TABS: Tab[] = ['paste', 'upload', 'github', 'download'];
+  const tabLabels: Record<Tab, string> = { paste: 'Paste', upload: 'Upload', github: 'GitHub URL', download: 'Download URL' };
 
   function handleFileDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -77,6 +78,17 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
         });
         jobId = res.data.id;
         jobData = res.data;
+      } else if (tab === 'download') {
+        if (!/^https?:\/\/.+/.test(downloadUrl.trim())) {
+          setError('Please enter a valid HTTP or HTTPS URL.');
+          return;
+        }
+        const res = await api.post('/api/system/skill-analyser/jobs', {
+          sourceType: 'download',
+          url: downloadUrl.trim(),
+        });
+        jobId = res.data.id;
+        jobData = res.data;
       } else {
         if (!/^https:\/\/github\.com\/[^/]+\/[^/]+/.test(githubUrl.trim())) {
           setError('Please enter a valid GitHub URL (https://github.com/{owner}/{repo}).');
@@ -102,7 +114,8 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
   const canSubmit =
     (tab === 'paste' && pasteText.trim().length >= 10) ||
     (tab === 'upload' && files.length > 0) ||
-    (tab === 'github' && /^https:\/\/github\.com\/[^/]+\/[^/]+/.test(githubUrl.trim()));
+    (tab === 'github' && /^https:\/\/github\.com\/[^/]+\/[^/]+/.test(githubUrl.trim())) ||
+    (tab === 'download' && /^https?:\/\/.+/.test(downloadUrl.trim()));
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6">
@@ -204,6 +217,26 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
           />
           <p className="text-xs text-slate-400 mt-1">
             Example: <code>https://github.com/anthropics/claude-skills</code>
+          </p>
+        </div>
+      )}
+
+      {/* Download URL tab */}
+      {tab === 'download' && (
+        <div>
+          <p className="text-xs text-slate-500 mb-2">
+            Enter a URL to a skill file (<code>.md</code>, <code>.json</code>) or a <code>.zip</code> archive.
+            Supports Google Drive, Dropbox, OneDrive, Box sharing links, or any direct HTTP link.
+          </p>
+          <input
+            type="url"
+            value={downloadUrl}
+            onChange={(e) => setDownloadUrl(e.target.value)}
+            placeholder="https://example.com/skills.zip"
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-slate-700 placeholder:text-slate-300"
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Sharing links from Google Drive, Dropbox, OneDrive, and Box are automatically converted to direct downloads.
           </p>
         </div>
       )}

@@ -77,6 +77,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     } else if (job.sourceType === 'github') {
       const githubMeta = job.sourceMetadata as { url: string };
       candidates = await skillParserService.parseFromGitHub(githubMeta.url);
+    } else if (job.sourceType === 'download') {
+      const downloadMeta = job.sourceMetadata as { url: string };
+      candidates = await skillParserService.parseFromDownloadUrl(downloadMeta.url);
     } else {
       candidates = [];
     }

@@ -199,8 +199,162 @@ async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
   return skills;
 }
 
+// ---------------------------------------------------------------------------
+// Download URL support — fetch a file from any HTTP(S) URL
+// Handles Google Drive, Dropbox, OneDrive sharing links, plus plain URLs.
+// ---------------------------------------------------------------------------
+
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
+
+/** Convert common cloud-sharing URLs to direct download links. */
+function toDirectDownloadUrl(url: string): string {
+  // Google Drive: https://drive.google.com/file/d/{id}/view  →  export download
+  const gdriveMatch = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (gdriveMatch) {
+    return `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+  }
+
+  // Dropbox: change dl=0 → dl=1, or append dl=1
+  if (url.includes('dropbox.com')) {
+    const u = new URL(url);
+    u.searchParams.set('dl', '1');
+    return u.toString();
+  }
+
+  // OneDrive/SharePoint: append download=1
+  if (url.includes('1drv.ms') || url.includes('sharepoint.com') || url.includes('onedrive.live.com')) {
+    const u = new URL(url);
+    u.searchParams.set('download', '1');
+    return u.toString();
+  }
+
+  // Box: https://app.box.com/s/{id} → https://app.box.com/shared/static/{id}
+  const boxMatch = url.match(/app\.box\.com\/s\/([a-zA-Z0-9]+)/);
+  if (boxMatch) {
+    return `https://app.box.com/shared/static/${boxMatch[1]}`;
+  }
+
+  // GitHub blob URLs → raw.githubusercontent.com
+  const ghBlobMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)/);
+  if (ghBlobMatch) {
+    return `https://raw.githubusercontent.com/${ghBlobMatch[1]}/${ghBlobMatch[2]}/${ghBlobMatch[3]}`;
+  }
+
+  return url;
+}
+
+/** Detect file type from URL path, Content-Type header, or content inspection. */
+function detectFileType(
+  url: string,
+  contentType: string | null,
+  buffer: Buffer
+): 'zip' | 'md' | 'json' | 'unknown' {
+  // Check URL extension first
+  const urlPath = new URL(url).pathname.toLowerCase();
+  if (urlPath.endsWith('.zip')) return 'zip';
+  if (urlPath.endsWith('.md')) return 'md';
+  if (urlPath.endsWith('.json')) return 'json';
+
+  // Check Content-Type header
+  if (contentType) {
+    const ct = contentType.toLowerCase();
+    if (ct.includes('zip') || ct.includes('octet-stream')) {
+      // Check ZIP magic bytes: PK\x03\x04
+      if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+        return 'zip';
+      }
+      if (ct.includes('zip')) return 'zip';
+    }
+    if (ct.includes('json')) return 'json';
+    if (ct.includes('markdown') || ct.includes('text/plain') || ct.includes('text/x-markdown')) {
+      // Heuristic: check if content looks like JSON
+      const text = buffer.toString('utf8', 0, Math.min(100, buffer.length)).trim();
+      if (text.startsWith('{') || text.startsWith('[')) return 'json';
+      return 'md';
+    }
+  }
+
+  // Magic bytes for ZIP
+  if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04) {
+    return 'zip';
+  }
+
+  // Content-based heuristic
+  const text = buffer.toString('utf8', 0, Math.min(200, buffer.length)).trim();
+  if (text.startsWith('{') || text.startsWith('[')) return 'json';
+  return 'md'; // default to markdown
+}
+
+/** Download and parse skills from an arbitrary HTTP(S) URL. */
+async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
+  const directUrl = toDirectDownloadUrl(url);
+
+  const response = await withBackoff(
+    () =>
+      fetch(directUrl, {
+        headers: { 'User-Agent': 'automation-v1/skill-analyzer' },
+        redirect: 'follow',
+      }).then(async (res) => {
+        if (!res.ok) {
+          throw Object.assign(
+            new Error(`Download failed (${res.status}): ${(await res.text()).slice(0, 200)}`),
+            { statusCode: res.status >= 500 ? 502 : 400 }
+          );
+        }
+        return res;
+      }),
+    {
+      label: 'download-url-fetch',
+      maxAttempts: 3,
+      correlationId: url,
+      runId: url,
+      isRetryable: (err: Error) => err.message.includes('502') || err.message.includes('503'),
+    }
+  );
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  if (buffer.length > MAX_DOWNLOAD_BYTES) {
+    throw { statusCode: 400, message: `Downloaded file exceeds ${MAX_DOWNLOAD_BYTES / (1024 * 1024)} MB limit.` };
+  }
+
+  const contentType = response.headers.get('content-type');
+  const fileType = detectFileType(directUrl, contentType, buffer);
+
+  if (fileType === 'zip') {
+    // Write to temp file and use existing zip parser
+    const tmpPath = path.join('data/uploads', `download-${Date.now()}.zip`);
+    await fs.mkdir(path.dirname(tmpPath), { recursive: true });
+    await fs.writeFile(tmpPath, buffer);
+    try {
+      return await parseZipFile(tmpPath);
+    } finally {
+      await fs.unlink(tmpPath).catch(() => {});
+    }
+  }
+
+  // Single file — derive a filename from the URL
+  const urlFilename = path.basename(new URL(directUrl).pathname) || 'downloaded-skill';
+  const content = buffer.toString('utf8');
+
+  if (fileType === 'json') {
+    const skill = parseJsonFile(urlFilename.endsWith('.json') ? urlFilename : `${urlFilename}.json`, content);
+    return skill ? [skill] : [];
+  }
+
+  // Markdown or unknown — try markdown parse, fall back to paste parse
+  const skill = parseMarkdownFile(urlFilename.endsWith('.md') ? urlFilename : `${urlFilename}.md`, content);
+  if (skill) return [skill];
+
+  // If single-file markdown parse didn't find a skill, try paste parse (handles multi-skill separator)
+  const pasteResults = parseFromText(content);
+  return pasteResults;
+}
+
 export const skillParserService = {
   parseUploadedFiles,
   parseFromGitHub,
+  parseFromDownloadUrl,
   parseFromPaste: parseFromText,
 };

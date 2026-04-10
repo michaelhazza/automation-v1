@@ -38,10 +38,10 @@ router.post(
     const userId = req.user!.id;
 
     // guard-ignore-next-line: input-validation reason="multipart/form-data route; multer parses fields, validateBody incompatible with file uploads"
-    const sourceType = req.body.sourceType as 'paste' | 'upload' | 'github';
+    const sourceType = req.body.sourceType as 'paste' | 'upload' | 'github' | 'download';
 
-    if (!['paste', 'upload', 'github'].includes(sourceType)) {
-      return res.status(400).json({ error: 'Invalid sourceType. Must be paste, upload, or github.' });
+    if (!['paste', 'upload', 'github', 'download'].includes(sourceType)) {
+      return res.status(400).json({ error: 'Invalid sourceType. Must be paste, upload, github, or download.' });
     }
 
     let rawInput: string | Express.Multer.File[];
@@ -68,6 +68,15 @@ router.post(
           mimeType: f.mimetype,
         })),
       };
+    } else if (sourceType === 'download') {
+      const url = req.body.url as string;
+      if (!url || !/^https?:\/\/.+/.test(url)) {
+        return res.status(400).json({
+          error: 'Invalid download URL. Must be a valid HTTP or HTTPS URL.',
+        });
+      }
+      rawInput = url;
+      sourceMetadata = { url };
     } else {
       // github
       const url = req.body.url as string;
