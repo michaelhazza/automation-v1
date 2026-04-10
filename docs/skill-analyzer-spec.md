@@ -272,6 +272,7 @@ CREATE INDEX skill_embeddings_source_idx
 - `source_type` distinguishes system skills (slug-identified), org skills (UUID-identified), and import candidates (`job:{jobId}:idx:{n}`)
 - The unique index on `content_hash` means identical content is never embedded twice
 - The `vector(1536)` column uses the same Drizzle `customType` pattern as `workspace_memories`
+- `source_type` and `source_identifier` are **debugging/provenance only**. Because the table upserts on `content_hash`, these columns reflect the last writer — if the same content exists as both a system skill and an org skill, whichever was stored last wins. Do not use these columns for source-filtered queries.
 
 ### Drizzle Schema Patterns
 
@@ -1011,7 +1012,7 @@ Contains:
 
 **Prerequisites:** pgvector extension already loaded (`db-init/01-extensions.sql`).
 
-**No RLS policies** for v1 — these tables are org-scoped via service-layer filtering, consistent with other non-tenant-data tables like `playbook_templates`.
+**No RLS policies** for v1 — these tables are org-scoped via service-layer filtering, consistent with other non-tenant-data tables like `playbook_templates`. Service-layer org-scoping via `organisationId` filtering is the sole tenant isolation mechanism for v1 — all `skillAnalyzerService` queries must include this filter.
 
 **New dependencies:**
 - `p-limit` — lightweight concurrency limiter for parallel LLM calls. Zero transitive dependencies.
