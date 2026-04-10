@@ -90,8 +90,8 @@ export const taskService = {
     if (!item) throw { statusCode: 404, message: 'Task not found' };
 
     const [activitiesRows, deliverablesRows] = await Promise.all([
-      db.select().from(taskActivities).where(eq(taskActivities.taskId, id)).orderBy(desc(taskActivities.createdAt)),
-      db.select().from(taskDeliverables).where(and(eq(taskDeliverables.taskId, id), isNull(taskDeliverables.deletedAt))).orderBy(desc(taskDeliverables.createdAt)),
+      db.select().from(taskActivities).where(and(eq(taskActivities.taskId, id), eq(taskActivities.organisationId, organisationId))).orderBy(desc(taskActivities.createdAt)),
+      db.select().from(taskDeliverables).where(and(eq(taskDeliverables.taskId, id), eq(taskDeliverables.organisationId, organisationId), isNull(taskDeliverables.deletedAt))).orderBy(desc(taskDeliverables.createdAt)),
     ]);
 
     const ids = (item.assignedAgentIds as string[] | null) ?? (item.assignedAgentId ? [item.assignedAgentId] : []);
@@ -162,6 +162,7 @@ export const taskService = {
       .returning();
 
     await db.insert(taskActivities).values({
+      organisationId,
       taskId: item.id,
       userId: userId ?? null,
       agentId: data.createdByAgentId ?? null,
@@ -246,6 +247,7 @@ export const taskService = {
         const agentObjs = await resolveAgents(agentIds);
         const names = agentObjs.map(a => a.name ?? 'Unknown').join(', ');
         await db.insert(taskActivities).values({
+          organisationId,
           taskId: id,
           userId: userId ?? null,
           activityType: 'assigned',
@@ -264,6 +266,7 @@ export const taskService = {
 
     if (data.status && data.status !== existing.status) {
       await db.insert(taskActivities).values({
+        organisationId,
         taskId: id,
         userId: userId ?? null,
         activityType: 'status_changed',
@@ -307,6 +310,7 @@ export const taskService = {
 
     if (statusChanged) {
       await db.insert(taskActivities).values({
+        organisationId: existing.organisationId,
         taskId: id,
         userId: userId ?? null,
         activityType: 'status_changed',
@@ -355,23 +359,16 @@ export const taskService = {
   // ─── Activities ─────────────────────────────────────────────────────────────
 
   async listActivities(taskId: string, organisationId: string) {
-    // Validate that the task belongs to this org before returning activities
-    const [task] = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(and(eq(tasks.id, taskId), eq(tasks.organisationId, organisationId), isNull(tasks.deletedAt)));
-
-    if (!task) throw { statusCode: 404, message: 'Task not found' };
-
     return db
       .select()
       .from(taskActivities)
-      .where(eq(taskActivities.taskId, taskId))
+      .where(and(eq(taskActivities.taskId, taskId), eq(taskActivities.organisationId, organisationId)))
       .orderBy(desc(taskActivities.createdAt));
   },
 
   async addActivity(
     taskId: string,
+    organisationId: string,
     data: {
       activityType: 'created' | 'assigned' | 'status_changed' | 'progress' | 'completed' | 'note' | 'blocked' | 'deliverable_added';
       message: string;
@@ -383,6 +380,7 @@ export const taskService = {
     const [activity] = await db
       .insert(taskActivities)
       .values({
+        organisationId,
         taskId,
         agentId: data.agentId ?? null,
         userId: data.userId ?? null,
@@ -398,21 +396,23 @@ export const taskService = {
 
   // ─── Deliverables ───────────────────────────────────────────────────────────
 
-  async listDeliverables(taskId: string) {
+  async listDeliverables(taskId: string, organisationId: string) {
     return db
       .select()
       .from(taskDeliverables)
-      .where(and(eq(taskDeliverables.taskId, taskId), isNull(taskDeliverables.deletedAt)))
+      .where(and(eq(taskDeliverables.taskId, taskId), eq(taskDeliverables.organisationId, organisationId), isNull(taskDeliverables.deletedAt)))
       .orderBy(desc(taskDeliverables.createdAt));
   },
 
   async addDeliverable(
     taskId: string,
+    organisationId: string,
     data: { deliverableType: 'file' | 'url' | 'artifact'; title: string; path?: string; description?: string }
   ) {
     const [deliverable] = await db
       .insert(taskDeliverables)
       .values({
+        organisationId,
         taskId,
         deliverableType: data.deliverableType,
         title: data.title,
@@ -425,10 +425,16 @@ export const taskService = {
     return deliverable;
   },
 
-  async deleteDeliverable(id: string) {
-    const [existing] = await db.select().from(taskDeliverables).where(and(eq(taskDeliverables.id, id), isNull(taskDeliverables.deletedAt)));
+  async deleteDeliverable(id: string, organisationId: string) {
+    const [existing] = await db.select().from(taskDeliverables).where(and(
+      eq(taskDeliverables.id, id),
+      eq(taskDeliverables.organisationId, organisationId),
+      isNull(taskDeliverables.deletedAt),
+    ));
     if (!existing) throw { statusCode: 404, message: 'Deliverable not found' };
-    await db.update(taskDeliverables).set({ deletedAt: new Date() }).where(eq(taskDeliverables.id, id));
+    await db.update(taskDeliverables).set({ deletedAt: new Date() }).where(
+      and(eq(taskDeliverables.id, id), eq(taskDeliverables.organisationId, organisationId)),
+    );
   },
 
   // ─── Helpers ────────────────────────────────────────────────────────────────

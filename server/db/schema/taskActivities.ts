@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { organisations } from './organisations';
 import { tasks } from './tasks';
 import { agents } from './agents';
 import { users } from './users';
@@ -7,6 +8,9 @@ export const taskActivities = pgTable(
   'task_activities',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    organisationId: uuid('organisation_id')
+      .notNull()
+      .references(() => organisations.id),
     taskId: uuid('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
@@ -22,6 +26,7 @@ export const taskActivities = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
+    orgIdx: index('task_activities_org_idx').on(table.organisationId),
     taskIdx: index('task_activities_task_idx').on(table.taskId),
     taskCreatedIdx: index('task_activities_task_created_idx').on(table.taskId, table.createdAt),
     agentIdx: index('task_activities_agent_idx').on(table.agentId),

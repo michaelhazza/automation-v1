@@ -133,24 +133,23 @@ export const agentActivityService = {
    * Get recent agent-created workspace activities (for the activity feed).
    */
   async getRecentActivities(params: {
-    organisationId?: string;
+    organisationId: string;
     subaccountId?: string;
     limit?: number;
   }) {
     const limit = Math.min(params.limit ?? 30, 100);
 
-    // Get activities that were created by agents
-    let query = db
+    // Get activities that were created by agents, scoped to org
+    return db
       .select({
         activity: taskActivities,
         agentName: agents.name,
       })
       .from(taskActivities)
       .innerJoin(agents, eq(agents.id, taskActivities.agentId))
+      .where(eq(taskActivities.organisationId, params.organisationId))
       .orderBy(desc(taskActivities.createdAt))
       .limit(limit);
-
-    return query;
   },
 
   /**
