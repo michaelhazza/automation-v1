@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../lib/api';
 import Modal from './Modal';
@@ -25,6 +25,15 @@ const PROVIDER_LABELS: Record<string, string> = {
   web_login: 'Web Login',
   custom: 'Custom',
 };
+
+/** OAuth providers available for connection — matches server/config/oauthProviders.ts */
+const OAUTH_PROVIDER_OPTIONS: { key: string; label: string; description: string }[] = [
+  { key: 'slack', label: 'Slack', description: 'Team messaging and notifications' },
+  { key: 'gmail', label: 'Gmail', description: 'Send and read emails' },
+  { key: 'hubspot', label: 'HubSpot', description: 'CRM contacts and deals' },
+  { key: 'ghl', label: 'GoHighLevel', description: 'Contacts and opportunities' },
+  { key: 'teamwork', label: 'Teamwork', description: 'Project management' },
+];
 
 const STATUS_STYLES: Record<string, string> = {
   active: 'bg-green-100 text-green-800',
@@ -57,6 +66,10 @@ export default function CredentialsTab({ subaccountId }: Props) {
   const [webLoginSaving, setWebLoginSaving] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
+  // Provider dropdown
+  const [showProviderMenu, setShowProviderMenu] = useState(false);
+  const providerMenuRef = useRef<HTMLDivElement>(null);
+
   // Slack channel config modal
   const [slackConfigConn, setSlackConfigConn] = useState<Connection | null>(null);
   const [slackChannels, setSlackChannels] = useState<{ id: string; name: string }[]>([]);
@@ -88,13 +101,13 @@ export default function CredentialsTab({ subaccountId }: Props) {
     }
   }, [baseUrl]);
 
-  // Detect ?connected=slack after OAuth redirect
+  // Detect ?connected=<provider> after OAuth redirect
   useEffect(() => {
     const connected = searchParams.get('connected');
     const oauthError = searchParams.get('error');
-    if (connected === 'slack') {
+    if (connected) {
       setSearchParams(p => { p.delete('connected'); return p; }, { replace: true });
-      load({ openSlackConfig: true });
+      load({ openSlackConfig: connected === 'slack' });
     } else if (oauthError) {
       setError(`Connection failed: ${oauthError.replace(/_/g, ' ')}`);
       setSearchParams(p => { p.delete('error'); return p; }, { replace: true });
@@ -105,6 +118,19 @@ export default function CredentialsTab({ subaccountId }: Props) {
   // On mount only — `load` is stable for the component's lifetime since subaccountId
   // doesn't change after mount. Intentionally not re-running on load reference changes.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close provider menu on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (providerMenuRef.current && !providerMenuRef.current.contains(e.target as Node)) {
+        setShowProviderMenu(false);
+      }
+    }
+    if (showProviderMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showProviderMenu]);
 
   // Fetch Slack channels when modal opens
   useEffect(() => {
@@ -120,8 +146,9 @@ export default function CredentialsTab({ subaccountId }: Props) {
       .finally(() => setChannelsLoading(false));
   }, [slackConfigConn?.id, subaccountId]);
 
-  const connectSlack = async () => {
+  const connectProvider = async (provider: string) => {
     setError(null);
+    setShowProviderMenu(false);
     try {
       // Strip OAuth callback params from current URL to prevent redirect loop
       const cleanParams = new URLSearchParams(window.location.search);
@@ -131,15 +158,16 @@ export default function CredentialsTab({ subaccountId }: Props) {
       const cleanPath = window.location.pathname + cleanSearch;
       const separator = cleanSearch.includes('?') ? '&' : '?';
       const oauthParams: Record<string, string> = {
-        provider: 'slack',
+        provider,
         scope: subaccountId ? 'subaccount' : 'org',
-        returnPath: encodeURIComponent(`${cleanPath}${separator}connected=slack`),
+        returnPath: encodeURIComponent(`${cleanPath}${separator}connected=${provider}`),
       };
       if (subaccountId) oauthParams.subaccountId = subaccountId;
       const { data } = await api.get('/api/integrations/oauth2/auth-url', { params: oauthParams });
       window.location.href = (data as { url: string }).url;
     } catch {
-      setError('Failed to initiate Slack connection. Check that OAUTH_SLACK_CLIENT_ID is configured.');
+      const label = PROVIDER_LABELS[provider] ?? provider;
+      setError(`Failed to initiate ${label} connection. Check that OAUTH_${provider.toUpperCase()}_CLIENT_ID is configured.`);
     }
   };
 
@@ -222,7 +250,6 @@ export default function CredentialsTab({ subaccountId }: Props) {
 
   const oauthProviders = connections.filter(c => c.providerType !== 'web_login');
   const webLogins = connections.filter(c => c.providerType === 'web_login');
-  const hasSlack = oauthProviders.some(c => c.providerType === 'slack' && c.connectionStatus === 'active');
 
   if (loading) return <div className="p-6 text-sm text-slate-500">Loading credentials…</div>;
 
@@ -239,18 +266,32 @@ export default function CredentialsTab({ subaccountId }: Props) {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-slate-700">OAuth Connections</h2>
-          {!hasSlack && (
+          <div className="relative" ref={providerMenuRef}>
             <button
-              onClick={connectSlack}
-              className="text-sm px-3 py-1.5 rounded-md bg-[#4A154B] text-white hover:bg-[#611f69] transition-colors"
+              onClick={() => setShowProviderMenu(v => !v)}
+              className="text-sm px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-700 transition-colors"
             >
-              Connect Slack
+              + Add Connection
             </button>
-          )}
+            {showProviderMenu && (
+              <div className="absolute right-0 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1">
+                {OAUTH_PROVIDER_OPTIONS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => connectProvider(p.key)}
+                    className="w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors"
+                  >
+                    <span className="text-sm font-medium text-slate-800">{p.label}</span>
+                    <span className="block text-xs text-slate-400">{p.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {oauthProviders.length === 0 ? (
-          <p className="text-sm text-slate-500">No OAuth connections yet. Connect Slack to enable agent messaging.</p>
+          <p className="text-sm text-slate-500">No OAuth connections yet. Add a connection to enable agent integrations.</p>
         ) : (
           <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
             {oauthProviders.map(conn => (
