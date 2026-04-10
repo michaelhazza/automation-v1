@@ -45,6 +45,7 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
     case 'update_page': return executeUpdatePage(payload, context);
     case 'publish_page': return executePublishPage(payload, context);
     case 'write_spec': return executeWriteSpecApproved(payload, context);
+    case 'publish_post': return executePublishPostApproved(payload, context);
     default: return { success: false, error: `No worker handler for: ${actionType}` };
   }
 }));
@@ -542,6 +543,88 @@ export const skillExecutor = {
 
       case 'write_spec':
         return proposeReviewGatedAction('write_spec', input, context);
+
+      // ── Support Agent skills ─────────────────────────────────────────────
+
+      case 'classify_email':
+        return executeMethodologySkill('classify_email', input, {
+          template: {
+            emailReference: '',
+            primaryIntent: '',
+            urgency: '',
+            sentiment: '',
+            routingAction: '',
+            isAutomated: false,
+            keySignals: [],
+            classificationNotes: '',
+            suggestedReplyTone: '',
+          },
+          guidance: 'Follow the classify_email methodology in your skill context. Classify the email by intent category, urgency, sentiment, and routing action. Return the structured classification result.',
+        });
+
+      case 'draft_reply':
+        return executeMethodologySkill('draft_reply', input, {
+          template: {
+            to: '',
+            subject: '',
+            confidence: '',
+            routingAction: '',
+            body: '',
+            confidenceFlags: [],
+            draftingNotes: '',
+          },
+          guidance: 'Follow the draft_reply methodology in your skill context. Use the classification output and knowledge base context to draft a concise, on-brand reply. If routing_action is escalate, return an escalation response instead of a draft.',
+        });
+
+      case 'search_knowledge_base': {
+        // Auto-gated stub — integration not yet wired
+        const searchQuery = typeof input.query === 'string' ? input.query : '';
+        const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
+        return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
+          status: 'stub',
+          query: searchQuery,
+          intent_category: searchCategory ?? null,
+          results: [],
+          message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
+        }));
+      }
+
+      // ── Social Media Agent skills ────────────────────────────────────────
+
+      case 'draft_post':
+        return executeMethodologySkill('draft_post', input, {
+          template: {
+            brief: '',
+            platforms: [],
+            brandVoice: '',
+            drafts: {},
+            sharedNotes: '',
+            verifyItems: [],
+          },
+          guidance: 'Follow the draft_post methodology in your skill context. Produce platform-specific post variants for each requested platform, respecting character limits, hashtag strategies, and brand voice. Flag any claims that need verification with [VERIFY] placeholders.',
+        });
+
+      case 'publish_post':
+        return proposeReviewGatedAction('publish_post', input, context);
+
+      case 'read_analytics': {
+        // Auto-gated stub — platform integrations not yet wired
+        const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
+        const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+        const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+        // Validate date range
+        if (dateFrom && dateTo && dateFrom > dateTo) {
+          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+        }
+        return executeWithActionAudit('read_analytics', input, context, async () => ({
+          status: 'stub',
+          platforms: analyticsplatforms,
+          date_from: dateFrom,
+          date_to: dateTo,
+          results: [],
+          message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
+        }));
+      }
 
       // ── Phase 2: Workflow orchestration ──────────────────────────────────
       case 'assign_task': {
@@ -1184,6 +1267,54 @@ async function executeWriteSpecApproved(
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to persist approved spec: ${errMsg}` };
   }
+}
+
+// ---------------------------------------------------------------------------
+// executePublishPostApproved — MVP stub for the publish_post worker handler.
+// Platform API integrations are not yet wired. Logs the intended publish action
+// and returns pending_integration status.
+// ---------------------------------------------------------------------------
+
+async function executePublishPostApproved(
+  payload: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const platform = String(payload.platform ?? '');
+  const postContent = String(payload.post_content ?? '');
+  const scheduleAt = payload.schedule_at ? String(payload.schedule_at) : null;
+  const campaignTag = payload.campaign_tag ? String(payload.campaign_tag) : null;
+  const reasoning = String(payload.reasoning ?? '');
+
+  if (!platform) return { success: false, error: 'platform is required' };
+  if (!postContent) return { success: false, error: 'post_content is required' };
+
+  // Log publish action to workspace memory if a taskId is available
+  if (context.taskId) {
+    try {
+      const logMsg = [
+        `PUBLISH_POST_APPROVED:${platform}`,
+        `campaign: ${campaignTag ?? 'none'}`,
+        scheduleAt ? `scheduled: ${scheduleAt}` : 'publish: immediate',
+        `reasoning: ${reasoning}`,
+        `---\n${postContent}`,
+      ].join('\n');
+
+      await taskService.addActivity(context.taskId, context.organisationId, {
+        activityType: 'note',
+        message: logMsg,
+        agentId: context.agentId,
+      });
+    } catch { /* non-fatal — log failure does not block publish response */ }
+  }
+
+  return {
+    success: true,
+    platform,
+    publish_status: 'pending_integration',
+    scheduled_for: scheduleAt,
+    campaign_tag: campaignTag,
+    message: `Publish approved for ${platform}. Platform integration not yet connected — action logged. When integration is live, this will ${scheduleAt ? `schedule the post for ${scheduleAt}` : 'publish immediately'}.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

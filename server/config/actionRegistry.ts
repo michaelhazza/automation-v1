@@ -890,6 +890,88 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     isUniversal: true,
     topics: [],
   },
+
+  // ── Support Agent — auto-gated stubs ────────────────────────────────────────
+
+  search_knowledge_base: {
+    actionType: 'search_knowledge_base',
+    description: 'Search the workspace knowledge base for articles and FAQs relevant to a query. Returns ranked results with excerpts.',
+    actionCategory: 'api',
+    topics: ['support'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['query', 'intent_category', 'max_results'],
+    parameterSchema: z.object({
+      query: z.string().describe('The search query in natural language'),
+      intent_category: z.string().optional().describe('Email intent category from classify_email to narrow search scope'),
+      max_results: z.number().optional().describe('Maximum results to return (default 5, max 10)'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  // ── Social Media Agent — review-gated publish + auto-gated analytics ────────
+
+  publish_post: {
+    actionType: 'publish_post',
+    description: 'Submit an approved social media post for publishing or scheduling. Review-gated — requires human approval before the post goes live.',
+    actionCategory: 'api',
+    topics: ['social'],
+    isExternal: true,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['platform', 'post_content', 'schedule_at', 'campaign_tag', 'reasoning'],
+    parameterSchema: z.object({
+      platform: z.enum(['twitter', 'linkedin', 'instagram', 'facebook']).describe('Target publishing platform'),
+      post_content: z.string().describe('The final approved post copy'),
+      schedule_at: z.string().optional().describe('ISO 8601 datetime to schedule the post. If omitted, publishes immediately upon approval.'),
+      media_urls: z.array(z.string()).optional().describe('Optional media attachment URLs'),
+      hashtags_in_comment: z.boolean().optional().describe('Instagram: post hashtags in first comment'),
+      campaign_tag: z.string().optional().describe('Campaign identifier for analytics grouping'),
+      reasoning: z.string().describe('Timing rationale and campaign context — shown to the human reviewer'),
+    }),
+    retryPolicy: {
+      maxRetries: 0,
+      strategy: 'none',
+      retryOn: [],
+      doNotRetryOn: ['validation_error', 'platform_error'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } },
+    idempotencyStrategy: 'locked',
+  },
+
+  read_analytics: {
+    actionType: 'read_analytics',
+    description: 'Retrieve social media performance metrics for one or more platforms and a specified time period.',
+    actionCategory: 'api',
+    topics: ['social'],
+    isExternal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['platforms', 'date_from', 'date_to', 'metrics', 'campaign_tag'],
+    parameterSchema: z.object({
+      platforms: z.array(z.enum(['twitter', 'linkedin', 'instagram', 'facebook'])).describe('Platforms to retrieve analytics for'),
+      date_from: z.string().describe('Start date in ISO 8601 format (YYYY-MM-DD)'),
+      date_to: z.string().optional().describe('End date in ISO 8601 format. Defaults to today.'),
+      metrics: z.array(z.enum(['impressions', 'reach', 'engagement_rate', 'clicks', 'follower_growth', 'top_posts', 'post_count'])).optional().describe('Specific metrics to retrieve. Omit for all.'),
+      campaign_tag: z.string().optional().describe('Filter results to posts with this campaign tag'),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'platform_not_configured'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } },
+    idempotencyStrategy: 'read_only',
+  },
 };
 
 /** Check if an action type is known */
