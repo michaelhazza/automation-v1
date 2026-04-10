@@ -82,25 +82,41 @@ export function slugify(name: string): string {
 }
 
 /** Parse free-text paste into one or more skills.
- *  Splits on '---' separator lines and attempts to parse each block. */
+ *  Splits by finding YAML frontmatter openers (a line that is exactly '---'
+ *  followed by a 'key: value' line), so that bare '---' separators between
+ *  skills and the '---' that closes a frontmatter block are not confused with
+ *  the start of a new skill. */
 export function parseFromText(text: string): ParsedSkill[] {
-  // Split on lines that are exactly '---' (document separators)
-  const blocks = text.split(/^---$/m);
-  const results: ParsedSkill[] = [];
+  // Locate every position that begins a YAML frontmatter block.
+  // A frontmatter opener: a line that is exactly '---' whose next line starts
+  // with a YAML key (e.g. 'name: ...'). This distinguishes it from closing
+  // '---' delimiters and bare content-separator '---' lines.
+  const lines = text.split('\n');
+  const blockStarts: number[] = [];
+  let charOffset = 0;
 
-  for (const block of blocks) {
-    const trimmed = block.trim();
-    if (trimmed.length < 10) continue;
-
-    // If the block itself starts with '---' it's a frontmatter block
-    const skill = parseMarkdownFile('paste', trimmed.startsWith('---') ? trimmed : `---\n${trimmed}`);
-    if (skill) results.push(skill);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === '---' && i + 1 < lines.length && /^[a-zA-Z_-]+:/.test(lines[i + 1])) {
+      blockStarts.push(charOffset);
+    }
+    charOffset += lines[i].length + 1; // +1 for the '\n'
   }
 
-  // If splitting produced nothing useful, try the whole text as one skill
-  if (results.length === 0) {
+  if (blockStarts.length === 0) {
+    // No frontmatter opener found — attempt to parse whole text as one skill
     const skill = parseMarkdownFile('paste', text);
-    if (skill) results.push(skill);
+    return skill ? [skill] : [];
+  }
+
+  const results: ParsedSkill[] = [];
+  for (let i = 0; i < blockStarts.length; i++) {
+    const start = blockStarts[i];
+    const end = blockStarts[i + 1] ?? text.length;
+    const block = text.slice(start, end).trim();
+    if (block.length >= 10) {
+      const skill = parseMarkdownFile('paste', block);
+      if (skill) results.push(skill);
+    }
   }
 
   return results;

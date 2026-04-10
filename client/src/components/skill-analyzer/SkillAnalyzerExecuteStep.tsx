@@ -144,7 +144,7 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
 
             <div className="flex gap-3">
               <button
-                onClick={() => navigate('/admin/skills')}
+                onClick={() => navigate('/system/skills')}
                 className="flex-1 px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
               >
                 Return to Skills

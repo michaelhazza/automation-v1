@@ -23,6 +23,11 @@ const PHASE_LABELS: Record<string, string> = {
 export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onComplete, onStartNew }: Props) {
   const [currentJob, setCurrentJob] = useState<AnalysisJob>(initialJob);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (currentJob.status === 'completed' || currentJob.status === 'failed') return;
@@ -31,6 +36,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
       try {
         const res = await api.get(`/api/system/skill-analyser/jobs/${jobId}`);
         const { job: j, results: r } = res.data as { job: AnalysisJob; results: AnalysisResult[] };
+        if (!mountedRef.current) return;
         setCurrentJob(j);
 
         if (j.status === 'completed') {
@@ -39,8 +45,8 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
         } else if (j.status === 'failed') {
           clearInterval(intervalRef.current!);
         }
-      } catch {
-        // non-fatal polling error
+      } catch (err) {
+        console.error('[SkillAnalyzer] Polling error:', err);
       }
     }, 2000);
 
@@ -89,7 +95,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
           )}
 
           <div className="flex justify-center mt-6">
-            <div className="w-8 h-8 border-[3px] border-slate-200 border-t-indigo-500 rounded-full [animation:spin_0.8s_linear_infinite]" />
+            <div className="w-8 h-8 border-[3px] border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
           </div>
         </>
       )}

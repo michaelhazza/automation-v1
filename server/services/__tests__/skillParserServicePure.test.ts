@@ -193,7 +193,9 @@ description: Second skill
 Do thing two.
 `;
   const skills = parseFromText(twoSkills);
-  assert(skills.length >= 1, `expected at least 1 skill, got ${skills.length}`);
+  assert(skills.length === 2, `expected exactly 2 skills, got ${skills.length}`);
+  assert(skills[0].name === 'Skill One', `expected first skill "Skill One", got "${skills[0].name}"`);
+  assert(skills[1].name === 'Skill Two', `expected second skill "Skill Two", got "${skills[1].name}"`);
 });
 
 test('parseFromText: returns empty array for empty/short input', () => {

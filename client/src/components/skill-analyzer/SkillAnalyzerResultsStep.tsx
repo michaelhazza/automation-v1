@@ -87,9 +87,11 @@ function ResultCard({
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
 }) {
   const [showDiff, setShowDiff] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function setAction(action: 'approved' | 'rejected' | 'skipped') {
     const next = result.actionTaken === action ? null : action;
+    setActionError(null);
     try {
       if (next) {
         await api.patch(`/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`, { action: next });
@@ -98,8 +100,11 @@ function ResultCard({
         await api.patch(`/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`, { action: 'skipped' });
       }
       onActionChange(result.id, next);
-    } catch {
-      // ignore
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string };
+      const msg = e?.response?.data?.error ?? e?.message ?? 'Failed to save action.';
+      console.error('[SkillAnalyzer] Failed to set result action:', err);
+      setActionError(msg);
     }
   }
 
@@ -160,6 +165,10 @@ function ResultCard({
           </button>
         </div>
       </div>
+
+      {actionError && (
+        <p className="mt-2 text-xs text-red-600">{actionError}</p>
+      )}
 
       {/* Diff toggle */}
       {result.diffSummary && (
@@ -256,6 +265,7 @@ function ResultSection({
 
 export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdated, onContinue }: Props) {
   const CLASSIFICATIONS: Classification[] = ['IMPROVEMENT', 'DISTINCT', 'PARTIAL_OVERLAP', 'DUPLICATE'];
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   function handleActionChange(resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) {
     onResultsUpdated(
@@ -266,6 +276,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
   async function handleBulkAction(classification: Classification, action: 'approved' | 'rejected' | 'skipped') {
     const ids = results.filter((r) => r.classification === classification).map((r) => r.id);
     if (ids.length === 0) return;
+    setBulkError(null);
 
     try {
       await api.post(`/api/system/skill-analyser/jobs/${job.id}/results/bulk-action`, {
@@ -277,8 +288,11 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           r.classification === classification ? { ...r, actionTaken: action } : r
         )
       );
-    } catch {
-      // ignore
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string };
+      const msg = e?.response?.data?.error ?? e?.message ?? 'Bulk action failed.';
+      console.error('[SkillAnalyzer] Failed to bulk-set actions:', err);
+      setBulkError(msg);
     }
   }
 
@@ -308,6 +322,12 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           {approvedCount > 0 && ` (${approvedCount} approved)`}
         </button>
       </div>
+
+      {bulkError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {bulkError}
+        </div>
+      )}
 
       {/* Result sections */}
       {CLASSIFICATIONS.map((c) => (
