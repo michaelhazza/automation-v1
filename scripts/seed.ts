@@ -563,30 +563,41 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
   const TEMPLATE_SLUG = 'portfolio-health-sweep';
   const TEMPLATE_NAME = 'Portfolio Health Sweep';
 
-  // NOTE: This template uses a non-standard agentRef that does not resolve
-  // through the normal playbook validator (agentRef.slug 'reporting-agent'
-  // is a subaccount agent, not a system agent). Preserved from the original
-  // seed-portfolio-health-playbook.ts to avoid regressing existing behaviour.
-  // Fixing the agentRef is tracked as a separate concern.
+  // Two-step playbook against the portfolio-health-agent system agent:
+  //   1. query_subaccount_cohort — returns health/activity summaries across
+  //      every active subaccount in the org (empty tag_filters = all). This
+  //      replaces the previous reference to a never-built 'list_active_subaccounts'
+  //      skill and the previous (broken) 'reporting-agent' system slug.
+  //   2. generate_portfolio_report — produces the briefing, consuming the
+  //      cohort output as context.
+  //
+  // portfolio-health-agent is one of the 16 system agents seeded in Phase 2
+  // and is org-scoped (executionScope: 'org'), which is the correct scope for
+  // a cross-subaccount sweep.
   const definition = {
     name: TEMPLATE_NAME,
     description:
-      'Enumerate active subaccounts and run health checks in parallel via bulk mode. ' +
-      'A synthesis step waits for all per-subaccount results before generating the portfolio report.',
+      'Query health, activity and pipeline metrics across every active subaccount in the org, ' +
+      'then synthesise a portfolio-level intelligence briefing from the results. ' +
+      'Runs at org scope via the portfolio-health-agent system agent.',
     initialInputSchema: { type: 'object', properties: {}, required: [] },
     maxParallelSteps: 8,
     steps: [
       {
         id: 'enumerate_subaccounts',
-        name: 'List active subaccounts',
+        name: 'Query active subaccount cohort',
         type: 'agent_call',
         dependsOn: [],
         sideEffectType: 'none',
-        agentRef: { kind: 'system', slug: 'reporting-agent' },
-        agentInputs: { skill: 'list_active_subaccounts' },
-        outputSchema: {
-          type: 'object',
-          properties: { subaccountIds: { type: 'array', items: { type: 'string' } } },
+        agentRef: { kind: 'system', slug: 'portfolio-health-agent' },
+        agentInputs: {
+          skill: 'query_subaccount_cohort',
+          parameters: {
+            // Empty filters → all active subaccounts in the org
+            tag_filters: '[]',
+            subaccount_ids: '[]',
+            metric_focus: 'all',
+          },
         },
       },
       {
@@ -595,9 +606,14 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
         type: 'agent_call',
         dependsOn: ['enumerate_subaccounts'],
         sideEffectType: 'none',
-        agentRef: { kind: 'system', slug: 'reporting-agent' },
+        agentRef: { kind: 'system', slug: 'portfolio-health-agent' },
         agentInputs: {
           skill: 'generate_portfolio_report',
+          parameters: {
+            reporting_period_days: 7,
+            format: 'structured',
+            verbosity: 'standard',
+          },
           context: '{{ steps.enumerate_subaccounts.output }}',
         },
       },

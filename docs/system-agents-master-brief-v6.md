@@ -1146,7 +1146,7 @@ These four skills had no wiring anywhere in the repo. v6.0 resolves each one:
 | `read_inbox` | **Wired into `support-agent/AGENTS.md`** | Had a full `actionRegistry` entry and executor case at [server/services/skillExecutor.ts](../server/services/skillExecutor.ts) line 380 but no agent was referencing it. Support Agent cannot do its job (triaging inbound email) without it — the wiring was an unfinished handoff from the earlier file-based-skill migration. Fixed. |
 | `update_memory_block` | **Wired into `orchestrator/AGENTS.md`** (gate: review) | Sprint 4/5 shared-memory-block primitive with a full runtime handler at [server/services/skillExecutor.ts](../server/services/skillExecutor.ts) line 1083 via `memoryBlockService`. The Orchestrator is the only agent that coordinates cross-agent state, so it is the natural owner for a "write to a named block with ownership semantics" primitive. The skill is `review`-gated so it always goes through HITL approval — the Orchestrator proposes, the human confirms. |
 | `trigger_process.md` | **Deleted** | No runtime handler in `skillExecutor.ts`, no entry in `actionRegistry.ts`. This was a stub from commit `37f2184` ("feat: file-based system skills + general-purpose Orchestrator prompt") that matched an aspirational Orchestrator prompt but was never implemented. The shipped Orchestrator uses `spawn_sub_agents` for parallel work instead. Removing the stub prevents a future author from wiring it and getting a silent no-op. |
-| `read_data_source` | **Left in place; flagged as a known issue** | This is a **broken wire**: the executor handler at [server/services/skillExecutor.ts](../server/services/skillExecutor.ts) line 360 exists, the tool implementation at [server/tools/readDataSource.ts](../server/tools/readDataSource.ts) exists, and the per-run limits at [server/config/limits.ts](../server/config/limits.ts) line 37 reference it — but there is no registry entry in [server/config/actionRegistry.ts](../server/config/actionRegistry.ts). Without a registry entry, agents that list the skill in their frontmatter cannot invoke it through the tool-call infrastructure because parameter validation and gate enforcement live in the registry. Wiring it now would create silent failures. The fix is to add the missing registry entry in a separate PR — tracked as a followup. |
+| `read_data_source` | **Registry entry added — runtime now complete** | Previously a broken wire: the executor handler at [server/services/skillExecutor.ts](../server/services/skillExecutor.ts) line 360 existed, the tool implementation at [server/tools/readDataSource.ts](../server/tools/readDataSource.ts) existed, and the per-run limits at [server/config/limits.ts](../server/config/limits.ts) line 37 referenced it — but there was no registry entry in [server/config/actionRegistry.ts](../server/config/actionRegistry.ts), so agents listing it in their frontmatter could not invoke it through the tool-call infrastructure. v6.0 closes the loop by adding a full `read_data_source` entry with the correct `list` / `read` parameter schema, `topics: ['workspace']`, `defaultGateLevel: 'auto'`, and `idempotencyStrategy: 'read_only'`. The skill is now **callable** by any agent that adds it to its `skills:` frontmatter — but is deliberately not pre-wired to any agent. It is an opt-in primitive for agents that want to query a specific attached data source mid-run beyond what the cascading-context auto-load provides. Classified as `visibility: none` (app-foundational) because the data source surface is a run-internal platform primitive, not a customer-facing capability. |
 
 **Dangling references:** none. Every skill slug referenced in any agent frontmatter exists on disk.
 
@@ -1156,10 +1156,22 @@ These four skills had no wiring anywhere in the repo. v6.0 resolves each one:
 - Wired to at least one agent via `companies/automation-os/agents/` AGENTS.md: **76** (was 74; +2 from orphan wiring)
 - Wired via master seed to the Reporting Agent: **5**
 - Wired via master seed to the Playbook Author: **5**
-- Unwired but with live runtime (broken wire, tracked for fix): **1** (`read_data_source`)
+- Runtime complete, not pre-wired to any agent (opt-in): **1** (`read_data_source`)
 - Unwired and dead: **0** (was 1; `trigger_process` deleted)
 
+Every skill file on disk now has either (a) at least one agent referencing it, (b) a master-seed code path referencing it, or (c) a complete runtime that any agent can opt into by adding the slug to its frontmatter. Zero broken wires.
+
 If any future audit re-introduces an unwired skill, the pattern for resolving it is documented in Appendix D.
+
+### Playbook template fix: `portfolio-health-sweep`
+
+The `portfolio-health-sweep` system playbook template (seeded in Phase 4 of the master seed) previously referenced `agentRef: { kind: 'system', slug: 'reporting-agent' }` — but `reporting-agent` is a subaccount-scoped custom agent, not a system agent, so the reference would have failed to resolve at playbook run time. It also referenced a never-built skill named `list_active_subaccounts`. v6.0 corrects both:
+
+- **Agent reference:** now `{ kind: 'system', slug: 'portfolio-health-agent' }` — the actual system agent for org-scoped portfolio monitoring, with `executionScope: 'org'`.
+- **Step 1 skill:** now `query_subaccount_cohort` with empty `tag_filters` — returns every active subaccount in the org. This skill is already wired to `portfolio-health-agent` and replaces the hypothetical `list_active_subaccounts`.
+- **Step 2 skill:** still `generate_portfolio_report`, which is already wired to `portfolio-health-agent` and produces the structured briefing. Now passes explicit parameters (`reporting_period_days: 7`, `format: 'structured'`, `verbosity: 'standard'`) instead of relying on defaults.
+
+The playbook now resolves cleanly against real system agents and real skills at run time.
 
 ---
 

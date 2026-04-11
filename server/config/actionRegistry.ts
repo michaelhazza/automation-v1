@@ -220,6 +220,58 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+  read_data_source: {
+    actionType: 'read_data_source',
+    description:
+      'Query the run-scoped cascading context data sources. Two ops: `list` ' +
+      'returns the manifest of all active sources visible to this run; `read` ' +
+      'returns a slice of a specific source by id with offset/limit pagination. ' +
+      'Enforces per-run call count and per-call token limits. Suppressed ' +
+      'sources are invisible per spec §3.6.',
+    actionCategory: 'worker',
+    topics: ['workspace'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['op', 'id', 'offset', 'limit'],
+    parameterSchema: z.object({
+      op: z
+        .enum(['list', 'read'])
+        .describe(
+          "'list' returns the manifest of active sources; 'read' returns a content slice for a specific source id",
+        ),
+      id: z
+        .string()
+        .optional()
+        .describe("Source id (required when op='read')"),
+      offset: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          "Character offset into the source content (read op only; default 0)",
+        ),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Maximum tokens to return in this call (read op only; clamped to MAX_READ_DATA_SOURCE_TOKENS_PER_CALL regardless of caller value)",
+        ),
+    }),
+    retryPolicy: { maxRetries: 0, strategy: 'none', retryOn: [], doNotRetryOn: [] },
+    mcp: {
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    idempotencyStrategy: 'read_only',
+  },
   reassign_task: {
     actionType: 'reassign_task',
     description: 'Reassign a task to a different agent.',
