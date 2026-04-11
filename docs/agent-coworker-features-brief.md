@@ -62,16 +62,27 @@ An in-flight architectural change is moving skills from file-based markdown (`se
 
 A single org-level page answering "what's happening across my entire agent fleet right now?" Today, to get the same picture, an operator has to bounce between `AgentRunHistoryPage`, the inbox, the review queue, `AdminHealthFindingsPage`, and per-agent trace viewers. The primitives all exist; there is no view that stitches them together. This dashboard is that view.
 
+### Scope — single component, three routes
+
+This is a single page component rendered at all three scopes, with queries narrowed via the standard scope pattern we already use for permissioned pages (skills, agents, etc.):
+
+| Scope | Route | Data filter |
+|---|---|---|
+| Subaccount | `/subaccounts/:id/ops` | Single subaccount |
+| Org | `/admin/ops` | All subaccounts in the org |
+| System | `/system/ops` | Multi-org via `X-Organisation-Id` header |
+
+One React component, three routes, same layout, different data scope. This mirrors how `AdminSkillsPage` / `SystemSkillsPage` already work.
+
+### Relationship to the existing `SystemActivityPage`
+
+The current `SystemActivityPage` (`client/src/pages/SystemActivityPage.tsx`) is scoped to **process engine executions only** — it queries `/api/system/executions` and shows n8n / ghl / make / zapier / custom_webhook runs. It does not cover agent runs, the review queue, the inbox, health findings, or decisions. It's a legacy slice, not the same feature.
+
+**Recommended path:** rename and extend `SystemActivityPage` into the new Ops page. Engine executions remain as one panel; agent runs, review queue, inbox, findings, and decisions become additional panels. This avoids UI sprawl and gives operators one canonical "what's happening" surface. The alternative — building Ops net-new and leaving `SystemActivityPage` alongside it — ships faster but leaves two overlapping pages. Leaning toward extend-in-place.
+
 ### Problem it solves
 
 The forum post captured this bluntly: "slack turned into chaos... so he started building dashboards: what ran, what failed, what's in progress, what decisions were made." We have rich per-run traces and per-agent history, but no single pane of glass. `AdminHealthFindingsPage` is even explicitly noted as a known UI gap in `architecture.md` — registered in the router but only reachable via the dashboard widget, no sidebar entry.
-
-### Scope
-
-- **Primary view:** org-level. Shows records from every subaccount in the org by default.
-- **Drill-down:** subaccount filter narrows the view to a single subaccount.
-- **System admin:** can scope into any org via the existing `X-Organisation-Id` header pattern. Multi-org visibility for platform operators.
-- **Permission gating:** use `org.health_audit.view` or equivalent as the base permission. Read-only stakeholders can browse; mutations (resolve finding, approve review item) are gated on separate write permissions that already exist.
 
 ### Data sources (all primitives exist today)
 
@@ -123,6 +134,23 @@ A unified, scored, ranked queue of "open work" that heartbeat agents can read at
 The forum post author's exact complaint: "it struggled to prioritize anything correctly... so most of the time he still triggered things manually because he didn't trust it yet." We have the scheduler (`pg-boss` + heartbeat + event-driven subtask wakeups) but no prioritization layer. Without this, heartbeat autonomy is limited — humans still have to be in the loop to say "do this first." With this, the agent can pull the top N open items, judge them against its capabilities, and pick the highest-leverage action on its own.
 
 This is the feature that turns "heartbeat runs on schedule" into "heartbeat does the most important thing on schedule."
+
+### Where priority comes from — no new fields
+
+A critical point: **this feature introduces no new priority field and no new UI for setting priority.** It consumes signals that already exist in the schema, via a scoring function. Sources of priority by feed entry type:
+
+| Entry type | Priority signal | Where the user sets it |
+|---|---|---|
+| Task | `tasks.priority` (low/normal/high/urgent) + `tasks.position` (column order) + age since `updatedAt` | **Task creation form** sets initial `priority` (most priority should be set here to minimise manual work later). **Kanban drag-and-drop** adjusts `position` within a column when a human wants fine-grained override. |
+| Health finding | Detector-defined severity (critical/warning/info) | Defined in the detector code, not user-set |
+| Review item | Age-weighted | Auto — no user field |
+| Agent inbox item | Age-weighted | Auto — no user field |
+| Playbook run awaiting input/approval | Age-weighted | Auto — no user field |
+| Failed run needing retry decision | Failure cost (e.g. `cost_exceeded` > `timeout`) | Auto — derived from `failureReason` |
+
+**For tasks specifically,** drag-and-drop on the kanban already updates `tasks.position`, and the task creation / edit form already writes to `tasks.priority`. The feed's scoring function reads both fields and combines them with age. No new UI, no new database column.
+
+The scoring function returns a ranked list that merges all of these signals onto a common 0–1 score scale, so tasks and findings and review items can all appear in the same top-K feed. Heartbeat agents consume the feed without ever touching the kanban.
 
 ### Sources merged into the feed
 
@@ -238,6 +266,27 @@ Today:
 
 Skill Studio removes the developer from the loop. A system admin (and eventually the platform itself via a `platform-maintainer` agent) can refine skills chat-first, with simulation against captured regressions proving the fix works before it ships.
 
+### Relationship to the Skill Analyzer (complementary, not overlapping)
+
+The platform already has a `SkillAnalyzerPage` and a corresponding spec at `docs/skill-analyzer-spec.md`. These two features cover different halves of the skill lifecycle and should coexist:
+
+| Feature | Stage | What it does |
+|---|---|---|
+| **Skill Analyzer** (exists) | Intake | Import external skills from paste / upload / GitHub URL, compare against existing library via hybrid pipeline (hash → embedding → LLM), classify as `DUPLICATE` / `IMPROVEMENT` / `PARTIAL_OVERLAP` / `DISTINCT`, operator decides what to absorb |
+| **Skill Studio** (this feature) | Refinement | Take a skill already in the library, refine it based on observed regressions, simulate against captured failures, save a new version |
+
+```
+External skill → Skill Analyzer → library → Skill Studio → refined skill
+  (intake)                                      (refinement)
+```
+
+They share infrastructure: embeddings, simulation harness, version history. They should both live as entry points from `SystemSkillsPage` (and `AdminSkillsPage` for org-scope):
+
+- **On `SystemSkillsPage`:** the existing "Analyze & Import" button (Analyzer) plus a new per-skill "Refine in Studio" button / link.
+- **On `AdminSkillsPage`:** org-tier Studio access for refining org-owned skills (and eventually writing per-org overrides of system skills).
+
+Skill Studio is not a replacement for Skill Analyzer. It's the missing refinement half.
+
 ### Mirror of Playbook Studio
 
 Playbook Studio already solves the equivalent problem for playbooks. Skill Studio mirrors that pattern part-for-part:
@@ -326,18 +375,33 @@ Turn Slack from an output-only notification channel into a bidirectional convers
 
 ### Problem it solves
 
-The forum post's exact framing: "the key wasn't notifications, it was real conversations plus team visibility." Our current Slack integration is skewed toward output — `send_to_slack` skill pushes messages out, `slackWebhook.ts` ingests events from integrations, but there's no conversational path where a team member can DM an agent and get a threaded response. All interactive agent workflows (HITL approvals, clarifying questions, status checks) happen in the admin UI, which means team members who don't live in that UI are effectively locked out of the agent fleet.
+The forum post's exact framing: "the key wasn't notifications, it was real conversations plus team visibility." The current Slack integration is skewed toward output — the `send_to_slack` skill pushes messages out, `slackWebhook.ts` ingests events from integrations, but there's no conversational path where a team member can DM an agent and get a threaded response. All interactive agent workflows (HITL approvals, clarifying questions, status checks) happen in the admin UI, which means team members who don't live in that UI are effectively locked out of the agent fleet.
 
-Breakout uses Slack heavily. This is the feature that makes the agent fleet feel like a team member in Slack rather than a bot that posts status messages.
+This feature closes that gap, making the agent fleet feel like team members in Slack rather than a bot that posts status messages.
 
-### Current state (what exists today)
+### This feature extends the existing integration — it does not replace it
 
-- `send_to_slack` skill — output path. Works, uses `withBackoff` + `runCostBreaker`.
-- `server/routes/webhooks/slackWebhook.ts` — inbound webhook, currently focused on event ingestion for integrations.
-- Slack OAuth integration via `oauthIntegrations.ts` and `integrationConnections.ts`.
-- In-app agent chat via `AgentChatPage`.
+The current Slack integration already has substantial infrastructure that this feature reuses unchanged:
 
-None of these form a conversational loop in Slack itself.
+| Existing piece | File | Reused by this feature |
+|---|---|---|
+| Multi-tenant inbound webhook with HMAC signature verification + replay protection | `server/routes/webhooks/slackWebhook.ts` | Yes — new event handlers hook in at the normaliser |
+| Multi-workspace support via connector configs | `connectorConfigService` + `connectorConfigs` table | Yes — one Slack bot per workspace, same pattern |
+| Adapter layer with event normalisation | `server/adapters/slack/` | Yes — new event types plug into the existing adapter |
+| Webhook dedup store | `webhookDedupeStore` | Yes |
+| Slack OAuth flow for workspace linking | `oauthIntegrations.ts` + `integrationConnections.ts` | Yes |
+| Outbound messaging service | `sendToSlackService.ts` | Yes — reused for agent replies |
+| `send_to_slack` skill for output | `server/skills/send_to_slack.md` | Yes |
+
+Crucially, `slackWebhook.ts` already contains this exact comment: *"Future: publish to event bus / pg-boss queue for agent processing."* That future is this feature. The existing webhook normalises events and currently just logs them; the new work publishes the normalised events to a pg-boss queue that dispatches to agent runs.
+
+**What this feature adds on top of the existing integration:**
+
+- Event handlers for `app_mention` and `message.im` (currently the webhook ingests but doesn't dispatch)
+- Agent dispatch on @mention, routed via pg-boss into the standard agent run infrastructure
+- A new `slack_conversations` table mapping `(workspace_id, channel_id, thread_ts)` → `agent_conversation_id` for thread continuity
+- Interactive Block Kit message rendering for review items, with action IDs that feed back into `reviewItems` via the existing HITL service
+- Slack user ↔ org user linkage (either a new `users.slackUserId` column or a row in `integrationConnections`, TBD)
 
 ### New capabilities
 
@@ -355,21 +419,22 @@ None of these form a conversational loop in Slack itself.
 
 ### Tech sketch
 
-- **Slack Bolt framework** for event handling. Listens on `app_mention`, `message.im`, `message.channels`, `interactive.block_actions`.
-- **Slack user → org user mapping** via a new column on `users` (e.g. `slackUserId`) or via `integrationConnections` config. Either way, mandatory linkage before a Slack user can act on review items (authorization boundary).
-- **Conversation persistence.** Slack `thread_ts` becomes the primary key of a new `slack_conversations` table that maps `(workspace_id, channel_id, thread_ts)` to an `agent_conversation_id`. Every message in a thread writes to the same conversation, which the agent reads on each message to get context.
-- **@mention dispatch logic.** Channel metadata determines which subaccount agents are "subscribed" to that channel. When an @mention fires, the bot looks up the intended agent, enqueues an agent run with the Slack message as input, and uses the standard execution infrastructure. No agent-execution changes needed.
-- **Slack bot process.** Runs in the main app process or as a separate worker, TBD. Main-app is simpler; worker is more scalable.
-- **Interactive review flow.** Block Kit messages include action ids that the webhook handler parses. The handler validates the Slack user is authorized to act on the review item, then writes to `reviewItems` via the existing service. Same code path as the in-app button.
+- **Event handling via the existing webhook + new dispatchers.** The existing `slackWebhook.ts` already verifies signatures, deduplicates, and normalises events. New work subscribes additional event types (`app_mention`, `message.im`, `message.channels`, `interactive.block_actions`) and publishes them to a pg-boss `slack-inbound` queue — exactly as anticipated by the TODO comment already in the code.
+- **Slack user → org user mapping.** Either a new `users.slackUserId` column or a row in `integrationConnections`. Either way, mandatory linkage before a Slack user can act on review items — the authorization boundary.
+- **Conversation persistence.** Slack `thread_ts` becomes the key of a new `slack_conversations` table mapping `(workspace_id, channel_id, thread_ts)` to an `agent_conversation_id`. Every message in a thread writes to the same conversation, which the agent reads on each message to get context.
+- **@mention dispatch.** Channel metadata determines which subaccount agents are "subscribed" to that channel. When an @mention fires, the dispatcher looks up the intended agent, enqueues an agent run with the Slack message as input, and uses the standard execution infrastructure. No agent-execution changes needed.
+- **Bot process.** Runs in the main app process or as a separate worker, TBD. Main-app is simpler and reuses existing webhook plumbing; worker is more scalable. Leaning main-app for v1 since the existing webhook handler already lives there.
+- **Interactive review flow.** Block Kit messages include action ids that the webhook handler parses. The handler validates the Slack user is authorized to act on the review item via the user mapping, then writes to `reviewItems` via the existing HITL service. Same code path as the in-app button.
 
-### Benefits (why this is worth building for Breakout)
+### Benefits
 
 - **HITL latency collapses.** Today approvers have to remember to check the in-app queue. In Slack, they get a DM with buttons — decision in seconds instead of hours.
 - **Team visibility without admin UI training.** Non-admin team members see agent work land in project channels. No learning curve.
 - **Conversations feel natural.** Instead of a separate chat UI, agent conversations happen where the team already is.
-- **Review throughput goes up** because reviewing is one click from wherever you are, not a context switch.
-- **Agents become team members, not dashboards.** Psychological shift — agents are people you talk to, not systems you monitor.
+- **Review throughput goes up** because reviewing is one click from wherever the reviewer is, not a context switch.
+- **Agents become team members, not dashboards.** Psychological shift — agents are entities you talk to, not systems you monitor.
 - **Clarifying questions unblock faster** because they DM the right person directly instead of waiting in an inbox someone has to remember to check.
+- **Reuses all existing Slack integration work** — multi-tenant webhook, OAuth, adapters, dedup, outbound messaging all stay as-is. This is an additive layer, not a rewrite.
 
 ### Effort
 
@@ -377,7 +442,7 @@ Medium. Slack Bolt is mature, the conversation persistence is a new table, the @
 
 ### Priority
 
-**P1.** Breakout-specific value is high because Slack is already where the team lives. For an org that doesn't use Slack, this drops to P2 or P3. Worth building even standalone because the HITL latency improvement alone is large.
+**P1.** Value scales with how much any given org's team lives in Slack. For Slack-first teams this is a major UX upgrade; for teams that don't use Slack this is irrelevant. The HITL latency improvement alone justifies building it for any Slack-using org. Feature gates per-org via the existing Slack connector config — orgs that don't link a Slack workspace don't see this functionality.
 
 ### Out of scope (v1)
 
@@ -408,6 +473,18 @@ Today every agent has access to its own workspace memory via the standard retrie
 - `MAX_EAGER_BUDGET` (60k tokens) caps the knowledge base layer so flooded searches can't blow the context window
 
 This feature is genuinely close to "wire up existing primitives as a new skill."
+
+### Operating model — fully automated, zero-touch
+
+This feature is a **capability**, not a **workflow**. After v1 ships there is nothing for an operator to configure, trigger, or maintain:
+
+- The skill is auto-injected into every agent run via `universalSkills.ts`, same as `read_data_source` and `update_memory_block`.
+- Agents decide when to call it based on their own reasoning — no human trigger.
+- There is no user-facing UI. The only visibility is via the standard tool-call trace in `RunTraceViewerPage` for debugging.
+- No background batch jobs. Retrieval happens in-line when the agent calls the skill.
+- No operator rituals. You turn it on, and from that moment every agent silently gains the ability to search the team's collective memory whenever it decides that's useful.
+
+Humans are not in the loop for this feature at all after the initial deploy. Agents are the sole consumer.
 
 ### The skill
 
@@ -515,20 +592,26 @@ Feature 3 (Skill Studio) ─── BLOCKED on skills-to-DB migration
 - Do we want a single "agent-coworker" feature flag that gates all five, or per-feature flags? Leaning per-feature.
 
 **Feature 1 — Ops Dashboard**
+- **Extend `SystemActivityPage` in place, or build net-new?** Leaning extend-in-place (rename it to Ops, add new panels alongside the existing engine executions panel) to avoid UI sprawl. Needs confirmation before build.
 - Real-time updates v1: polling every 10s, or WebSocket-based? Polling is simpler and almost certainly fine.
 - Do we want custom user-saved views, or is a single canonical layout enough for v1?
 - Does the "Decisions log" panel need a separate permission beyond `org.health_audit.view`?
+- How does the system-level view join data across orgs — one query per org or a single multi-org query? The existing `/api/system/executions` endpoint pattern is a template.
 
 **Feature 2 — Prioritized Work Feed**
 - Initial scoring weights — do we start with the heuristic in this brief, or calibrate against captured regressions first?
 - Should `claim()` be hard-locking (one agent, exclusive) or soft (advisory, multiple agents can observe but only one should act)?
 - How does the feed interact with `subtaskWakeupService`? Reactive wake-ups are already a priority signal — does the feed subsume them or complement them?
+- How does `tasks.position` (kanban order) translate into a score contribution alongside `tasks.priority`? Needs a concrete formula at build time — e.g. priority tier sets the bucket, position sets the intra-bucket order.
+- Do we want to add automatic priority escalation when a task ages past a threshold, or leave that as a v2 concern?
 
 **Feature 3 — Skill Studio**
 - Once skills are DB-backed, what does the migration path from existing `server/skills/*.md` files look like? Does it happen in the migration itself, or does Studio include a "import from file" flow?
 - Does Skill Studio need multi-user concurrent editing, or is single-editor-per-skill enforced via advisory lock enough?
 - How does versioning interact with the existing `regression_cases` replay harness — do we replay against the version that was live when the regression was captured, or the current version?
 - Should system-tier edits still go through a PR flow as an optional secondary path for code-review-required changes? (Recommendation: yes, keep it as an option, default to direct DB write.)
+- How much infrastructure should Skill Studio share with Skill Analyzer? Both need embeddings, simulation, and version history. Consolidate into a shared `skillPipeline` service layer, or keep them separate for now?
+- Button placement on `SystemSkillsPage` / `AdminSkillsPage` — per-skill "Refine in Studio" action on each row, plus a top-level "Skill Studio" link in the sidebar? Needs a UX decision at build time.
 
 **Feature 4 — Slack Conversational Surface**
 - Does the Slack bot run in the main app process or as a dedicated worker? Main-app is simpler; worker is more scalable. Leaning main-app for v1.
