@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -114,6 +115,12 @@ export const agentRuns = pgTable(
 
     // Sprint 5 P4.3: Plan emitted during the planning prelude for complex runs.
     planJson: jsonb('plan_json'),
+
+    // Brain Tree OS adoption P1 (migration 0095) — structured handoff document
+    // produced when the run reaches a terminal state. The shape is versioned;
+    // see AgentRunHandoffV1 in server/services/agentRunHandoffServicePure.ts.
+    // Reads must tolerate null (legacy runs) and unknown future fields.
+    handoffJson: jsonb('handoff_json').$type<AgentRunHandoffV1 | null>(),
 
     // Context tracking
     systemPromptTokens: integer('system_prompt_tokens').notNull().default(0),

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback, KeyboardEvent } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
+import SessionLogCardList, { type SessionLogRun } from '../components/SessionLogCardList';
 
 interface Agent {
   id: string;
@@ -147,6 +148,7 @@ const STARTERS = [
 
 export default function AgentChatPage({ user: _user }: { user: User }) {
   const { id: agentId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -158,6 +160,24 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const [sending, setSending] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [error, setError] = useState('');
+  // Brain Tree OS adoption P3 — recent runs sidebar section
+  const [recentRuns, setRecentRuns] = useState<SessionLogRun[]>([]);
+
+  // Load recent runs for this agent (org-scope). Refreshed when WebSocket
+  // signals a run completion.
+  const loadRecentRuns = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      const res = await api.get(`/api/org/agents/${agentId}/runs`, { params: { limit: 10 } });
+      setRecentRuns(res.data ?? []);
+    } catch {
+      // Endpoint may 403 if org-level config doesn't exist for this agent —
+      // silently treat as no recent runs.
+      setRecentRuns([]);
+    }
+  }, [agentId]);
+
+  useEffect(() => { void loadRecentRuns(); }, [loadRecentRuns]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -391,6 +411,27 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                     </div>
                   );
                 })
+              )}
+
+              {/* Brain Tree OS adoption P3 — recent runs section */}
+              {recentRuns.length > 0 && (
+                <div className="mt-4 px-1">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">Recent runs</div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/agents/${agentId}/runs`)}
+                      className="text-[10.5px] text-indigo-500 hover:text-indigo-700 font-semibold border-0 bg-transparent cursor-pointer p-0"
+                    >
+                      See all →
+                    </button>
+                  </div>
+                  <SessionLogCardList
+                    runs={recentRuns}
+                    startNumber={recentRuns.length}
+                    onSelectRun={(runId) => navigate(`/admin/subaccounts/_/runs/${runId}`)}
+                  />
+                </div>
               )}
             </div>
           </div>

@@ -69,6 +69,9 @@ export const ORG_PERMISSIONS = {
   PLAYBOOK_TEMPLATES_WRITE: 'org.playbook_templates.write',
   PLAYBOOK_TEMPLATES_PUBLISH: 'org.playbook_templates.publish',
   PLAYBOOK_STUDIO_ACCESS: 'org.playbook_studio.access',
+  // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
+  HEALTH_AUDIT_VIEW: 'org.health_audit.view',
+  HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────

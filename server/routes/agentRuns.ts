@@ -189,6 +189,40 @@ router.get(
   })
 );
 
+// ─── Brain Tree OS adoption P1 — latest handoff for an agent ─────────────────
+
+router.get(
+  '/api/org/agents/:agentId/latest-handoff',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { getLatestHandoffForAgent } = await import('../services/agentRunHandoffService.js');
+    const result = await getLatestHandoffForAgent({
+      agentId: req.params.agentId,
+      organisationId: req.orgId!,
+      subaccountId: null,
+    });
+    res.json(result);
+  })
+);
+
+router.get(
+  '/api/subaccounts/:subaccountId/agents/:agentId/latest-handoff',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const { getLatestHandoffForAgent } = await import('../services/agentRunHandoffService.js');
+    const result = await getLatestHandoffForAgent({
+      agentId,
+      organisationId: req.orgId!,
+      subaccountId,
+    });
+    res.json(result);
+  })
+);
+
 // ─── Configure subaccount agent (schedule, skills, limits) ───────────────────
 
 router.patch(

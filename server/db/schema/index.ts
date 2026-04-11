@@ -110,3 +110,6 @@ export * from './agentRunMessages';
 // Sprint 5 — P4.2 shared memory blocks (migration 0088)
 export * from './memoryBlocks';
 export * from './memoryBlockAttachments';
+
+// Brain Tree OS adoption P4 — workspace health audit (migration 0096)
+export * from './workspaceHealthFindings';
