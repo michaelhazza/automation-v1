@@ -18,6 +18,7 @@
     "seed:production": "tsx scripts/seed.ts --production",
     "skills:apply-visibility": "tsx scripts/apply-skill-visibility.ts",
     "skills:verify-visibility": "tsx scripts/verify-skill-visibility.ts",
+    "skills:backfill": "tsx scripts/backfill-system-skills.ts",
     "playbooks:validate": "tsx scripts/validate-playbooks.ts",
     "playbooks:test": "tsx server/lib/playbook/__tests__/playbook.test.ts",
     "test": "npm run test:gates && npm run test:qa && npm run test:unit",

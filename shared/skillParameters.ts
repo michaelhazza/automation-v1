@@ -102,6 +102,29 @@ export function buildToolDefinition(
   };
 }
 
+/** Minimal shape check for an Anthropic tool-definition object. Used by
+ *  systemSkillService.createSystemSkill / updateSystemSkill and by the
+ *  skill-analyzer merge PATCH endpoint (Phase 5) so every write path to
+ *  `system_skills.definition` agrees on what counts as "a valid tool definition".
+ *
+ *  The predicate is deliberately shallow — it confirms the required top-level
+ *  keys and their coarse types, not every nested constraint. Deeper validation
+ *  happens downstream (the LLM SDK, the agent execution path). */
+export function isValidToolDefinitionShape(
+  def: unknown
+): def is { name: string; description: string; input_schema: { type: 'object'; properties: Record<string, unknown>; required?: unknown[] } } {
+  if (def === null || typeof def !== 'object') return false;
+  const d = def as Record<string, unknown>;
+  if (typeof d.name !== 'string' || d.name.length === 0) return false;
+  if (typeof d.description !== 'string') return false;
+  if (d.input_schema === null || typeof d.input_schema !== 'object') return false;
+  const schema = d.input_schema as Record<string, unknown>;
+  if (schema.type !== 'object') return false;
+  if (schema.properties === null || typeof schema.properties !== 'object') return false;
+  if (schema.required !== undefined && !Array.isArray(schema.required)) return false;
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Parse parameter lines from markdown ## Parameters section
 // ---------------------------------------------------------------------------

@@ -1,159 +1,123 @@
-import { readdir, readFile } from 'fs/promises';
-import { join } from 'path';
-import { fileURLToPath } from 'url';
+import { and, eq, ne, sql } from 'drizzle-orm';
+import { db, type OrgScopedTx } from '../db/index.js';
+import { systemSkills, type SystemSkill as SystemSkillRow } from '../db/schema/systemSkills.js';
 import type { AnthropicTool } from './llmService.js';
 import { isSkillVisibility, type SkillVisibility } from '../lib/skillVisibility.js';
-import { parseParameterSection, buildToolDefinition } from '../../shared/skillParameters.js';
+import { isValidToolDefinitionShape } from '../../shared/skillParameters.js';
+import { SKILL_HANDLERS } from './skillExecutor.js';
 
 // ---------------------------------------------------------------------------
-// System Skill Service — reads platform-level skills from .md files
-// Source of truth: server/skills/*.md — no DB sync required.
+// System Skill Service — DB-backed
+// ---------------------------------------------------------------------------
+// Source of truth: the `system_skills` Postgres table. The markdown files at
+// server/skills/*.md are a seed source only — they are parsed by the Phase 0
+// backfill script (scripts/backfill-system-skills.ts) into DB rows on first
+// setup. Runtime reads and writes go through this service.
+//
+// Handler pairing: every row has a `handlerKey` that must resolve to a key in
+// SKILL_HANDLERS (server/services/skillExecutor.ts). This invariant is enforced
+// at three write-time gates — backfill script, createSystemSkill, and the
+// analyzer execute gate — and at one boot-time gate: validateSystemSkillHandlers.
+// See docs/skill-analyzer-v2-spec.md §5.5 for the full contract.
 // ---------------------------------------------------------------------------
 
-const __filename = fileURLToPath(import.meta.url);
-const SKILLS_DIR = join(__filename, '..', '..', 'skills');
-
+/** Public shape returned to callers. Preserves the legacy interface the
+ *  file-based service exposed: callers see `id` (UUID from the DB row),
+ *  `slug`, `name`, `description`, `isActive`, `visibility`, `definition`,
+ *  `instructions` — the same property names as before. */
 export interface SystemSkill {
-  id: string;          // slug (filename without .md)
+  id: string;
   slug: string;
   name: string;
   description: string;
   isActive: boolean;
-  /**
-   * Three-state cascade visibility for org/subaccount tiers. Defaults to
-   * 'none' so skills must be explicitly opted in.
-   *   none   — invisible to lower tiers
-   *   basic  — name + description only
-   *   full   — everything (instructions, definition)
-   */
   visibility: SkillVisibility;
   definition: AnthropicTool;
   instructions: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// In-memory cache
-// ---------------------------------------------------------------------------
-
-let _cache: Map<string, SystemSkill> | null = null;
-
-async function loadSkills(): Promise<Map<string, SystemSkill>> {
-  if (_cache) return _cache;
-
-  const map = new Map<string, SystemSkill>();
-
-  let files: string[];
-  try {
-    files = await readdir(SKILLS_DIR);
-  } catch {
-    console.warn('[systemSkillService] skills directory not found:', SKILLS_DIR);
-    _cache = map;
-    return map;
-  }
-
-  for (const file of files) {
-    if (!file.endsWith('.md')) continue;
-    const slug = file.slice(0, -3);
-
-    try {
-      const raw = await readFile(join(SKILLS_DIR, file), 'utf-8');
-      const skill = parseSkillFile(slug, raw);
-      if (skill) map.set(slug, skill);
-    } catch (err) {
-      console.warn(`[systemSkillService] failed to load skill ${file}:`, err);
-    }
-  }
-
-  _cache = map;
-  return map;
+/** Optional transaction handle — when provided, the method runs against the
+ *  transaction instead of the module-level `db`. Standard Drizzle idiom for
+ *  atomic multi-statement sequences (see docs/skill-analyzer-v2-spec.md §8.1). */
+export interface WithTx {
+  tx?: OrgScopedTx;
 }
 
-/** Extract a markdown section by heading. Returns content between `## Heading`
- *  and the next `## ` heading or end of string. Returns null if section missing. */
-function extractSection(body: string, heading: string): string | null {
-  const marker = `## ${heading}\n`;
-  const start = body.indexOf(marker);
-  if (start === -1) return null;
-  const contentStart = start + marker.length;
-  const nextHeading = body.indexOf('\n## ', contentStart);
-  const content = nextHeading === -1
-    ? body.slice(contentStart)
-    : body.slice(contentStart, nextHeading);
-  const trimmed = content.trim();
-  return trimmed || null;
+// ---------------------------------------------------------------------------
+// Row → public shape mapping
+// ---------------------------------------------------------------------------
+
+function toPublic(row: SystemSkillRow): SystemSkill {
+  // The schema stores `visibility` as plain text with app-layer enforcement
+  // of the 'none' | 'basic' | 'full' cascade. Validate once at the service
+  // boundary so downstream consumers can trust the union type.
+  const visibility: SkillVisibility = isSkillVisibility(row.visibility)
+    ? row.visibility
+    : 'none';
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description ?? '',
+    isActive: row.isActive,
+    visibility,
+    definition: row.definition as AnthropicTool,
+    instructions: row.instructions ?? null,
+  };
 }
 
-/** Parse a skill .md file into a SystemSkill record */
-function parseSkillFile(slug: string, raw: string): SystemSkill | null {
-  // Normalize Windows CRLF → LF before any regex matching
-  const normalised = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+// ---------------------------------------------------------------------------
+// Write-time validators
+// ---------------------------------------------------------------------------
 
-  // Split frontmatter
-  const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!fmMatch) return null;
-
-  const frontmatter = fmMatch[1];
-  const body = fmMatch[2];
-
-  // Parse frontmatter (simple key: value — no nested YAML)
-  const fm: Record<string, string> = {};
-  for (const line of frontmatter.split('\n')) {
-    const colonIdx = line.indexOf(':');
-    if (colonIdx === -1) continue;
-    const key = line.slice(0, colonIdx).trim();
-    const value = line.slice(colonIdx + 1).trim();
-    fm[key] = value;
+function assertHandlerRegistered(handlerKey: string): void {
+  if (!(handlerKey in SKILL_HANDLERS)) {
+    throw {
+      statusCode: 400,
+      message: `No handler registered for skill '${handlerKey}'. Add an entry to SKILL_HANDLERS in server/services/skillExecutor.ts before creating this row.`,
+    };
   }
+}
 
-  const name = fm['name'] ?? slug;
-  const description = fm['description'] ?? '';
-  const isActive = fm['isActive'] !== 'false';
-  // visibility defaults to 'none'. Legacy isVisible boolean is honoured as
-  // a one-time fallback so older .md files keep working until they're
-  // migrated: isVisible: true → 'full', isVisible: false → 'none'.
-  let visibility: SkillVisibility = 'none';
-  if (fm['visibility'] && isSkillVisibility(fm['visibility'])) {
-    visibility = fm['visibility'];
-  } else if (fm['isVisible'] === 'true') {
-    visibility = 'full';
+function assertValidDefinition(definition: unknown): void {
+  if (!isValidToolDefinitionShape(definition)) {
+    throw {
+      statusCode: 400,
+      message: 'definition must be an Anthropic tool-definition object with name, description, and input_schema',
+    };
   }
+}
 
-  // ---------------------------------------------------------------------------
-  // Parse tool definition: new format (## Parameters) or legacy (JSON block)
-  // ---------------------------------------------------------------------------
-  let definition: AnthropicTool;
-
-  const parametersSection = extractSection(body, 'Parameters');
-  if (parametersSection) {
-    // New format: auto-generate definition from slug + description + parameter list
-    const params = parseParameterSection(parametersSection);
-    definition = buildToolDefinition(slug, description, params) as AnthropicTool;
-  } else {
-    // Legacy format: parse JSON code block
-    const jsonMatch = body.match(/```json\n([\s\S]*?)\n```/);
-    if (!jsonMatch) return null;
-    try {
-      definition = JSON.parse(jsonMatch[1]);
-    } catch {
-      console.warn(`[systemSkillService] invalid JSON in skill ${slug}`);
-      return null;
-    }
+function assertValidVisibility(visibility: unknown): asserts visibility is SkillVisibility {
+  if (!isSkillVisibility(visibility)) {
+    throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
   }
+}
 
-  // ---------------------------------------------------------------------------
-  // Parse instructions: merge ## Instructions + ## Methodology (legacy) into one
-  // ---------------------------------------------------------------------------
-  const instructionsSection = extractSection(body, 'Instructions');
-  const methodologySection = extractSection(body, 'Methodology');
+// ---------------------------------------------------------------------------
+// Create / update input shapes
+// ---------------------------------------------------------------------------
 
-  let instructions: string | null = null;
-  if (instructionsSection && methodologySection) {
-    instructions = instructionsSection + '\n\n' + methodologySection;
-  } else {
-    instructions = instructionsSection ?? methodologySection ?? null;
-  }
+export interface CreateSystemSkillInput {
+  slug: string;
+  handlerKey: string;
+  name: string;
+  description: string;
+  definition: AnthropicTool;
+  instructions?: string | null;
+  visibility?: SkillVisibility;
+  isActive?: boolean;
+}
 
-  return { id: slug, slug, name, description, isActive, visibility, definition, instructions };
+export interface UpdateSystemSkillPatch {
+  name?: string;
+  description?: string;
+  definition?: AnthropicTool;
+  instructions?: string | null;
+  visibility?: SkillVisibility;
+  isActive?: boolean;
+  // Note: slug and handlerKey are intentionally not patchable — the
+  // handlerKey = slug invariant is locked at create time. See §5.5.
 }
 
 // ---------------------------------------------------------------------------
@@ -161,129 +125,204 @@ function parseSkillFile(slug: string, raw: string): SystemSkill | null {
 // ---------------------------------------------------------------------------
 
 export const systemSkillService = {
-  /** Reload the in-memory cache (useful in tests or hot-reload scenarios) */
-  invalidateCache() {
-    _cache = null;
+  /** No-op façade preserved for callers that imported the legacy name. The
+   *  in-memory cache is gone — all reads hit the DB directly. Kept as an
+   *  export so existing call sites compile unchanged. */
+  invalidateCache(): void {
+    // intentionally empty
   },
 
+  /** Return all system skill rows regardless of isActive or visibility.
+   *  Used by the skill analyzer so incoming candidates can be dedup-checked
+   *  against the full library (including retired rows). */
   async listSkills(): Promise<SystemSkill[]> {
-    const map = await loadSkills();
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    const rows = await db.select().from(systemSkills).orderBy(systemSkills.name);
+    return rows.map(toPublic);
   },
 
+  /** Skills with `isActive = true`. Inactive rows are hidden but still live
+   *  in the library (e.g. for dedup in the analyzer). */
   async listActiveSkills(): Promise<SystemSkill[]> {
-    const skills = await this.listSkills();
-    return skills.filter(s => s.isActive);
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(eq(systemSkills.isActive, true))
+      .orderBy(systemSkills.name);
+    return rows.map(toPublic);
   },
 
   /** Skills that are both active AND visible to org/subaccount level
-   *  (visibility !== 'none'). Returns the raw row including the body — the
-   *  caller is responsible for stripping the body via stripBodyForBasic()
-   *  when visibility === 'basic'.
-   */
+   *  (visibility !== 'none'). The caller is responsible for stripping the
+   *  body via stripBodyForBasic() when visibility === 'basic'. */
   async listVisibleSkills(): Promise<SystemSkill[]> {
-    const skills = await this.listSkills();
-    return skills.filter(s => s.isActive && s.visibility !== 'none');
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(and(eq(systemSkills.isActive, true), ne(systemSkills.visibility, 'none')))
+      .orderBy(systemSkills.name);
+    return rows.map(toPublic);
   },
 
-  /**
-   * Strip the body fields from a system skill so a 'basic' viewer only
-   * sees name + description + visibility (no instructions or tool definition).
-   * Mirrors the same operation skillService does for org-level skills via
-   * decorateSkillForViewer.
-   */
+  /** Strip the body fields from a system skill so a 'basic' viewer only
+   *  sees name + description + visibility (no instructions or tool definition).
+   *  Pure helper — does not touch the DB. */
   stripBodyForBasic(skill: SystemSkill): SystemSkill {
     return {
       ...skill,
       instructions: null,
-      definition: { name: skill.definition.name, description: skill.definition.description, input_schema: { type: 'object', properties: {}, required: [] } } as AnthropicTool,
+      definition: {
+        name: skill.definition.name,
+        description: skill.definition.description,
+        input_schema: { type: 'object', properties: {}, required: [] },
+      } as AnthropicTool,
     };
   },
 
+  /** Get a skill by DB UUID. Throws 404 if not found. Note: the legacy
+   *  file-based service keyed `getSkill(id)` by slug because id and slug
+   *  were aliases. The DB-backed version is strictly UUID-keyed — callers
+   *  that want slug lookup should use `getSkillBySlug`. The single existing
+   *  caller (`server/routes/systemSkills.ts`) has been rewired accordingly. */
   async getSkill(id: string): Promise<SystemSkill> {
-    const map = await loadSkills();
-    const skill = map.get(id);
-    if (!skill) throw { statusCode: 404, message: 'System skill not found' };
-    return skill;
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(eq(systemSkills.id, id))
+      .limit(1);
+    const row = rows[0];
+    if (!row) throw { statusCode: 404, message: 'System skill not found' };
+    return toPublic(row);
   },
 
+  /** Get a skill by slug. Returns null when the skill is missing OR inactive
+   *  — matches the legacy behaviour that filtered inactive rows out of the
+   *  slug-lookup path. Use listSkills / listActiveSkills for queries that
+   *  need visibility into inactive rows. */
   async getSkillBySlug(slug: string): Promise<SystemSkill | null> {
-    const map = await loadSkills();
-    const skill = map.get(slug);
-    if (!skill || !skill.isActive) return null;
-    return skill;
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(eq(systemSkills.slug, slug))
+      .limit(1);
+    const row = rows[0];
+    if (!row || !row.isActive) return null;
+    return toPublic(row);
   },
 
-  /**
-   * Set the cascade visibility on a skill by rewriting its .md frontmatter.
-   * The .md files are the source of truth so this is the only durable way
-   * to persist the change. Replaces both legacy `isVisible:` lines and any
-   * existing `visibility:` line in one pass.
-   */
+  /** Update the cascade visibility on a skill by slug. No more markdown
+   *  frontmatter rewriting — the DB row is the source of truth now. */
   async updateSkillVisibility(slug: string, visibility: SkillVisibility): Promise<SystemSkill> {
-    if (!isSkillVisibility(visibility)) {
-      throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
-    }
-    const map = await loadSkills();
-    const skill = map.get(slug);
-    if (!skill) throw { statusCode: 404, message: 'System skill not found' };
-
-    const filePath = join(SKILLS_DIR, `${slug}.md`);
-    const raw = await readFile(filePath, 'utf-8');
-
-    // Preserve the file's existing line ending (CRLF on Windows-edited files,
-    // LF elsewhere). All regexes below are CRLF-tolerant via \r?\n so the
-    // injection does not silently no-op on Windows.
-    const eol = raw.includes('\r\n') ? '\r\n' : '\n';
-
-    let updated = raw;
-    // Strip any legacy isVisible line so it can never override visibility.
-    if (/^isVisible:/m.test(updated)) {
-      updated = updated.replace(/^isVisible:.*\r?\n?/m, '');
-    }
-    if (/^visibility:/m.test(updated)) {
-      updated = updated.replace(/^visibility:.*$/m, `visibility: ${visibility}`);
-    } else {
-      // Inject after the last frontmatter key (before closing ---).
-      // Use \r?\n so this works on both LF and CRLF files.
-      updated = updated.replace(/^(---\r?\n[\s\S]*?)(^---)/m, `$1visibility: ${visibility}${eol}$2`);
-    }
-
-    const { writeFile } = await import('fs/promises');
-    await writeFile(filePath, updated, 'utf-8');
-
-    // Invalidate cache so the change is visible immediately
-    _cache = null;
-    const freshMap = await loadSkills();
-    return freshMap.get(slug)!;
+    assertValidVisibility(visibility);
+    const rows = await db
+      .update(systemSkills)
+      .set({ visibility, updatedAt: new Date() })
+      .where(eq(systemSkills.slug, slug))
+      .returning();
+    const row = rows[0];
+    if (!row) throw { statusCode: 404, message: 'System skill not found' };
+    return toPublic(row);
   },
 
-  /**
-   * Resolve an array of system skill slugs into Anthropic tool definitions + prompt instructions.
-   */
+  /** Resolve an array of system skill slugs into Anthropic tool definitions
+   *  and prompt instructions. Used by the agent execution path to hydrate a
+   *  running agent with its configured system skills. */
   async resolveSystemSkills(
-    skillSlugs: string[]
+    skillSlugs: string[],
   ): Promise<{ tools: AnthropicTool[]; instructions: string[] }> {
     if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [] };
 
     const tools: AnthropicTool[] = [];
     const instructions: string[] = [];
 
+    // Single round-trip batch fetch — avoid an N+1 over getSkillBySlug.
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(and(eq(systemSkills.isActive, true), sql`${systemSkills.slug} = ANY(${skillSlugs})`));
+
+    // Preserve caller order by indexing into a slug-keyed map.
+    const bySlug = new Map(rows.map((r) => [r.slug, r]));
     for (const slug of skillSlugs) {
-      const skill = await this.getSkillBySlug(slug);
-      if (!skill) continue;
-
+      const row = bySlug.get(slug);
+      if (!row) continue;
+      const def = row.definition as AnthropicTool;
       tools.push({
-        name: skill.definition.name,
-        description: skill.definition.description,
-        input_schema: skill.definition.input_schema,
+        name: def.name,
+        description: def.description,
+        input_schema: def.input_schema,
       });
-
-      if (skill.instructions) {
-        instructions.push(skill.instructions);
-      }
+      if (row.instructions) instructions.push(row.instructions);
     }
 
     return { tools, instructions };
+  },
+
+  /** Create a new system skill row. `handlerKey` must equal `slug` and must
+   *  resolve to a key in SKILL_HANDLERS — these are the Phase 0 write-time
+   *  gates against the "data refers to code" drift that opens the moment
+   *  skill rows become DB-editable. */
+  async createSystemSkill(
+    input: CreateSystemSkillInput,
+    opts: WithTx = {},
+  ): Promise<SystemSkill> {
+    if (input.handlerKey !== input.slug) {
+      throw {
+        statusCode: 400,
+        message: 'handlerKey must equal slug — the invariant is locked at create time (see spec §5.5)',
+      };
+    }
+    assertHandlerRegistered(input.handlerKey);
+    assertValidDefinition(input.definition);
+    if (input.visibility !== undefined) assertValidVisibility(input.visibility);
+
+    const runner = opts.tx ?? db;
+    const rows = await runner
+      .insert(systemSkills)
+      .values({
+        slug: input.slug,
+        handlerKey: input.handlerKey,
+        name: input.name,
+        description: input.description,
+        definition: input.definition as unknown as object,
+        instructions: input.instructions ?? null,
+        visibility: input.visibility ?? 'none',
+        isActive: input.isActive ?? true,
+      })
+      .returning();
+
+    const row = rows[0];
+    if (!row) throw { statusCode: 500, message: 'createSystemSkill: insert returned no rows' };
+    return toPublic(row);
+  },
+
+  /** Patch an existing system skill by DB UUID. Only the columns present in
+   *  `patch` are touched — `slug` and `handlerKey` are NOT patchable (both
+   *  are locked at create time to preserve the handlerKey = slug invariant). */
+  async updateSystemSkill(
+    id: string,
+    patch: UpdateSystemSkillPatch,
+    opts: WithTx = {},
+  ): Promise<SystemSkill> {
+    if (patch.definition !== undefined) assertValidDefinition(patch.definition);
+    if (patch.visibility !== undefined) assertValidVisibility(patch.visibility);
+
+    const runner = opts.tx ?? db;
+    const update: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.name !== undefined) update.name = patch.name;
+    if (patch.description !== undefined) update.description = patch.description;
+    if (patch.definition !== undefined) update.definition = patch.definition;
+    if (patch.instructions !== undefined) update.instructions = patch.instructions;
+    if (patch.visibility !== undefined) update.visibility = patch.visibility;
+    if (patch.isActive !== undefined) update.isActive = patch.isActive;
+
+    const rows = await runner
+      .update(systemSkills)
+      .set(update)
+      .where(eq(systemSkills.id, id))
+      .returning();
+
+    const row = rows[0];
+    if (!row) throw { statusCode: 404, message: 'System skill not found' };
+    return toPublic(row);
   },
 };
