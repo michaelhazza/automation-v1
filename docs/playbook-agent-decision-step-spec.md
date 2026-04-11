@@ -1,9 +1,68 @@
 # Playbook `agent_decision` Step Type — Implementation Spec
 
-**Status:** Draft
-**Related:** `architecture.md` (Playbooks section), `server/services/playbookEngineService.ts`, `server/lib/playbook/validator.ts`, `server/lib/playbook/templating.ts`
+**Status:** Draft (audited against `origin/main` at 2026-04-11)
+**Related:** `architecture.md` (Playbooks section), `server/services/playbookEngineService.ts`, `server/lib/playbook/validator.ts`, `server/lib/playbook/types.ts`, `server/lib/playbook/templating.ts`
 **Phase:** proposed for Phase 2 of `docs/improvements-roadmap.md`
 **Date:** 2026-04-11
+
+---
+
+## Audit note (2026-04-11)
+
+This spec was drafted against an earlier snapshot of the codebase and was audited against `origin/main` after the April 26 bugfixes PR (`5d2c804`) merged. Several things in the codebase changed between the drafts of Part A and Part B of this spec, and a few details in the original draft did not match reality. The corrections are summarised here for reviewers.
+
+**What actually exists in `main` that the earlier spec got right:**
+
+- The `server/lib/playbook/` module layout (`types.ts`, `validator.ts`, `renderer.ts`, `templating.ts`, `definePlaybook.ts`, `canonicalJson.ts`, `hash.ts`, `index.ts`) — unchanged.
+- `playbookEngineService.ts` dispatch → ready set → per-type dispatch switch in `dispatchStep` — unchanged.
+- `playbookAgentRunHook.ts` post-run bridge — unchanged.
+- `server/playbooks/*.playbook.ts` seed location — unchanged.
+- `server/playbooks/event-creation.playbook.ts` reference seed — unchanged.
+- Supervised-mode approval gating for `agent_call` / `prompt` steps in `dispatchStep` — unchanged.
+- Replay-mode hard block on external work in `dispatchStep` — unchanged.
+- `agent_runs.playbookStepRunId` (from migration `0076`) — **already exists**, so the spec's original migration `0092` (which planned to add this column) is redundant and has been removed.
+
+**What changed on main and what this spec now reconciles:**
+
+1. **`PlaybookStep` is a single interface, not a discriminated union.** The earlier draft sketched a separate `AgentDecisionStep` interface variant. In reality, `PlaybookStep` is one interface in `server/lib/playbook/types.ts` with a `type: StepType` field and optional type-specific fields. Decision-step fields must be additive optional fields on the same interface, and the validator enforces "when `type === 'agent_decision'`, `branches` is set." §4, §16 have been updated to match.
+
+2. **Agents are referenced via `agentRef: { kind, slug }`, not `agentId: string`.** The engine resolves the ref to a concrete agent id at dispatch time via `resolveAgentRef()`. §4, §16 have been updated to use `agentRef`.
+
+3. **`agentInputs`, not `inputs`.** The existing `agent_call` field is `agentInputs: Record<string, string>`. §4, §16 have been updated for naming consistency.
+
+4. **`outputSchema` is a `ZodSchema` required on every step.** The earlier draft used `JSONSchema7` and made the base schema "fixed." In the current codebase, `outputSchema` is a Zod schema required per step — so the decision step's `outputSchema` is supplied by the `definePlaybook` helper automatically, built from the fixed base schema plus any author extension. §16 and §24 have been updated.
+
+5. **`ValidationRule` is a closed union of snake_case rule names.** The validator emits errors as `{ rule: ValidationRule, stepId, message }`. Decision-step validation codes have been renamed from `decision_too_few_branches` style to rule names that match the existing convention (`decision_branches_too_few`, `decision_branch_duplicate_id`, etc.) and added to the existing `ValidationRule` union. §9 has been updated.
+
+6. **`agent_runs.runType` is a plain TEXT column, not a Postgres enum.** The column is typed in TypeScript as `'scheduled' | 'manual' | 'triggered'` and these are trigger causes, not run purposes. The earlier draft added a `'playbook_decision'` value via `ALTER TYPE`, which is wrong on two counts (there is no enum, and the semantic category is wrong). **Removed.** Decision agent runs are dispatched as normal playbook-linked runs via the existing `playbookStepRunId` column — no schema change needed for routing. The completion hook dispatches on `step.type === 'agent_decision'` instead of on `runType`.
+
+7. **Migration 0092 (add `decision_parent_step_run_id`) was redundant and has been dropped.** `agent_runs.playbookStepRunId` already carries the link from migration `0076`.
+
+8. **Migration 0091 in the earlier draft collided with a real migration on main (`0091_rls_task_activities_deliverables.sql`).** Decision-step migrations have been renumbered to `0099` and (if needed) later. As of this audit the next free number is `0099`.
+
+9. **Envelope template lives as a TypeScript constant, not a markdown file.** The earlier draft proposed `server/prompts/playbook/agent-decision-envelope.md`. That directory does not exist, and the current convention for engine-owned prompts is to keep them as TypeScript constants alongside the pure logic — see `server/lib/playbook/templating.ts` for precedent. The envelope now lives at `server/lib/playbook/agentDecisionEnvelope.ts`. §13 and §17 have been updated.
+
+10. **`FailureReason` is a Zod `z.enum([...])`, not a `const` array.** §25.4 has been updated to show the actual format.
+
+11. **`FailureObjectSchema.failureDetail` has a 200-character hard limit.** Decision step failure details must fit; long diagnostic payloads go into `metadata`. §11, §21 now note this constraint.
+
+12. **Existing `ValidationResult` shape is `{ ok: true } | { ok: false; errors: ValidationError[] }`.** The earlier draft introduced its own `{ ok, issues }` shape. §16 and §24 have been updated to use the existing shape.
+
+13. **Event names use colons, not dots.** The engine emits events like `'playbook:step:dispatched'`, not `'playbook.step.dispatched'`. §19.3 has been updated.
+
+14. **DB-backed `system_skills` migration (migration `0097`) landed on April 26.** The skill catalogue is now in Postgres, with a `handler_key` column mapping each row to a TypeScript handler in `SKILL_HANDLERS` (`server/services/skillExecutor.ts`). A startup validator (`validateSystemSkillHandlers` in `server/services/systemSkillHandlerValidator.ts`) refuses to boot if any active row references a handler key that does not resolve. This is the canonical "data refers to code" pattern and is now the reference implementation for similar future primitives. Decision steps do not interact with `system_skills` directly (they dispatch to an agent with an empty skill allowlist — see §18) so the migration does not affect decision-step execution semantics, but the spec now acknowledges the new pattern.
+
+15. **Part A cross-references to imagined files have been corrected** wherever a path was wrong. Real paths throughout now point at `server/lib/playbook/types.ts`, `server/lib/playbook/validator.ts`, `server/lib/playbook/agentDecisionPure.ts` (new), `server/lib/playbook/agentDecisionEnvelope.ts` (new), `server/lib/playbook/agentDecisionSchemas.ts` (new), `server/services/playbookEngineService.ts`, and `server/services/playbookAgentRunHook.ts`.
+
+**What was NOT changed:**
+
+- The design itself — the agent_decision step type, its semantics, the DAG branching model, the skip-set algorithm, the confidence-escape path, the replay invariant, the supervised-mode review flow, the pure helper contract. All of these survive the audit unchanged.
+- The four-slice phased implementation plan (§26). Slice boundaries and acceptance criteria still apply.
+- The 13 non-negotiable invariants (§15). All still apply.
+
+**Confidence that the spec is now implementation-ready against current main: high.** Any remaining misalignment is a detail-level issue that will surface during slice 1 unit tests and can be fixed inline. The structural bet — "extend the existing single-interface PlaybookStep with optional decision fields, reuse the existing dispatch switch, delegate skip-set math to a pure helper" — is correct and consistent with the codebase's current shape.
+
+---
 
 This spec defines a new step type for the Playbook DAG engine: `agent_decision`. The step asks an agent to pick between predeclared downstream branches, records the choice and rationale, and lets the engine skip the non-chosen branches.
 
@@ -128,61 +187,105 @@ The current workaround is to add an `agent_call` step that writes a branching hi
 
 ## 4. Step definition shape
 
-The new step type extends the existing `PlaybookStep` discriminated union declared in `server/lib/playbook/definePlaybook.ts` (or wherever the step shape is canonically defined in the DB-backed version). The new variant:
+The new step type does **not** introduce a new interface — it extends the existing `PlaybookStep` interface in `server/lib/playbook/types.ts` with additional optional fields, and adds `'agent_decision'` to the `StepType` union. The validator (§9) enforces that the decision-specific fields are populated when `step.type === 'agent_decision'`.
+
+### 4.1 Fields added to `PlaybookStep`
 
 ```typescript
-interface AgentDecisionStep {
-  id: string;                       // stable within template version
-  name: string;
-  type: 'agent_decision';
-  dependsOn: string[];              // prior steps, same as every other step type
-  sideEffectType: 'none';           // ALWAYS none for decision steps — see §5
-  humanReviewRequired?: boolean;    // if true, decision routes through the approval queue
+// server/lib/playbook/types.ts (additions — existing fields elided)
 
-  // Which agent makes the decision
-  agentId: string;                  // org or system agent id (same semantics as agent_call)
-  agentRole?: string;               // optional role tag for agents that inflect on role
+export type StepType =
+  | 'prompt'
+  | 'agent_call'
+  | 'user_input'
+  | 'approval'
+  | 'conditional'
+  | 'agent_decision';  // NEW
 
-  // What the agent is asked
-  decisionPrompt: string;           // templated like every other prompt field
-  inputs?: Record<string, string>;  // map of paramName -> template expression, same as agent_call
+export interface PlaybookStep {
+  // ... existing fields (id, name, type, dependsOn, sideEffectType, etc.) ...
 
-  // The candidate branches
-  branches: AgentDecisionBranch[];  // minimum 2, maximum 8 for phase 1
+  // ── type: agent_decision ─────────────────────────────────────────────────
+  /** Templated question the decision agent is asked. Required when type==='agent_decision'. */
+  decisionPrompt?: string;
 
-  // How to handle ambiguity
-  defaultBranchId?: string;         // fallback if the agent output is invalid and retries fail
-  minConfidence?: number;           // 0-1; below this, escalate to HITL via confidence-escape middleware
+  /**
+   * Reuses the existing agent_call agentRef field. A decision step IS a
+   * specialised agent call — it resolves through resolveAgentRef() the same
+   * way, and the resolver cache is shared.
+   */
+  // agentRef is already declared above for agent_call; decision steps reuse it.
 
-  // Optional output schema extension
-  // The base output shape { chosenBranchId, rationale, confidence? } is fixed;
-  // authors can require additional fields for observability but cannot change the base shape.
-  extraOutputSchema?: JSONSchema;
+  /**
+   * Reuses the existing agent_call agentInputs field. Same templating
+   * semantics as agent_call inputs.
+   */
+  // agentInputs is already declared above for agent_call; decision steps reuse it.
+
+  /** Candidate branches. Min 2, max 8. Required when type==='agent_decision'. */
+  branches?: AgentDecisionBranch[];
+
+  /**
+   * Fallback branch id used when the agent output is invalid after
+   * MAX_DECISION_RETRIES attempts. Must match one of branches[].id if set.
+   * If unset and retries exhaust, the step fails hard.
+   */
+  defaultBranchId?: string;
+
+  /**
+   * Confidence threshold in [0, 1]. If the agent emits a confidence below
+   * this value, the decision escalates via the HITL path instead of being
+   * applied. If unset, all outputs are trusted regardless of confidence.
+   */
+  minConfidence?: number;
 }
 
-interface AgentDecisionBranch {
-  id: string;                       // stable within the step definition
-  label: string;                    // short human-readable name, shown in UI
-  description: string;              // the line the agent reads when deciding
-  entrySteps: string[];             // step ids that are the heads of this branch
-                                    // each entry step's dependsOn MUST include the decision step id
+export interface AgentDecisionBranch {
+  /** Stable id within the step. Used as chosenBranchId. */
+  id: string;
+  /** Short human-readable name shown in UI. Max 80 chars. */
+  label: string;
+  /** Description the agent reads when deciding. One to two sentences. Max 500 chars. */
+  description: string;
+  /**
+   * Step ids that are the heads of this branch. Each entry step's dependsOn
+   * MUST include the decision step id — validated at publish time.
+   */
+  entrySteps: string[];
 }
 ```
 
-The `sideEffectType` for a decision step is **always** `none`. This is enforced by the validator (see §9). A decision step itself cannot have side effects — its only output is the branch choice. The side effects live in the branches themselves, each of which is a regular step with its own classification.
+### 4.2 Side-effect classification
 
-The `outputSchema` field that other step types carry is **not** author-controlled for decision steps. The shape is fixed:
+A decision step's `sideEffectType` is **always** `'none'`. The validator (§9) rejects any value other than `'none'` on a decision step. This is a belt-and-braces invariant: a decision step itself cannot have side effects — its only output is the branch choice. Side effects belong to the branches, each of which is a regular step with its own classification.
+
+### 4.3 Output schema
+
+Every playbook step requires a `outputSchema: ZodSchema`. For decision steps, the `definePlaybook` helper **supplies the `outputSchema` automatically** from a fixed base schema when the author does not provide one. The base schema is:
 
 ```typescript
-interface AgentDecisionOutput {
-  chosenBranchId: string;           // must match one of branches[].id
-  rationale: string;                // one-paragraph explanation, surfaced in UI
-  confidence?: number;              // 0-1; present if the agent is prompted to emit it
-  // ...plus any fields declared in extraOutputSchema
+// server/lib/playbook/agentDecisionSchemas.ts
+
+import { z } from 'zod';
+
+export const agentDecisionOutputBaseSchema = z.object({
+  chosenBranchId: z.string().min(1),
+  rationale: z.string().min(1),
+  confidence: z.number().min(0).max(1).optional(),
+}).passthrough(); // allows author-declared extra fields
+```
+
+Authors who need extra observability fields can pass their own schema via `outputSchema`, but the `definePlaybook` helper wraps it with a refinement that guarantees the base fields are present:
+
+```typescript
+// Conceptual — the real helper is in definePlaybook.ts
+function decisionOutputSchema(authorExtra?: ZodSchema): ZodSchema {
+  if (!authorExtra) return agentDecisionOutputBaseSchema;
+  return z.intersection(agentDecisionOutputBaseSchema, authorExtra);
 }
 ```
 
-Fixing the base shape guarantees that the engine's branch-selection logic, the UI rendering, the pure helper, and the replay mechanism all agree on the same interface. Authors who need richer observability use `extraOutputSchema` to append fields; they cannot rename or remove the base fields.
+The base fields (`chosenBranchId`, `rationale`, `confidence`) can never be renamed, removed, or retyped by the author — they are the canonical interface the engine, the UI, the pure helper, and the replay mechanism all agree on.
 
 ---
 
@@ -251,24 +354,26 @@ When the tick algorithm's step 4 enumerates ready steps, any step with `type: 'a
 
 ```
 for each ready agent_decision step:
-  1. Resolve the decisionPrompt and inputs via run.contextJson templating.
-  2. Assemble the decision context:
-       - rendered decisionPrompt
-       - branches list ({ id, label, description })
-       - the output schema the agent must emit
-       - (optional) minConfidence threshold
-  3. Enqueue an agentRun with:
-       - runType: 'playbook_decision'        (new enum variant on agent_runs.runType)
-       - playbookStepRunId: stepRun.id       (existing column added alongside migration 0076)
-       - agentId: step.agentId
-       - systemPromptAddendum: the decision context
+  1. Resolve the decisionPrompt and agentInputs via templating.ts against the run context.
+  2. Resolve step.agentRef to a concrete agent id via the existing resolveAgentRef().
+  3. Render the envelope via agentDecisionEnvelope.renderAgentDecisionEnvelope({
+       decisionPrompt,
+       branches: step.branches,
+       minConfidence: step.minConfidence,
+     }).
+  4. Enqueue an agentRun with:
+       - runType: 'triggered'                (existing trigger-cause value — unchanged)
+       - playbookStepRunId: stepRun.id       (existing column from migration 0076)
+       - agentId: <resolved from agentRef>
+       - systemPromptAddendum: the rendered envelope
+       - toolAllowlist: []                   (empty — decision runs have no tools; §18)
        - idempotencyKey: playbook:{runId}:{stepId}:{attempt}
        - budget: reserved from the run's remaining budget (same as agent_call)
-  4. Mark stepRun.status = 'running'.
-  5. Return — the tick is done; completion happens on the agent run's post-hook.
+  5. Mark stepRun.status = 'running'.
+  6. Return — the tick is done; completion happens on the agent run's post-hook.
 ```
 
-The dispatch path reuses `playbookAgentRunHook` with a small routing difference: when the post-hook fires for an agent run with `runType: 'playbook_decision'`, it routes through `handleDecisionStepCompletion` instead of `handleAgentCallStepCompletion`.
+The dispatch path reuses `playbookAgentRunHook` with a small routing difference: when the post-hook fires for an agent run that has `playbookStepRunId` set, it loads the owning step and inspects `step.type`. If `'agent_decision'`, it routes through `handleDecisionStepCompletion`; otherwise it routes through the existing `handleAgentCallStepCompletion`. There is no `runType` inspection — routing is purely TypeScript-layer on the step type.
 
 ### Completion handling (new post-hook branch)
 
@@ -338,7 +443,7 @@ Emit a single JSON object matching this schema. Do not add prose before or after
 - If you cannot confidently choose, set confidence below {{minConfidence}} and explain why in the rationale — the system will escalate to a human.
 ```
 
-The envelope is templated from the step definition at dispatch time. The template itself lives alongside other playbook agent prompts (`server/prompts/playbook/agent-decision-envelope.md` or equivalent).
+The envelope is templated from the step definition at dispatch time. The template lives as a TypeScript constant in `server/lib/playbook/agentDecisionEnvelope.ts` alongside the pure renderer (§17.5).
 
 ### Output schema enforcement
 
@@ -407,27 +512,55 @@ Already covered in §6. The decision is replayed from snapshot; no new agent cal
 
 ## 9. Validation rules (publish path)
 
-The `playbookTemplateService.publish()` path already runs DAG validation (no cycles, dependsOn resolvable, output schemas valid). Decision steps add the following checks in `server/lib/playbook/validator.ts`:
+The `validateDefinition()` function in `server/lib/playbook/validator.ts` already runs DAG validation (unique ids, kebab_case, unresolved deps, cycles, orphans, missing entries, missing output schema, missing side effect type, missing agent, missing required fields per step type, irreversible-with-retries, version monotonicity, max DAG depth, reserved template namespace). Decision steps add new rule names to the existing `ValidationRule` closed union and emit errors in the same shape as every other rule:
 
-| Check | Failure code |
-|-------|--------------|
-| `type: 'agent_decision'` requires `branches.length >= 2` | `decision_too_few_branches` |
-| `type: 'agent_decision'` requires `branches.length <= 8` (phase 1 cap) | `decision_too_many_branches` |
-| Every `branches[i].id` must be unique within the step | `decision_duplicate_branch_id` |
-| Every `branches[i].entrySteps` must be non-empty | `decision_branch_no_entry` |
-| Every entry step must exist in the DAG | `decision_entry_step_not_found` |
-| Every entry step must list the decision step id in its own `dependsOn` | `decision_entry_step_missing_dep` |
-| No two branches may share an entry step | `decision_branch_entry_collision` |
-| `sideEffectType` must be `'none'` | `decision_illegal_side_effect` |
-| `agentId` must resolve to an org or system agent the template owner has permission to use | `decision_agent_not_authorised` |
-| `defaultBranchId`, if set, must match one of the declared branches | `decision_default_branch_invalid` |
-| `minConfidence`, if set, must be in `[0, 1]` | `decision_min_confidence_out_of_range` |
-| `extraOutputSchema`, if set, must not redeclare base fields (`chosenBranchId`, `rationale`, `confidence`) | `decision_extra_schema_collision` |
-| No cycle through the decision step's branches (standard DAG cycle check) | `decision_cycle_detected` |
+```typescript
+// server/lib/playbook/types.ts — ValidationRule union extended
+
+export type ValidationRule =
+  // ...existing rules (unique_id, kebab_case, unresolved_dep, cycle, orphan,
+  //  missing_entry, missing_output_schema, missing_side_effect_type, missing_field,
+  //  agent_not_found, irreversible_with_retries, version_not_monotonic, ...) ...
+  | 'decision_branches_too_few'
+  | 'decision_branches_too_many'
+  | 'decision_branch_duplicate_id'
+  | 'decision_branch_no_entry_steps'
+  | 'decision_entry_step_not_found'
+  | 'decision_entry_step_missing_dep'
+  | 'decision_branch_entry_collision'
+  | 'decision_side_effect_not_none'
+  | 'decision_default_branch_invalid'
+  | 'decision_min_confidence_out_of_range';
+```
+
+Validation checks (emitted via the existing `errors.push({ rule, stepId, message })` pattern):
+
+| Check | `rule` |
+|-------|--------|
+| `type === 'agent_decision'` and `branches` is missing or `branches.length < 2` | `decision_branches_too_few` |
+| `type === 'agent_decision'` and `branches.length > 8` (phase 1 cap) | `decision_branches_too_many` |
+| Two branches in the same decision step share an `id` | `decision_branch_duplicate_id` |
+| A branch has an empty `entrySteps` array | `decision_branch_no_entry_steps` |
+| An `entrySteps` id does not exist as a step in the definition | `decision_entry_step_not_found` |
+| An entry step exists but does not list the decision step id in its own `dependsOn` | `decision_entry_step_missing_dep` |
+| Two branches claim the same entry step | `decision_branch_entry_collision` |
+| `sideEffectType !== 'none'` on a decision step | `decision_side_effect_not_none` |
+| `defaultBranchId` is set but does not match any branch id | `decision_default_branch_invalid` |
+| `minConfidence` is set but outside `[0, 1]` | `decision_min_confidence_out_of_range` |
+
+**Rules that are enforced by existing infrastructure, not new decision-specific rules:**
+
+- **`agent_not_found`** — already enforced for any step that sets `agentRef`. Decision steps inherit this.
+- **`missing_field`** — already enforced for type-specific required fields. The existing switch is extended to require `decisionPrompt`, `branches`, and `agentRef` when `type === 'agent_decision'`.
+- **`cycle`** — the existing cycle detector already walks every step's `dependsOn`. Decision steps add new forward edges (entry steps depend on the decision step), which the existing detector handles automatically.
+- **`missing_output_schema`** — decision steps receive their `outputSchema` from the `definePlaybook` helper automatically (§4.3), so this rule never fires for them.
+- **`max_dag_depth_exceeded`** — unchanged. Decision branches add depth like any other step chain.
 
 All checks run at publish time on the immutable version. Once a version is published, its decision steps cannot drift.
 
-**CI gate:** add `verify-playbook-decision-shape.sh` to `scripts/run-all-gates.sh` that lints every seeded playbook file (`server/playbooks/*.playbook.ts`) for decision step shape. Same pattern as the existing playbook validation CI.
+**Implementation location:** the new rules go into `validateDefinition()` in `server/lib/playbook/validator.ts` as a new block after the existing step-type validation switch. No new file; same rule-emission convention.
+
+**CI gate:** add `verify-playbook-decision-shape.sh` to `scripts/run-all-gates.sh` that imports every seeded playbook file (`server/playbooks/*.playbook.ts`) and runs `validateDefinition()` against it — same pattern as the existing `scripts/validate-playbooks.ts` script, which is already wired into `test:gates`.
 
 ---
 
@@ -437,7 +570,7 @@ All checks run at publish time on the immutable version. Once a version is publi
 
 - **`playbookStepRuns.outputJson`** captures `{ chosenBranchId, rationale, confidence }` plus any `extraOutputSchema` fields. This is the canonical record of what the agent decided.
 - **`playbookStepRuns.agentRunId`** links to the agent run that made the decision, so the full prompt, tool calls (none, for a decision), and LLM response are inspectable via the run trace viewer.
-- **`agent_runs.runType = 'playbook_decision'`** is the filter that lets usage reports segment decision calls from regular agent calls. This matters for cost attribution — decisions are usually cheap but high-cardinality.
+- **Decision-call segmentation** for usage reports is done by joining `agent_runs` → `playbook_step_runs` on `playbookStepRunId` and filtering to rows whose owning step has `type = 'agent_decision'`. This is the canonical query. Phase 2 may add a partial index on `agent_runs(playbook_step_run_id)` for frequent observability queries — see §25.1 — but phase 1 does not need one.
 
 ### UI rendering
 
@@ -587,36 +720,39 @@ New files:
 
 | File | Purpose |
 |------|---------|
-| `server/lib/playbook/agentDecisionPure.ts` | Pure helper (§12) |
+| `server/lib/playbook/agentDecisionPure.ts` | Pure helper (§12, implementations in §24) |
+| `server/lib/playbook/agentDecisionSchemas.ts` | Zod schemas + `composeDecisionOutputSchema` helper (§16.2) |
+| `server/lib/playbook/agentDecisionEnvelope.ts` | Envelope template constant + `renderAgentDecisionEnvelope` (§17) |
 | `server/lib/playbook/__tests__/agentDecisionPure.test.ts` | Unit tests for the pure helper |
-| `server/prompts/playbook/agent-decision-envelope.md` | The system-prompt envelope template |
-| `scripts/verify-playbook-decision-shape.sh` | CI gate for seeded playbook decision shape |
+| `server/lib/playbook/__tests__/agentDecisionEnvelope.test.ts` | Unit tests for the envelope renderer |
+| `server/services/__tests__/playbookEngine.decision.test.ts` | Engine integration tests (§14) |
+| `scripts/verify-playbook-decision-shape.sh` | CI gate that loads every seeded playbook and runs `validateDefinition` — extends the existing `scripts/validate-playbooks.ts` pattern |
 | `docs/playbook-agent-decision-step-spec.md` | This document |
 
 Modified files:
 
 | File | Change |
 |------|--------|
-| `server/lib/playbook/definePlaybook.ts` | Extend `PlaybookStep` discriminated union with `AgentDecisionStep` variant. |
-| `server/lib/playbook/validator.ts` | Add validation rules from §9; call `agentDecisionPure.validateDecisionStep` for each decision step. |
-| `server/lib/playbook/renderer.ts` | Render decision steps when generating `.playbook.ts` files via Playbook Studio. |
-| `server/services/playbookEngineService.ts` | Add dispatch clause in the tick algorithm (§6); call `agentDecisionPure.computeSkipSet` on completion. |
-| `server/services/playbookAgentRunHook.ts` | Route `runType: 'playbook_decision'` completions through `handleDecisionStepCompletion`. |
-| `server/db/schema/agentRuns.ts` | Add `'playbook_decision'` to the `runType` enum (migration). |
-| `server/db/schema/playbookStepRuns.ts` | Confirm existing `outputJson` / `agentRunId` columns are sufficient (should be — no schema change expected). |
-| `server/config/limits.ts` | Add `MAX_DECISION_RETRIES = 3` constant. |
-| `server/services/middleware/index.ts` | Wire confidence-escape middleware to handle decision-step confidence values (reuse the existing hook). |
-| `client/src/pages/PlaybookRunDetailPage.tsx` | Render `agent_decision` step cards with chosen branch, rationale, confidence, skipped-branch list. |
-| `client/src/components/playbook/StepCard.tsx` (or equivalent) | New variant for decision steps. |
+| `server/lib/playbook/types.ts` | Add `'agent_decision'` to `StepType`; add `decisionPrompt` / `branches` / `defaultBranchId` / `minConfidence` optional fields to `PlaybookStep`; add `AgentDecisionBranch` interface; extend `ValidationRule` union with the 10 new rule names (§9). |
+| `server/lib/playbook/definePlaybook.ts` | Extend the step helper so authors can pass `type: 'agent_decision'` with the new fields; auto-populate `outputSchema` via `composeDecisionOutputSchema`. |
+| `server/lib/playbook/validator.ts` | Add decision-step rules into `validateDefinition()` following the existing `errors.push({ rule, stepId, message })` convention. |
+| `server/lib/playbook/renderer.ts` | Render decision steps when generating `.playbook.ts` source via Playbook Studio's save path. |
+| `server/services/playbookEngineService.ts` | Add `'agent_decision'` case to the `dispatchStep()` switch; call `agentDecisionPure.computeSkipSet` from the completion handler. |
+| `server/services/playbookAgentRunHook.ts` | When the completed agent run has a `playbookStepRunId`, inspect `step.type` and route to `handleDecisionStepCompletion` if `'agent_decision'`. |
+| `server/config/limits.ts` | Add `MAX_DECISION_RETRIES`, `DEFAULT_DECISION_STEP_TIMEOUT_SECONDS`, `MAX_DECISION_BRANCHES_PER_STEP`, `DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS`. |
+| `shared/iee/failureReason.ts` | Add the 12 new failure reasons from §21 to the existing `z.enum([...])` (§25.4). |
+| `client/src/pages/PlaybookRunDetailPage.tsx` | Render decision step cards (chosen branch, rationale, confidence, skipped-branch list, link to agent reasoning). |
+| `client/src/components/playbook/StepCard.tsx` (or equivalent component) | New variant for decision steps with approval panel in supervised mode. |
 | `scripts/run-all-gates.sh` | Add `verify-playbook-decision-shape.sh` to the gate list. |
+| `scripts/validate-playbooks.ts` | Extend the existing script so it recognises decision steps and emits the new rule names correctly. |
 | `architecture.md` | Add a subsection under Playbooks describing the new step type. |
 | `server/playbooks/event-creation.playbook.ts` (or a new reference playbook) | Add at least one seeded playbook that uses `agent_decision` as a reference implementation. |
 
-Migration:
+**No schema changes required to `agent_runs` or `playbook_step_runs`.** The audit confirmed that `agent_runs.playbookStepRunId` already exists (migration `0076`) and `playbook_step_runs.outputJson` already stores arbitrary JSON. The decision output fits inside the existing columns.
 
-| Migration | Change |
-|-----------|--------|
-| `0091_agent_decision_run_type.sql` | Add `'playbook_decision'` to the `runType` enum on `agent_runs`. No data migration needed — existing rows are unaffected. Forward-only. |
+**No new migration needed for routing.** The earlier draft's `0091_agent_decision_run_type.sql` was based on a wrong assumption that `agent_runs.runType` is a Postgres enum. It is not — it is a plain TEXT column with a TypeScript-level literal type, and its semantic category is "trigger cause" (`scheduled` / `manual` / `triggered`), not "run purpose." Decision runs fit the existing `'triggered'` runType because they are triggered by a playbook step. Routing to the decision handler is done in TypeScript at the completion hook, not at the DB level.
+
+**Optional future migration** (defer to Phase 2): if observability queries need to filter decision runs efficiently, add a partial index on `agent_runs(playbook_step_run_id)` where the owning step is a decision. Phase 1 does not need this — queries go through `playbook_step_runs` first, which already has the step id.
 
 ---
 
@@ -695,279 +831,227 @@ These are the invariants every implementation round must preserve. A violation o
 
 ## 16. Complete TypeScript type definitions
 
-This is the canonical type surface. All types live in `shared/playbook/agentDecisionTypes.ts` (new file) so they can be imported by server, worker, and client without duplication. Existing playbook types in `server/lib/playbook/definePlaybook.ts` import and re-export from the shared file.
+The type surface is split across the existing `server/lib/playbook/types.ts` (extended in place) and two new files:
 
-### 16.1 Step definition types
+- `server/lib/playbook/types.ts` — existing file, extended with the new `StepType` value, the new optional fields on `PlaybookStep`, the `AgentDecisionBranch` interface, and the new `ValidationRule` members.
+- `server/lib/playbook/agentDecisionSchemas.ts` — new file, Zod schemas for runtime validation.
+- `server/lib/playbook/agentDecisionPure.ts` — new file, pure helpers (implementations in §24).
+
+All types keep the existing `types.ts` convention: no `readonly` modifiers, mutable interfaces (consistent with the rest of the file), and no `shared/` export — playbooks are server-only, and the client fetches definition JSON through the API.
+
+### 16.1 Extensions to `types.ts`
 
 ```typescript
-// shared/playbook/agentDecisionTypes.ts
+// server/lib/playbook/types.ts (diff-style additions — existing content unchanged unless noted)
 
-import type { JSONSchema7 } from 'json-schema';
+export type StepType =
+  | 'prompt'
+  | 'agent_call'
+  | 'user_input'
+  | 'approval'
+  | 'conditional'
+  | 'agent_decision';  // NEW
 
-/**
- * A single branch the decision agent may select.
- * Branches are author-declared at template publish time and are immutable
- * for the lifetime of a template version.
- */
 export interface AgentDecisionBranch {
   /** Stable id within the decision step. Used as chosenBranchId. */
-  readonly id: string;
-
+  id: string;
   /** Short human-readable name shown in UI. Max 80 chars. */
-  readonly label: string;
-
-  /**
-   * Description the agent reads when deciding. This is the primary
-   * signal to the model about when each branch applies. Keep it focused
-   * — one to two sentences. Max 500 chars.
-   */
-  readonly description: string;
-
+  label: string;
+  /** Description the agent reads when deciding. Max 500 chars. */
+  description: string;
   /**
    * Step ids that are the heads of this branch. Each entry step's
-   * own dependsOn[] MUST contain the decision step id — validated at
-   * publish time. Every entry step runs if the branch is chosen.
-   *
-   * Phase 1 constraint: entry steps are ALWAYS direct successors.
-   * Indirect branch roots (entry step → fan-out → real work) are
-   * allowed but considered authoring hygiene, not engine semantics.
+   * dependsOn MUST include the decision step id — validated at publish
+   * time.
    */
-  readonly entrySteps: readonly string[];
+  entrySteps: string[];
 }
 
-/**
- * The agent_decision step definition, stored in
- * playbookTemplateVersions.definitionJson under the canonical
- * PlaybookStep discriminated union.
- */
-export interface AgentDecisionStep {
-  /** Stable id within the template version. */
-  readonly id: string;
+export interface PlaybookStep {
+  // ...existing fields unchanged...
 
-  readonly name: string;
-
-  readonly type: 'agent_decision';
-
-  readonly dependsOn: readonly string[];
+  // ── type: agent_decision ─────────────────────────────────────────────────
+  /**
+   * Templated question the decision agent is asked. Required when
+   * type==='agent_decision'. Uses the same templating.ts resolver as
+   * agent_call prompts.
+   */
+  decisionPrompt?: string;
 
   /**
-   * ALWAYS 'none' for decision steps. Enforced by the validator; also
-   * hard-coded in the engine's side-effect classification path. A
-   * decision step cannot have side effects — its only output is the
-   * branch choice. Side effects belong to the branches themselves.
+   * Candidate branches for this decision. Required when
+   * type==='agent_decision'. Min 2, max 8 (phase 1 cap).
    */
-  readonly sideEffectType: 'none';
-
-  /** If true, decision routes through the approval queue in supervised mode. */
-  readonly humanReviewRequired?: boolean;
-
-  // Agent dispatch config
-  /** Org or system agent id. Same resolution as agent_call steps. */
-  readonly agentId: string;
-
-  /** Optional role tag; inherited from agent_call semantics. */
-  readonly agentRole?: string;
-
-  // Decision prompt + inputs
-  /**
-   * Author-supplied question the agent is asked. Templated against
-   * run.contextJson via the standard templating.ts resolver.
-   * Rendered into the envelope's ### The question section.
-   */
-  readonly decisionPrompt: string;
+  branches?: AgentDecisionBranch[];
 
   /**
-   * Map of inputName -> template expression. Same semantics as
-   * agent_call step inputs. Resolved at dispatch time and passed
-   * to the agent as part of the run context.
+   * Fallback branch id used when the agent output is invalid after
+   * MAX_DECISION_RETRIES attempts. Must match one of branches[].id.
+   * If unset and retries exhaust, the step fails hard.
    */
-  readonly inputs?: Readonly<Record<string, string>>;
-
-  // Branch configuration
-  /** Minimum 2, maximum 8 branches. Enforced at publish time. */
-  readonly branches: readonly AgentDecisionBranch[];
-
-  // Behaviour knobs
-  /**
-   * Fallback branch id used when the agent output fails validation
-   * MAX_DECISION_RETRIES times in a row. Must match one of branches[].id
-   * if set. If unset and retries exhaust, the step fails hard.
-   */
-  readonly defaultBranchId?: string;
+  defaultBranchId?: string;
 
   /**
-   * Confidence threshold in [0, 1]. If the agent emits a confidence
-   * below this value, the decision is escalated via confidence-escape
-   * middleware instead of being applied. If unset, all outputs are
-   * trusted regardless of confidence.
+   * Confidence threshold in [0, 1]. If the agent emits confidence
+   * below this value, the step escalates via the HITL path instead
+   * of applying the decision.
    */
-  readonly minConfidence?: number;
+  minConfidence?: number;
 
-  /**
-   * Optional schema extension for author-specific observability fields.
-   * MUST NOT redeclare base fields (chosenBranchId, rationale, confidence).
-   * Validated at publish time against the base schema.
-   */
-  readonly extraOutputSchema?: JSONSchema7;
-
-  /**
-   * Per-step timeout in seconds. Defaults to
-   * DEFAULT_DECISION_STEP_TIMEOUT_SECONDS (60). Hard ceiling on how
-   * long the decision agent run may take before the step times out.
-   */
-  readonly timeoutSeconds?: number;
+  // ── existing agent_call fields (agentRef, agentInputs) are reused by
+  //    agent_decision steps — same semantics, same resolver, same cache.
 }
 
-/**
- * The fixed base output shape for every decision step. Extension fields
- * declared via extraOutputSchema are merged on top via the Zod
- * .passthrough() path at validation time, but the base fields are
- * non-negotiable.
- */
-export interface AgentDecisionOutput {
-  readonly chosenBranchId: string;
-  readonly rationale: string;
-  readonly confidence?: number;
-  /** Any additional author-declared fields land here. */
-  readonly [key: string]: unknown;
-}
-
-/**
- * Shape stored in playbookStepRuns.outputJson for decision steps.
- * Superset of AgentDecisionOutput plus engine-tracked metadata.
- */
-export interface DecisionStepRunOutput extends AgentDecisionOutput {
-  /**
-   * The deterministic skip set this decision produced, as computed by
-   * agentDecisionPure.computeSkipSet. Frozen at completion time for
-   * replay consistency.
-   */
-  readonly skippedStepIds: readonly string[];
-
-  /** Number of retries before the output was accepted. */
-  readonly retryCount: number;
-
-  /**
-   * Whether the output was selected by the agent (false means
-   * defaultBranchId fallback was applied after retries exhausted).
-   */
-  readonly chosenByAgent: boolean;
-}
+export type ValidationRule =
+  // ...existing rules unchanged...
+  | 'decision_branches_too_few'
+  | 'decision_branches_too_many'
+  | 'decision_branch_duplicate_id'
+  | 'decision_branch_no_entry_steps'
+  | 'decision_entry_step_not_found'
+  | 'decision_entry_step_missing_dep'
+  | 'decision_branch_entry_collision'
+  | 'decision_side_effect_not_none'
+  | 'decision_default_branch_invalid'
+  | 'decision_min_confidence_out_of_range';
 ```
 
-### 16.2 Zod schemas
+The existing `ValidationError` and `ValidationResult` types are reused unchanged:
+
+```typescript
+// Existing — DO NOT introduce a new shape.
+export interface ValidationError {
+  rule: ValidationRule;
+  stepId?: string;
+  path?: string;
+  message: string;
+}
+
+export type ValidationResult =
+  | { ok: true }
+  | { ok: false; errors: ValidationError[] };
+```
+
+### 16.2 Decision output types
+
+The decision output shape lives in `agentDecisionSchemas.ts` because it is runtime-validated via Zod and can be inferred directly from the schema. No separate interface definition needed.
 
 ```typescript
 // server/lib/playbook/agentDecisionSchemas.ts
 
 import { z } from 'zod';
 
-/** Base Zod schema for parsing raw agent output. */
+/**
+ * The fixed base schema for every decision output. Used by:
+ *   - The definePlaybook helper to auto-populate outputSchema on decision steps.
+ *   - parseDecisionOutput in the pure helper.
+ *   - The engine completion handler when validating raw agent output.
+ *
+ * Authors who want extra observability fields provide their own schema
+ * via step.outputSchema; definePlaybook intersects it with this base.
+ */
 export const agentDecisionOutputBaseSchema = z.object({
   chosenBranchId: z.string().min(1, 'chosenBranchId is required'),
   rationale: z.string().min(1, 'rationale is required'),
   confidence: z.number().min(0).max(1).optional(),
-}).passthrough(); // allows extraOutputSchema fields through
+}).passthrough();
 
-/** Branch definition schema (publish-time validation). */
+export type AgentDecisionOutput = z.infer<typeof agentDecisionOutputBaseSchema>;
+
+/**
+ * Shape persisted in playbook_step_runs.outputJson for decision steps.
+ * Superset of the decision output plus engine-tracked metadata.
+ */
+export const decisionStepRunOutputSchema = agentDecisionOutputBaseSchema.extend({
+  skippedStepIds: z.array(z.string()),
+  retryCount: z.number().int().min(0),
+  chosenByAgent: z.boolean(),
+});
+
+export type DecisionStepRunOutput = z.infer<typeof decisionStepRunOutputSchema>;
+
+/**
+ * Helper used by definePlaybook() to compose a decision step's outputSchema.
+ * Takes an optional author-supplied extension and intersects it with the
+ * base schema so base fields are always present.
+ */
+export function composeDecisionOutputSchema(authorExtra?: z.ZodTypeAny): z.ZodTypeAny {
+  if (!authorExtra) return agentDecisionOutputBaseSchema;
+  return z.intersection(agentDecisionOutputBaseSchema, authorExtra);
+}
+
+/**
+ * Runtime-validated shape of an AgentDecisionBranch, used by the validator
+ * and by the publish-path Zod check. Matches the interface in types.ts.
+ */
 export const agentDecisionBranchSchema = z.object({
-  id: z.string().min(1).max(64).regex(/^[a-z0-9_-]+$/, 'ids must be lowercase alphanumeric with hyphens or underscores'),
+  id: z.string().min(1).max(64).regex(
+    /^[a-z0-9_-]+$/,
+    'branch ids must be lowercase alphanumeric with hyphens or underscores',
+  ),
   label: z.string().min(1).max(80),
   description: z.string().min(1).max(500),
   entrySteps: z.array(z.string().min(1)).min(1, 'every branch needs at least one entry step'),
 });
-
-/** Full step definition schema (publish-time validation). */
-export const agentDecisionStepSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  type: z.literal('agent_decision'),
-  dependsOn: z.array(z.string()),
-  sideEffectType: z.literal('none'),
-  humanReviewRequired: z.boolean().optional(),
-  agentId: z.string().min(1),
-  agentRole: z.string().optional(),
-  decisionPrompt: z.string().min(1),
-  inputs: z.record(z.string()).optional(),
-  branches: z.array(agentDecisionBranchSchema)
-    .min(2, 'agent_decision requires at least 2 branches')
-    .max(8, 'phase 1 caps branches at 8'),
-  defaultBranchId: z.string().optional(),
-  minConfidence: z.number().min(0).max(1).optional(),
-  extraOutputSchema: z.record(z.unknown()).optional(),
-  timeoutSeconds: z.number().int().positive().max(600).optional(),
-}).refine(
-  (step) => !step.defaultBranchId || step.branches.some((b) => b.id === step.defaultBranchId),
-  { message: 'defaultBranchId must reference an existing branch', path: ['defaultBranchId'] },
-).refine(
-  (step) => {
-    const ids = step.branches.map((b) => b.id);
-    return new Set(ids).size === ids.length;
-  },
-  { message: 'branch ids must be unique within the step', path: ['branches'] },
-);
 ```
 
-### 16.3 Engine-side types
+### 16.3 Pure helper result types
 
 ```typescript
-// server/lib/playbook/agentDecisionPureTypes.ts
+// server/lib/playbook/agentDecisionPure.ts (types only — implementation in §24)
+
+import type { AgentDecisionOutput } from './agentDecisionSchemas.js';
+import type { PlaybookStep } from './types.js';
 
 export type StepReadiness = 'ready' | 'waiting' | 'skipped';
 
-export type StepRunTerminalStatus = 'completed' | 'skipped' | 'failed' | 'cancelled';
+/**
+ * Status values a playbook step run can hold. Matches the existing
+ * playbook_step_runs.status column enum — DO NOT introduce a new enum.
+ */
+export type StepRunStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting_input'
+  | 'awaiting_approval'
+  | 'awaiting_hitl'
+  | 'completed'
+  | 'skipped'
+  | 'failed'
+  | 'cancelled';
 
-export type StepRunStatus = 'pending' | 'running' | 'awaiting_input' | 'awaiting_approval' | 'awaiting_hitl' | StepRunTerminalStatus;
-
-/** Result of the pure parser — discriminated union, never throws. */
+/**
+ * Result of the pure parser — discriminated union, never throws.
+ * Used by the engine completion handler to decide whether to accept,
+ * retry, fallback, or fail.
+ */
 export type DecisionParseResult =
   | { ok: true; output: AgentDecisionOutput }
   | { ok: false; error: DecisionParseError };
 
 export interface DecisionParseError {
-  readonly code:
+  code:
     | 'invalid_json'
     | 'schema_violation'
-    | 'unknown_branch'
-    | 'extra_schema_violation';
-  readonly message: string;
-  readonly detail?: Readonly<Record<string, unknown>>;
+    | 'unknown_branch';
+  message: string;
+  detail?: Record<string, unknown>;
 }
-
-/** Result of the pure validator — also never throws. */
-export interface ValidationResult {
-  readonly ok: boolean;
-  readonly issues: readonly ValidationIssue[];
-}
-
-export interface ValidationIssue {
-  readonly code: DecisionValidationCode;
-  readonly stepId: string;
-  readonly message: string;
-  readonly path?: readonly string[];
-}
-
-export type DecisionValidationCode =
-  | 'decision_too_few_branches'
-  | 'decision_too_many_branches'
-  | 'decision_duplicate_branch_id'
-  | 'decision_branch_no_entry'
-  | 'decision_entry_step_not_found'
-  | 'decision_entry_step_missing_dep'
-  | 'decision_branch_entry_collision'
-  | 'decision_illegal_side_effect'
-  | 'decision_agent_not_authorised'
-  | 'decision_default_branch_invalid'
-  | 'decision_min_confidence_out_of_range'
-  | 'decision_extra_schema_collision'
-  | 'decision_cycle_detected';
 ```
+
+**Note:** there is no separate `ValidationResult` type for decision steps. The pure validator (`validateDecisionStepInline`) emits errors directly into the existing `ValidationError[]` array passed by `validateDefinition()`, using the existing `ValidationError` shape from `types.ts`. This is the same convention every other validation rule follows.
 
 ---
 
 ## 17. Prompt envelope template (verbatim)
 
-The envelope is a fixed template checked into `server/prompts/playbook/agent-decision-envelope.md`. The engine renders it with a deterministic templating helper — **not** the same templating resolver used for `run.contextJson` references (that one allows arbitrary expressions, which would be unsafe inside a system prompt). The envelope template uses a minimal, whitelisted placeholder set and nothing else.
+The envelope is a TypeScript constant in `server/lib/playbook/agentDecisionEnvelope.ts` — a new file that sits alongside the other pure playbook helpers (`templating.ts`, `renderer.ts`, `validator.ts`). It is **not** a separate markdown asset. The rationale:
+
+- Keeping the envelope in TS means it is versioned, typechecked, and imported like any other source — no filesystem dependency at runtime.
+- The existing `server/lib/playbook/` convention is that every piece of playbook logic lives in this directory as a pure TypeScript module.
+- There is no precedent for a `server/prompts/` folder. The only existing "prompt files on disk" are system-agent master prompts under `server/agents/<slug>/master-prompt.md` and system-skill markdown seed files under `server/skills/*.md` — neither of which is an architectural fit for a per-run envelope that is reconstructed every dispatch.
+
+The engine renders the envelope with a deterministic templating helper that takes a structured `EnvelopeRenderContext` — **not** the `templating.ts` resolver used for `run.contextJson` references (that one allows arbitrary whitelisted expressions, which would be unsafe inside a system prompt boundary). The envelope renderer uses a minimal, whitelisted placeholder set and nothing else.
 
 ### 17.1 Whitelisted placeholders
 
@@ -1070,11 +1154,14 @@ Please fix the issue and respond again. Do not repeat the same mistake.
 ### 17.5 Envelope rendering API
 
 ```typescript
-// server/prompts/playbook/renderAgentDecisionEnvelope.ts
+// server/lib/playbook/agentDecisionEnvelope.ts
+
+import type { AgentDecisionBranch } from './types.js';
 
 export interface EnvelopeRenderContext {
-  decisionPrompt: string;     // already resolved via templating.ts against run.contextJson
-  branches: readonly AgentDecisionBranch[];
+  /** Already resolved via templating.ts against the run context. */
+  decisionPrompt: string;
+  branches: AgentDecisionBranch[];
   minConfidence?: number;
   priorAttempt?: {
     errorMessage: string;
@@ -1083,15 +1170,27 @@ export interface EnvelopeRenderContext {
 }
 
 /**
- * Pure, deterministic envelope renderer. No DB, no LLM, no side effects.
- * Given the same context, always produces the same string.
+ * Pure, deterministic envelope renderer. No DB, no LLM, no filesystem reads,
+ * no side effects. Given the same context, always produces the same string.
+ *
+ * The envelope template is a TypeScript string constant in this file, not a
+ * separate markdown asset. Keeps the template typechecked and removes the
+ * runtime filesystem dependency.
  */
-export function renderAgentDecisionEnvelope(ctx: EnvelopeRenderContext): string;
+export function renderAgentDecisionEnvelope(ctx: EnvelopeRenderContext): string {
+  // implementation: string template assembly — see full implementation in §24.x
+}
 ```
 
 ### 17.6 How the envelope is attached to the agent run
 
-The rendered envelope is passed to the agent execution service as a `systemPromptAddendum`. It is appended to the end of the agent's normal system prompt (after the agent's masterPrompt, additionalPrompt, and team roster) so the model sees it in the place it expects instructions to land. The addendum is **not** part of the agent's stored configuration — it is per-run, disposable, and reconstructed on replay.
+The rendered envelope is passed to the agent execution service as a system prompt addendum. The dispatch path reuses the same code path as `agent_call` steps — there is no new agent execution mode. The decision step's envelope is appended to the agent's normal system prompt (after the agent's masterPrompt, additionalPrompt, and team roster) by passing it through whatever addendum field the existing agent execution service already supports for playbook-driven runs (see `server/services/playbookEngineService.ts dispatchStep()` for the current agent_call dispatch shape — the decision dispatch mirrors it with the envelope inserted as additional instructions).
+
+**The addendum is not part of the agent's stored configuration.** It is per-run, disposable, and reconstructed on replay by calling `renderAgentDecisionEnvelope` with the same deterministic context. Replay mode never needs to read a prior envelope from storage because it can rebuild it deterministically from the step definition and the run context.
+
+### 17.7 How the agent run is linked back to the playbook step
+
+The decision agent run is dispatched as a normal playbook-linked agent run via the existing `playbookStepRunId` column on `agent_runs` (added in migration `0076`). The completion hook in `playbookAgentRunHook.ts` already routes on `agent_runs.playbookStepRunId` being set; the handler then looks at `step.type` on the owning step definition and dispatches to `handleDecisionStepCompletion` when the type is `agent_decision`. No new `runType` enum value is needed (see §25 and the audit note at the top of this spec for context on why the earlier draft was wrong here).
 
 ---
 
@@ -1118,7 +1217,7 @@ At **four** layers, belt-and-braces:
 | **Envelope instruction** | The system prompt addendum in §17.2 explicitly tells the agent it has no tools. This is the softest layer — relies on the model's instruction-following. |
 | **Tool allowlist override** | The decision step dispatches with `allowedToolSlugs: []` (empty array) passed to the agent execution service. The existing `toolRestrictionMiddleware` enforces this — any tool call with an empty allowlist is blocked at the `preTool` gate. |
 | **Topic filter override** | The `topicFilterMiddleware` receives a `forceTopic: 'playbook_decision'` flag for decision runs, which maps to an empty tool list. Universal skills that normally get re-injected (ask_clarifying_question, read_workspace, web_search, read_codebase) are **also** excluded for decision runs. The middleware exports a helper `mutateActiveToolsForDecisionRun()` that returns an empty array unconditionally. |
-| **Agent run type guard** | `agentExecutionService` checks `runType === 'playbook_decision'` at the top of the tool dispatch path and throws if any tool call is attempted. The throw aborts the run with `FailureReason: 'decision_tool_call_blocked'`. |
+| **Decision-run dispatch flag** | The dispatch context carries an `isDecisionRun: true` flag set by `playbookEngineService.dispatchStep()` when it fires a decision step. The agent execution service checks this flag at the top of the tool dispatch path and throws `FailureReason: 'decision_tool_call_blocked'` if any tool call is attempted. This is a runtime context check, not a DB column — it never leaves the in-memory dispatch path. |
 
 ### 18.3 Explicit exceptions
 
@@ -1184,14 +1283,18 @@ Endpoints affected (in terms of what they now serialise / deserialise):
 
 ### 19.3 WebSocket event additions
 
-Two new event types on the existing `playbook-run:{runId}` room:
+The existing engine emits events with colon-separated names (e.g. `'playbook:step:dispatched'`, `'playbook:step:completed'`) via `emitPlaybookEvent(runId, subaccountId, event, payload)`. New events follow the same convention:
 
 | Event | Payload | Emitted when |
 |-------|---------|--------------|
-| `playbook.decision.dispatched` | `{ stepRunId, stepId, agentRunId, branchesCount }` | Decision step enters `running` state |
-| `playbook.decision.completed` | `{ stepRunId, stepId, chosenBranchId, confidence?, retryCount, chosenByAgent, skippedStepIds }` | Decision step enters `completed` state |
+| `playbook:decision:dispatched` | `{ stepRunId, stepId, agentRunId, branchesCount }` | Decision step enters `running` state |
+| `playbook:decision:completed` | `{ stepRunId, stepId, chosenBranchId, confidence?, retryCount, chosenByAgent, skippedStepIds }` | Decision step enters `completed` state |
+| `playbook:decision:escalated` | `{ stepRunId, stepId, confidence, reason }` | Decision routed to HITL via confidence-escape |
+| `playbook:decision:failed` | `{ stepRunId, stepId, failureReason }` | Decision step enters `failed` state |
 
-The existing generic `playbook.step.*` events (`dispatched`, `completed`, `failed`, `skipped`) continue to fire as well — decision steps do not bypass the generic stream. The specific events above are for clients that want to render decision-specific UI without inspecting the step type on every generic event.
+The existing generic `playbook:step:*` events (`dispatched`, `completed`, `failed`, `skipped`) continue to fire as well — decision steps do not bypass the generic stream. The specific events above are additive, for clients that want to render decision-specific UI without inspecting the step type on every generic event. Both streams emit; clients choose which to listen to.
+
+The room is `playbook-run:{runId}` — unchanged from the existing convention. No new rooms.
 
 ### 19.4 Studio chat-authoring tool additions
 
@@ -1731,7 +1834,8 @@ import type {
   PlaybookDefinition,
   AgentDecisionStep,
   PlaybookStep,
-} from '../../../shared/playbook/agentDecisionTypes.js';
+} from './types.js';
+// AgentDecisionOutput / agentDecisionOutputBaseSchema from './agentDecisionSchemas.js'
 
 /**
  * Compute the set of step ids that should be transitioned to `skipped`
@@ -2040,7 +2144,8 @@ export function computeStepReadiness(
 import type {
   AgentDecisionStep,
   AgentDecisionOutput,
-} from '../../../shared/playbook/agentDecisionTypes.js';
+} from './types.js';
+// AgentDecisionOutput / agentDecisionOutputBaseSchema from './agentDecisionSchemas.js'
 import type { DecisionParseResult } from './agentDecisionPureTypes.js';
 import { agentDecisionOutputBaseSchema } from './agentDecisionSchemas.js';
 
@@ -2148,7 +2253,8 @@ function truncate(s: string, n: number): string {
 import type {
   PlaybookDefinition,
   AgentDecisionStep,
-} from '../../../shared/playbook/agentDecisionTypes.js';
+} from './types.js';
+// AgentDecisionOutput / agentDecisionOutputBaseSchema from './agentDecisionSchemas.js'
 import type {
   ValidationResult,
   ValidationIssue,
@@ -2306,7 +2412,8 @@ function extractTopLevelPropertyNames(schema: unknown): readonly string[] {
 ### 24.5 `renderBranchesTable`
 
 ```typescript
-import type { AgentDecisionBranch } from '../../../shared/playbook/agentDecisionTypes.js';
+import type { AgentDecisionBranch } from './types.js';
+// AgentDecisionOutput / agentDecisionOutputBaseSchema from './agentDecisionSchemas.js'
 
 /**
  * Render the branches as a markdown bullet list for inclusion in the envelope.
@@ -2352,115 +2459,48 @@ All functions are < 1ms for any realistic input. None requires memoisation in ph
 
 ## 25. Database migration (SQL)
 
-Two migrations land together in a single sprint. Numbering assumes the next free migration numbers are `0091` and `0092` as of this spec. Reconcile against the actual next free number in `migrations/` before committing.
+**No forward migration is required for phase 1 routing.** The audit confirmed that every column the spec needs already exists:
 
-### 25.1 `0091_playbook_decision_run_type.sql`
+- `agent_runs.playbookStepRunId` — added in migration `0076`.
+- `agent_runs.runType` — already a plain TEXT column typed in TypeScript as `'scheduled' | 'manual' | 'triggered'`; these are trigger causes, not run purposes, and a decision run fits `'triggered'` unchanged.
+- `playbook_step_runs.outputJson` — already stores arbitrary JSON; the decision output shape fits inside it.
 
-```sql
--- Migration: add 'playbook_decision' to the agent_runs run_type enum
---
--- Adds a new run_type enum value for decision agent runs. Decision runs
--- differ from 'playbook_step' (agent_call) runs in that they dispatch
--- with an empty tool allowlist and their output is parsed as a structured
--- decision rather than as a generic agent output.
---
--- Forward-only. No data migration needed — existing rows are unaffected.
+The earlier draft of this spec proposed two migrations (`0091_playbook_decision_run_type.sql` and `0092_playbook_decision_metadata.sql`). Both have been removed in this audit:
 
-BEGIN;
+1. **`0091` removed** — `ALTER TYPE agent_run_type ADD VALUE` was wrong because `agent_run_type` is not a Postgres enum. The TypeScript type `'scheduled' | 'manual' | 'triggered'` is enforced at the application layer via Drizzle's `$type<...>()` annotation. Nothing in the DB constrains the text value. Routing decision runs is a TypeScript-layer concern, not a schema-layer concern.
+2. **`0092` removed** — the proposed column `decision_parent_step_run_id` was redundant with the existing `playbook_step_run_id` column (from migration `0076`). Using two columns for the same thing would create drift risk for zero benefit.
 
--- PostgreSQL cannot add enum values inside a transaction that also uses
--- them, so we add the value first and let any dependent DDL run in a
--- later transaction. This migration contains only the enum change.
-ALTER TYPE agent_run_type ADD VALUE IF NOT EXISTS 'playbook_decision';
+Also note: migration `0091` in the earlier draft collided with the real migration `0091_rls_task_activities_deliverables.sql` that landed on main. The collision alone would have been a blocker; the deeper issue is that the migration was unnecessary to begin with.
 
-COMMIT;
-```
+### 25.1 Optional observability migration — defer to phase 2
 
-Down migration (`0091_playbook_decision_run_type.down.sql`):
+If, after launch, observability queries against decision agent runs become a hot path (e.g. "show me all decision runs where the reviewer overrode the agent in the last 30 days"), add a partial index in a phase 2 follow-up migration. Proposed form:
 
 ```sql
--- Down: removing an enum value in Postgres requires rebuilding the type,
--- which is a much bigger operation than the forward migration.
--- Phase 1 leaves this as a no-op and relies on the forward-only runner.
--- If this must be reverted in a local dev environment, use:
---
--- BEGIN;
---   CREATE TYPE agent_run_type_new AS ENUM (...existing values without 'playbook_decision'...);
---   ALTER TABLE agent_runs ALTER COLUMN run_type TYPE agent_run_type_new
---     USING run_type::text::agent_run_type_new;
---   DROP TYPE agent_run_type;
---   ALTER TYPE agent_run_type_new RENAME TO agent_run_type;
--- COMMIT;
---
--- Do NOT run this against a database that has live 'playbook_decision' rows.
+-- Phase 2 (conditional on observed query load — DO NOT ship in phase 1)
+-- Next free migration number at the time this lands (check migrations/ before committing).
 
-SELECT 1;
+CREATE INDEX IF NOT EXISTS idx_agent_runs_playbook_decision_runs
+  ON agent_runs (playbook_step_run_id, created_at DESC)
+  WHERE playbook_step_run_id IS NOT NULL;
 ```
 
-### 25.2 `0092_playbook_decision_metadata.sql`
+Even this index is only worth adding once decision runs are common enough to dominate `agent_runs` queries. Phase 1 should ship with no schema changes at all.
 
-```sql
--- Migration: add optional decision-specific columns to agent_runs and
--- playbook_step_runs for observability and replay correctness.
---
--- agent_runs gains:
---   - decision_parent_step_run_id: links the decision agent run back to its
---     playbook step run (redundant with playbook_step_run_id but typed,
---     indexed, and constrained).
---
--- playbook_step_runs gains no new columns — the DecisionStepRunOutput shape
--- fits inside the existing outputJson column.
---
--- Indexes added to support the observability queries:
---   - partial index on agent_runs (decision_parent_step_run_id)
---     WHERE run_type = 'playbook_decision' — keeps the index small.
+### 25.2 `FailureReason` enum additions
 
-BEGIN;
-
-ALTER TABLE agent_runs
-  ADD COLUMN IF NOT EXISTS decision_parent_step_run_id uuid
-    REFERENCES playbook_step_runs(id) ON DELETE SET NULL;
-
-CREATE INDEX IF NOT EXISTS idx_agent_runs_decision_parent_step_run_id
-  ON agent_runs (decision_parent_step_run_id)
-  WHERE run_type = 'playbook_decision';
-
--- RLS: inherit from the existing agent_runs policy, which already filters
--- by organisation_id. No policy change needed because the new column is
--- a reference, not a tenant discriminator.
-
-COMMIT;
-```
-
-Down migration (`0092_playbook_decision_metadata.down.sql`):
-
-```sql
-BEGIN;
-
-DROP INDEX IF EXISTS idx_agent_runs_decision_parent_step_run_id;
-
-ALTER TABLE agent_runs
-  DROP COLUMN IF EXISTS decision_parent_step_run_id;
-
-COMMIT;
-```
-
-### 25.3 Migration ordering and runner notes
-
-- Migration `0091` runs before `0092`. The forward-only runner (`scripts/migrate.ts`) applies them in filename order, so the numeric prefix guarantees ordering.
-- Both migrations are idempotent (`IF NOT EXISTS` everywhere) so re-running them is safe.
-- Neither migration touches RLS policies. The new enum value `playbook_decision` is subject to the existing `agent_runs` RLS policy, which filters on `organisation_id = current_setting('app.organisation_id')`.
-- No data migration. Existing playbooks without decision steps are unchanged; new playbooks that include decision steps take effect only after the template version is republished.
-
-### 25.4 `FailureReason` enum additions
-
-The failure reasons listed in §21 must be added to `shared/iee/failureReason.ts` in the same commit as the feature code. The enum is a closed TypeScript type plus a Zod schema; both need updating.
+The failure reasons listed in §21 must be added to `shared/iee/failureReason.ts` in the same commit as the feature code. The enum in main is a Zod `z.enum([...])`, not a `const` array — the additions go inside the existing enum:
 
 ```typescript
-// shared/iee/failureReason.ts (diff)
+// shared/iee/failureReason.ts (diff against main as of 2026-04-11)
 
-export const FAILURE_REASONS = [
-  // ... existing values ...
+export const FailureReason = z.enum([
+  // ... existing values (timeout, step_limit_reached, execution_error,
+  //     environment_error, auth_failure, budget_exceeded, connector_timeout,
+  //     rate_limited, data_incomplete, internal_error, scope_violation,
+  //     missing_org_context, unknown) ...
+
+  // Playbook agent_decision step additions (§21)
   'decision_parse_failure',
   'decision_unknown_branch',
   'decision_extra_schema_violation',
@@ -2473,12 +2513,14 @@ export const FAILURE_REASONS = [
   'decision_cancelled',
   'decision_invalid_edit',
   'decision_skip_set_collision',
-] as const;
+]);
 ```
 
-The `verify-failure-reason-closed-enum.sh` CI gate will catch any code path that tries to emit a reason not in this list.
+**Constraint from existing shape:** `FailureObjectSchema.failureDetail` has a 200-character hard limit (see `shared/iee/failureReason.ts`). Decision step failures must fit their detail message inside 200 characters; longer diagnostic payloads (e.g. the full invalid agent output) go into `metadata`, which is `z.record(z.unknown()).optional()` and has no hard length cap. Update the retry envelope truncation in §11 accordingly — the `rawOutput` that feeds into the next retry's envelope is truncated to `DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS` (1000), but the `failureDetail` field on the persisted failure is a separate, shorter string.
 
-### 25.5 New config constants
+The existing lint rule + `verify-failure-reason-closed-enum.sh` gate will catch any code path that tries to emit a reason not in this list.
+
+### 25.3 New config constants
 
 `server/config/limits.ts` gains:
 
@@ -2503,13 +2545,12 @@ Implementing this feature as a single-PR big-bang is risky — too many touchpoi
 
 **Deliverables:**
 
-- `shared/playbook/agentDecisionTypes.ts` — type definitions (§16)
-- `server/lib/playbook/agentDecisionSchemas.ts` — Zod schemas (§16.2)
-- `server/lib/playbook/agentDecisionPureTypes.ts` — helper types (§16.3)
-- `server/lib/playbook/agentDecisionPure.ts` — full pure helper (§24)
+- `server/lib/playbook/types.ts` — extend existing file: add `'agent_decision'` to `StepType`, add optional fields to `PlaybookStep`, add `AgentDecisionBranch` interface, extend `ValidationRule` union (§16.1)
+- `server/lib/playbook/agentDecisionSchemas.ts` — new file: Zod schemas + `composeDecisionOutputSchema` helper (§16.2)
+- `server/lib/playbook/agentDecisionPure.ts` — new file: full pure helper with inline helper types (§24)
 - `server/lib/playbook/__tests__/agentDecisionPure.test.ts` — comprehensive unit tests (§14)
-- `server/config/limits.ts` — new constants (§25.5)
-- `shared/iee/failureReason.ts` — new enum members (§25.4)
+- `server/config/limits.ts` — new constants (§25.3)
+- `shared/iee/failureReason.ts` — new enum members inside the existing `z.enum([...])` (§25.2)
 - `docs/playbook-agent-decision-step-spec.md` — this spec (already shipped)
 
 **Acceptance for slice 1:**
@@ -2552,18 +2593,16 @@ Implementing this feature as a single-PR big-bang is risky — too many touchpoi
 
 **Deliverables:**
 
-- `migrations/0091_playbook_decision_run_type.sql` + `.down.sql`
-- `migrations/0092_playbook_decision_metadata.sql` + `.down.sql`
-- `server/db/schema/agentRuns.ts` — add `'playbook_decision'` to the enum and the new `decision_parent_step_run_id` column.
-- `server/services/playbookEngineService.ts` — dispatch and completion branches for `agent_decision` (§6).
-- `server/services/playbookAgentRunHook.ts` — route `runType: 'playbook_decision'` completions through `handleDecisionStepCompletion`.
-- `server/prompts/playbook/agent-decision-envelope.md` — verbatim template (§17.2).
-- `server/prompts/playbook/renderAgentDecisionEnvelope.ts` — envelope renderer.
-- `server/services/middleware/topicFilterMiddleware.ts` — `mutateActiveToolsForDecisionRun` helper.
-- `server/services/middleware/agentExecutionRunTypeGuard.ts` — or wherever the `runType === 'playbook_decision'` tool guard lives; belt-and-braces layer 4 enforcement (§18.2).
+- **No new migration required.** See §25 for why — `agent_runs.playbookStepRunId` already exists from migration `0076`, `agent_runs.runType` is a plain TEXT column at the application layer (not a Postgres enum), and `playbook_step_runs.outputJson` already accepts the decision output shape.
+- `server/lib/playbook/agentDecisionEnvelope.ts` — new file: verbatim envelope template constant + `renderAgentDecisionEnvelope` pure renderer (§17).
+- `server/lib/playbook/__tests__/agentDecisionEnvelope.test.ts` — unit tests for the renderer, including retry-envelope content and markdown escaping.
+- `server/services/playbookEngineService.ts` — add `'agent_decision'` case to the `dispatchStep()` switch; add a `handleDecisionStepCompletion` function; call `agentDecisionPure.computeSkipSet` from the completion path (§6).
+- `server/services/playbookAgentRunHook.ts` — when the completed agent run has a `playbookStepRunId`, inspect `step.type` on the owning step; route `'agent_decision'` to `handleDecisionStepCompletion` (no `runType` check — routing is purely TypeScript-layer on the step type).
+- `server/services/middleware/topicFilterMiddleware.ts` — add a small branch that returns an empty tool list when the dispatching context carries a "decision run" flag (§18.2 layer 3).
+- `server/services/agentExecutionService.ts` (or wherever the tool dispatch guard lives) — belt-and-braces layer 4: if the dispatching context is a decision run and the model attempts a tool call, throw with `FailureReason: 'decision_tool_call_blocked'` (§18.2 layer 4). The "decision run" flag is passed in the dispatch context, not stored on `agent_runs.runType`.
 - Metrics wiring for every metric in §§10, 21, 23.
 - Audit event wiring for every state transition (§15 invariant 13).
-- Integration test: `server/services/__tests__/playbookEngine.decision.test.ts` — happy path + confidence-escape + fallback + replay (§14).
+- Integration test: `server/services/__tests__/playbookEngine.decision.test.ts` — happy path + supervised edit + confidence-escape + fallback + replay (§14).
 
 **Acceptance for slice 3:**
 - A decision step in `auto` mode dispatches, validates its output, applies the skip set, and the run continues along the chosen branch.
