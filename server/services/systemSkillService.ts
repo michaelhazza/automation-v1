@@ -209,6 +209,20 @@ export const systemSkillService = {
     return toPublic(row);
   },
 
+  /** Admin-facing slug lookup — unlike getSkillBySlug this does NOT filter
+   *  inactive rows. Used by the system-admin GET /api/system/skills/:id
+   *  route so admins can still view and manage retired skills. */
+  async getSkillBySlugIncludingInactive(slug: string): Promise<SystemSkill | null> {
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(eq(systemSkills.slug, slug))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    return toPublic(row);
+  },
+
   /** Update the cascade visibility on a skill by slug. No more markdown
    *  frontmatter rewriting — the DB row is the source of truth now. */
   async updateSkillVisibility(slug: string, visibility: SkillVisibility): Promise<SystemSkill> {

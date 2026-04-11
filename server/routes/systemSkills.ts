@@ -21,10 +21,11 @@ router.get('/api/system/skills', authenticate, requireSystemAdmin, asyncHandler(
 // (e.g. 'web_search') because the file-based service keyed ids by slug.
 // Preserving the slug-keyed route contract for frontend compatibility — the
 // new DB-backed getSkill(id) is strictly UUID-keyed, so this route calls
-// getSkillBySlug instead. Frontend migration to UUID lookups is a follow-on
-// concern.
+// getSkillBySlugIncludingInactive instead so retired (isActive=false) rows
+// remain viewable from the system-admin UI (parity with pre-Phase-0 behaviour).
+// Frontend migration to UUID lookups is a follow-on concern.
 router.get('/api/system/skills/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
-  const skill = await systemSkillService.getSkillBySlug(req.params.id);
+  const skill = await systemSkillService.getSkillBySlugIncludingInactive(req.params.id);
   if (!skill) {
     res.status(404).json({ error: 'System skill not found' });
     return;
@@ -71,6 +72,13 @@ router.post('/api/system/skills', authenticate, requireSystemAdmin, asyncHandler
     res.status(400).json({ error: 'description is required' });
     return;
   }
+  // visibility is optional on create (defaults to 'none' in the service),
+  // but if the caller supplies a value it must be a valid cascade enum —
+  // silently coercing an unrecognised string to undefined hides typos.
+  if (body.visibility !== undefined && !isSkillVisibility(body.visibility)) {
+    res.status(400).json({ error: 'visibility must be one of: none, basic, full' });
+    return;
+  }
   const skill = await systemSkillService.createSystemSkill({
     slug: body.slug,
     handlerKey: body.slug,
@@ -80,7 +88,7 @@ router.post('/api/system/skills', authenticate, requireSystemAdmin, asyncHandler
     // before any DB write, so we hand the value straight through.
     definition: body.definition as never,
     instructions: body.instructions ?? null,
-    visibility: isSkillVisibility(body.visibility) ? body.visibility : undefined,
+    visibility: body.visibility,
     isActive: body.isActive,
   });
   res.status(201).json(skill);

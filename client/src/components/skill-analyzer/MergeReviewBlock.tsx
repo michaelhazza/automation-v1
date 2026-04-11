@@ -314,6 +314,16 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
   }
 
   async function handleReset() {
+    // Cancel any pending debounced PATCH before resetting. Without this, a
+    // merge-field edit made inside the 300ms window still fires after the
+    // reset completes and clobbers the restored AI suggestion, flipping
+    // userEditedMerge back on. The timer ref and the pending patch buffer
+    // both need to be cleared.
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    pendingPatchRef.current = {};
     setIsResetting(true);
     setPatchError(null);
     try {

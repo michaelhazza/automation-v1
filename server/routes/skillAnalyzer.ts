@@ -131,12 +131,17 @@ router.get(
 router.get(
   '/api/system/skill-analyser/jobs/:jobId',
   asyncHandler(async (req, res) => {
-    const { job, results } = await skillAnalyzerService.getJob(
-      req.params.jobId,
-      req.orgId!
-    );
+    const { job, results, unregisteredHandlerSlugs, availableSystemAgents } =
+      await skillAnalyzerService.getJob(req.params.jobId, req.orgId!);
 
-    return res.json({ job, results });
+    // Phase 1 of skill-analyzer-v2: the client's AnalysisJob type expects
+    // unregisteredHandlerSlugs and availableSystemAgents as fields on `job`
+    // (the Review UI reads job.unregisteredHandlerSlugs / job.availableSystemAgents).
+    // The service returns them as top-level siblings, so fold them in here.
+    return res.json({
+      job: { ...job, unregisteredHandlerSlugs, availableSystemAgents },
+      results,
+    });
   })
 );
 
