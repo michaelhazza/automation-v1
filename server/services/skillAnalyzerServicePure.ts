@@ -252,6 +252,191 @@ export function parseClassificationResponse(response: string): ClassificationRes
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3: Classify prompt + parser with proposedMerge
+// ---------------------------------------------------------------------------
+// The base classify prompt + parser above are unchanged. Phase 3 of
+// skill-analyzer-v2 introduces a parallel buildClassifyPromptWithMerge /
+// parseClassificationResponseWithMerge pair that asks the LLM to ALSO
+// produce a "best of both" merged version when classification is
+// PARTIAL_OVERLAP or IMPROVEMENT. The merged version is what the Review UI
+// renders in the Recommended column of the three-column merge view (Phase 5)
+// and what executeApproved writes back on a partial-overlap update.
+//
+// Spec §6.1, §10 Phase 3, §9 edge case "LLM returns proposedMerge with
+// fewer fields than expected".
+
+/** Shape of the proposedMerge object the LLM is asked to return when
+ *  classification is PARTIAL_OVERLAP or IMPROVEMENT. Matches the
+ *  proposed_merged_content jsonb column on skill_analyzer_results. */
+export interface ProposedMerge {
+  name: string;
+  description: string;
+  // Anthropic tool definition object — never a string.
+  definition: object;
+  instructions: string | null;
+}
+
+/** Result returned by parseClassificationResponseWithMerge. The classification
+ *  + confidence + reasoning fields match the base classifier; proposedMerge
+ *  is non-null only when the LLM returned a valid merged version on a
+ *  PARTIAL_OVERLAP / IMPROVEMENT classification. */
+export interface ClassificationResultWithMerge {
+  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+  confidence: number;
+  reasoning: string;
+  proposedMerge: ProposedMerge | null;
+}
+
+const CLASSIFICATION_WITH_MERGE_SYSTEM_PROMPT = `${CLASSIFICATION_SYSTEM_PROMPT}
+
+## Additional task: produce a merged version (PARTIAL_OVERLAP / IMPROVEMENT only)
+
+When classification is PARTIAL_OVERLAP or IMPROVEMENT, ALSO produce a
+\`proposedMerge\` object that takes the best of both — preserve what works in
+the existing library version, incorporate genuine improvements from the
+incoming version. Do NOT hallucinate novel content. Each field of the
+proposed merge MUST be grounded in either the existing library text or the
+incoming candidate text.
+
+For DUPLICATE and DISTINCT classifications, OMIT the \`proposedMerge\` field
+entirely (or set it to null) — there is nothing to merge.
+
+The proposedMerge object has exactly four fields:
+- \`name\` — string
+- \`description\` — string
+- \`definition\` — the Anthropic tool definition JSON object (\`name\`,
+  \`description\`, \`input_schema\`). NEVER a string.
+- \`instructions\` — string OR null
+
+## Output Format (PARTIAL_OVERLAP or IMPROVEMENT)
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "classification": "PARTIAL_OVERLAP" | "IMPROVEMENT",
+  "confidence": 0.0-1.0,
+  "reasoning": "1-3 sentences explaining the classification decision",
+  "proposedMerge": {
+    "name": "...",
+    "description": "...",
+    "definition": { "name": "...", "description": "...", "input_schema": { ... } },
+    "instructions": "..."
+  }
+}
+
+## Output Format (DUPLICATE or DISTINCT)
+
+Respond with ONLY a JSON object in this exact format (no proposedMerge):
+{
+  "classification": "DUPLICATE" | "DISTINCT",
+  "confidence": 0.0-1.0,
+  "reasoning": "1-3 sentences explaining the classification decision"
+}`;
+
+/** Build the merge-aware classification prompt for a candidate/library pair.
+ *  Same shape as buildClassificationPrompt — system prompt is identical
+ *  across calls (cached by Anthropic), only the user message changes per
+ *  pair. */
+export function buildClassifyPromptWithMerge(
+  candidate: ParsedSkill,
+  librarySkill: LibrarySkillSummary,
+  band: 'likely_duplicate' | 'ambiguous',
+): { system: string; userMessage: string } {
+  const candidateSummary = formatSkillForPrompt('INCOMING SKILL (CANDIDATE)', {
+    name: candidate.name,
+    slug: candidate.slug,
+    description: candidate.description,
+    definition: candidate.definition,
+    instructions: candidate.instructions,
+  });
+
+  const librarySummary = formatSkillForPrompt('EXISTING SKILL (LIBRARY)', {
+    name: librarySkill.name,
+    slug: librarySkill.slug,
+    description: librarySkill.description,
+    definition: librarySkill.definition,
+    instructions: librarySkill.instructions,
+  });
+
+  const bandHint =
+    band === 'likely_duplicate'
+      ? 'Note: These skills have very high embedding similarity (>0.92). This is likely DUPLICATE or IMPROVEMENT.'
+      : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
+
+  const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
+
+  return { system: CLASSIFICATION_WITH_MERGE_SYSTEM_PROMPT, userMessage };
+}
+
+/** Validate that an unknown value matches the ProposedMerge shape. Pure —
+ *  no library-row dependency. Per spec §9 edge case: a malformed merge is
+ *  treated as missing (returns null), the row falls through to the existing
+ *  null-fallback path, and execute rejects with "merge proposal unavailable
+ *  — re-run analysis". The parser does NOT attempt field-level repair. */
+function isValidProposedMerge(value: unknown): value is ProposedMerge {
+  if (value === null || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.name !== 'string' || v.name.length === 0) return false;
+  if (typeof v.description !== 'string') return false;
+  if (v.definition === null || typeof v.definition !== 'object') return false;
+  // instructions may be null or string
+  if (v.instructions !== null && typeof v.instructions !== 'string') return false;
+  return true;
+}
+
+/** Parse the merge-aware LLM classification response. Returns null on
+ *  unparseable output. When classification is PARTIAL_OVERLAP or IMPROVEMENT
+ *  the parser tries to validate proposedMerge — if missing or malformed,
+ *  proposedMerge is set to null and the row follows the §6.3 LLM-fallback
+ *  path on execute. For DUPLICATE / DISTINCT, proposedMerge is always null
+ *  regardless of what the LLM returned. */
+export function parseClassificationResponseWithMerge(
+  response: string,
+): ClassificationResultWithMerge | null {
+  // Extract JSON from response (may be wrapped in markdown code block).
+  let jsonStr = response.trim();
+  const jsonBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (jsonBlockMatch) {
+    jsonStr = jsonBlockMatch[1].trim();
+  } else {
+    const start = jsonStr.indexOf('{');
+    const end = jsonStr.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      jsonStr = jsonStr.slice(start, end + 1);
+    }
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const p = parsed as Record<string, unknown>;
+  if (!isValidClassification(p.classification)) return null;
+  if (typeof p.confidence !== 'number' || p.confidence < 0 || p.confidence > 1) return null;
+  if (typeof p.reasoning !== 'string') return null;
+
+  const classification = p.classification;
+  let proposedMerge: ProposedMerge | null = null;
+  if (classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') {
+    if (p.proposedMerge !== undefined && p.proposedMerge !== null) {
+      if (isValidProposedMerge(p.proposedMerge)) {
+        proposedMerge = p.proposedMerge;
+      }
+      // Otherwise leave as null — null-fallback path on execute.
+    }
+  }
+
+  return {
+    classification,
+    confidence: p.confidence,
+    reasoning: p.reasoning,
+    proposedMerge,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Diff Summary
 // ---------------------------------------------------------------------------
 
@@ -377,6 +562,8 @@ export const skillAnalyzerServicePure = {
   computeBestMatches,
   buildClassificationPrompt,
   parseClassificationResponse,
+  buildClassifyPromptWithMerge,
+  parseClassificationResponseWithMerge,
   generateDiffSummary,
   rankAgentsForCandidate,
 };

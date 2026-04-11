@@ -419,6 +419,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     librarySlug: string | null;
     libraryName: string | null;
     diffSummary: object | null;
+    // Phase 3 of skill-analyzer-v2: LLM-generated merged version of the
+    // candidate + library skill, populated only when the classifier
+    // returns a valid proposedMerge for a PARTIAL_OVERLAP / IMPROVEMENT
+    // result. Null on every other path. The Write stage persists this
+    // into both proposed_merged_content (mutable) and
+    // original_proposed_merge (immutable) on the result row.
+    proposedMerge: object | null;
   };
 
   const classifiedResults: ClassifiedResult[] = [];
@@ -449,6 +456,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           librarySlug: null,
           libraryName: null,
           diffSummary: null,
+          proposedMerge: null,
         });
         continue;
       }
@@ -465,6 +473,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         librarySlug: matchedLib.slug,
         libraryName: matchedLib.name,
         diffSummary: skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib),
+        // No LLM = no merge proposal. Row will fail the null guard on
+        // execute (spec §6.3 LLM-fallback path).
+        proposedMerge: null,
       });
     }
 
@@ -494,17 +505,21 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               librarySlug: null,
               libraryName: null,
               diffSummary: null,
+              proposedMerge: null,
             });
             return;
           }
 
-          const { system, userMessage } = skillAnalyzerServicePure.buildClassificationPrompt(
+          // Phase 3: use the merge-aware prompt + parser. The system prompt
+          // is a superset of the base classifier — it adds instructions for
+          // producing a proposedMerge object on PARTIAL_OVERLAP / IMPROVEMENT.
+          const { system, userMessage } = skillAnalyzerServicePure.buildClassifyPromptWithMerge(
             candidate,
             matchedLib,
-            match.band as 'likely_duplicate' | 'ambiguous'
+            match.band as 'likely_duplicate' | 'ambiguous',
           );
 
-          let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponse>;
+          let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
 
           try {
             const response = await withBackoff(
@@ -536,15 +551,20 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               }
             );
 
-            classificationResult = skillAnalyzerServicePure.parseClassificationResponse(response.content);
+            classificationResult = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
           } catch {
             classificationResult = null;
           }
 
+          // Fallback: classification failed entirely (LLM error or
+          // unparseable output). Tag the row as PARTIAL_OVERLAP for human
+          // review with a null merge — execute will fail the null guard
+          // with the spec's standard "merge proposal unavailable" error.
           const finalResult = classificationResult ?? {
             classification: 'PARTIAL_OVERLAP' as const,
             confidence: 0.3,
             reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
+            proposedMerge: null,
           };
 
           const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
@@ -560,6 +580,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             librarySlug: matchedLib.slug,
             libraryName: matchedLib.name,
             diffSummary,
+            proposedMerge: finalResult.proposedMerge ?? null,
           });
 
           classifiedCount++;
@@ -746,6 +767,14 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       // Phase 2: agent proposals only for LLM-classified DISTINCT results.
       // The agent-propose stage above populates the map for both bands.
       agentProposals: agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [],
+      // Phase 3: persist the LLM merge proposal into BOTH the mutable
+      // proposed_merged_content column AND the immutable
+      // original_proposed_merge column. They are identical at write time
+      // and diverge only when the user edits the Recommended column via
+      // the Phase 5 PATCH endpoint. Reset endpoint copies original back
+      // into proposedMergedContent. Null on every non-merge path.
+      proposedMergedContent: r.proposedMerge ?? undefined,
+      originalProposedMerge: r.proposedMerge ?? undefined,
     });
   }
 
