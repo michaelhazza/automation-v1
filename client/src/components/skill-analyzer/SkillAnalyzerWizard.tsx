@@ -46,6 +46,18 @@ export interface AvailableSystemAgent {
   name: string;
 }
 
+/** Parsed candidate skill content stashed on the job row. The client uses
+ *  this to render the "Incoming" column of the Phase 5 three-column merge
+ *  view — the row's candidateIndex points into this array. */
+export interface ParsedCandidate {
+  name: string;
+  slug: string;
+  description: string;
+  definition: object | null;
+  instructions: string | null;
+  rawSource?: string;
+}
+
 export interface AnalysisJob {
   id: string;
   status: string;
@@ -58,6 +70,10 @@ export interface AnalysisJob {
   sourceType: string;
   createdAt: string;
   completedAt: string | null;
+  /** Parsed candidates as stored on the job row (JSONB). The client uses
+   *  these for the Phase 5 three-column merge view's "Incoming" column —
+   *  result.candidateIndex indexes into this array. */
+  parsedCandidates?: ParsedCandidate[] | null;
   /** Phase 1 of skill-analyzer-v2: candidate slugs in this job whose handler
    *  is not registered in skillExecutor.ts SKILL_HANDLERS at request time.
    *  The Review UI uses this list to disable the Approve button on affected

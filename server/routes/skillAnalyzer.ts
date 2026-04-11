@@ -200,6 +200,64 @@ router.patch(
 );
 
 // ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/merge
+// Phase 5 of skill-analyzer-v2 (spec §7.3): patch one or more fields of
+// proposedMergedContent on a PARTIAL_OVERLAP / IMPROVEMENT result. Sets
+// userEditedMerge=true. Definition shape is validated via the shared
+// isValidToolDefinitionShape predicate.
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/merge',
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      name?: string;
+      description?: string;
+      definition?: object;
+      instructions?: string | null;
+    };
+
+    // Light shape check before reaching the service.
+    if (
+      body.name === undefined &&
+      body.description === undefined &&
+      body.definition === undefined &&
+      body.instructions === undefined
+    ) {
+      return res.status(400).json({ error: 'at least one of name, description, definition, instructions is required' });
+    }
+
+    const updated = await skillAnalyzerService.patchMergeFields({
+      resultId: req.params.resultId,
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+      patch: body,
+    });
+
+    return res.json(updated);
+  })
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/results/:resultId/merge/reset
+// Phase 5 of skill-analyzer-v2 (spec §7.3): copy originalProposedMerge back
+// into proposedMergedContent and clear userEditedMerge. 409 if the original
+// is null.
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/merge/reset',
+  asyncHandler(async (req, res) => {
+    const updated = await skillAnalyzerService.resetMergeToOriginal({
+      resultId: req.params.resultId,
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+    });
+    return res.json(updated);
+  })
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/system/skill-analyser/jobs/:jobId/results/bulk-action — Bulk action
 // ---------------------------------------------------------------------------
 

@@ -1,3 +1,4 @@
+import { diffWordsWithSpace } from 'diff';
 import { ParsedSkill, contentHash } from './skillParserServicePure.js';
 
 // ---------------------------------------------------------------------------
@@ -556,6 +557,43 @@ export function rankAgentsForCandidate(
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Phase 5: deriveDiffRows — token-level diff for the Recommended column
+// ---------------------------------------------------------------------------
+// Used by the Phase 5 MergeReviewBlock React component to render inline
+// highlighting in the Recommended column of the three-column merge view.
+// Pure wrapper around jsdiff's diffWordsWithSpace so the diff algorithm
+// is testable in isolation and the React component is a thin renderer.
+
+/** One token in a token-level diff between two strings. The kind tells the
+ *  renderer which span style to apply: 'unchanged' is plain text, 'added'
+ *  is highlighted as an insertion, 'removed' is shown as a strikethrough. */
+export interface DiffToken {
+  kind: 'unchanged' | 'added' | 'removed';
+  value: string;
+}
+
+/** Compute a word-level diff between current and recommended strings.
+ *  Returns an array of tokens the React component can render as styled
+ *  spans. Idempotent: passing the same strings twice yields equivalent
+ *  arrays (modulo array identity). Pure — no DOM, no clock, no I/O.
+ *
+ *  Uses jsdiff's diffWordsWithSpace which keeps whitespace intact so
+ *  rendering preserves the original layout. For the Phase 5 use case the
+ *  Recommended column is highlighted against Current — so 'added' tokens
+ *  are content NEW in Recommended that wasn't in Current, and 'removed'
+ *  tokens are content present in Current that's missing from Recommended. */
+export function deriveDiffRows(current: string, recommended: string): DiffToken[] {
+  if (current === recommended) {
+    return current.length === 0 ? [] : [{ kind: 'unchanged', value: current }];
+  }
+  const parts = diffWordsWithSpace(current, recommended);
+  return parts.map((p) => ({
+    kind: p.added ? 'added' : p.removed ? 'removed' : 'unchanged',
+    value: p.value,
+  }));
+}
+
 export const skillAnalyzerServicePure = {
   cosineSimilarity,
   classifyBand,
@@ -566,4 +604,5 @@ export const skillAnalyzerServicePure = {
   parseClassificationResponseWithMerge,
   generateDiffSummary,
   rankAgentsForCandidate,
+  deriveDiffRows,
 };

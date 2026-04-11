@@ -1,10 +1,12 @@
 import { useState, useMemo } from 'react';
 import api from '../../lib/api';
+import MergeReviewBlock from './MergeReviewBlock';
 import type {
   AnalysisJob,
   AnalysisResult,
   AgentProposal,
   AvailableSystemAgent,
+  ParsedCandidate,
 } from './SkillAnalyzerWizard';
 
 interface Props {
@@ -255,15 +257,19 @@ function ResultCard({
   jobId,
   unregisteredHandler,
   availableSystemAgents,
+  candidate,
   onActionChange,
   onProposalsUpdated,
+  onResultPatched,
 }: {
   result: AnalysisResult;
   jobId: string;
   unregisteredHandler: boolean;
   availableSystemAgents: AvailableSystemAgent[];
+  candidate: ParsedCandidate | undefined;
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
   onProposalsUpdated: (resultId: string, proposals: AgentProposal[]) => void;
+  onResultPatched: (next: AnalysisResult) => void;
 }) {
   const [showDiff, setShowDiff] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -379,8 +385,22 @@ function ResultCard({
         />
       )}
 
-      {/* Diff toggle */}
-      {result.diffSummary && (
+      {/* Phase 5: Three-column merge view — only on PARTIAL_OVERLAP /
+          IMPROVEMENT cards. Reads the candidate from the job's
+          parsedCandidates array indexed by result.candidateIndex. */}
+      {(result.classification === 'PARTIAL_OVERLAP' || result.classification === 'IMPROVEMENT') && candidate && (
+        <MergeReviewBlock
+          result={result}
+          candidate={candidate}
+          jobId={jobId}
+          onResultUpdated={onResultPatched}
+        />
+      )}
+
+      {/* Legacy diff pills — kept for partial overlaps that have no
+          merge proposal yet (LLM fallback path) so the reviewer still
+          sees field-level differences. */}
+      {result.diffSummary && !result.proposedMergedContent && (
         <button
           onClick={() => setShowDiff((v) => !v)}
           className="mt-2 text-xs text-indigo-600 hover:text-indigo-800 transition-colors"
@@ -388,7 +408,7 @@ function ResultCard({
           {showDiff ? 'Hide' : 'Show'} field differences
         </button>
       )}
-      {showDiff && <DiffView result={result} />}
+      {showDiff && !result.proposedMergedContent && <DiffView result={result} />}
     </div>
   );
 }
@@ -399,18 +419,22 @@ function ResultSection({
   jobId,
   unregisteredHandlerSlugs,
   availableSystemAgents,
+  parsedCandidates,
   onActionChange,
   onBulkAction,
   onProposalsUpdated,
+  onResultPatched,
 }: {
   classification: Classification;
   results: AnalysisResult[];
   jobId: string;
   unregisteredHandlerSlugs: Set<string>;
   availableSystemAgents: AvailableSystemAgent[];
+  parsedCandidates: ParsedCandidate[];
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
   onBulkAction: (classification: Classification, action: 'approved' | 'rejected' | 'skipped') => void;
   onProposalsUpdated: (resultId: string, proposals: AgentProposal[]) => void;
+  onResultPatched: (next: AnalysisResult) => void;
 }) {
   const [open, setOpen] = useState(SECTION_CONFIG[classification].defaultOpen);
   const cfg = SECTION_CONFIG[classification];
@@ -454,6 +478,15 @@ function ResultSection({
                 Approve all new
               </button>
             )}
+            {classification === 'PARTIAL_OVERLAP' && (
+              <button
+                onClick={() => onBulkAction(classification, 'approved')}
+                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                title="Only rows with an LLM merge proposal are eligible — rows without a proposal are skipped client-side."
+              >
+                Approve all partial overlaps (with proposal)
+              </button>
+            )}
             {classification === 'DUPLICATE' && (
               <button
                 onClick={() => onBulkAction(classification, 'rejected')}
@@ -471,8 +504,10 @@ function ResultSection({
               jobId={jobId}
               unregisteredHandler={unregisteredHandlerSlugs.has(r.candidateSlug)}
               availableSystemAgents={availableSystemAgents}
+              candidate={parsedCandidates[r.candidateIndex]}
               onActionChange={onActionChange}
               onProposalsUpdated={onProposalsUpdated}
+              onResultPatched={onResultPatched}
             />
           ))}
         </div>
@@ -495,6 +530,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     [job.unregisteredHandlerSlugs],
   );
   const availableSystemAgents = job.availableSystemAgents ?? [];
+  const parsedCandidates = job.parsedCandidates ?? [];
 
   function handleActionChange(resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) {
     onResultsUpdated(
@@ -508,6 +544,14 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     );
   }
 
+  /** Phase 5: replace a single result row with the freshly enriched
+   *  version returned by the merge PATCH / reset endpoints. The whole row
+   *  is swapped (not field-merged) because the server response includes
+   *  every field including matchedSkillContent. */
+  function handleResultPatched(next: AnalysisResult) {
+    onResultsUpdated(results.map((r) => (r.id === next.id ? next : r)));
+  }
+
   async function handleBulkAction(classification: Classification, action: 'approved' | 'rejected' | 'skipped') {
     setBulkError(null);
     setBulkInfo(null);
@@ -516,10 +560,19 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
 
     // Phase 4 handler gate: skip DISTINCT cards whose handler is not
     // registered. Spec §7.1 + §7.2.
+    // Phase 5 partial-overlap gate: skip PARTIAL_OVERLAP / IMPROVEMENT
+    // cards with no proposedMergedContent (LLM fallback path). The
+    // executeApproved server-side path also enforces this, but the
+    // client-side filter avoids surfacing the failure as a per-row error
+    // in the response. Spec §7.2.
     let eligible = sectionResults;
     let skippedCount = 0;
     if (classification === 'DISTINCT' && action === 'approved') {
       eligible = sectionResults.filter((r) => !unregisteredHandlerSlugs.has(r.candidateSlug));
+      skippedCount = sectionResults.length - eligible.length;
+    }
+    if ((classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') && action === 'approved') {
+      eligible = sectionResults.filter((r) => r.proposedMergedContent != null);
       skippedCount = sectionResults.length - eligible.length;
     }
     if (eligible.length === 0) {
@@ -604,9 +657,11 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           jobId={job.id}
           unregisteredHandlerSlugs={unregisteredHandlerSlugs}
           availableSystemAgents={availableSystemAgents}
+          parsedCandidates={parsedCandidates}
           onActionChange={handleActionChange}
           onBulkAction={handleBulkAction}
           onProposalsUpdated={handleProposalsUpdated}
+          onResultPatched={handleResultPatched}
         />
       ))}
 
