@@ -21,20 +21,21 @@ to finish wiring the parts that need real credentials.
 
 ---
 
-## 1. Run the seed
+## 1. Run the master seed
 
 ```bash
-npx tsx scripts/seed-42macro-reporting-agent.ts
+npx tsx scripts/seed.ts
 ```
 
-This is idempotent. Re-run it whenever you wipe the local DB.
+This is the master seed script (Phase 5 of 5 creates the Reporting Agent). It is idempotent — re-run it whenever you wipe the local DB.
 
-It creates:
+Phase 5 creates:
 - Organisation `breakout-solutions`
+- Org admin user `michael@breakoutsolutions.com`
 - Subaccount `42macro-tracking`
-- Custom skill `analyse_42macro_transcript` (org-scoped, full 42 Macro A-Player Brain prompt embedded as `instructions`)
-- Agent `42macro-reporting-agent` with the orchestration master prompt and `defaultSkillSlugs` covering all four steps
+- Agent `reporting-agent` with the orchestration master prompt and `defaultSkillSlugs` covering all four steps (the `analyse_42macro_transcript` lens is a file-based skill in `server/skills/`)
 - `subaccount_agents` link for the Breakout Solutions / 42 Macro Tracking pair, with `maxCostPerRunCents=500` (T23 cost breaker ceiling)
+- All 16 baseline system agents from the Automation OS company, activated in the org and linked through to the subaccount
 - Two **placeholder** `integration_connections` rows with `connectionStatus='error'` — the worker will refuse to use these until you replace them with real credentials in step 3
 
 ---

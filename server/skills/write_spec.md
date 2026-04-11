@@ -2,7 +2,7 @@
 name: Write Spec
 description: Submit a requirements spec to the HITL review queue for human approval. On approval, writes the spec to workspace memory and updates task status.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

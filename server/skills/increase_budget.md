@@ -2,7 +2,7 @@
 name: Increase Budget
 description: Proposes a budget increase for a high-performing campaign. Block-gated — always requires explicit human approval before execution.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

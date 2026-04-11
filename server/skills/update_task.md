@@ -2,7 +2,7 @@
 name: Update Task
 description: Update the content fields of an existing task — title, description, brief, or priority.
 isActive: true
-visibility: basic
+visibility: none
 ---
 
 ## Parameters

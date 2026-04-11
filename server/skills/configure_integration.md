@@ -2,7 +2,7 @@
 name: Configure Integration
 description: Guides the Onboarding Agent through setting up a workspace integration (CRM, email, ads platform, accounting). Review-gated — requires human approval before any integration credentials are stored.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -2,7 +2,7 @@
 name: Write Docs
 description: Applies an approved documentation update to the connected documentation system. Review-gated — requires human approval before any content is written.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

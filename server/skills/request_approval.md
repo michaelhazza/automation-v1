@@ -2,7 +2,7 @@
 name: Request Approval
 description: Escalate a decision to a human operator for review and approval.
 isActive: true
-visibility: basic
+visibility: none
 ---
 
 ## Parameters

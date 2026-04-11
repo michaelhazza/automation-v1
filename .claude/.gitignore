@@ -1,0 +1,5 @@
+# One-shot config-edit approval sentinel (see .claude/hooks/config-protection.js).
+# This file grants the config-protection hook permission for exactly one edit
+# and is deleted on use. It must never be committed — its presence in git
+# would grant a standing approval to any branch that includes it.
+config-edit-approved

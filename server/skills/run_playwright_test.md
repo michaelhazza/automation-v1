@@ -2,7 +2,7 @@
 name: Run Playwright Test
 description: Execute a Playwright end-to-end test file against a running application.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters
