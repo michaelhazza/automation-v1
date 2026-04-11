@@ -131,12 +131,17 @@ router.get(
 router.get(
   '/api/system/skill-analyser/jobs/:jobId',
   asyncHandler(async (req, res) => {
-    const { job, results } = await skillAnalyzerService.getJob(
-      req.params.jobId,
-      req.orgId!
-    );
+    const { job, results, unregisteredHandlerSlugs, availableSystemAgents } =
+      await skillAnalyzerService.getJob(req.params.jobId, req.orgId!);
 
-    return res.json({ job, results });
+    // Phase 1 of skill-analyzer-v2: the client's AnalysisJob type expects
+    // unregisteredHandlerSlugs and availableSystemAgents as fields on `job`
+    // (the Review UI reads job.unregisteredHandlerSlugs / job.availableSystemAgents).
+    // The service returns them as top-level siblings, so fold them in here.
+    return res.json({
+      job: { ...job, unregisteredHandlerSlugs, availableSystemAgents },
+      results,
+    });
   })
 );
 
@@ -162,6 +167,98 @@ router.patch(
     });
 
     return res.json({ ok: true });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/agents
+// Phase 4 of skill-analyzer-v2 (spec §7.3): toggle / remove / addIfMissing
+// modes for the agentProposals jsonb on a DISTINCT result row.
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/agents',
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      systemAgentId?: string;
+      selected?: boolean;
+      remove?: boolean;
+      addIfMissing?: boolean;
+    };
+
+    if (typeof body.systemAgentId !== 'string' || body.systemAgentId.length === 0) {
+      return res.status(400).json({ error: 'systemAgentId is required' });
+    }
+
+    const updated = await skillAnalyzerService.updateAgentProposal({
+      resultId: req.params.resultId,
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+      systemAgentId: body.systemAgentId,
+      selected: body.selected,
+      remove: body.remove,
+      addIfMissing: body.addIfMissing,
+    });
+
+    return res.json(updated);
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/merge
+// Phase 5 of skill-analyzer-v2 (spec §7.3): patch one or more fields of
+// proposedMergedContent on a PARTIAL_OVERLAP / IMPROVEMENT result. Sets
+// userEditedMerge=true. Definition shape is validated via the shared
+// isValidToolDefinitionShape predicate.
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/merge',
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      name?: string;
+      description?: string;
+      definition?: object;
+      instructions?: string | null;
+    };
+
+    // Light shape check before reaching the service.
+    if (
+      body.name === undefined &&
+      body.description === undefined &&
+      body.definition === undefined &&
+      body.instructions === undefined
+    ) {
+      return res.status(400).json({ error: 'at least one of name, description, definition, instructions is required' });
+    }
+
+    const updated = await skillAnalyzerService.patchMergeFields({
+      resultId: req.params.resultId,
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+      patch: body,
+    });
+
+    return res.json(updated);
+  })
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/results/:resultId/merge/reset
+// Phase 5 of skill-analyzer-v2 (spec §7.3): copy originalProposedMerge back
+// into proposedMergedContent and clear userEditedMerge. 409 if the original
+// is null.
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/merge/reset',
+  asyncHandler(async (req, res) => {
+    const updated = await skillAnalyzerService.resetMergeToOriginal({
+      resultId: req.params.resultId,
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+    });
+    return res.json(updated);
   })
 );
 

@@ -5,6 +5,7 @@ import {
   integer,
   real,
   jsonb,
+  boolean,
   timestamp,
   index,
 } from 'drizzle-orm/pg-core';
@@ -27,11 +28,18 @@ export const skillAnalyzerResults = pgTable(
     candidateIndex: integer('candidate_index').notNull(),
     candidateName: text('candidate_name').notNull(),
     candidateSlug: text('candidate_slug').notNull(),
+    // SHA-256 of the candidate's normalized content, computed during the
+    // Hash stage and persisted here so the Phase 4 manual-add PATCH can
+    // look up the candidate embedding in skill_embeddings without
+    // recomputing it. See spec §5.2 / §6 Write stage.
+    candidateContentHash: text('candidate_content_hash').notNull(),
 
-    // Matched existing skill (null for DISTINCT)
+    // Matched existing skill (null for DISTINCT). Re-points at system_skills.id
+    // after Phase 1 — the analyzer is system-only. Soft FK (no constraint)
+    // because the analyzer uses it as a lookup hint. Legacy
+    // matched_system_skill_slug and matched_skill_name columns dropped in
+    // migration 0098 — matchedSkillContent is computed live in getJob().
     matchedSkillId: uuid('matched_skill_id'),
-    matchedSystemSkillSlug: text('matched_system_skill_slug'),
-    matchedSkillName: text('matched_skill_name'),
 
     // Classification output
     classification: text('classification')
@@ -43,6 +51,21 @@ export const skillAnalyzerResults = pgTable(
 
     // Diff data for side-by-side UI
     diffSummary: jsonb('diff_summary'),
+
+    // Agent attachment proposals — populated only for DISTINCT results.
+    // Shape: Array<{ systemAgentId: uuid, slugSnapshot: string,
+    // nameSnapshot: string, score: number, selected: boolean }>. See spec §5.2.
+    agentProposals: jsonb('agent_proposals').notNull().default([]),
+
+    // LLM-generated merge proposal for PARTIAL_OVERLAP / IMPROVEMENT results.
+    // Shape: { name, description, definition: object, instructions: string|null }.
+    // Editable via PATCH; see spec §7.3 merge endpoint.
+    proposedMergedContent: jsonb('proposed_merged_content'),
+    // The LLM's untouched original — Reset endpoint copies this back into
+    // proposedMergedContent. Immutable after the Write stage.
+    originalProposedMerge: jsonb('original_proposed_merge'),
+    // Set true when the user edits any field in proposedMergedContent.
+    userEditedMerge: boolean('user_edited_merge').notNull().default(false),
 
     // User action
     actionTaken: text('action_taken')
