@@ -419,6 +419,7 @@ Not exhaustive. Add to this list as you find relevant ones. For each entry, reco
 |---------|----------------|
 | **Devin** (Cognition) | The benchmark for autonomous coding agents. Proactive planning, long-horizon execution. |
 | **Polsia** (Ben Cera) | Referenced by the founder. Autonomous company operator. Solo-operator market. |
+| **OpenClaw** | **Founder flagged — category unknown to this brief.** The researcher should treat "what is OpenClaw and why does it matter?" as an open investigation. Likely an open-source agent / autonomy project, but do not assume — verify the positioning, maintainership, traction, and how it relates (if at all) to Claude / Anthropic's ecosystem. If the name is ambiguous or collides with unrelated products (there is an old 2D platformer engine called OpenClaw), disambiguate explicitly and report which candidate matches the AI agent space. If the product turns out to belong in a different category (model-provider runtime, horizontal platform, vertical product), relocate it in your output. |
 | **Cognosys** | Autonomous research agent. Early/raw. |
 | **Replit Agent / Replit Cloud** | "Tell it what you want and it builds it." Integrated execution + hosting. |
 | **Open Interpreter** | Local-first agent with code execution. |
@@ -459,7 +460,7 @@ Not exhaustive. Add to this list as you find relevant ones. For each entry, reco
 
 ### How to prioritise the watchlist
 
-Start with **Claude Cowork, Claude Agent SDK, MCP, Devin, MindPal, Lindy, Harvey, and Relevance AI**. Those eight cover the highest-information diagonal of the grid: the frontier-provider question (H1, H7), the tool-protocol question (H3), the proactive-autonomy question (H5), the direct-competitor question (H2, H6), and the vertical-depth question (H6). If time is constrained, these eight are non-negotiable. Everything else is depth you can add to sharpen the verdict.
+Start with **Claude Cowork, Claude Agent SDK, MCP, Devin, MindPal, Lindy, Harvey, Relevance AI, and OpenClaw**. Those nine cover the highest-information diagonal of the grid: the frontier-provider question (H1, H7), the tool-protocol question (H3), the proactive-autonomy question (H5), the direct-competitor question (H2, H6), and the vertical-depth question (H6). OpenClaw is included at the founder's explicit request — treat it as a mandatory investigation even though this brief does not describe what it is. If time is constrained, these nine are non-negotiable. Everything else is depth you can add to sharpen the verdict.
 
 ## 7. Deliverable format & what would change our minds
 
