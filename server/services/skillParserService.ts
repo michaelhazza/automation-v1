@@ -109,97 +109,164 @@ async function parseZipFile(filePath: string): Promise<ParsedSkill[]> {
   });
 }
 
-/** Parse GitHub URL to extract owner/repo/branch/path components. */
+/** Parse GitHub URL to extract owner/repo/branch/path components.
+ *  `specifiedBranch` is null when the URL didn't explicitly include
+ *  `/tree/{branch}/...` — in that case the caller resolves the repo's
+ *  default branch via the API rather than guessing. */
 function parseGithubUrl(url: string): {
   owner: string;
   repo: string;
-  branch: string;
+  specifiedBranch: string | null;
   repoPath: string;
 } | null {
   // Supports:
   //   https://github.com/{owner}/{repo}
+  //   https://github.com/{owner}/{repo}.git
+  //   https://github.com/{owner}/{repo}/tree/{branch}
   //   https://github.com/{owner}/{repo}/tree/{branch}/{path}
   const match = url.match(
-    /^https:\/\/github\.com\/([^/]+)\/([^/]+)(?:\/tree\/([^/]+)(?:\/(.+))?)?/
+    /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?(?:\/tree\/([^/]+)(?:\/(.+))?)?$/
   );
   if (!match) return null;
 
   return {
     owner: match[1],
     repo: match[2],
-    branch: match[3] || 'main',
-    repoPath: match[4] || '',
+    specifiedBranch: match[3] || null,
+    repoPath: (match[4] || '').replace(/\/$/, ''),
   };
 }
 
-/** Fetch and parse skills from a GitHub repo URL.
- *  Uses GitHub REST API (unauthenticated, 60 req/hr per IP). */
-async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
-  const parsed = parseGithubUrl(url);
-  if (!parsed) throw { statusCode: 400, message: `Invalid GitHub URL: ${url}` };
+const GITHUB_HEADERS = {
+  Accept: 'application/vnd.github.v3+json',
+  'User-Agent': 'automation-v1/skill-analyzer',
+};
 
-  const { owner, repo, branch, repoPath } = parsed;
-  const contentsUrl = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${repoPath}?ref=${branch}`;
+const GITHUB_IS_RETRYABLE = (err: Error) =>
+  err.message.includes('429') || err.message.includes('503');
 
-  // Fetch directory listing
-  const dirResponse = await withBackoff(
+const MAX_SKILL_FILES_PER_REPO = 500;
+
+/** Fetch JSON from a GitHub API endpoint with retry. */
+async function githubApiJson<T>(url: string, label: string, correlationId: string): Promise<T> {
+  const response = await withBackoff(
     () =>
-      fetch(contentsUrl, {
-        headers: { Accept: 'application/vnd.github.v3+json', 'User-Agent': 'automation-v1/skill-analyzer' },
-      }).then(async (res) => {
+      fetch(url, { headers: GITHUB_HEADERS }).then(async (res) => {
         if (!res.ok) {
           const body = await res.text();
           const statusCode = res.status === 403 || res.status === 429 ? 429 : 502;
-          throw Object.assign(new Error(`GitHub fetch failed (${res.status}): ${body.slice(0, 200)}`), { statusCode });
+          throw Object.assign(
+            new Error(`GitHub fetch failed (${res.status}): ${body.slice(0, 200)}`),
+            { statusCode }
+          );
         }
         return res;
       }),
     {
-      label: 'github-dir-listing',
+      label,
       maxAttempts: 3,
-      correlationId: url,
-      runId: url,
-      isRetryable: (err: Error) => err.message.includes('429') || err.message.includes('503'),
+      correlationId,
+      runId: correlationId,
+      isRetryable: GITHUB_IS_RETRYABLE,
     }
   );
+  return response.json() as Promise<T>;
+}
 
-  const entries = await dirResponse.json() as Array<{
-    name: string;
-    type: string;
-    download_url: string | null;
-  }>;
+/** Fetch and parse skills from a GitHub repo URL.
+ *
+ *  Walks the entire repository tree (recursively) via the Git Trees API
+ *  in a single call, then fetches matching .md/.json blobs from
+ *  raw.githubusercontent.com (CDN-served, not subject to the 60/hr
+ *  api.github.com rate limit).
+ *
+ *  When the URL specifies a subdirectory (`/tree/{branch}/{path}`), only
+ *  files under that prefix are considered. */
+async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
+  const parsed = parseGithubUrl(url);
+  if (!parsed) throw { statusCode: 400, message: `Invalid GitHub URL: ${url}` };
 
-  if (!Array.isArray(entries)) {
-    throw { statusCode: 400, message: 'GitHub API returned non-array response — URL may point to a file, not a directory.' };
+  const { owner, repo, specifiedBranch, repoPath } = parsed;
+
+  // Resolve the ref to use for the tree fetch. If the URL didn't include
+  // /tree/{branch}, look up the repo's default_branch — don't assume 'main'.
+  let branch = specifiedBranch;
+  if (!branch) {
+    const repoInfo = await githubApiJson<{ default_branch?: string }>(
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}`,
+      'github-repo-metadata',
+      url
+    );
+    branch = repoInfo.default_branch || 'main';
   }
 
-  const skillFiles = entries.filter(
-    (e) => e.type === 'file' && (e.name.endsWith('.md') || e.name.endsWith('.json')) && e.download_url
+  // Fetch the full recursive tree in a single call.
+  const treeData = await githubApiJson<{
+    tree: Array<{ path: string; type: string; size?: number }>;
+    truncated: boolean;
+  }>(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+    'github-tree',
+    url
   );
+
+  if (treeData.truncated) {
+    console.warn(
+      `[skillParser] GitHub tree truncated for ${owner}/${repo} (>100k entries or >7MB). Some files may be missed.`
+    );
+  }
+
+  // Filter to .md / .json blobs, optionally restricted to the requested subpath.
+  const pathPrefix = repoPath ? `${repoPath}/` : '';
+  const skillFiles = treeData.tree
+    .filter((e) => e.type === 'blob')
+    .filter((e) => e.path.endsWith('.md') || e.path.endsWith('.json'))
+    .filter((e) => !pathPrefix || e.path === repoPath || e.path.startsWith(pathPrefix))
+    .slice(0, MAX_SKILL_FILES_PER_REPO);
+
+  if (skillFiles.length === 0) {
+    // Surface a clearer error than the generic "no valid skill definitions found"
+    // — most common cause is the URL pointing at a subdirectory that doesn't exist
+    // or a repo with no .md/.json files.
+    const scope = repoPath ? `under '${repoPath}'` : 'in the repository tree';
+    throw {
+      statusCode: 400,
+      message: `No .md or .json files found ${scope} for ${owner}/${repo}@${branch}.`,
+    };
+  }
 
   const skills: ParsedSkill[] = [];
 
   for (const file of skillFiles) {
-    const content = await withBackoff(
-      () =>
-        fetch(file.download_url!).then(async (res) => {
-          if (!res.ok) throw new Error(`Failed to fetch ${file.name}: ${res.status}`);
-          return res.text();
-        }),
-      {
-        label: `github-file-${file.name}`,
-        maxAttempts: 3,
-        correlationId: url,
-        runId: url,
-        isRetryable: (err: Error) => err.message.includes('429') || err.message.includes('503'),
-      }
-    );
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${file.path}`;
+    let content: string;
+    try {
+      content = await withBackoff(
+        () =>
+          fetch(rawUrl).then(async (res) => {
+            if (!res.ok) throw new Error(`Failed to fetch ${file.path}: ${res.status}`);
+            return res.text();
+          }),
+        {
+          label: `github-file-${file.path}`,
+          maxAttempts: 3,
+          correlationId: url,
+          runId: url,
+          isRetryable: GITHUB_IS_RETRYABLE,
+        }
+      );
+    } catch (err) {
+      console.warn(
+        `[skillParser] Failed to fetch ${file.path}:`,
+        err instanceof Error ? err.message : err
+      );
+      continue;
+    }
 
-    const ext = path.extname(file.name).toLowerCase();
+    const filename = path.basename(file.path);
+    const ext = path.extname(filename).toLowerCase();
     const skill =
-      ext === '.md'
-        ? parseMarkdownFile(file.name, content)
-        : parseJsonFile(file.name, content);
+      ext === '.md' ? parseMarkdownFile(filename, content) : parseJsonFile(filename, content);
 
     if (skill) skills.push(skill);
   }

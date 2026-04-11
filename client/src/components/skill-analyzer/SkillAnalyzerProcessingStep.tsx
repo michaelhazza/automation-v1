@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import api from '../../lib/api';
 import type { AnalysisJob, AnalysisResult } from './SkillAnalyzerWizard';
 
@@ -22,42 +22,49 @@ const PHASE_LABELS: Record<string, string> = {
 
 export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onComplete, onStartNew }: Props) {
   const [currentJob, setCurrentJob] = useState<AnalysisJob>(initialJob);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const mountedRef = useRef(true);
+  const [pollErrorCount, setPollErrorCount] = useState(0);
 
   useEffect(() => {
-    return () => { mountedRef.current = false; };
-  }, []);
+    // Terminal state at mount — no polling needed.
+    if (initialJob.status === 'completed' || initialJob.status === 'failed') return;
 
-  useEffect(() => {
-    if (currentJob.status === 'completed' || currentJob.status === 'failed') return;
+    // Local `cancelled` flag instead of a ref — refs + StrictMode double-mount
+    // leave the cleanup-set ref stuck at false across the second mount, which
+    // silently discards every poll result and pins the UI to the initial state.
+    let cancelled = false;
 
-    intervalRef.current = setInterval(async () => {
+    const interval = setInterval(async () => {
+      if (cancelled) return;
       try {
         const res = await api.get(`/api/system/skill-analyser/jobs/${jobId}`);
+        if (cancelled) return;
         const { job: j, results: r } = res.data as { job: AnalysisJob; results: AnalysisResult[] };
-        if (!mountedRef.current) return;
         setCurrentJob(j);
+        setPollErrorCount(0);
 
         if (j.status === 'completed') {
-          clearInterval(intervalRef.current!);
+          clearInterval(interval);
           onComplete(j, r);
         } else if (j.status === 'failed') {
-          clearInterval(intervalRef.current!);
+          clearInterval(interval);
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('[SkillAnalyzer] Polling error:', err);
+        setPollErrorCount((n) => n + 1);
       }
     }, 2000);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      cancelled = true;
+      clearInterval(interval);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
   const isFailed = currentJob.status === 'failed';
   const pct = currentJob.progressPct ?? 0;
+  const showPollWarning = !isFailed && currentJob.status !== 'completed' && pollErrorCount >= 2;
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-2xl mx-auto">
@@ -92,6 +99,12 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
               Found <strong>{currentJob.candidateCount}</strong> skill
               {currentJob.candidateCount === 1 ? '' : 's'} in the import
             </p>
+          )}
+
+          {showPollWarning && (
+            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 text-center">
+              Connection issue — retrying. Status may be stale.
+            </div>
           )}
 
           <div className="flex justify-center mt-6">

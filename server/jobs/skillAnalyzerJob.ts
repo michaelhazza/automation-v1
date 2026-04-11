@@ -65,7 +65,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'parsing',
     progressPct: 0,
-    progressMessage: 'Parsing skill definitions…',
+    progressMessage: 'Parsing skill definitions...',
   });
 
   let candidates: ParsedSkill[];
@@ -107,7 +107,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   await updateJobProgress(jobId, {
     progressPct: 10,
-    progressMessage: `Found ${candidates.length} skill${candidates.length === 1 ? '' : 's'} — checking for exact duplicates…`,
+    progressMessage: `Found ${candidates.length} skill${candidates.length === 1 ? '' : 's'} - checking for exact duplicates...`,
     candidateCount: candidates.length,
     // Store (possibly freshly parsed) candidates for display/replay
     parsedCandidates: candidates,
@@ -119,7 +119,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'hashing',
     progressPct: 10,
-    progressMessage: 'Computing content hashes…',
+    progressMessage: 'Computing content hashes...',
   });
 
   // Load all library skills
@@ -209,7 +209,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   await updateJobProgress(jobId, {
     progressPct: 20,
-    progressMessage: `${exactDuplicates.length} exact duplicate${exactDuplicates.length === 1 ? '' : 's'} found — embedding ${remainingCandidates.length} remaining…`,
+    progressMessage: `${exactDuplicates.length} exact duplicate${exactDuplicates.length === 1 ? '' : 's'} found - embedding ${remainingCandidates.length} remaining...`,
     exactDuplicateCount: exactDuplicates.length,
   });
 
@@ -219,7 +219,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'embedding',
     progressPct: 20,
-    progressMessage: 'Generating embeddings…',
+    progressMessage: 'Generating embeddings...',
   });
 
   // Gather all content needing embeddings (candidates + library skills)
@@ -299,11 +299,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         const pct = 20 + Math.round((Math.min(i + BATCH_SIZE, uniqueUncached.length) / uniqueUncached.length) * 20);
         await updateJobProgress(jobId, {
           progressPct: pct,
-          progressMessage: `Embedded ${Math.min(i + BATCH_SIZE, uniqueUncached.length)} / ${uniqueUncached.length} skills…`,
+          progressMessage: `Embedded ${Math.min(i + BATCH_SIZE, uniqueUncached.length)} / ${uniqueUncached.length} skills...`,
         });
       }
     } else {
-      console.warn('[SkillAnalyzerJob] OPENAI_API_KEY not set — skipping embeddings, all pairs treated as ambiguous');
+      console.warn('[SkillAnalyzerJob] OPENAI_API_KEY not set - skipping embeddings, all pairs treated as ambiguous');
     }
   }
 
@@ -313,7 +313,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'comparing',
     progressPct: 40,
-    progressMessage: 'Computing similarity scores…',
+    progressMessage: 'Computing similarity scores...',
   });
 
   // Build embedding arrays for comparison
@@ -391,7 +391,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   await updateJobProgress(jobId, {
     progressPct: 60,
-    progressMessage: `${distinctResults.length} distinct, ${llmQueue.length} need classification…`,
+    progressMessage: `${distinctResults.length} distinct, ${llmQueue.length} need classification...`,
     comparisonCount: bestMatches.length,
   });
 
@@ -401,7 +401,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'classifying',
     progressPct: 60,
-    progressMessage: 'Classifying with AI…',
+    progressMessage: 'Classifying with AI...',
   });
 
   type ClassifiedResult = {
@@ -440,7 +440,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             classification: 'DISTINCT',
             confidence: 0.5,
             similarityScore: match.similarity,
-            classificationReasoning: 'Library skill not found — treating as distinct.',
+            classificationReasoning: 'Library skill not found - treating as distinct.',
             libraryId: null,
             librarySlug: null,
             libraryName: null,
@@ -487,7 +487,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         const finalResult = classificationResult ?? {
           classification: 'PARTIAL_OVERLAP' as const,
           confidence: 0.3,
-          reasoning: 'LLM classification failed — defaulting to PARTIAL_OVERLAP for human review.',
+          reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
         };
 
         const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
@@ -509,7 +509,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
         await updateJobProgress(jobId, {
           progressPct: Math.min(pct, 89),
-          progressMessage: `Classified ${classifiedCount} / ${llmQueue.length}…`,
+          progressMessage: `Classified ${classifiedCount} / ${llmQueue.length}...`,
         });
       })
     )
@@ -520,7 +520,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // -------------------------------------------------------------------------
   await updateJobProgress(jobId, {
     progressPct: 90,
-    progressMessage: 'Writing results…',
+    progressMessage: 'Writing results...',
   });
 
   // Collect all result rows
@@ -559,7 +559,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       classification: 'DISTINCT',
       confidence: 1 - m.similarity,
       similarityScore: m.similarity,
-      classificationReasoning: `Low embedding similarity (${(m.similarity * 100).toFixed(0)}%) — no existing skill is close.`,
+      classificationReasoning: `Low embedding similarity (${(m.similarity * 100).toFixed(0)}%) - no existing skill is close.`,
       diffSummary: null,
     });
   }
@@ -589,7 +589,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'completed',
     progressPct: 100,
-    progressMessage: `Analysis complete — ${resultRows.length} result${resultRows.length === 1 ? '' : 's'}.`,
+    progressMessage: `Analysis complete - ${resultRows.length} result${resultRows.length === 1 ? '' : 's'}.`,
     completedAt: new Date(),
   });
 }
