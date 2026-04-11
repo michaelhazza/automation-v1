@@ -110,16 +110,42 @@ The forum post captured this bluntly: "slack turned into chaos... so he started 
 | Open health findings | `workspaceHealthService.listActiveFindings(orgId)` | Already grouped by severity |
 | Recent decisions | `tool_call_security_events` + `audit_events` | Filter by actor, action, resource for "why did the agent do X" drill-down |
 
-### View shape
+### View shape — unified table + filters (not panels)
 
-Single page, four stacked panels, each collapsible:
+Single page, single data model, one table, filter-driven navigation. This mirrors the existing `ExecutionHistoryPage` pattern (single table + filters) rather than inventing a new multi-panel layout. The benefit is that adding a new activity type later is a new filter value, not a new panel.
 
-1. **Live** — active runs, grouped by subaccount. Click-through to `RunTraceViewerPage`.
-2. **Attention needed** — failed runs + awaiting-review + awaiting-input + critical health findings. Sorted by severity then age. This is the "act on me now" column.
-3. **Recent activity** — completed runs in the last 24h, with the `nextRecommendedAction` from each run's `handoffJson` surfaced as the card subtitle. This is the "what did the fleet do today" feed.
-4. **Decisions log** — recent policy evaluations and security events. Expandable to show the full tool-call chain for any decision. This answers "why did the agent do / not do X."
+Every row in the unified feed has the same core shape regardless of source type:
 
-Filters at the top: subaccount, agent, status, severity, time range. All filters compose.
+| Column | Contents |
+|---|---|
+| Type | Activity-type badge (execution / agent run / review / finding / inbox / decision / playbook run / task event) |
+| Status | Mapped to common states: `active`, `attention-needed`, `completed`, `failed`, `cancelled` |
+| Subject | One-line description (agent + action + target) |
+| Actor | Who/what triggered it |
+| Subaccount | Shown at org + system scope |
+| Timestamp | Created / updated |
+| Severity | For findings, failed runs, review priority |
+| Action | Link to the detail page for that record type |
+
+**Filters (compose-able, URL-persisted so links are shareable):**
+
+| Filter | Values | Available in scopes |
+|---|---|---|
+| **Activity type** (multi-select) | Workflow execution, Agent run, Review item, Health finding, Inbox item, Decision log, Playbook run, Task event | All |
+| **Status** (multi-select) | Active, Attention needed, Completed, Failed, Cancelled | All |
+| **Date range** | From / to | All |
+| **Subaccount** | Dropdown of accessible subaccounts | Org + system (hidden at subaccount scope) |
+| **Agent** | Dropdown of accessible agents | All |
+| **Severity** (multi-select) | Critical / warning / info | All |
+| **Assignee** | User dropdown | All |
+| **Organisation** | Org dropdown | System only |
+| **Search** | Free text | All |
+
+**Sort options:** Newest first (default) / Oldest first / Severity (critical → info) / Attention-first (bubbles up items needing action).
+
+**Default view on first load:** `Status = "attention needed"` filter pre-applied, sorted attention-first. This immediately answers "what needs me right now" as the landing experience. The operator clears or changes filters to drill into specific activity types.
+
+**Net effect:** one table, one query, one mental model. Shared behaviour across all three scopes. No UI sprawl.
 
 ### Effort
 
@@ -472,32 +498,45 @@ Crucially, `slackWebhook.ts` already contains this exact comment: *"Future: publ
 
 6. **Threaded status updates.** Long-running tasks can post progress updates into their own thread, so the channel doesn't get flooded and follow-ups stay contextual.
 
-### How the bot knows what channels to listen to (+ DMs)
+### How the bot knows when to respond — tag-only + thread stickiness
 
-Two layers — one controlled by Slack, one controlled by us.
+**Response rule in one sentence:** the bot responds to explicit `@mentions`, to follow-up messages in threads where it was previously @mentioned, and to DMs. It ignores everything else — even in channels it is a member of.
 
-**Layer 1 — Slack controls event delivery.** The Slack Events API only delivers events for channels the bot has been explicitly added to (via `/invite @botname` by a workspace admin), plus any DM to the bot (`message.im`). There is no "configure which channels to listen to" on our side — we listen to whatever Slack delivers. This is Slack's authorisation boundary and we inherit it for free.
+**Why this over "channel subscriptions":** an earlier iteration of this brief proposed a `slack_channel_subscriptions` table mapping channels to default agents so that project channels could have a "resident" agent responding to every message. That was over-engineered. Tag-only is simpler, avoids surprise responses, and — crucially — **scales naturally to multiple agents per channel** because each `@mention` picks a specific agent. Channel-default routing hard-codes one agent per channel and loses this. Dropping it entirely.
 
-**Layer 2 — we control which agent responds to each delivered event.** Routing is configured via an admin UI backed by a new `slack_channel_subscriptions` table mapping `(workspace_id, channel_id) → subaccount_agent_id`. Routing rules per event type:
+**Two layers of control:**
 
-| Event type | Routing rule |
+**Layer 1 — Slack controls event delivery.** The Events API only delivers events for channels the bot has been explicitly `/invite`d to, plus DMs. Workspace admins decide where the bot is available by adding or removing it from channels via Slack's native UI. **No config lives on our side for this.**
+
+**Layer 2 — we control which received events get a response.** Routing rules per event type:
+
+| Event type | Response rule |
 |---|---|
-| `app_mention` (explicit `@AgentName` in a channel) | Parse the mention, look up the named agent in the caller's org, dispatch. Mention wins over channel default. |
-| `message.channels` / `message.groups` (any message in a channel the bot is in, no mention) | Silently ignored **unless** the channel has a default agent in `slack_channel_subscriptions`. If so, route there. Lets project channels have a default agent for follow-up messages in threads. |
-| `message.im` (DM to the bot) | **Always handled.** Primary 1:1 conversational surface. Routes to: (a) the agent named in an `@mention` if the DM starts with one, (b) the user's default subaccount agent otherwise, (c) fallback `"which agent did you want?"` prompt if nothing resolves. |
+| `app_mention` in any channel the bot is in | **Respond.** Parse the mention, resolve the named agent in the caller's org, dispatch. `thread_ts` becomes the conversation id (persisted to `slack_conversations`). |
+| `message.channels` / `message.groups` in an existing thread whose `thread_ts` is in `slack_conversations` | **Respond.** Thread stickiness — route to the agent previously resolved for that thread. No re-tagging required once a conversation has started. |
+| `message.channels` / `message.groups` anywhere else (no mention, not in a known thread) | **Ignore silently.** The bot sits in the channel available for tagging but does not listen to untagged messages. |
+| `message.im` (DM) | **Always respond.** Primary 1:1 surface. Agent resolved via `@mention` in the DM if present, or the user's default subaccount agent otherwise, with a fallback `"which agent did you want?"` prompt if nothing resolves. |
 
-**DMs are a first-class surface.** A team member can DM the bot directly without being in any channel, and get threaded replies. The `thread_ts` of the first message becomes the conversation id, and all subsequent messages in that thread belong to the same agent conversation via `slack_conversations`.
+**Consequences of this model:**
 
-**Channel subscription config UI.** New admin page (or a panel on an existing integrations page) where operators map channels to default agents. Only orgs with a linked Slack workspace see this. System admins can manage across all orgs; org admins manage their own org's mappings. Subaccount admins can configure only their own subaccount's channels.
+- **No `slack_channel_subscriptions` table.** One less thing to build and maintain.
+- **Admins control channel membership via Slack's own UI.** `/invite @botname` to enable, `/remove @botname` to disable. We don't reimplement Slack's channel permissions.
+- **Multiple agents can coexist in one channel.** `#automation` can have `@ChurnAgent`, `@ReportingAgent`, and `@DevAgent` all sitting in it — each tag invokes a different agent. This is a strict upgrade over channel-default routing.
+- **Zero surprise responses.** The rule is predictable: mention it or reply in its thread. Otherwise silence.
+- **Small user friction at thread start.** You have to explicitly tag the agent on the first message of a new conversation. Thread stickiness means you only tag once per conversation, so the friction is negligible.
+- **DMs stay first-class.** A team member can DM the bot with no channel membership at all and get a threaded reply, same as before.
 
-**Thread stickiness.** Once a thread starts with a given agent (via @mention or channel default), all subsequent messages in that thread route to the same agent, regardless of whether later messages also @mention. This prevents a single thread from flipping between agents mid-conversation.
+**What's given up (and why it's fine):**
+
+- No "ambient listening" workflow where the bot reads every message in a channel and decides what's relevant. This generates noise and fuzzy boundaries — better lost than kept.
+- No way to say "this channel is reserved for the Acme agent" as a hard config. If you want that convention, put the agent's name in the channel topic and rely on social convention. We don't need a schema for it.
 
 ### Tech sketch
 
 - **Event handling via the existing webhook + new dispatchers.** The existing `slackWebhook.ts` already verifies signatures, deduplicates, and normalises events. New work subscribes additional event types (`app_mention`, `message.im`, `message.channels`, `interactive.block_actions`) and publishes them to a pg-boss `slack-inbound` queue — exactly as anticipated by the TODO comment already in the code.
 - **Slack user → org user mapping.** Either a new `users.slackUserId` column or a row in `integrationConnections`. Either way, mandatory linkage before a Slack user can act on review items — the authorization boundary.
 - **Conversation persistence.** Slack `thread_ts` becomes the key of a new `slack_conversations` table mapping `(workspace_id, channel_id, thread_ts)` to an `agent_conversation_id`. Every message in a thread writes to the same conversation, which the agent reads on each message to get context.
-- **@mention dispatch.** Channel metadata determines which subaccount agents are "subscribed" to that channel. When an @mention fires, the dispatcher looks up the intended agent, enqueues an agent run with the Slack message as input, and uses the standard execution infrastructure. No agent-execution changes needed.
+- **@mention dispatch.** When an `app_mention` event fires, parse the mention, resolve the named agent in the caller's org (scoped via the Slack user → org user mapping), enqueue an agent run with the Slack message as input, and persist the resulting conversation id against `thread_ts` in `slack_conversations`. Uses the standard execution infrastructure — no agent-execution changes needed. Thread follow-ups without a new mention are routed via thread stickiness by looking up `thread_ts` before dispatch.
 - **Bot process.** Runs in the main app process or as a separate worker, TBD. Main-app is simpler and reuses existing webhook plumbing; worker is more scalable. Leaning main-app for v1 since the existing webhook handler already lives there.
 - **Interactive review flow.** Block Kit messages include action ids that the webhook handler parses. The handler validates the Slack user is authorized to act on the review item via the user mapping, then writes to `reviewItems` via the existing HITL service. Same code path as the in-app button.
 
@@ -703,8 +742,11 @@ Feature 3 (Skill Studio) ─── BLOCKED on skills-to-DB migration
 - Does the Slack bot run in the main app process or as a dedicated worker? Main-app is simpler; worker is more scalable. Leaning main-app for v1.
 - Slack user → org user mapping: new `users.slackUserId` column, or via `integrationConnections`? Column is simpler but couples the `users` table to a specific integration.
 - How do we handle a Slack user who isn't linked to an org user yet but @mentions an agent? Refuse, or offer a self-serve link flow?
-- What's the decay / retention policy on `slack_conversations`? Conversations can accumulate indefinitely.
+- What's the decay / retention policy on `slack_conversations`? Conversations can accumulate indefinitely. Leaning toward a time-based TTL (e.g. 90 days) matching the standard run retention pattern.
 - Review buttons in Slack: do we require the Slack user to also be signed in to the web app for the authorization check, or is Slack OAuth + org-user mapping enough?
+- Thread stickiness has a blast radius question — if an agent was @mentioned months ago in a now-archived thread, and someone revives the thread, does it still route to that agent? Recommendation: yes, because the conversation context is still valid. But the TTL above would bound this.
+- Thread-stickiness collision: what happens if a user @mentions a *different* agent in a thread that already has a sticky agent? Recommendation: the new @mention wins — explicit user intent overrides thread stickiness. Needs an explicit decision before build.
+- Do we need a visible indicator in Slack ("you're now talking to @ChurnAgent in this thread") so users know which agent is responding? Probably yes for initial response, possibly as a slim thread-header message.
 
 **Feature 5 — Cross-Agent Memory Search**
 - Default top-K value? Leaning K=10 but needs validation.
