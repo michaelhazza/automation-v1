@@ -1,8 +1,8 @@
 # Agent Coworker Features — Development Brief
 
-> **Status:** parked. Captured for future build. Not currently in flight.
+> **Status:** superseded. See `docs/agent-coworker-features-spec.md` for the full development specification (ready-for-implementation).
 > **Captured:** 2026-04-11 from a forum-post dissection conversation.
-> **Format:** development brief, not a spec. Captures intent, rationale, shape, and open questions. Spec-level decisions happen at build time.
+> **Format:** development brief — intent, rationale, shape, and open questions. Spec-level decisions are in the spec document above.
 
 ---
 
