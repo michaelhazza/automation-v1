@@ -59,14 +59,21 @@ export async function buildHandoffForRun(
 
     // ── Assistant text from agent_run_messages (decision extraction) ─────
     // We only need the textual content, not full block-level structure.
-    // Cap at 50 messages to keep the read bounded for very long runs.
+    // Cap at 200 messages to keep the read bounded for very long runs.
+    // Org-scoped per the standard convention even though runId is unique;
+    // this protects against any future RLS / drift surprise.
     const messageRows = await db
       .select({
         role: agentRunMessages.role,
         content: agentRunMessages.content,
       })
       .from(agentRunMessages)
-      .where(eq(agentRunMessages.runId, runId))
+      .where(
+        and(
+          eq(agentRunMessages.runId, runId),
+          eq(agentRunMessages.organisationId, organisationId),
+        ),
+      )
       .orderBy(asc(agentRunMessages.sequenceNumber))
       .limit(200);
 
@@ -81,7 +88,12 @@ export async function buildHandoffForRun(
         taskId: taskActivities.taskId,
       })
       .from(taskActivities)
-      .where(eq(taskActivities.agentRunId, runId))
+      .where(
+        and(
+          eq(taskActivities.agentRunId, runId),
+          eq(taskActivities.organisationId, organisationId),
+        ),
+      )
       .limit(100);
 
     const touchedTaskIds = Array.from(new Set(touchedActivityRows.map((r) => r.taskId)));
@@ -207,6 +219,12 @@ export async function getLatestHandoffForAgent(params: {
       eq(agentRuns.organisationId, params.organisationId),
       eq(agentRuns.agentId, params.agentId),
       sql`${agentRuns.handoffJson} IS NOT NULL`,
+      // Defensive: only seed from runs that reached a terminal state.
+      // The completion path is currently the only writer of handoffJson, so
+      // every row with a non-null handoff is already terminal — but enforcing
+      // it at the query level prevents a future mid-run write from poisoning
+      // the seed-from-previous context.
+      inArray(agentRuns.status, ['completed', 'failed', 'timeout', 'cancelled', 'loop_detected', 'budget_exceeded']),
     ];
 
     if (params.subaccountId) {

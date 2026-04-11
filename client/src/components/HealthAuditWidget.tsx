@@ -61,7 +61,13 @@ export default function HealthAuditWidget() {
       await api.post('/api/org/health-audit/run');
       await loadFindings();
     } catch (err: any) {
-      setError(err.response?.data?.message ?? 'Audit failed');
+      // 403 means the user lost permission since the widget rendered. Hide
+      // silently to mirror the loadFindings path. Any other error surfaces.
+      if (err.response?.status === 403) {
+        setError('hidden');
+      } else {
+        setError(err.response?.data?.message ?? 'Audit failed');
+      }
     } finally {
       setRefreshing(false);
     }

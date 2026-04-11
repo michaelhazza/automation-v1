@@ -8,7 +8,11 @@ CREATE TABLE workspace_health_findings (
   detector text NOT NULL,
   severity text NOT NULL,                        -- 'info' | 'warning' | 'critical'
   resource_kind text NOT NULL,                   -- 'agent' | 'subaccount_agent' | 'process' | 'subaccount' | 'org'
-  resource_id uuid NOT NULL,
+  -- text, not uuid — most resources are uuids but some detectors emit
+  -- composite keys (e.g. process.broken_connection_mapping uses
+  -- "{processId}:{subaccountId}" so the same process broken across multiple
+  -- subaccounts produces distinct findings rather than upsert-overwriting).
+  resource_id text NOT NULL,
   resource_label text NOT NULL,
   message text NOT NULL,
   recommendation text NOT NULL,

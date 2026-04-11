@@ -25,7 +25,10 @@ export const workspaceHealthFindings = pgTable(
     detector: text('detector').notNull(),
     severity: text('severity').notNull().$type<WorkspaceHealthSeverity>(),
     resourceKind: text('resource_kind').notNull().$type<WorkspaceHealthResourceKind>(),
-    resourceId: uuid('resource_id').notNull(),
+    // text, not uuid — most resources are uuids but some detectors (e.g.
+    // process.broken_connection_mapping) emit composite keys to keep
+    // per-subaccount findings distinct under the unique constraint.
+    resourceId: text('resource_id').notNull(),
     resourceLabel: text('resource_label').notNull(),
     message: text('message').notNull(),
     recommendation: text('recommendation').notNull(),

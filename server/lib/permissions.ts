@@ -174,6 +174,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_WRITE,   description: 'Create / fork / delete Playbook templates',     groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_TEMPLATES_PUBLISH, description: 'Publish a new version of a Playbook template', groupName: 'org.playbooks' },
   { key: ORG_PERMISSIONS.PLAYBOOK_STUDIO_ACCESS,     description: 'Access the Playbook Studio chat authoring UI', groupName: 'org.playbooks' },
+  // org.health_audit (Brain Tree OS adoption P4)
+  { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
+  { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },

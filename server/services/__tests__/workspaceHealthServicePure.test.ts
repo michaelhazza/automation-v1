@@ -190,6 +190,30 @@ test('process.broken_connection_mapping — fires when required slot is missing'
   assertTrue(broken[0].message.includes('gmail_account'), 'mentions missing key');
 });
 
+test('process.broken_connection_mapping — composite resourceId distinguishes the same process across subaccounts', () => {
+  const ctx = emptyCtx();
+  ctx.processes.push({
+    id: 'p-multi',
+    name: 'Send GHL note',
+    status: 'active',
+    scope: 'organisation',
+    workflowEngineId: 'eng-1',
+    requiredConnections: [{ key: 'ghl_account', provider: 'ghl', required: true }],
+  });
+  // Two subaccounts both link the process but neither maps the required slot
+  // (each has a mapping for some unrelated key so the pair is "linked").
+  ctx.processConnectionMappings.push(
+    { processId: 'p-multi', subaccountId: 'sub-A', subaccountName: 'Acme', connectionKey: 'unrelated' },
+    { processId: 'p-multi', subaccountId: 'sub-B', subaccountName: 'Beta', connectionKey: 'unrelated' },
+  );
+  const f = runDetectors(ctx);
+  const broken = f.filter((x) => x.detector === 'process.broken_connection_mapping');
+  assertEqual(broken.length, 2, 'one finding per subaccount');
+  // Composite resourceIds must differ so the unique upsert keeps both rows.
+  assertTrue(broken[0].resourceId !== broken[1].resourceId, 'distinct resourceIds');
+  assertTrue(broken.every((x) => x.resourceId.includes(':')), 'composite key contains colon');
+});
+
 test('process.broken_connection_mapping — does NOT fire when all required slots are mapped', () => {
   const ctx = emptyCtx();
   ctx.processes.push({

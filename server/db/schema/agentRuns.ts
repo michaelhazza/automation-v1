@@ -170,6 +170,13 @@ export const agentRuns = pgTable(
     playbookStepRunIdx: index('agent_runs_playbook_step_run_id_idx')
       .on(table.playbookStepRunId)
       .where(sql`${table.playbookStepRunId} IS NOT NULL`),
+    // Brain Tree OS adoption P1 (migration 0095) — supports the
+    // "latest handoff for this agent" lookup used by getLatestHandoffForAgent
+    // and the seedFromPreviousRun read path. Partial so the index stays
+    // bounded — only runs that have produced a handoff are indexed.
+    latestHandoffIdx: index('agent_runs_latest_handoff_idx')
+      .on(table.agentId, table.subaccountId, table.createdAt)
+      .where(sql`${table.handoffJson} IS NOT NULL`),
   })
 );
 
