@@ -398,10 +398,21 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // -------------------------------------------------------------------------
   // Stage 5: Classify (60% → 90%)
   // -------------------------------------------------------------------------
+  // When ANTHROPIC_API_KEY is not configured, the LLM classification step
+  // cannot run. Rather than burning 3 backoff retries per candidate on a
+  // call that will always throw PROVIDER_NOT_CONFIGURED (which leaves the
+  // UI hanging on "Classifying with AI..." for minutes), detect the missing
+  // key upfront and route every queued candidate directly to PARTIAL_OVERLAP
+  // for human review. Mirrors the existing OPENAI_API_KEY fallback in the
+  // embedding stage above.
+  const classificationFallback = !env.ANTHROPIC_API_KEY;
+
   await updateJobProgress(jobId, {
     status: 'classifying',
     progressPct: 60,
-    progressMessage: 'Classifying with AI...',
+    progressMessage: classificationFallback
+      ? 'LLM classification unavailable - marking candidates for human review...'
+      : 'Classifying with AI...',
   });
 
   type ClassifiedResult = {
@@ -424,96 +435,150 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     librarySkills.map((lib) => [lib.slug, lib])
   );
 
-  const limit = await getPLimit(5);
-  let classifiedCount = 0;
+  if (classificationFallback) {
+    console.warn(
+      '[SkillAnalyzerJob] ANTHROPIC_API_KEY not set - skipping LLM classification; all ambiguous pairs routed to PARTIAL_OVERLAP for human review'
+    );
 
-  await Promise.all(
-    llmQueue.map((match) =>
-      limit(async () => {
-        const candidate = candidates[match.candidateIndex];
-        const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
+    for (const match of llmQueue) {
+      const candidate = candidates[match.candidateIndex];
+      const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
-        if (!matchedLib || !candidate) {
-          classifiedResults.push({
-            candidateIndex: match.candidateIndex,
-            candidate,
-            classification: 'DISTINCT',
-            confidence: 0.5,
-            similarityScore: match.similarity,
-            classificationReasoning: 'Library skill not found - treating as distinct.',
-            libraryId: null,
-            librarySlug: null,
-            libraryName: null,
-            diffSummary: null,
-          });
-          return;
-        }
-
-        const { system, userMessage } = skillAnalyzerServicePure.buildClassificationPrompt(
-          candidate,
-          matchedLib,
-          match.band as 'likely_duplicate' | 'ambiguous'
-        );
-
-        let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponse>;
-
-        try {
-          const response = await withBackoff(
-            () =>
-              anthropicAdapter.call({
-                model: 'claude-haiku-4-5-20251001',
-                system,
-                messages: [{ role: 'user', content: userMessage }],
-                maxTokens: 512,
-                temperature: 0.1,
-              }),
-            {
-              label: `skill-classify-${match.candidateIndex}`,
-              maxAttempts: 3,
-              correlationId: jobId,
-              runId: jobId,
-              isRetryable: (err: unknown) => {
-                const e = err as { statusCode?: number; code?: string };
-                return e?.statusCode === 503 || e?.statusCode === 529 || e?.code === 'PROVIDER_UNAVAILABLE';
-              },
-            }
-          );
-
-          classificationResult = skillAnalyzerServicePure.parseClassificationResponse(response.content);
-        } catch {
-          classificationResult = null;
-        }
-
-        const finalResult = classificationResult ?? {
-          classification: 'PARTIAL_OVERLAP' as const,
-          confidence: 0.3,
-          reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
-        };
-
-        const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
-
+      if (!matchedLib || !candidate) {
         classifiedResults.push({
           candidateIndex: match.candidateIndex,
           candidate,
-          classification: finalResult.classification,
-          confidence: finalResult.confidence,
+          classification: 'DISTINCT',
+          confidence: 0.5,
           similarityScore: match.similarity,
-          classificationReasoning: finalResult.reasoning,
-          libraryId: matchedLib.id,
-          librarySlug: matchedLib.slug,
-          libraryName: matchedLib.name,
-          diffSummary,
+          classificationReasoning: 'Library skill not found - treating as distinct.',
+          libraryId: null,
+          librarySlug: null,
+          libraryName: null,
+          diffSummary: null,
         });
+        continue;
+      }
 
-        classifiedCount++;
-        const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
-        await updateJobProgress(jobId, {
-          progressPct: Math.min(pct, 89),
-          progressMessage: `Classified ${classifiedCount} / ${llmQueue.length}...`,
-        });
-      })
-    )
-  );
+      classifiedResults.push({
+        candidateIndex: match.candidateIndex,
+        candidate,
+        classification: 'PARTIAL_OVERLAP',
+        confidence: 0.3,
+        similarityScore: match.similarity,
+        classificationReasoning:
+          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+        libraryId: matchedLib.id,
+        librarySlug: matchedLib.slug,
+        libraryName: matchedLib.name,
+        diffSummary: skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib),
+      });
+    }
+
+    await updateJobProgress(jobId, {
+      progressPct: 89,
+      progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
+    });
+  } else {
+    const limit = await getPLimit(5);
+    let classifiedCount = 0;
+
+    await Promise.all(
+      llmQueue.map((match) =>
+        limit(async () => {
+          const candidate = candidates[match.candidateIndex];
+          const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
+
+          if (!matchedLib || !candidate) {
+            classifiedResults.push({
+              candidateIndex: match.candidateIndex,
+              candidate,
+              classification: 'DISTINCT',
+              confidence: 0.5,
+              similarityScore: match.similarity,
+              classificationReasoning: 'Library skill not found - treating as distinct.',
+              libraryId: null,
+              librarySlug: null,
+              libraryName: null,
+              diffSummary: null,
+            });
+            return;
+          }
+
+          const { system, userMessage } = skillAnalyzerServicePure.buildClassificationPrompt(
+            candidate,
+            matchedLib,
+            match.band as 'likely_duplicate' | 'ambiguous'
+          );
+
+          let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponse>;
+
+          try {
+            const response = await withBackoff(
+              () =>
+                anthropicAdapter.call({
+                  model: 'claude-haiku-4-5-20251001',
+                  system,
+                  messages: [{ role: 'user', content: userMessage }],
+                  maxTokens: 512,
+                  temperature: 0.1,
+                }),
+              {
+                label: `skill-classify-${match.candidateIndex}`,
+                maxAttempts: 3,
+                correlationId: jobId,
+                runId: jobId,
+                // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
+                // cannot change between attempts, so retrying just wastes time.
+                // Retry only transient upstream failures.
+                isRetryable: (err: unknown) => {
+                  const e = err as { statusCode?: number; code?: string };
+                  if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+                  return (
+                    e?.statusCode === 503 ||
+                    e?.statusCode === 529 ||
+                    e?.code === 'PROVIDER_UNAVAILABLE'
+                  );
+                },
+              }
+            );
+
+            classificationResult = skillAnalyzerServicePure.parseClassificationResponse(response.content);
+          } catch {
+            classificationResult = null;
+          }
+
+          const finalResult = classificationResult ?? {
+            classification: 'PARTIAL_OVERLAP' as const,
+            confidence: 0.3,
+            reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
+          };
+
+          const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
+
+          classifiedResults.push({
+            candidateIndex: match.candidateIndex,
+            candidate,
+            classification: finalResult.classification,
+            confidence: finalResult.confidence,
+            similarityScore: match.similarity,
+            classificationReasoning: finalResult.reasoning,
+            libraryId: matchedLib.id,
+            librarySlug: matchedLib.slug,
+            libraryName: matchedLib.name,
+            diffSummary,
+          });
+
+          classifiedCount++;
+          const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
+          await updateJobProgress(jobId, {
+            progressPct: Math.min(pct, 89),
+            progressMessage: `Classified ${classifiedCount} / ${llmQueue.length}...`,
+          });
+        })
+      )
+    );
+  }
 
   // -------------------------------------------------------------------------
   // Stage 6: Write Results (90% → 100%)
