@@ -1,6 +1,6 @@
-# Spec Self-Review — Brain Tree OS Adoption
+# Spec Self-Review — Run Continuity & Workspace Health
 
-**Spec:** `docs/brain-tree-os-adoption-spec.md`
+**Spec:** `docs/run-continuity-and-workspace-health-spec.md`
 **Iteration:** 1 (manual self-review)
 **Reviewer:** Claude (acting as both Codex and adjudicator)
 **Why self-review:** Codex CLI is not installed in this environment. The `spec-reviewer` agent depends on `codex review` and cannot run. The rubric portion of the spec-reviewer agent is the same on every iteration regardless of Codex output, so this self-review applies the rubric directly.
@@ -127,4 +127,4 @@ The mechanical-only result with zero rejections means iteration 2 would also be 
 
 ## Mechanical changes applied
 
-See git diff on `docs/brain-tree-os-adoption-spec.md` for the exact edits. Each fix corresponds to a finding above, and the fix is the minimum change needed — no opportunistic rewrites.
+See git diff on `docs/run-continuity-and-workspace-health-spec.md` for the exact edits. Each fix corresponds to a finding above, and the fix is the minimum change needed — no opportunistic rewrites.

@@ -1,9 +1,8 @@
-# Brain Tree OS Adoption — Detailed Implementation Specification
+# Run Continuity & Workspace Health — Detailed Implementation Specification
 
-Companion spec derived from the brain-tree-os code review (see `tasks/brain-tree-os-review.md` for the raw findings, if present; the review lives in session history otherwise). The review identified five patterns from the MIT-licensed `brain-tree-dev/brain-tree-os` repository worth adopting into Automation OS. This document specifies *how* each one lands: file paths, schema changes, contracts, and an explicit verdict per item.
+Companion spec derived from a code review of an upstream MIT-licensed reference implementation that demonstrated several patterns worth adopting into Automation OS: a structured run handoff document, an execution plan right-pane, a compact session log UI, a knowledge graph visualisation, and a workspace health audit. This document specifies *how* each one lands: file paths, schema changes, contracts, and an explicit verdict per item.
 
 **Source review context:**
-- Upstream repo: `https://github.com/brain-tree-dev/brain-tree-os` (MIT)
 - Patterns adopted: agent handoff document, execution plan right-pane, session log UI, knowledge graph visualisation, workspace health audit
 - Pattern dropped before this spec: custom Claude Code slash commands (out-of-scope — our skill system already covers this surface area, and slash-command distribution is a separate product decision)
 - Pattern dropped from the adoption list: CLAUDE.md operational restructure (process change only, no code — folded into P6 as a brief documentation checklist rather than a build item)
@@ -66,7 +65,7 @@ No item in this spec is gated on external approval, feature flags, or staged rol
 
 ### Goal
 
-Every `agent_runs` row that reaches a terminal status produces a structured **handoff document** — a JSON payload the next run against the same agent/subaccount can read as its "starting context" instead of re-derivng context from raw conversation history. The handoff captures accomplishments, decisions, blockers, next recommended step, and a short list of key artefacts touched. This is the direct analogue of brain-tree-os's `/wrap-up-braintree → /resume-braintree` cycle.
+Every `agent_runs` row that reaches a terminal status produces a structured **handoff document** — a JSON payload the next run against the same agent/subaccount can read as its "starting context" instead of re-derivng context from raw conversation history. The handoff captures accomplishments, decisions, blockers, next recommended step, and a short list of key artefacts touched. This mirrors the wrap-up → resume cycle pattern from the upstream reference implementation.
 
 ### Current state
 
@@ -199,7 +198,7 @@ Static gates + pure-function unit tests. No frontend tests.
 
 ### Goal
 
-Surface the **run-level execution plan** as a compact, scannable right-hand pane on `RunTraceViewerPage`. For runs with a `planJson` (Sprint 5 P4.3 — planning prelude for complex runs), this pane shows plan actions grouped by phase, with per-action status (pending / in-progress / complete / skipped), and a progress bar at the top. For runs without a plan, the pane shows the tool-call timeline in the same grouped format as a fallback. This is the direct analogue of brain-tree-os's execution-plan right-pane view.
+Surface the **run-level execution plan** as a compact, scannable right-hand pane on `RunTraceViewerPage`. For runs with a `planJson` (Sprint 5 P4.3 — planning prelude for complex runs), this pane shows plan actions grouped by phase, with per-action status (pending / in-progress / complete / skipped), and a progress bar at the top. For runs without a plan, the pane shows the tool-call timeline in the same grouped format as a fallback. This mirrors the execution-plan right-pane pattern from the upstream reference implementation.
 
 ### Current state
 
@@ -254,7 +253,7 @@ export function deriveView(run: { planJson: unknown; toolCallsLog: unknown[] }):
                  ~280px                      flex-1                        320px
 ```
 
-On screens narrower than 1280px, the right pane collapses into a tab at the top of the main content labelled "Plan" — same pattern as brain-tree-os uses on mobile. The existing `RunTraceViewerPage` responsive breakpoints stay unchanged; the new pane's collapse logic is self-contained.
+On screens narrower than 1280px, the right pane collapses into a tab at the top of the main content labelled "Plan" — same responsive pattern as the upstream reference implementation. The existing `RunTraceViewerPage` responsive breakpoints stay unchanged; the new pane's collapse logic is self-contained.
 
 **Click-through from a plan item** opens the matching tool call in the existing `CollapsibleSection` for "Tool Calls" — scrolling and auto-expanding it. Uses the existing `evidenceToolCallIndex` + DOM id pattern already used by `TraceChainTimeline`.
 
@@ -301,7 +300,7 @@ Static gates only + manual verification.
 
 ### Goal
 
-Present agent run history as a compact, scan-friendly card list on the agent detail views. Each card shows: session number, relative timestamp, duration, status pill, and the handoff's one-line "next recommended action" (or the run summary as fallback). Modelled on brain-tree-os's Session Log tab — the user should be able to glance at the list and understand the agent's recent activity without clicking into individual runs.
+Present agent run history as a compact, scan-friendly card list on the agent detail views. Each card shows: session number, relative timestamp, duration, status pill, and the handoff's one-line "next recommended action" (or the run summary as fallback). Modelled on the upstream reference implementation's Session Log tab — the user should be able to glance at the list and understand the agent's recent activity without clicking into individual runs.
 
 ### Current state
 
@@ -335,7 +334,7 @@ Both placements consume the same `SessionLogCardList` component.
 └────────────────────────────────────────────────────┘
 ```
 
-- **Session number.** Sequential per agent-run list, computed on the client from the ordered array (highest number = most recent). Not stored in the DB — the number is purely presentational and would drift under deletion. This is the brain-tree-os pattern and it works because the list is always loaded as a contiguous set.
+- **Session number.** Sequential per agent-run list, computed on the client from the ordered array (highest number = most recent). Not stored in the DB — the number is purely presentational and would drift under deletion. This presentational-only pattern works because the list is always loaded as a contiguous set.
 - **Status pill.** Reuses the existing `STATUS_BADGE` colour map from `RunTraceViewerPage.tsx` — the color mapping is hoisted into `client/src/lib/statusBadge.ts` as a shared util so the session log and the run trace viewer both consume the same source of truth.
 - **Duration.** Formatted via the existing `formatDuration(ms)` helper — same hoisting treatment as `STATUS_BADGE`, into `client/src/lib/formatDuration.ts`.
 - **Relative timestamp.** Uses `Intl.RelativeTimeFormat` (built-in, no new dep). Helper: `client/src/lib/relativeTime.ts`.
@@ -393,7 +392,7 @@ Static gates + manual verification.
 
 ### Goal
 
-A read-only audit job that walks an organisation's agent and process configuration and surfaces actionable health findings: agents with no recent runs, processes with broken connection mappings, subaccount agents missing skills or schedules, agent templates that have drifted from their deployed instances. Modelled on brain-tree-os's `/sync-braintree` brain audit. Surfaces results via a new health endpoint and a dashboard widget.
+A read-only audit job that walks an organisation's agent and process configuration and surfaces actionable health findings: agents with no recent runs, processes with broken connection mappings, subaccount agents missing skills or schedules, agent templates that have drifted from their deployed instances. Modelled on the upstream reference implementation's brain-audit pattern. Surfaces results via a new health endpoint and a dashboard widget.
 
 ### Current state
 
@@ -558,7 +557,7 @@ Both keys are inherited by org admin via the existing `Object.values(ORG_PERMISS
 
 ### Goal
 
-A visual graph view of the org's agent network showing parent/child agent relationships, sub-agent spawn edges, and system-agent linkage. Force-directed layout, hover highlighting, click-to-open agent detail. Modelled on brain-tree-os's `graph-view.tsx` D3 implementation. Lowest priority in the adoption list and explicitly cuttable if scope tightens.
+A visual graph view of the org's agent network showing parent/child agent relationships, sub-agent spawn edges, and system-agent linkage. Force-directed layout, hover highlighting, click-to-open agent detail. Modelled on the upstream reference implementation's D3 force-directed graph. Lowest priority in the adoption list and explicitly cuttable if scope tightens.
 
 ### Current state
 
@@ -572,7 +571,7 @@ The data exists. The schema is complete. There is no UI surfacing it as a graph.
 
 ### Design
 
-**Library choice.** Use `d3` directly — the library is already in our `package.json` (it's used by `ActivityCharts.tsx`). No new dependency. The brain-tree-os `graph-view.tsx` is MIT-licensed and 49KB; we adapt the force simulation, drag, and hover patterns but write our own renderer that consumes our schema shapes. Direct copy-paste is not the right approach because their data model (markdown files + wikilinks) doesn't map onto agents + parent edges.
+**Library choice.** Use `d3` directly — the library is already in our `package.json` (it's used by `ActivityCharts.tsx`). No new dependency. The upstream reference uses an MIT-licensed D3 force-directed graph (~49KB); we adapt the force simulation, drag, and hover patterns but write our own renderer that consumes our schema shapes. Direct copy-paste is not the right approach because their data model (markdown files + wikilinks) doesn't map onto agents + parent edges.
 
 **Data model:**
 
@@ -603,7 +602,7 @@ export function buildAgentGraph(input: {
 
 `buildAgentGraph` is a pure helper. It dedupes nodes by id (a system agent linked from an org agent appears as one node, not two), builds edges for parent/spawn/system_link relationships, and computes `recentRunCount` per node from the runs array.
 
-**Renderer.** A new component `AgentNetworkGraph.tsx` mounts a D3 force simulation onto an SVG ref. The simulation uses `forceSimulation`, `forceLink`, `forceCharge`, `forceCenter`, `forceCollide` — the same five force types as brain-tree-os. Drag is wired via `d3-drag`. Hover state uses local React state; D3 selects for the highlighting, React owns the layout.
+**Renderer.** A new component `AgentNetworkGraph.tsx` mounts a D3 force simulation onto an SVG ref. The simulation uses `forceSimulation`, `forceLink`, `forceCharge`, `forceCenter`, `forceCollide` — the same five force types as the upstream reference. Drag is wired via `d3-drag`. Hover state uses local React state; D3 selects for the highlighting, React owns the layout.
 
 **Interactions:**
 - Hover a node → highlight connected nodes and edges, dim the rest.
@@ -611,7 +610,7 @@ export function buildAgentGraph(input: {
 - Drag a node → repositions and pins it; double-click to unpin.
 - Pan/zoom via `d3-zoom`.
 
-**No minimap, no path-finding, no department layout in v1.** Brain-tree-os has all three; they're not needed for an org with <100 agents and would inflate scope.
+**No minimap, no path-finding, no department layout in v1.** The upstream reference has all three; they're not needed for an org with <100 agents and would inflate scope.
 
 **Backend route.** `GET /api/org/agent-graph` returns the four arrays the pure builder needs, all in one round-trip. Service: `agentGraphService.ts` (impure wrapper). The route is org-scoped via `req.orgId` and the service uses `getOrgScopedDb` for all reads. Permission: `requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW)`.
 
@@ -665,7 +664,7 @@ If P5 is built later, the implementation lands as a standalone PR — none of P1
 
 ### Goal
 
-Add a small operational appendix to the project's `CLAUDE.md` mirroring the brain-tree-os example's "constitution" structure. No code change. Specifies exactly which sections are added so the work is reviewable as a doc patch.
+Add a small operational appendix to the project's `CLAUDE.md` mirroring the upstream reference implementation's "constitution" structure. No code change. Specifies exactly which sections are added so the work is reviewable as a doc patch.
 
 ### Current state
 
@@ -684,7 +683,7 @@ Append two new sections to `CLAUDE.md`, after the existing "Local Dev Agent Flee
 ```markdown
 ## Current focus
 
-**In-flight spec:** `docs/brain-tree-os-adoption-spec.md`
+**In-flight spec:** `docs/run-continuity-and-workspace-health-spec.md`
 **Active items:** P1, P2, P3, P4 (P5 deferred)
 ```
 
@@ -711,7 +710,7 @@ This is a hand-maintained pointer. The agent should read it at session start to 
 
 The table is intentionally short — it points at the door, not at every room behind the door. `architecture.md` is the deep reference; `CLAUDE.md`'s table is the index.
 
-**Multi-agent parallelism rules.** Already covered in the existing "Local Dev Agent Fleet" section — no addition needed. The brain-tree-os pattern (multiple agents working in worktrees) is not how this project operates; we use single-session sequential execution with subagents for parallelism inside one session. The existing CLAUDE.md is correct; no edit needed for this point.
+**Multi-agent parallelism rules.** Already covered in the existing "Local Dev Agent Fleet" section — no addition needed. The upstream reference's pattern (multiple agents working in worktrees) is not how this project operates; we use single-session sequential execution with subagents for parallelism inside one session. The existing CLAUDE.md is correct; no edit needed for this point.
 
 ### Files to change
 
@@ -793,13 +792,13 @@ Items considered during scoping and explicitly excluded from this spec.
 
 ### D2 — Brain-style markdown export of handoffs (deferred)
 
-**What it is:** Generate a human-readable markdown file per session log entry, exportable as a brain-tree-os-style "Handoff" document.
+**What it is:** Generate a human-readable markdown file per session log entry, exportable as a "Handoff" document in the same style as the upstream reference implementation.
 
 **Why deferred:** No user has asked for it. The structured JSON in `handoff_json` is queryable in the UI directly. Markdown export is a one-day follow-up if a real need surfaces.
 
 ### D3 — Slash command distribution (`/wrap-up`, `/resume`)
 
-**What it is:** Brain-tree-os ships `.md` slash command files into `~/.claude/commands/` so users can type `/wrap-up-braintree` in Claude Code. Adopt the same for our skill system.
+**What it is:** The upstream reference ships `.md` slash command files into `~/.claude/commands/` so users can type `/wrap-up` in Claude Code. Adopt the same for our skill system.
 
 **Why deferred:** Surface-area collision with our existing skill system. Slash commands as a distribution mechanism is a separate product decision (do we want to be a Claude Code add-on?) and is not the right call to make as part of an adoption pass. Track the idea via `triage-agent` if it surfaces again.
 
@@ -817,7 +816,7 @@ Items considered during scoping and explicitly excluded from this spec.
 
 ### D6 — Graph view minimap, path-finding, department layout
 
-**What it is:** Brain-tree-os's `graph-view.tsx` includes a canvas minimap, BFS path-finding between two nodes, and a department-grouped radial layout. We adopt only the force simulation in P5.
+**What it is:** The upstream reference's graph view includes a canvas minimap, BFS path-finding between two nodes, and a department-grouped radial layout. We adopt only the force simulation in P5.
 
 **Why deferred:** Each of these is a significant addition to a feature that is already marked DEFER. Out of scope.
 
@@ -831,5 +830,5 @@ Items considered during scoping and explicitly excluded from this spec.
 
 ## End of spec
 
-This spec is implementation-ready against the project conventions in `architecture.md` and the framing in `docs/spec-context.md` as of the date this document was written. The spec-reviewer agent (Codex-backed) was unavailable in the working environment, so the spec has been self-reviewed against the spec-reviewer rubric — the rubric findings and adjudications are recorded in `tasks/brain-tree-os-adoption-self-review-<timestamp>.md` for the human to audit.
+This spec is implementation-ready against the project conventions in `architecture.md` and the framing in `docs/spec-context.md` as of the date this document was written. The spec-reviewer agent (Codex-backed) was unavailable in the working environment, so the spec has been self-reviewed against the spec-reviewer rubric — the rubric findings and adjudications are recorded in `tasks/run-continuity-self-review-<timestamp>.md` for the human to audit.
 

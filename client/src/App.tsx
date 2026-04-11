@@ -69,6 +69,7 @@ const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPa
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
+const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 
 function PageLoader() {
   return (
@@ -209,8 +210,10 @@ export default function App() {
             <Route path="/admin/org-agent-configs" element={<Navigate to="/admin/agents?tab=org-execution" replace />} />
             <Route path="/admin/hierarchy-templates" element={<Navigate to="/admin/agents?tab=team-templates" replace />} />
             <Route path="/admin/connectors" element={<Navigate to="/admin/mcp-servers" replace />} />
-            {/* Brain Tree OS adoption P4 — workspace health findings */}
+            {/* Workspace health audit findings */}
             <Route path="/admin/health-findings" element={<AdminHealthFindingsPage user={user!} />} />
+            {/* Per-subaccount action audit log */}
+            <Route path="/admin/subaccounts/:subaccountId/actions" element={<AdminActionLogPage user={user!} />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
