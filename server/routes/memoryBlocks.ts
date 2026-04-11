@@ -1,10 +1,28 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { validateBody } from '../middleware/validate.js';
 import * as memoryBlockService from '../services/memoryBlockService.js';
 
 const router = Router();
+
+// Body schemas
+const createMemoryBlockBody = z.object({
+  name: z.string().min(1),
+  content: z.string().min(1),
+  subaccountId: z.string().uuid().optional(),
+  ownerAgentId: z.string().uuid().optional(),
+  isReadOnly: z.boolean().optional(),
+});
+
+const updateMemoryBlockBody = z.object({
+  name: z.string().min(1).optional(),
+  content: z.string().min(1).optional(),
+  isReadOnly: z.boolean().optional(),
+  ownerAgentId: z.string().uuid().nullable().optional(),
+});
 
 // ─── List memory blocks (org-scoped, optional subaccount filter) ────────────
 
@@ -28,13 +46,9 @@ router.post(
   '/api/memory-blocks',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  validateBody(createMemoryBlockBody, 'warn'),
   asyncHandler(async (req, res) => {
     const { name, content, subaccountId, ownerAgentId, isReadOnly } = req.body;
-
-    if (!name || !content) {
-      res.status(400).json({ error: 'name and content are required' });
-      return;
-    }
 
     const block = await memoryBlockService.createBlock({
       organisationId: req.orgId!,
@@ -55,6 +69,7 @@ router.patch(
   '/api/memory-blocks/:id',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  validateBody(updateMemoryBlockBody, 'warn'),
   asyncHandler(async (req, res) => {
     const { name, content, isReadOnly, ownerAgentId } = req.body;
 

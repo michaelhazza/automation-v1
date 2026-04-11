@@ -5,6 +5,38 @@
 # Requires: jq
 command -v jq >/dev/null 2>&1 || { echo "[GUARD] Error: jq is required but not installed" >&2; exit 1; }
 
+# ── jq portability shim ──────────────────────────────────────────────────────
+# jq on Windows (winget/native binary) under Git Bash has two hazards:
+#   (1) It writes CRLF line endings to stdout. Bash captures via $(...) and
+#       word-splits — each token ends up with a trailing \r, breaking
+#       comparisons, array lookups, and key-by-name fetches.
+#   (2) MSYS auto-converts Unix-style argv tokens that look like paths
+#       (e.g. `--arg p "/api/engines"`) into Windows paths, mangling the
+#       comparison value. Disabling path conv with MSYS_NO_PATHCONV=1 fixes
+#       (2) but then breaks file-path positional args like
+#       `/c/Files/.../baseline.json`.
+# Solution: walk argv. Convert any token that exists as a file to its Windows
+# native form (so jq's binary can open it), but leave non-file tokens alone
+# (so --arg values aren't mangled). cygpath is part of every Git Bash install.
+# Also disable global path conv via MSYS_NO_PATHCONV to stop --arg mangling.
+# Both behaviours no-op on Linux/macOS where cygpath is absent.
+jq() {
+  if command -v cygpath >/dev/null 2>&1; then
+    local args=()
+    local a
+    for a in "$@"; do
+      if [ -f "$a" ]; then
+        args+=("$(cygpath -m "$a")")
+      else
+        args+=("$a")
+      fi
+    done
+    MSYS_NO_PATHCONV=1 command jq "${args[@]}" | tr -d '\r'
+  else
+    command jq "$@" | tr -d '\r'
+  fi
+}
+
 # ── Suppression Comments ─────────────────────────────────────────────────────
 # Suppression uses a next-line directive. Place on the line ABOVE the violation.
 #
