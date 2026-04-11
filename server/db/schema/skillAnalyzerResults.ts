@@ -74,6 +74,12 @@ export const skillAnalyzerResults = pgTable(
     actionTakenBy: uuid('action_taken_by')
       .references(() => users.id),
 
+    // Optimistic concurrency for merge edits — set by patchMergeFields and
+    // resetMergeToOriginal. Null on rows that have never been merge-edited.
+    // The PATCH /merge endpoint accepts an optional ifUnmodifiedSince value and
+    // rejects with 409 when this column is newer than the client's copy.
+    mergeUpdatedAt: timestamp('merge_updated_at', { withTimezone: true }),
+
     // Execution outcome
     executionResult: text('execution_result')
       .$type<'created' | 'updated' | 'skipped' | 'failed'>(),

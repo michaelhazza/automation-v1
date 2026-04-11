@@ -488,11 +488,14 @@ export async function updateAgentProposal(
 
 /** Body for the PATCH /merge endpoint. Per spec §7.3 the four merge fields
  *  are individually patchable; any omitted field is left untouched.
- *  `instructions` may be explicitly null to clear the field. */
+ *  `instructions` may be explicitly null to clear the field.
+ *  `ifUnmodifiedSince` is an optional ISO timestamp for optimistic concurrency:
+ *  if the stored mergeUpdatedAt is newer than this value the endpoint returns 409. */
 export interface PatchMergeFieldsParams {
   resultId: string;
   jobId: string;
   organisationId: string;
+  ifUnmodifiedSince?: string;
   patch: {
     name?: string;
     description?: string;
@@ -544,6 +547,18 @@ export async function patchMergeFields(
     throw { statusCode: 404, message: 'Result not found' };
   }
 
+  // Optimistic concurrency: if the client sent ifUnmodifiedSince and the row
+  // has already been written after that point, reject to avoid overwriting a
+  // concurrent edit.
+  if (params.ifUnmodifiedSince && row.mergeUpdatedAt) {
+    if (new Date(row.mergeUpdatedAt) > new Date(params.ifUnmodifiedSince)) {
+      throw {
+        statusCode: 409,
+        message: 'merge content was modified by another session — reload and retry',
+      };
+    }
+  }
+
   // Per spec §7.3: merge edits only valid for PARTIAL_OVERLAP / IMPROVEMENT.
   if (row.classification !== 'PARTIAL_OVERLAP' && row.classification !== 'IMPROVEMENT') {
     throw {
@@ -576,6 +591,7 @@ export async function patchMergeFields(
     .set({
       proposedMergedContent: next,
       userEditedMerge: true,
+      mergeUpdatedAt: new Date(),
     })
     .where(eq(skillAnalyzerResults.id, resultId));
 
@@ -658,6 +674,7 @@ export async function resetMergeToOriginal(params: {
     .set({
       proposedMergedContent: row.originalProposedMerge,
       userEditedMerge: false,
+      mergeUpdatedAt: new Date(),
     })
     .where(eq(skillAnalyzerResults.id, resultId));
 
