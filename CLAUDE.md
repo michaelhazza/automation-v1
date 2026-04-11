@@ -340,6 +340,7 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
 - **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
+- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
 
 ---
 

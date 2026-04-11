@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { systemSkillService } from '../services/systemSkillService.js';
+import { systemSkillService, UpdateSystemSkillPatch } from '../services/systemSkillService.js';
 import { isSkillVisibility } from '../lib/skillVisibility.js';
 
 const router = Router();
@@ -12,20 +12,30 @@ const router = Router();
 // reads and writes go through systemSkillService → the system_skills table.
 // See docs/skill-analyzer-v2-spec.md §10 Phase 0.
 
+// UUID detection — the frontend now navigates by DB UUID (skill.id from
+// listSkills). Legacy slug-keyed links are still supported as a fallback.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/api/system/skills', authenticate, requireSystemAdmin, asyncHandler(async (_req, res) => {
   const skills = await systemSkillService.listSkills();
   res.json(skills);
 }));
 
-// GET-by-slug. The URL :id parameter has historically been the skill slug
-// (e.g. 'web_search') because the file-based service keyed ids by slug.
-// Preserving the slug-keyed route contract for frontend compatibility — the
-// new DB-backed getSkill(id) is strictly UUID-keyed, so this route calls
-// getSkillBySlugIncludingInactive instead so retired (isActive=false) rows
-// remain viewable from the system-admin UI (parity with pre-Phase-0 behaviour).
-// Frontend migration to UUID lookups is a follow-on concern.
+// GET-by-id-or-slug. The frontend now navigates by UUID (skill.id), so we
+// route UUID params to the UUID-keyed getSkill() and fall back to the
+// slug-keyed getSkillBySlugIncludingInactive() for any legacy links.
 router.get('/api/system/skills/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
-  const skill = await systemSkillService.getSkillBySlugIncludingInactive(req.params.id);
+  const { id } = req.params;
+  let skill;
+  if (UUID_RE.test(id)) {
+    try {
+      skill = await systemSkillService.getSkill(id);
+    } catch {
+      skill = null;
+    }
+  } else {
+    skill = await systemSkillService.getSkillBySlugIncludingInactive(id);
+  }
   if (!skill) {
     res.status(404).json({ error: 'System skill not found' });
     return;
@@ -33,16 +43,46 @@ router.get('/api/system/skills/:id', authenticate, requireSystemAdmin, asyncHand
   res.json(skill);
 }));
 
-// PATCH visibility. The URL :id parameter is the slug, matching the GET route
-// above. Writes through to the system_skills DB row.
+// PATCH — two call sites with the same :id param (now UUID from the frontend):
+//   1. List page: { visibility } only (toggle cascade visibility)
+//   2. Edit page: { name, description, instructions, definition, isActive } (full save)
+// Both are routed through updateSystemSkill which handles partial patches.
+// Legacy slug-based callers fall back to updateSkillVisibility for visibility-only patches.
 router.patch('/api/system/skills/:id', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
-  const { visibility } = req.body;
-  if (!isSkillVisibility(visibility)) {
-    res.status(400).json({ error: 'visibility must be one of: none, basic, full' });
-    return;
+  const { id } = req.params;
+  const body = req.body as {
+    visibility?: unknown;
+    name?: string;
+    description?: string;
+    instructions?: string | null;
+    definition?: unknown;
+    isActive?: boolean;
+  };
+
+  if (UUID_RE.test(id)) {
+    // Validate visibility if present
+    if (body.visibility !== undefined && !isSkillVisibility(body.visibility)) {
+      res.status(400).json({ error: 'visibility must be one of: none, basic, full' });
+      return;
+    }
+    const patch: UpdateSystemSkillPatch = {};
+    if (body.name !== undefined) patch.name = body.name;
+    if (body.description !== undefined) patch.description = body.description;
+    if (body.instructions !== undefined) patch.instructions = body.instructions;
+    if (body.definition !== undefined) patch.definition = body.definition as UpdateSystemSkillPatch['definition'];
+    if (body.isActive !== undefined) patch.isActive = body.isActive;
+    if (body.visibility !== undefined) patch.visibility = body.visibility as UpdateSystemSkillPatch['visibility'];
+    const skill = await systemSkillService.updateSystemSkill(id, patch);
+    res.json(skill);
+  } else {
+    // Legacy slug-based path: visibility-only patch
+    if (!isSkillVisibility(body.visibility)) {
+      res.status(400).json({ error: 'visibility must be one of: none, basic, full' });
+      return;
+    }
+    const skill = await systemSkillService.updateSkillVisibility(id, body.visibility);
+    res.json(skill);
   }
-  const skill = await systemSkillService.updateSkillVisibility(req.params.id, visibility);
-  res.json(skill);
 }));
 
 // POST: create a new system skill via the analyzer-approve or the system-admin
