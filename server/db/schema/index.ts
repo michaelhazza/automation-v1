@@ -77,10 +77,11 @@ export * from './mcpServerConfigs';
 export * from './mcpServerAgentLinks';
 export * from './goals';
 export * from './agentPromptRevisions';
-// Skill Analyzer (migration 0092)
+// Skill Analyzer (migration 0092, extended in 0098)
 export * from './skillAnalyzerJobs';
 export * from './skillAnalyzerResults';
 export * from './skillEmbeddings';
+export * from './agentEmbeddings';
 export * from './inboxReadStates';
 export * from './feedbackVotes';
 export * from './taskAttachments';

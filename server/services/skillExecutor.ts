@@ -294,6 +294,810 @@ export function setHandoffJobSender(sender: (name: string, data: object) => Prom
   pgBossSend = sender;
 }
 
+/**
+ * Signature for a skill handler entry in SKILL_HANDLERS. Each entry is an
+ * async function that receives the raw tool input and the current skill
+ * execution context and returns whatever value the LLM should observe as the
+ * tool result. This is the Phase 0 replacement for the old switch statement
+ * dispatch — keeping the registry shape explicit (not a Map) so static
+ * analysis and the skill-analyzer can walk the keys directly.
+ */
+export type SkillHandler = (
+  input: Record<string, unknown>,
+  context: SkillExecutionContext,
+) => Promise<unknown>;
+
+/**
+ * Registry of skill handlers keyed by skill name. The `skillExecutor.execute`
+ * method dispatches to an entry here after handling the MCP prefix and the
+ * toolCallId stash. Previously this was a 770-line switch statement; it now
+ * lives as a module-level constant so other modules (notably the
+ * skill-analyzer) can enumerate the supported skill names without having to
+ * parse source code.
+ */
+export const SKILL_HANDLERS: Record<string, SkillHandler> = {
+  // ── Meta tools — BM25 tool discovery (no action record) ─────────────
+  search_tools: async (input, context) => {
+    const { executeSearchTools } = await import('../tools/meta/searchTools.js');
+    return executeSearchTools(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
+  },
+  load_tool: async (input, context) => {
+    const { executeLoadTool } = await import('../tools/meta/searchTools.js');
+    return executeLoadTool(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
+  },
+
+  // ── Direct skills (no action record) ──────────────────────────────
+  web_search: async (input, context) => {
+    return executeWebSearch(input, context);
+  },
+  read_workspace: async (input, context) => {
+    requireSubaccountContext(context, 'read_workspace');
+    return executeReadWorkspace(input, context);
+  },
+  write_workspace: async (input, context) => {
+    requireSubaccountContext(context, 'write_workspace');
+    return executeWriteWorkspace(input, context);
+  },
+  trigger_process: async (input, context) => {
+    requireSubaccountContext(context, 'trigger_process');
+    return executeTriggerProcess(input, context);
+  },
+  spawn_sub_agents: async (input, context) => {
+    requireSubaccountContext(context, 'spawn_sub_agents');
+    return executeSpawnSubAgents(input, context);
+  },
+
+  // ── Context data source retrieval (spec §8.2) ────────────────────────
+  read_data_source: async (input, context) => {
+    const { executeReadDataSource } = await import('../tools/readDataSource.js');
+    return executeReadDataSource(input, context);
+  },
+
+  // ── Auto-gated skills (action record for audit, executes synchronously) ──
+  create_task: async (input, context) => {
+    requireSubaccountContext(context, 'create_task');
+    return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
+  },
+  triage_intake: async (input, context) => {
+    requireSubaccountContext(context, 'triage_intake');
+    return executeWithActionAudit('triage_intake', input, context, () => executeTriageIntake(input, context));
+  },
+  move_task: async (input, context) => {
+    return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
+  },
+  add_deliverable: async (input, context) => {
+    return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
+  },
+  reassign_task: async (input, context) => {
+    requireSubaccountContext(context, 'reassign_task');
+    return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
+  },
+  update_task: async (input, context) => {
+    return executeWithActionAudit('update_task', input, context, () => executeUpdateTask(input, context));
+  },
+  read_inbox: async (input, context) => {
+    return executeWithActionAudit('read_inbox', input, context, () => executeReadInbox(input, context));
+  },
+  fetch_url: async (input, context) => {
+    return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
+  },
+
+  // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
+  playbook_read_existing: async (input) => {
+    return executePlaybookReadExisting(input);
+  },
+  playbook_validate: async (input) => {
+    return executePlaybookValidate(input);
+  },
+  playbook_simulate: async (input) => {
+    return executePlaybookSimulate(input);
+  },
+  playbook_estimate_cost: async (input) => {
+    return executePlaybookEstimateCost(input);
+  },
+  playbook_propose_save: async (input, context) => {
+    return executePlaybookProposeSave(input, context);
+  },
+
+  // ── Review-gated skills (proposes action, does NOT execute immediately) ──
+  send_email: async (input, context) => {
+    return proposeReviewGatedAction('send_email', input, context);
+  },
+  update_record: async (input, context) => {
+    return proposeReviewGatedAction('update_record', input, context);
+  },
+  request_approval: async (input, context) => {
+    return proposeReviewGatedAction('request_approval', input, context);
+  },
+
+  // ── Dev/QA auto-gated skills (all require subaccount context) ─────────
+  read_codebase: async (input, context) => {
+    requireSubaccountContext(context, 'read_codebase');
+    return executeWithActionAudit('read_codebase', input, context, () => executeReadCodebase(input, context));
+  },
+  search_codebase: async (input, context) => {
+    requireSubaccountContext(context, 'search_codebase');
+    return executeWithActionAudit('search_codebase', input, context, () => executeSearchCodebase(input, context));
+  },
+  run_tests: async (input, context) => {
+    requireSubaccountContext(context, 'run_tests');
+    return executeWithActionAudit('run_tests', input, context, () => executeRunTests(input, context));
+  },
+  analyze_endpoint: async (input, context) => {
+    requireSubaccountContext(context, 'analyze_endpoint');
+    return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
+  },
+  report_bug: async (input, context) => {
+    requireSubaccountContext(context, 'report_bug');
+    return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
+  },
+  capture_screenshot: async (input, context) => {
+    requireSubaccountContext(context, 'capture_screenshot');
+    return executeWithActionAudit('capture_screenshot', input, context, () => executeCaptureScreenshot(input, context));
+  },
+  run_playwright_test: async (input, context) => {
+    requireSubaccountContext(context, 'run_playwright_test');
+    return executeWithActionAudit('run_playwright_test', input, context, () => executeRunPlaywrightTest(input, context));
+  },
+
+  // ── Dev review-gated skills (safeMode-checked, require subaccount) ───
+  write_patch: async (input, context) => {
+    requireSubaccountContext(context, 'write_patch');
+    return proposeDevopsAction('write_patch', input, context);
+  },
+  run_command: async (input, context) => {
+    requireSubaccountContext(context, 'run_command');
+    return proposeDevopsAction('run_command', input, context);
+  },
+  create_pr: async (input, context) => {
+    requireSubaccountContext(context, 'create_pr');
+    return proposeDevopsAction('create_pr', input, context);
+  },
+
+  // ── Page infrastructure skills (require subaccount) ────────────────
+  create_page: async (input, context) => {
+    requireSubaccountContext(context, 'create_page');
+    return proposeReviewGatedAction('create_page', input, context);
+  },
+  update_page: async (input, context) => {
+    requireSubaccountContext(context, 'update_page');
+    return proposeReviewGatedAction('update_page', input, context);
+  },
+  publish_page: async (input, context) => {
+    requireSubaccountContext(context, 'publish_page');
+    return proposeReviewGatedAction('publish_page', input, context);
+  },
+
+  // ── Methodology skills — LLM-guided reasoning; executor returns a
+  //    structured scaffold the agent fills using the injected instructions ─
+  draft_architecture_plan: async (input) => {
+    return executeMethodologySkill('draft_architecture_plan', input, {
+      template: {
+        intent: '',
+        classification: '',
+        implementationChunks: [],
+        contracts: [],
+        failureModes: [],
+        openQuestions: [],
+        affectedFiles: [],
+        testStrategy: '',
+      },
+      guidance: 'Fill in each section of the architecture plan template above. Use the methodology instructions in your context. Return the completed plan as your tool result.',
+    });
+  },
+  draft_tech_spec: async (input) => {
+    return executeMethodologySkill('draft_tech_spec', input, {
+      template: {
+        openApiChanges: '',
+        schemaChanges: '',
+        sequenceDiagram: '',
+        migrationPlan: '',
+        breakingChanges: [],
+        envVarChanges: [],
+      },
+      guidance: 'Fill in each section of the tech spec template. Omit sections not applicable to this change.',
+    });
+  },
+  review_ux: async (input) => {
+    return executeMethodologySkill('review_ux', input, {
+      template: {
+        findings: [],
+        highPriority: [],
+        mediumPriority: [],
+        lowPriority: [],
+        recommendation: 'proceed | revise | escalate',
+      },
+      guidance: 'Evaluate each changed UI surface against the UX checklist in your context. Populate findings by priority.',
+    });
+  },
+  review_code: async (input) => {
+    return executeMethodologySkill('review_code', input, {
+      template: {
+        blocking: [],
+        nonBlocking: [],
+        securityIssues: [],
+        planComplianceIssues: [],
+        acCoverageGaps: [],
+        recommendation: 'approve | revise | escalate',
+      },
+      guidance: 'Review each changed file against the checklist in your context. Only blocking issues prevent submission.',
+    });
+  },
+  write_tests: async (input) => {
+    return executeMethodologySkill('write_tests', input, {
+      template: {
+        targetFile: '',
+        framework: '',
+        testCases: [],
+        coveredScenarios: [],
+        deferredScenarios: [],
+        estimatedCoverageDelta: '',
+      },
+      guidance: 'Follow the test authorship methodology in your context. For each scenario, write the test case and submit via write_patch.',
+    });
+  },
+
+  // ── BA / QA MVP skills ───────────────────────────────────────────────
+  draft_requirements: async (input) => {
+    return executeMethodologySkill('draft_requirements', input, {
+      template: {
+        taskId: '',
+        status: 'draft',
+        userStories: [],
+        openQuestions: [],
+        definitionOfDone: [],
+        traceability: [],
+      },
+      guidance: 'Follow the draft_requirements methodology in your skill context. Produce a structured requirements spec with INVEST user stories, Gherkin ACs (AC-X.Y format, Type: positive/negative), ranked open questions, and a Definition of Done. If the brief is too ambiguous, return a clarification_required response instead of a partial spec.',
+    });
+  },
+  derive_test_cases: async (input) => {
+    return executeMethodologySkill('derive_test_cases', input, {
+      template: {
+        specReferenceId: '',
+        manifestValidFor: '',
+        taskId: '',
+        testCases: [],
+        coverageMatrix: [],
+        untestableAcs: [],
+      },
+      guidance: 'Follow the derive_test_cases methodology in your skill context. For each Gherkin AC in the spec, produce a test case with a stable TC-[task_id]-NNN ID, preconditions, action, and expected result. Write the completed manifest to workspace memory via write_workspace.',
+    });
+  },
+  write_spec: async (input, context) => {
+    return proposeReviewGatedAction('write_spec', input, context);
+  },
+
+  // ── Support Agent skills ─────────────────────────────────────────────
+  classify_email: async (input) => {
+    return executeMethodologySkill('classify_email', input, {
+      template: {
+        emailReference: '',
+        primaryIntent: '',
+        urgency: '',
+        sentiment: '',
+        routingAction: '',
+        isAutomated: false,
+        keySignals: [],
+        classificationNotes: '',
+        suggestedReplyTone: '',
+      },
+      guidance: 'Follow the classify_email methodology in your skill context. Classify the email by intent category, urgency, sentiment, and routing action. Return the structured classification result.',
+    });
+  },
+  draft_reply: async (input) => {
+    return executeMethodologySkill('draft_reply', input, {
+      template: {
+        to: '',
+        subject: '',
+        confidence: '',
+        routingAction: '',
+        body: '',
+        confidenceFlags: [],
+        draftingNotes: '',
+      },
+      guidance: 'Follow the draft_reply methodology in your skill context. Use the classification output and knowledge base context to draft a concise, on-brand reply. If routing_action is escalate, return an escalation response instead of a draft.',
+    });
+  },
+  search_knowledge_base: async (input, context) => {
+    // Auto-gated stub — integration not yet wired
+    const searchQuery = typeof input.query === 'string' ? input.query : '';
+    const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
+    return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      query: searchQuery,
+      intent_category: searchCategory ?? null,
+      results: [],
+      message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
+    }));
+  },
+
+  // ── Social Media Agent skills ────────────────────────────────────────
+  draft_post: async (input) => {
+    return executeMethodologySkill('draft_post', input, {
+      template: {
+        brief: '',
+        platforms: [],
+        brandVoice: '',
+        drafts: {},
+        sharedNotes: '',
+        verifyItems: [],
+      },
+      guidance: 'Follow the draft_post methodology in your skill context. Produce platform-specific post variants for each requested platform, respecting character limits, hashtag strategies, and brand voice. Flag any claims that need verification with [VERIFY] placeholders.',
+    });
+  },
+  publish_post: async (input, context) => {
+    return proposeReviewGatedAction('publish_post', input, context);
+  },
+  read_analytics: async (input, context) => {
+    // Auto-gated stub — platform integrations not yet wired
+    const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
+    const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+    const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+    // Validate date range
+    if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
+      return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+    }
+    return executeWithActionAudit('read_analytics', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      platforms: analyticsplatforms,
+      date_from: dateFrom,
+      date_to: dateTo,
+      results: [],
+      message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
+    }));
+  },
+
+  // ── Ads Management Agent skills ──────────────────────────────────────
+  read_campaigns: async (input, context) => {
+    // Auto-gated stub — ads platform integrations not yet wired
+    const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
+    const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+    const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+    if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
+      return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+    }
+    return executeWithActionAudit('read_campaigns', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      platform: adsPlatform,
+      date_from: adsDateFrom,
+      date_to: adsDateTo,
+      campaigns: [],
+      message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
+    }));
+  },
+  analyse_performance: async (input) => {
+    return executeMethodologySkill('analyse_performance', input, {
+      template: {
+        period: '',
+        campaignsAnalysed: 0,
+        executiveSummary: '',
+        campaigns: [],
+        anomalies: [],
+        rankedActions: [],
+        caveats: [],
+      },
+      guidance: 'Follow the analyse_performance methodology in your skill context. Analyse the campaign data from read_campaigns, identify underperformers and anomalies, and produce ranked recommendations (pause, reduce_bid, increase_budget, test_copy, monitor).',
+    });
+  },
+  draft_ad_copy: async (input) => {
+    return executeMethodologySkill('draft_ad_copy', input, {
+      template: {
+        campaignName: '',
+        platform: '',
+        adFormat: '',
+        variants: [],
+        copyNotes: '',
+        verifyItems: [],
+      },
+      guidance: 'Follow the draft_ad_copy methodology in your skill context. Produce the requested number of meaningfully different ad copy variants within platform character limits. State the test hypothesis for each variant. Use [VERIFY] for unconfirmed claims.',
+    });
+  },
+  update_bid: async (input, context) => {
+    return proposeReviewGatedAction('update_bid', input, context);
+  },
+  update_copy: async (input, context) => {
+    return proposeReviewGatedAction('update_copy', input, context);
+  },
+  pause_campaign: async (input, context) => {
+    return proposeReviewGatedAction('pause_campaign', input, context);
+  },
+  increase_budget: async (input, context) => {
+    return proposeReviewGatedAction('increase_budget', input, context);
+  },
+
+  // ── Email Outreach Agent skills ──────────────────────────────────────
+  enrich_contact: async (input, context) => {
+    // Auto-gated stub — enrichment integration not yet wired
+    const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
+    return executeWithActionAudit('enrich_contact', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      contact: enrichEmail,
+      matched: false,
+      fields: {},
+      message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
+    }));
+  },
+  draft_sequence: async (input) => {
+    return executeMethodologySkill('draft_sequence', input, {
+      template: {
+        contactEmail: '',
+        goal: '',
+        steps: [],
+        draftingNotes: '',
+        unresolvedTokens: [],
+        verifyItems: [],
+      },
+      guidance: 'Follow the draft_sequence methodology in your skill context. Produce a multi-step outreach sequence with distinct purpose per step. Use enrichment data for personalisation if available; fall back to generic copy if enrichment is a stub. Flag all [VERIFY] items and unresolved personalisation tokens.',
+    });
+  },
+  update_crm: async (input, context) => {
+    return proposeReviewGatedAction('update_crm', input, context);
+  },
+
+  // ── Finance Agent skills ─────────────────────────────────────────────
+  read_revenue: async (input, context) => {
+    const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+    const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+    if (revDateFrom && revDateTo && new Date(revDateFrom) > new Date(revDateTo)) {
+      return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+    }
+    return executeWithActionAudit('read_revenue', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      date_from: revDateFrom,
+      date_to: revDateTo,
+      total_revenue: null,
+      message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
+    }));
+  },
+  read_expenses: async (input, context) => {
+    const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
+    const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
+    if (expDateFrom && expDateTo && new Date(expDateFrom) > new Date(expDateTo)) {
+      return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
+    }
+    return executeWithActionAudit('read_expenses', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      date_from: expDateFrom,
+      date_to: expDateTo,
+      total_expenses: null,
+      message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
+    }));
+  },
+  analyse_financials: async (input) => {
+    return executeMethodologySkill('analyse_financials', input, {
+      template: {
+        period: '',
+        dataQuality: '',
+        executiveSummary: '',
+        keyMetrics: {},
+        revenueAnalysis: '',
+        expenseAnalysis: '',
+        anomalies: [],
+        recommendations: [],
+        caveats: [],
+      },
+      guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
+    });
+  },
+  update_financial_record: async (input, context) => {
+    return proposeReviewGatedAction('update_financial_record', input, context);
+  },
+
+  // ── Strategic Intelligence Agent skills ──────────────────────────────
+  generate_competitor_brief: async (input) => {
+    return executeMethodologySkill('generate_competitor_brief', input, {
+      template: {
+        competitor: '',
+        researchDate: '',
+        executiveSummary: '',
+        productAndPricing: {},
+        recentDevelopments: [],
+        strengths: [],
+        weaknesses: [],
+        competitiveImplications: '',
+        sources: [],
+        gaps: [],
+      },
+      guidance: 'Follow the generate_competitor_brief methodology in your skill context. Use web_search to retrieve current competitor pricing, product info, and recent news. Do not rely on training data for facts that change frequently. Mark unverifiable claims with [VERIFY].',
+    });
+  },
+  synthesise_voc: async (input) => {
+    return executeMethodologySkill('synthesise_voc', input, {
+      template: {
+        sources: [],
+        period: '',
+        dataPoints: 0,
+        executiveSummary: '',
+        sentimentBreakdown: {},
+        topThemes: [],
+        topPraise: [],
+        topPainPoints: [],
+        featureRequests: [],
+        churnSignals: [],
+        focusQuestionAnswers: [],
+        strategicImplications: [],
+        dataCaveats: [],
+      },
+      guidance: 'Follow the synthesise_voc methodology in your skill context. Extract recurring themes from the VoC data, compute sentiment breakdown, and answer any focus questions explicitly. Do not fabricate quotes — paraphrase only from the actual voc_data input.',
+    });
+  },
+
+  // ── Content/SEO Agent skills ─────────────────────────────────────────
+  draft_content: async (input) => {
+    return executeMethodologySkill('draft_content', input, {
+      template: {
+        contentType: '',
+        title: '',
+        primaryKeyword: '',
+        wordCount: 0,
+        body: '',
+        draftingNotes: '',
+        verifyItems: [],
+        todoItems: [],
+      },
+      guidance: 'Follow the draft_content methodology in your skill context. Produce a structured draft for the requested content type within the target word count. Apply brand voice, include SEO recommendations if a primary keyword is provided, and mark unverifiable claims with [VERIFY].',
+    });
+  },
+  audit_seo: async (input) => {
+    return executeMethodologySkill('audit_seo', input, {
+      template: {
+        page: '',
+        targetKeyword: '',
+        overallScore: 0,
+        summary: '',
+        criticalIssues: [],
+        highPriority: [],
+        mediumPriority: [],
+        lowPriority: [],
+        quickWins: [],
+        notes: '',
+      },
+      guidance: 'Follow the audit_seo methodology in your skill context. Evaluate the page content against the on-page SEO checklist, score based on findings, and produce a prioritised list of specific recommendations.',
+    });
+  },
+  create_lead_magnet: async (input, context) => {
+    return proposeReviewGatedAction('create_lead_magnet', input, context);
+  },
+
+  // ── Client Reporting Agent skills ────────────────────────────────────
+  draft_report: async (input) => {
+    return executeMethodologySkill('draft_report', input, {
+      template: {
+        reportType: '',
+        clientName: '',
+        reportingPeriod: '',
+        executiveSummary: [],
+        sections: [],
+        recommendations: [],
+        draftingNotes: '',
+        verifyItems: [],
+        todoItems: [],
+      },
+      guidance: 'Follow the draft_report methodology in your skill context. Produce a structured client-facing report from the provided data sections. Lead each section with the key finding, compare to targets where available, and write recommendations specific to this client\'s data.',
+    });
+  },
+  deliver_report: async (input, context) => {
+    return proposeReviewGatedAction('deliver_report', input, context);
+  },
+
+  // ── Onboarding Agent skills ──────────────────────────────────────────
+  configure_integration: async (input, context) => {
+    return proposeReviewGatedAction('configure_integration', input, context);
+  },
+
+  // ── CRM/Pipeline Agent skills ────────────────────────────────────────
+  read_crm: async (input, context) => {
+    // Auto-gated stub — CRM integration not yet wired
+    const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
+    return executeWithActionAudit('read_crm', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      query_type: crmQueryType,
+      records: [],
+      message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
+    }));
+  },
+  analyse_pipeline: async (input) => {
+    return executeMethodologySkill('analyse_pipeline', input, {
+      template: {
+        period: '',
+        dataQuality: '',
+        executiveSummary: '',
+        keyMetrics: {},
+        stageBreakdown: [],
+        staleDeals: [],
+        rankedActions: [],
+        caveats: [],
+      },
+      guidance: 'Follow the analyse_pipeline methodology in your skill context. Compute pipeline velocity, stage conversion, and stale deal metrics from the CRM data. Identify deals requiring follow-up and produce ranked actions.',
+    });
+  },
+  draft_followup: async (input) => {
+    return executeMethodologySkill('draft_followup', input, {
+      template: {
+        contactEmail: '',
+        dealName: '',
+        goal: '',
+        subject: '',
+        body: '',
+        draftingNotes: '',
+      },
+      guidance: 'Follow the draft_followup methodology in your skill context. Draft a short (3–5 sentence) follow-up email referencing the last activity. Match tone to days-since-activity. Include a single, clear CTA matching the follow_up_goal.',
+    });
+  },
+  detect_churn_risk: async (input) => {
+    return executeMethodologySkill('detect_churn_risk', input, {
+      template: {
+        accountsAnalysed: 0,
+        atRiskAccounts: [],
+        healthyAccounts: [],
+        summary: '',
+        caveats: [],
+      },
+      guidance: 'Follow the detect_churn_risk methodology in your skill context. Score each account based on engagement, commercial, and relationship signals. Never assign HIGH or CRITICAL risk without 2+ supporting signals. Produce specific recommended interventions per at-risk account.',
+    });
+  },
+
+  // ── Knowledge Management Agent skills ────────────────────────────────
+  read_docs: async (input, context) => {
+    // Auto-gated stub — documentation integration not yet wired
+    const docPageId = typeof input.page_id === 'string' ? input.page_id : '';
+    const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
+    return executeWithActionAudit('read_docs', input, context, async () => ({
+      status: 'stub',
+      dataAvailability: 'stub' as const,
+      page_id: docPageId,
+      page_title: docPageTitle,
+      content: null,
+      message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
+    }));
+  },
+  propose_doc_update: async (input, context) => {
+    return proposeReviewGatedAction('propose_doc_update', input, context);
+  },
+  write_docs: async (input, context) => {
+    return proposeReviewGatedAction('write_docs', input, context);
+  },
+
+  // ── Phase 2: Workflow orchestration ──────────────────────────────────
+  assign_task: async (input, context) => {
+    const { executeAssignTask } = await import('../tools/internal/assignTask.js');
+    return executeWithActionAudit('assign_task', input, context, () =>
+      executeAssignTask(input, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
+    );
+  },
+
+  // ── Phase 3: Cross-subaccount intelligence skills ───────────────────
+  query_subaccount_cohort: async (input, context) => {
+    const { executeQuerySubaccountCohort } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('query_subaccount_cohort', input, context, () =>
+      executeQuerySubaccountCohort(input, context));
+  },
+  read_org_insights: async (input, context) => {
+    const { executeReadOrgInsights } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('read_org_insights', input, context, () =>
+      executeReadOrgInsights(input, context));
+  },
+  write_org_insight: async (input, context) => {
+    const { executeWriteOrgInsight } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('write_org_insight', input, context, () =>
+      executeWriteOrgInsight(input, context));
+  },
+  compute_health_score: async (input, context) => {
+    const { executeComputeHealthScore } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('compute_health_score', input, context, () =>
+      executeComputeHealthScore(input, context));
+  },
+  detect_anomaly: async (input, context) => {
+    const { executeDetectAnomaly } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('detect_anomaly', input, context, () =>
+      executeDetectAnomaly(input, context));
+  },
+  compute_churn_risk: async (input, context) => {
+    const { executeComputeChurnRisk } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('compute_churn_risk', input, context, () =>
+      executeComputeChurnRisk(input, context));
+  },
+  generate_portfolio_report: async (input, context) => {
+    const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
+    return executeWithActionAudit('generate_portfolio_report', input, context, () =>
+      executeGeneratePortfolioReport(input, context));
+  },
+  trigger_account_intervention: async (input, context) => {
+    return proposeReviewGatedAction('trigger_account_intervention', input, context);
+  },
+
+  // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
+  analyse_42macro_transcript: async (input) => {
+    return executeMethodologySkill('analyse_42macro_transcript', input, {
+      template: {
+        filename: 'YYYYMMDD_Report_Name.md',
+        tier1Dashboard: '',
+        tier2ExecutiveSummary: '',
+        tier3FullAnalysis: {
+          section1MacroSnapshot: '',
+          section2BitcoinAndDigitalAssets: '',
+          section3TheBottomLine: '',
+        },
+      },
+      guidance:
+        'Follow the 42 Macro A-Player Brain instructions injected into your system prompt. Output the three tiers (Dashboard, Executive Summary, Full Analysis) in plain language. Return the completed markdown content as the value of the tier3FullAnalysis fields and the rendered filename. The agent will pass the result to send_to_slack.',
+    });
+  },
+
+  // ── Reporting Agent paywall workflow skills ───────────────────────────
+  // Spec: docs/reporting-agent-paywall-workflow-spec.md §4 / Code Change B
+  transcribe_audio: async (input, context) => {
+    const { transcribeAudio } = await import('./transcribeAudioService.js');
+    return transcribeAudio(
+      input as Parameters<typeof transcribeAudio>[0],
+      {
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        agentId: context.agentId,
+        correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+      },
+    );
+  },
+  // Spec: docs/reporting-agent-paywall-workflow-spec.md §6 / Code Change D
+  fetch_paywalled_content: async (input, context) => {
+    const { fetchPaywalledContent } = await import('./fetchPaywalledContentService.js');
+    return fetchPaywalledContent(
+      input as unknown as Parameters<typeof fetchPaywalledContent>[0],
+      {
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        agentId: context.agentId,
+        correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+      },
+    );
+  },
+  // Spec: docs/reporting-agent-paywall-workflow-spec.md §5 / Code Change C
+  send_to_slack: async (input, context) => {
+    const { sendToSlack } = await import('./sendToSlackService.js');
+    return sendToSlack(
+      input as unknown as Parameters<typeof sendToSlack>[0],
+      {
+        runId: context.runId,
+        organisationId: context.organisationId,
+        subaccountId: context.subaccountId,
+        agentId: context.agentId,
+        correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
+      },
+    );
+  },
+
+  // ── Sprint 5 P4.1: Clarification escape hatch ──────────────────
+  ask_clarifying_question: async (input, context) => {
+    const { executeAskClarifyingQuestion } = await import('../tools/internal/askClarifyingQuestion.js');
+    return executeAskClarifyingQuestion(input, {
+      runId: context.runId,
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? undefined,
+    });
+  },
+
+  // ── Sprint 5 P4.2: Memory block write path ─────────────────────
+  update_memory_block: async (input, context) => {
+    const { updateBlock } = await import('./memoryBlockService.js');
+    const blockName = (input as Record<string, unknown>).block_name as string;
+    const newContent = (input as Record<string, unknown>).new_content as string;
+    if (!blockName || !newContent) {
+      return { success: false, error: 'block_name and new_content are required' };
+    }
+    return updateBlock(blockName, newContent, context.agentId, context.organisationId);
+  },
+};
+
 export const skillExecutor = {
   async execute(params: SkillExecutionParams): Promise<unknown> {
     const { skillName, input, context, toolCallId } = params;
@@ -325,780 +1129,14 @@ export const skillExecutor = {
       );
     }
 
-    switch (skillName) {
-      // ── Meta tools — BM25 tool discovery (no action record) ─────────────
-      case 'search_tools': {
-        const { executeSearchTools } = await import('../tools/meta/searchTools.js');
-        return executeSearchTools(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
-      }
-      case 'load_tool': {
-        const { executeLoadTool } = await import('../tools/meta/searchTools.js');
-        return executeLoadTool(input, { runId: context.runId, subaccountId: context.subaccountId!, organisationId: context.organisationId });
-      }
-
-      // ── Direct skills (no action record) ──────────────────────────────
-      case 'web_search':
-        return executeWebSearch(input, context);
-      case 'read_workspace': {
-        requireSubaccountContext(context, 'read_workspace');
-        return executeReadWorkspace(input, context);
-      }
-      case 'write_workspace': {
-        requireSubaccountContext(context, 'write_workspace');
-        return executeWriteWorkspace(input, context);
-      }
-      case 'trigger_process': {
-        requireSubaccountContext(context, 'trigger_process');
-        return executeTriggerProcess(input, context);
-      }
-      case 'spawn_sub_agents': {
-        requireSubaccountContext(context, 'spawn_sub_agents');
-        return executeSpawnSubAgents(input, context);
-      }
-
-      // ── Context data source retrieval (spec §8.2) ────────────────────────
-      case 'read_data_source': {
-        const { executeReadDataSource } = await import('../tools/readDataSource.js');
-        return executeReadDataSource(input, context);
-      }
-
-      // ── Auto-gated skills (action record for audit, executes synchronously) ──
-      case 'create_task': {
-        requireSubaccountContext(context, 'create_task');
-        return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
-      }
-      case 'triage_intake': {
-        requireSubaccountContext(context, 'triage_intake');
-        return executeWithActionAudit('triage_intake', input, context, () => executeTriageIntake(input, context));
-      }
-      case 'move_task':
-        return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
-      case 'add_deliverable':
-        return executeWithActionAudit('add_deliverable', input, context, () => executeAddDeliverable(input, context));
-      case 'reassign_task': {
-        requireSubaccountContext(context, 'reassign_task');
-        return executeWithActionAudit('reassign_task', input, context, () => executeReassignTask(input, context));
-      }
-      case 'update_task':
-        return executeWithActionAudit('update_task', input, context, () => executeUpdateTask(input, context));
-      case 'read_inbox':
-        return executeWithActionAudit('read_inbox', input, context, () => executeReadInbox(input, context));
-      case 'fetch_url':
-        return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
-
-      // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
-      case 'playbook_read_existing':
-        return executePlaybookReadExisting(input);
-      case 'playbook_validate':
-        return executePlaybookValidate(input);
-      case 'playbook_simulate':
-        return executePlaybookSimulate(input);
-      case 'playbook_estimate_cost':
-        return executePlaybookEstimateCost(input);
-      case 'playbook_propose_save':
-        return executePlaybookProposeSave(input, context);
-
-      // ── Review-gated skills (proposes action, does NOT execute immediately) ──
-      case 'send_email':
-        return proposeReviewGatedAction('send_email', input, context);
-      case 'update_record':
-        return proposeReviewGatedAction('update_record', input, context);
-      case 'request_approval':
-        return proposeReviewGatedAction('request_approval', input, context);
-
-      // ── Dev/QA auto-gated skills (all require subaccount context) ─────────
-      case 'read_codebase': {
-        requireSubaccountContext(context, 'read_codebase');
-        return executeWithActionAudit('read_codebase', input, context, () => executeReadCodebase(input, context));
-      }
-      case 'search_codebase': {
-        requireSubaccountContext(context, 'search_codebase');
-        return executeWithActionAudit('search_codebase', input, context, () => executeSearchCodebase(input, context));
-      }
-      case 'run_tests': {
-        requireSubaccountContext(context, 'run_tests');
-        return executeWithActionAudit('run_tests', input, context, () => executeRunTests(input, context));
-      }
-      case 'analyze_endpoint': {
-        requireSubaccountContext(context, 'analyze_endpoint');
-        return executeWithActionAudit('analyze_endpoint', input, context, () => executeAnalyzeEndpoint(input, context));
-      }
-      case 'report_bug': {
-        requireSubaccountContext(context, 'report_bug');
-        return executeWithActionAudit('report_bug', input, context, () => executeReportBug(input, context));
-      }
-      case 'capture_screenshot': {
-        requireSubaccountContext(context, 'capture_screenshot');
-        return executeWithActionAudit('capture_screenshot', input, context, () => executeCaptureScreenshot(input, context));
-      }
-      case 'run_playwright_test': {
-        requireSubaccountContext(context, 'run_playwright_test');
-        return executeWithActionAudit('run_playwright_test', input, context, () => executeRunPlaywrightTest(input, context));
-      }
-
-      // ── Dev review-gated skills (safeMode-checked, require subaccount) ───
-      case 'write_patch': {
-        requireSubaccountContext(context, 'write_patch');
-        return proposeDevopsAction('write_patch', input, context);
-      }
-      case 'run_command': {
-        requireSubaccountContext(context, 'run_command');
-        return proposeDevopsAction('run_command', input, context);
-      }
-      case 'create_pr': {
-        requireSubaccountContext(context, 'create_pr');
-        return proposeDevopsAction('create_pr', input, context);
-      }
-
-      // ── Page infrastructure skills (require subaccount) ────────────────
-      case 'create_page': {
-        requireSubaccountContext(context, 'create_page');
-        return proposeReviewGatedAction('create_page', input, context);
-      }
-      case 'update_page': {
-        requireSubaccountContext(context, 'update_page');
-        return proposeReviewGatedAction('update_page', input, context);
-      }
-      case 'publish_page': {
-        requireSubaccountContext(context, 'publish_page');
-        return proposeReviewGatedAction('publish_page', input, context);
-      }
-
-      // ── Methodology skills — LLM-guided reasoning; executor returns a
-      //    structured scaffold the agent fills using the injected instructions ─
-      case 'draft_architecture_plan':
-        return executeMethodologySkill('draft_architecture_plan', input, {
-          template: {
-            intent: '',
-            classification: '',
-            implementationChunks: [],
-            contracts: [],
-            failureModes: [],
-            openQuestions: [],
-            affectedFiles: [],
-            testStrategy: '',
-          },
-          guidance: 'Fill in each section of the architecture plan template above. Use the methodology instructions in your context. Return the completed plan as your tool result.',
-        });
-      case 'draft_tech_spec':
-        return executeMethodologySkill('draft_tech_spec', input, {
-          template: {
-            openApiChanges: '',
-            schemaChanges: '',
-            sequenceDiagram: '',
-            migrationPlan: '',
-            breakingChanges: [],
-            envVarChanges: [],
-          },
-          guidance: 'Fill in each section of the tech spec template. Omit sections not applicable to this change.',
-        });
-      case 'review_ux':
-        return executeMethodologySkill('review_ux', input, {
-          template: {
-            findings: [],
-            highPriority: [],
-            mediumPriority: [],
-            lowPriority: [],
-            recommendation: 'proceed | revise | escalate',
-          },
-          guidance: 'Evaluate each changed UI surface against the UX checklist in your context. Populate findings by priority.',
-        });
-      case 'review_code':
-        return executeMethodologySkill('review_code', input, {
-          template: {
-            blocking: [],
-            nonBlocking: [],
-            securityIssues: [],
-            planComplianceIssues: [],
-            acCoverageGaps: [],
-            recommendation: 'approve | revise | escalate',
-          },
-          guidance: 'Review each changed file against the checklist in your context. Only blocking issues prevent submission.',
-        });
-      case 'write_tests':
-        return executeMethodologySkill('write_tests', input, {
-          template: {
-            targetFile: '',
-            framework: '',
-            testCases: [],
-            coveredScenarios: [],
-            deferredScenarios: [],
-            estimatedCoverageDelta: '',
-          },
-          guidance: 'Follow the test authorship methodology in your context. For each scenario, write the test case and submit via write_patch.',
-        });
-
-      // ── BA / QA MVP skills ───────────────────────────────────────────────
-
-      case 'draft_requirements':
-        return executeMethodologySkill('draft_requirements', input, {
-          template: {
-            taskId: '',
-            status: 'draft',
-            userStories: [],
-            openQuestions: [],
-            definitionOfDone: [],
-            traceability: [],
-          },
-          guidance: 'Follow the draft_requirements methodology in your skill context. Produce a structured requirements spec with INVEST user stories, Gherkin ACs (AC-X.Y format, Type: positive/negative), ranked open questions, and a Definition of Done. If the brief is too ambiguous, return a clarification_required response instead of a partial spec.',
-        });
-
-      case 'derive_test_cases':
-        return executeMethodologySkill('derive_test_cases', input, {
-          template: {
-            specReferenceId: '',
-            manifestValidFor: '',
-            taskId: '',
-            testCases: [],
-            coverageMatrix: [],
-            untestableAcs: [],
-          },
-          guidance: 'Follow the derive_test_cases methodology in your skill context. For each Gherkin AC in the spec, produce a test case with a stable TC-[task_id]-NNN ID, preconditions, action, and expected result. Write the completed manifest to workspace memory via write_workspace.',
-        });
-
-      case 'write_spec':
-        return proposeReviewGatedAction('write_spec', input, context);
-
-      // ── Support Agent skills ─────────────────────────────────────────────
-
-      case 'classify_email':
-        return executeMethodologySkill('classify_email', input, {
-          template: {
-            emailReference: '',
-            primaryIntent: '',
-            urgency: '',
-            sentiment: '',
-            routingAction: '',
-            isAutomated: false,
-            keySignals: [],
-            classificationNotes: '',
-            suggestedReplyTone: '',
-          },
-          guidance: 'Follow the classify_email methodology in your skill context. Classify the email by intent category, urgency, sentiment, and routing action. Return the structured classification result.',
-        });
-
-      case 'draft_reply':
-        return executeMethodologySkill('draft_reply', input, {
-          template: {
-            to: '',
-            subject: '',
-            confidence: '',
-            routingAction: '',
-            body: '',
-            confidenceFlags: [],
-            draftingNotes: '',
-          },
-          guidance: 'Follow the draft_reply methodology in your skill context. Use the classification output and knowledge base context to draft a concise, on-brand reply. If routing_action is escalate, return an escalation response instead of a draft.',
-        });
-
-      case 'search_knowledge_base': {
-        // Auto-gated stub — integration not yet wired
-        const searchQuery = typeof input.query === 'string' ? input.query : '';
-        const searchCategory = typeof input.intent_category === 'string' ? input.intent_category : undefined;
-        return executeWithActionAudit('search_knowledge_base', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          query: searchQuery,
-          intent_category: searchCategory ?? null,
-          results: [],
-          message: 'Knowledge base integration not yet configured. Downstream draft_reply will flag replies as confidence: low.',
-        }));
-      }
-
-      // ── Social Media Agent skills ────────────────────────────────────────
-
-      case 'draft_post':
-        return executeMethodologySkill('draft_post', input, {
-          template: {
-            brief: '',
-            platforms: [],
-            brandVoice: '',
-            drafts: {},
-            sharedNotes: '',
-            verifyItems: [],
-          },
-          guidance: 'Follow the draft_post methodology in your skill context. Produce platform-specific post variants for each requested platform, respecting character limits, hashtag strategies, and brand voice. Flag any claims that need verification with [VERIFY] placeholders.',
-        });
-
-      case 'publish_post':
-        return proposeReviewGatedAction('publish_post', input, context);
-
-      case 'read_analytics': {
-        // Auto-gated stub — platform integrations not yet wired
-        const analyticsplatforms = Array.isArray(input.platforms) ? input.platforms : [];
-        const dateFrom = typeof input.date_from === 'string' ? input.date_from : '';
-        const dateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        // Validate date range
-        if (dateFrom && dateTo && new Date(dateFrom) > new Date(dateTo)) {
-          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
-        }
-        return executeWithActionAudit('read_analytics', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          platforms: analyticsplatforms,
-          date_from: dateFrom,
-          date_to: dateTo,
-          results: [],
-          message: 'Social media analytics integration not yet configured. Downstream skills should handle stub status by noting data unavailability.',
-        }));
-      }
-
-      // ── Ads Management Agent skills ──────────────────────────────────────
-
-      case 'read_campaigns': {
-        // Auto-gated stub — ads platform integrations not yet wired
-        const adsPlatform = typeof input.platform === 'string' ? input.platform : '';
-        const adsDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
-        const adsDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        if (adsDateFrom && adsDateTo && new Date(adsDateFrom) > new Date(adsDateTo)) {
-          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
-        }
-        return executeWithActionAudit('read_campaigns', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          platform: adsPlatform,
-          date_from: adsDateFrom,
-          date_to: adsDateTo,
-          campaigns: [],
-          message: `The ${adsPlatform} integration has not been configured. Downstream skills should handle stub status by noting data unavailability.`,
-        }));
-      }
-
-      case 'analyse_performance':
-        return executeMethodologySkill('analyse_performance', input, {
-          template: {
-            period: '',
-            campaignsAnalysed: 0,
-            executiveSummary: '',
-            campaigns: [],
-            anomalies: [],
-            rankedActions: [],
-            caveats: [],
-          },
-          guidance: 'Follow the analyse_performance methodology in your skill context. Analyse the campaign data from read_campaigns, identify underperformers and anomalies, and produce ranked recommendations (pause, reduce_bid, increase_budget, test_copy, monitor).',
-        });
-
-      case 'draft_ad_copy':
-        return executeMethodologySkill('draft_ad_copy', input, {
-          template: {
-            campaignName: '',
-            platform: '',
-            adFormat: '',
-            variants: [],
-            copyNotes: '',
-            verifyItems: [],
-          },
-          guidance: 'Follow the draft_ad_copy methodology in your skill context. Produce the requested number of meaningfully different ad copy variants within platform character limits. State the test hypothesis for each variant. Use [VERIFY] for unconfirmed claims.',
-        });
-
-      case 'update_bid':
-        return proposeReviewGatedAction('update_bid', input, context);
-
-      case 'update_copy':
-        return proposeReviewGatedAction('update_copy', input, context);
-
-      case 'pause_campaign':
-        return proposeReviewGatedAction('pause_campaign', input, context);
-
-      case 'increase_budget':
-        return proposeReviewGatedAction('increase_budget', input, context);
-
-      // ── Email Outreach Agent skills ──────────────────────────────────────
-
-      case 'enrich_contact': {
-        // Auto-gated stub — enrichment integration not yet wired
-        const enrichEmail = typeof input.contact_email === 'string' ? input.contact_email : '';
-        return executeWithActionAudit('enrich_contact', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          contact: enrichEmail,
-          matched: false,
-          fields: {},
-          message: 'Data enrichment integration not configured. Downstream draft_sequence should apply generic personalisation.',
-        }));
-      }
-
-      case 'draft_sequence':
-        return executeMethodologySkill('draft_sequence', input, {
-          template: {
-            contactEmail: '',
-            goal: '',
-            steps: [],
-            draftingNotes: '',
-            unresolvedTokens: [],
-            verifyItems: [],
-          },
-          guidance: 'Follow the draft_sequence methodology in your skill context. Produce a multi-step outreach sequence with distinct purpose per step. Use enrichment data for personalisation if available; fall back to generic copy if enrichment is a stub. Flag all [VERIFY] items and unresolved personalisation tokens.',
-        });
-
-      case 'update_crm':
-        return proposeReviewGatedAction('update_crm', input, context);
-
-      // ── Finance Agent skills ─────────────────────────────────────────────
-
-      case 'read_revenue': {
-        const revDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
-        const revDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        if (revDateFrom && revDateTo && new Date(revDateFrom) > new Date(revDateTo)) {
-          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
-        }
-        return executeWithActionAudit('read_revenue', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          date_from: revDateFrom,
-          date_to: revDateTo,
-          total_revenue: null,
-          message: 'Accounting/billing integration not configured. Downstream analyse_financials will note data unavailability.',
-        }));
-      }
-
-      case 'read_expenses': {
-        const expDateFrom = typeof input.date_from === 'string' ? input.date_from : '';
-        const expDateTo = typeof input.date_to === 'string' ? input.date_to : new Date().toISOString().slice(0, 10);
-        if (expDateFrom && expDateTo && new Date(expDateFrom) > new Date(expDateTo)) {
-          return { success: false, error: 'validation_error', message: 'date_from must be before date_to' };
-        }
-        return executeWithActionAudit('read_expenses', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          date_from: expDateFrom,
-          date_to: expDateTo,
-          total_expenses: null,
-          message: 'Accounting integration not configured. Downstream analyse_financials will note data unavailability.',
-        }));
-      }
-
-      case 'analyse_financials':
-        return executeMethodologySkill('analyse_financials', input, {
-          template: {
-            period: '',
-            dataQuality: '',
-            executiveSummary: '',
-            keyMetrics: {},
-            revenueAnalysis: '',
-            expenseAnalysis: '',
-            anomalies: [],
-            recommendations: [],
-            caveats: [],
-          },
-          guidance: 'Follow the analyse_financials methodology in your skill context. Compute key ratios from the revenue and expense data, identify anomalies, and produce ranked recommendations. If either data source is a stub, note unavailability and compute only what is possible.',
-        });
-
-      case 'update_financial_record':
-        return proposeReviewGatedAction('update_financial_record', input, context);
-
-      // ── Strategic Intelligence Agent skills ──────────────────────────────
-
-      case 'generate_competitor_brief':
-        return executeMethodologySkill('generate_competitor_brief', input, {
-          template: {
-            competitor: '',
-            researchDate: '',
-            executiveSummary: '',
-            productAndPricing: {},
-            recentDevelopments: [],
-            strengths: [],
-            weaknesses: [],
-            competitiveImplications: '',
-            sources: [],
-            gaps: [],
-          },
-          guidance: 'Follow the generate_competitor_brief methodology in your skill context. Use web_search to retrieve current competitor pricing, product info, and recent news. Do not rely on training data for facts that change frequently. Mark unverifiable claims with [VERIFY].',
-        });
-
-      case 'synthesise_voc':
-        return executeMethodologySkill('synthesise_voc', input, {
-          template: {
-            sources: [],
-            period: '',
-            dataPoints: 0,
-            executiveSummary: '',
-            sentimentBreakdown: {},
-            topThemes: [],
-            topPraise: [],
-            topPainPoints: [],
-            featureRequests: [],
-            churnSignals: [],
-            focusQuestionAnswers: [],
-            strategicImplications: [],
-            dataCaveats: [],
-          },
-          guidance: 'Follow the synthesise_voc methodology in your skill context. Extract recurring themes from the VoC data, compute sentiment breakdown, and answer any focus questions explicitly. Do not fabricate quotes — paraphrase only from the actual voc_data input.',
-        });
-
-      // ── Content/SEO Agent skills ─────────────────────────────────────────
-
-      case 'draft_content':
-        return executeMethodologySkill('draft_content', input, {
-          template: {
-            contentType: '',
-            title: '',
-            primaryKeyword: '',
-            wordCount: 0,
-            body: '',
-            draftingNotes: '',
-            verifyItems: [],
-            todoItems: [],
-          },
-          guidance: 'Follow the draft_content methodology in your skill context. Produce a structured draft for the requested content type within the target word count. Apply brand voice, include SEO recommendations if a primary keyword is provided, and mark unverifiable claims with [VERIFY].',
-        });
-
-      case 'audit_seo':
-        return executeMethodologySkill('audit_seo', input, {
-          template: {
-            page: '',
-            targetKeyword: '',
-            overallScore: 0,
-            summary: '',
-            criticalIssues: [],
-            highPriority: [],
-            mediumPriority: [],
-            lowPriority: [],
-            quickWins: [],
-            notes: '',
-          },
-          guidance: 'Follow the audit_seo methodology in your skill context. Evaluate the page content against the on-page SEO checklist, score based on findings, and produce a prioritised list of specific recommendations.',
-        });
-
-      case 'create_lead_magnet':
-        return proposeReviewGatedAction('create_lead_magnet', input, context);
-
-      // ── Client Reporting Agent skills ────────────────────────────────────
-
-      case 'draft_report':
-        return executeMethodologySkill('draft_report', input, {
-          template: {
-            reportType: '',
-            clientName: '',
-            reportingPeriod: '',
-            executiveSummary: [],
-            sections: [],
-            recommendations: [],
-            draftingNotes: '',
-            verifyItems: [],
-            todoItems: [],
-          },
-          guidance: 'Follow the draft_report methodology in your skill context. Produce a structured client-facing report from the provided data sections. Lead each section with the key finding, compare to targets where available, and write recommendations specific to this client\'s data.',
-        });
-
-      case 'deliver_report':
-        return proposeReviewGatedAction('deliver_report', input, context);
-
-      // ── Onboarding Agent skills ──────────────────────────────────────────
-
-      case 'configure_integration':
-        return proposeReviewGatedAction('configure_integration', input, context);
-
-      // ── CRM/Pipeline Agent skills ────────────────────────────────────────
-
-      case 'read_crm': {
-        // Auto-gated stub — CRM integration not yet wired
-        const crmQueryType = typeof input.query_type === 'string' ? input.query_type : '';
-        return executeWithActionAudit('read_crm', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          query_type: crmQueryType,
-          records: [],
-          message: 'CRM integration not configured. Downstream analyse_pipeline, detect_churn_risk, and draft_followup should handle stub status by noting data unavailability.',
-        }));
-      }
-
-      case 'analyse_pipeline':
-        return executeMethodologySkill('analyse_pipeline', input, {
-          template: {
-            period: '',
-            dataQuality: '',
-            executiveSummary: '',
-            keyMetrics: {},
-            stageBreakdown: [],
-            staleDeals: [],
-            rankedActions: [],
-            caveats: [],
-          },
-          guidance: 'Follow the analyse_pipeline methodology in your skill context. Compute pipeline velocity, stage conversion, and stale deal metrics from the CRM data. Identify deals requiring follow-up and produce ranked actions.',
-        });
-
-      case 'draft_followup':
-        return executeMethodologySkill('draft_followup', input, {
-          template: {
-            contactEmail: '',
-            dealName: '',
-            goal: '',
-            subject: '',
-            body: '',
-            draftingNotes: '',
-          },
-          guidance: 'Follow the draft_followup methodology in your skill context. Draft a short (3–5 sentence) follow-up email referencing the last activity. Match tone to days-since-activity. Include a single, clear CTA matching the follow_up_goal.',
-        });
-
-      case 'detect_churn_risk':
-        return executeMethodologySkill('detect_churn_risk', input, {
-          template: {
-            accountsAnalysed: 0,
-            atRiskAccounts: [],
-            healthyAccounts: [],
-            summary: '',
-            caveats: [],
-          },
-          guidance: 'Follow the detect_churn_risk methodology in your skill context. Score each account based on engagement, commercial, and relationship signals. Never assign HIGH or CRITICAL risk without 2+ supporting signals. Produce specific recommended interventions per at-risk account.',
-        });
-
-      // ── Knowledge Management Agent skills ────────────────────────────────
-
-      case 'read_docs': {
-        // Auto-gated stub — documentation integration not yet wired
-        const docPageId = typeof input.page_id === 'string' ? input.page_id : '';
-        const docPageTitle = typeof input.page_title === 'string' ? input.page_title : '';
-        return executeWithActionAudit('read_docs', input, context, async () => ({
-          status: 'stub',
-          dataAvailability: 'stub' as const,
-          page_id: docPageId,
-          page_title: docPageTitle,
-          content: null,
-          message: 'Documentation integration not configured. Connect the documentation system in workspace settings to enable page retrieval.',
-        }));
-      }
-
-      case 'propose_doc_update':
-        return proposeReviewGatedAction('propose_doc_update', input, context);
-
-      case 'write_docs':
-        return proposeReviewGatedAction('write_docs', input, context);
-
-      // ── Phase 2: Workflow orchestration ──────────────────────────────────
-      case 'assign_task': {
-        const { executeAssignTask } = await import('../tools/internal/assignTask.js');
-        return executeWithActionAudit('assign_task', input, context, () =>
-          executeAssignTask(input, { runId: context.runId, organisationId: context.organisationId, subaccountId: context.subaccountId!, agentId: context.agentId }),
-        );
-      }
-
-      // ── Phase 3: Cross-subaccount intelligence skills ───────────────────
-      case 'query_subaccount_cohort': {
-        const { executeQuerySubaccountCohort } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('query_subaccount_cohort', input, context, () =>
-          executeQuerySubaccountCohort(input, context));
-      }
-      case 'read_org_insights': {
-        const { executeReadOrgInsights } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('read_org_insights', input, context, () =>
-          executeReadOrgInsights(input, context));
-      }
-      case 'write_org_insight': {
-        const { executeWriteOrgInsight } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('write_org_insight', input, context, () =>
-          executeWriteOrgInsight(input, context));
-      }
-      case 'compute_health_score': {
-        const { executeComputeHealthScore } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('compute_health_score', input, context, () =>
-          executeComputeHealthScore(input, context));
-      }
-      case 'detect_anomaly': {
-        const { executeDetectAnomaly } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('detect_anomaly', input, context, () =>
-          executeDetectAnomaly(input, context));
-      }
-      case 'compute_churn_risk': {
-        const { executeComputeChurnRisk } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('compute_churn_risk', input, context, () =>
-          executeComputeChurnRisk(input, context));
-      }
-      case 'generate_portfolio_report': {
-        const { executeGeneratePortfolioReport } = await import('./intelligenceSkillExecutor.js');
-        return executeWithActionAudit('generate_portfolio_report', input, context, () =>
-          executeGeneratePortfolioReport(input, context));
-      }
-      case 'trigger_account_intervention':
-        return proposeReviewGatedAction('trigger_account_intervention', input, context);
-
-      // ── 42 Macro analysis (custom prompt skill, scoped to Breakout Solutions) ──
-      case 'analyse_42macro_transcript':
-        return executeMethodologySkill('analyse_42macro_transcript', input, {
-          template: {
-            filename: 'YYYYMMDD_Report_Name.md',
-            tier1Dashboard: '',
-            tier2ExecutiveSummary: '',
-            tier3FullAnalysis: {
-              section1MacroSnapshot: '',
-              section2BitcoinAndDigitalAssets: '',
-              section3TheBottomLine: '',
-            },
-          },
-          guidance:
-            'Follow the 42 Macro A-Player Brain instructions injected into your system prompt. Output the three tiers (Dashboard, Executive Summary, Full Analysis) in plain language. Return the completed markdown content as the value of the tier3FullAnalysis fields and the rendered filename. The agent will pass the result to send_to_slack.',
-        });
-
-      // ── Reporting Agent paywall workflow skills ───────────────────────────
-      // Spec: docs/reporting-agent-paywall-workflow-spec.md §4 / Code Change B
-      case 'transcribe_audio': {
-        const { transcribeAudio } = await import('./transcribeAudioService.js');
-        return transcribeAudio(
-          input as Parameters<typeof transcribeAudio>[0],
-          {
-            runId: context.runId,
-            organisationId: context.organisationId,
-            subaccountId: context.subaccountId,
-            agentId: context.agentId,
-            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
-          },
-        );
-      }
-      // Spec: docs/reporting-agent-paywall-workflow-spec.md §6 / Code Change D
-      case 'fetch_paywalled_content': {
-        const { fetchPaywalledContent } = await import('./fetchPaywalledContentService.js');
-        return fetchPaywalledContent(
-          input as unknown as Parameters<typeof fetchPaywalledContent>[0],
-          {
-            runId: context.runId,
-            organisationId: context.organisationId,
-            subaccountId: context.subaccountId,
-            agentId: context.agentId,
-            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
-          },
-        );
-      }
-      // Spec: docs/reporting-agent-paywall-workflow-spec.md §5 / Code Change C
-      case 'send_to_slack': {
-        const { sendToSlack } = await import('./sendToSlackService.js');
-        return sendToSlack(
-          input as unknown as Parameters<typeof sendToSlack>[0],
-          {
-            runId: context.runId,
-            organisationId: context.organisationId,
-            subaccountId: context.subaccountId,
-            agentId: context.agentId,
-            correlationId: (context as { correlationId?: string }).correlationId ?? context.runId,
-          },
-        );
-      }
-
-      // ── Sprint 5 P4.1: Clarification escape hatch ──────────────────
-      case 'ask_clarifying_question': {
-        const { executeAskClarifyingQuestion } = await import('../tools/internal/askClarifyingQuestion.js');
-        return executeAskClarifyingQuestion(input, {
-          runId: context.runId,
-          organisationId: context.organisationId,
-          subaccountId: context.subaccountId ?? undefined,
-        });
-      }
-
-      // ── Sprint 5 P4.2: Memory block write path ─────────────────────
-      case 'update_memory_block': {
-        const { updateBlock } = await import('./memoryBlockService.js');
-        const blockName = (input as Record<string, unknown>).block_name as string;
-        const newContent = (input as Record<string, unknown>).new_content as string;
-        if (!blockName || !newContent) {
-          return { success: false, error: 'block_name and new_content are required' };
-        }
-        return updateBlock(blockName, newContent, context.agentId, context.organisationId);
-      }
-
-      default:
-        return { success: false, error: `Unknown skill: ${skillName}` };
+    const handler = SKILL_HANDLERS[skillName];
+    if (!handler) {
+      return { success: false, error: `Unknown skill: ${skillName}` };
     }
+    return handler(input, context);
   },
 };
+
 
 // ---------------------------------------------------------------------------
 // Action-gated execution helpers

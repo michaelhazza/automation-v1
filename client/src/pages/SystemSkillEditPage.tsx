@@ -85,6 +85,9 @@ export default function SystemSkillEditPage({ user }: { user: User }) {
         definition: JSON.stringify(data.definition, null, 2),
         isActive: data.isActive,
       });
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setSaveError(e.response?.data?.error ?? 'Failed to load skill.');
     } finally {
       setLoading(false);
     }
