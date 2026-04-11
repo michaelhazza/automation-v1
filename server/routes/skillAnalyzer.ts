@@ -166,6 +166,40 @@ router.patch(
 );
 
 // ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/agents
+// Phase 4 of skill-analyzer-v2 (spec §7.3): toggle / remove / addIfMissing
+// modes for the agentProposals jsonb on a DISTINCT result row.
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/agents',
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      systemAgentId?: string;
+      selected?: boolean;
+      remove?: boolean;
+      addIfMissing?: boolean;
+    };
+
+    if (typeof body.systemAgentId !== 'string' || body.systemAgentId.length === 0) {
+      return res.status(400).json({ error: 'systemAgentId is required' });
+    }
+
+    const updated = await skillAnalyzerService.updateAgentProposal({
+      resultId: req.params.resultId,
+      jobId: req.params.jobId,
+      organisationId: req.orgId!,
+      systemAgentId: body.systemAgentId,
+      selected: body.selected,
+      remove: body.remove,
+      addIfMissing: body.addIfMissing,
+    });
+
+    return res.json(updated);
+  })
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/system/skill-analyser/jobs/:jobId/results/bulk-action — Bulk action
 // ---------------------------------------------------------------------------
 
