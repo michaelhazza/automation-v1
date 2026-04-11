@@ -16,6 +16,7 @@
  *   (or: tsx scripts/backfill-system-skills.ts)
  */
 
+import 'dotenv/config';
 import { readdir, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -44,7 +45,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const mdFiles = files.filter((f) => f.endsWith('.md')).sort();
+  // Skip non-skill markdown files (README.md, NOTES.md, etc.). Skill files
+  // have a slug-like filename — lowercase letters, digits, and underscores only.
+  const mdFiles = files
+    .filter((f) => f.endsWith('.md'))
+    .filter((f) => /^[a-z0-9_]+\.md$/.test(f))
+    .sort();
   console.log(`[backfill] found ${mdFiles.length} .md files`);
 
   // ---------------------------------------------------------------------------
