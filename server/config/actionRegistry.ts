@@ -198,6 +198,71 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
     idempotencyStrategy: 'keyed_write',
   },
+  triage_intake: {
+    actionType: 'triage_intake',
+    description:
+      "Capture and route incoming ideas, feature requests, or bugs into the task board. " +
+      "Two modes: 'capture' creates a single structured task in the 'inbox' (untriaged) column " +
+      "from raw text — fast, judgement-free intake used by the Orchestrator and Business Analyst " +
+      "when items arrive outside normal channels. 'triage' scans the existing inbox for items " +
+      "lacking a triage decision and returns a structured proposal list (duplicate check, " +
+      "rough relevance, suggested disposition) for human or Orchestrator review.",
+    actionCategory: 'worker',
+    topics: ['task'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['mode', 'raw_input', 'input_type', 'source', 'related_task_id', 'scope'],
+    parameterSchema: z.object({
+      mode: z.enum(['capture', 'triage']).describe(
+        "'capture' for fast intake of a single idea/bug; 'triage' to assess and route the inbox queue"
+      ),
+      raw_input: z
+        .string()
+        .optional()
+        .describe('Raw text of the idea, bug, or feature request. Required in capture mode.'),
+      input_type: z
+        .enum(['idea', 'bug', 'chore'])
+        .optional()
+        .describe('Classification of the input. Required in capture mode.'),
+      source: z
+        .string()
+        .optional()
+        .describe(
+          "Where this came from: human, support-agent, ba-agent, orchestrator, etc. " +
+            'Required in capture mode.'
+        ),
+      related_task_id: z
+        .string()
+        .optional()
+        .describe(
+          'Optional reference to an existing board task this is related to (capture mode), ' +
+            'or the specific task to triage (triage mode with scope=single).'
+        ),
+      scope: z
+        .enum(['all', 'single'])
+        .optional()
+        .describe(
+          "Triage mode only. 'all' processes the full untriaged inbox; 'single' (with " +
+            'related_task_id) processes one item. Defaults to all.'
+        ),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'fixed',
+      retryOn: ['db_error'],
+      doNotRetryOn: ['validation_error'],
+    },
+    mcp: {
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
   move_task: {
     actionType: 'move_task',
     description: 'Move a task to a different status column on the board.',
