@@ -574,7 +574,93 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   }
 
   // -------------------------------------------------------------------------
-  // Stage 6: Write Results (90% → 100%)
+  // Stage 6: Agent-embed (75% → 80%) — Phase 2 of skill-analyzer-v2
+  // -------------------------------------------------------------------------
+  // Refresh embeddings for every active system agent. Lazy invalidation:
+  // anything whose stored content_hash matches the live hash is a cache hit
+  // and skipped. See spec §6 Pipeline + agentEmbeddingService.
+  await updateJobProgress(jobId, {
+    progressPct: 75,
+    progressMessage: 'Refreshing system agent embeddings...',
+  });
+
+  const { agentEmbeddingService } = await import('../services/agentEmbeddingService.js');
+  const { systemAgentService } = await import('../services/systemAgentService.js');
+
+  await agentEmbeddingService.refreshSystemAgentEmbeddings();
+
+  // -------------------------------------------------------------------------
+  // Stage 7: Agent-propose (80% → 90%) — Phase 2 of skill-analyzer-v2
+  // -------------------------------------------------------------------------
+  // For every DISTINCT result, compute cosine similarity against every
+  // system agent embedding and write the top-K=3 to agent_proposals on
+  // the result row. The threshold drives pre-selection only — top-K is
+  // always persisted in full so reviewers can promote a below-threshold
+  // chip with one click. See spec §6.2.
+  await updateJobProgress(jobId, {
+    progressPct: 80,
+    progressMessage: 'Proposing system agent attachments...',
+  });
+
+  // Pre-load every active system agent + its cached embedding into a
+  // single in-memory list so the per-result loop is just N cosine
+  // computations. Zero-agents edge case: empty list → empty proposals.
+  const allSystemAgents = await systemAgentService.listAgents();
+  const rankableAgents: Array<{
+    systemAgentId: string;
+    slug: string;
+    name: string;
+    embedding: number[];
+  }> = [];
+  for (const agent of allSystemAgents) {
+    const embRow = await agentEmbeddingService.getAgentEmbedding(agent.id);
+    if (embRow) {
+      rankableAgents.push({
+        systemAgentId: agent.id,
+        slug: agent.slug,
+        name: agent.name,
+        embedding: embRow.embedding,
+      });
+    }
+  }
+
+  // Compute proposals for every DISTINCT result. Indexed by candidateIndex
+  // so the Write stage below can look them up alongside the existing result
+  // row data.
+  const agentProposalsByCandidateIndex = new Map<
+    number,
+    ReturnType<typeof skillAnalyzerServicePure.rankAgentsForCandidate>
+  >();
+
+  if (rankableAgents.length > 0) {
+    for (const distinctMatch of distinctResults) {
+      const candidateEmbedding = candidateEmbeddingsForCompare.find(
+        (c) => c.index === distinctMatch.candidateIndex,
+      )?.embedding;
+      if (!candidateEmbedding) continue;
+      const proposals = skillAnalyzerServicePure.rankAgentsForCandidate(
+        candidateEmbedding,
+        rankableAgents,
+      );
+      agentProposalsByCandidateIndex.set(distinctMatch.candidateIndex, proposals);
+    }
+    // Also propose for any LLM-classified result that landed on DISTINCT.
+    for (const r of classifiedResults) {
+      if (r.classification !== 'DISTINCT') continue;
+      const candidateEmbedding = candidateEmbeddingsForCompare.find(
+        (c) => c.index === r.candidateIndex,
+      )?.embedding;
+      if (!candidateEmbedding) continue;
+      const proposals = skillAnalyzerServicePure.rankAgentsForCandidate(
+        candidateEmbedding,
+        rankableAgents,
+      );
+      agentProposalsByCandidateIndex.set(r.candidateIndex, proposals);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 8: Write Results (90% → 100%)
   // -------------------------------------------------------------------------
   await updateJobProgress(jobId, {
     progressPct: 90,
@@ -635,6 +721,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       similarityScore: m.similarity,
       classificationReasoning: `Low embedding similarity (${(m.similarity * 100).toFixed(0)}%) - no existing skill is close.`,
       diffSummary: null,
+      // Phase 2: agent proposals from the Agent-propose stage above. The
+      // map only has entries for DISTINCT candidates that had a candidate
+      // embedding; rows with no proposals fall back to the column default
+      // of [].
+      agentProposals: agentProposalsByCandidateIndex.get(m.candidateIndex) ?? [],
     });
   }
 
@@ -652,6 +743,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       similarityScore: r.similarityScore ?? undefined,
       classificationReasoning: r.classificationReasoning ?? undefined,
       diffSummary: r.diffSummary ?? undefined,
+      // Phase 2: agent proposals only for LLM-classified DISTINCT results.
+      // The agent-propose stage above populates the map for both bands.
+      agentProposals: agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [],
     });
   }
 

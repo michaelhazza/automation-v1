@@ -296,6 +296,81 @@ export function generateDiffSummary(
   return { addedFields, removedFields, changedFields };
 }
 
+// ---------------------------------------------------------------------------
+// Agent ranking — Phase 2 of skill-analyzer-v2
+// ---------------------------------------------------------------------------
+
+/** Top-K constant for the agent-propose pipeline stage. The pipeline always
+ *  persists at most this many proposals per DISTINCT result, regardless of
+ *  threshold. The threshold below decides only which chips are pre-checked
+ *  in the Review UI. See spec §6.2 and the iteration-1 HITL resolution
+ *  on Finding 1.4. */
+export const AGENT_PROPOSAL_TOPK = 3;
+
+/** Similarity threshold for pre-selection. Proposals with score >= threshold
+ *  ship with selected: true (pre-checked chip). Proposals below threshold
+ *  ship with selected: false (visible but not pre-checked, so reviewers can
+ *  promote them with one click if the AI under-scored an obvious fit). */
+export const AGENT_PROPOSAL_THRESHOLD = 0.5;
+
+/** One agent in the input set for ranking. The score is computed externally
+ *  via cosineSimilarity; the helper just sorts and slices. */
+export interface RankableAgent {
+  systemAgentId: string;
+  slug: string;
+  name: string;
+  embedding: number[];
+}
+
+/** One proposal entry in the output. Matches the agent_proposals jsonb
+ *  shape on skill_analyzer_results (spec §5.2). */
+export interface AgentProposal {
+  systemAgentId: string;
+  slugSnapshot: string;
+  nameSnapshot: string;
+  score: number;
+  selected: boolean;
+}
+
+/** Rank a set of system agents by cosine similarity against a candidate
+ *  embedding, take the top-K (regardless of threshold), and pre-select any
+ *  result whose score is at or above the threshold. Pure — no DB, no clock.
+ *
+ *  Edge cases (covered by tests):
+ *  - Empty agents list → empty proposals array
+ *  - K > agents.length → returns all agents (truncation is min(K, count))
+ *  - Tie scores → stable order (the underlying Array.sort is not guaranteed
+ *    stable in older JS engines, but the V8 sort used by Node has been
+ *    stable since v12, which the project requires)
+ *  - All scores below threshold → still returns top-K, all with
+ *    selected: false (reviewer can promote with one click)
+ */
+export function rankAgentsForCandidate(
+  candidateEmbedding: number[],
+  agents: readonly RankableAgent[],
+  options: { topK?: number; threshold?: number } = {},
+): AgentProposal[] {
+  const topK = options.topK ?? AGENT_PROPOSAL_TOPK;
+  const threshold = options.threshold ?? AGENT_PROPOSAL_THRESHOLD;
+
+  if (agents.length === 0) return [];
+
+  const scored = agents.map((a) => ({
+    agent: a,
+    score: cosineSimilarity(candidateEmbedding, a.embedding),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  const top = scored.slice(0, Math.min(topK, scored.length));
+
+  return top.map(({ agent, score }) => ({
+    systemAgentId: agent.systemAgentId,
+    slugSnapshot: agent.slug,
+    nameSnapshot: agent.name,
+    score,
+    selected: score >= threshold,
+  }));
+}
+
 export const skillAnalyzerServicePure = {
   cosineSimilarity,
   classifyBand,
@@ -303,4 +378,5 @@ export const skillAnalyzerServicePure = {
   buildClassificationPrompt,
   parseClassificationResponse,
   generateDiffSummary,
+  rankAgentsForCandidate,
 };

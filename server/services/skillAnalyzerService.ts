@@ -446,13 +446,17 @@ export async function executeApproved(params: {
         );
         continue;
       }
-      // Open the per-result transaction. In Phase 1 the only statement
-      // inside is the createSystemSkill call; Phase 2 adds the agent-attach
-      // loop here. The transaction wrapper ships in Phase 1 so the §8.1
-      // contract is in place when Phase 2 builds on it.
+      // Open the per-result transaction. Inside: create the skill, then
+      // for every selected agent proposal look up the live agent row and
+      // append the new skill's slug to its defaultSystemSkillSlugs array.
+      // If any agent update throws, the entire transaction rolls back so
+      // the row is left clean (the skill is not created either) — see
+      // spec §8.1 transaction-threading contract. Per-proposal outcomes
+      // are emitted to the structured logger; the row-level executionResult
+      // reflects only overall transaction success.
       try {
         const newSkill = await db.transaction(async (tx) => {
-          return systemSkillService.createSystemSkill(
+          const created = await systemSkillService.createSystemSkill(
             {
               slug: candidate.slug,
               handlerKey: candidate.slug,
@@ -463,6 +467,63 @@ export async function executeApproved(params: {
             },
             { tx },
           );
+
+          // Phase 2: read agentProposals off the result row, filter to
+          // the selected ones, and attach the new skill's slug to each
+          // chosen agent's defaultSystemSkillSlugs array. Missing agents
+          // are logged and skipped (not a hard failure — see spec §9
+          // edge case "system agent is deleted between analysis and
+          // execute").
+          const proposals = (result.agentProposals as Array<{
+            systemAgentId: string;
+            slugSnapshot: string;
+            nameSnapshot: string;
+            score: number;
+            selected: boolean;
+          }> | null) ?? [];
+
+          for (const proposal of proposals) {
+            if (!proposal.selected) continue;
+
+            let agent;
+            try {
+              agent = await systemAgentService.getAgent(proposal.systemAgentId, { tx });
+            } catch {
+              // 404 — agent was deleted between analysis and execute.
+              console.info('[skillAnalyzer] agent attach skipped — missing', {
+                resultId: result.id,
+                systemAgentId: proposal.systemAgentId,
+                outcome: 'skipped-missing',
+              });
+              continue;
+            }
+
+            const currentSlugs: string[] = Array.isArray(agent.defaultSystemSkillSlugs)
+              ? (agent.defaultSystemSkillSlugs as string[])
+              : [];
+            if (currentSlugs.includes(created.slug)) {
+              // Already attached — idempotent no-op.
+              console.info('[skillAnalyzer] agent attach already-present', {
+                resultId: result.id,
+                systemAgentId: proposal.systemAgentId,
+                outcome: 'attached',
+              });
+              continue;
+            }
+            const nextSlugs = [...currentSlugs, created.slug];
+            await systemAgentService.updateAgent(
+              proposal.systemAgentId,
+              { defaultSystemSkillSlugs: nextSlugs },
+              { tx },
+            );
+            console.info('[skillAnalyzer] agent attach succeeded', {
+              resultId: result.id,
+              systemAgentId: proposal.systemAgentId,
+              outcome: 'attached',
+            });
+          }
+
+          return created;
         });
         await db
           .update(skillAnalyzerResults)

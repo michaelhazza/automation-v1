@@ -1,7 +1,16 @@
 import { eq, and, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, type OrgScopedTx } from '../db/index.js';
 import { systemAgents, agents } from '../db/schema/index.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
+
+/** Optional transaction handle — see docs/skill-analyzer-v2-spec.md §8.1.
+ *  When provided, methods run against the transaction handle; when absent
+ *  they run against the module-level `db`. Used by the Phase 2 analyzer
+ *  agent-attach path so the per-result transaction wraps both the system
+ *  skill create AND every agent's defaultSystemSkillSlugs update. */
+interface WithTx {
+  tx?: OrgScopedTx;
+}
 
 // ---------------------------------------------------------------------------
 // System Agent Service — manages platform-level agent definitions
@@ -24,8 +33,9 @@ export const systemAgentService = {
       .orderBy(systemAgents.name);
   },
 
-  async getAgent(id: string) {
-    const [agent] = await db
+  async getAgent(id: string, opts: WithTx = {}) {
+    const runner = opts.tx ?? db;
+    const [agent] = await runner
       .select()
       .from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));
@@ -100,8 +110,9 @@ export const systemAgentService = {
     agentRole: string | null;
     agentTitle: string | null;
     parentSystemAgentId: string | null;
-  }>) {
-    const [existing] = await db.select().from(systemAgents)
+  }>, opts: WithTx = {}) {
+    const runner = opts.tx ?? db;
+    const [existing] = await runner.select().from(systemAgents)
       .where(and(eq(systemAgents.id, id), isNull(systemAgents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'System agent not found' };
 
@@ -138,7 +149,7 @@ export const systemAgentService = {
       update.parentSystemAgentId = parentId ?? null;
     }
 
-    const [updated] = await db.update(systemAgents).set(update).where(eq(systemAgents.id, id)).returning();
+    const [updated] = await runner.update(systemAgents).set(update).where(eq(systemAgents.id, id)).returning();
     return updated;
   },
 
