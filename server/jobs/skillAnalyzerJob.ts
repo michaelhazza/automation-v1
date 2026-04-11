@@ -19,7 +19,11 @@ import { env } from '../lib/env.js';
 import { skillParserService } from '../services/skillParserService.js';
 import { skillEmbeddingService } from '../services/skillEmbeddingService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
-import { skillService } from '../services/skillService.js';
+// Phase 1 of skill-analyzer-v2: the analyzer is system-only. The org-skill
+// library read path was removed; all dedup comparisons happen against
+// system_skills via systemSkillService.listSkills() (which returns all rows
+// regardless of isActive / visibility, so retired skills still participate
+// in dedup detection — see spec §10 Phase 0 listSkills() contract).
 import {
   updateJobProgress,
   getJobById,
@@ -122,34 +126,23 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     progressMessage: 'Computing content hashes...',
   });
 
-  // Load all library skills
-  const [systemSkills, orgSkills] = await Promise.all([
-    systemSkillService.listActiveSkills(),
-    skillService.listSkills(organisationId),
-  ]);
+  // Load all library skills from system_skills. listSkills() returns every
+  // row regardless of isActive / visibility so retired skills still
+  // participate in dedup. See spec §10 Phase 0 listSkills() contract.
+  const systemSkillRows = await systemSkillService.listSkills();
 
-  const librarySkills: LibrarySkillSummary[] = [
-    ...systemSkills.map((s) => ({
-      id: null,
-      slug: s.slug,
-      name: s.name,
-      description: s.description,
-      definition: s.definition as object | null,
-      instructions: s.instructions,
-      isSystem: true,
-    })),
-    ...orgSkills
-      .filter((s: { skillType?: string }) => s.skillType !== 'built_in')
-      .map((s) => ({
-        id: s.id,
-        slug: s.slug,
-        name: s.name,
-        description: s.description ?? '',
-        definition: s.definition as object | null,
-        instructions: s.instructions,
-          isSystem: false,
-      })),
-  ];
+  const librarySkills: LibrarySkillSummary[] = systemSkillRows.map((s) => ({
+    id: s.id,
+    slug: s.slug,
+    name: s.name,
+    description: s.description,
+    definition: s.definition as object | null,
+    instructions: s.instructions,
+    // isSystem is now always true (the analyzer is system-only post Phase 1).
+    // Field kept for backwards compatibility with the LibrarySkillSummary
+    // type used by skillAnalyzerServicePure helpers.
+    isSystem: true,
+  }));
 
   // Compute candidate hashes
   const candidateHashes = candidates.map((c) =>
@@ -591,6 +584,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // Collect all result rows
   const resultRows: (typeof skillAnalyzerResults.$inferInsert)[] = [];
 
+  // Helper: look up the SHA-256 hash for a given candidate index. The hash
+  // is computed in Stage 2 (Hash) and was originally only used for dedup.
+  // Phase 1 of skill-analyzer-v2 persists it on the result row so the Phase 4
+  // manual-add PATCH can look up the candidate embedding in skill_embeddings
+  // by content hash without recomputing it. See spec §5.2 candidateContentHash.
+  const hashByIndex = new Map<number, string>();
+  for (let i = 0; i < candidates.length; i++) {
+    hashByIndex.set(i, candidateHashes[i]);
+  }
+  const getCandidateHash = (idx: number): string => {
+    const h = hashByIndex.get(idx);
+    if (h === undefined) {
+      // Should be unreachable — every candidate is hashed in Stage 2.
+      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
+    }
+    return h;
+  };
+
   // Exact duplicates from Stage 2
   for (const dup of exactDuplicates) {
     const candidate = candidates[dup.candidateIndex];
@@ -599,9 +610,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateIndex: dup.candidateIndex,
       candidateName: candidate.name,
       candidateSlug: candidate.slug,
+      candidateContentHash: getCandidateHash(dup.candidateIndex),
       matchedSkillId: dup.matchedLib.id ?? undefined,
-      matchedSystemSkillSlug: dup.matchedLib.isSystem ? dup.matchedLib.slug : undefined,
-      matchedSkillName: dup.matchedLib.name,
       classification: 'DUPLICATE',
       confidence: 1.0,
       similarityScore: 1.0,
@@ -618,9 +628,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateIndex: m.candidateIndex,
       candidateName: candidate.name,
       candidateSlug: candidate.slug,
+      candidateContentHash: getCandidateHash(m.candidateIndex),
       matchedSkillId: undefined,
-      matchedSystemSkillSlug: undefined,
-      matchedSkillName: undefined,
       classification: 'DISTINCT',
       confidence: 1 - m.similarity,
       similarityScore: m.similarity,
@@ -636,10 +645,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateIndex: r.candidateIndex,
       candidateName: r.candidate.name,
       candidateSlug: r.candidate.slug,
+      candidateContentHash: getCandidateHash(r.candidateIndex),
       matchedSkillId: r.libraryId ?? undefined,
-      // Only set for system skills (id === null). Org skills are identified by matchedSkillId.
-      matchedSystemSkillSlug: (r.libraryId === null && r.librarySlug != null) ? r.librarySlug : undefined,
-      matchedSkillName: r.libraryName ?? undefined,
       classification: r.classification,
       confidence: r.confidence,
       similarityScore: r.similarityScore ?? undefined,

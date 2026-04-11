@@ -5,6 +5,47 @@ import SkillAnalyzerProcessingStep from './SkillAnalyzerProcessingStep';
 import SkillAnalyzerResultsStep from './SkillAnalyzerResultsStep';
 import SkillAnalyzerExecuteStep from './SkillAnalyzerExecuteStep';
 
+/** Pre-computed live snapshot of a system_skills row for the matched library
+ *  skill on a partial-overlap result. Provided by the GET /jobs/:id endpoint
+ *  via a live lookup so the Review UI can render the Current column of the
+ *  three-column merge view (Phase 5) without an extra round-trip. */
+export interface MatchedSkillContent {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  // Anthropic tool definition shape — JSON object, never a string.
+  definition: Record<string, unknown>;
+  instructions: string | null;
+}
+
+/** One agent proposal entry for a DISTINCT result. Populated by the Phase 2
+ *  agent-propose pipeline stage. systemAgentId is the stable identity key —
+ *  slug and name are display-only snapshots captured at analysis time. */
+export interface AgentProposal {
+  systemAgentId: string;
+  slugSnapshot: string;
+  nameSnapshot: string;
+  score: number;
+  selected: boolean;
+}
+
+/** LLM-generated merge proposal for PARTIAL_OVERLAP / IMPROVEMENT results.
+ *  Populated by the Phase 3 classify-stage extension. Editable via PATCH. */
+export interface ProposedMergedContent {
+  name: string;
+  description: string;
+  definition: Record<string, unknown>;
+  instructions: string | null;
+}
+
+/** A system agent surfaced for the "Add another system agent..." combobox. */
+export interface AvailableSystemAgent {
+  systemAgentId: string;
+  slug: string;
+  name: string;
+}
+
 export interface AnalysisJob {
   id: string;
   status: string;
@@ -17,6 +58,15 @@ export interface AnalysisJob {
   sourceType: string;
   createdAt: string;
   completedAt: string | null;
+  /** Phase 1 of skill-analyzer-v2: candidate slugs in this job whose handler
+   *  is not registered in skillExecutor.ts SKILL_HANDLERS at request time.
+   *  The Review UI uses this list to disable the Approve button on affected
+   *  New Skill cards and to filter the "Approve all new" bulk action. */
+  unregisteredHandlerSlugs?: string[];
+  /** Phase 1 of skill-analyzer-v2: live snapshot of the system_agents
+   *  inventory, populated for the Phase 4 "Add another system agent..."
+   *  combobox. Empty when there are no system agents. */
+  availableSystemAgents?: AvailableSystemAgent[];
 }
 
 export interface AnalysisResult {
@@ -25,8 +75,6 @@ export interface AnalysisResult {
   candidateName: string;
   candidateSlug: string;
   matchedSkillId: string | null;
-  matchedSystemSkillSlug: string | null;
-  matchedSkillName: string | null;
   classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
   confidence: number;
   similarityScore: number | null;
@@ -39,6 +87,29 @@ export interface AnalysisResult {
   actionTaken: 'approved' | 'rejected' | 'skipped' | null;
   executionResult: 'created' | 'updated' | 'skipped' | 'failed' | null;
   executionError: string | null;
+  /** Phase 1 of skill-analyzer-v2: live system_skills lookup attached when
+   *  matchedSkillId is set and the row still exists. Replaces the legacy
+   *  matchedSkillName / matchedSystemSkillSlug fields which were dropped
+   *  from the schema in migration 0098. */
+  matchedSkillContent?: MatchedSkillContent;
+  /** Phase 1 of skill-analyzer-v2: SHA-256 of the candidate content. Used
+   *  by the Phase 4 manual-add PATCH to look up the candidate embedding in
+   *  skill_embeddings without an extra OpenAI call. */
+  candidateContentHash?: string;
+  /** Phase 2 of skill-analyzer-v2: top-K system agent proposals for DISTINCT
+   *  results (always [] for other classifications and when no system agents
+   *  exist). */
+  agentProposals?: AgentProposal[];
+  /** Phase 3 of skill-analyzer-v2: LLM-generated merge proposal for
+   *  PARTIAL_OVERLAP / IMPROVEMENT results. Editable via PATCH. */
+  proposedMergedContent?: ProposedMergedContent | null;
+  /** Phase 3 of skill-analyzer-v2: the LLM's untouched original. The Reset
+   *  endpoint copies this back into proposedMergedContent. */
+  originalProposedMerge?: ProposedMergedContent | null;
+  /** Phase 3 of skill-analyzer-v2: set true when the user edits any field
+   *  in proposedMergedContent. Used to gate the "Reset to AI suggestion"
+   *  link in the merge view. */
+  userEditedMerge?: boolean;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

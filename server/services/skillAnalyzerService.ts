@@ -3,7 +3,13 @@ import { db } from '../db/index.js';
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../db/schema/index.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { skillParserService } from './skillParserService.js';
-import { skillService } from './skillService.js';
+// Phase 1 of skill-analyzer-v2: the analyzer is system-only. The
+// org-skill skillService import was removed; executeApproved now writes
+// to system_skills via systemSkillService and gates DISTINCT results
+// against the SKILL_HANDLERS registry to prevent shipping unpaired rows.
+import { systemSkillService, type SystemSkill } from './systemSkillService.js';
+import { systemAgentService } from './systemAgentService.js';
+import { SKILL_HANDLERS } from './skillExecutor.js';
 
 // ---------------------------------------------------------------------------
 // Skill Analyzer Service — CRUD for jobs/results + pipeline orchestration
@@ -63,11 +69,53 @@ export async function createJob(params: {
   return { jobId };
 }
 
-/** Get job status and results. Validates that job belongs to the org. */
+/** Shape of `matchedSkillContent` attached to result rows in the GET response.
+ *  Computed live from systemSkillService.getSkill at request time. See spec §7.4. */
+export interface MatchedSkillContent {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  definition: object;
+  instructions: string | null;
+}
+
+/** Shape of `availableSystemAgents` attached to the job in the GET response.
+ *  Used by the Phase 4 "Add another system agent..." combobox. */
+export interface AvailableSystemAgent {
+  systemAgentId: string;
+  slug: string;
+  name: string;
+}
+
+/** Result row enriched with the live `matchedSkillContent` lookup. */
+export type EnrichedResult = typeof skillAnalyzerResults.$inferSelect & {
+  matchedSkillContent?: MatchedSkillContent;
+};
+
+/** Job + enriched results + Phase 1 GET response extensions. */
+export interface GetJobResponse {
+  job: typeof skillAnalyzerJobs.$inferSelect;
+  results: EnrichedResult[];
+  /** Per spec §7.4: candidate slugs in this job's results that have no
+   *  corresponding key in SKILL_HANDLERS at request time. The Review UI
+   *  uses this to disable the Approve button on affected New Skill cards
+   *  and to filter the "Approve all new" bulk action. */
+  unregisteredHandlerSlugs: string[];
+  /** Per spec §7.4: live snapshot of all system agents for the
+   *  "Add another system agent..." combobox in Phase 4. */
+  availableSystemAgents: AvailableSystemAgent[];
+}
+
+/** Get job status and results. Validates that job belongs to the org.
+ *  Phase 1 of skill-analyzer-v2 extends the response with three new fields:
+ *  - matchedSkillContent on each result with a non-null matchedSkillId
+ *  - unregisteredHandlerSlugs on the job (handler-gate state for §7.1 UI)
+ *  - availableSystemAgents on the job (combobox source for Phase 4) */
 export async function getJob(
   jobId: string,
   organisationId: string
-): Promise<{ job: typeof skillAnalyzerJobs.$inferSelect; results: typeof skillAnalyzerResults.$inferSelect[] }> {
+): Promise<GetJobResponse> {
   const jobRows = await db
     .select()
     .from(skillAnalyzerJobs)
@@ -79,13 +127,65 @@ export async function getJob(
     throw { statusCode: 404, message: 'Job not found' };
   }
 
-  const results = await db
+  const rawResults = await db
     .select()
     .from(skillAnalyzerResults)
     .where(eq(skillAnalyzerResults.jobId, jobId))
     .orderBy(skillAnalyzerResults.candidateIndex);
 
-  return { job, results };
+  // Live lookup: for every result with matchedSkillId set, fetch the current
+  // system_skills row and attach as matchedSkillContent. If the skill was
+  // deleted between analysis and now, omit the field for that result (the
+  // Review UI handles the missing field with a fallback notice — spec §7.4).
+  const matchedSkillIds = Array.from(
+    new Set(
+      rawResults
+        .map((r) => r.matchedSkillId)
+        .filter((id): id is string => id !== null && id !== undefined),
+    ),
+  );
+  const matchedSkillsById = new Map<string, SystemSkill>();
+  for (const id of matchedSkillIds) {
+    try {
+      const skill = await systemSkillService.getSkill(id);
+      matchedSkillsById.set(id, skill);
+    } catch {
+      // 404 — skill was deleted after analysis. Leave out of the map.
+    }
+  }
+
+  const results: EnrichedResult[] = rawResults.map((r) => {
+    if (!r.matchedSkillId) return r;
+    const matched = matchedSkillsById.get(r.matchedSkillId);
+    if (!matched) return r;
+    const matchedSkillContent: MatchedSkillContent = {
+      id: matched.id,
+      slug: matched.slug,
+      name: matched.name,
+      description: matched.description,
+      definition: matched.definition as object,
+      instructions: matched.instructions,
+    };
+    return { ...r, matchedSkillContent };
+  });
+
+  // Diff the candidate slugs in this job against the live SKILL_HANDLERS
+  // registry. Any candidate slug whose handler is not registered appears in
+  // unregisteredHandlerSlugs and the Review UI gates approval accordingly.
+  const candidateSlugs = Array.from(new Set(rawResults.map((r) => r.candidateSlug)));
+  const registeredHandlers = new Set(Object.keys(SKILL_HANDLERS));
+  const unregisteredHandlerSlugs = candidateSlugs.filter((slug) => !registeredHandlers.has(slug));
+
+  // Live read of system_agents for the "Add another system agent" combobox.
+  // Full inventory at request time — not cached.
+  const allAgents = await systemAgentService.listAgents();
+  const availableSystemAgents: AvailableSystemAgent[] = allAgents.map((a) => ({
+    systemAgentId: a.id,
+    slug: a.slug,
+    name: a.name,
+  }));
+
+  return { job, results, unregisteredHandlerSlugs, availableSystemAgents };
 }
 
 /** List jobs for an org (most recent first). */
@@ -171,7 +271,20 @@ export async function bulkSetResultAction(params: {
     );
 }
 
-/** Execute all approved actions (create/update skills in the library). */
+/** Execute all approved results (create/update system skills + agent attach).
+ *
+ *  Per spec §8 (skill-analyzer-v2):
+ *  - DISTINCT: handler-gate check → definition-not-null check → create
+ *    system skill inside a transaction. Phase 2 extends this branch with
+ *    the agent-attach loop; in Phase 1, agentProposals is always [] so the
+ *    transaction wraps a single statement.
+ *  - PARTIAL_OVERLAP / IMPROVEMENT: validate matchedSkillId + handler pair +
+ *    proposedMergedContent then update. In Phase 1, proposedMergedContent
+ *    is always null (Phase 3 lands the LLM merge proposal), so every
+ *    PARTIAL_OVERLAP execute fails the null guard with the spec's error
+ *    message — a known intermediate state called out in §10 Phase 1.
+ *  - DUPLICATE: skip (no-op).
+ */
 export async function executeApproved(params: {
   jobId: string;
   organisationId: string;
@@ -187,7 +300,7 @@ export async function executeApproved(params: {
   const { job, results } = await getJob(jobId, organisationId);
 
   const approved = results.filter(
-    (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed')
+    (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed'),
   );
   const parsedCandidates = (job.parsedCandidates as unknown[]) || [];
 
@@ -195,6 +308,18 @@ export async function executeApproved(params: {
   let updated = 0;
   let failed = 0;
   const errors: Array<{ resultId: string; error: string }> = [];
+
+  // Helper: mark a result as failed and bookkeep counters. Used for both
+  // pre-transaction guards and try/catch fallthroughs from the per-result
+  // transaction block.
+  const failResult = async (resultId: string, errMsg: string): Promise<void> => {
+    errors.push({ resultId, error: errMsg });
+    failed++;
+    await db
+      .update(skillAnalyzerResults)
+      .set({ executionResult: 'failed', executionError: errMsg })
+      .where(eq(skillAnalyzerResults.id, resultId));
+  };
 
   for (const result of approved) {
     const candidate = parsedCandidates[result.candidateIndex] as {
@@ -206,72 +331,149 @@ export async function executeApproved(params: {
     } | undefined;
 
     if (!candidate) {
-      errors.push({ resultId: result.id, error: 'Candidate data not found in job' });
-      failed++;
+      await failResult(result.id, 'Candidate data not found in job');
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // DUPLICATE: skip
+    // -----------------------------------------------------------------------
+    if (result.classification === 'DUPLICATE') {
       await db
         .update(skillAnalyzerResults)
-        .set({ executionResult: 'failed', executionError: 'Candidate data not found in job' })
+        .set({ executionResult: 'skipped' })
         .where(eq(skillAnalyzerResults.id, result.id));
       continue;
     }
 
-    try {
-      if (result.classification === 'DUPLICATE') {
-        // Approved duplicate = skip (no-op)
-        await db
-          .update(skillAnalyzerResults)
-          .set({ executionResult: 'skipped' })
-          .where(eq(skillAnalyzerResults.id, result.id));
+    // -----------------------------------------------------------------------
+    // PARTIAL_OVERLAP / IMPROVEMENT: update existing system skill via merge
+    // -----------------------------------------------------------------------
+    if (result.classification === 'PARTIAL_OVERLAP' || result.classification === 'IMPROVEMENT') {
+      // Guard 1: matchedSkillId must be set.
+      if (!result.matchedSkillId) {
+        await failResult(result.id, 'matchedSkillId is required for partial-overlap write');
         continue;
       }
-
-      if (result.classification === 'IMPROVEMENT' && !result.matchedSkillId) {
-        // System skill match — cannot update system skills (no DB id)
-        errors.push({ resultId: result.id, error: 'Cannot update a system skill — approve as DISTINCT to create an org-level override instead.' });
-        failed++;
-        await db
-          .update(skillAnalyzerResults)
-          .set({ executionResult: 'failed', executionError: 'Cannot update system skills; re-approve as DISTINCT to create an org override.' })
-          .where(eq(skillAnalyzerResults.id, result.id));
+      // Guard 2: matched library skill's slug must resolve to a registered
+      // handler. The startup validator guarantees this for active rows, but
+      // listSkills() includes inactive rows too — a matched inactive row may
+      // reference an unregistered handler. Re-read the row inside the txn
+      // and check before writing. See spec §8 PARTIAL_OVERLAP branch.
+      let matchedRow: SystemSkill | null = null;
+      try {
+        matchedRow = await systemSkillService.getSkill(result.matchedSkillId);
+      } catch {
+        matchedRow = null;
+      }
+      if (!matchedRow) {
+        await failResult(result.id, 'library skill no longer exists — re-run analysis');
         continue;
-      } else if (result.classification === 'IMPROVEMENT' && result.matchedSkillId) {
-        // Update the matched org skill
-        await skillService.updateSkill(result.matchedSkillId, organisationId, {
-          name: candidate.name,
-          description: candidate.description,
-          definition: candidate.definition ?? {},
-          instructions: candidate.instructions ?? undefined,
+      }
+      if (!(matchedRow.slug in SKILL_HANDLERS)) {
+        await failResult(
+          result.id,
+          `matched library skill has no registered handler — this is an inactive row; reactivation requires an engineer to add a handler to SKILL_HANDLERS in server/services/skillExecutor.ts`,
+        );
+        continue;
+      }
+      // Guard 3: proposedMergedContent must be present (Phase 3 populates it).
+      const merge = result.proposedMergedContent as
+        | { name: string; description: string; definition: object; instructions: string | null }
+        | null;
+      if (!merge) {
+        await failResult(result.id, 'merge proposal unavailable — re-run analysis');
+        continue;
+      }
+      // Apply the merge inside a transaction. In Phase 1 this is a single-
+      // statement transaction; the wrapping is in place for Phase 2's
+      // multi-statement extensions.
+      try {
+        await db.transaction(async (tx) => {
+          await systemSkillService.updateSystemSkill(
+            result.matchedSkillId!,
+            {
+              name: merge.name,
+              description: merge.description,
+              definition: merge.definition as never,
+              instructions: merge.instructions,
+            },
+            { tx },
+          );
         });
-
         await db
           .update(skillAnalyzerResults)
           .set({ executionResult: 'updated', resultingSkillId: result.matchedSkillId })
           .where(eq(skillAnalyzerResults.id, result.id));
         updated++;
-      } else {
-        // DISTINCT or PARTIAL_OVERLAP — create new org skill
-        const newSkill = await skillService.createSkill(organisationId, {
-          name: candidate.name,
-          slug: candidate.slug,
-          description: candidate.description,
-          definition: candidate.definition ?? {},
-          instructions: candidate.instructions ?? undefined,
-        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await failResult(result.id, errMsg);
+      }
+      continue;
+    }
 
+    // -----------------------------------------------------------------------
+    // DISTINCT: create a new system skill (+ agent attach in Phase 2)
+    // -----------------------------------------------------------------------
+    if (result.classification === 'DISTINCT') {
+      // Guard 1: handler must already be registered. The analyzer can stage
+      // an unpaired skill in the DB row but execute will refuse — engineers
+      // must add the handler to skillExecutor.ts SKILL_HANDLERS first.
+      if (!(candidate.slug in SKILL_HANDLERS)) {
+        await failResult(
+          result.id,
+          `No handler registered for skill '${candidate.slug}'. An engineer must add an entry to SKILL_HANDLERS in server/services/skillExecutor.ts before this skill can be imported.`,
+        );
+        continue;
+      }
+      // Guard 2: candidate definition must be a non-null object — the
+      // system_skills.definition column is NOT NULL.
+      if (!candidate.definition) {
+        await failResult(
+          result.id,
+          'definition is required — candidate had no tool-definition block',
+        );
+        continue;
+      }
+      // Guard 3: slug uniqueness — block before opening the transaction so
+      // we surface a clean error rather than a Postgres unique-violation.
+      const existing = await systemSkillService.getSkillBySlug(candidate.slug);
+      if (existing) {
+        await failResult(
+          result.id,
+          `slug '${candidate.slug}' already exists in system_skills — pick a different slug or update the existing row instead`,
+        );
+        continue;
+      }
+      // Open the per-result transaction. In Phase 1 the only statement
+      // inside is the createSystemSkill call; Phase 2 adds the agent-attach
+      // loop here. The transaction wrapper ships in Phase 1 so the §8.1
+      // contract is in place when Phase 2 builds on it.
+      try {
+        const newSkill = await db.transaction(async (tx) => {
+          return systemSkillService.createSystemSkill(
+            {
+              slug: candidate.slug,
+              handlerKey: candidate.slug,
+              name: candidate.name,
+              description: candidate.description,
+              definition: candidate.definition as never,
+              instructions: candidate.instructions,
+            },
+            { tx },
+          );
+        });
         await db
           .update(skillAnalyzerResults)
           .set({ executionResult: 'created', resultingSkillId: newSkill.id })
           .where(eq(skillAnalyzerResults.id, result.id));
         created++;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await failResult(result.id, errMsg);
       }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      errors.push({ resultId: result.id, error: errMsg });
-      failed++;
-      await db
-        .update(skillAnalyzerResults)
-        .set({ executionResult: 'failed', executionError: errMsg })
-        .where(eq(skillAnalyzerResults.id, result.id));
+      continue;
     }
   }
 

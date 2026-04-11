@@ -119,9 +119,9 @@ function ResultCard({
             <span className="font-medium text-slate-800 text-sm">{result.candidateName}</span>
             <code className="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{result.candidateSlug}</code>
           </div>
-          {result.matchedSkillName && (
+          {result.matchedSkillContent && (
             <p className="text-xs text-slate-500 mb-1">
-              vs. <strong>{result.matchedSkillName}</strong>
+              vs. <strong>{result.matchedSkillContent.name}</strong>
               {similarity != null && ` · ${similarity}% similar`}
               {` · ${confidence}% confidence`}
             </p>
