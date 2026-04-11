@@ -171,6 +171,21 @@ export function parseMarkdownFile(filename: string, content: string): ParsedSkil
     instructions = instructionsSection ?? methodologySection ?? null;
   }
 
+  // Fallback: Anthropic-Plugin-style SKILL.md files put the full skill content
+  // in the body without a dedicated `## Instructions` section. When we found
+  // nothing via section headings, use the whole body (minus a leading `# Title`)
+  // so the skill has usable instructions rather than a null field.
+  if (!instructions) {
+    const trimmed = body.trimStart();
+    const afterH1 = trimmed.startsWith('# ')
+      ? trimmed.slice(trimmed.indexOf('\n') + 1)
+      : trimmed;
+    const normalized = afterH1.trim();
+    if (normalized.length > 0) {
+      instructions = normalized;
+    }
+  }
+
   return {
     name,
     slug,

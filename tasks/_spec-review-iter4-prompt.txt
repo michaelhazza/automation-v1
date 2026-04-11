@@ -1,0 +1,31 @@
+You are reviewing a technical specification document for implementation readiness. The spec is at docs/skill-analyzer-v2-spec.md. The spec has been through three prior review iterations and is now at revision 2+. Your job: identify any remaining implementation-readiness issues.
+
+Focus exclusively on MECHANICAL issues in the spec text itself:
+- Internal contradictions (same concept described two different ways in different sections)
+- Stale language from approaches the spec explicitly retired
+- Load-bearing claims without supporting contracts (e.g. "X is idempotent" without saying how)
+- File inventory drift (prose mentions files that don't appear in the Files table for the same item)
+- Schema overlaps without a source-of-truth statement
+- Sequencing/ordering bugs (A depends on B but B ships later)
+- Invariants stated in one place but not enforced elsewhere
+- Items missing verdicts
+- Unnamed new primitives (new type/function/table without a concrete name)
+- Missing function signatures, endpoint contracts, column definitions
+
+DO NOT suggest:
+- Feature flags, staged rollouts, canary deploys, monitoring, rate limits (pre-production codebase)
+- Adding frontend tests, E2E tests, API contract tests, composition tests, performance baselines (testing posture is static-gates + pure-function unit tests only)
+- Introducing new abstractions when existing primitives would work
+- Rolling out one tenant at a time
+- Scope changes (adding/removing/re-sequencing roadmap items)
+- Architectural posture changes
+
+Read docs/skill-analyzer-v2-spec.md in full. Return findings in this format:
+
+FINDING N:
+Section: <section heading or line range>
+Description: <one sentence>
+Severity: critical | important | minor | nit
+Suggested fix: <concrete fix>
+
+If no findings, say "NO FINDINGS". Be specific. Cite exact line numbers or section headings.

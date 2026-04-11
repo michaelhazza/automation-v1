@@ -360,6 +360,21 @@ async function start() {
   } catch (err) {
     console.error('[boot] scheduled task retry reconciliation failed', err);
   }
+  // System skill handler pairing: every active system_skills row must
+  // reference a handler function that exists in SKILL_HANDLERS. This is the
+  // fail-fast gate against the "data refers to code" drift the Phase 0 DB
+  // migration opens up (see docs/skill-analyzer-v2-spec.md §10 Phase 0). If
+  // any row points at a missing handler, the server refuses to boot with a
+  // clear error listing the offending keys so the operator can fix it before
+  // the port binds.
+  try {
+    const { validateSystemSkillHandlers } = await import('./services/systemSkillHandlerValidator.js');
+    await validateSystemSkillHandlers();
+  } catch (err) {
+    console.error('[boot] system skill handler validation failed:', err);
+    throw err;
+  }
+
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {

@@ -7,7 +7,9 @@ model: opus
 
 ## Configuration
 
-**`MAX_ITERATIONS = 5`** — the maximum number of Codex review cycles before the loop force-exits. To change the cap, edit this single line. Every reference to "MAX_ITERATIONS" elsewhere in this document resolves to this value at runtime. HITL pauses do not count against this cap; only full Codex cycles do.
+**`MAX_ITERATIONS = 5`** — the maximum number of Codex review cycles across the **entire lifetime of a spec**, not per-invocation. To change the cap, edit this single line. Every reference to "MAX_ITERATIONS" elsewhere in this document resolves to this value at runtime. HITL pauses do not count against this cap; only full Codex cycles do.
+
+**Lifetime counting:** before starting the first iteration of a new invocation, scan `tasks/` for existing `spec-review-checkpoint-<spec-slug>-<N>-*.md` files and read the highest `<N>` seen. Also check for the most recent `spec-review-final-<spec-slug>-*.md`. The next iteration number is `max(N, last_final_report_iteration) + 1`. If the next iteration number would exceed MAX_ITERATIONS, do not start a new iteration — return immediately to the caller with a message explaining that the spec has already reached the lifetime cap and further review requires a human decision to bust the cap or mark the spec done.
 
 ---
 
