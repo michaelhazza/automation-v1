@@ -220,6 +220,7 @@ router.patch(
       description?: string;
       definition?: object;
       instructions?: string | null;
+      mergeUpdatedAt?: string;
     };
 
     // Light shape check before reaching the service.
@@ -232,11 +233,13 @@ router.patch(
       return res.status(400).json({ error: 'at least one of name, description, definition, instructions is required' });
     }
 
+    const { mergeUpdatedAt: ifUnmodifiedSince, ...patch } = body;
     const updated = await skillAnalyzerService.patchMergeFields({
       resultId: req.params.resultId,
       jobId: req.params.jobId,
       organisationId: req.orgId!,
-      patch: body,
+      ifUnmodifiedSince,
+      patch,
     });
 
     return res.json(updated);

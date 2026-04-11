@@ -256,17 +256,24 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
       pendingPatchRef.current = {};
       if (Object.keys(patch).length === 0) return;
       try {
+        const body = result.mergeUpdatedAt
+          ? { ...patch, mergeUpdatedAt: result.mergeUpdatedAt }
+          : patch;
         const { data } = await api.patch<AnalysisResult>(
           `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/merge`,
-          patch,
+          body,
         );
         setPatchError(null);
         onResultUpdated(data);
       } catch (err) {
-        const e = err as { response?: { data?: { error?: string; message?: string } }; message?: string };
-        const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Failed to save merge edit.';
-        console.error('[SkillAnalyzer] Failed to PATCH merge:', err);
-        setPatchError(msg);
+        const e = err as { response?: { status?: number; data?: { error?: string; message?: string } }; message?: string };
+        if (e?.response?.status === 409) {
+          setPatchError('This merge was edited in another session. Reload the page to see the latest version.');
+        } else {
+          const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Failed to save merge edit.';
+          console.error('[SkillAnalyzer] Failed to PATCH merge:', err);
+          setPatchError(msg);
+        }
       }
     }, 300);
   }
