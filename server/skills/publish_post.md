@@ -2,7 +2,7 @@
 name: Publish Post
 description: Submits an approved social media post for publishing (immediately or at a scheduled time) via the connected platform integration. Review-gated — requires human approval before execution.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

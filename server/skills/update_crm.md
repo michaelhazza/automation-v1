@@ -2,7 +2,7 @@
 name: Update CRM
 description: Writes contact or deal updates to the connected CRM. Review-gated — requires human approval before any data is written.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -15,6 +15,7 @@ skills:
   - write_workspace
   - read_codebase
   - request_approval
+  - read_inbox
   - classify_email
   - search_knowledge_base
   - draft_reply

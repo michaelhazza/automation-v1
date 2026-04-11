@@ -2,7 +2,7 @@
 name: Write Workspace
 description: Add an activity entry to a task.
 isActive: true
-visibility: basic
+visibility: none
 ---
 
 ## Parameters

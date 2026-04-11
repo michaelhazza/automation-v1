@@ -134,19 +134,27 @@ This creates all the tables in your PostgreSQL database.
 
 ---
 
-## Step 8 — Seed the System Agents
+## Step 8 — Run the Master Seed
 
 ```bash
-npx tsx scripts/seed-local.ts
+npm run seed
 ```
 
-This loads:
-- The system organisation
-- Your admin user
-- The 4 system agents (Orchestrator, BA, Dev, QA)
-- Skills and team template
+This runs `scripts/seed.ts` — the single master seed script. It loads, in five phases:
 
-**Safe to re-run** — it skips existing records and updates agents.
+1. **System bootstrap** — system organisation + admin user
+2. **System agents** — the 16 Automation OS company agents from `companies/automation-os/agents/`
+3. **Playbook Author** — the 17th system agent (Studio tool runner)
+4. **Playbook templates** — everything under `server/playbooks/*.playbook.ts` plus the portfolio-health-sweep template
+5. **Dev fixtures** — Breakout Solutions demo org + `michael@breakoutsolutions.com` org admin + `42macro-tracking` subaccount + Reporting Agent + integration placeholders, AND every system agent from phase 2 is activated in the org and linked through to the subaccount
+
+**Safe to re-run** — every phase upserts existing rows rather than skip-or-duplicate, so running it again after you've added agents or updated skill wiring re-applies the latest state without destroying real data. The one deliberate exception is `integration_connections`: those rows use insert-if-missing semantics so that real credentials filled in via the UI are never overwritten by placeholders.
+
+For production seeds (skip Phase 5 dev fixtures):
+
+```bash
+npm run seed:production
+```
 
 ---
 

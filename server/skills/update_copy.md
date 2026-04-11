@@ -2,7 +2,7 @@
 name: Update Copy
 description: Uploads approved ad copy to the connected ads platform, replacing or adding to existing copy. Review-gated — requires human approval before the copy change goes live.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

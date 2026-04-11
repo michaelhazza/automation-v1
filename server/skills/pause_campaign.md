@@ -2,7 +2,7 @@
 name: Pause Campaign
 description: Proposes pausing a campaign on the connected ads platform. Block-gated — always requires explicit human approval before execution.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

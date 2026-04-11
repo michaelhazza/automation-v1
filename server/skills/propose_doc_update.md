@@ -2,7 +2,7 @@
 name: Propose Doc Update
 description: Proposes a specific change to an existing documentation page — a diff-style proposal showing what would change and why. Review-gated — requires human approval before any documentation is modified.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -367,6 +367,10 @@ export const skillExecutor = {
         requireSubaccountContext(context, 'create_task');
         return executeWithActionAudit('create_task', input, context, () => executeCreateTask(input, context));
       }
+      case 'triage_intake': {
+        requireSubaccountContext(context, 'triage_intake');
+        return executeWithActionAudit('triage_intake', input, context, () => executeTriageIntake(input, context));
+      }
       case 'move_task':
         return executeWithActionAudit('move_task', input, context, () => executeMoveTask(input, context));
       case 'add_deliverable':
@@ -2146,6 +2150,305 @@ async function executeCreateTask(
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Failed to create task: ${errMsg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Triage Intake — capture and route ideas/bugs into the inbox
+//
+// Two modes:
+//   - capture: fast, judgement-free intake of one item. Builds a structured
+//              description and creates a task in the 'inbox' status column.
+//              Bugs that mention data corruption/data loss are auto-escalated
+//              to priority='urgent'.
+//   - triage:  scans the inbox for tasks lacking a triage disposition and
+//              returns a structured proposal list (type_inferred, suggested
+//              disposition, rationale). The skill is a *proposer*, not an
+//              applier — the caller (orchestrator or human) decides which
+//              dispositions to apply via move_task / update_task.
+//
+// Spec: server/skills/triage_intake.md
+// ---------------------------------------------------------------------------
+
+const DATA_LOSS_PATTERN =
+  /\b(data\s*loss|data\s*corruption|corrupted|lost\s+data|wrong\s+data\s+written|cannot\s+recover|deleted\s+(?:rows?|records?)|overwritten|stale\s+writes?)\b/i;
+
+const TRIAGE_DECISION_MARKER = 'Triage decision:';
+
+function buildIdeaDescription(args: {
+  source: string;
+  rawInput: string;
+  relatedTaskId?: string;
+}): string {
+  return [
+    `Task type: idea`,
+    `Origin: ${args.source}`,
+    `Related task: ${args.relatedTaskId ?? 'None'}`,
+    ``,
+    `Problem / Opportunity:`,
+    args.rawInput.trim(),
+    ``,
+    `Notes:`,
+    `Captured via triage_intake (capture mode). Awaiting triage disposition — the orchestrator or a human will assess scope, value, and routing in the next triage pass.`,
+  ].join('\n');
+}
+
+function buildBugDescription(args: {
+  source: string;
+  rawInput: string;
+  relatedTaskId?: string;
+  dataLossEscalated: boolean;
+}): string {
+  return [
+    `Task type: bug`,
+    `Origin: ${args.source}`,
+    `Related task: ${args.relatedTaskId ?? 'None'}`,
+    ``,
+    `Reported behaviour:`,
+    args.rawInput.trim(),
+    ``,
+    `Expected behaviour:`,
+    `(to be filled in during triage)`,
+    ``,
+    `Reproduction steps:`,
+    `(to be filled in during triage)`,
+    ``,
+    `Impact estimate:`,
+    `- Users affected: Unknown`,
+    `- Data impact: ${args.dataLossEscalated ? 'POSSIBLE DATA LOSS — escalated to urgent priority' : 'Unknown'}`,
+    `- Workaround exists: Unknown`,
+    args.dataLossEscalated
+      ? `\n⚠ AUTO-ESCALATED: data-loss/corruption keywords detected in raw input. Priority set to urgent. Human review required before fix work begins.`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildChoreDescription(args: {
+  source: string;
+  rawInput: string;
+  relatedTaskId?: string;
+}): string {
+  return [
+    `Task type: chore`,
+    `Origin: ${args.source}`,
+    `Related task: ${args.relatedTaskId ?? 'None'}`,
+    ``,
+    `Description:`,
+    args.rawInput.trim(),
+    ``,
+    `Notes:`,
+    `Captured via triage_intake (capture mode). Awaiting scheduling decision.`,
+  ].join('\n');
+}
+
+function inferTypeFromDescription(description: string | null): 'idea' | 'bug' | 'chore' | 'unknown' {
+  if (!description) return 'unknown';
+  const match = description.match(/^Task type:\s*(idea|bug|chore)/im);
+  return (match?.[1]?.toLowerCase() as 'idea' | 'bug' | 'chore' | undefined) ?? 'unknown';
+}
+
+function suggestDisposition(args: {
+  type: ReturnType<typeof inferTypeFromDescription>;
+  priority: string;
+  description: string | null;
+  title: string;
+}): { disposition: 'Defer' | 'Assess' | 'Schedule' | 'Close'; rationale: string } {
+  // Urgent items always get Schedule (they need to be acted on, not deferred)
+  if (args.priority === 'urgent') {
+    return {
+      disposition: 'Schedule',
+      rationale: 'Urgent priority — requires immediate scheduling, not deferral.',
+    };
+  }
+
+  // Bugs with data-loss markers — already escalated above. Ordinary bugs → Schedule.
+  if (args.type === 'bug') {
+    return {
+      disposition: 'Schedule',
+      rationale: 'Bug reports default to schedule for fix work — defer only after explicit assessment.',
+    };
+  }
+
+  // Chores → Schedule (small, predictable work)
+  if (args.type === 'chore') {
+    return {
+      disposition: 'Schedule',
+      rationale: 'Chore tasks are small and predictable — schedule directly without spec work.',
+    };
+  }
+
+  // Ideas → Assess (need BA evaluation before sizing)
+  if (args.type === 'idea') {
+    return {
+      disposition: 'Assess',
+      rationale: 'Idea/feature request — route to Business Analyst for scope and value assessment before scheduling.',
+    };
+  }
+
+  // Unknown type — default to Defer (safer than guessing)
+  return {
+    disposition: 'Defer',
+    rationale: 'Unknown task type — defer until reclassified or human reviews.',
+  };
+}
+
+async function executeTriageIntake(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const mode = String(input.mode ?? '');
+  if (mode !== 'capture' && mode !== 'triage') {
+    return { success: false, error: "mode must be 'capture' or 'triage'" };
+  }
+
+  // ── CAPTURE MODE ──────────────────────────────────────────────────────
+  if (mode === 'capture') {
+    const rawInput = String(input.raw_input ?? '').trim();
+    const inputType = String(input.input_type ?? '').toLowerCase();
+    const source = String(input.source ?? '').trim();
+    const relatedTaskId = input.related_task_id ? String(input.related_task_id) : undefined;
+
+    if (!rawInput) {
+      return { success: false, error: "'raw_input' is required in capture mode" };
+    }
+    if (inputType !== 'idea' && inputType !== 'bug' && inputType !== 'chore') {
+      return {
+        success: false,
+        error: "'input_type' must be one of: idea, bug, chore",
+      };
+    }
+    if (!source) {
+      return { success: false, error: "'source' is required in capture mode" };
+    }
+
+    // Detect data-loss escalation for bugs (per spec escalation rule)
+    const dataLossEscalated = inputType === 'bug' && DATA_LOSS_PATTERN.test(rawInput);
+
+    // Map intake type → runtime priority. Bugs with data-loss markers escalate
+    // to 'urgent'; everything else defaults to 'normal'. Triage mode is the
+    // place where priorities get adjusted further if needed.
+    const priority: TaskPriority = dataLossEscalated ? 'urgent' : 'normal';
+
+    // Build the structured description per the spec template
+    let description: string;
+    if (inputType === 'idea') {
+      description = buildIdeaDescription({ source, rawInput, relatedTaskId });
+    } else if (inputType === 'bug') {
+      description = buildBugDescription({ source, rawInput, relatedTaskId, dataLossEscalated });
+    } else {
+      description = buildChoreDescription({ source, rawInput, relatedTaskId });
+    }
+
+    // Title: first line of raw input, truncated. Capture mode is allowed to
+    // be lossy here — the structured description carries the full content.
+    const title = rawInput.split(/\n/, 1)[0]!.slice(0, MAX_TASK_TITLE_LENGTH).trim() || `${inputType} from ${source}`;
+
+    try {
+      const item = await taskService.createTask(
+        context.organisationId,
+        context.subaccountId!,
+        {
+          title,
+          description: description.slice(0, MAX_TASK_DESCRIPTION_LENGTH),
+          priority,
+          status: 'inbox',
+          createdByAgentId: context.agentId,
+        }
+      );
+
+      return {
+        success: true,
+        mode: 'capture' as const,
+        task_id: item.id,
+        title: item.title,
+        captured_type: inputType,
+        priority,
+        escalated: dataLossEscalated,
+        _created_task: true,
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: `Failed to capture task: ${errMsg}` };
+    }
+  }
+
+  // ── TRIAGE MODE ───────────────────────────────────────────────────────
+  // Scan the inbox for items lacking a triage disposition and return a
+  // structured proposal list. This skill does NOT apply dispositions —
+  // the caller (orchestrator or human) does that via move_task/update_task.
+  const scope = String(input.scope ?? 'all');
+  const relatedTaskId = input.related_task_id ? String(input.related_task_id) : undefined;
+
+  if (scope === 'single' && !relatedTaskId) {
+    return { success: false, error: "'related_task_id' is required when scope='single'" };
+  }
+
+  try {
+    const conditions = [
+      eq(tasks.subaccountId, context.subaccountId!),
+      eq(tasks.status, 'inbox'),
+      isNull(tasks.deletedAt),
+    ];
+    if (scope === 'single' && relatedTaskId) {
+      conditions.push(eq(tasks.id, relatedTaskId));
+    }
+
+    const inboxRows = await db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        description: tasks.description,
+        priority: tasks.priority,
+        createdAt: tasks.createdAt,
+      })
+      .from(tasks)
+      .where(and(...conditions));
+
+    // Filter out items that already carry a triage decision marker — those
+    // have been triaged in a previous pass and are awaiting application.
+    const untriaged = inboxRows.filter(
+      (row) => !row.description?.includes(TRIAGE_DECISION_MARKER)
+    );
+
+    const proposals = untriaged.map((row) => {
+      const type = inferTypeFromDescription(row.description);
+      const { disposition, rationale } = suggestDisposition({
+        type,
+        priority: row.priority,
+        description: row.description,
+        title: row.title,
+      });
+      return {
+        task_id: row.id,
+        title: row.title,
+        type_inferred: type,
+        priority: row.priority,
+        suggested_disposition: disposition,
+        rationale,
+      };
+    });
+
+    // Group counts for the summary block
+    const byDisposition = proposals.reduce<Record<string, number>>((acc, p) => {
+      acc[p.suggested_disposition] = (acc[p.suggested_disposition] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    return {
+      success: true,
+      mode: 'triage' as const,
+      scope,
+      scanned: inboxRows.length,
+      already_triaged: inboxRows.length - untriaged.length,
+      proposals_returned: proposals.length,
+      summary: byDisposition,
+      proposals,
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: `Failed to scan inbox for triage: ${errMsg}` };
   }
 }
 
