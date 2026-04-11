@@ -2,7 +2,7 @@
 name: Update Financial Record
 description: Writes a financial record update (budget entry, forecast adjustment, or note) to the connected accounting system. Review-gated — requires human approval before execution.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

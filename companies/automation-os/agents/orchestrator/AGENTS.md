@@ -13,6 +13,7 @@ maxToolCalls: 20
 skills:
   - read_workspace
   - write_workspace
+  - update_memory_block
   - create_task
   - move_task
   - reassign_task

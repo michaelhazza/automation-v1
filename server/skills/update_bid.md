@@ -2,7 +2,7 @@
 name: Update Bid
 description: Proposes a bid adjustment for a campaign or ad group on the connected ads platform. Review-gated — requires human approval before the change is applied.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

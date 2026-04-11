@@ -2,7 +2,7 @@
 name: Deliver Report
 description: Delivers an approved client report via the configured delivery channel (email, shared link, or portal). Review-gated — requires human approval before the report is sent to the client.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

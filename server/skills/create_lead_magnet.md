@@ -2,7 +2,7 @@
 name: Create Lead Magnet
 description: Produces a complete lead magnet asset (checklist, template, mini-guide, or scorecard) from a brief. Review-gated — the finalised asset requires human approval before being used in campaigns.
 isActive: true
-visibility: none
+visibility: basic
 ---
 
 ## Parameters

@@ -2,7 +2,7 @@
 name: Update Memory Block
 description: Update a shared memory block's content. Requires write permission and block ownership.
 isActive: true
-visibility: basic
+visibility: none
 ---
 
 ## Parameters
