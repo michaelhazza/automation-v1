@@ -1,5 +1,20 @@
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
+import { systemSkills } from '../db/schema/systemSkills.js';
+
+/** Best-effort string extraction for thrown values. Services in this codebase
+ *  throw plain objects of shape `{ statusCode, message }` (not Error
+ *  instances), so the standard `err instanceof Error ? err.message : String(err)`
+ *  pattern produces "[object Object]" for service errors. Try the message
+ *  field first, fall back to Error.message, then String coercion. */
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === 'string' && m.length > 0) return m;
+  }
+  return String(err);
+}
 import { skillAnalyzerJobs, skillAnalyzerResults } from '../db/schema/index.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
 import { skillParserService } from './skillParserService.js';
@@ -137,6 +152,7 @@ export async function getJob(
   // system_skills row and attach as matchedSkillContent. If the skill was
   // deleted between analysis and now, omit the field for that result (the
   // Review UI handles the missing field with a fallback notice — spec §7.4).
+  // Single batched query — avoid N+1 over getSkill().
   const matchedSkillIds = Array.from(
     new Set(
       rawResults
@@ -145,12 +161,26 @@ export async function getJob(
     ),
   );
   const matchedSkillsById = new Map<string, SystemSkill>();
-  for (const id of matchedSkillIds) {
-    try {
-      const skill = await systemSkillService.getSkill(id);
-      matchedSkillsById.set(id, skill);
-    } catch {
-      // 404 — skill was deleted after analysis. Leave out of the map.
+  if (matchedSkillIds.length > 0) {
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(inArray(systemSkills.id, matchedSkillIds));
+    for (const row of rows) {
+      const visibility =
+        row.visibility === 'none' || row.visibility === 'basic' || row.visibility === 'full'
+          ? row.visibility
+          : 'none';
+      matchedSkillsById.set(row.id, {
+        id: row.id,
+        slug: row.slug,
+        name: row.name,
+        description: row.description ?? '',
+        isActive: row.isActive,
+        visibility,
+        definition: row.definition as SystemSkill['definition'],
+        instructions: row.instructions ?? null,
+      });
     }
   }
 
@@ -388,6 +418,11 @@ export async function updateAgentProposal(
 
       const agent = await systemAgentService.getAgent(systemAgentId);
       const agentEmbedding = await agentEmbeddingService.refreshSystemAgentEmbedding(systemAgentId);
+      // Hash-only lookup is intentional. Per skill_embeddings.ts schema
+      // comment, sourceType reflects the LAST writer for a content hash and
+      // is provenance-only — filtering by sourceType here would be wrong
+      // because the same hash may have been re-written by a system or org
+      // path before the candidate path. Spec §5.2 candidateContentHash.
       const candidateEmbedding = await skillEmbeddingService.getByContentHash(row.candidateContentHash);
       if (!candidateEmbedding) {
         throw {
@@ -795,7 +830,7 @@ export async function executeApproved(params: {
           .where(eq(skillAnalyzerResults.id, result.id));
         updated++;
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = toErrorMessage(err);
         await failResult(result.id, errMsg);
       }
       continue;
@@ -826,12 +861,21 @@ export async function executeApproved(params: {
       }
       // Guard 3: slug uniqueness — block before opening the transaction so
       // we surface a clean error rather than a Postgres unique-violation.
-      const existing = await systemSkillService.getSkillBySlug(candidate.slug);
-      if (existing) {
-        await failResult(
-          result.id,
-          `slug '${candidate.slug}' already exists in system_skills — pick a different slug or update the existing row instead`,
-        );
+      // NOTE: getSkillBySlug filters out inactive rows; we need to check
+      // EVERY row regardless of isActive because slug is UNIQUE at the
+      // schema level. A retired (isActive=false) row with the same slug
+      // would slip past getSkillBySlug and explode at the constraint inside
+      // the transaction. Use a direct DB query that ignores isActive.
+      const existingRows = await db
+        .select({ id: systemSkills.id, isActive: systemSkills.isActive })
+        .from(systemSkills)
+        .where(eq(systemSkills.slug, candidate.slug))
+        .limit(1);
+      if (existingRows[0]) {
+        const msg = existingRows[0].isActive
+          ? `slug '${candidate.slug}' already exists in system_skills — pick a different slug or update the existing row instead`
+          : `slug '${candidate.slug}' already exists in system_skills as a retired (inactive) row — reactivate it or pick a different slug`;
+        await failResult(result.id, msg);
         continue;
       }
       // Open the per-result transaction. Inside: create the skill, then
@@ -919,7 +963,7 @@ export async function executeApproved(params: {
           .where(eq(skillAnalyzerResults.id, result.id));
         created++;
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = toErrorMessage(err);
         await failResult(result.id, errMsg);
       }
       continue;
