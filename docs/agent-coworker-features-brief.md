@@ -74,11 +74,26 @@ This is a single page component rendered at all three scopes, with queries narro
 
 One React component, three routes, same layout, different data scope. This mirrors how `AdminSkillsPage` / `SystemSkillsPage` already work.
 
-### Relationship to the existing `SystemActivityPage`
+### Relationship to the existing execution-history pages
 
-The current `SystemActivityPage` (`client/src/pages/SystemActivityPage.tsx`) is scoped to **process engine executions only** — it queries `/api/system/executions` and shows n8n / ghl / make / zapier / custom_webhook runs. It does not cover agent runs, the review queue, the inbox, health findings, or decisions. It's a legacy slice, not the same feature.
+The platform already has **two** execution-history pages, both scoped to **process engine runs only** (n8n / ghl / make / zapier / custom_webhook via `processes` + `executions`):
 
-**Recommended path:** rename and extend `SystemActivityPage` into the new Ops page. Engine executions remain as one panel; agent runs, review queue, inbox, findings, and decisions become additional panels. This avoids UI sprawl and gives operators one canonical "what's happening" surface. The alternative — building Ops net-new and leaving `SystemActivityPage` alongside it — ships faster but leaves two overlapping pages. Leaning toward extend-in-place.
+| Page | Route | API | Scope |
+|---|---|---|---|
+| `ExecutionHistoryPage` | `/executions` | `/api/executions` | Org — "all workflow runs for this org" |
+| `SystemActivityPage` | (system admin) | `/api/system/executions` | Platform — all orgs |
+
+Neither covers agent runs, the review queue, the inbox, health findings, or decisions. They are the legacy "workflow runs" slice of what an Ops Dashboard should cover.
+
+**This actually validates the scoping approach.** We already have the pattern of "same feature at org and system scope as sibling pages." Feature 1 extends that pattern to three scopes and adds the missing subaccount variant, and expands all three from "engine executions only" to full Ops coverage.
+
+**Recommended path:** extend `ExecutionHistoryPage` and `SystemActivityPage` in place, keeping the existing "Execution History" panel as one panel among many on the unified Ops page. Add the missing subaccount-scoped variant at the same time. All three routes render the same React component with the same panel layout, narrowed by scope:
+
+- `/subaccounts/:id/ops` (new) — single subaccount
+- `/executions` (extend in place) → becomes org-level Ops page
+- `/system/ops` (extend `SystemActivityPage`) — platform-level Ops page
+
+Each panel's data source is scope-narrowed at the API level, not the UI level.
 
 ### Problem it solves
 
@@ -287,6 +302,46 @@ They share infrastructure: embeddings, simulation harness, version history. They
 
 Skill Studio is not a replacement for Skill Analyzer. It's the missing refinement half.
 
+### How regressions are captured and stored (what Studio reads from)
+
+The regression capture pipeline already exists (Sprint 2 P1.2, migration 0083). Skill Studio is a consumer of this pipeline — it doesn't add to it. The existing flow:
+
+1. **Trigger.** A human rejects a review item via `reviewService.ts`. The service calls `queueService.enqueueRegressionCapture({ reviewItemId, organisationId })`.
+2. **Queue.** A pg-boss `regression-capture` job is enqueued.
+3. **Worker.** `regressionCaptureService.captureRegressionFromRejection()` runs asynchronously. It loads the review item, the linked action, the agent run, and the run snapshots.
+4. **Materialise.** `regressionCaptureServicePure.materialiseCapture()` builds a deterministic snapshot and inserts a row into `regression_cases`.
+
+**What gets stored (`regression_cases` columns):**
+
+| Column | Contents |
+|---|---|
+| `inputContractJson` | Materialised snapshot of the agent's state at rejection: system prompt, tool manifest, trimmed conversation transcript, run metadata |
+| `rejectedCallJson` | The tool call the human rejected: `{ name, args }` canonicalised |
+| `rejectionReason` | Reviewer's free-text note |
+| `inputContractHash` | sha256 of canonicalised contract — used to mark cases `stale` when the agent's contract drifts |
+| `rejectedCallHash` | sha256 of `${toolName}:${canonicalise(args)}` — the assertion key |
+| `status` | `active` / `retired` / `stale` |
+| `lastReplayedAt` / `lastReplayResult` / `consecutivePasses` | Populated by the replay harness |
+
+**Lifecycle:** per-agent ring buffer capped by `agents.regression_case_cap` (default `DEFAULT_REGRESSION_CASE_CAP` from `server/config/limits.ts`). When the cap is hit, the oldest `active` case is moved to `retired`. The suite always reflects the most recent rejections.
+
+**Best-effort capture:** if the source run, snapshot, or action was already pruned by retention when the job runs, the capture is silently skipped. Regression capture is additive, not on the critical review path.
+
+### Everyday usage flow — rejection to Studio display
+
+1. During normal operation, humans reject review items when an agent's proposed action is wrong.
+2. Each rejection auto-captures to `regression_cases` via the pg-boss job. **Zero operator effort.**
+3. The agent's recent rejections accumulate in the per-agent ring buffer.
+4. When the operator opens Skill Studio for `draft_report`, the `skill_read_regressions` skill queries `regression_cases` filtered by `agentId` (and optionally `rejectedCallJson->>'name' = 'draft_report'` for skill-specific filtering).
+5. The cards shown in the regression pane come directly from this table.
+6. `skill_simulate` replays the proposed new skill definition against each captured `inputContractJson` and checks whether the new version still emits a call matching `rejectedCallHash`. If the new call hash differs, the regression is marked "resolved by this fix" in the simulation output.
+
+### Gotcha to flag for build time — filtering by skill, not agent
+
+`regression_cases` is indexed by `agentId` and `rejectedCallHash`, not by skill slug. To list regressions "for this skill specifically," Studio has to filter by `rejectedCallJson->>'name' = <skillSlug>`. v1 can scan and filter in memory; if cardinality becomes a problem, add a functional index on `(agentId, (rejectedCallJson->>'name'))`.
+
+Also note: a single regression may span **multiple skill edits** before it's resolved — the first skill fix might resolve 3 of 4 captured failures, leaving the 4th which is actually a different issue entirely. Studio should classify unresolved regressions as `skill-fixable` / `master-prompt-fixable` / `bug` / `data` after simulation, so the operator knows which ones to come back to.
+
 ### Mirror of Playbook Studio
 
 Playbook Studio already solves the equivalent problem for playbooks. Skill Studio mirrors that pattern part-for-part:
@@ -417,6 +472,26 @@ Crucially, `slackWebhook.ts` already contains this exact comment: *"Future: publ
 
 6. **Threaded status updates.** Long-running tasks can post progress updates into their own thread, so the channel doesn't get flooded and follow-ups stay contextual.
 
+### How the bot knows what channels to listen to (+ DMs)
+
+Two layers — one controlled by Slack, one controlled by us.
+
+**Layer 1 — Slack controls event delivery.** The Slack Events API only delivers events for channels the bot has been explicitly added to (via `/invite @botname` by a workspace admin), plus any DM to the bot (`message.im`). There is no "configure which channels to listen to" on our side — we listen to whatever Slack delivers. This is Slack's authorisation boundary and we inherit it for free.
+
+**Layer 2 — we control which agent responds to each delivered event.** Routing is configured via an admin UI backed by a new `slack_channel_subscriptions` table mapping `(workspace_id, channel_id) → subaccount_agent_id`. Routing rules per event type:
+
+| Event type | Routing rule |
+|---|---|
+| `app_mention` (explicit `@AgentName` in a channel) | Parse the mention, look up the named agent in the caller's org, dispatch. Mention wins over channel default. |
+| `message.channels` / `message.groups` (any message in a channel the bot is in, no mention) | Silently ignored **unless** the channel has a default agent in `slack_channel_subscriptions`. If so, route there. Lets project channels have a default agent for follow-up messages in threads. |
+| `message.im` (DM to the bot) | **Always handled.** Primary 1:1 conversational surface. Routes to: (a) the agent named in an `@mention` if the DM starts with one, (b) the user's default subaccount agent otherwise, (c) fallback `"which agent did you want?"` prompt if nothing resolves. |
+
+**DMs are a first-class surface.** A team member can DM the bot directly without being in any channel, and get threaded replies. The `thread_ts` of the first message becomes the conversation id, and all subsequent messages in that thread belong to the same agent conversation via `slack_conversations`.
+
+**Channel subscription config UI.** New admin page (or a panel on an existing integrations page) where operators map channels to default agents. Only orgs with a linked Slack workspace see this. System admins can manage across all orgs; org admins manage their own org's mappings. Subaccount admins can configure only their own subaccount's channels.
+
+**Thread stickiness.** Once a thread starts with a given agent (via @mention or channel default), all subsequent messages in that thread route to the same agent, regardless of whether later messages also @mention. This prevents a single thread from flipping between agents mid-conversation.
+
 ### Tech sketch
 
 - **Event handling via the existing webhook + new dispatchers.** The existing `slackWebhook.ts` already verifies signatures, deduplicates, and normalises events. New work subscribes additional event types (`app_mention`, `message.im`, `message.channels`, `interactive.block_actions`) and publishes them to a pg-boss `slack-inbound` queue — exactly as anticipated by the TODO comment already in the code.
@@ -480,11 +555,22 @@ This feature is a **capability**, not a **workflow**. After v1 ships there is no
 
 - The skill is auto-injected into every agent run via `universalSkills.ts`, same as `read_data_source` and `update_memory_block`.
 - Agents decide when to call it based on their own reasoning — no human trigger.
-- There is no user-facing UI. The only visibility is via the standard tool-call trace in `RunTraceViewerPage` for debugging.
+- There is no user-facing UI. The only visibility is via the standard tool-call trace in `RunTraceViewerPage`.
 - No background batch jobs. Retrieval happens in-line when the agent calls the skill.
 - No operator rituals. You turn it on, and from that moment every agent silently gains the ability to search the team's collective memory whenever it decides that's useful.
 
 Humans are not in the loop for this feature at all after the initial deploy. Agents are the sole consumer.
+
+### Observability — how you see if/when agents are using it
+
+Because it's a normal skill call, every invocation is visible through existing observability infrastructure with zero additional work:
+
+- **Per-run trace:** every call to `search_agent_history` creates a row in the `actions` table and renders in `RunTraceViewerPage` alongside the rest of the run's tool calls. You see the query, the results returned, the duration, and the cost.
+- **Agent run history:** `SessionLogCardList` and `AgentRunHistoryPage` already display tool calls per run — cross-agent memory searches show up in the same list.
+- **Usage queries:** "How often are agents using this?" → query `actions` table by action name. "Which agent searched for what yesterday?" → filter by `agentRunId` + action name. No new telemetry needed.
+- **Cost attribution:** the skill goes through `runCostBreaker` like every other external-call skill, so per-run cost breakdown captures memory search spend automatically in `costAggregates`.
+
+Nothing new needs to be built for observability — it comes free with the existing trace and usage infrastructure.
 
 ### The skill
 
