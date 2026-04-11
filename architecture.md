@@ -223,6 +223,110 @@ Agents can spawn sub-agents via the `spawn_sub_agents` skill.
 - Sub-agent errors are bounded — parent run continues with error context
 - Handoff jobs enqueued to `agent-handoff-run` queue in pg-boss
 
+> **Note on terminology:** "Handoff" in this section refers to the parent → child sub-agent spawn. The "structured run handoff document" (next section) is a different concept — it is the JSON summary an agent emits when its OWN run finishes, used to seed continuity for the next run of the same agent.
+
+---
+
+## Run Continuity & Workspace Health
+
+A continuity layer that lets agents "remember" prior runs and surfaces planning state to humans, plus a workspace health audit subsystem that flags configuration drift.
+
+### Structured run handoff
+
+Every completed run produces a JSON handoff document persisted to `agent_runs.handoffJson` (jsonb). Built best-effort by `buildHandoffForRun()` after the run completion is committed — a build failure logs and leaves the column null but never fails the run.
+
+Service: `server/services/agentRunHandoffService.ts` (impure, Drizzle) + `server/services/agentRunHandoffServicePure.ts` (pure shape derivation, fully unit-tested).
+
+Shape:
+
+```ts
+interface HandoffJson {
+  accomplished: string[];        // bullet list of what the run did
+  blockers: string[];            // unresolved issues
+  nextRecommendedAction: string; // single-sentence "do this next"
+  openQuestions: string[];       // anything pending HITL
+  artefacts: { kind: string; ref: string; label: string }[];
+}
+```
+
+Endpoints:
+
+- `GET /api/org/agents/:agentId/latest-handoff` — most recent handoff for the org-scoped agent
+- `GET /api/subaccounts/:subaccountId/agents/:agentId/latest-handoff` — same, scoped to a subaccount
+- `getLatestHandoffForAgent(agentId, orgId, subaccountId?)` — service helper used by future continuity flows
+
+Frontend: `client/src/components/HandoffCard.tsx` is rendered at the top of `RunTraceViewerPage` whenever `run.handoffJson` is populated, and `client/src/components/SessionLogCardList.tsx` extracts the `nextRecommendedAction` for the "Next: …" line on each card.
+
+### Planning prelude
+
+Before the main agentic loop runs, every agent now executes a planning prelude that produces a structured `plan_json` blob persisted to `agent_runs.planJson`. The plan is a list of intended tool calls with reasons:
+
+```ts
+interface PlanJson {
+  actions: { tool: string; reason: string }[];
+}
+```
+
+Frontend: `client/src/components/ExecutionPlanPane.tsx` renders the plan as a right-side pane on `RunTraceViewerPage` with progress derived by cross-referencing `plan_json` against `toolCallsLog`. The pure helper `client/src/lib/runPlanView.ts` computes "done / current / pending" status per planned action.
+
+### Session log surfacing
+
+`SessionLogCardList` is a compact, scannable run-history component used in two places:
+
+1. `AgentChatPage` — shows the most recent runs of the active agent inline so the user can see "what has this agent been doing"
+2. `AgentRunHistoryPage` (`/admin/agents/:agentId/runs` and `/admin/subaccounts/:subaccountId/agents/:agentId/runs`) — full-page paginated history with status filter
+
+The status filter is wired through to `agentActivityService.listRuns({ status })`. The two new history routes (`/api/org/agents/:agentId/runs` and `/api/subaccounts/:subaccountId/agents/:agentId/runs`) accept `status`, `limit`, `offset` query params.
+
+`agentActivityService.listRuns()` now also returns `handoffJson` in each row payload so the cards can render the "Next: …" line without a per-run fetch.
+
+### Workspace health audit
+
+A scheduled audit subsystem that surfaces configuration drift and operational issues across an org's subaccounts.
+
+**Schema:** `health_findings` table (resourceKind, resourceId, detector, severity, message, recommendation, detectedAt, resolvedAt). Findings are deduped by `(orgId, detector, resourceKind, resourceId)`.
+
+**Detector framework:** `server/services/workspaceHealth/detectors/`. Each detector exports:
+
+```ts
+{
+  name: string;            // unique key, e.g. 'agent_no_recent_runs'
+  severity: 'info' | 'warning' | 'critical';
+  detect(orgId, db): Promise<DetectedFinding[]>;
+}
+```
+
+Currently shipping detectors:
+
+| Detector | Severity | Flags |
+|---|---|---|
+| `agentNoRecentRuns` | warning | active agents with no run in the last 14 days |
+| `processBrokenConnectionMapping` | critical | triggers/processes pointing at deleted connections |
+| `processNoEngine` | warning | processes with no engine assigned |
+| `subaccountAgentNoSchedule` | info | agents with no scheduled tasks AND no triggers |
+| `subaccountAgentNoSkills` | warning | agents with zero enabled skills |
+| `systemAgentLinkNeverSynced` | info | system-managed agents that never received their first masterPrompt sync |
+
+Detectors are registered via `server/services/workspaceHealth/detectors/index.ts` — adding a new detector means dropping a file in the detectors folder and re-exporting it from the index.
+
+**Service:** `workspaceHealthService.ts` (impure orchestrator) + `workspaceHealthServicePure.ts` (pure dedup/upsert decision logic, unit-tested).
+
+- `runAudit(orgId)` — runs all detectors, reconciles findings (insert new, mark resolved if no longer detected)
+- `listActiveFindings(orgId)` — lists unresolved findings ordered by severity then detectedAt
+- `resolveFinding(id, orgId)` — manual resolve
+
+**Routes:** `server/routes/workspaceHealth.ts`
+
+- `POST /api/org/health-audit/run` — `org.health_audit.view`
+- `GET  /api/org/health-audit/findings` — `org.health_audit.view`
+- `POST /api/org/health-audit/findings/:id/resolve` — `org.health_audit.resolve`
+
+The view/resolve permission split is intentional — read-only stakeholders can browse findings but cannot dismiss them.
+
+**Frontend:** `client/src/pages/AdminHealthFindingsPage.tsx` lists findings grouped by severity. The "Mark resolved" button is hidden for users without `org.health_audit.resolve` (honoring `__system_admin__` / `__org_admin__` sentinels from `/api/my-permissions`). `client/src/components/HealthAuditWidget.tsx` renders a compact summary on the dashboard.
+
+> ⚠️ **Known UI gap:** `AdminHealthFindingsPage` is registered in the router but currently only reachable via the dashboard widget — no sidebar nav entry. See "Pre-testing audit" notes in commit history.
+
 ---
 
 ## Idempotency Keys

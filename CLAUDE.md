@@ -274,8 +274,8 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ## Current focus
 
-**In-flight spec:** `docs/brain-tree-os-adoption-spec.md`
-**Active items:** P1, P2, P3, P4, P6 (P5 deferred)
+**In-flight spec:** none
+**Active items:** none
 
 This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
 
