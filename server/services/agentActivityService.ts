@@ -54,6 +54,10 @@ export const agentActivityService = {
       runType: run.runType,
       status: run.status,
       summary: run.summary,
+      // Brain Tree OS adoption P1 — surface the structured handoff in the
+      // listing payload so the session log card can render the "Next: …"
+      // line without a per-run fetch.
+      handoffJson: run.handoffJson,
       totalToolCalls: run.totalToolCalls,
       totalTokens: run.totalTokens,
       tasksCreated: run.tasksCreated,

@@ -131,11 +131,12 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
-    const { limit, offset } = req.query;
+    const { limit, offset, status } = req.query;
 
     const runs = await agentActivityService.listRuns({
       organisationId: req.orgId!,
       agentId,
+      status: typeof status === 'string' && status.length > 0 ? status : undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -153,12 +154,13 @@ router.get(
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    const { limit, offset } = req.query;
+    const { limit, offset, status } = req.query;
 
     const runs = await agentActivityService.listRuns({
       organisationId: req.orgId!,
       subaccountId,
       agentId,
+      status: typeof status === 'string' && status.length > 0 ? status : undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -186,6 +188,40 @@ router.get(
   asyncHandler(async (req, res) => {
     const chain = await agentActivityService.getRunChain(req.params.id, req.orgId!);
     res.json(chain);
+  })
+);
+
+// ─── Brain Tree OS adoption P1 — latest handoff for an agent ─────────────────
+
+router.get(
+  '/api/org/agents/:agentId/latest-handoff',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { getLatestHandoffForAgent } = await import('../services/agentRunHandoffService.js');
+    const result = await getLatestHandoffForAgent({
+      agentId: req.params.agentId,
+      organisationId: req.orgId!,
+      subaccountId: null,
+    });
+    res.json(result);
+  })
+);
+
+router.get(
+  '/api/subaccounts/:subaccountId/agents/:agentId/latest-handoff',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const { getLatestHandoffForAgent } = await import('../services/agentRunHandoffService.js');
+    const result = await getLatestHandoffForAgent({
+      agentId,
+      organisationId: req.orgId!,
+      subaccountId,
+    });
+    res.json(result);
   })
 );
 

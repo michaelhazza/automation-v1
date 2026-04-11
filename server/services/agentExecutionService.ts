@@ -178,6 +178,15 @@ export interface AgentRunRequest {
    * initiating user. Review finding #3.
    */
   userId?: string;
+  /**
+   * Brain Tree OS adoption P1 — when true, the executor looks up the most
+   * recent terminal run with a non-null handoff for the same agent and
+   * scope, and injects its handoff into the initial message under a
+   * "## Previous Session" block. Default false. Only manual / continue-from
+   * UX paths should set this to true; scheduled and triggered runs should
+   * leave it false to avoid stale-context poisoning.
+   */
+  seedFromPreviousRun?: boolean;
 }
 
 export interface AgentRunResult {
@@ -1012,6 +1021,25 @@ export const agentExecutionService = {
         updatedAt: new Date(),
       }).where(eq(agentRuns.id, run.id));
 
+      // Brain Tree OS adoption P1 — build the structured handoff document
+      // and persist it. Best-effort: a build failure logs and leaves the
+      // column null. The run completion above is the source-of-truth state
+      // change; this is a follow-up enrichment.
+      try {
+        const { buildHandoffForRun } = await import('./agentRunHandoffService.js');
+        const handoff = await buildHandoffForRun(run.id, request.organisationId);
+        if (handoff !== null) {
+          await db.update(agentRuns)
+            .set({ handoffJson: handoff })
+            .where(eq(agentRuns.id, run.id));
+        }
+      } catch (err) {
+        logger.warn('agent_runs.handoff_build_failed', {
+          runId: run.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       // H-5: upsert toolCallsLog into the snapshot table
       await db.insert(agentRunSnapshots)
         .values({ runId: run.id, toolCallsLog: loopResult.toolCallsLog })
@@ -1537,7 +1565,32 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     timeoutMs,
   });
 
-  const initialMessage = buildInitialMessage(request);
+  // Brain Tree OS adoption P1 — optional previous-session seeding.
+  // When the caller passes seedFromPreviousRun=true (manual / continue-from
+  // UX paths), look up the most recent handoff and prepend it. Best-effort:
+  // any failure logs and skips the seeding.
+  let previousSessionBlock: string | null = null;
+  if (request.seedFromPreviousRun) {
+    try {
+      const { getLatestHandoffForAgent } = await import('./agentRunHandoffService.js');
+      const previous = await getLatestHandoffForAgent({
+        agentId: request.agentId,
+        organisationId: request.organisationId,
+        subaccountId: request.subaccountId ?? null,
+        excludeRunId: runId,
+      });
+      if (previous) {
+        previousSessionBlock = formatPreviousSessionBlock(previous.handoff);
+      }
+    } catch (err) {
+      logger.warn('agent_runs.seed_previous_handoff_failed', {
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const initialMessage = buildInitialMessage(request, previousSessionBlock);
   const messages: LLMMessage[] = [{ role: 'user', content: initialMessage }];
 
   let lastTextContent = '';
@@ -2512,16 +2565,55 @@ function buildAutonomousInstructions(request: AgentRunRequest, targetItem: Recor
   return parts.join('\n');
 }
 
-function buildInitialMessage(request: AgentRunRequest): string {
+function buildInitialMessage(request: AgentRunRequest, previousSessionBlock?: string | null): string {
+  let base: string;
   if (request.taskId) {
-    return `You have a task assigned to you. Please work on it now. The task details are in your system context above.`;
+    base = `You have a task assigned to you. Please work on it now. The task details are in your system context above.`;
+  } else {
+    const messages: Record<string, string> = {
+      scheduled: 'This is your scheduled run. Check the board, review any tasks assigned to you, and do your job. Take actions based on your role and current board state.',
+      manual: 'You have been manually triggered. Check the board and take appropriate actions based on your role.',
+      triggered: 'You have been triggered by an event. Check the trigger context and board, then take appropriate actions.',
+    };
+    base = messages[request.runType] ?? messages.manual;
   }
 
-  const messages: Record<string, string> = {
-    scheduled: 'This is your scheduled run. Check the board, review any tasks assigned to you, and do your job. Take actions based on your role and current board state.',
-    manual: 'You have been manually triggered. Check the board and take appropriate actions based on your role.',
-    triggered: 'You have been triggered by an event. Check the trigger context and board, then take appropriate actions.',
-  };
+  // Brain Tree OS adoption P1 — when seedFromPreviousRun is enabled and the
+  // caller fetched a previous handoff, prepend a "Previous Session" block so
+  // the agent sees its own last handoff before the new instruction.
+  if (previousSessionBlock) {
+    return `${previousSessionBlock}\n\n${base}`;
+  }
+  return base;
+}
 
-  return messages[request.runType] ?? messages.manual;
+/**
+ * Format an AgentRunHandoffV1 as a "Previous Session" markdown block for
+ * injection into the initial user message. Imported by runAgenticLoop when
+ * `seedFromPreviousRun` is set on the request.
+ */
+function formatPreviousSessionBlock(handoff: import('./agentRunHandoffServicePure.js').AgentRunHandoffV1): string {
+  const lines: string[] = ['## Previous Session', ''];
+  if (handoff.accomplishments.length > 0) {
+    lines.push('**Accomplishments:**');
+    for (const a of handoff.accomplishments) lines.push(`- ${a}`);
+    lines.push('');
+  }
+  if (handoff.decisions.length > 0) {
+    lines.push('**Decisions:**');
+    for (const d of handoff.decisions) {
+      lines.push(d.rationale ? `- ${d.decision} (because ${d.rationale})` : `- ${d.decision}`);
+    }
+    lines.push('');
+  }
+  if (handoff.blockers.length > 0) {
+    lines.push('**Blockers:**');
+    for (const b of handoff.blockers) lines.push(`- [${b.severity}] ${b.blocker}`);
+    lines.push('');
+  }
+  if (handoff.nextRecommendedAction) {
+    lines.push(`**Next recommended action:** ${handoff.nextRecommendedAction}`);
+    lines.push('');
+  }
+  return lines.join('\n').trim();
 }

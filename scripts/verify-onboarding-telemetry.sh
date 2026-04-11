@@ -3,6 +3,26 @@ set -euo pipefail
 
 # Validates that key onboarding lifecycle endpoints exist for telemetry instrumentation in Automation OS
 
+# jq on Windows (winget binary) under Git Bash has two portability hazards:
+#   (1) CRLF line endings on stdout — break bash word-splitting on captured
+#       output (each token ends up with a trailing \r).
+#   (2) MSYS auto-converts Unix-style argv tokens (e.g. `--arg p
+#       "/api/engines"`) to Windows paths, mangling the comparison value.
+# Solution: convert positional file args to Windows native form via cygpath,
+# disable global path conv, then strip \r. No-op on Linux/macOS.
+jq() {
+  if command -v cygpath >/dev/null 2>&1; then
+    local args=()
+    local a
+    for a in "$@"; do
+      if [ -f "$a" ]; then args+=("$(cygpath -m "$a")"); else args+=("$a"); fi
+    done
+    MSYS_NO_PATHCONV=1 command jq "${args[@]}" | tr -d '\r'
+  else
+    command jq "$@" | tr -d '\r'
+  fi
+}
+
 classify_and_exit() {
   local severity=$1
   local message=$2

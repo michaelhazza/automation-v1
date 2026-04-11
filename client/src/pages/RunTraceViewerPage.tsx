@@ -1,9 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import TraceChainSidebar from '../components/TraceChainSidebar';
 import TraceChainTimeline from '../components/TraceChainTimeline';
+import HandoffCard from '../components/HandoffCard';
+import ExecutionPlanPane from '../components/ExecutionPlanPane';
+import { StatusBadge } from '../lib/statusBadge';
+import { formatDuration } from '../lib/formatDuration';
 
 interface ToolCallEntry {
   tool?: string;
@@ -32,10 +36,29 @@ interface ContextSourceSnapshotEntry {
   exclusionReason: 'budget_exceeded' | 'override_suppressed' | 'lazy_not_rendered' | null;
 }
 
+// Brain Tree OS adoption P1 — handoff document shape (mirrors AgentRunHandoffV1)
+interface AgentRunHandoff {
+  version: 1;
+  accomplishments: string[];
+  decisions: Array<{ decision: string; rationale: string }>;
+  blockers: Array<{ blocker: string; severity: 'low' | 'medium' | 'high' }>;
+  nextRecommendedAction: string | null;
+  keyArtefacts: Array<{ kind: string; id: string | null; label: string }>;
+  generatedAt: string;
+  runStatus: string;
+  durationMs: number | null;
+}
+
+// Brain Tree OS adoption P2 — plan_json shape from the planning prelude
+interface RunPlanJson {
+  actions?: Array<{ tool: string; reason: string }>;
+}
+
 interface RunDetail {
   id: string;
   organisationId: string;
-  subaccountId: string;
+  // Brain Tree OS adoption — org-scoped runs (no subaccount) have null here.
+  subaccountId: string | null;
   agentId: string;
   subaccountAgentId: string;
   agentName: string | null;
@@ -72,33 +95,11 @@ interface RunDetail {
   createdAt: string;
   updatedAt: string;
   contextSourcesSnapshot: ContextSourceSnapshotEntry[] | null;
-}
-
-const STATUS_BADGE: Record<string, string> = {
-  completed:       'bg-emerald-50 text-emerald-700 border-emerald-200',
-  failed:          'bg-red-50 text-red-700 border-red-200',
-  running:         'bg-blue-50 text-blue-700 border-blue-200',
-  pending:         'bg-slate-100 text-slate-600 border-slate-200',
-  timeout:         'bg-amber-50 text-amber-700 border-amber-200',
-  cancelled:       'bg-slate-100 text-slate-400 border-slate-200',
-  loop_detected:   'bg-amber-100 text-amber-800 border-amber-200',
-  budget_exceeded: 'bg-amber-100 text-amber-800 border-amber-200',
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const cls = STATUS_BADGE[status] ?? STATUS_BADGE.pending;
-  return (
-    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[12px] font-semibold border ${cls}`}>
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms == null) return '--';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60_000).toFixed(1)}m`;
+  // Brain Tree OS adoption P1
+  handoffJson: AgentRunHandoff | null;
+  // Brain Tree OS adoption P2
+  planJson: RunPlanJson | null;
+  runResultStatus: 'success' | 'partial' | 'failed' | null;
 }
 
 function formatTimestamp(ts: string | null): string {
@@ -230,6 +231,20 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
     }
   }, [navigate, subaccountId]);
 
+  // Brain Tree OS adoption P2 — ref to the tool-calls section for scroll-to.
+  const toolCallsRef = useRef<HTMLDivElement | null>(null);
+  const handleSelectToolCallFromPlan = useCallback((index: number) => {
+    if (toolCallsRef.current) {
+      toolCallsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Best-effort: also flash the matched tool-call card.
+      const card = toolCallsRef.current.querySelector(`[data-tool-call-index="${index}"]`);
+      if (card) {
+        card.classList.add('ring-2', 'ring-indigo-400');
+        setTimeout(() => card.classList.remove('ring-2', 'ring-indigo-400'), 1500);
+      }
+    }
+  }, []);
+
   if (loading) {
     return (
       <div className="animate-[fadeIn_0.2s_ease-out_both]">
@@ -252,16 +267,23 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   const toolCalls: ToolCallEntry[] = Array.isArray(run.toolCallsLog) ? run.toolCallsLog : [];
 
   return (
-    <div className="flex animate-[fadeIn_0.2s_ease-out_both]">
+    <div className="flex gap-4 animate-[fadeIn_0.2s_ease-out_both]">
       <TraceChainSidebar runId={runId!} onSelectRun={handleSelectRun} />
       <div className="flex-1 max-w-[960px] mx-auto">
       <div className="mb-4 text-[13px] text-slate-500 flex items-center gap-1.5">
-        <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
-          {run.subaccountName ?? 'Workspace'}
-        </Link>
+        {run.subaccountId ? (
+          <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
+            {run.subaccountName ?? 'Workspace'}
+          </Link>
+        ) : (
+          <span className="font-medium text-slate-600">Org</span>
+        )}
         <span>/</span>
         <span>Run Trace</span>
       </div>
+
+      {/* Brain Tree OS adoption P1 — handoff card at the top of the main content. */}
+      {run.handoffJson && <HandoffCard handoff={run.handoffJson} />}
 
       {chainRuns.length > 1 && (
         <div className="bg-white rounded-xl border border-slate-200 px-5 py-4 mb-4">
@@ -344,17 +366,21 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       )}
 
       {toolCalls.length > 0 && (
-        <CollapsibleSection
-          title="Tool Calls Timeline"
-          defaultOpen
-          badge={<span className="text-[11px] font-semibold text-white bg-indigo-600 px-2 py-0.5 rounded-full ml-2">{toolCalls.length}</span>}
-        >
-          <div className="mt-3 flex flex-col gap-2.5">
-            {toolCalls.map((tc, i) => (
-              <ToolCallCard key={i} index={i} toolName={tc.tool ?? tc.name ?? 'unknown'} entry={tc} subaccountId={run.subaccountId} />
-            ))}
-          </div>
-        </CollapsibleSection>
+        <div ref={toolCallsRef}>
+          <CollapsibleSection
+            title="Tool Calls Timeline"
+            defaultOpen
+            badge={<span className="text-[11px] font-semibold text-white bg-indigo-600 px-2 py-0.5 rounded-full ml-2">{toolCalls.length}</span>}
+          >
+            <div className="mt-3 flex flex-col gap-2.5">
+              {toolCalls.map((tc, i) => (
+                <div key={i} data-tool-call-index={i} className="rounded-lg transition-shadow">
+                  <ToolCallCard index={i} toolName={tc.tool ?? tc.name ?? 'unknown'} entry={tc} subaccountId={run.subaccountId} />
+                </div>
+              ))}
+            </div>
+          </CollapsibleSection>
+        </div>
       )}
 
       {(run.status === 'failed' || run.errorMessage) && (
@@ -395,11 +421,21 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
 
       <div className="h-10" />
       </div>
+      {/* Brain Tree OS adoption P2 — execution plan / tool call right pane.
+          The component itself handles the responsive xl:block hide-on-narrow. */}
+      <ExecutionPlanPane
+        run={{
+          status: run.status,
+          planJson: run.planJson,
+          toolCallsLog: run.toolCallsLog,
+        }}
+        onSelectToolCall={handleSelectToolCallFromPlan}
+      />
     </div>
   );
 }
 
-function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number; toolName: string; entry: ToolCallEntry; subaccountId: string }) {
+function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number; toolName: string; entry: ToolCallEntry; subaccountId: string | null }) {
   const [showInput, setShowInput] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
 
@@ -414,7 +450,7 @@ function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number;
         </div>
         <div className="flex items-center gap-2">
           {entry.durationMs != null && <span className="text-[11.5px] text-slate-500 font-medium">{formatDuration(entry.durationMs)}</span>}
-          {entry.actionId && (
+          {entry.actionId && subaccountId && (
             <Link to={`/admin/subaccounts/${subaccountId}/workspace`} className="text-[11px] text-indigo-600 font-semibold no-underline bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">action</Link>
           )}
         </div>

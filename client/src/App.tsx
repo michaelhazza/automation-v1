@@ -67,6 +67,9 @@ const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
 const SubaccountAgentEditPage = lazy(() => import('./pages/SubaccountAgentEditPage'));
 const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
+const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
+const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
+const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 
 function PageLoader() {
   return (
@@ -207,6 +210,10 @@ export default function App() {
             <Route path="/admin/org-agent-configs" element={<Navigate to="/admin/agents?tab=org-execution" replace />} />
             <Route path="/admin/hierarchy-templates" element={<Navigate to="/admin/agents?tab=team-templates" replace />} />
             <Route path="/admin/connectors" element={<Navigate to="/admin/mcp-servers" replace />} />
+            {/* Workspace health audit findings */}
+            <Route path="/admin/health-findings" element={<AdminHealthFindingsPage user={user!} />} />
+            {/* Per-subaccount action audit log */}
+            <Route path="/admin/subaccounts/:subaccountId/actions" element={<AdminActionLogPage user={user!} />} />
           </Route>
 
           <Route element={<SystemAdminGuard user={user} />}>
@@ -252,6 +259,9 @@ export default function App() {
           {/* AI Agents */}
           <Route path="/agents" element={<Navigate to="/" replace />} />
           <Route path="/agents/:id" element={<AgentChatPage user={user!} />} />
+          {/* Brain Tree OS adoption P3 — agent run history */}
+          <Route path="/agents/:agentId/runs" element={<AgentRunHistoryPage user={user!} />} />
+          <Route path="/admin/subaccounts/:subaccountId/agents/:agentId/runs" element={<AgentRunHistoryPage user={user!} />} />
 
           {/* Client portal routes */}
           <Route path="/portal" element={<PortalLandingPage user={user!} />} />

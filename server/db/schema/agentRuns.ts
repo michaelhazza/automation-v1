@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { AgentRunHandoffV1 } from '../../services/agentRunHandoffServicePure';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -115,6 +116,12 @@ export const agentRuns = pgTable(
     // Sprint 5 P4.3: Plan emitted during the planning prelude for complex runs.
     planJson: jsonb('plan_json'),
 
+    // Brain Tree OS adoption P1 (migration 0095) — structured handoff document
+    // produced when the run reaches a terminal state. The shape is versioned;
+    // see AgentRunHandoffV1 in server/services/agentRunHandoffServicePure.ts.
+    // Reads must tolerate null (legacy runs) and unknown future fields.
+    handoffJson: jsonb('handoff_json').$type<AgentRunHandoffV1 | null>(),
+
     // Context tracking
     systemPromptTokens: integer('system_prompt_tokens').notNull().default(0),
 
@@ -163,6 +170,13 @@ export const agentRuns = pgTable(
     playbookStepRunIdx: index('agent_runs_playbook_step_run_id_idx')
       .on(table.playbookStepRunId)
       .where(sql`${table.playbookStepRunId} IS NOT NULL`),
+    // Brain Tree OS adoption P1 (migration 0095) — supports the
+    // "latest handoff for this agent" lookup used by getLatestHandoffForAgent
+    // and the seedFromPreviousRun read path. Partial so the index stays
+    // bounded — only runs that have produced a handoff are indexed.
+    latestHandoffIdx: index('agent_runs_latest_handoff_idx')
+      .on(table.agentId, table.subaccountId, table.createdAt)
+      .where(sql`${table.handoffJson} IS NOT NULL`),
   })
 );
 

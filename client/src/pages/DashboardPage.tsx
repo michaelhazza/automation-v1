@@ -4,6 +4,7 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import MetricCard from '../components/MetricCard';
 import { RunActivityChart } from '../components/ActivityCharts';
+import HealthAuditWidget from '../components/HealthAuditWidget';
 
 interface Agent { id: string; name: string; description?: string; icon?: string; status: string; }
 interface Execution {
@@ -199,6 +200,11 @@ export default function DashboardPage({ user }: { user: User }) {
       {user.role === 'system_admin' && (
         <QueueHealthSummary />
       )}
+
+      {/* ── Brain Tree OS adoption P4 — workspace health widget ────────────── */}
+      <div className="mb-6">
+        <HealthAuditWidget />
+      </div>
 
       {/* ── Run activity chart ─────────────────────────────────────────────── */}
       {daily.length > 0 && (

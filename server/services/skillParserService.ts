@@ -473,6 +473,7 @@ async function parseFromDownloadUrl(url: string): Promise<ParsedSkill[]> {
     try {
       return await parseZipFile(tmpPath);
     } finally {
+      // guard-ignore-next-line: no-silent-failures reason="fire-and-forget temp file cleanup; stale temp files are harmless and the request must not fail on cleanup error"
       await fs.unlink(tmpPath).catch(() => {});
     }
   }

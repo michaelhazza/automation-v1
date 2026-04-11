@@ -1,8 +1,25 @@
 import React, { useEffect, useState, useRef, useCallback, KeyboardEvent } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
+import SessionLogCardList, { type SessionLogRun } from '../components/SessionLogCardList';
+import { relativeTime } from '../lib/relativeTime';
+
+interface AgentRunHandoff {
+  version: 1;
+  accomplishments: string[];
+  decisions: Array<{ decision: string; rationale: string }>;
+  blockers: Array<{ blocker: string; severity: 'low' | 'medium' | 'high' }>;
+  nextRecommendedAction: string | null;
+  keyArtefacts: Array<{ kind: string; id: string | null; label: string }>;
+}
+
+interface LatestHandoffResponse {
+  runId: string;
+  handoff: AgentRunHandoff;
+  createdAt: string;
+}
 
 interface Agent {
   id: string;
@@ -147,6 +164,7 @@ const STARTERS = [
 
 export default function AgentChatPage({ user: _user }: { user: User }) {
   const { id: agentId } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [agent, setAgent] = useState<Agent | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -158,6 +176,45 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
   const [sending, setSending] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [error, setError] = useState('');
+  // Recent runs sidebar section
+  const [recentRuns, setRecentRuns] = useState<SessionLogRun[]>([]);
+  // Latest structured handoff from a previous run (for the "Continue from
+  // last session" card). Null until loaded; null after load if no prior
+  // run with a handoff exists.
+  const [latestHandoff, setLatestHandoff] = useState<LatestHandoffResponse | null>(null);
+
+  // Load recent runs for this agent (org-scope). Refreshed when WebSocket
+  // signals a run completion.
+  const loadRecentRuns = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      const res = await api.get(`/api/org/agents/${agentId}/runs`, { params: { limit: 10 } });
+      setRecentRuns(res.data ?? []);
+    } catch {
+      // Endpoint may 403 if org-level config doesn't exist for this agent —
+      // silently treat as no recent runs.
+      setRecentRuns([]);
+    }
+  }, [agentId]);
+
+  const loadLatestHandoff = useCallback(async () => {
+    if (!agentId) return;
+    try {
+      const res = await api.get<LatestHandoffResponse | null>(`/api/org/agents/${agentId}/latest-handoff`);
+      setLatestHandoff(res.data ?? null);
+    } catch {
+      setLatestHandoff(null);
+    }
+  }, [agentId]);
+
+  useEffect(() => { void loadRecentRuns(); void loadLatestHandoff(); }, [loadRecentRuns, loadLatestHandoff]);
+
+  const handleContinueFromHandoff = useCallback(() => {
+    if (!latestHandoff?.handoff.nextRecommendedAction) return;
+    setInput(latestHandoff.handoff.nextRecommendedAction);
+    // Defer focus to next tick so the textarea has the new value first.
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [latestHandoff]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -391,6 +448,68 @@ export default function AgentChatPage({ user: _user }: { user: User }) {
                     </div>
                   );
                 })
+              )}
+
+              {/* Continue from last session — surfaces the structured handoff
+                  from the most recent terminal run so users can resume work
+                  with the agent's recommended next action pre-filled. */}
+              {latestHandoff && latestHandoff.handoff.nextRecommendedAction && (
+                <div className="mt-4 mx-1 bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-200 rounded-xl p-3.5">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <div className="text-[10.5px] font-bold text-indigo-600 uppercase tracking-wider">Continue from last session</div>
+                    <span className="text-[10.5px] text-slate-400">{relativeTime(latestHandoff.createdAt)}</span>
+                  </div>
+                  <div className="text-[12.5px] text-slate-700 leading-snug mb-2.5 line-clamp-3">
+                    {latestHandoff.handoff.nextRecommendedAction}
+                  </div>
+                  {latestHandoff.handoff.blockers.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-2.5">
+                      {latestHandoff.handoff.blockers.slice(0, 2).map((b, i) => (
+                        <span
+                          key={i}
+                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                            b.severity === 'high'
+                              ? 'bg-red-50 text-red-700 border-red-200'
+                              : b.severity === 'medium'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}
+                          title={b.blocker}
+                        >
+                          ⚠ {b.blocker.length > 28 ? b.blocker.slice(0, 28) + '…' : b.blocker}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleContinueFromHandoff}
+                    className="w-full text-[12px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md py-1.5 transition-colors"
+                  >
+                    Continue from here →
+                  </button>
+                </div>
+              )}
+
+              {/* Recent runs section */}
+              {recentRuns.length > 0 && (
+                <div className="mt-4 px-1">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">Recent runs</div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/agents/${agentId}/runs`)}
+                      className="text-[10.5px] text-indigo-500 hover:text-indigo-700 font-semibold border-0 bg-transparent cursor-pointer p-0"
+                    >
+                      See all →
+                    </button>
+                  </div>
+                  <SessionLogCardList
+                    runs={recentRuns}
+                    startNumber={recentRuns.length}
+                    onSelectRun={(runId) => navigate(`/admin/subaccounts/_/runs/${runId}`)}
+                  />
+                </div>
               )}
             </div>
           </div>

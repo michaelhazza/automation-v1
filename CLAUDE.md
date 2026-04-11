@@ -272,6 +272,35 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 ---
 
+## Current focus
+
+**In-flight spec:** none
+**Active items:** none
+
+This pointer is hand-maintained. Update it whenever the current spec or sprint changes. **A stale pointer is worse than no pointer** because it actively misleads future agent sessions about what to focus on. If the project has no in-flight spec, set both fields to `none` rather than leaving them stale.
+
+---
+
+## Key files per domain
+
+Quick reference for "where do I start when adding X". This is the index, not the deep reference — `architecture.md` is the deep reference for everything below.
+
+| Task | Start here |
+|------|------------|
+| Add a new agent skill | `server/skills/`, `server/config/actionRegistry.ts` |
+| Add a new tool action | `server/config/actionRegistry.ts`, `server/services/skillExecutor.ts` |
+| Add a new database table | `server/db/schema/`, `migrations/` (next free sequence number) |
+| Add a new pg-boss job | `server/jobs/`, `server/jobs/index.ts` (registration) |
+| Add a new agent middleware | `server/services/middleware/`, `server/services/middleware/index.ts` |
+| Add a new client page | `client/src/pages/`, router config in `client/src/App.tsx` |
+| Add a new permission key | `server/lib/permissions.ts` |
+| Add a new static gate | `scripts/verify-*.sh`, `scripts/run-all-gates.sh` |
+| Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
+| Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
+| Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
+
+---
+
 ## Capturing Ideas During Development
 
 When a feature idea, UX improvement, or "nice to have" surfaces during a dev session:
