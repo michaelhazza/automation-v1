@@ -12,6 +12,8 @@ interface ScheduledTaskDetail {
   rrule: string;
   timezone: string;
   scheduleTime: string;
+  endsAt: string | null;
+  endsAfterRuns: number | null;
   isActive: boolean;
   priority: string;
   assignedAgentId: string;
@@ -46,6 +48,8 @@ interface EditForm {
   rrule: string;
   timezone: string;
   scheduleTime: string;
+  endsAt: string | null;
+  endsAfterRuns: number | null;
 }
 
 const STATUS_CLS: Record<string, string> = {
@@ -112,6 +116,8 @@ export default function ScheduledTaskDetailPage({ user: _user }: { user: { id: s
       rrule: detail.rrule,
       timezone: detail.timezone,
       scheduleTime: detail.scheduleTime,
+      endsAt: detail.endsAt,
+      endsAfterRuns: detail.endsAfterRuns,
     });
     setEditing(true);
     setError('');

@@ -131,11 +131,12 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
-    const { limit, offset } = req.query;
+    const { limit, offset, status } = req.query;
 
     const runs = await agentActivityService.listRuns({
       organisationId: req.orgId!,
       agentId,
+      status: typeof status === 'string' && status.length > 0 ? status : undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -153,12 +154,13 @@ router.get(
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    const { limit, offset } = req.query;
+    const { limit, offset, status } = req.query;
 
     const runs = await agentActivityService.listRuns({
       organisationId: req.orgId!,
       subaccountId,
       agentId,
+      status: typeof status === 'string' && status.length > 0 ? status : undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });

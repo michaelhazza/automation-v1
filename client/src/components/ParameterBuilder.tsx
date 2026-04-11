@@ -158,8 +158,15 @@ interface ParameterBuilderProps {
 export default function ParameterBuilder({ definitionJson, slug, description, onChange, disabled }: ParameterBuilderProps) {
   const [showRawJson, setShowRawJson] = useState(false);
 
-  // Parse current definition into parameters
-  let parsedDef: { input_schema?: { properties?: Record<string, unknown>; required?: string[] } } = {};
+  // Parse current definition into parameters. The runtime shape is whatever
+  // JSON.parse returns; we narrow it to the structure schemaToParameters
+  // expects, then it tolerates missing/extra fields per-property.
+  let parsedDef: {
+    input_schema?: {
+      properties?: Record<string, { type?: string; enum?: string[]; description?: string }>;
+      required?: string[];
+    };
+  } = {};
   try {
     parsedDef = JSON.parse(definitionJson);
   } catch {

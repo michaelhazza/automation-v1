@@ -38,6 +38,23 @@ export default function AdminHealthFindingsPage({ user: _user }: { user: User })
   const [refreshing, setRefreshing] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Brain Tree OS adoption P4 — the resolve endpoint requires a separate
+  // permission from view. Hide the per-row "Mark resolved" button for users
+  // who only have view access so they don't get a misleading 403.
+  const [canResolve, setCanResolve] = useState(false);
+
+  useEffect(() => {
+    api.get('/api/my-permissions')
+      .then(({ data }) => {
+        const perms: string[] = data?.permissions ?? [];
+        // `/api/my-permissions` returns sentinel markers for admin roles
+        // (`__system_admin__` / `__org_admin__`) instead of enumerating
+        // every key, so honor those alongside the explicit permission.
+        const isAdmin = perms.includes('__system_admin__') || perms.includes('__org_admin__');
+        setCanResolve(isAdmin || perms.includes('org.health_audit.resolve'));
+      })
+      .catch(() => setCanResolve(false));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,14 +160,16 @@ export default function AdminHealthFindingsPage({ user: _user }: { user: User })
                           </div>
                           <div className="text-[14px] font-semibold text-slate-800">{f.resourceLabel}</div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleResolve(f.id)}
-                          disabled={resolvingId === f.id}
-                          className="shrink-0 text-[11.5px] font-semibold text-emerald-600 hover:text-emerald-800 border border-emerald-200 rounded-md px-2.5 py-1 bg-white hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {resolvingId === f.id ? 'Resolving…' : 'Mark resolved'}
-                        </button>
+                        {canResolve && (
+                          <button
+                            type="button"
+                            onClick={() => handleResolve(f.id)}
+                            disabled={resolvingId === f.id}
+                            className="shrink-0 text-[11.5px] font-semibold text-emerald-600 hover:text-emerald-800 border border-emerald-200 rounded-md px-2.5 py-1 bg-white hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {resolvingId === f.id ? 'Resolving…' : 'Mark resolved'}
+                          </button>
+                        )}
                       </div>
                       <div className="text-[13px] text-slate-700 mt-1">{f.message}</div>
                       <div className="text-[12px] text-slate-500 italic mt-1">Recommendation: {f.recommendation}</div>

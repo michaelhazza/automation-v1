@@ -57,7 +57,8 @@ interface RunPlanJson {
 interface RunDetail {
   id: string;
   organisationId: string;
-  subaccountId: string;
+  // Brain Tree OS adoption — org-scoped runs (no subaccount) have null here.
+  subaccountId: string | null;
   agentId: string;
   subaccountAgentId: string;
   agentName: string | null;
@@ -270,9 +271,13 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
       <TraceChainSidebar runId={runId!} onSelectRun={handleSelectRun} />
       <div className="flex-1 max-w-[960px] mx-auto">
       <div className="mb-4 text-[13px] text-slate-500 flex items-center gap-1.5">
-        <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
-          {run.subaccountName ?? 'Workspace'}
-        </Link>
+        {run.subaccountId ? (
+          <Link to={`/admin/subaccounts/${run.subaccountId}/workspace`} className="text-indigo-600 hover:text-indigo-700 no-underline font-medium">
+            {run.subaccountName ?? 'Workspace'}
+          </Link>
+        ) : (
+          <span className="font-medium text-slate-600">Org</span>
+        )}
         <span>/</span>
         <span>Run Trace</span>
       </div>
@@ -430,7 +435,7 @@ export default function RunTraceViewerPage({ user: _user }: { user: User }) {
   );
 }
 
-function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number; toolName: string; entry: ToolCallEntry; subaccountId: string }) {
+function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number; toolName: string; entry: ToolCallEntry; subaccountId: string | null }) {
   const [showInput, setShowInput] = useState(false);
   const [showOutput, setShowOutput] = useState(false);
 
@@ -445,7 +450,7 @@ function ToolCallCard({ index, toolName, entry, subaccountId }: { index: number;
         </div>
         <div className="flex items-center gap-2">
           {entry.durationMs != null && <span className="text-[11.5px] text-slate-500 font-medium">{formatDuration(entry.durationMs)}</span>}
-          {entry.actionId && (
+          {entry.actionId && subaccountId && (
             <Link to={`/admin/subaccounts/${subaccountId}/workspace`} className="text-[11px] text-indigo-600 font-semibold no-underline bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">action</Link>
           )}
         </div>
