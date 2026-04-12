@@ -187,6 +187,18 @@ export interface AgentRunRequest {
    * leave it false to avoid stale-context poisoning.
    */
   seedFromPreviousRun?: boolean;
+  /**
+   * Playbook agent_decision steps: rendered decision envelope injected at the
+   * end of the system prompt so the agent sees branch options and output schema.
+   * Spec: docs/playbook-agent-decision-step-spec.md §17.
+   */
+  systemPromptAddendum?: string;
+  /**
+   * Playbook agent_decision steps: when set to an empty array, the agent runs
+   * with no tools (pure reasoning only). If omitted, the agent's configured
+   * skill set is used.
+   */
+  allowedToolSlugs?: string[];
 }
 
 export interface AgentRunResult {
@@ -706,6 +718,12 @@ export const agentExecutionService = {
 
       systemPromptParts.push(buildAutonomousInstructions(request, targetItem));
 
+      // agent_decision steps inject a structured decision envelope at the end
+      // of the system prompt so the agent sees branch options and output schema.
+      if (request.systemPromptAddendum) {
+        systemPromptParts.push(`\n\n---\n${request.systemPromptAddendum}`);
+      }
+
       const fullSystemPrompt = systemPromptParts.join('');
       const systemPromptTokens = approxTokens(fullSystemPrompt);
 
@@ -868,8 +886,16 @@ export const agentExecutionService = {
           traceSessionId = run.id;
         }
 
+        // agent_decision steps restrict the tool list to prevent side effects.
+        // allowedToolSlugs: [] means no tools (pure reasoning). When undefined,
+        // the full enhancedTools list is used (normal agent behavior).
+        const effectiveTools =
+          request.allowedToolSlugs !== undefined
+            ? enhancedTools.filter(t => (request.allowedToolSlugs as string[]).includes(t.name))
+            : enhancedTools;
+
         // Run fingerprint (Section 8.3)
-        const skillSlugs = enhancedTools.map(t => t.name);
+        const skillSlugs = effectiveTools.map(t => t.name);
         const runFingerprint = generateRunFingerprint(request.agentId, 'development', skillSlugs);
 
         const trace = langfuse.trace({
@@ -912,7 +938,7 @@ export const agentExecutionService = {
               sourceType:        'agent_run',
             },
             systemPrompt: fullSystemPrompt,
-            tools: enhancedTools,
+            tools: effectiveTools,
             tokenBudget,
             maxToolCalls,
             timeoutMs,

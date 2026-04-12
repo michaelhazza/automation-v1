@@ -2192,7 +2192,103 @@ export const playbookEngineService = {
         return;
       }
 
-      // Max retries exceeded.
+      // Max retries exceeded — fall back to defaultBranchId if set, else fail.
+      if (decisionStep.defaultBranchId) {
+        logger.info('playbook_decision_step_default_branch_fallback', {
+          event: 'decision.default_branch_fallback',
+          runId: run.id,
+          stepRunId: sr.id,
+          stepId: step.id,
+          defaultBranchId: decisionStep.defaultBranchId,
+          retryCount,
+          parseErrorCode: parseResult.error.code,
+        });
+
+        const ctx = run.contextJson as unknown as RunContext;
+        const skipSet = computeSkipSet(def, step.id, decisionStep.defaultBranchId);
+        const stepOutput: Record<string, unknown> = {
+          chosenBranchId: decisionStep.defaultBranchId,
+          rationale: `default_branch_fallback: parse failed after ${retryCount} retries`,
+          skippedStepIds: [...skipSet],
+          retryCount,
+          chosenByAgent: false,
+        };
+        const nextCtx = mergeStepOutputIntoContext(ctx, step.id, stepOutput);
+        const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
+        try {
+          assertContextSize(nextBytes, run.id);
+        } catch {
+          await db
+            .update(playbookRuns)
+            .set({
+              status: 'failed',
+              error: 'context_overflow',
+              failedDueToStepId: step.id,
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(playbookRuns.id, run.id));
+          return;
+        }
+        const outputHash = hashValue(stepOutput);
+        await db.transaction(async (tx) => {
+          await tx
+            .update(playbookStepRuns)
+            .set({
+              status: 'completed',
+              outputJson: stepOutput as unknown as Record<string, unknown>,
+              outputHash,
+              completedAt: new Date(),
+              version: sr.version + 1,
+              updatedAt: new Date(),
+            })
+            .where(eq(playbookStepRuns.id, sr.id));
+          for (const skippedStepId of skipSet) {
+            const skippedStepDef = findStepInDefinition(def, skippedStepId);
+            if (!skippedStepDef) continue;
+            try {
+              await tx.insert(playbookStepRuns).values({
+                runId: run.id,
+                stepId: skippedStepId,
+                stepType: skippedStepDef.type,
+                status: 'skipped',
+                sideEffectType: skippedStepDef.sideEffectType,
+                dependsOn: skippedStepDef.dependsOn,
+                completedAt: new Date(),
+              });
+            } catch {
+              await tx
+                .update(playbookStepRuns)
+                .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
+                .where(
+                  and(
+                    eq(playbookStepRuns.runId, run.id),
+                    eq(playbookStepRuns.stepId, skippedStepId)
+                  )
+                );
+            }
+          }
+          await tx
+            .update(playbookRuns)
+            .set({
+              contextJson: nextCtx as unknown as Record<string, unknown>,
+              contextSizeBytes: nextBytes,
+              updatedAt: new Date(),
+            })
+            .where(eq(playbookRuns.id, run.id));
+        });
+
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:decision:default_branch_applied', {
+          stepRunId: sr.id,
+          stepId: step.id,
+          chosenBranchId: decisionStep.defaultBranchId,
+          skippedStepIds: [...skipSet],
+        });
+
+        await this.enqueueTick(run.id);
+        return;
+      }
+
       await this.failStepRunInternal(
         sr,
         `decision_parse_failure: ${parseResult.error.code}: ${parseResult.error.message}`
@@ -2533,6 +2629,14 @@ export const playbookEngineService = {
             idempotencyKey,
             triggerContext,
             playbookStepRunId: data.playbookStepRunId,
+            // Decision-step constraints: pass through when present so the
+            // execution service enforces the envelope + tool restriction.
+            ...(data.systemPromptAddendum !== undefined && {
+              systemPromptAddendum: data.systemPromptAddendum,
+            }),
+            ...(data.allowedToolSlugs !== undefined && {
+              allowedToolSlugs: data.allowedToolSlugs,
+            }),
           });
           // executeRun is synchronous (awaits the agent loop). The hook in
           // playbookAgentRunHook fires from the success/failure paths in
