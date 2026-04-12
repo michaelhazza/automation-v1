@@ -646,7 +646,13 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
       }
 
-      // Phase 2D: Agent briefing — compact cross-run summary for this agent
+      // ── Stable/dynamic split for multi-breakpoint prompt caching (Phase 0C) ──
+      // Sections 1-6 + team roster = stablePrefix (cached across runs)
+      // Briefing, task instructions, manifest, memory, entities, board, autonomous = dynamicSuffix
+      const stablePrefix = systemPromptParts.join('');
+      const dynamicParts: string[] = [];
+
+      // Phase 2D: Agent briefing — compact cross-run summary (dynamic — updates after each run)
       if (!isOrgRun) {
         try {
           const briefing = await agentBriefingService.get(
@@ -655,18 +661,12 @@ export const agentExecutionService = {
             request.agentId,
           );
           if (briefing) {
-            systemPromptParts.push(`\n\n---\n## Your Briefing\n${briefing}`);
+            dynamicParts.push(`\n\n---\n## Your Briefing\n${briefing}`);
           }
         } catch {
           // Non-fatal — agent runs fine without a briefing
         }
       }
-
-      // ── Stable/dynamic split for multi-breakpoint prompt caching (Phase 0C) ──
-      // Sections 1-7 + team roster + briefing = stablePrefix (cached across runs)
-      // Task instructions, manifest, memory, entities, board, autonomous = dynamicSuffix
-      const stablePrefix = systemPromptParts.join('');
-      const dynamicParts: string[] = [];
 
       // Layer 3.5: Task Instructions (dynamic — changes per scheduled task)
       if (runContextData.taskInstructions) {
@@ -2156,11 +2156,11 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       // `assertNever` line until a handler is added here.
       let postToolBreakOuter = false;
       for (const mw of pipeline.postTool) {
-        const postResult = mw.execute(
+        const postResult = await Promise.resolve(mw.execute(
           mwCtx,
           { name: toolCall.name, input: toolCall.input },
           { content: resultContent, durationMs: toolDurationMs }
-        );
+        ));
         switch (postResult.action) {
           case 'continue':
             if (postResult.content) {

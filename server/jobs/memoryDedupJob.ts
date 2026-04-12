@@ -10,13 +10,8 @@
  * and allow logging at a useful granularity.
  */
 
-import type PgBoss from 'pg-boss';
 import { sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
-import { workspaceMemoryEntries } from '../db/schema/index.js';
-
-const QUEUE_NAME = 'maintenance:memory-dedup';
-const SCHEDULE_CRON = '30 4 * * *'; // 4:30 AM daily — after memory-decay (3 AM) and agent-run-cleanup (4 AM)
+import { withAdminConnection } from '../lib/adminDbConnection.js';
 
 /** Cosine distance threshold — pairs closer than this are near-duplicates. */
 const COSINE_DISTANCE_THRESHOLD = 0.15;
@@ -25,25 +20,33 @@ const COSINE_DISTANCE_THRESHOLD = 0.15;
  * Run one full deduplication sweep across all subaccounts.
  */
 export async function runMemoryDedup(): Promise<void> {
-  // Step 1: collect subaccounts that have at least one embedded entry.
-  const subaccounts: { subaccountId: string }[] = await db
-    .selectDistinct({ subaccountId: workspaceMemoryEntries.subaccountId })
-    .from(workspaceMemoryEntries)
-    .where(sql`${workspaceMemoryEntries.embedding} IS NOT NULL`);
+  // Cross-org maintenance sweep — must bypass RLS via admin connection
+  await withAdminConnection(
+    { source: 'memory-dedup', reason: 'Nightly cross-org duplicate sweep' },
+    async (tx) => {
+      // Switch to admin_role to bypass RLS fail-closed policies
+      await tx.execute(sql`SET LOCAL ROLE admin_role`);
 
-  let totalDeleted = 0;
+      // Step 1: collect subaccounts that have at least one embedded entry.
+      const subaccounts: { subaccount_id: string }[] = await tx.execute(
+        sql`SELECT DISTINCT subaccount_id FROM workspace_memory_entries WHERE embedding IS NOT NULL`
+      ) as unknown as { subaccount_id: string }[];
 
-  for (const { subaccountId } of subaccounts) {
-    const deleted = await deduplicateSubaccount(subaccountId);
-    if (deleted > 0) {
-      console.info(
-        `[MemoryDedup] Removed ${deleted} duplicate entries for subaccount ${subaccountId}`,
-      );
-    }
-    totalDeleted += deleted;
-  }
+      let totalDeleted = 0;
 
-  console.info(`[MemoryDedup] Sweep complete — removed ${totalDeleted} duplicate entries across ${subaccounts.length} subaccounts`);
+      for (const row of subaccounts) {
+        const deleted = await deduplicateSubaccount(tx, row.subaccount_id);
+        if (deleted > 0) {
+          console.info(
+            `[MemoryDedup] Removed ${deleted} duplicate entries for subaccount ${row.subaccount_id}`,
+          );
+        }
+        totalDeleted += deleted;
+      }
+
+      console.info(`[MemoryDedup] Sweep complete — removed ${totalDeleted} duplicate entries across ${subaccounts.length} subaccounts`);
+    },
+  );
 }
 
 /**
@@ -57,13 +60,13 @@ export async function runMemoryDedup(): Promise<void> {
  *
  * Returns the number of deleted rows.
  */
-async function deduplicateSubaccount(subaccountId: string): Promise<number> {
+async function deduplicateSubaccount(tx: Parameters<Parameters<typeof withAdminConnection>[1]>[0], subaccountId: string): Promise<number> {
   // Identify IDs to delete in a single query:
   //   - Self-join on cosine distance < threshold
   //   - a.id < b.id avoids double-counting
   //   - For each pair, delete the entry with the lower quality_score
   //     (or the one with the greater id on tie)
-  const result = await db.execute<{ id: string }>(sql`
+  const result = await tx.execute<{ id: string }>(sql`
     DELETE FROM workspace_memory_entries
     WHERE id IN (
       SELECT DISTINCT
@@ -87,14 +90,5 @@ async function deduplicateSubaccount(subaccountId: string): Promise<number> {
   return result.length;
 }
 
-// ---------------------------------------------------------------------------
-// Registration — wire the worker + schedule onto a pg-boss instance
-// ---------------------------------------------------------------------------
-
-export async function registerMemoryDedupJob(boss: PgBoss): Promise<void> {
-  await (boss as any).work(QUEUE_NAME, { teamSize: 1, teamConcurrency: 1 }, async () => {
-    await runMemoryDedup();
-  });
-
-  await boss.schedule(QUEUE_NAME, SCHEDULE_CRON, {});
-}
+// Worker registration + schedule lives in queueService.ts alongside all other
+// workers. This file only exports the handler function.

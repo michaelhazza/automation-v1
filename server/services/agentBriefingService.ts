@@ -170,12 +170,10 @@ Respond with only the briefing text — no preamble, no markdown headers, no quo
         },
       });
 
-      // Extract text from response
-      const newContent =
-        typeof response.content?.[0] === 'object' &&
-        'text' in response.content[0]
-          ? (response.content[0] as { text: string }).text.trim()
-          : null;
+      // Extract text from response (routeCall returns ProviderResponse.content: string)
+      const newContent = typeof response.content === 'string' && response.content.trim().length > 0
+        ? response.content.trim()
+        : null;
 
       if (!newContent || newContent.length < 20) return;
 
@@ -183,30 +181,9 @@ Respond with only the briefing text — no preamble, no markdown headers, no quo
       const finalContent = truncateToTokens(newContent, BRIEFING_TOKEN_HARD_CAP);
       const tokenCount = estimateTokens(finalContent);
 
-      // 5. Load existing row for version increment
-      const [existing] = await db
-        .select({
-          version: agentBriefings.version,
-          sourceRunIds: agentBriefings.sourceRunIds,
-        })
-        .from(agentBriefings)
-        .where(
-          and(
-            eq(agentBriefings.organisationId, orgId),
-            eq(agentBriefings.subaccountId, subaccountId),
-            eq(agentBriefings.agentId, agentId),
-          ),
-        )
-        .limit(1);
-
-      const nextVersion = (existing?.version ?? 0) + 1;
-
-      // Keep last 10 source run IDs for provenance
-      const existingRunIds: string[] = (existing?.sourceRunIds as string[]) ?? [];
-      const updatedRunIds = [...existingRunIds, runId].slice(-10);
-      const runIdsLiteral = `{${updatedRunIds.join(',')}}`;
-
-      // 6. Upsert briefing row
+      // 5. Upsert briefing row with atomic version increment to avoid TOCTOU race.
+      // sourceRunIds uses array_append + trim to last 10 atomically.
+      const runIdLiteral = sql`ARRAY[${runId}]::uuid[]`;
       await db
         .insert(agentBriefings)
         .values({
@@ -215,8 +192,8 @@ Respond with only the briefing text — no preamble, no markdown headers, no quo
           agentId,
           content: finalContent,
           tokenCount,
-          sourceRunIds: sql`${runIdsLiteral}::uuid[]`,
-          version: nextVersion,
+          sourceRunIds: runIdLiteral,
+          version: 1,
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -228,8 +205,9 @@ Respond with only the briefing text — no preamble, no markdown headers, no quo
           set: {
             content: finalContent,
             tokenCount,
-            sourceRunIds: sql`${runIdsLiteral}::uuid[]`,
-            version: nextVersion,
+            // Atomic: append runId — Postgres trims to last 10 via array slice
+            sourceRunIds: sql`(source_run_ids || ARRAY[${runId}]::uuid[])[GREATEST(1, array_length(source_run_ids || ARRAY[${runId}]::uuid[], 1) - 9):]`,
+            version: sql`${agentBriefings.version} + 1`,
             updatedAt: new Date(),
           },
         });

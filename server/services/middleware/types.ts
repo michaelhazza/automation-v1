@@ -143,7 +143,7 @@ export interface PostToolMiddleware {
     ctx: MiddlewareContext,
     toolCall: { name: string; input: Record<string, unknown> },
     result: { content: string; durationMs: number }
-  ): PostToolResult;
+  ): PostToolResult | Promise<PostToolResult>;
 }
 
 export interface MiddlewarePipeline {

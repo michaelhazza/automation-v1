@@ -25,7 +25,6 @@ const SECTION_HEADER = '## Relevant Context for This Task\n\n';
 export async function enrichContextForTask(params: {
   orgId: string;
   subaccountId: string;
-  agentId: string;
   taskDescription: string;
   existingEagerSourceIds: string[];
   tokenBudget: number;

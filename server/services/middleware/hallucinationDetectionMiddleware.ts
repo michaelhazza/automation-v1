@@ -84,12 +84,8 @@ export const hallucinationDetectionMiddleware: PostToolMiddleware = {
     ctx: MiddlewareContext,
     _toolCall: { name: string; input: Record<string, unknown> },
     _result: { content: string; durationMs: number },
-  ): PostToolResult {
-    // The interface requires a synchronous return, but we need async DB access.
-    // Return a promise — the pipeline runner awaits PostToolResult via
-    // Promise.resolve(). Cast through unknown to satisfy the type checker
-    // while keeping the implementation clean.
-    return executeAsync(ctx) as unknown as PostToolResult;
+  ): Promise<PostToolResult> {
+    return executeAsync(ctx);
   },
 };
 

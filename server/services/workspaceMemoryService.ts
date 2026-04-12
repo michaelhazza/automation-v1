@@ -228,8 +228,9 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
   );
   const hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
 
-  // Statement timeout to prevent slow queries blocking the request thread
-  await db.execute(sql`SET LOCAL statement_timeout = '200ms'`);
+  // Statement timeout to prevent slow queries blocking the request thread.
+  // Use session-level SET (not SET LOCAL) since we're not in an explicit transaction.
+  await db.execute(sql`SET statement_timeout = '200ms'`);
 
   // Full-text CTE (optional)
   const fullTextCte = hasValidTsquery
@@ -305,6 +306,9 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
     ORDER BY combined_score DESC
     LIMIT ${retrieveLimit}
   `);
+
+  // Reset statement timeout to default (no limit)
+  await db.execute(sql`SET statement_timeout = '0'`);
 
   let results = rows as unknown as HybridResult[];
 
@@ -421,12 +425,6 @@ async function _expandByRelation(
   if (results.length === 0) return [];
 
   const existingIds = results.map(r => r.id);
-  const taskSlugs = new Set<string>();
-
-  // Collect task_slug values from initial results for relational expansion
-  for (const r of results) {
-    // We'll query for task_slug from the DB since it's not in HybridResult
-  }
 
   // Query for entries sharing the same task_slug as any result entry
   const expanded = await db.execute<{
@@ -890,9 +888,11 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     queryEmbedding: number[],
     queryText: string,
     taskSlug?: string,
+    orgId?: string,
   ): Promise<Array<{ content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
     const results = await _hybridRetrieve({
       subaccountId,
+      orgId,
       queryText,
       queryEmbedding,
       qualityThreshold,
@@ -1003,38 +1003,10 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
           searchLimit: VECTOR_SEARCH_LIMIT,
         });
 
-        // HyDE: for short queries, generate hypothetical memory to improve embedding quality
-        let embeddingInput = taskContext;
-        let hydeUsed = false;
-        if (taskContext.length < HYDE_THRESHOLD && taskContext.length >= MIN_QUERY_CONTEXT_LENGTH) {
-          const cacheKey = `hyde:${createHash('sha256').update(taskContext).digest('hex').slice(0, 16)}`;
-          const cached = hydeCacheGet(cacheKey);
-          if (cached) {
-            embeddingInput = cached;
-            hydeUsed = true;
-          } else {
-            try {
-              const hydeResponse = await routeCall({
-                messages: [{ role: 'user', content: `Given this short task context, generate a hypothetical memory entry (2-3 sentences) that would be relevant and useful. Include specific details and terminology.\n\nTask context: "${taskContext}"\n\nRespond with only the hypothetical memory entry.` }],
-                temperature: 0.5,
-                maxTokens: HYDE_MAX_TOKENS,
-                context: { organisationId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', executionPhase: 'execution', routingMode: 'ceiling' },
-              });
-              const hydeText = hydeResponse?.content ?? null;
-              if (hydeText) {
-                embeddingInput = hydeText;
-                hydeUsed = true;
-                hydeCacheSet(cacheKey, hydeText);
-              }
-            } catch {
-              // Fall back to original query
-            }
-          }
-        }
-
-        const queryEmbedding = await generateEmbedding(embeddingInput);
-        // queryText for keyword search always uses original context (not HyDE output)
+        // Delegate to _hybridRetrieve via getRelevantMemories — HyDE,
+        // sanitization, intent classification are all handled internally.
         const queryText = taskContext.slice(0, MAX_QUERY_TEXT_CHARS);
+        const queryEmbedding = await generateEmbedding(taskContext);
 
         if (queryEmbedding) {
           const relevant = await this.getRelevantMemories(
@@ -1042,6 +1014,8 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
             memory.qualityThreshold,
             queryEmbedding,
             queryText,
+            undefined,
+            organisationId,
           );
 
           recallSpan.end({
