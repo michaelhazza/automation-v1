@@ -1,7 +1,7 @@
 # Org Subaccount Refactor — Development Specification
 
 **Date:** 2026-04-12
-**Status:** Draft
+**Status:** Review-ready (feedback incorporated 2026-04-12)
 **Brief:** `tasks/org-subaccount-refactor-brief.md`
 **Supersedes:** `tasks/org-level-agents-brief.md`, `tasks/org-level-agents-full-spec-v2.md`
 **Migration:** `0106_org_subaccount.sql`
@@ -23,9 +23,10 @@
 10. Route & Service Cleanup
 11. UI Implications
 12. Deprecation Plan
-13. Verification Plan
-14. Phased Delivery
-15. Open Questions
+13. Observability
+14. Verification Plan
+15. Phased Delivery
+16. Resolved Questions
 
 ---
 
@@ -85,8 +86,22 @@ isOrgSubaccount: boolean('is_org_subaccount').notNull().default(false),
 
 **Constraints:**
 - One org subaccount per org (partial unique index: `WHERE is_org_subaccount = true AND deleted_at IS NULL`)
-- Cannot be soft-deleted (enforced in route/service layer, not DB constraint)
-- Status always `'active'` (enforced in route/service layer)
+- Cannot be soft-deleted — **enforced at DB level** via CHECK constraint (not just service layer)
+- Status always `'active'` — **enforced at DB level** via CHECK constraint
+
+```sql
+-- Prevent soft-deleting the org subaccount
+ALTER TABLE subaccounts
+ADD CONSTRAINT org_subaccount_not_deleted
+CHECK (NOT (is_org_subaccount = true AND deleted_at IS NOT NULL));
+
+-- Prevent changing status away from 'active'
+ALTER TABLE subaccounts
+ADD CONSTRAINT org_subaccount_active_only
+CHECK (NOT (is_org_subaccount = true AND status != 'active'));
+```
+
+Service-layer guards remain as UX (return 403 with friendly message) but the DB constraints are the real enforcement.
 
 ### 3b. `organisations` table — no changes required
 
@@ -125,13 +140,23 @@ CREATE INDEX subaccounts_org_hq_idx
   ON subaccounts (organisation_id, is_org_subaccount)
   WHERE is_org_subaccount = true;
 
--- 4. Backfill: create org subaccount for every existing org that doesn't have one
+-- 4. DB-level invariant constraints
+ALTER TABLE subaccounts
+ADD CONSTRAINT org_subaccount_not_deleted
+CHECK (NOT (is_org_subaccount = true AND deleted_at IS NOT NULL));
+
+ALTER TABLE subaccounts
+ADD CONSTRAINT org_subaccount_active_only
+CHECK (NOT (is_org_subaccount = true AND status != 'active'));
+
+-- 5. Backfill: create org subaccount for every existing org that doesn't have one
+-- Slug uses org ID prefix to avoid collision with existing 'org-hq' subaccounts
 INSERT INTO subaccounts (id, organisation_id, name, slug, status, is_org_subaccount, include_in_org_inbox, created_at, updated_at)
 SELECT
   gen_random_uuid(),
   o.id,
-  o.name || ' HQ',
-  'org-hq',
+  o.name || ' Workspace',
+  'org-hq-' || substring(o.id::text, 1, 8),
   'active',
   true,
   true,
@@ -149,9 +174,30 @@ WHERE NOT EXISTS (
 -- This is handled in application code post-migration via a one-time job,
 -- not in SQL, because boardService.initSubaccountBoard() has application logic.
 
--- 6. RLS policy update (if applicable) — org subaccounts follow standard
+-- 6. Migration state tracking table
+CREATE TABLE IF NOT EXISTS migration_states (
+  key TEXT PRIMARY KEY,
+  completed_at TIMESTAMPTZ,
+  metadata JSONB
+);
+
+-- 7. RLS policy update (if applicable) — org subaccounts follow standard
 -- subaccount RLS; no special policy needed.
 ```
+
+### 4b. Migration execution contract
+
+The migration spans SQL + application-level jobs. These are NOT atomic. To prevent half-migrated orgs:
+
+1. SQL migration (`0106`) runs first — schema changes + backfill org subaccounts
+2. Application migration job runs — config migration, memory migration, schedule migration
+3. Each step writes to `migration_states` on completion:
+   - `org_subaccount_schema` — SQL migration complete
+   - `org_subaccount_config_migration` — orgAgentConfigs migrated (with counts in metadata)
+   - `org_subaccount_memory_migration` — orgMemories migrated (with counts)
+   - `org_subaccount_schedule_migration` — schedules migrated
+4. Application code checks `migration_states` before removing org-level code paths
+5. A verification script validates all orgs are fully migrated before Phase 2 cleanup
 
 ---
 
@@ -193,7 +239,31 @@ For each `org_agent_configs` row, create a corresponding `subaccount_agents` row
 
 **Execution:** Application-level script (not raw SQL) to resolve the org subaccount ID per org. Run as a one-time migration job after `0106` applies.
 
-**Conflict handling:** If a `subaccount_agents` row already exists for the same `(subaccount_id, agent_id)` pair, skip (idempotent). Log skipped rows for manual review.
+**Conflict handling — true upsert, not skip:**
+```sql
+INSERT INTO subaccount_agents (subaccount_id, agent_id, organisation_id, ...)
+VALUES (...)
+ON CONFLICT (subaccount_id, agent_id)
+DO UPDATE SET
+  token_budget_per_run = EXCLUDED.token_budget_per_run,
+  max_tool_calls_per_run = EXCLUDED.max_tool_calls_per_run,
+  timeout_seconds = EXCLUDED.timeout_seconds,
+  skill_slugs = EXCLUDED.skill_slugs,
+  custom_instructions = EXCLUDED.custom_instructions,
+  heartbeat_enabled = EXCLUDED.heartbeat_enabled,
+  heartbeat_interval_hours = EXCLUDED.heartbeat_interval_hours,
+  schedule_cron = EXCLUDED.schedule_cron,
+  schedule_enabled = EXCLUDED.schedule_enabled,
+  updated_at = NOW();
+```
+
+This makes the migration safe to re-run. Partial runs, retries, and config changes between runs are all handled correctly.
+
+**Migration must log:**
+- `created_count` — new `subaccount_agents` rows inserted
+- `updated_count` — existing rows updated via upsert
+- `skipped_count` — rows with no matching org subaccount (should be 0)
+- `error_count` — any failures (with org ID for debugging)
 
 ### 5b. `orgMemories` / `orgMemoryEntries` → workspace memory
 
@@ -203,7 +273,15 @@ For each org:
    - `subaccount_id` = org subaccount ID
    - `organisation_id` = same
    - All content, embedding, quality_score, entry_type fields copied
-   - `source_subaccount_ids` preserved in a metadata JSONB field for traceability
+   - Full provenance stored in a metadata JSONB field:
+     ```json
+     {
+       "source": "org_memory",
+       "source_id": "<original org_memory_entries.id>",
+       "source_subaccount_ids": ["..."],
+       "migrated_at": "2026-04-XX..."
+     }
+     ```
 3. Copy `org_memories.summary` → `workspace_memories.summary`
 
 **Timing:** This runs after the schema migration but can be done asynchronously. The org memory tables are kept read-only as backup until verified.
@@ -232,7 +310,21 @@ if (request.executionScope === 'org') {
 }
 ```
 
-**After:** Remove both blocks. All runs require `subaccountId`. The org subaccount is just a subaccount. The `orgExecutionEnabled` flag either moves to a general org-level toggle or is removed.
+**After:** Remove org-specific validation. All runs require `subaccountId`. The org subaccount is just a subaccount.
+
+Replace with a **single general execution toggle** at the top of `executeRun()`:
+
+```typescript
+const [org] = await db.select({ executionEnabled: organisations.orgExecutionEnabled })
+  .from(organisations)
+  .where(eq(organisations.id, request.organisationId));
+
+if (!org?.executionEnabled) {
+  return { status: 'skipped', reason: 'org_execution_disabled' };
+}
+```
+
+This applies to ALL runs (org subaccount and regular subaccounts alike). Single enforcement point, no drift. The column name `orgExecutionEnabled` is renamed to `executionEnabled` in a Phase 2 cleanup migration.
 
 ### 6b. Unify config loading (lines 342-365)
 
@@ -309,9 +401,30 @@ if (context.subaccountId) {
 
 **Access control replacement:** Instead of scope-based guards, control access via skill assignment. Only agents that have these skills in their `skillSlugs` can call them. The Portfolio Health Agent has them; the Dev Agent doesn't. No guard needed.
 
-### 7c. Cross-subaccount query safety
+### 7c. Cross-subaccount access guard
 
-Skills like `query_subaccount_cohort` query across all subaccounts for the org. They must NOT accidentally scope to only the org subaccount. Verify that these skills use `organisationId` for their queries, not `subaccountId`. Current code already does this — confirm with tests.
+Skills like `query_subaccount_cohort` query across all subaccounts for the org. Two concerns:
+
+**1. Must not accidentally scope to org subaccount only.** Verify these skills use `organisationId` for their queries, not `subaccountId`. Current code already does this — confirm with tests.
+
+**2. Access control for cross-subaccount skills.** Removing `allowedSubaccountIds` is a permission change. To prevent non-org agents from accidentally querying across subaccounts, add an optional guard:
+
+```typescript
+// In SkillExecutionContext (or middleware):
+allowedSubaccountIds?: string[];  // null = full org access (org subaccount agents)
+```
+
+**Default behaviour:**
+- Agents in the **org subaccount** → `allowedSubaccountIds = null` (full access across all subaccounts)
+- Agents in **regular subaccounts** → `allowedSubaccountIds = [their own subaccountId]` (scoped)
+
+Cross-subaccount skills check this:
+```typescript
+const targetIds = context.allowedSubaccountIds ?? allOrgSubaccountIds;
+// ... WHERE subaccount_id = ANY(targetIds)
+```
+
+This preserves flexibility without reintroducing the `orgAgentConfigs.allowedSubaccountIds` field. The guard is derived from whether the agent runs in the org subaccount, not from explicit config.
 
 ---
 
@@ -334,6 +447,28 @@ The startup loop that loads active `orgAgentConfigs` with `scheduleEnabled = tru
 ### 8d. Org run handler removal (lines 89-131)
 
 The `AGENT_ORG_RUN_QUEUE` worker handler that loads `orgAgentConfigs`, checks `orgExecutionEnabled`, and calls `executeRun()` with `executionScope: 'org'` is removed. Standard subaccount run handler processes all runs.
+
+### 8e. Queue cleanup during cutover
+
+Existing scheduled jobs may still exist in pg-boss under the old queue name. Before removing the handler:
+
+```typescript
+// Drain/cancel orphan jobs in the old queue
+await boss.deleteQueue('agent-org-scheduled-run');
+// Or if deleteQueue is not available:
+await boss.cancel({ name: 'agent-org-scheduled-run' });
+```
+
+If the queue cannot be cleaned programmatically, the old handler is replaced with a no-op that logs a warning:
+
+```typescript
+// Temporary: catch any orphan org-scheduled jobs
+boss.work('agent-org-scheduled-run', async (job) => {
+  logger.warn('Orphan org-scheduled job received post-migration — dropping', { jobId: job.id });
+});
+```
+
+This prevents duplicate or orphan runs during the transition window.
 
 ---
 
@@ -375,10 +510,11 @@ When a hierarchy template is applied to a subaccount AND includes the Portfolio 
 ### 9d. Org subaccount auto-provisioning
 
 When a new organisation is created:
-1. Create the org subaccount (`isOrgSubaccount: true`, slug: `org-hq`)
+1. Create the org subaccount (`isOrgSubaccount: true`, name: `[Org Name] Workspace`, slug: `org-hq-{orgId prefix}`)
 2. Init board config from org template
 3. Create workspace memory for the org subaccount
-4. If the org's default hierarchy template exists, apply it to the org subaccount (auto-links Portfolio Health Agent and any other org-targeted agents)
+4. Auto-link all system agents allowed by the org's subscription tier
+5. If the org's default hierarchy template exists, apply it to the org subaccount
 
 This happens in the organisation creation route/service — a new step after org row insertion.
 
@@ -424,13 +560,15 @@ Add similar guard for status changes (prevent suspending/inactivating org subacc
 
 ### 11a. Subaccount list — distinguish org subaccount
 
-The org subaccount appears in the subaccount list alongside client workspaces. The UI should:
-- Pin it to the top of the list
-- Show a distinct label (e.g., "HQ" or "[Org Name] Workspace")
-- Use a different icon or badge to distinguish it from client subaccounts
-- Hide the delete button / status toggle for it
+The org subaccount appears in the subaccount list alongside client workspaces. The UI must:
+- **Render in a separate "Organisation Workspace" section** above client subaccounts (not mixed in)
+- Show as "[Org Name] Workspace" label
+- Use a distinct icon/badge to differentiate from client subaccounts
+- Hide the delete button and status toggle
+- **Non-selectable in client dropdowns** (e.g., when assigning a client to a subaccount) unless explicitly enabled
+- Prevent linking client-specific agents to it unless flagged with `defaultTarget: org-hq`
 
-**Implementation:** The API already returns `isOrgSubaccount` in the subaccount response. Client-side filtering/sorting is sufficient.
+**Implementation:** The API returns `isOrgSubaccount` in the subaccount response. Client-side filtering splits the list into two sections. Dropdowns that represent "client" selections filter out `isOrgSubaccount: true`.
 
 ### 11b. Org agent config UI → subaccount agent config UI
 
@@ -459,7 +597,39 @@ Search for client-side references to `/api/org/tasks` or `/api/org/agent-configs
 
 ---
 
-## 13. Verification Plan
+## 13. Observability
+
+This is a structural change to the execution pipeline. Add temporary metrics to build confidence quickly:
+
+### 13a. Events to emit (via Langfuse or application logging)
+
+```typescript
+// On every run in the org subaccount (temporary, remove after 2 weeks stable)
+createEvent('org_subaccount_run', {
+  orgId,
+  agentId,
+  agentSlug,
+  runId,
+  hasCrossSubaccountSkills: boolean,
+});
+```
+
+### 13b. Metrics to track post-deploy
+
+| Metric | How | Why |
+|---|---|---|
+| % of runs in org subaccount vs regular subaccounts | Query `agent_runs` by subaccount `isOrgSubaccount` flag | Verify org agents are running in the right place |
+| Failure rate by agent (pre vs post migration) | Compare `agent_runs.status = 'failed'` rates by agent, 7 days before vs after | Catch regressions |
+| Cross-subaccount query counts per run | Log in intelligence skill handlers | Verify cross-subaccount skills still fire correctly |
+| Orphan org-queue jobs | Log from the no-op handler (section 8e) | Verify queue cleanup is complete |
+
+### 13c. Rollback signal
+
+If failure rate for org subaccount agents exceeds 2x the pre-migration baseline within 48 hours, pause and investigate before proceeding. The deprecated code paths are still present (marked deprecated, not deleted) so rollback is: revert the execution service changes and re-register the `AGENT_ORG_RUN_QUEUE`.
+
+---
+
+## 14. Verification Plan
 
 ### 13a. Pre-migration checks
 
@@ -485,13 +655,14 @@ Search for client-side references to `/api/org/tasks` or `/api/org/agent-configs
 ### 13c. New tests to write
 
 - [ ] `orgSubaccountCreation.test.ts` — org creation auto-creates org subaccount
-- [ ] `orgSubaccountGuards.test.ts` — cannot delete, cannot suspend org subaccount
-- [ ] `orgAgentConfigMigration.test.ts` — config migration is idempotent and complete
-- [ ] `crossSubaccountSkills.test.ts` — intelligence skills work from within org subaccount
+- [ ] `orgSubaccountGuards.test.ts` — cannot delete, cannot suspend org subaccount (DB constraint rejects)
+- [ ] `orgAgentConfigMigration.test.ts` — config migration is idempotent (re-run produces same result), upsert counts are correct
+- [ ] `crossSubaccountSkills.test.ts` — intelligence skills work from within org subaccount, query across all subaccounts (not just org subaccount)
+- [ ] **`orgRefactorRegression.test.ts`** — **critical:** Portfolio Health Agent produces identical output pre vs post refactor. Captures a run before migration, runs again after, compares: same skills called, same cross-subaccount data accessed, same output structure. This proves the refactor didn't change behaviour.
 
 ---
 
-## 14. Phased Delivery
+## 15. Phased Delivery
 
 ### Phase 1: Foundation (this spec)
 
@@ -517,32 +688,20 @@ Search for client-side references to `/api/org/tasks` or `/api/org/agent-configs
 
 ---
 
-## 15. Open Questions
+## 16. Resolved Questions
 
-### Q1: Should the org subaccount be visible in the subaccount list or hidden?
+### Q1: Naming — RESOLVED
 
-**Recommendation:** Visible but visually distinct (pinned to top, "HQ" badge). Hiding it creates confusion when users see agent runs happening in a subaccount they can't find. Showing it makes the system transparent.
+**Decision:** "[Org Name] Workspace". The org subaccount name is `{org.name} Workspace`, slug is `org-hq-{orgId prefix}`.
 
-**Need input:** Does the user/CEO have a preference on naming? "HQ", "[Org Name] Workspace", "Organisation", or something else?
+### Q2: `allowedSubaccountIds` — RESOLVED
 
-### Q2: What happens to `allowedSubaccountIds` on `orgAgentConfigs`?
+**Decision:** Drop the field from migrated config. Replace with a derived access guard based on subaccount type (see section 7c). Org subaccount agents get full cross-subaccount access; regular subaccount agents are scoped to their own subaccount. No explicit config needed.
 
-This field restricts which subaccounts an org-scoped agent can access. After migration, it's dropped from the `subaccountAgents` record (that field doesn't exist there). Cross-subaccount access control would need a different mechanism if needed.
+### Q3: `orgExecutionEnabled` — RESOLVED
 
-**Recommendation:** Drop it for now. The skills themselves control what they query — they always query all active subaccounts for the org. If fine-grained access control is needed later, add it as a skill-level config, not an agent config.
+**Decision:** Repurpose as a general org execution toggle. Check at the top of `executeRun()` for all runs (see section 6a). Rename column to `executionEnabled` in Phase 2 cleanup.
 
-### Q3: Should `orgExecutionEnabled` be kept as a general kill switch?
+### Q4: Auto-linked agents — RESOLVED
 
-Currently it only gates org-scoped runs. Options:
-- **Drop it:** One less thing to maintain. Orgs can disable agents individually.
-- **Repurpose:** Make it disable ALL agent execution for the org (useful for billing/suspension).
-
-**Recommendation:** Repurpose as a general org execution toggle. Rename to `executionEnabled` on the `organisations` table. Check it at the top of `executeRun()` regardless of scope.
-
-### Q4: Should the org subaccount get auto-linked agents from the hierarchy template?
-
-When the org subaccount is created, should the default hierarchy template be auto-applied to it? This would auto-link the Orchestrator, all business agents, and the Portfolio Health Agent.
-
-**Recommendation:** Yes — but only agents with `defaultTarget: org-hq` (Portfolio Health Agent initially). Other agents get linked to client subaccounts. The org subaccount is the org's internal workspace, not a client workspace.
-
-**Need input:** Which agents should be auto-linked to the org subaccount? Just Portfolio Health? Or also the Orchestrator and Strategic Intelligence Agent?
+**Decision:** All system agents allowed by the org's subscription tier are auto-linked to the org subaccount. For seed data (development/testing), this means all 16 system agents. In production, the subscription tier determines the available agent set. The org subaccount is the org's internal workspace — it gets the full agent roster.
