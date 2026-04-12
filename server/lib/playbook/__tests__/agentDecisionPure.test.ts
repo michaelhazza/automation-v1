@@ -212,6 +212,56 @@ test('skip_set: downstream of non-chosen branch entry step is also skipped', () 
   assert(skipSet.has('branch_b_sub'), 'branch_b_sub must be skipped (transitive)');
 });
 
+test('skip_set: multi-level skip chain (3 levels deep)', () => {
+  // Topology: decision → [branch_a_step, branch_b_step → branch_b_sub → branch_b_leaf] → merge
+  // Choosing branch_a should skip branch_b_step, branch_b_sub, and branch_b_leaf.
+  // merge must NOT be skipped (has branch_a_step as live ancestor).
+  const def = makeDecisionDef({
+    extraSteps: [
+      {
+        id: 'branch_b_sub',
+        name: 'Branch B sub',
+        type: 'prompt',
+        dependsOn: ['branch_b_step'],
+        sideEffectType: 'none',
+        outputSchema: {} as any,
+      },
+      {
+        id: 'branch_b_leaf',
+        name: 'Branch B leaf',
+        type: 'prompt',
+        dependsOn: ['branch_b_sub'],
+        sideEffectType: 'none',
+        outputSchema: {} as any,
+      },
+    ],
+  });
+  const skipSet = computeSkipSet(def, 'decision', 'branch_a');
+  assert(skipSet.has('branch_b_step'), 'branch_b_step skipped');
+  assert(skipSet.has('branch_b_sub'), 'branch_b_sub skipped (depth 2)');
+  assert(skipSet.has('branch_b_leaf'), 'branch_b_leaf skipped (depth 3)');
+  assert(!skipSet.has('merge'), 'merge (convergence) NOT skipped');
+  assert(!skipSet.has('branch_a_step'), 'branch_a_step NOT skipped');
+  assert(!skipSet.has('decision'), 'decision NOT skipped');
+});
+
+test('skip_set: convergence step is NOT skipped when it depends on multiple branches and one is chosen', () => {
+  // The merge step depends on BOTH branch_a_step and branch_b_step.
+  // When branch_a is chosen, branch_b_step is skipped but merge has a live ancestor
+  // (branch_a_step) so it must remain pending, not skipped.
+  const def = makeDecisionDef();
+  const skipSetA = computeSkipSet(def, 'decision', 'branch_a');
+  const skipSetB = computeSkipSet(def, 'decision', 'branch_b');
+
+  // Whichever branch is chosen, merge must stay alive.
+  assert(!skipSetA.has('merge'), 'merge not skipped when branch_a chosen');
+  assert(!skipSetB.has('merge'), 'merge not skipped when branch_b chosen');
+
+  // Exactly one branch entry step is skipped per choice.
+  assertEqual(skipSetA.has('branch_b_step') && !skipSetA.has('branch_a_step'), true, 'A: only b skipped');
+  assertEqual(skipSetB.has('branch_a_step') && !skipSetB.has('branch_b_step'), true, 'B: only a skipped');
+});
+
 test('skip_set: throws if decision step not found', () => {
   const def = makeDecisionDef();
   assertThrows(

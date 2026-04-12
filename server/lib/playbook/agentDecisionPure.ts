@@ -32,6 +32,13 @@ export type StepReadiness = 'ready' | 'waiting' | 'skipped';
 /**
  * Mirrors PlaybookStepRunStatus from the DB schema. Duplicated here to keep
  * this module free of imports from server/db/.
+ *
+ * NOTE: `awaiting_hitl` and `cancelled` are not yet in the DB schema
+ * (as of the current migrations) but are declared here for forward-compat:
+ * `awaiting_hitl` will be added when the HITL confidence-escalation path is
+ * fully wired through the UI; `cancelled` if per-step cancellation lands.
+ * Both are treated as non-terminal by `computeStepReadiness`, which is the
+ * correct behaviour regardless of schema timing.
  */
 export type StepRunStatus =
   | 'pending'
@@ -111,8 +118,12 @@ export function computeSkipSet(
     );
   }
 
-  // Build adjacency indices once.
+  // Build adjacency indices and the all-branch-descended set once (O(V+E) each).
+  // These are passed into hasLiveBranchAncestor to avoid rebuilding them O(V) times
+  // inside the BFS loop (which would make the overall algorithm O(V*(V+E))).
   const downstream = buildDownstreamIndex(definition);
+  const upstream = buildUpstreamIndex(definition);
+  const allBranchDescended = computeAllBranchDescendedSteps(definition, decisionStep);
 
   // Build the set of steps reachable from the chosen branch.
   const liveBranchSet = computeBranchLiveSet(definition, decisionStep, chosenBranchId);
@@ -127,6 +138,8 @@ export function computeSkipSet(
   }
 
   // BFS forward from the skip candidates, using live-ancestor short-circuit.
+  // Overall complexity: O(V+E) — the pre-computed indices are shared across
+  // all hasLiveBranchAncestor calls rather than rebuilt each time.
   const skipSet = new Set<string>();
   const queue: string[] = [...skipCandidates];
   const visited = new Set<string>();
@@ -137,13 +150,13 @@ export function computeSkipSet(
     visited.add(stepId);
 
     // A step is skipped only if it is NOT reachable from the chosen branch.
-    // If a step is in the live branch set, it is a convergence step — skip it.
+    // If a step is in the live branch set, it is a convergence step — keep alive.
     if (liveBranchSet.has(stepId)) {
       continue;
     }
 
     // Additionally, check if any branch-descended ancestor is in the live set.
-    if (hasLiveBranchAncestor(stepId, definition, decisionStep, liveBranchSet)) {
+    if (hasLiveBranchAncestor(stepId, upstream, allBranchDescended, liveBranchSet)) {
       continue;
     }
 
@@ -162,18 +175,16 @@ export function computeSkipSet(
 /**
  * Returns true if any branch-descended ancestor of `stepId` is in the
  * live branch set (i.e. is reachable from the chosen branch).
+ *
+ * Accepts pre-computed `upstream` and `allBranchDescended` to avoid
+ * rebuilding them on every call (caller computes once, passes here).
  */
 function hasLiveBranchAncestor(
   stepId: string,
-  definition: PlaybookDefinition,
-  decisionStep: AgentDecisionStep,
+  upstream: ReadonlyMap<string, readonly string[]>,
+  allBranchDescended: ReadonlySet<string>,
   liveBranchSet: ReadonlySet<string>,
 ): boolean {
-  const upstream = buildUpstreamIndex(definition);
-
-  // Collect all branch-descended ancestors of stepId.
-  const allBranchDescended = computeAllBranchDescendedSteps(definition, decisionStep);
-
   // BFS backwards from stepId collecting branch-descended ancestors.
   const q: string[] = [stepId];
   const seen = new Set<string>();

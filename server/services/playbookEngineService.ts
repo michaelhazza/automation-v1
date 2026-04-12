@@ -719,12 +719,12 @@ export const playbookEngineService = {
         const decisionStep = step as AgentDecisionStep;
         const ctx = run.contextJson as unknown as RunContext;
 
-        // Resolve decisionPrompt via templating.
+        // Resolve decisionPrompt via templating. The validator requires decisionPrompt
+        // to be set on every agent_decision step, so the fallback is unreachable in
+        // well-validated definitions. It is kept as a safety net against stale data.
         let resolvedDecisionPrompt: string;
         try {
-          resolvedDecisionPrompt = step.decisionPrompt
-            ? renderString(step.decisionPrompt, ctx)
-            : 'Choose the most appropriate branch based on the context.';
+          resolvedDecisionPrompt = renderString(step.decisionPrompt ?? '', ctx);
         } catch (err) {
           if (err instanceof TemplatingError) {
             await this.failStepRunInternal(
@@ -858,7 +858,7 @@ export const playbookEngineService = {
         await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:decision:dispatched', {
           stepRunId: sr.id,
           stepId: step.id,
-          agentRunId: resolvedAgentId, // will be updated when agent run is created
+          agentId: resolvedAgentId, // the agent entity; agentRunId is populated by agentExecutionService
           branchesCount: decisionStep.branches.length,
         });
         return;
@@ -2003,21 +2003,23 @@ export const playbookEngineService = {
   },
 
   /**
-   * Hook called by the agent run completion path. Looks up the playbook
-   * step run linked to the agent run and routes to the appropriate handler:
+   * Hook called by the agent run completion path. The caller (playbookAgentRunHook)
+   * passes the `stepRunId` from `agentRuns.playbookStepRunId` directly — this avoids
+   * the broken reverse-lookup pattern (playbookStepRuns.agentRunId is never written).
+   *
+   * Routes:
    *   - agent_decision steps → handleDecisionStepCompletion (parse + skip-set)
    *   - all other types     → completeStepRun / failStepRun
-   *
-   * Wired into agentRunService in step 6.
    */
   async onAgentRunCompleted(
-    agentRunId: string,
-    result: { ok: boolean; output?: unknown; error?: string }
+    stepRunId: string,
+    result: { ok: boolean; output?: unknown; error?: string },
+    agentRunId: string
   ): Promise<void> {
     const [sr] = await db
       .select()
       .from(playbookStepRuns)
-      .where(eq(playbookStepRuns.agentRunId, agentRunId));
+      .where(eq(playbookStepRuns.id, stepRunId));
     if (!sr) return;
     if (sr.status === 'invalidated') {
       logger.warn('playbook_step_result_discarded_invalidated', {
@@ -2057,7 +2059,7 @@ export const playbookEngineService = {
   async handleDecisionStepCompletion(
     sr: PlaybookStepRun,
     result: { ok: boolean; output?: unknown; error?: string },
-    _agentRunId: string
+    agentRunId: string
   ): Promise<void> {
     // 1. Load run + definition + step.
     const [run] = await db.select().from(playbookRuns).where(eq(playbookRuns.id, sr.runId));
@@ -2082,8 +2084,13 @@ export const playbookEngineService = {
       return;
     }
 
-    // 3. Parse agent output.
-    const parseResult = parseDecisionOutput(result.output, decisionStep);
+    // 3. Parse agent output. Coerce to string — agent run output may be an
+    //    already-parsed object depending on how the completion hook serialises it.
+    const rawOutput =
+      typeof result.output === 'string'
+        ? result.output
+        : JSON.stringify(result.output ?? '');
+    const parseResult = parseDecisionOutput(rawOutput, decisionStep);
     const inputJson = (sr.inputJson ?? {}) as Record<string, unknown>;
     const retryCount = typeof inputJson.retryCount === 'number' ? inputJson.retryCount : 0;
 
@@ -2098,11 +2105,8 @@ export const playbookEngineService = {
           // Use the raw template on render failure.
         }
 
-        const rawStr =
-          typeof result.output === 'string'
-            ? result.output
-            : JSON.stringify(result.output ?? '');
-        const truncatedRaw = rawStr.slice(0, DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS);
+        // rawOutput was already coerced to string at parse time — reuse it.
+        const truncatedRaw = rawOutput.slice(0, DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS);
 
         const envelope = renderAgentDecisionEnvelope({
           decisionPrompt: resolvedDecisionPrompt,
@@ -2197,7 +2201,54 @@ export const playbookEngineService = {
     }
 
     // 4. Parse succeeded — apply the decision.
-    const { chosenBranchId, rationale, confidence } = parseResult.value;
+    const { chosenBranchId, rationale, confidence } = parseResult.output;
+
+    // 4a. minConfidence HITL escalation (spec §7).
+    // When the agent reports a confidence value below the step's threshold,
+    // escalate to a human reviewer instead of applying the skip set automatically.
+    if (
+      decisionStep.minConfidence !== undefined &&
+      confidence !== undefined &&
+      confidence < decisionStep.minConfidence
+    ) {
+      // Store the tentative decision in the step run's inputJson so the reviewer
+      // can inspect it. The step stays in awaiting_approval; when approved the
+      // caller will re-invoke with the same output or an override.
+      await db
+        .update(playbookStepRuns)
+        .set({
+          inputJson: {
+            ...(inputJson ?? {}),
+            tentativeDecision: { chosenBranchId, rationale, confidence },
+          } as unknown as Record<string, unknown>,
+          updatedAt: new Date(),
+        })
+        .where(eq(playbookStepRuns.id, sr.id));
+
+      await playbookStepReviewService.requireApproval(sr, {
+        reviewKind: 'decision_confidence_escalation',
+      } as Parameters<typeof playbookStepReviewService.requireApproval>[1]);
+
+      logger.info('playbook_decision_low_confidence_escalated', {
+        event: 'decision.low_confidence_escalation',
+        runId: run.id,
+        stepRunId: sr.id,
+        stepId: step.id,
+        chosenBranchId,
+        confidence,
+        minConfidence: decisionStep.minConfidence,
+        agentRunId,
+      });
+
+      await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:decision:low_confidence', {
+        stepRunId: sr.id,
+        stepId: step.id,
+        chosenBranchId,
+        confidence,
+        minConfidence: decisionStep.minConfidence,
+      });
+      return;
+    }
 
     // Compute skip set: all non-chosen branch steps that lack a live chosen ancestor.
     const skipSet = computeSkipSet(def, step.id, chosenBranchId);
@@ -2446,7 +2497,13 @@ export const playbookEngineService = {
               )
             );
 
-          const idempotencyKey = `playbook:${data.playbookRunId}:${data.stepId}:${data.attempt}`;
+          // Include retryCount in the idempotency key so decision retries get a
+          // fresh agent run rather than deduplicating against the failed original.
+          const retryCountForKey = (data.triggerContext?.retryCount as number) ?? 0;
+          const idempotencyKey =
+            retryCountForKey > 0
+              ? `playbook:${data.playbookRunId}:${data.stepId}:${data.attempt}:retry${retryCountForKey}`
+              : `playbook:${data.playbookRunId}:${data.stepId}:${data.attempt}`;
           // Use caller-supplied triggerContext when present (decision retries carry
           // extra fields like retryCount). Fall back to constructing it fresh.
           const triggerContext: Record<string, unknown> = data.triggerContext ?? {

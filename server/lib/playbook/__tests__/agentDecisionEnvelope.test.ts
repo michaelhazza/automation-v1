@@ -93,7 +93,8 @@ test('envelope: contains JSON schema example with chosenBranchId', () => {
 
 test('envelope: instructs agent to respond with only JSON', () => {
   const out = renderAgentDecisionEnvelope(makeCtx());
-  assert(out.includes('nothing else'), 'nothing else instruction present');
+  // Updated instruction post-fix: no prose, no code fences, raw JSON
+  assert(out.includes('no prose') || out.includes('nothing else') || out.includes('raw JSON'), 'raw JSON instruction present');
 });
 
 test('envelope: deterministic — same input produces same output', () => {
