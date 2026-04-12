@@ -20,7 +20,8 @@ export type StepType =
   | 'agent_call'
   | 'user_input'
   | 'approval'
-  | 'conditional';
+  | 'conditional'
+  | 'agent_decision';
 
 export type SideEffectType =
   | 'none'
@@ -36,6 +37,23 @@ export interface AgentRef {
   kind: 'system' | 'org';
   /** Slug of the agent — resolved to a concrete agentId at run start (§3.4). */
   slug: string;
+}
+
+/**
+ * A single selectable branch for an `agent_decision` step. The agent must
+ * choose exactly one branch by its `id`.
+ *
+ * Spec: docs/playbook-agent-decision-step-spec.md §4.
+ */
+export interface AgentDecisionBranch {
+  /** Stable identifier — used as `chosenBranchId` in the agent output. Max 64 chars, [a-z0-9_-]. */
+  id: string;
+  /** Human-readable label shown in the decision envelope. Max 80 chars. */
+  label: string;
+  /** Explanation of when this branch should be chosen. Max 500 chars. */
+  description: string;
+  /** IDs of the head steps of this branch (the first steps that belong to it). */
+  entrySteps: string[];
 }
 
 export interface StepRetryPolicy {
@@ -111,6 +129,26 @@ export interface PlaybookStep {
   trueOutput?: unknown;
   falseOutput?: unknown;
 
+  // ── type: agent_decision ──────────────────────────────────────────────────
+  /**
+   * The question the agent must answer in order to choose a branch.
+   * Appended to the agent system prompt via the decision envelope.
+   */
+  decisionPrompt?: string;
+  /** Two to MAX_DECISION_BRANCHES_PER_STEP selectable branches. */
+  branches?: AgentDecisionBranch[];
+  /**
+   * Branch id chosen if the agent run fails after exhausting retries.
+   * When absent, failure causes the step (and run) to fail instead.
+   */
+  defaultBranchId?: string;
+  /**
+   * Minimum acceptable confidence value (0–1). When the agent returns a
+   * confidence value below this threshold, the decision is escalated to HITL
+   * instead of applied automatically.
+   */
+  minConfidence?: number;
+
   /**
    * REQUIRED for every step type. Validator-validated. Engine parses agent /
    * prompt outputs through this schema; failures retry up to N times then
@@ -118,6 +156,20 @@ export interface PlaybookStep {
    */
   outputSchema: ZodSchema;
 }
+
+/**
+ * Narrowed view of a PlaybookStep for `agent_decision` steps.
+ * Use this when you need the compiler to enforce that the required fields
+ * (`branches`, `decisionPrompt`, `agentRef`) are present.
+ *
+ * Spec: docs/playbook-agent-decision-step-spec.md §4.
+ */
+export type AgentDecisionStep = PlaybookStep & {
+  type: 'agent_decision';
+  branches: AgentDecisionBranch[];
+  decisionPrompt: string;
+  agentRef: AgentRef;
+};
 
 export interface PlaybookDefinition {
   /** Matches filename: server/playbooks/<slug>.playbook.ts */
@@ -158,7 +210,18 @@ export type ValidationRule =
   | 'version_not_monotonic'
   | 'irreversible_with_retries'
   | 'max_dag_depth_exceeded'
-  | 'reserved_template_namespace';
+  | 'reserved_template_namespace'
+  // agent_decision step rules (spec §6)
+  | 'decision_branches_too_few'
+  | 'decision_branches_too_many'
+  | 'decision_branch_duplicate_id'
+  | 'decision_branch_no_entry_steps'
+  | 'decision_entry_step_not_found'
+  | 'decision_entry_step_missing_dep'
+  | 'decision_branch_entry_collision'
+  | 'decision_side_effect_not_none'
+  | 'decision_default_branch_invalid'
+  | 'decision_min_confidence_out_of_range';
 
 export interface ValidationError {
   rule: ValidationRule;

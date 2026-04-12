@@ -101,7 +101,8 @@ export type PlaybookStepType =
   | 'agent_call'
   | 'user_input'
   | 'approval'
-  | 'conditional';
+  | 'conditional'
+  | 'agent_decision';
 
 export type PlaybookStepRunStatus =
   | 'pending'

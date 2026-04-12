@@ -45,8 +45,11 @@ export async function notifyPlaybookEngineOnAgentRunComplete(
 
   logger.info('playbook_agent_run_complete_hook', {
     agentRunId,
+    playbookStepRunId: run.playbookStepRunId,
     ok: result.ok,
   });
 
-  await playbookEngineService.onAgentRunCompleted(agentRunId, result);
+  // Pass stepRunId directly — the engine looks up the step run by primary key.
+  // Passing agentRunId along for logging/tracing in the engine.
+  await playbookEngineService.onAgentRunCompleted(run.playbookStepRunId, result, agentRunId);
 }
