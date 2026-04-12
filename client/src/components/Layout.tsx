@@ -745,15 +745,19 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && activeClientId && (
             <>
               <NavSection label="Company" />
-              {hasOrgPerm('org.agents.view') && (
+              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && (
                 <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
               )}
-              {hasOrgPerm('org.subaccounts.view') && (
+              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && (
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
-              <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
-              <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
-              {hasOrgPerm('org.subaccounts.edit') && (
+              {hasSidebarItem('ops') && (
+                <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+              )}
+              {hasSidebarItem('companies') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
+              )}
+              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.edit') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
               )}
             </>
