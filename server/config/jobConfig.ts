@@ -182,6 +182,21 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'fifo' as const,
   },
 
+  // ── Tier 3b: Memory deduplication (Phase 2B, daily sweep) ──────
+  'maintenance:memory-dedup': {
+    expireInSeconds: 600,
+    idempotencyStrategy: 'fifo' as const,
+  },
+
+  // ── Tier 4: Agent briefing update (event-driven, non-critical) ─
+  'agent-briefing-update': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    idempotencyStrategy: 'one-shot' as const, // one per run completion
+  },
+
   // ── Tier 4: Memory enrichment (async, non-critical) ────────────
   'memory-context-enrichment': {
     retryLimit: 2,

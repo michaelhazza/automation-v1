@@ -138,6 +138,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0084_agent_run_checkpoint_and_messages.sql',
     rationale: 'Per-run LLM conversation transcript — full prompts, tool inputs, tool outputs from every agent run.',
   },
+  // 0105 — Agent Intelligence Upgrade (Phases 2D + 3B)
+  {
+    tableName: 'agent_briefings',
+    schemaFile: 'agentBriefings.ts',
+    policyMigration: '0105_agent_intelligence.sql',
+    rationale: 'Per-agent cross-run briefing — contains summarised workspace context and recent activity.',
+  },
+  {
+    tableName: 'subaccount_state_summaries',
+    schemaFile: 'subaccountStateSummaries.ts',
+    policyMigration: '0105_agent_intelligence.sql',
+    rationale: 'Auto-generated subaccount operational state — task counts, run stats, health findings.',
+  },
   // 0088 — Sprint 5 P4.2 shared memory blocks
   {
     tableName: 'memory_blocks',

@@ -26,7 +26,10 @@ const geminiAdapter: LLMProviderAdapter = {
     };
 
     if (params.system) {
-      body.systemInstruction = { parts: [{ text: params.system }] };
+      const systemText = typeof params.system === 'object'
+        ? params.system.stablePrefix + params.system.dynamicSuffix
+        : params.system;
+      body.systemInstruction = { parts: [{ text: systemText }] };
     }
 
     if (params.tools && params.tools.length > 0) {

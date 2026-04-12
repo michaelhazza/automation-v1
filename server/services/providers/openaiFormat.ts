@@ -55,12 +55,15 @@ interface OpenAIResponse {
 
 export function toOpenAIMessages(
   messages: ProviderMessage[],
-  system?: string,
+  system?: string | { stablePrefix: string; dynamicSuffix: string },
 ): OpenAIMessage[] {
   const result: OpenAIMessage[] = [];
 
   if (system) {
-    result.push({ role: 'system', content: system });
+    const systemText = typeof system === 'object'
+      ? system.stablePrefix + system.dynamicSuffix
+      : system;
+    result.push({ role: 'system', content: systemText });
   }
 
   for (const msg of messages) {

@@ -169,6 +169,34 @@ export const PROVIDER_CALL_TIMEOUT_MS = 30000;
 /** How long (ms) a provider stays in cooldown after exhausting retries */
 export const PROVIDER_COOLDOWN_MS = 60000;
 
+// ── Phase 1B: Dominance-ratio confidence gating ────────────────────────────
+
+/**
+ * Minimum ratio of top-1 score / top-2 score before the retrieval is
+ * considered confident. Below this threshold, reranking and graph expansion
+ * are skipped to prevent amplifying ambiguous results.
+ */
+export const DOMINANCE_THRESHOLD = 1.2;
+
+/**
+ * Minimum absolute combined_score the top result must reach before graph
+ * expansion is allowed. Prevents expansion from weak seeds — a dominant
+ * result that is still low-quality overall should not trigger relational
+ * expansion. Complements DOMINANCE_THRESHOLD (relative) with an absolute floor.
+ */
+export const EXPANSION_MIN_SCORE = 0.05;
+
+// ── Phase 2D: Agent briefing ────────────────────────────────────────────────
+
+/** Hard token cap for stored briefings. Anything above is truncated. */
+export const BRIEFING_TOKEN_HARD_CAP = 1200;
+
+/** Number of recent high-quality memory entries to feed the briefing LLM. */
+export const BRIEFING_MEMORY_ENTRIES_LIMIT = 5;
+
+/** Minimum quality score for memory entries included in briefing context. */
+export const BRIEFING_MEMORY_QUALITY_THRESHOLD = 0.5;
+
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
 /** Max memory entries returned by vector search */

@@ -61,7 +61,7 @@ export type LLMCallContext = z.infer<typeof LLMCallContextSchema>;
 
 export interface RouterCallParams {
   messages:     ProviderMessage[];
-  system?:      string;
+  system?:      string | { stablePrefix: string; dynamicSuffix: string };
   tools?:       ProviderTool[];
   maxTokens?:   number;
   temperature?: number;

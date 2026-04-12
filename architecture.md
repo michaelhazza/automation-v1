@@ -571,11 +571,36 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 
 ## Workspace Memory
 
-- `workspaceMemories` table stores entities (type, content, tags, embedding)
-- `workspaceMemoryService` handles CRUD and retrieval
-- `memoryDecayJob` clears stale memories on a schedule
-- Embeddings supported for semantic search across memories
-- Used by orchestrator agent to accumulate cross-run context
+- `workspaceMemoryEntries` table stores agent-written facts (type, content, embedding `vector(1536)`, `quality_score`, `tsv` for full-text)
+- `workspaceMemoryService` handles CRUD, hybrid retrieval, entity extraction, and LLM-assisted deduplication
+- `memoryDecayJob` prunes entries with `quality_score < 0.3` and fewer than 3 accesses after 90 days
+- Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
+- Used by agents to accumulate cross-run context, exposed to humans via the Ops Dashboard memory search
+
+### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
+
+`workspaceMemoryService._hybridRetrieve()` is the canonical path for injecting memory into agent prompts. It replaces the former single-CTE vector search with a multi-stage Reciprocal Rank Fusion pipeline:
+
+1. **Candidate pool** — up to `MAX_MEMORY_SCAN` (1000) entries filtered by scope, quality threshold, domain tag, and `VECTOR_SEARCH_RECENCY_DAYS` (90-day window).
+2. **HyDE query expansion** (Phase B4) — queries shorter than `HYDE_THRESHOLD` (100 chars) trigger a cheap LLM call that produces a hypothetical document, improving recall for terse inputs. Result cached per run.
+3. **Domain classification** — query text mapped to a domain tag (`customer_success`, `revenue`, etc.) to pre-filter the candidate pool.
+4. **Semantic retrieval** — cosine distance ranking over embedded candidates; top `N × RRF_OVER_RETRIEVE_MULTIPLIER` kept.
+5. **Full-text retrieval** — `plainto_tsquery` over the `tsv` tsvector column; scores merged when valid tokens are present.
+6. **RRF fusion** — `rrf_score = SUM(1 / (k + rank_i))` per entry across both retrieval sources; entries below `RRF_MIN_SCORE` dropped.
+7. **Combined score** — `rrf_score × 0.70 + quality_score × 0.15 + recency_score × 0.15`.
+8. **Optional reranking** (Phase B3) — when `RERANKER_PROVIDER` is set, a Cohere reranker re-scores the top candidates. Capped at `RERANKER_MAX_CALLS_PER_RUN` per run.
+9. **Statement timeout** — the RRF query runs under `SET statement_timeout = '200ms'`; the reset is guaranteed by `try/finally` so pool connections are never left with a shortened timeout on error.
+
+All tunable constants live in `server/config/limits.ts` under the `── Hybrid Search / RRF`, `── Reranking`, and `── Query Expansion / HyDE` sections.
+
+### Memory Deduplication Job (Phase 2B)
+
+`server/jobs/memoryDedupJob.ts` exports `runMemoryDedup()`, registered as a scheduled pg-boss job. Each sweep:
+
+1. Collects distinct subaccounts with at least one embedded entry.
+2. Self-joins `workspace_memory_entries` on cosine distance `< 0.15` (≈85% similarity) per subaccount.
+3. Hard-deletes the lower-quality entry from each near-duplicate pair (tie-broken by `id` for determinism).
+4. Runs via `withAdminConnection` + `SET LOCAL ROLE admin_role` to bypass RLS (cross-org maintenance path).
 
 ### Cross-Agent Memory Search (Agent Coworker Feature 5)
 
@@ -584,6 +609,54 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 - **Service:** `workspaceMemoryService.semanticSearchMemories()` — generates embedding for query text, runs cosine similarity (`<=>`) against `workspaceMemoryEntries.embedding`, joins `agents` for source agent names. `getMemoryEntry()` fetches a single entry by ID with org-scope guard.
 - **Skill:** `search_agent_history` in `actionRegistry.ts` (`isUniversal: true`). Two ops: `search` (semantic vector search) and `read` (fetch single entry). Handler in `SKILL_HANDLERS` auto-enables org-wide search when no subaccountId context.
 - **No schema changes** — uses existing `embedding vector(1536)` column and HNSW index on `workspaceMemoryEntries`.
+
+---
+
+## Agent Briefing (Agent Intelligence Upgrade Phase 2D)
+
+A compact, cross-run orientation document automatically maintained per agent-subaccount pair and injected into the system prompt at every run start.
+
+### Schema
+
+`agent_briefings` table (`server/db/schema/agentBriefings.ts`) — one row per `(organisationId, subaccountId, agentId)` (unique index). Stores `content` (text), `tokenCount`, `sourceRunIds` (uuid[]), and `version`.
+
+### How it works
+
+1. **Generation** — after every run completes, `agentExecutionService` enqueues an `agent-briefing-update` pg-boss job (fire-and-forget). The handler `runAgentBriefingUpdate` in `server/jobs/agentBriefingJob.ts` calls `agentBriefingService.updateAfterRun()`.
+2. **Update** — `updateAfterRun` loads the previous briefing + the latest `handoffJson` + up to `BRIEFING_MEMORY_ENTRIES_LIMIT` (5) recent high-quality memory entries, then calls the LLM to produce a rolling summary. Output is truncated to `BRIEFING_TOKEN_HARD_CAP` (1200 tokens) and upserted.
+3. **Injection** — at run start, `agentBriefingService.get()` fetches the current briefing. If present, it is appended to the system prompt as a `## Your Briefing` section in the dynamic suffix (see Stable/Dynamic Prompt Split below).
+
+**Non-blocking contract:** a briefing failure never blocks the agent run. Both the enqueue and the `get()` call are wrapped in try/catch.
+
+The `handoffJson` block in the briefing LLM prompt is delimited by `<run-outcome-data>` tags to prevent prompt injection from agent-generated content.
+
+---
+
+## Subaccount State Summary (Agent Intelligence Upgrade Phase 3B)
+
+A structured operational snapshot injected into the system prompt so agents have immediate situational awareness without running data-fetching tool calls first.
+
+### Service
+
+`server/services/subaccountStateSummaryService.ts` — `getOrGenerate(orgId, subaccountId)`. Assembles the summary from live DB data (task counts by status, recent agent run stats, high-signal memory entries) with **no LLM calls**. Result is cached in `subaccount_state_summaries` with a 4-hour TTL.
+
+- **Cache hit** — returns the stored text directly.
+- **Cache miss / stale** — regenerates, upserts, then returns.
+
+Injected into the system prompt as a dynamic section after `## Current Board`. Non-fatal if generation fails.
+
+---
+
+## Stable/Dynamic Prompt Split (Agent Intelligence Upgrade Phase 0C)
+
+The system prompt is split into two parts to enable multi-breakpoint prompt caching:
+
+| Part | Contents | Caching behaviour |
+|------|----------|-------------------|
+| `stablePrefix` | Sections 1–6 (master prompt, sub-prompt, additional instructions, task instructions context) + team roster | Cached across runs — changes only on agent config edit |
+| `dynamicSuffix` | Agent briefing, task instructions, lazy manifest, workspace memory, workspace entities, current board, subaccount state summary, autonomous instructions | Dynamic — rebuilt each run |
+
+The `runAgenticLoop` call receives `systemPrompt` as `{ stablePrefix, dynamicSuffix }` so the LLM gateway can route each part to the appropriate cache breakpoint tier.
 
 ---
 
@@ -633,6 +706,7 @@ Runs per tool call, in order:
 ### Phase 3 — postTool (after each tool call completes)
 
 1. **reflectionLoopMiddleware** (Sprint 3 P2.2) — enforces "no `write_patch` without prior `APPROVE` from `review_code`" contract. Escalates to HITL after `MAX_REFLECTION_ITERATIONS` blocked review attempts.
+2. **hallucinationDetectionMiddleware** (Agent Intelligence Upgrade Phase 3C) — extracts entity-like references from the latest assistant message (quoted strings, capitalised multi-word phrases), cross-checks them against `workspace_entities` for the current subaccount, and injects an advisory message when unmatched references are found. Entity lookup is cached per run to avoid per-tool-call DB queries.
 
 ### Critique gate
 
