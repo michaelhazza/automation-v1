@@ -527,6 +527,22 @@ When a new organisation is created:
 4. Auto-link all system agents allowed by the org's subscription tier
 5. If the org's default hierarchy template exists, apply it to the org subaccount
 
+**Concurrent creation safety:** The partial unique index prevents duplicate org subaccounts. If two concurrent requests race, the loser hits a unique violation. Handle with retry-on-conflict:
+
+```typescript
+try {
+  await createOrgSubaccount(orgId, orgName);
+} catch (err) {
+  if (isUniqueViolation(err)) {
+    // Another request already created it — fetch and continue
+    return getOrgSubaccount(orgId);
+  }
+  throw err;
+}
+```
+
+This makes org provisioning fully idempotent — safe for retries, multi-worker setups, and async flows.
+
 This happens in the organisation creation route/service — a new step after org row insertion.
 
 ---
@@ -709,7 +725,7 @@ If failure rate for org subaccount agents exceeds 2x the pre-migration baseline 
 
 ### Q1: Naming — RESOLVED
 
-**Decision:** "[Org Name] Workspace". The org subaccount name is `{org.name} Workspace`, slug is `org-hq-{orgId prefix}`.
+**Decision:** "[Org Name] Workspace". The org subaccount name is `{org.name} Workspace`, slug is `org-hq-{generated UUID}` (full UUID guarantees no collision with existing subaccounts).
 
 ### Q2: `allowedSubaccountIds` — RESOLVED
 
