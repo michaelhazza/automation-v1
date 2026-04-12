@@ -1113,7 +1113,7 @@ Covered in §3.5 (Module A). The sidebar reads `sidebar_config` from the active 
 
 #### 8.2.1 Customer Dashboard — `ClientPulseDashboardPage.tsx`
 
-**Route:** `/dashboard` (top-level, first thing users see after onboarding)
+**Route:** `/clientpulse` (top-level, first thing users see after onboarding)
 
 **NOT the same as `OpsDashboardPage`** (operator-facing at `/admin/ops`). These are two different pages for two different personas. The ClientPulse customer Dashboard is portfolio-health-focused; the Ops Dashboard is an internal activity feed.
 
@@ -1196,7 +1196,7 @@ Simpler approach: In the Integrations page component, if the user is on a module
 
 ### 8.4 Verification
 
-- [ ] ClientPulse org lands on `/dashboard` after login — shows health breakdown, anomalies, high-risk clients
+- [ ] ClientPulse org lands on `/clientpulse` after login — shows health breakdown, anomalies, high-risk clients
 - [ ] Dashboard widgets populate with real data from canonical accounts
 - [ ] Sync progress bar shows real-time progress during initial sync
 - [ ] Reports list page shows delivered reports with sort/filter
@@ -1237,13 +1237,13 @@ The consumer-grade front door. Seven steps from landing page to first report (ma
 **Signup handler logic:**
 
 ```typescript
-async function signup(email: string, password: string): Promise<{ token: string; user: User }> {
+async function signup(email: string, password: string, agencyName: string): Promise<{ token: string; user: User }> {
   // 1. Create user row
   const user = await userService.create({ email, password });
 
-  // 2. Create organisation row
+  // 2. Create organisation row (name from agencyName field — see §15.1)
   const org = await organisationService.create({
-    name: `${email.split('@')[0]}'s Agency`,
+    name: agencyName.trim(),
     ownerId: user.id,
   });
 
@@ -1260,7 +1260,10 @@ async function signup(email: string, password: string): Promise<{ token: string;
   // 4. Provision the Reporting Agent via template
   await systemTemplateService.loadToOrg('ghl-agency-intelligence', org.id, {});
 
-  // 5. Generate JWT
+  // 5. Send welcome email async (see §15.1) — fire-and-forget
+  emailService.sendWelcomeEmail(email, agencyName).catch(() => {});
+
+  // 6. Generate JWT
   const token = generateToken(user, org);
   return { token, user };
 }
@@ -1352,11 +1355,11 @@ interface SyncStatus {
 }
 ```
 
-**When all accounts are synced:** auto-advance to "Generating first report..." message, then redirect to `/dashboard` when the first Reporting Agent run completes. The first-run trigger from §6.8 handles this.
+**When all accounts are synced:** auto-advance to "Generating first report..." message, then redirect to `/clientpulse` when the first Reporting Agent run completes. The first-run trigger from §6.8 handles this.
 
 ### 9.4 Post-onboarding landing
 
-After the first report is generated, redirect to `/dashboard`. The Dashboard (§8.2.1) shows the portfolio overview. The first email report is also in the user's inbox.
+After the first report is generated, redirect to `/clientpulse`. The Dashboard (§8.2.1) shows the portfolio overview. The first email report is also in the user's inbox.
 
 From this point, the weekly schedule takes over. The user manages their account via the ClientPulse sidebar: Dashboard, Inbox, Companies, Reports, Integrations, Team, Manage Org.
 
@@ -1419,7 +1422,7 @@ This section is intentionally brief — Stripe integration is not on the critica
 - **Webhook handler:** `server/routes/webhooks/stripeWebhook.ts` — mount before body parsing (raw body for signature verification)
 - **Stripe SDK:** Use `stripe` npm package (must be added to `package.json` — not currently installed)
 - **Customer creation:** On first payment, create Stripe Customer linked to org via `organisations.stripe_customer_id` (new column)
-- **Checkout session:** `POST /api/billing/checkout` → creates Stripe Checkout Session → redirects to Stripe → success redirects to `/dashboard`
+- **Checkout session:** `POST /api/billing/checkout` → creates Stripe Checkout Session → redirects to Stripe → success redirects to `/clientpulse`
 - **Portal session:** `POST /api/billing/portal` → creates Stripe Customer Portal Session → redirects to Stripe
 
 ### 10.3 Verification
@@ -1632,7 +1635,7 @@ Consider adding these project-specific verify scripts:
 | 1 | Chart rendering: `quickchart.io` vs `chartjs-node-canvas` | Start with `quickchart.io` |
 | 2 | Template authoring: YAML in repo vs DB-only | DB-only via admin UI; YAML import as optional enhancement |
 | 3 | Soft-launch audience: invite-only vs public | Invite-only (matches private-app 5-agency cap) |
-| 4 | Dashboard landing route for non-ClientPulse orgs | Keep existing dashboard; `/dashboard` only for ClientPulse module orgs |
+| 4 | Dashboard landing route for non-ClientPulse orgs | Keep existing dashboard; `/clientpulse` only for ClientPulse module orgs |
 
 ### Risks
 
@@ -1786,7 +1789,7 @@ Request notification permission at the start of the sync step (when the user is 
 
 ### 15.5 First-report celebration (Module D — §9.4 / Module E — §8.2.1)
 
-**Success screen before dashboard.** Instead of silently redirecting to `/dashboard`, show a brief celebration interstitial:
+**Success screen before dashboard.** Instead of silently redirecting to `/clientpulse`, show a brief celebration interstitial:
 
 - Headline: "Your agency dashboard is ready"
 - Summary: "23 clients monitored. 18 healthy. 3 need attention. 2 at risk."
@@ -1870,6 +1873,7 @@ Add a "Need help?" link in the sidebar footer (below the trial countdown, if pre
 - [ ] Location list shows city/metadata, has search filter at 20+ locations
 - [ ] Subaccount limit surfaced as greyed-out locations + upgrade banner, not a hard error
 - [ ] Sync progress shows per-client data snippets as they complete
+- [ ] "Email me when ready" option shown on sync progress screen; toast confirms opt-in
 - [ ] Browser notification fires when sync completes with tab unfocused
 - [ ] Success interstitial shows before dashboard with health summary
 - [ ] First email has distinct subject line ("Your first ClientPulse report is ready")
