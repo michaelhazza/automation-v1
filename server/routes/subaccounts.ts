@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
@@ -55,6 +55,7 @@ router.get(
         status: sa.status,
         settings: sa.settings,
         includeInOrgInbox: sa.includeInOrgInbox,
+        isOrgSubaccount: sa.isOrgSubaccount,
         createdAt: sa.createdAt,
         updatedAt: sa.updatedAt,
       }))
@@ -72,6 +73,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_CREATE),
   asyncHandler(async (req, res) => {
     const organisationId = req.orgId!;
+    // guard-ignore-next-line: input-validation reason="manual field validation enforced: name required check, status type guard, includeInOrgInbox boolean guard"
     const { name, slug, status, settings } = req.body as {
       name?: string;
       slug?: string;
@@ -147,6 +149,12 @@ router.patch(
       includeInOrgInbox?: boolean;
     };
 
+    // Guard: org subaccount cannot have its status changed
+    if (sa.isOrgSubaccount && status !== undefined && status !== 'active') {
+      res.status(403).json({ error: 'Cannot change the status of the organisation workspace' });
+      return;
+    }
+
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) update.name = name;
     if (slug !== undefined) update.slug = slug;
@@ -177,6 +185,12 @@ router.delete(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_DELETE),
   asyncHandler(async (req, res) => {
     const sa = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+
+    if (sa.isOrgSubaccount) {
+      res.status(403).json({ error: 'Cannot delete the organisation workspace' });
+      return;
+    }
+
     const now = new Date();
     await db.update(subaccounts).set({ deletedAt: now, updatedAt: now }).where(eq(subaccounts.id, sa.id));
     res.json({ message: 'Subaccount deleted' });

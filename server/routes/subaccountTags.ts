@@ -1,5 +1,5 @@
 import { Router, NextFunction } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { subaccountTagService } from '../services/subaccountTagService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';

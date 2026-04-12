@@ -162,6 +162,7 @@ export async function captureRegressionFromRejection(
   const [agentRow] = await tx
     .select({ cap: agents.regressionCaseCap })
     .from(agents)
+    // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT for cap lookup; runRow obtained from org-scoped transaction context"
     .where(eq(agents.id, runRow.agentId));
 
   const cap = agentRow?.cap ?? DEFAULT_REGRESSION_CASE_CAP;

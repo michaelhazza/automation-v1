@@ -41,6 +41,7 @@ router.put(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PROCESSES_CONFIGURE),
   asyncHandler(async (req, res) => {
     const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    // guard-ignore-next-line: input-validation reason="manual validation enforced: Array.isArray check, per-item connection ownership and status validation"
     const { mappings } = req.body as { mappings: Array<{ connectionKey: string; connectionId: string }> };
 
     if (!Array.isArray(mappings)) {

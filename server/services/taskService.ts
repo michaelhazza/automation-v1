@@ -261,6 +261,7 @@ export const taskService = {
     const [updated] = await db
       .update(tasks)
       .set(update)
+      // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
       .where(eq(tasks.id, id))
       .returning();
 
@@ -305,6 +306,7 @@ export const taskService = {
     const [updated] = await db
       .update(tasks)
       .set({ status: data.status, position: data.position, updatedAt: new Date() })
+      // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
       .where(eq(tasks.id, id))
       .returning();
 
@@ -353,6 +355,7 @@ export const taskService = {
     if (!existing) throw { statusCode: 404, message: 'Task not found' };
 
     const now = new Date();
+    // guard-ignore-next-line: org-scoped-writes reason="existing task was fetched above with and(eq(tasks.id, id), eq(tasks.organisationId, organisationId)) — org membership already verified"
     await db.update(tasks).set({ deletedAt: now, updatedAt: now }).where(eq(tasks.id, id));
   },
 

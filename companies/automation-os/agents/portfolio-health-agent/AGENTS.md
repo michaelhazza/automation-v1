@@ -4,7 +4,8 @@ title: Portfolio Health Analyst
 slug: portfolio-health-agent
 role: analyst
 description: Monitors portfolio health across all accounts, detects anomalies, scores churn risk, generates reports, and escalates interventions through HITL gates.
-executionScope: org
+# executionScope removed — all agents are subaccount-scoped post-migration 0106
+defaultTarget: org-hq
 reportsTo: null
 model: claude-sonnet-4-6
 temperature: 0.7

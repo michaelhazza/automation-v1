@@ -59,12 +59,12 @@ router.post('/api/files/upload', authenticate, validateMultipart, asyncHandler(a
     return;
   }
 
-  const result = await fileService.uploadFile(executionId, req.user!.id, req.user!.organisationId, file);
+  const result = await fileService.uploadFile(executionId, req.user!.id, req.orgId, file);
   res.status(201).json(result);
 }));
 
 router.get('/api/files/:fileId/download', authenticate, asyncHandler(async (req, res) => {
-  const result = await fileService.downloadFile(req.params.fileId, req.user!.id, req.user!.organisationId, req.user!.role);
+  const result = await fileService.downloadFile(req.params.fileId, req.user!.id, req.orgId!, req.user!.role);
   res.json(result);
 }));
 

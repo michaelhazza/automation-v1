@@ -266,9 +266,9 @@ export const gitService = {
     try {
       await writeFile(tmpFile, diff, 'utf8');
       await git(['apply', '--whitespace=nowarn', tmpFile], root);
-      await unlink(tmpFile).catch(() => undefined);
+      await unlink(tmpFile).catch(() => undefined); // guard-ignore: no-silent-failures reason="best-effort temp diff file cleanup"
     } catch (err) {
-      await unlink(tmpFile).catch(() => undefined);
+      await unlink(tmpFile).catch(() => undefined); // guard-ignore: no-silent-failures reason="best-effort temp diff file cleanup on error"
       throw err;
     }
 

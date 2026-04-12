@@ -1097,12 +1097,11 @@ async function activateBaselineSystemAgents(
       orgAgentsCreated += 1;
     }
 
-    // Org-scoped agents (e.g. portfolio-health-agent) do not get a subaccount
-    // link — they operate against all subaccounts at org level. If an agent
-    // has flipped from subaccount to org scope since the last seed run, any
-    // existing active subaccount_agents row for it must be deactivated so
-    // the link doesn't linger as a false-positive "active at subaccount".
+    // Org-scoped agents (e.g. portfolio-health-agent) are linked to the org
+    // subaccount, not the regular subaccount. They should NOT be linked to
+    // client subaccounts. Post-migration 0106: all agents are subaccount-scoped.
     if (sysAgent.executionScope === 'org') {
+      // Deactivate any existing link to the regular subaccount
       await db
         .update(subaccountAgents)
         .set({ isActive: false, updatedAt: new Date() })
@@ -1113,6 +1112,49 @@ async function activateBaselineSystemAgents(
             eq(subaccountAgents.isActive, true),
           ),
         );
+
+      // Link to the org subaccount instead
+      const { ensureOrgSubaccount } = await import('../server/services/orgSubaccountService.js');
+      const orgSa = await ensureOrgSubaccount(organisationId, '');
+      if (orgSa) {
+        const skillSlugs = sysAgent.defaultSystemSkillSlugs ?? [];
+        const [existingOrgLink] = await db
+          .select()
+          .from(subaccountAgents)
+          .where(
+            and(
+              eq(subaccountAgents.subaccountId, orgSa.id),
+              eq(subaccountAgents.agentId, orgAgentId),
+            ),
+          )
+          .limit(1);
+
+        if (existingOrgLink) {
+          await db
+            .update(subaccountAgents)
+            .set({
+              isActive: true,
+              skillSlugs,
+              tokenBudgetPerRun: sysAgent.defaultTokenBudget,
+              maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
+              updatedAt: new Date(),
+            })
+            .where(eq(subaccountAgents.id, existingOrgLink.id));
+          subaccountLinksUpdated += 1;
+        } else {
+          await db.insert(subaccountAgents).values({
+            organisationId,
+            subaccountId: orgSa.id,
+            agentId: orgAgentId,
+            isActive: true,
+            skillSlugs,
+            tokenBudgetPerRun: sysAgent.defaultTokenBudget,
+            maxToolCallsPerRun: sysAgent.defaultMaxToolCalls,
+            timeoutSeconds: 300,
+          });
+          subaccountLinksCreated += 1;
+        }
+      }
       orgScopedSkipped += 1;
       continue;
     }

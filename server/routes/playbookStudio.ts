@@ -85,6 +85,7 @@ router.post(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
+    // guard-ignore-next-line: input-validation reason="definition validated by playbookStudioService.validateCandidate before any action is taken"
     const { definition } = req.body as { definition?: unknown };
     const result = playbookStudioService.validateCandidate(definition);
     // On success, also return the canonical hash so the UI can inject

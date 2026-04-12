@@ -131,6 +131,7 @@ export const playbookRunService = {
     const [sub] = await db
       .select({ id: subaccounts.id, name: subaccounts.name, organisationId: subaccounts.organisationId })
       .from(subaccounts)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; org membership verified in application code on the following line"
       .where(eq(subaccounts.id, input.subaccountId));
     if (!sub || sub.organisationId !== input.organisationId) {
       throw { statusCode: 404, message: 'Subaccount not found' };

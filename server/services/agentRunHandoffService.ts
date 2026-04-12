@@ -34,6 +34,7 @@ import {
   type AgentRunHandoffV1,
   type BuildHandoffInput,
 } from './agentRunHandoffServicePure.js';
+import { getOrgSubaccount } from './orgSubaccountService.js';
 
 /**
  * Build (and validate) a handoff for the given run. Pure builder is called
@@ -227,11 +228,21 @@ export async function getLatestHandoffForAgent(params: {
       inArray(agentRuns.status, ['completed', 'failed', 'timeout', 'cancelled', 'loop_detected', 'budget_exceeded']),
     ];
 
+    // Always scope to subaccountId. Post org-subaccount refactor every run
+    // has a subaccountId (the org subaccount for org-level runs). Without
+    // this filter, a null subaccountId would match runs from any scope.
     if (params.subaccountId) {
       conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
-      conditions.push(eq(agentRuns.executionScope, 'subaccount'));
     } else {
-      conditions.push(eq(agentRuns.executionScope, 'org'));
+      // Caller passed null — resolve the org subaccount so we match
+      // post-refactor org-level runs instead of only legacy NULL rows.
+      const orgSa = await getOrgSubaccount(params.organisationId);
+      if (orgSa) {
+        conditions.push(eq(agentRuns.subaccountId, orgSa.id));
+      } else {
+        // No org subaccount yet (pre-migration) — fall back to IS NULL
+        conditions.push(sql`${agentRuns.subaccountId} IS NULL`);
+      }
     }
 
     if (params.excludeRunId) {
@@ -303,8 +314,16 @@ async function pickNextOpenTask(
     // Open = not in done/cancelled
     sql`${tasks.status} NOT IN ('done', 'cancelled', 'archived')`,
   ];
+  // Always scope to subaccountId to prevent cross-scope leakage.
   if (subaccountId) {
     conditions.push(eq(tasks.subaccountId, subaccountId));
+  } else {
+    const orgSa = await getOrgSubaccount(organisationId);
+    if (orgSa) {
+      conditions.push(eq(tasks.subaccountId, orgSa.id));
+    } else {
+      conditions.push(sql`${tasks.subaccountId} IS NULL`);
+    }
   }
 
   // Priority order: urgent > high > normal > low

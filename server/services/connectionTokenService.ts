@@ -144,6 +144,7 @@ export const connectionTokenService = {
       // Update status to error since we can't refresh
       await db.update(integrationConnections)
         .set({ connectionStatus: 'error', updatedAt: new Date() })
+        // guard-ignore-next-line: org-scoped-writes reason="connection object passed in by caller who obtained it via org-scoped query"
         .where(eq(integrationConnections.id, connection.id));
       throw { statusCode: 400, message: `Connection ${connection.id} token expired and no refresh token available` };
     }
@@ -167,6 +168,7 @@ export const connectionTokenService = {
         connectionStatus: 'active',
         updatedAt: new Date(),
       })
+      // guard-ignore-next-line: org-scoped-writes reason="connection object passed in by caller who obtained it via org-scoped query"
       .where(eq(integrationConnections.id, connection.id))
       .returning();
 

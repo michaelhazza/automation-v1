@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { db } from '../db/index.js';
@@ -10,6 +11,8 @@ import { env } from '../lib/env.js';
 import { emailService } from '../services/emailService.js';
 
 const router = Router();
+const inviteRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
+const resetPasswordRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
 
 // List all system admin users — system_admin only
 router.get('/api/system/users', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
@@ -31,7 +34,7 @@ router.get('/api/system/users', authenticate, requireSystemAdmin, asyncHandler(a
 }));
 
 // Invite a new system admin — system_admin only
-router.post('/api/system/users/invite', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.post('/api/system/users/invite', authenticate, inviteRateLimit, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { email, firstName, lastName } = req.body;
   if (!email) {
     res.status(400).json({ error: 'Validation failed', details: 'email is required' });
@@ -52,7 +55,7 @@ router.post('/api/system/users/invite', authenticate, requireSystemAdmin, asyncH
   const inviteExpiresAt = new Date(Date.now() + env.INVITE_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000);
   const tempHash = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
 
-  const callerOrgId = req.user!.organisationId;
+  const callerOrgId = req.orgId!;
 
   const [newUser] = await db
     .insert(users)
@@ -88,7 +91,7 @@ router.post('/api/system/users/invite', authenticate, requireSystemAdmin, asyncH
 }));
 
 // Reset any user's password — system_admin only
-router.post('/api/system/users/:id/reset-password', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+router.post('/api/system/users/:id/reset-password', authenticate, resetPasswordRateLimit, requireSystemAdmin, asyncHandler(async (req, res) => {
   const { newPassword } = req.body;
   if (!newPassword || newPassword.length < 8) {
     res.status(400).json({ error: 'Password must be at least 8 characters' });

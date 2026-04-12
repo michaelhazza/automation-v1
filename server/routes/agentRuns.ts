@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
@@ -7,7 +7,7 @@ import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
-import { subaccountAgents, agentRuns } from '../db/schema/index.js';
+import { agentRuns } from '../db/schema/index.js';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
@@ -22,6 +22,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
+    // guard-ignore-next-line: input-validation reason="body fields are all optional; execution service validates agentId/subaccountId via DB lookup before running"
     const { taskId, idempotencyKey, executionMode } = req.body as {
       taskId?: string;
       idempotencyKey?: string;
@@ -29,16 +30,7 @@ router.post(
     };
 
     // Find the subaccount agent link
-    const [saLink] = await db
-      .select()
-      .from(subaccountAgents)
-      .where(
-        and(
-          eq(subaccountAgents.subaccountId, subaccountId),
-          eq(subaccountAgents.agentId, agentId),
-          eq(subaccountAgents.organisationId, req.orgId!)
-        )
-      );
+    const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, subaccountId, agentId);
 
     if (!saLink) {
       res.status(404).json({ error: 'Agent is not linked to this subaccount' });
@@ -71,7 +63,7 @@ router.post(
   })
 );
 
-// ─── Manual trigger: Run an org-level agent ─────────────────────────────────
+// ─── Manual trigger: Run an org-level agent (via org subaccount) ─────────────
 
 router.post(
   '/api/org/agents/:agentId/run',
@@ -84,20 +76,15 @@ router.post(
       idempotencyKey?: string;
     };
 
-    // Find the org agent config
-    const { orgAgentConfigs } = await import('../db/schema/index.js');
-    const [orgConfig] = await db
-      .select()
-      .from(orgAgentConfigs)
-      .where(
-        and(
-          eq(orgAgentConfigs.agentId, agentId),
-          eq(orgAgentConfigs.organisationId, req.orgId!)
-        )
-      );
+    // Resolve the org subaccount
+    const { requireOrgSubaccount } = await import('../services/orgSubaccountService.js');
+    const orgSa = await requireOrgSubaccount(req.orgId!);
 
-    if (!orgConfig) {
-      res.status(404).json({ error: 'No org-level config found for this agent' });
+    // Find the subaccount agent link in the org subaccount
+    const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, orgSa.id, agentId);
+
+    if (!saLink) {
+      res.status(404).json({ error: 'No agent config found for this agent in the organisation workspace' });
       return;
     }
 
@@ -107,15 +94,15 @@ router.post(
     const result = await agentExecutionService.executeRun({
       agentId,
       organisationId: req.orgId!,
-      executionScope: 'org',
-      orgAgentConfigId: orgConfig.id,
+      subaccountId: orgSa.id,
+      subaccountAgentId: saLink.id,
+      executionScope: 'subaccount',
       runType: 'manual',
       executionMode: 'api',
       runSource: 'manual',
       taskId,
       idempotencyKey: effectiveIdempotencyKey,
       triggerContext: { triggeredBy: req.user!.id, source: 'manual-org' },
-      // Review finding #3 — user-scoped runs carry the principal through.
       userId: req.user!.id,
     });
 
@@ -235,16 +222,7 @@ router.patch(
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const [saLink] = await db
-      .select()
-      .from(subaccountAgents)
-      .where(
-        and(
-          eq(subaccountAgents.subaccountId, subaccountId),
-          eq(subaccountAgents.agentId, agentId),
-          eq(subaccountAgents.organisationId, req.orgId!)
-        )
-      );
+    const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, subaccountId, agentId);
 
     if (!saLink) {
       res.status(404).json({ error: 'Agent is not linked to this subaccount' });
@@ -257,17 +235,17 @@ router.patch(
       skillSlugs, customInstructions,
     } = req.body;
 
-    const update: Record<string, unknown> = { updatedAt: new Date() };
+    const hasConfigUpdate = tokenBudgetPerRun !== undefined || maxToolCallsPerRun !== undefined ||
+      timeoutSeconds !== undefined || skillSlugs !== undefined || customInstructions !== undefined;
 
-    if (tokenBudgetPerRun !== undefined) update.tokenBudgetPerRun = tokenBudgetPerRun;
-    if (maxToolCallsPerRun !== undefined) update.maxToolCallsPerRun = maxToolCallsPerRun;
-    if (timeoutSeconds !== undefined) update.timeoutSeconds = timeoutSeconds;
-    if (skillSlugs !== undefined) update.skillSlugs = skillSlugs;
-    if (customInstructions !== undefined) update.customInstructions = customInstructions;
-
-    // Update non-schedule fields
-    if (Object.keys(update).length > 1) {
-      await db.update(subaccountAgents).set(update).where(eq(subaccountAgents.id, saLink.id));
+    if (hasConfigUpdate) {
+      await subaccountAgentService.updateLink(req.orgId!, saLink.id, {
+        ...(tokenBudgetPerRun !== undefined && { tokenBudgetPerRun }),
+        ...(maxToolCallsPerRun !== undefined && { maxToolCallsPerRun }),
+        ...(timeoutSeconds !== undefined && { timeoutSeconds }),
+        ...(skillSlugs !== undefined && { skillSlugs }),
+        ...(customInstructions !== undefined && { customInstructions }),
+      });
     }
 
     // Handle schedule changes through the schedule service
@@ -280,7 +258,7 @@ router.patch(
     }
 
     // Return updated record
-    const [updated] = await db.select().from(subaccountAgents).where(eq(subaccountAgents.id, saLink.id));
+    const updated = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, subaccountId, agentId);
     res.json(updated);
   })
 );
@@ -295,16 +273,7 @@ router.get(
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
-    const [saLink] = await db
-      .select()
-      .from(subaccountAgents)
-      .where(
-        and(
-          eq(subaccountAgents.subaccountId, subaccountId),
-          eq(subaccountAgents.agentId, agentId),
-          eq(subaccountAgents.organisationId, req.orgId!)
-        )
-      );
+    const saLink = await subaccountAgentService.getLinkByAgentInSubaccount(req.orgId!, subaccountId, agentId);
 
     if (!saLink) {
       res.status(404).json({ error: 'Agent is not linked to this subaccount' });

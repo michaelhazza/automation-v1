@@ -21,7 +21,7 @@ export const skillVersions = pgTable(
     changeSummary: text('change_summary'),
     authoredBy: uuid('authored_by')
       .references(() => users.id, { onDelete: 'set null' }),
-    regressionIds: sql`uuid[]`.as('regression_ids'),
+    regressionIds: uuid('regression_ids').array(),
     simulationPassCount: integer('simulation_pass_count').notNull().default(0),
     simulationTotalCount: integer('simulation_total_count').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

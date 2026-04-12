@@ -36,6 +36,7 @@ router.post('/api/processes', authenticate, requireOrgPermission(ORG_PERMISSIONS
 router.get('/api/processes/:id', authenticate, asyncHandler(async (req, res) => {
   const result = await processService.getProcess(req.params.id, req.orgId!, req.user!.role);
   // For system-managed processes, hide the execution internals from org admins
+  // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — hides internal fields from non-system-admins"
   if ((result as { isSystemManaged?: boolean }).isSystemManaged && req.user!.role !== 'system_admin') {
     const { webhookPath, inputSchema, outputSchema, configSchema, requiredConnections, workflowEngineId, ...safe } = result as Record<string, unknown>;
     res.json(safe);
@@ -94,6 +95,7 @@ router.get('/api/processes/system', authenticate, requireOrgPermission(ORG_PERMI
     .where(and(eq(processes.scope, 'system'), eq(processes.status, 'active'), isNull(processes.deletedAt)))
     .orderBy(desc(processes.createdAt));
 
+  // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin sees raw fields, org_admin gets sanitized view"
   const isSystemAdmin = req.user!.role === 'system_admin';
   res.json(isSystemAdmin ? rows : rows.map(r => sanitizeSystemProcess(r as Record<string, unknown>)));
 }));
@@ -144,6 +146,7 @@ router.post('/api/processes/link-system/:systemProcessId', authenticate, require
     status: 'active', // auto-active since the system process is already active
   }).returning();
 
+  // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin sees raw linked fields, org_admin gets sanitized response"
   const isSystemAdmin = req.user!.role === 'system_admin';
   if (!isSystemAdmin) {
     const { webhookPath: _w, inputSchema: _i, outputSchema: _o, configSchema: _c, requiredConnections: _r, workflowEngineId: _e, ...safe } = linked as Record<string, unknown>;

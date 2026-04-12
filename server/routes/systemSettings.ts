@@ -12,6 +12,7 @@ router.get('/api/system/settings', authenticate, requireSystemAdmin, asyncHandle
 }));
 
 router.patch('/api/system/settings', authenticate, requireSystemAdmin, asyncHandler(async (req, res) => {
+  // guard-ignore-next-line: input-validation reason="manual validation enforced: allowlist check against SETTING_KEYS before any value is written"
   const updates = req.body as Record<string, string>;
   const allowed = new Set(Object.values(SETTING_KEYS));
   for (const [key, value] of Object.entries(updates)) {

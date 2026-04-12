@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { userService } from '../services/userService.js';
@@ -7,6 +8,7 @@ import { inviteUserBody, createMemberBody, updateProfileBody, updateUserBody } f
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 
 const router = Router();
+const inviteRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
 
 router.get('/api/users', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_VIEW), asyncHandler(async (req, res) => {
   const result = await userService.listUsers(req.orgId!, {
@@ -18,7 +20,7 @@ router.get('/api/users', authenticate, requireOrgPermission(ORG_PERMISSIONS.USER
   res.json(result);
 }));
 
-router.post('/api/users/invite', authenticate, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), validateBody(inviteUserBody, 'warn'), asyncHandler(async (req, res) => {
+router.post('/api/users/invite', authenticate, inviteRateLimit, requireOrgPermission(ORG_PERMISSIONS.USERS_INVITE), validateBody(inviteUserBody, 'warn'), asyncHandler(async (req, res) => {
   const { email, role, firstName, lastName } = req.body;
   if (!email || !role) {
     res.status(400).json({ error: 'Validation failed', details: 'email and role are required' });

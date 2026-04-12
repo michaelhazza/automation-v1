@@ -279,6 +279,7 @@ export const skillService = {
           await db.update(skills).set({
             instructions: def.instructions ?? null,
             updatedAt: new Date(),
+          // guard-ignore-next-line: org-scoped-writes reason="built-in skills have null organisationId by design; current.id obtained from prior SELECT filtered by isNull(skills.organisationId) and slug"
           }).where(eq(skills.id, current.id));
         }
         continue;

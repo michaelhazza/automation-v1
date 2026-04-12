@@ -3,6 +3,11 @@ import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { agents } from './agents.js';
 
+/**
+ * @deprecated — Data migrated to `subaccount_agents` via migration 0106.
+ * Table kept read-only during Phase 1 transition. Will be dropped in Phase 2 cleanup.
+ * See: docs/org-subaccount-refactor-spec.md §3c
+ */
 export const orgAgentConfigs = pgTable(
   'org_agent_configs',
   {

@@ -8,7 +8,7 @@
  */
 
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -21,7 +21,7 @@ const router = Router();
 router.get(
   '/api/subaccounts/:subaccountId/playbook-runs',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
@@ -36,7 +36,7 @@ router.get(
 router.post(
   '/api/subaccounts/:subaccountId/playbook-runs',
   authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);

@@ -97,6 +97,7 @@ export const pageProjectService = {
     const [updated] = await db
       .update(pageProjects)
       .set({ ...updates, updatedAt: new Date() })
+      // guard-ignore-next-line: org-scoped-writes reason="existing record verified via getById(id, subaccountId, organisationId) above — org membership already confirmed"
       .where(eq(pageProjects.id, id))
       .returning();
 
@@ -110,6 +111,7 @@ export const pageProjectService = {
     await db
       .update(pageProjects)
       .set({ deletedAt: new Date() })
+      // guard-ignore-next-line: org-scoped-writes reason="existing record verified via getById(id, subaccountId, organisationId) above — org membership already confirmed"
       .where(eq(pageProjects.id, id));
   },
 };

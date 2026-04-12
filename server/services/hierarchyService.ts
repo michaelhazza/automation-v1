@@ -46,6 +46,7 @@ export async function validateHierarchy(
       const [row] = await db
         .select({ parentId: agents.parentAgentId })
         .from(agents)
+        // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT for hierarchy traversal; currentId starts from caller-validated agentId and follows parentAgentId links"
         .where(eq(agents.id, currentId));
       parentRow = row;
     } else {

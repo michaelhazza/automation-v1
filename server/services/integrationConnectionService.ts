@@ -340,6 +340,7 @@ export const integrationConnectionService = {
       };
       await db.update(integrationConnections)
         .set({ ...updateSet, configJson: mergedConfigJson })
+        // guard-ignore-next-line: org-scoped-writes reason="existing.id obtained from prior SELECT with and(...conditions) which includes organisationId and subaccountId filters"
         .where(eq(integrationConnections.id, existing.id));
     } else {
       try {
@@ -360,6 +361,7 @@ export const integrationConnectionService = {
             };
             await db.update(integrationConnections)
               .set({ ...updateSet, configJson: mergedConfigJson })
+              // guard-ignore-next-line: org-scoped-writes reason="raceWinner.id obtained from prior SELECT with and(...conditions) which includes organisationId and subaccountId filters"
               .where(eq(integrationConnections.id, raceWinner.id));
           }
         } else {
@@ -391,6 +393,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
     const [fresh] = await db
       .select()
       .from(integrationConnections)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; conn passed in by callers who obtained it via org-scoped query; re-fetch to get latest token state"
       .where(eq(integrationConnections.id, conn.id))
       .limit(1);
     if (!fresh) throw new Error('Connection disappeared during refresh');
@@ -412,6 +415,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
     const [current] = await db
       .select()
       .from(integrationConnections)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; conn passed in by callers who obtained it via org-scoped query; re-fetch after acquiring advisory lock"
       .where(eq(integrationConnections.id, conn.id))
       .limit(1);
 
@@ -461,6 +465,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
       await db
         .update(integrationConnections)
         .set({ oauthStatus: 'error', updatedAt: new Date() })
+        // guard-ignore-next-line: org-scoped-writes reason="conn passed in by callers who obtained it via org-scoped query; updating own record within advisory lock"
         .where(eq(integrationConnections.id, conn.id));
       throw new Error(`Token refresh failed for ${conn.providerType}: ${errText}`);
     }
@@ -490,6 +495,7 @@ async function refreshWithLock(conn: IntegrationConnection): Promise<DecryptedCo
         oauthStatus: 'active',
         updatedAt: new Date(),
       })
+      // guard-ignore-next-line: org-scoped-writes reason="conn passed in by callers who obtained it via org-scoped query; updating own record within advisory lock after successful token refresh"
       .where(eq(integrationConnections.id, conn.id));
 
     return {

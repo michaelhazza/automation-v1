@@ -374,7 +374,7 @@ export const systemAgentService = {
 
       await db.update(agents)
         .set({ parentAgentId: parentOrgAgentId, updatedAt: new Date() })
-        .where(eq(agents.id, oa.id));
+        .where(and(eq(agents.id, oa.id), eq(agents.organisationId, oa.organisationId)));
       updated++;
     }
 

@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { hierarchyTemplateService } from '../services/hierarchyTemplateService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 
 const router = Router();
 
@@ -108,13 +109,14 @@ router.post(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res) => {
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { name, manifest, saveAsTemplate } = req.body;
     if (!name || !manifest) {
       res.status(400).json({ error: 'name and manifest are required' });
       return;
     }
     const result = await hierarchyTemplateService.importToSubaccount(req.orgId!, {
-      subaccountId: req.params.subaccountId,
+      subaccountId: subaccount.id,
       name,
       manifest,
       saveAsTemplate: saveAsTemplate ?? false,

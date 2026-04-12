@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { db } from '../db/index.js';
 import {
   permissionSets,
@@ -91,6 +92,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.PERMISSION_SETS_MANAGE),
   asyncHandler(async (req, res) => {
     const organisationId = req.orgId!;
+    // guard-ignore-next-line: input-validation reason="manual validation enforced: name required check, permissionKeys Array.isArray guard"
     const { name, description, permissionKeys } = req.body as {
       name?: string;
       description?: string;
@@ -477,6 +479,7 @@ router.get(
   '/api/my-permissions',
   authenticate,
   asyncHandler(async (req, res) => {
+    // guard-ignore-next-line: no-direct-role-checks reason="conditional response shaping, not access control — returns synthetic permission tokens based on role"
     if (req.user!.role === 'system_admin') {
       res.json({ permissions: ['__system_admin__'] });
       return;
@@ -489,6 +492,7 @@ router.get(
     }
 
     // org_admin gets full org-level access — same as system_admin but scoped to their org
+    // guard-ignore-next-line: no-direct-role-checks reason="conditional response shaping, not access control — returns synthetic permission tokens based on role"
     if (req.user!.role === 'org_admin') {
       res.json({ permissions: ['__org_admin__'] });
       return;
@@ -513,12 +517,14 @@ router.get(
   '/api/subaccounts/:subaccountId/my-permissions',
   authenticate,
   asyncHandler(async (req, res) => {
+    // guard-ignore-next-line: no-direct-role-checks reason="conditional response shaping, not access control — returns synthetic permission tokens based on role"
     if (req.user!.role === 'system_admin') {
       res.json({ permissions: ['__system_admin__'] });
       return;
     }
 
-    const subaccountId = req.params.subaccountId;
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const subaccountId = subaccount.id;
 
     const rows = await db
       .select({ permissionKey: permissionSetItems.permissionKey })

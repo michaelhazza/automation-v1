@@ -506,7 +506,9 @@ export const systemTemplateService = {
           subAgentLink = existingLink;
         } else {
           const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
-            .from(agents).where(eq(agents.id, orgAgentId));
+            .from(agents)
+            // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch defaultSkillSlugs; orgAgentId obtained from org-scoped agent provisioning within this same transaction"
+            .where(eq(agents.id, orgAgentId));
 
           const [newLink] = await tx.insert(subaccountAgents).values({
             organisationId,
@@ -664,7 +666,9 @@ export const systemTemplateService = {
 
         if (!existingLink) {
           const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
-            .from(agents).where(eq(agents.id, orgAgentId));
+            .from(agents)
+            // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch defaultSkillSlugs; orgAgentId obtained from org-scoped agent provisioning within this same transaction"
+            .where(eq(agents.id, orgAgentId));
 
           await tx.insert(subaccountAgents).values({
             organisationId,
@@ -836,25 +840,31 @@ export const systemTemplateService = {
         agentsProvisioned++;
       }
 
-      // For org-scoped agents, create orgAgentConfigs entry
+      // For org-scoped agents, link to the org subaccount instead of orgAgentConfigs
+      // Post-migration 0106: all agents are subaccount-scoped
       if (executionScope === 'org') {
-        const skillEnablementMap = (slot as unknown as Record<string, unknown>).skillEnablementMap as Record<string, boolean> | undefined;
-        const enabledSlugs = skillEnablementMap
-          ? Object.entries(skillEnablementMap).filter(([_, v]) => v).map(([k]) => k)
-          : null;
+        const { getOrgSubaccount } = await import('./orgSubaccountService.js');
+        const orgSa = await getOrgSubaccount(organisationId);
+        if (orgSa) {
+          const skillEnablementMap = (slot as unknown as Record<string, unknown>).skillEnablementMap as Record<string, boolean> | undefined;
+          const enabledSlugs = skillEnablementMap
+            ? Object.entries(skillEnablementMap).filter(([_, v]) => v).map(([k]) => k)
+            : null;
 
-        await db
-          .insert(orgAgentConfigs)
-          .values({
-            organisationId,
-            agentId,
-            isActive: true,
-            skillSlugs: enabledSlugs,
-            heartbeatEnabled: sysAgent.heartbeatEnabled ?? false,
-            heartbeatIntervalHours: sysAgent.heartbeatIntervalHours ?? 4,
-          } as typeof orgAgentConfigs.$inferInsert)
-          .onConflictDoNothing();
-        orgAgentConfigsCreated++;
+          await db
+            .insert(subaccountAgents)
+            .values({
+              organisationId,
+              subaccountId: orgSa.id,
+              agentId,
+              isActive: true,
+              skillSlugs: enabledSlugs,
+              heartbeatEnabled: sysAgent.heartbeatEnabled ?? false,
+              heartbeatIntervalHours: sysAgent.heartbeatIntervalHours ?? 4,
+            } as typeof subaccountAgents.$inferInsert)
+            .onConflictDoNothing();
+          orgAgentConfigsCreated++;
+        }
       }
     }
 

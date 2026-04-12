@@ -71,8 +71,13 @@ registerAdapter('worker', createWorkerAdapter(async (actionType, payload, ctx) =
 export interface SkillExecutionContext {
   runId: string;
   organisationId: string;
-  /** Null for org-level agent runs */
   subaccountId: string | null;
+  /**
+   * Cross-subaccount access control. null = full org access (org subaccount agents).
+   * Array of IDs = scoped to those subaccounts only (regular subaccount agents).
+   * Derived from whether the agent runs in the org subaccount. See spec §7c.
+   */
+  allowedSubaccountIds?: string[] | null;
   agentId: string;
   /**
    * The principal that initiated this run, when known. Populated by
@@ -2847,6 +2852,7 @@ async function executeReassignTask(
       handoffContext: handoffContext ? { message: handoffContext } : null,
       handoffDepth: currentDepth + 1,
       updatedAt: new Date(),
+    // guard-ignore-next-line: org-scoped-writes reason="taskId passed through taskService.updateTask above which verifies org membership; this is a supplemental metadata update on the same task"
     }).where(eq(tasks.id, taskId));
 
     await taskService.addActivity(taskId, context.organisationId, {
@@ -2983,7 +2989,7 @@ async function executeSpawnSubAgents(
             subaccountId: context.subaccountId,
             subaccountAgentId: job.saLink.id,
             organisationId: context.organisationId,
-            executionScope: context.subaccountId ? 'subaccount' : 'org',
+            executionScope: 'subaccount',
             runType: 'triggered',
             runSource: 'sub_agent',
             executionMode: 'api',

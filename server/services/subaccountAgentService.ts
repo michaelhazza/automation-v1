@@ -292,6 +292,21 @@ export const subaccountAgentService = {
     return buildTree(items, (i) => i.parentSubaccountAgentId);
   },
 
+  async getLinkByAgentInSubaccount(organisationId: string, subaccountId: string, agentId: string) {
+    const [link] = await db
+      .select()
+      .from(subaccountAgents)
+      .where(
+        and(
+          eq(subaccountAgents.organisationId, organisationId),
+          eq(subaccountAgents.subaccountId, subaccountId),
+          eq(subaccountAgents.agentId, agentId),
+        )
+      )
+      .limit(1);
+    return link ?? null;
+  },
+
   // ─── Subaccount-level data sources ──────────────────────────────────────────
 
   async listSubaccountDataSources(subaccountAgentId: string) {

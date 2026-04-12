@@ -88,7 +88,7 @@ import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
 import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
 import orgMemoryRouter from './routes/orgMemory.js';
-import orgWorkspaceRouter from './routes/orgWorkspace.js';
+// orgWorkspaceRouter removed — org tasks now live in the org subaccount's task board (migration 0106)
 import mcpServersRouter from './routes/mcpServers.js';
 import goalsRouter from './routes/goals.js';
 import webhookAdapterRouter from './routes/webhookAdapter.js';
@@ -239,7 +239,7 @@ app.use(connectorConfigsRouter);
 // ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
 app.use(subaccountTagsRouter);
 app.use(orgMemoryRouter);
-app.use(orgWorkspaceRouter);
+// orgWorkspaceRouter mount removed (migration 0106)
 app.use(mcpServersRouter);
 app.use(goalsRouter);
 app.use(webhookAdapterRouter);
@@ -365,6 +365,30 @@ async function start() {
     } catch (err) {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
+  }
+  // Org subaccount data migration (migration 0106) — idempotent but expensive.
+  // Only runs if migration_states records BOTH config and memory as completed.
+  try {
+    const { eq, inArray } = await import('drizzle-orm');
+    const { migrationStates } = await import('./db/schema/index.js');
+    const { db: bootDb } = await import('./db/index.js');
+    const migStates = await bootDb
+      .select({ key: migrationStates.key, completedAt: migrationStates.completedAt })
+      .from(migrationStates)
+      .where(inArray(migrationStates.key, [
+        'org_subaccount_config_migration',
+        'org_subaccount_memory_migration',
+      ]));
+    const configDone = migStates.some(s => s.key === 'org_subaccount_config_migration' && s.completedAt);
+    const memoryDone = migStates.some(s => s.key === 'org_subaccount_memory_migration' && s.completedAt);
+    if (configDone && memoryDone) {
+      console.log('[boot] org subaccount migration already completed (config + memory), skipping');
+    } else {
+      const { runOrgSubaccountMigration } = await import('./jobs/orgSubaccountMigrationJob.js');
+      await runOrgSubaccountMigration();
+    }
+  } catch (err) {
+    console.error('[boot] org subaccount data migration failed — existing org agents may not be accessible', err);
   }
   // Reconcile any scheduled-task runs left in `retrying` from a previous
   // process — their in-process retry timer was lost on restart.

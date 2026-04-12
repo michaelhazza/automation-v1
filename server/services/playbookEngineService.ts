@@ -2581,8 +2581,10 @@ export const playbookEngineService = {
         }
 
         try {
-          // Look up subaccountAgent linking row if any (used by agent system
-          // to scope budgets and limits to the per-client config).
+          // Look up subaccountAgent linking row — required post-migration 0106.
+          // All runs must have a subaccountAgentId; if the agent is not linked,
+          // fail the step immediately rather than letting executeRun throw before
+          // creating a run record (which would break the playbook completion hook).
           const [saLink] = await db
             .select()
             .from(subaccountAgents)
@@ -2592,6 +2594,20 @@ export const playbookEngineService = {
                 eq(subaccountAgents.subaccountId, data.subaccountId)
               )
             );
+
+          if (!saLink) {
+            logger.error('playbook_agent_step_agent_not_linked', {
+              stepRunId: data.playbookStepRunId,
+              stepId: data.stepId,
+              agentId: data.agentId,
+              subaccountId: data.subaccountId,
+            });
+            await this.failStepRun(
+              data.playbookStepRunId,
+              `agent_not_linked_to_subaccount: agentId=${data.agentId} subaccountId=${data.subaccountId}`,
+            );
+            return;
+          }
 
           // Include retryCount in the idempotency key so decision retries get a
           // fresh agent run rather than deduplicating against the failed original.
@@ -2620,7 +2636,7 @@ export const playbookEngineService = {
           await agentExecutionService.executeRun({
             agentId: data.agentId,
             subaccountId: data.subaccountId,
-            subaccountAgentId: saLink?.id ?? null,
+            subaccountAgentId: saLink.id,
             organisationId: data.organisationId,
             executionScope: 'subaccount',
             runType: 'triggered',
