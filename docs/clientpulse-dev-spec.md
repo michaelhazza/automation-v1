@@ -52,13 +52,13 @@ This spec translates the ClientPulse dev brief (`docs/clientpulse-ghl-dev-brief.
 
 ## 2. Current state audit
 
-Inventory of existing code that ClientPulse builds on. Every file path verified against main as of commit `83c8736`.
+Inventory of existing code that ClientPulse builds on. Every file path verified against main as of commit `f5b3d7c`.
 
 ### 2.1 Config template system (~50% complete)
 
 | Asset | Path | Status |
 |-------|------|--------|
-| Schema: templates | `server/db/schema/systemHierarchyTemplates.ts` | Exists — `id`, `name`, `slug`, `description`, `operationalDefaults` (jsonb), `memorySeedsJson` (jsonb), `requiredOperatorInputs` (jsonb), `isPublished`, `createdAt`, `updatedAt`, `deletedAt` |
+| Schema: templates | `server/db/schema/systemHierarchyTemplates.ts` | Exists — `id`, `name`, `description`, `requiredConnectorType` (text), `operationalDefaults` (jsonb), `memorySeedsJson` (jsonb), `requiredOperatorInputs` (jsonb), `isPublished`, `createdAt`, `updatedAt`, `deletedAt` (no `slug` column yet — added by migration 0104) |
 | Schema: template slots | `server/db/schema/systemHierarchyTemplateSlots.ts` | Exists — `templateId`, `systemAgentId`, `executionScope`, `skillSlugs` (jsonb), `sortOrder` |
 | Service | `server/services/systemTemplateService.ts` (903 lines) | Exists — `loadToOrg()`, template CRUD, Paperclip import |
 | Service | `server/services/hierarchyTemplateService.ts` (676 lines) | Exists — org-level template management |
@@ -87,7 +87,7 @@ Inventory of existing code that ClientPulse builds on. Every file path verified 
 
 | Asset | Path | Status |
 |-------|------|--------|
-| Migration 0043 | `migrations/0043_*.sql` | Landed — nullable `subaccountId` on `agent_runs`, `execution_mode`, `result_status`, `config_snapshot` |
+| Migration 0043 | `migrations/0043_*.sql` | Landed — nullable `subaccountId` on `agent_runs`, `execution_scope`, `run_result_status`, `config_snapshot` |
 | Org agent configs | `server/db/schema/orgAgentConfigs.ts` + `server/services/orgAgentConfigService.ts` | Exists |
 | Execution service | `server/services/agentExecutionService.ts` | Updated — execution mode routing, kill switch, config loading |
 | Schedule service | `server/services/agentScheduleService.ts` | Updated — org-level job queue (`agent-org-scheduled-run`) |
@@ -283,6 +283,14 @@ Currently the sidebar is a static list of nav items gated by permissions. Change
 3. Filter the nav items list: only render items whose slug is in the sidebar config array.
 4. Permission checks still apply on top — sidebar config removes items the module doesn't expose; permissions remove items the user's role can't access. Both filters must pass.
 
+**Route:**
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET | `/api/my-sidebar-config` | `authenticate` | Return ordered nav-item slug array for the current user's org |
+
+**Route file:** Add to `server/routes/modules.ts` (alongside the system admin module routes, with a separate non-admin handler for this endpoint).
+
 **Nav item slug registry** (new constant, `client/src/lib/navSlugs.ts`):
 
 ```typescript
@@ -446,10 +454,12 @@ Prices intentionally NULL — lock before Stripe integration.
 // Subscription catalogue CRUD (system admin)
 async function listSubscriptions(): Promise<Subscription[]>
 async function getSubscription(id: string): Promise<Subscription>
+async function getSubscriptionBySlug(slug: string): Promise<Subscription> // used internally (e.g. signup flow: getSubscriptionBySlug('starter'))
 async function createSubscription(data: CreateSubscriptionInput): Promise<Subscription>
 async function updateSubscription(id: string, data: UpdateSubscriptionInput): Promise<Subscription>
 async function archiveSubscription(id: string): Promise<void>
-  // Blocked if any org_subscriptions reference it with status in ('trialing','active','past_due')
+  // Sets status = 'archived' (NOT deleted_at — archival uses the status field; deleted_at is reserved for potential hard-delete).
+  // Blocked if any org_subscriptions reference it with status in ('trialing','active','past_due').
 
 // Per-org assignment
 async function getOrgSubscription(orgId: string): Promise<OrgSubscription | null>
@@ -554,7 +564,7 @@ The spec introduces `org_subscriptions.status = 'trialing'` with `trial_ends_at`
 - **Grace period:** None in v1 — trial end is a hard cutoff. A 3-day grace period can be added later if churn data suggests it helps conversion.
 
 **Job file:** `server/jobs/subscriptionTrialCheckJob.ts`
-**Job config:** Add to `server/config/jobConfig.ts` with `cron: '0 2 * * *'`, registered in `server/jobs/index.ts`.
+**Job config:** Add to `server/config/jobConfig.ts`. Register the cron schedule via `boss.schedule('subscription-trial-check', '0 2 * * *', {})` in `server/services/queueService.ts` (where all other cron schedules are registered — see the `maintenance:memory-decay`, `agent-run-cleanup`, etc. calls already there). There is no `server/jobs/index.ts`.
 
 ### 4.7 Subaccount limit enforcement
 
@@ -877,7 +887,7 @@ The `generate_portfolio_report` skill handler must:
 #### New table: `reports`
 
 ```sql
--- Migration: 0106_reports.sql (or combined with earlier migrations)
+-- Migration: 0104 (combined migration — see §11 Migration inventory)
 CREATE TABLE reports (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organisation_id   UUID NOT NULL REFERENCES organisations(id),
@@ -1131,7 +1141,7 @@ interface DashboardData {
 
 **UI layout (widget-based, data-driven):**
 
-1. **Sync status bar** (top) — "Monitoring N clients. Last sync: X minutes ago." If initial sync is in progress: "Syncing N clients… X done, Y to go" with a progress bar. Uses `useSocketRoom` for live updates.
+1. **Sync status bar** (top) — "Monitoring N clients. Last sync: X minutes ago." If initial sync is in progress: "Syncing N clients… X done, Y to go" with a progress bar. Uses `useSocket('dashboard:update', callback)` for live updates.
 2. **Health breakdown widget** — three large numbers: Healthy (green), At Risk (yellow), Critical (red). Clickable → filters the client list.
 3. **Recent anomalies widget** — compact list of the last 5 anomalies with client name, metric, severity badge. Links to client detail.
 4. **High-risk clients widget** — table of top 5 clients by churn score. Columns: Client name, Health score (colour badge), Churn risk (%), Primary factor.
@@ -1159,8 +1169,9 @@ interface DashboardData {
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET | `/api/reports` | `authenticate` | Paginated report list for current org |
+| GET | `/api/reports/latest` | `authenticate` | Most recent report (must be registered before `/:id` in Express to avoid route capture) |
 | GET | `/api/reports/:id` | `authenticate` | Single report with full data |
-| GET | `/api/reports/latest` | `authenticate` | Most recent report |
+| POST | `/api/reports/:id/resend` | `authenticate` | Re-send report email to org owner |
 
 #### 8.2.3 Report detail — `ReportDetailPage.tsx`
 
@@ -1180,7 +1191,7 @@ The Integrations page (`IntegrationsAndCredentialsPage.tsx`) currently shows all
 
 **Implementation:** The `connector_configs` for the org already know which connector type is active. The sidebar config from Module A hides the full integrations page and replaces it with a narrowed version. Alternatively, add a `?connectorTypes=ghl` query parameter to the integrations API and have the sidebar config pass it.
 
-Simpler approach: In the Integrations page component, if the user is on a module that specifies `requiredConnectorType` in the template's operational defaults, show only that connector. The template's `operationalDefaults.requiredConnectorType` field already exists in the schema.
+Simpler approach: In the Integrations page component, if the user is on a module whose system template specifies a `requiredConnectorType`, show only that connector. The `requiredConnectorType` field is a top-level column on `system_hierarchy_templates` (not a key inside `operationalDefaults`) — it already exists in the schema (`server/db/schema/systemHierarchyTemplates.ts`).
 
 ### 8.4 Verification
 
@@ -1236,7 +1247,7 @@ async function signup(email: string, password: string): Promise<{ token: string;
   });
 
   // 3. Assign Starter subscription (trialing)
-  const starterSub = await subscriptionService.getBySlug('starter');
+  const starterSub = await subscriptionService.getSubscriptionBySlug('starter');
   await subscriptionService.assignSubscription(org.id, {
     subscriptionId: starterSub.id,
     billingCycle: 'monthly',
@@ -1260,7 +1271,19 @@ async function signup(email: string, password: string): Promise<{ token: string;
 
 **New page:** `OnboardingWizardPage.tsx` at `/onboarding`
 
-A multi-step wizard shown after signup. The wizard tracks progress via a `wizard_step` field on the org or a separate `onboarding_state` in localStorage.
+A multi-step wizard shown after signup. The wizard derives its current step from a server-side status endpoint — no dedicated DB column is added. `localStorage` is used only for within-session UX continuity (e.g. remembering the current page after a hot-reload); it is not the source of truth for step completion.
+
+**Step completion source of truth: `GET /api/onboarding/status`**
+
+```typescript
+interface OnboardingStatus {
+  ghlConnected: boolean;       // true if integration_connections has a 'ghl' row for this org
+  agentsProvisioned: boolean;  // true if the org's Reporting Agent has been created
+  firstRunComplete: boolean;   // true if agent_runs has a completed run for the org's Reporting Agent
+}
+```
+
+This endpoint is derived entirely from existing DB tables (`integration_connections`, `agents`, `agent_runs`) — no migration change needed, and no new column is added to `organisations`. The wizard client calls this endpoint on mount and on step completion to determine which step to show, making the wizard cross-device safe (e.g. user connects GHL on mobile, resumes on desktop).
 
 #### Step 1: Connect Go High Level
 
@@ -1301,8 +1324,10 @@ Single-screen with one button: "Connect Go High Level"
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
+| GET | `/api/onboarding/status` | `authenticate` | Derive wizard step completion from DB state (ghlConnected, agentsProvisioned, firstRunComplete) |
 | GET | `/api/onboarding/locations` | `authenticate` | List discovered GHL locations |
 | POST | `/api/onboarding/locations/confirm` | `authenticate` | Confirm selected locations, create subaccounts, trigger sync |
+| GET | `/api/onboarding/sync-status` | `authenticate` | Return real-time sync progress for the org's connector (used by Step 3 progress UI) |
 
 #### Step 3: Sync progress
 
@@ -1339,6 +1364,10 @@ From this point, the weekly schedule takes over. The user manages their account 
 **New file:** `server/services/onboardingService.ts`
 
 ```typescript
+async function getOnboardingStatus(orgId: string): Promise<OnboardingStatus>
+  // Derives { ghlConnected, agentsProvisioned, firstRunComplete } from existing DB tables
+  // (integration_connections, agents, agent_runs) — no dedicated column
+
 async function discoverLocations(orgId: string): Promise<GhlLocation[]>
   // Finds the org's GHL connection, calls listAccounts
 
@@ -1354,6 +1383,10 @@ async function getSyncStatus(orgId: string): Promise<SyncStatus>
 ### 9.6 Verification
 
 - [ ] Full signup flow: email/password → org created → Starter subscription assigned → Reporting Agent provisioned
+- [ ] `GET /api/onboarding/status` returns `{ ghlConnected: false, agentsProvisioned: true, firstRunComplete: false }` immediately after signup (before OAuth)
+- [ ] `GET /api/onboarding/status` returns `{ ghlConnected: true, agentsProvisioned: true, firstRunComplete: false }` after GHL OAuth completes
+- [ ] `GET /api/onboarding/status` returns `{ ghlConnected: true, agentsProvisioned: true, firstRunComplete: true }` after first report is generated
+- [ ] Wizard re-opened on a different device resumes at the correct step (not at step 1)
 - [ ] OAuth redirect to GHL → approval → callback → tokens stored
 - [ ] Location enumeration shows real GHL sub-accounts
 - [ ] Selecting locations creates subaccounts + canonical accounts
@@ -1493,7 +1526,7 @@ Phase 1 (foundation)        Phase 2 (data + intelligence)      Phase 3 (surfaces
 | `ClientPulseDashboardPage.tsx` — widget-based layout | E | 2 days |
 | `ReportsListPage.tsx` — ColHeader table + API | E | 1 day |
 | `ReportDetailPage.tsx` — HTML viewer | E | 0.5 day |
-| Report routes (`/api/reports`, `/api/reports/:id`) | E | 0.5 day |
+| Report routes (`/api/reports`, `/api/reports/latest`, `/api/reports/:id`, `POST /api/reports/:id/resend`) | E | 0.5 day |
 | Integrations page filtering for ClientPulse orgs | E | 0.5 day |
 
 **Total Phase 3: ~8 days (can compress to ~5 with parallelism)**
