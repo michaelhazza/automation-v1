@@ -11,7 +11,7 @@
 import { classifyQueryIntent } from '../../lib/queryIntentClassifier.js';
 import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../../lib/queryIntent.js';
 import { sanitizeSearchQuery } from '../../lib/sanitizeSearchQuery.js';
-import { DOMINANCE_THRESHOLD } from '../../config/limits.js';
+import { DOMINANCE_THRESHOLD, EXPANSION_MIN_SCORE } from '../../config/limits.js';
 
 let passed = 0;
 let failed = 0;
@@ -188,6 +188,27 @@ test('dominance-gated results should NOT trigger graph expansion', () => {
   const confidentTop = 0.8;
   const confidentSecond = 0.4;
   assert(!isDominanceGated(confidentTop, confidentSecond), 'confident results should not be gated');
+});
+
+console.log('\nRetrieval pipeline — absolute score floor for expansion');
+
+test('EXPANSION_MIN_SCORE is exported from config', () => {
+  assert(typeof EXPANSION_MIN_SCORE === 'number', 'expected number');
+  assert(EXPANSION_MIN_SCORE > 0, 'floor must be > 0');
+});
+
+test('strong result above floor allows expansion', () => {
+  assert(0.2 >= EXPANSION_MIN_SCORE, 'score 0.2 should clear the floor');
+});
+
+test('weak result below floor blocks expansion', () => {
+  assert(0.01 < EXPANSION_MIN_SCORE, 'score 0.01 should NOT clear the floor');
+});
+
+test('dominant but weak results should still block expansion', () => {
+  // Top=0.02 is dominant over second=0.01 (ratio 2.0 > 1.2) but both are weak
+  assert(!isDominanceGated(0.02, 0.01), 'dominant ratio — not dominance-gated');
+  assert(0.02 < EXPANSION_MIN_SCORE, 'but top score is below absolute floor — expansion blocked');
 });
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

@@ -178,6 +178,14 @@ export const PROVIDER_COOLDOWN_MS = 60000;
  */
 export const DOMINANCE_THRESHOLD = 1.2;
 
+/**
+ * Minimum absolute combined_score the top result must reach before graph
+ * expansion is allowed. Prevents expansion from weak seeds — a dominant
+ * result that is still low-quality overall should not trigger relational
+ * expansion. Complements DOMINANCE_THRESHOLD (relative) with an absolute floor.
+ */
+export const EXPANSION_MIN_SCORE = 0.05;
+
 // ── Phase 2D: Agent briefing ────────────────────────────────────────────────
 
 /** Hard token cap for stored briefings. Anything above is truncated. */

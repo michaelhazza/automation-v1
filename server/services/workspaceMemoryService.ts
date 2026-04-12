@@ -38,6 +38,7 @@ import {
   HYDE_THRESHOLD,
   HYDE_MAX_TOKENS,
   DOMINANCE_THRESHOLD,
+  EXPANSION_MIN_SCORE,
   type EntryType,
 } from '../config/limits.js';
 import { rerank } from '../lib/reranker.js';
@@ -387,9 +388,10 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
 
   // Phase 1C: Graph-aware context expansion — follow relational edges to
   // surface connected memories that vector search may miss.
-  // Gated on dominance confidence: when results are ambiguous, expansion
-  // would amplify noise rather than enrich context.
-  if (results.length > 0 && !dominanceGated) {
+  // Double-gated: skip when results are ambiguous (dominance ratio) OR when
+  // the top result is too weak in absolute terms (EXPANSION_MIN_SCORE).
+  const topScoreAboveFloor = results.length > 0 && results[0].combined_score >= EXPANSION_MIN_SCORE;
+  if (results.length > 0 && !dominanceGated && topScoreAboveFloor) {
     const expanded = await _expandByRelation(results, scopeFilter, 5);
     if (expanded.length > 0) {
       const existingIds = new Set(results.map(r => r.id));
