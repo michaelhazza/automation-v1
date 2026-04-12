@@ -9,19 +9,20 @@
 
 1. Strategic framing
 2. Guiding architectural principle — templates are the abstraction
-3. Module breakdown
+3. User journey — landing page to first report
+4. Module breakdown
    - Module A — Config Template System & Module Lifecycle
    - Module B — ClientPulse (1-agent Reporting Agent, org-scoped)
    - Module C — GHL Data Connector
    - Module D — Self-Serve Onboarding
    - Module E — Template-Driven UI Narrowing + Dashboard & Reports
    - Module F — HTML Email Report Delivery
-   - Module G — Billing & Metering
-4. What we are leveraging — already built
-5. Explicitly out of scope for soft launch
-6. Open questions to resolve before writing the full spec
-7. Suggested build order
-8. Success criteria for soft launch
+   - Module G — Subscriptions, Billing & System Admin UI
+5. What we are leveraging — already built
+6. Explicitly out of scope for soft launch
+7. Open questions to resolve before writing the full spec
+8. Suggested build order
+9. Success criteria for soft launch
 
 ---
 
@@ -56,7 +57,79 @@ A Config Template declares, in one place:
 
 ---
 
-## 3. Module breakdown
+## 3. User journey — landing page to first report
+
+This is the north-star flow every module is in service of. It is also the concrete acceptance test for "is ClientPulse ready to ship." All architectural decisions in this brief exist to make this flow work end-to-end on a real design-partner agency with real GHL data.
+
+### Step 1 — Landing page (0–30 sec)
+
+Agency owner lands at `synthetos.ai/clientpulse`. Sees the pitch: *"Weekly client health reports and churn-risk alerts, powered by AI."* Clicks "Start free trial."
+
+### Step 2 — Signup (30 sec – 1 min)
+
+- Email + password, or Google SSO
+- Create `user` row + `organisations` row
+- Look up the Starter subscription in the `subscriptions` catalogue
+- Create `org_subscriptions` row with `status: 'trialing'`, 14-day trial
+- Call `systemTemplateService.loadToOrg('ghl-agency-intelligence', orgId, {})` — provisions the Reporting Agent row in `agents` for this org (`isSystemManaged: true`, `executionScope: 'org'`)
+- The `client_pulse` module is now active on this org; its allowlist `['reporting_agent']` governs what runs (per Module A's allowlist enforcement)
+- Redirect to the onboarding wizard
+
+### Step 3 — Connect Go High Level (1–2 min)
+
+Single-screen wizard: one button, "Connect Go High Level." On click:
+
+- Redirect to GHL's OAuth consent screen with the scope list from Module C
+- User approves → GHL redirects to `https://app.synthetos.ai/oauth/callback?code=...&state=ghl`
+- Exchange the authorization code for an `access_token` + `refresh_token` + `companyId` via GHL's token endpoint
+- Write credentials to `integration_connections` via the existing `integrationConnectionService` (591 lines, already built)
+
+### Step 4 — Location enumeration (10–30 sec)
+
+- Call `ghlAdapter.ingestion.listAccounts(connection, { companyId })` — already implemented at `server/adapters/ghlAdapter.ts:91`
+- GHL returns every location (sub-account) under the agency via `GET /locations/search?companyId={id}&limit=100`
+- Wizard shows: *"We found N sub-accounts. Which ones should ClientPulse monitor?"* with a "Select all" default
+- On confirm, create a `subaccounts` row + a `canonical_accounts` row per selected location, all org-scoped (reuses the existing three-tier data model)
+
+### Step 5 — First data pull (1–5 min, async background)
+
+A `connectorPollingService` job fires per newly-created canonical account. For each sub-account, in order:
+
+1. `fetchContacts` → `canonical_contacts`
+2. `fetchOpportunities` → `canonical_opportunities`
+3. `fetchConversations` → `canonical_conversations`
+4. `fetchRevenue` → `canonical_revenue` (best-effort; swallows errors on plans without `/payments/orders`)
+5. `computeMetrics` → metrics table
+
+**Realistic timing:** on an agency with many clients and years of historical data, this is the slowest step in the whole flow — minutes, not seconds. The UI must show per-client progress ("Syncing 23 clients… 6 done, 17 to go") rather than appearing frozen. A background job with a polling dashboard is fine; a spinner is not.
+
+### Step 6 — First report triggered (1–2 min)
+
+Once the initial sync completes, **immediately fire one run of the Reporting Agent** — do not wait for the weekly schedule. Waiting would be a bad first impression for a paying customer who just onboarded. The agent:
+
+1. Runs its planning prelude
+2. Queries `canonicalDataService` for the org's active GHL-linked subaccounts
+3. Iterates client-by-client in its execution loop (single run, not one run per client)
+4. Per client, calls: `compute_health_score`, `detect_anomaly`, `compute_churn_risk`
+5. Emits a per-client section into the run's handoff JSON
+6. Calls `generate_portfolio_report` to produce the final report artefact
+7. Writes the report to a new `reports` table row (org-scoped)
+8. Calls `send_email` to deliver the HTML report (see Module F) to the signup email
+9. Completes; dashboard refreshes via WebSocket (`useSocket`)
+
+### Step 7 — First report viewed (immediate)
+
+User lands on the Dashboard (see Module E) showing the red / yellow / green portfolio overview. The first weekly HTML report is also sitting in their inbox. **From week 2 onward, the scheduled task takes over** and fires the Reporting Agent on its configured weekly cadence (default: Monday 8am in the org's timezone).
+
+### Acceptance target
+
+**Landing page → dashboard with first report visible in under 10 minutes** for a typical agency (20–50 clients). Stretch target: under 5 minutes. For 100+ client agencies with deep historical data, longer is acceptable — but the UI must never appear stuck. The sync progress UI is non-negotiable.
+
+The ClientPulse soft launch is **not considered validated** until this flow works end-to-end for a real design-partner agency on real GHL data. Mocks and test fixtures are necessary during development but are not a substitute for real-world validation (see Module C's agency-token-vs-location-token note — that's the single biggest unverified GHL-side risk in the plan).
+
+---
+
+## 4. Module breakdown
 
 Each module is a unit of functionality a template can opt into. MVP ships these seven:
 
@@ -169,34 +242,130 @@ Important: the customer never sees the Reporting Agent as "an agent." They see *
 
 **Upgrade path note:** when a customer later upgrades to the full Synthetos tier, their subscription activates the `full_access` module (which has `allow_all_agents: true`). If additional agents haven't yet been provisioned, `loadToOrg()` runs with the relevant template to create them. If they downgrade back to ClientPulse, the `full_access` module deactivates, the allowlist contracts to `['reporting_agent']`, and the extra agents immediately stop firing — not because anything was deleted, but because they're no longer entitled to run. The Reporting Agent continues running because `client_pulse` is still active. On re-upgrade, the extra agents resume without re-provisioning.
 
-### Module C — GHL Data Connector *(new plugin)*
+### Module C — GHL Data Connector *(extends existing, ~60% built)*
 
-A first-class integration plugin, not a hardcoded special case.
+The **first data source plugin** — the same extensibility point that will later host Google Ads, GA4, Meta, HubSpot, Stripe. Architecturally GHL is the first citizen, not a special case, so the plugin shape it establishes is what future connectors inherit.
 
-- OAuth 2.0 **Agency App** registered with GHL (marketplace-approved later; private during beta)
-- `/locations` enumeration → bulk subaccount provisioning
-- Data source adapters for: contacts, opportunities, calendars, campaigns, forms, call tracking, reviews
-- Rate-limit + backoff via existing `withBackoff`
-- Pulled data stored as `agent_data_sources` rows at subaccount scope, using the existing cascade
-- Refresh schedule (daily or just-before-report)
+**Status: ~60% already built.** See `server/adapters/ghlAdapter.ts` (342 lines), `server/routes/webhooks/ghlWebhook.ts`, and the `canonicalEntities` + `canonicalDataService` stack. What's left: real-world validation of the fetch methods against a live GHL agency, webhook event normalisation for Opportunity stage/status transitions, and completing the sync-phase state machine (see `tasks/ghl-agency-development-brief.md` Phase 2).
 
-Architecturally, this is the **first data source plugin** — the same extensibility point that will later host Google Ads, GA4, Meta, HubSpot, Stripe. GHL is the first citizen, not a special case.
+#### OAuth + app registration
+
+- **App type:** Agency-level (not Sub-Account). One install at agency level grants access to all locations under that agency — no per-client setup, no per-client auth prompts.
+- **Redirect URL:** `https://app.synthetos.ai/oauth/callback` — generic path, future connectors share it via `state`-parameter dispatch
+- **Webhook URL:** `https://app.synthetos.ai/webhooks/ingest` — generic path, future connectors share it via sub-path or header routing
+- **URL compliance:** no `ghl`, `gohighlevel`, `highlevel`, `hl`, or `leadconnector` strings in any registered URL — GHL's validator rejects them outright and the white-label approval rule demands it (see "GHL compliance rules" below)
+- **Distribution:** **Private app** during beta. Install URL shared directly with design partners. **Hard cap: 5 active external agencies** on private apps before new installs are blocked. Marketplace submission required to scale past 5.
+- **Full step-by-step app registration walkthrough:** see `docs/create-ghl-app.md` — covers the Create App dialog, Profile → Basic Info, Advanced Settings → Auth, Advanced Settings → Webhooks, scopes investigation, compliance rules, private-app limits, and a logo generation prompt
+
+#### Minimum OAuth scope set
+
+Seven scopes, all read-only. Keeping the list tight matters for consent-screen trust, marketplace review velocity, and security blast radius.
+
+| Scope | Purpose |
+|---|---|
+| `locations.readonly` | List sub-accounts at install time via `/locations/search` |
+| `contacts.readonly` | Contact records + Contact lifecycle webhooks — drives lead volume metric |
+| `opportunities.readonly` | Opportunity records + Opportunity stage/status webhooks — drives pipeline velocity metric |
+| `conversations.readonly` | Conversation metadata + Conversation lifecycle webhooks — drives engagement metric |
+| `conversations/message.readonly` | Message-level details — some GHL plans require this as a separate scope |
+| `payments/orders.readonly` | Invoice/Payment webhooks + revenue data — degrades gracefully on plans without payments |
+| `businesses.readonly` | Business metadata per sub-account (name, timezone, address) — used for report labelling |
+
+**Not requested:** any `.write` scopes (v1 is strictly read-only), `calendars*`, `associations*`, `campaigns*`, `forms*`, `surveys*`, `users*`.
+
+#### Webhook event subscriptions
+
+See `docs/create-ghl-app.md` Appendix B for the canonical list. High-level:
+
+- **Contact lifecycle** — `ContactCreate` / `ContactUpdate` / `ContactDelete`
+- **Opportunity lifecycle** — `OpportunityCreate` / `OpportunityStageUpdate` / `OpportunityStatusUpdate` / `OpportunityDelete`
+- **Conversation lifecycle** — `ConversationCreated` / `ConversationUpdated` / `ConversationInactive`
+- **Revenue** — `InvoiceCreated`, `PaymentReceived`, `InvoicePaid` (plan-dependent)
+- **App lifecycle (critical)** — `INSTALL`, `UNINSTALL` — drives initial sync and cleanup
+- **Sub-account lifecycle** — `LocationCreate`, `LocationUpdate` — detect new sub-accounts mid-stream without waiting for re-enumeration
+
+Everything else stays disabled. The existing `mapGhlEventType` in `ghlAdapter.ts` handles the canonical events and silently drops unrecognised ones, so enabling extras doesn't crash — it just adds noise and consumes inbound rate-limit budget.
+
+#### GHL API endpoints used
+
+All live on `https://services.leadconnectorhq.com` with `Version: 2021-07-28` header and Bearer-token auth, called from the existing `ghlAdapter.ingestion` methods:
+
+| Purpose | Endpoint |
+|---|---|
+| List sub-accounts | `GET /locations/search?companyId={agencyId}&limit=100` |
+| Fetch contacts | `GET /contacts/?locationId={id}` (paginated) |
+| Fetch opportunities | `GET /opportunities/search?location_id={id}` (paginated) |
+| Fetch conversations | `GET /conversations/search?locationId={id}` (paginated) |
+| Fetch payment orders | `GET /payments/orders?altId={id}&altType=location` (paginated — may 404 on plans without payments) |
+
+#### Agency token vs location-token exchange — the biggest unverified risk
+
+The existing `ghlAdapter.ts` assumes **a single agency-level OAuth token can directly call per-location endpoints** with `locationId` as a query parameter. This is the optimistic assumption and it may or may not hold for every endpoint in the current GHL API version. The code was written to that assumption but has not been validated against a real GHL agency account.
+
+**If direct calls fail on some endpoints during live testing**, the fallback is a minimal one-day extension:
+
+1. Add `getLocationToken(connection, locationId)` helper that POSTs to `/oauth/locationToken` with `{ companyId, locationId }` using the agency token
+2. GHL returns a location-scoped token with short TTL (~1 hour)
+3. Cache the location token keyed on `(companyId, locationId)` until expiry
+4. In the fetch methods, replace `decryptAccessToken(connection)` with `getLocationToken(connection, locationId)` on the affected endpoints only
+
+**This must be verified against a real GHL agency with 3–5 sub-accounts before committing to soft launch.** It is the single biggest GHL-side risk in the plan. Build the `getLocationToken` helper early even if the direct-token pattern works — it's cheap insurance against GHL tightening the API in a future version.
+
+#### GHL compliance rules — "no HighLevel references"
+
+GHL enforces a "no HighLevel references in public surfaces" rule to preserve white-label compatibility. Many GHL agencies run in SaaS Mode where their clients never see the "HighLevel" brand — if ClientPulse references HighLevel anywhere public, those agencies can't safely install it.
+
+**The rule:** do not use the strings `highlevel`, `gohighlevel`, `hl`, or `leadconnector` in:
+
+- App name, tagline, company, website URL (in the GHL marketplace listing)
+- Redirect URL or webhook URL paths (enforced by GHL's URL validator — rejects outright)
+- Landing page content at the registered website
+- Marketing copy in the Listing Configuration / App Profile
+- Screenshot captions
+- Getting Started Guide copy
+
+**Permitted everywhere else:** internal code, comments, documentation (including this brief), the authenticated Synthetos app after install, private support materials. The restriction is specifically on the public-facing surface the GHL review team and white-label agencies can see.
+
+This is why the recommended URL paths are `/oauth/callback` and `/webhooks/ingest`, not `/integrations/ghl/callback` and `/webhooks/ghl`. It's also why the tagline, company, and website fields in `docs/create-ghl-app.md` are written to avoid brand references while still describing the product accurately.
+
+#### Private-app soft-launch ramp
+
+| Phase | Action | External agency count |
+|---|---|---|
+| 0 | Install on own test agency. Verify OAuth + data pull end-to-end, including the agency-token-vs-location-token question. | 0 (internal only) |
+| 1 | Closed beta with 3–5 design-partner agencies on the private app | 3–5 |
+| 2 | Submit for marketplace review — in parallel with closed beta, not after | Still 3–5 |
+| 3 | Approval lands → flip to Public → scale past 5 | Unlimited |
+
+**Submission timing:** start marketplace submission **before** hitting the 5-cap, not after. Review timelines are unknown and non-trivial; approval must arrive when you're ready to scale, not after you're blocked with a waiting list.
+
+#### Codebase changes required to match registered URLs
+
+Whatever URLs get registered in the GHL app builder must match the Express route paths in the codebase. The existing `server/routes/webhooks/ghlWebhook.ts` is mounted at whatever path the `server/index.ts` gives it — that mount path needs to match the registered webhook URL (`/webhooks/ingest`). Same story for the OAuth callback: create or rename a route at `/oauth/callback` with state-based dispatch to the right adapter.
+
+Environment variables to set:
+
+| Variable | Source | Purpose |
+|---|---|---|
+| `GHL_APP_CLIENT_ID` | GHL app builder | OAuth client ID |
+| `GHL_APP_CLIENT_SECRET` | GHL app builder | OAuth client secret (sensitive) |
+| `GHL_APP_WEBHOOK_SECRET` | GHL app builder → Webhooks | HMAC signing secret for webhook verification |
+| `GHL_APP_REDIRECT_URI` | Hardcoded | `https://app.synthetos.ai/oauth/callback` |
 
 ### Module D — Self-Serve Onboarding *(new product surface)*
 
-The consumer-grade front door the platform currently lacks.
+The consumer-grade front door the platform currently lacks. See **Section 3** for the full step-by-step user journey this module implements.
 
 - Public signup (email + password or Google SSO)
-- Stripe checkout with trial
-- `createOrgFromTemplate('ghl-agency')` on signup
-- "Connect Go High Level" OAuth step
-- **Location enumeration screen**: "We found N sub-accounts. Select the ones you want ClientPulse to monitor."
-- Auto-provision selected locations as subaccounts (reuses existing subaccount model)
-- Auto-link Reporting Agent to each new subaccount via existing subaccount agent linking
-- First-report preview using sample data while real data pulls in the background
-- Post-signup dashboard landing
+- Stripe checkout with trial — **or admin-comped during soft launch** (see Module G; Stripe is not on the critical path for the initial beta)
+- On signup: create org + `org_subscriptions` row (Starter tier, trialing), call `systemTemplateService.loadToOrg('ghl-agency-intelligence', orgId, {})` to provision the Reporting Agent (org-scoped, single row)
+- "Connect Go High Level" OAuth step — redirects to GHL's consent screen with the Module C scope list
+- **Location enumeration screen**: *"We found N sub-accounts. Which ones should ClientPulse monitor?"* with "Select all" default
+- Auto-provision selected locations as `subaccounts` + `canonical_accounts` rows at the org level — **no per-subaccount agent provisioning**, because the Reporting Agent is already org-scoped from the template load (see Module B)
+- **Trigger the first Reporting Agent run immediately when initial sync completes** — do not wait for the weekly schedule. The first 10 minutes of a new customer's experience is non-negotiable.
+- Post-signup dashboard landing with a progress UI for any in-flight sync
 
-**Target: from landing page to first report in under 5 minutes.** That is the acceptance criterion.
+**Target:** landing page → dashboard with first report visible in **under 10 minutes** (stretch: under 5 minutes). Aligned with Section 3's acceptance target and Section 9's success criteria.
 
 ### Module E — Template-Driven UI Narrowing + Dashboard & Reports *(extends existing UI)*
 
@@ -226,11 +395,16 @@ The consumer-grade front door the platform currently lacks.
 **Final ClientPulse sidebar shape:** Dashboard → Inbox → Companies → Reports → Integrations → Team → Manage Org. Seven items. Zero operator concepts.
 
 **Build work in this module:**
-- Make the org sidebar config-driven (reads `sidebar` array from active template)
-- Build `DashboardPage` as a reusable component that works at ClientPulse tier and future full-tier
-- Build `ReportsListPage` + `ReportDetailPage`
-- Narrow the Integrations page to filter by template-allowed connectors
+
+- Make the org sidebar config-driven (reads `sidebar_config` from the union of active modules per Module A)
+- Build `DashboardPage` as a reusable component that works at ClientPulse tier and future full-tier — data-driven widgets (health scores, anomalies, recent runs, alerts), not hardcoded sections
+- Build `ReportsListPage` + `ReportDetailPage` for the portfolio-report viewer
+- Narrow the Integrations page to filter by template-allowed connectors (GHL only for this template)
 - Public marketing / signup pages at `synthetos.ai/clientpulse` (separate surface, not part of the authenticated app)
+- **Honour the "tables: column-header sort + filter by default" architecture rule** from CLAUDE.md — the Reports list, Companies list, and any tabular widgets on the Dashboard must use the `SystemSkillsPage.tsx` `ColHeader` / `NameColHeader` pattern: `Set<T>`-based exclusion filter state, sort indicators (↑ / ↓), active-filter indigo dots, and a "Clear all" button in the page header when any sort or filter is active. No exceptions, no legacy "static table" fallbacks.
+- **Distinguish the ClientPulse customer Dashboard from the internal `OpsDashboardPage`** — these are two different pages with different audiences and must not be confused or merged:
+  - `OpsDashboardPage` (at `/admin/ops`, `/system/ops`, `/admin/subaccounts/:id/ops`) is the **operator-facing** activity feed showing agent runs, review items, health findings, inbox items, decision logs, playbook runs, task events, and workflow executions. Built in the Agent Coworker Features work on main. ClientPulse users must NOT see it — their sidebar doesn't include it.
+  - The **ClientPulse customer Dashboard** (Module E) is a **portfolio-health-focused** view for agency owners showing per-client red/yellow/green status, anomalies, churn risk, and latest reports. Lives at a different route (e.g. `/dashboard`). It is not a replacement for `OpsDashboardPage`; both exist for different personas.
 
 ### Module F — HTML Email Report Delivery *(new capability)*
 
@@ -358,7 +532,7 @@ Prices intentionally left TBD — lock before Stripe integration.
 
 ---
 
-## 4. What we are leveraging — already built
+## 5. What we are leveraging — already built
 
 These exist today and require zero or minimal new work:
 
@@ -399,18 +573,32 @@ These exist today and require zero or minimal new work:
 - Run traces, cost breakers, budget reservations
 - Memory blocks (per-agency preferences, voice, thresholds)
 - `send_email`, `send_to_slack`, `transcribe_audio` skills
+- `useSocket` WebSocket hook for real-time dashboard refreshes on run completion
 
-**This is why the brief feels small — most of the platform is already done.** The new work is: finishing the GHL ingestion pipeline, wiring intelligence executors to real data, adding Module A's lifecycle gating, building the template-driven sidebar, a handful of new pages, and billing. Not seven new modules from scratch.
+**Agent Coworker Features (100% complete — available but not wired for ClientPulse v1):**
+
+Five features shipped on main that ClientPulse can optionally leverage later, but does not require for soft launch. Documented in `architecture.md` → "Agent Coworker Features":
+
+- **Ops Dashboard** (`OpsDashboardPage.tsx`, `opsDashboardService.ts`, routes at `/admin/ops`, `/system/ops`) — operator-facing activity feed. **Explicitly NOT the ClientPulse customer Dashboard** (see Module E for the distinction). Two different pages for two different personas.
+- **Priority Feed** (`priorityFeedService`, `read_priority_feed` universal skill, migration 0100) — scored work queue for heartbeat agents. Optional future optimisation: the Reporting Agent could use it to order which clients to process first. Not needed for v1; simple linear iteration is fine.
+- **Cross-Agent Memory Search** (`search_agent_history` universal skill, semantic vector search over `workspaceMemoryEntries`) — the Reporting Agent could reference observations from prior runs across the org. Not needed for v1 but available on demand.
+- **Slack Conversational Surface** (`slackConversationService`, `slackWebhook.ts` `block_actions` handler, migrations 0102–0103) — **not wired for ClientPulse v1** (read-only tier has no HITL actions to approve), but ready to go when ClientPulse v2 adds action-taking skills and needs HITL approvals over Slack. The infrastructure is done; the action-taking skills aren't.
+- **Skill Studio + skill versioning** (`skillStudioService`, `skill_versions` table, migration 0101) — available for rollback-safe refinement of the Reporting Agent skill bundle going forward. Relevant during the "wire intelligence executors to real canonical data" phase if the skills need iteration.
+- **System skills DB-backed** (migrations 0097–0099) — `systemSkillService` manages skill rows; `handlerKey` enforced at server boot by `validateSystemSkillHandlers()`. The Reporting Agent's skill bundle is governed by this, so any new intelligence skills must be registered in the handler map.
+
+**This is why the brief feels small — most of the platform is already done.** The new work is: finishing the GHL ingestion pipeline, wiring intelligence executors to real data, adding Module A's allowlist enforcement, building the module-driven sidebar, a handful of new pages, Module G's admin UI, and the GHL app registration. Not seven new modules from scratch.
 
 **Cross-references:**
-- `tasks/ghl-agency-development-brief.md` — authoritative phase-by-phase build plan with remaining-effort estimates
-- `tasks/ghl-agency-feasibility-assessment.md` — feasibility context
+- `architecture.md` — authoritative description of codebase patterns ClientPulse inherits (three-tier model, cascading data sources, RLS, pg-boss scheduling, skill system, the Agent Coworker Features above, and the "tables: column-header sort + filter by default" rule)
+- `docs/create-ghl-app.md` — step-by-step walkthrough for registering the ClientPulse app in the GHL Marketplace (Create dialog, Profile, Auth, Webhooks, scopes, compliance rules, private-app limits, logo prompt, known ambiguities)
+- `tasks/ghl-agency-development-brief.md` — authoritative phase-by-phase build plan with remaining-effort estimates per phase
+- `tasks/ghl-agency-feasibility-assessment.md` — feasibility context for the original GHL agency play
 - `tasks/ghl-agency-value-proposition.md` — positioning and value-prop thinking
-- `tasks/build-config-template-feature.md` — management-page task spec (editing templates from the UI)
+- `tasks/build-config-template-feature.md` — management-page task spec (editing config templates from the UI)
 
 ---
 
-## 5. Explicitly out of scope for soft launch
+## 6. Explicitly out of scope for soft launch
 
 Cut deliberately to keep scope tight:
 
@@ -426,7 +614,7 @@ Cut deliberately to keep scope tight:
 
 ---
 
-## 6. Open questions to resolve before writing the full spec
+## 7. Open questions to resolve before writing the full spec
 
 **Resolved in this revision:**
 
@@ -440,19 +628,23 @@ Cut deliberately to keep scope tight:
 - ~~System admin bypass~~ — no escape hatch in v1. System admins must change the org's subscription to change what's allowed. Future: optional audit-logged override if needed.
 - ~~Org-created agents~~ — bypass the allowlist entirely (only system-backed agents are governed by modules).
 - ~~Legacy orgs~~ — not a concern, product is still pre-launch; no legacy org migration needed.
+- ~~GHL marketplace approval path~~ — **start on a private app**, closed beta with 3–5 design partners, submit for marketplace review in parallel so approval lands before scaling past the 5-agency private cap. See Module C's "Private-app soft-launch ramp" table.
+- ~~GHL URL compliance~~ — no `ghl` / `gohighlevel` / `highlevel` / `hl` / `leadconnector` in any registered URL. Use `/oauth/callback` and `/webhooks/ingest` — generic, future-connector-friendly, and passes GHL's validator. See Module C and `docs/create-ghl-app.md`.
+- ~~First-report timing~~ — immediately trigger one Reporting Agent run when initial sync completes. Never wait for the weekly schedule on a fresh signup. See Section 3 Step 6 and Module D.
+- ~~Dashboard vs OpsDashboard distinction~~ — the ClientPulse customer Dashboard (Module E) and the internal operator-facing `OpsDashboardPage` are two different pages with different audiences. Both exist. ClientPulse users only see the customer Dashboard. See Module E.
 
 **Still open:**
 
 1. **Template config format** — operational_defaults JSONB (current) is fine for runtime, but should new templates be authored as YAML in repo (code-reviewed, diffable) and imported into the DB, or authored directly as DB records via an admin UI? Paperclip already supports the import path. Recommendation: YAML in repo for canonical templates; admin UI for ad-hoc edits.
-2. **GHL Marketplace approval path** — does soft launch wait for marketplace approval, or launch with a private OAuth app and migrate design partners later?
-3. **Minimum viable GHL data subset for a useful first report** — recommendation: contacts + opportunities + calendars + campaigns. Skip call tracking and reviews in v1.
-4. **Soft-launch audience** — invite-only with ~10 design partners, or public self-serve from day one? Invite-only is lower risk and gives tighter feedback.
-5. **Seed-script hygiene** — where does "GHL Agency Intelligence" get seeded, and is the master seed script the right home for it? Duplicate row in the current UI suggests repeat runs without upsert. Resolve before soft-launch testing.
-6. **Lock initial pricing** — Starter / Growth / Scale monthly dollar amounts need to be decided before Module G's seeded subscriptions are finalised.
+2. **Minimum viable GHL data subset for a useful first report** — recommendation: contacts + opportunities + conversations + revenue (where available). Skip calendars, call tracking, and reviews in v1.
+3. **Soft-launch audience** — invite-only with 3–5 design partners (matching the private-app cap), or wait for marketplace approval and go public from day one? Recommendation: invite-only private beta for tighter feedback, submit for review in parallel.
+4. **Seed-script hygiene** — the current UI shows two "GHL Agency Intelligence" rows (one with 1 agent, one with 0). Where does the template get seeded, and is the master seed script the right home? Upsert semantics keyed on a stable manifest hash or slug. Resolve before soft-launch testing.
+5. **Lock initial pricing** — Starter / Growth / Scale monthly dollar amounts need to be decided before Module G's seeded subscriptions are finalised.
+6. **Agency-token-vs-location-token empirical verification** — the existing adapter assumes direct agency-token calls work for all endpoints. This is unverified. Phase 0 of the soft-launch ramp (install on own test agency) must validate this before Phase 1 starts. See Module C's "Agency token vs location-token exchange" section.
 
 ---
 
-## 7. Suggested build order
+## 8. Suggested build order
 
 1. **Module A** — new `modules` table + seed `client_pulse` and `full_access` modules + `getAllowedAgentSlugs(orgId)` resolver + enforcement at the four points (scheduling, execution, UI, write-to-activate) + sidebar-in-module-config refactor + seed-script hygiene for the GHL template. Everything downstream depends on this.
 2. **Module G admin UI (partial)** — `subscriptions` + `org_subscriptions` tables + the system-admin subscription catalogue editor + per-org subscription assignment UI. **Stripe is NOT required at this stage** — admins can comp design-partner orgs directly. This is the shortest path to being able to toggle ClientPulse ↔ Full Access on test orgs end-to-end.
@@ -466,7 +658,7 @@ Cut deliberately to keep scope tight:
 
 ---
 
-## 8. Success criteria for soft launch
+## 9. Success criteria for soft launch
 
 - 10 paying GHL agencies onboarded with real data
 - End-to-end signup → first report in under 10 minutes (stretch target: 5)
