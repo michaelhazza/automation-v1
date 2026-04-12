@@ -83,10 +83,13 @@ export class OnboardingService {
 
     const subCount = subResult?.total ?? 0;
     if (subCount > 0) {
+      // TODO(Module C): Once real sync state is persisted, derive actual phase from sync records.
+      // Return 'syncing' here rather than 'complete' — reporting 'complete' immediately would
+      // skip the sync progress screen before any report is actually generated.
       return {
-        phase: 'complete',
+        phase: 'syncing',
         totalAccounts: subCount,
-        completedAccounts: subCount,
+        completedAccounts: 0,
         accounts: [],
       };
     }

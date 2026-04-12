@@ -6,6 +6,7 @@ import { db } from '../db/index.js';
 import { users, organisations } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { emailService } from './emailService.js';
+import { subscriptionService } from './subscriptionService.js';
 
 const JWT_EXPIRY = '24h';
 
@@ -284,6 +285,14 @@ export class AuthService {
 
       return { org, user };
     });
+
+    // Assign the Starter subscription (14-day trial) — non-blocking; failure should not block signup
+    try {
+      const starterSub = await subscriptionService.getSubscriptionBySlug('starter');
+      await subscriptionService.assignSubscription(org.id, starterSub.id);
+    } catch (err) {
+      console.error('[AuthService.signup] Failed to assign starter subscription:', err);
+    }
 
     // Send welcome email asynchronously (non-blocking)
     emailService.sendWelcomeEmail(normalizedEmail, firstName, agencyName).catch((err) => {

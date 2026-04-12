@@ -126,6 +126,7 @@ export default function ReportDetailPage({ user: _user }: Props) {
             title={report.title}
             className="w-full border-0"
             style={{ minHeight: '600px' }}
+            sandbox="allow-same-origin"
             onLoad={(e) => {
               const iframe = e.currentTarget;
               const h = iframe.contentDocument?.documentElement?.scrollHeight;

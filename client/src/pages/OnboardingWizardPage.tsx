@@ -118,7 +118,8 @@ function Step2Locations({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [subLimit, setSubLimit] = useState<number>(10);
+  // Infinity means no cap (null from API = unlimited plan)
+  const [subLimit, setSubLimit] = useState<number>(Infinity);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -128,7 +129,9 @@ function Step2Locations({
     ]).then(([locRes, subRes]) => {
       const locs: GhlLocation[] = locRes.data.locations ?? [];
       setLocations(locs);
-      const limit: number = subRes.data.subaccountLimit ?? 10;
+      // null means unlimited (no cap); Infinity disables the over-limit checks below
+      const rawLimit: number | null = subRes.data.subscription?.subaccountLimit ?? null;
+      const limit: number = rawLimit ?? Infinity;
       setSubLimit(limit);
       // Pre-select up to the limit
       const preSelected = new Set(locs.slice(0, limit).map((l) => l.id));
@@ -196,7 +199,7 @@ function Step2Locations({
           </svg>
           <span className="text-amber-800">
             Your Starter plan monitors up to <strong>{subLimit} clients</strong>.{' '}
-            <a href="/settings/billing" className="underline text-amber-700 hover:text-amber-900">Upgrade to Growth →</a>
+            <a href="/settings" className="underline text-amber-700 hover:text-amber-900">Upgrade to Growth →</a>
           </span>
         </div>
       )}

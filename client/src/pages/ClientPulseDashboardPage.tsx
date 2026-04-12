@@ -86,7 +86,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
           <span className="flex-1 font-medium">
             Your trial has ended. Upgrade to keep monitoring your clients.
           </span>
-          <a href="/settings/billing" className="text-white font-semibold underline whitespace-nowrap">
+          <a href="/settings" className="text-white font-semibold underline whitespace-nowrap">
             Choose a plan →
           </a>
         </div>
