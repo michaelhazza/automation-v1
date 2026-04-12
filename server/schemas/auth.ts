@@ -25,3 +25,10 @@ export const resetPasswordBody = z.object({
   password: z.string().min(8).max(500),
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordBody>;
+
+export const signupBody = z.object({
+  agencyName: z.string().min(1).max(255).trim(),
+  email: z.string().email().max(255),
+  password: z.string().min(8).max(500),
+});
+export type SignupInput = z.infer<typeof signupBody>;

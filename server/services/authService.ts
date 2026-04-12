@@ -6,6 +6,7 @@ import { db } from '../db/index.js';
 import { users, organisations } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
 import { emailService } from './emailService.js';
+import { subscriptionService } from './subscriptionService.js';
 
 const JWT_EXPIRY = '24h';
 
@@ -217,6 +218,105 @@ export class AuthService {
 
   async logout() {
     return { message: 'Logged out successfully' };
+  }
+
+  async signup(agencyName: string, email: string, password: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check for existing user with this email
+    const [existing] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.email, normalizedEmail), isNull(users.deletedAt)));
+
+    if (existing) {
+      throw { statusCode: 409, message: 'An account with this email already exists.' };
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Generate a URL-safe slug from the agency name
+    const baseSlug = agencyName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'agency';
+
+    // Ensure slug uniqueness with a random suffix if needed
+    let slug = baseSlug;
+    const [slugConflict] = await db
+      .select({ id: organisations.id })
+      .from(organisations)
+      .where(and(eq(organisations.slug, slug), isNull(organisations.deletedAt)));
+    if (slugConflict) {
+      slug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
+    }
+
+    // Derive first/last name from email local-part
+    const localPart = normalizedEmail.split('@')[0];
+    const nameParts = localPart.split(/[._-]/);
+    const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : 'Admin';
+    const lastName = nameParts[1] ? nameParts[1].charAt(0).toUpperCase() + nameParts[1].slice(1) : '';
+
+    // Wrap org + user creation in a transaction to prevent orphaned org rows
+    const { org, user } = await db.transaction(async (tx) => {
+      const [org] = await tx
+        .insert(organisations)
+        .values({
+          name: agencyName.trim(),
+          slug,
+          plan: 'starter',
+          status: 'active',
+        })
+        .returning();
+
+      const [user] = await tx
+        .insert(users)
+        .values({
+          organisationId: org.id,
+          email: normalizedEmail,
+          passwordHash,
+          firstName,
+          lastName: lastName || 'User',
+          role: 'org_admin',
+          status: 'active',
+        })
+        .returning();
+
+      return { org, user };
+    });
+
+    // Assign the Starter subscription (14-day trial) — non-blocking; failure should not block signup
+    try {
+      const starterSub = await subscriptionService.getSubscriptionBySlug('starter');
+      await subscriptionService.assignSubscription(org.id, starterSub.id);
+    } catch (err) {
+      console.error('[AuthService.signup] Failed to assign starter subscription:', err);
+    }
+
+    // Send welcome email asynchronously (non-blocking)
+    emailService.sendWelcomeEmail(normalizedEmail, firstName, agencyName).catch((err) => {
+      console.error('[AuthService.signup] Welcome email failed:', err);
+    });
+
+    const jwtToken = signToken({
+      id: user.id,
+      organisationId: org.id,
+      role: user.role,
+      email: user.email,
+    });
+
+    return {
+      token: jwtToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        organisationId: org.id,
+      },
+    };
   }
 }
 

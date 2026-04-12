@@ -177,6 +177,53 @@ function NavSection({ label, action }: { label: string; action?: React.ReactNode
   );
 }
 
+// ── Trial Countdown (sidebar footer) ──────────────────────────────────────
+function TrialCountdown() {
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get('/api/my-subscription').then(({ data }) => {
+      setStatus(data.status ?? null);
+      setTrialEndsAt(data.trialEndsAt ?? null);
+    }).catch(() => { /* not available yet */ });
+  }, []);
+
+  if (status !== 'trialing' || !trialEndsAt) return null;
+
+  const msLeft = new Date(trialEndsAt).getTime() - Date.now();
+  if (msLeft <= 0) return null;
+  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+
+  let label = '';
+  let cls = 'text-slate-500';
+  if (daysLeft > 7) {
+    label = `${daysLeft} days left in trial`;
+    cls = 'text-slate-500';
+  } else if (daysLeft > 2) {
+    label = `${daysLeft} days left in trial`;
+    cls = 'text-amber-400';
+  } else if (daysLeft === 2) {
+    label = 'Trial ends in 2 days';
+    cls = 'text-red-400';
+  } else if (daysLeft === 1) {
+    label = 'Trial ends tomorrow';
+    cls = 'text-red-400';
+  } else {
+    label = 'Trial ends today';
+    cls = 'text-red-400';
+  }
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-[6px] mx-1.5 my-px text-[11.5px] font-medium ${cls}`}>
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 // ── Main Layout ────────────────────────────────────────────────────────────
 export default function Layout({ user, children }: LayoutProps) {
   const navigate = useNavigate();
@@ -247,10 +294,19 @@ export default function Layout({ user, children }: LayoutProps) {
   // Command palette
   const [cmdOpen, setCmdOpen] = useState(false);
 
+  // Module-driven sidebar config
+  const [sidebarItems, setSidebarItems] = useState<Set<string> | null>(null);
+  const [sidebarLoaded, setSidebarLoaded] = useState(false);
+
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
   const hasAnyOrgPerm = orgPerms.size > 0;
   const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has('__org_admin__') || orgPerms.has(key);
   const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has('__org_admin__') || orgPerms.has('__org_admin__') || clientPerms.has(key);
+  /** Check if a nav-item slug is enabled by the module sidebar config. System admins bypass. Returns false while loading to prevent flash. */
+  const hasSidebarItem = (slug: string) => {
+    if (!sidebarLoaded) return false; // suppress until config loaded
+    return !sidebarItems || sidebarItems.has(slug);
+  };
 
   // Auto-set org context for non-system-admin users who belong to an org
   useEffect(() => {
@@ -301,6 +357,21 @@ export default function Layout({ user, children }: LayoutProps) {
       api.get(`/api/subaccounts/${activeClientId}/my-permissions`).then(({ data }) => setClientPerms(new Set(data.permissions))).catch((err) => { console.error('[Layout] Failed to fetch client permissions:', err); setClientPerms(new Set()); });
     } else { setClientPerms(new Set()); }
   }, [activeClientId, isSystemAdmin]);
+
+  // Fetch module-driven sidebar config
+  useEffect(() => {
+    if (isSystemAdmin) { setSidebarItems(null); setSidebarLoaded(true); return; }
+    if (hasOrgContext) {
+      setSidebarLoaded(false);
+      api.get('/api/my-sidebar-config').then(({ data }) => {
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          setSidebarItems(new Set(data.items));
+        } else {
+          setSidebarItems(null); // No module config = show default (all items)
+        }
+      }).catch(() => setSidebarItems(null)).finally(() => setSidebarLoaded(true));
+    } else { setSidebarItems(null); setSidebarLoaded(true); }
+  }, [hasOrgContext, activeOrgId, isSystemAdmin]);
 
   // Review queue badge — initial load + WebSocket updates
   useEffect(() => {
@@ -674,20 +745,30 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && activeClientId && (
             <>
               <NavSection label="Company" />
-              {hasOrgPerm('org.agents.view') && (
+              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && (
                 <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
               )}
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
-              )}
-              {hasOrgPerm('org.subaccounts.view') && (
+              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && (
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
-              <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
-              <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
-              {hasOrgPerm('org.subaccounts.edit') && (
+              {hasSidebarItem('ops') && (
+                <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+              )}
+              {hasSidebarItem('companies') && (
+                <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
+              )}
+              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.edit') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}`} exact icon={<Icons.settings />} label="Manage" />
               )}
+            </>
+          )}
+
+          {/* ── ClientPulse section — shown when org has client_pulse module */}
+          {hasOrgContext && hasSidebarItem('clientpulse') && (
+            <>
+              <NavSection label="ClientPulse" />
+              <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
+              {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
             </>
           )}
 
@@ -695,17 +776,17 @@ export default function Layout({ user, children }: LayoutProps) {
           {hasOrgContext && hasAnyOrgPerm && (
             <>
               <NavSection label="Organisation" />
-              {(hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
-              {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
-              {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
-              <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
-              {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
-              {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasOrgPerm('org.executions.view') && <NavItem to="/admin/ops" icon={<Icons.activity />} label="Ops Dashboard" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/skill-studio" icon={<Icons.skills />} label="Skill Studio" />}
-              {hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
-              {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
+              {hasSidebarItem('inbox') && (hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
+              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
+              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
+              {hasSidebarItem('workflows') && hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
+              {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
+              {hasSidebarItem('integrations') && hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
+              {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
+              {hasSidebarItem('ops') && hasOrgPerm('org.executions.view') && <NavItem to="/admin/ops" icon={<Icons.activity />} label="Ops Dashboard" />}
+              {hasSidebarItem('skills') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/skill-studio" icon={<Icons.skills />} label="Skill Studio" />}
+              {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
+              {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
           )}
 
@@ -724,6 +805,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
               <NavItem to="/system/config-templates" icon={<Icons.agents />} label="Config Templates" />
+              <NavItem to="/system/modules" icon={<Icons.boardTpl />} label="Modules" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}
@@ -731,6 +813,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
         {/* Footer */}
         <div className="px-1.5 pt-1.5 pb-2 border-t border-white/5">
+          <TrialCountdown />
           <NavItem to="/settings" exact icon={<Icons.settings />} label="Profile Settings" />
           <button
             onClick={handleLogout}
@@ -739,6 +822,15 @@ export default function Layout({ user, children }: LayoutProps) {
             <Icons.logout />
             <span>Sign out</span>
           </button>
+          <a
+            href="mailto:support@synthetos.ai"
+            className="flex items-center gap-[9px] px-3 py-[5px] mx-1.5 my-px rounded-[7px] text-slate-700 text-[12px] no-underline transition-[color,background] duration-100 hover:text-slate-400 hover:bg-white/[0.04]"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>Need help?</span>
+          </a>
         </div>
       </aside>
 

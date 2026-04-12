@@ -111,6 +111,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0082_tool_call_security_events.sql',
     rationale: 'Every tool call authorisation decision — audit trail for scope / policy checks.',
   },
+  // 0104 — ClientPulse: org_subscriptions + reports
+  {
+    tableName: 'org_subscriptions',
+    schemaFile: 'orgSubscriptions.ts',
+    policyMigration: '0104_clientpulse_modules.sql',
+    rationale: 'Per-org billing state — cross-tenant leak reveals pricing/plan of other orgs.',
+  },
+  {
+    tableName: 'reports',
+    schemaFile: 'reports.ts',
+    policyMigration: '0104_clientpulse_modules.sql',
+    rationale: 'Per-org portfolio health reports — agency client performance data.',
+  },
   // 0083 — Sprint 2 P1.2 regression capture
   {
     tableName: 'regression_cases',

@@ -722,6 +722,22 @@ export const queueService = {
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
 
+      // ClientPulse — trial expiry check (6am daily)
+      await boss.schedule('subscription-trial-check', '0 6 * * *', {});
+      await (boss as any).work('subscription-trial-check', { teamSize: 1, teamConcurrency: 1 }, async () => {
+        try {
+          const { subscriptionService } = await import('./subscriptionService.js');
+          const expired = await subscriptionService.getExpiredTrials();
+          for (const sub of expired) {
+            await subscriptionService.expireTrial(sub.id);
+            console.log(JSON.stringify({ event: 'trial_expired', orgSubscriptionId: sub.id, organisationId: sub.organisationId }));
+          }
+        } catch (err) {
+          console.error(JSON.stringify({ event: 'subscription-trial-check:error', error: String(err) }));
+          throw err;
+        }
+      });
+
       // Feature 4 — Slack inbound message processing (event-driven, no schedule)
       await (boss as any).work('slack-inbound', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 2 }, async (job: any) => {
         try {

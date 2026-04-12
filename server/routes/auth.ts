@@ -4,8 +4,8 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { auditService } from '../services/auditService.js';
 import { validateBody } from '../middleware/validate.js';
-import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody } from '../schemas/auth.js';
-import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput } from '../schemas/auth.js';
+import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, signupBody } from '../schemas/auth.js';
+import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
 
 const router = Router();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -33,6 +33,31 @@ function validatePasswordStrength(password: string): string | null {
   if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one special character';
   return null;
 }
+
+router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (req, res) => {
+  const rateKey = `signup:${req.ip}`;
+  if (!enforceLoginRateLimit(rateKey)) {
+    res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
+    return;
+  }
+  const { agencyName, email, password } = req.body as SignupInput;
+  const passwordError = validatePasswordStrength(password);
+  if (passwordError) {
+    res.status(400).json({ error: 'Validation failed', details: { password: [passwordError] } });
+    return;
+  }
+  const result = await authService.signup(agencyName, email, password);
+  auditService.log({
+    organisationId: result.user.organisationId,
+    actorId: result.user.id,
+    actorType: 'user',
+    action: 'signup',
+    entityType: 'user',
+    entityId: result.user.id,
+    ipAddress: req.ip,
+  });
+  res.status(201).json(result);
+}));
 
 router.post('/api/auth/login', validateBody(loginBody), asyncHandler(async (req, res) => {
   const { email, password, organisationSlug } = req.body as LoginInput;

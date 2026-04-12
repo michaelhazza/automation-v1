@@ -106,6 +106,11 @@ import opsDashboardRouter from './routes/opsDashboard.js';
 import skillStudioRouter from './routes/skillStudio.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
+// ClientPulse module routes
+import modulesRouter from './routes/modules.js';
+import onboardingRouter from './routes/onboarding.js';
+import clientpulseReportsRouter from './routes/clientpulseReports.js';
+import ghlRouter from './routes/ghl.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
 
 const app = express();
@@ -251,6 +256,11 @@ app.use(ieeRouter);
 app.use(skillAnalyzerRouter);
 app.use(opsDashboardRouter);
 app.use(skillStudioRouter);
+// ClientPulse module routes
+app.use(modulesRouter);
+app.use(onboardingRouter);
+app.use(clientpulseReportsRouter);
+app.use(ghlRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
