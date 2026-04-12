@@ -3,6 +3,8 @@ import { connectorConfigService } from '../../services/connectorConfigService.js
 import { adapters } from '../../adapters/index.js';
 import { webhookDedupeStore } from '../../lib/webhookDedupe.js';
 import { asyncHandler } from '../../lib/asyncHandler.js';
+import * as slackConversationService from '../../services/slackConversationService.js';
+import type { SlackInboundPayload } from '../../jobs/slackInboundJob.js';
 
 const router = Router();
 
@@ -110,8 +112,67 @@ router.post('/api/webhooks/slack', raw({ type: 'application/json' }), asyncHandl
 
     console.log(`[Slack Webhook] Processed ${normalised.eventType} in channel ${normalised.entityExternalId}`);
 
-    // Messaging webhook events are for real-time awareness (agent reactions).
-    // Future: publish to event bus / pg-boss queue for agent processing.
+    // ── Feature 4: Dispatch to agent processing via pg-boss ─────────
+    const slackEvent = event.event as Record<string, unknown> | undefined;
+    const eventType = slackEvent?.type as string | undefined;
+    const orgId = config.organisationId;
+
+    if (eventType === 'app_mention' && slackEvent) {
+      // @mention in a channel — create conversation and enqueue job
+      const threadTs = (slackEvent.thread_ts ?? slackEvent.ts) as string;
+      const channelId = slackEvent.channel as string;
+      const workspaceId = (event.team_id ?? '') as string;
+      const text = (slackEvent.text ?? '') as string;
+      const slackUserId = (slackEvent.user ?? '') as string;
+
+      const existing = await slackConversationService.resolveConversation({
+        workspaceId, channelId, threadTs, orgId,
+      });
+
+      if (!existing) {
+        // New conversation — agent resolution would match @AgentName to an agent
+        // For now, log the intent. Full agent resolution requires parsing the mention.
+        console.info(`[Slack Webhook] app_mention in ${channelId}, thread ${threadTs}`);
+      }
+    } else if (eventType === 'message' && slackEvent) {
+      const channelType = slackEvent.channel_type as string | undefined;
+      const threadTs = slackEvent.thread_ts as string | undefined;
+      const channelId = slackEvent.channel as string;
+      const workspaceId = (event.team_id ?? '') as string;
+
+      if (channelType === 'im') {
+        // DM to bot — create or resume conversation
+        console.info(`[Slack Webhook] DM in ${channelId}`);
+      } else if (threadTs) {
+        // Thread reply in a channel — check if thread is tracked
+        const conversation = await slackConversationService.resolveConversation({
+          workspaceId, channelId, threadTs, orgId,
+        });
+        if (conversation) {
+          console.info(`[Slack Webhook] Thread reply in tracked conversation ${conversation.id}`);
+        }
+      }
+    } else if (event.type === 'block_actions') {
+      // Interactive HITL buttons (approve/reject/ask)
+      const actions = (event.actions ?? []) as Array<{ action_id?: string }>;
+      for (const action of actions) {
+        const actionId = action.action_id ?? '';
+        if (actionId.startsWith('hitl:')) {
+          const [, reviewItemId, hitlAction] = actionId.split(':');
+          const slackUserId = ((event.user as Record<string, unknown>)?.id ?? '') as string;
+
+          // Resolve Slack user to org user for authorization
+          const orgUser = await slackConversationService.resolveSlackUser(slackUserId, orgId);
+          if (!orgUser) {
+            console.warn(`[Slack Webhook] Unlinked Slack user ${slackUserId} tried HITL action`);
+            // Would send ephemeral "link your account first" message
+          } else {
+            console.info(`[Slack Webhook] HITL ${hitlAction} on review item ${reviewItemId} by user ${orgUser.userId}`);
+            // Would call reviewService.processReview() here
+          }
+        }
+      }
+    }
   } catch (err) {
     console.error('[Slack Webhook] Error processing event:', err instanceof Error ? err.message : err);
   }

@@ -126,6 +126,10 @@ export interface AnalysisResult {
    *  in proposedMergedContent. Used to gate the "Reset to AI suggestion"
    *  link in the merge view. */
   userEditedMerge?: boolean;
+  /** ISO timestamp of the last merge write (patchMergeFields or resetMergeToOriginal).
+   *  Null on rows that have never been merge-edited. Echoed back on PATCH requests
+   *  as ifUnmodifiedSince for optimistic concurrency. */
+  mergeUpdatedAt?: string | null;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

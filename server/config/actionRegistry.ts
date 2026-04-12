@@ -1570,6 +1570,64 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
+  // ── Priority Feed (Feature 2) ───────────────────────────────────────────────
+
+  read_priority_feed: {
+    actionType: 'read_priority_feed',
+    description: 'Read, claim, or release items from the prioritized work feed.',
+    actionCategory: 'worker',
+    topics: ['workspace'],
+    isExternal: false,
+    isUniversal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['op', 'source', 'itemId', 'limit', 'ttlMinutes'],
+    parameterSchema: z.object({
+      op: z.enum(['list', 'claim', 'release']),
+      limit: z.number().int().min(1).max(50).optional(),
+      source: z.string().optional(),
+      itemId: z.string().optional(),
+      ttlMinutes: z.number().int().min(5).max(120).optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['validation_failure'],
+    },
+    mcp: { annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
+  // ── Cross-Agent Memory Search (Feature 5) ──────────────────────────────────
+
+  search_agent_history: {
+    actionType: 'search_agent_history',
+    description: 'Search memories and learnings across all agents in the workspace via semantic vector search.',
+    actionCategory: 'worker',
+    topics: ['workspace'],
+    isExternal: false,
+    isUniversal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['op', 'query', 'memoryId'],
+    parameterSchema: z.object({
+      op: z.enum(['search', 'read']),
+      query: z.string().min(1).max(1000).optional(),
+      includeOtherSubaccounts: z.boolean().optional(),
+      topK: z.number().int().min(1).max(50).optional(),
+      memoryId: z.string().uuid().optional(),
+    }),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['validation_failure'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
   // ── Methodology skills (pure prompt scaffolds, no side effects) ──────────
   // These entries enable the isMethodology fast-path in the preTool middleware,
   // which bypasses full action proposal and writes a lightweight audit row.

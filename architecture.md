@@ -8,19 +8,19 @@ Read this before making any backend changes. It documents the conventions, patte
 
 ```
 server/
-├── routes/          Route files — one per domain (~67 files)
-├── services/        Business logic — one per domain (~117 files, includes *Pure.ts companions)
-├── db/schema/       Drizzle ORM table definitions (~97 files)
+├── routes/          Route files — one per domain (~70 files)
+├── services/        Business logic — one per domain (~125 files, includes *Pure.ts companions)
+├── db/schema/       Drizzle ORM table definitions (~101 files)
 ├── middleware/      Express middleware (auth, validation, correlation, org scoping)
 ├── lib/             Shared utilities (asyncHandler, permissions, scopeAssertion, orgScopedDb, etc.)
 ├── config/          Environment, action registry, system limits, RLS manifest, topic registry
-├── skills/          File-based skill definitions (91 built-in skills as .md files)
-├── jobs/            Background jobs (cleanup, regression replay, security event pruning)
+├── skills/          File-based skill definitions (99 built-in skills as .md files)
+├── jobs/            Background jobs (cleanup, regression replay, security event pruning, priority feed, slack inbound)
 ├── tools/           Internal tool implementations (askClarifyingQuestion, readDataSource)
 └── index.ts         Express app setup, route mounting
 
 client/
-├── src/pages/       ~74 page components (lazy-loaded)
+├── src/pages/       ~76 page components (lazy-loaded)
 ├── src/components/  Reusable UI components (~21 files)
 ├── src/hooks/       useSocket.ts (WebSocket integration)
 └── src/lib/         api.ts, auth.ts, socket.ts
@@ -78,6 +78,8 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Playbook runs | `playbookRuns.ts` |
 | Playbook templates | `playbookTemplates.ts` |
 | Playbook studio | `playbookStudio.ts` |
+| Ops dashboard | `opsDashboard.ts` |
+| Skill studio | `skillStudio.ts` |
 
 ### Shared route helpers
 
@@ -325,7 +327,7 @@ The view/resolve permission split is intentional — read-only stakeholders can 
 
 **Frontend:** `client/src/pages/AdminHealthFindingsPage.tsx` lists findings grouped by severity. The "Mark resolved" button is hidden for users without `org.health_audit.resolve` (honoring `__system_admin__` / `__org_admin__` sentinels from `/api/my-permissions`). `client/src/components/HealthAuditWidget.tsx` renders a compact summary on the dashboard.
 
-> ⚠️ **Known UI gap:** `AdminHealthFindingsPage` is registered in the router but currently only reachable via the dashboard widget — no sidebar nav entry. See "Pre-testing audit" notes in commit history.
+> **Resolved:** `AdminHealthFindingsPage` now has a sidebar nav entry under the Organisation section (gated by `org.health_audit.view`). Health findings also surface in the Ops Dashboard (`/admin/ops`) as `health_finding` activity type.
 
 ---
 
@@ -368,7 +370,7 @@ Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_d
 
 ### File-based definitions
 
-Skills are defined as Markdown files in `server/skills/*.md`. There are 91 built-in system skills:
+Skills are defined as Markdown files in `server/skills/*.md`. There are 99 built-in system skills:
 
 | Category | Skills |
 |----------|--------|
@@ -384,6 +386,9 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 91 built
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
 | Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
 | Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
+| Skill Studio | `skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save` |
+| Priority Feed | `read_priority_feed` (universal — list/claim/release) |
+| Cross-Agent Memory | `search_agent_history` (universal — search/read) |
 
 `send_to_slack`, `transcribe_audio`, and `fetch_paywalled_content` were added with the Reporting Agent feature (migrations 0072–0074). All three go through `withBackoff` for retries and `runCostBreaker` for cost ceilings.
 
@@ -422,6 +427,10 @@ Processors can throw `TripWire` (from `server/lib/tripwire.ts`) to signal a retr
 | System | `systemSkills` | Platform-only; not shown in org UI |
 | Org | `skills` | Org admin can create/manage |
 | Subaccount | inherited from org assignment | Subaccount-specific overrides |
+
+System skills are now DB-backed (migrations 0097–0099). `server/skills/*.md` files are seed sources only. `systemSkillService` manages the DB rows; the backfill script (`scripts/backfill-system-skills.ts`) populates initial data. Every active system skill has a `handlerKey` wired to a TypeScript handler in `skillExecutor.ts`'s `SKILL_HANDLERS` map, enforced at server boot by `validateSystemSkillHandlers()`.
+
+**Skill versioning** (migration 0101): `skill_versions` stores immutable snapshots of skill definitions. The Skill Studio (Feature 3) creates new versions on every save, supporting rollback to any prior version. See the Agent Coworker Features section for full details.
 
 ---
 
@@ -526,6 +535,10 @@ Tasks can set `reviewRequired: true`. When an agent acts on such a task, actions
 - Review decisions logged to `reviewAuditRecords`
 - All review actions emit audit events
 
+### Slack HITL Integration (Agent Coworker Feature 4)
+
+When a review item is created, `reviewService` optionally calls `slackConversationService.postReviewItemToSlack()` if the org has a Slack connector with a configured `reviewChannel`. This posts a Block Kit message with Approve / Reject / Ask buttons. Button clicks flow back through `slackWebhook.ts`'s `block_actions` handler, which resolves the Slack user to an org user (`users.slack_user_id`) before authorizing the HITL action. Unlinked Slack users get an ephemeral "link your account" message.
+
 ---
 
 ## GitHub App Integration
@@ -564,6 +577,14 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 - Embeddings supported for semantic search across memories
 - Used by orchestrator agent to accumulate cross-run context
 
+### Cross-Agent Memory Search (Agent Coworker Feature 5)
+
+`search_agent_history` is a universal skill that exposes `workspaceMemoryEntries` via semantic vector search. Agents can query what other agents in their org have learned — not just their own memory.
+
+- **Service:** `workspaceMemoryService.semanticSearchMemories()` — generates embedding for query text, runs cosine similarity (`<=>`) against `workspaceMemoryEntries.embedding`, joins `agents` for source agent names. `getMemoryEntry()` fetches a single entry by ID with org-scope guard.
+- **Skill:** `search_agent_history` in `actionRegistry.ts` (`isUniversal: true`). Two ops: `search` (semantic vector search) and `read` (fetch single entry). Handler in `SKILL_HANDLERS` auto-enables org-wide search when no subaccountId context.
+- **No schema changes** — uses existing `embedding vector(1536)` column and HNSW index on `workspaceMemoryEntries`.
+
 ---
 
 ## Memory Blocks (Letta Pattern)
@@ -583,7 +604,7 @@ Sprint 5 P4.2. Named, shared context blocks that can be attached to multiple age
 
 ### Universal skills integration
 
-`read_data_source` and `update_memory_block` are injected into every agent run via the universal skills list in `server/config/universalSkills.ts`.
+`read_data_source` and `update_memory_block` are injected into every agent run via the universal skills list in `server/config/universalSkills.ts`. The Agent Coworker Features added two more universal skills: `search_agent_history` (cross-agent memory search) and `read_priority_feed` (prioritized work queue).
 
 ---
 
@@ -670,7 +691,7 @@ Non-org-scoped access paths (migrations, cron, admin tooling) use `server/lib/ad
 
 ## Event-Driven Architecture
 
-- **pg-boss** — job queue for all async work (handoffs, heartbeats, scheduled tasks)
+- **pg-boss** — job queue for all async work (handoffs, heartbeats, scheduled tasks, slack inbound, priority feed cleanup)
 - **WebSocket (Socket.IO)** — real-time updates to client. Rooms: subaccount tasks, agent runs
 - **`useSocket` hook** — client subscribes to subaccount-scoped room for live updates
 - **Audit events** — all significant actions logged to `auditEvents` with actor, action, resource
@@ -733,12 +754,12 @@ Examples: `agentExecutionServicePure.ts`, `regressionCaptureServicePure.ts`, `cr
 
 ### Runtime tests
 
-20 test files in `server/services/__tests__/` (~4200 lines). Key coverage:
+21 test files in `server/services/__tests__/` (~4350 lines). Key coverage:
 - `agentExecution.smoke.test.ts` — end-to-end agent execution
 - `rls.context-propagation.test.ts` — iterates `rlsProtectedTables.ts` to assert Layer B holds
 - `agentExecutionServicePure.checkpoint.test.ts` — crash-resume parity
 - `policyEngineService.scopeValidation.test.ts` — scope violation detection
-- Pure helper tests: `critiqueGatePure.test.ts`, `reflectionLoopPure.test.ts`, `trajectoryServicePure.test.ts`, etc.
+- Pure helper tests: `critiqueGatePure.test.ts`, `reflectionLoopPure.test.ts`, `trajectoryServicePure.test.ts`, `priorityFeedServicePure.test.ts`, etc.
 
 Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for deterministic testing. `server/services/__tests__/fixtures/loadFixtures.ts` — fixture loader.
 
@@ -767,9 +788,16 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ## Migrations
 
-92 migrations (0001–0090, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
+103 migrations (0001–0103, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0103` — `users.slack_user_id` — Slack user ↔ org user identity linkage (Feature 4)
+- `0102` — `slack_conversations` — thread → agent conversation mapping (Feature 4)
+- `0101` — `skill_versions` — immutable version history for skill definitions (Feature 3)
+- `0100` — `priority_feed_claims` — optimistic claim locks for work feed entries (Feature 2)
+- `0099` — `skill_analyzer_merge_updated_at` — updatedAt on merge records
+- `0098` — `skill_analyzer_v2_columns` — agent embeddings, skill analyzer v2 fields
+- `0097` — `system_skills_db_backed` — visibility + handler_key on system_skills; skills-to-DB migration
 - `0090` — `agents.complexity_hint` — agent complexity classification for execution routing
 - `0089` — `agent_runs.plan` — structured plan field for agent run planning phase
 - `0088` — memory blocks: `memory_blocks` + `memory_block_attachments` (Letta-pattern shared context)
@@ -1109,6 +1137,83 @@ Integrate into the existing permission set UI.
 - **Playbook Studio save endpoint is the trust boundary.** The server is the only producer of the `.playbook.ts` file body: the endpoint accepts the validated `definition` object only, and deterministically renders the file via `validateAndRender`. There is no field on the endpoint that a caller can use to inject arbitrary file content. (Deferred #5, PR #87 round 3.)
 - **Definition hash is stamped into the committed file** as a `@playbook-definition-hash` magic comment so drift between the `definitionJson` and the file body is detectable post-commit.
 - Org scoping applies to templates (`organisationId`) and runs (`organisationId` via subaccount).
+
+---
+
+## Agent Coworker Features
+
+Five features shipped together (spec: `docs/agent-coworker-features-spec.md`) to transform agents from tools into autonomous coworkers. Migrations 0097–0103.
+
+### Ops Dashboard (Feature 1)
+
+A unified, filter-driven activity table at three scopes (subaccount / org / system), replacing the need to bounce between run history, inbox, review queue, and health findings.
+
+**Service:** `opsDashboardService.ts` — fans out to 6 data sources in parallel (`agentRuns`, `reviewItems`, `workspaceHealthFindings`, `actions` (pending approval), `playbookRuns`, `executions`), normalises each to `OpsDashboardItem`, merge-sorts by requested order (default: `attention_first`), paginates. Soft-delete filters on all agent/subaccount joins.
+
+**Routes:** `opsDashboard.ts` — 3 endpoints:
+
+| Route | Auth |
+|-------|------|
+| `GET /api/subaccounts/:subaccountId/ops-dashboard` | `requireSubaccountPermission(EXECUTIONS_VIEW)` |
+| `GET /api/ops-dashboard` | `requireOrgPermission(EXECUTIONS_VIEW)` |
+| `GET /api/system/ops-dashboard` | `requireSystemAdmin` |
+
+Query params: `type`, `status`, `from`, `to`, `agentId`, `severity`, `assignee`, `q`, `sort`, `limit`, `offset`.
+
+**Frontend:** `OpsDashboardPage.tsx` — filter bar + ColHeader sort/filter table (matches `SystemSkillsPage` pattern). Client-side exclusion-set column filters, 10s polling. Routes: `/admin/ops`, `/system/ops`, `/admin/subaccounts/:subaccountId/ops`.
+
+### Prioritized Work Feed (Feature 2)
+
+A scored, ranked queue of open work items that heartbeat agents consume at run start. No user-facing UI — agents are the sole consumer.
+
+**Schema:** `priority_feed_claims` (migration 0100) — optimistic claim locks with TTL. Unique on `(item_source, item_id)`. Cascade delete from `agent_runs`.
+
+**Service:** `priorityFeedService.ts` (impure) + `priorityFeedServicePure.ts` (pure scoring).
+
+Scoring formula: `score = severity_weight × age_factor × assignment_relevance`
+- `severity_weight`: critical=1.0, warning=0.6, info=0.3
+- `age_factor`: linear ramp 1.0→2.0 over 7 days, capped
+- `assignment_relevance`: 1.0 same subaccount, 0.5 org-wide, 0.1 cross-subaccount
+
+Sources: health findings, pending reviews, open tasks, failed runs, playbook runs awaiting input. Excludes items with active (non-expired) claims.
+
+**Skill:** `read_priority_feed` (`isUniversal: true`). Ops: `list` (scored feed), `claim` (lock item), `release` (unlock). Handler delegates to `priorityFeedService`.
+
+**Job:** `priority-feed-cleanup` — daily pg-boss job at 5am UTC, prunes expired claims.
+
+### Skill Studio (Feature 3)
+
+A chat-driven authoring surface for refining skill definitions and master prompts, backed by regression capture data. Mirrors Playbook Studio.
+
+**Schema:** `skill_versions` (migration 0101) — immutable version history. Each row snapshots the full definition at that version. CHECK constraint ensures exactly one of `system_skill_id` or `skill_id` is set.
+
+**Service:** `skillStudioService.ts` — `listSkillsForStudio()`, `getSkillStudioContext()`, `validateSkillDefinition()`, `simulateSkillVersion()`, `saveSkillVersion()` (atomic: version row + skill row update), `listSkillVersions()`, `rollbackSkillVersion()`.
+
+**Routes:** `skillStudio.ts` — 11 endpoints across system (`/api/system/skill-studio/...`) and org (`/api/admin/skill-studio/...`) scopes. System routes require `requireSystemAdmin`; org routes require `requireOrgPermission('org.agents.view'/'org.agents.edit')`.
+
+**Studio agent skills:** 5 skills (`skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save`) registered in `SKILL_HANDLERS`. These are the tools the `skill-author` system agent uses to read regressions, propose fixes, simulate, and save.
+
+**Frontend:** `SkillStudioPage.tsx` — two-pane layout: left = skill list sorted by regression count, right = definition editor + instructions editor + simulation results + version history with rollback. Routes: `/system/skill-studio`, `/admin/skill-studio`.
+
+### Slack Conversational Surface (Feature 4)
+
+Extends the existing multi-tenant Slack webhook to dispatch inbound messages to agent runs via pg-boss. Adds thread-persistent conversations, @mention routing, and interactive HITL buttons.
+
+**Schema:**
+- `slack_conversations` (migration 0102) — maps `(workspace_id, channel_id, thread_ts)` to an agent conversation. Unique index on thread coordinates.
+- `users.slack_user_id` (migration 0103) — links Slack user identity to org user for HITL authorization. Partial unique index where not null.
+
+**Service:** `slackConversationService.ts` — `resolveConversation()`, `createConversation()`, `resolveSlackUser()`, `postReviewItemToSlack()`.
+
+**Webhook extensions** in `slackWebhook.ts` (after existing HMAC verification + dedup):
+- `app_mention` — parse @AgentName, resolve agent, create conversation, enqueue `slack-inbound` job
+- `message.im` — DM to bot, create/resume conversation
+- `message.channels/groups` with `thread_ts` — thread stickiness, resume if tracked
+- `block_actions` — HITL buttons (`hitl:{reviewItemId}:{approve|reject|ask}`), resolves Slack user → org user
+
+**Job:** `slack-inbound` — pg-boss worker for async Slack message processing. Loads conversation, dispatches to agent-run infrastructure, posts response back to thread.
+
+**Review integration:** `reviewService.createReviewItem()` optionally calls `postReviewItemToSlack()` (fire-and-forget, non-blocking).
 
 ---
 
