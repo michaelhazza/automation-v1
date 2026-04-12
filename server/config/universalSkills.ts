@@ -20,4 +20,5 @@ export const UNIVERSAL_SKILL_NAMES: readonly string[] = [
   'web_search',
   'read_codebase',
   'search_agent_history',
+  'read_priority_feed',
 ];

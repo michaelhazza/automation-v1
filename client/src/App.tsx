@@ -71,6 +71,7 @@ const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
 const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 const OpsDashboardPage = lazy(() => import('./pages/OpsDashboardPage'));
+const SkillStudioPage = lazy(() => import('./pages/SkillStudioPage'));
 
 function PageLoader() {
   return (
@@ -217,6 +218,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/actions" element={<AdminActionLogPage user={user!} />} />
             {/* Ops Dashboard — org scope */}
             <Route path="/admin/ops" element={<OpsDashboardPage user={user!} />} />
+            {/* Skill Studio — org scope */}
+            <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
             {/* Ops Dashboard — subaccount scope */}
             <Route path="/admin/subaccounts/:subaccountId/ops" element={<OpsDashboardPage user={user!} />} />
           </Route>
@@ -238,6 +241,8 @@ export default function App() {
             <Route path="/system/config-templates" element={<SystemCompanyTemplatesPage user={user!} />} />
             {/* Ops Dashboard — system scope */}
             <Route path="/system/ops" element={<OpsDashboardPage user={user!} />} />
+            {/* Skill Studio — system scope */}
+            <Route path="/system/skill-studio" element={<SkillStudioPage user={user!} />} />
           </Route>
 
           {/* Subaccount connections */}

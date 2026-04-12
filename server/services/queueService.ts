@@ -595,6 +595,18 @@ export const queueService = {
         }
       });
 
+      await (boss as any).work('priority-feed-cleanup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runPriorityFeedCleanup } = await import('../jobs/priorityFeedCleanupJob.js');
+          await withTimeout(runPriorityFeedCleanup().then(() => undefined), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'priority-feed-cleanup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +
       // ALS context pulled from job.data.organisationId.
@@ -708,6 +720,20 @@ export const queueService = {
       // cross-org and can briefly hold longer locks.
       await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
+      await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
+
+      // Feature 4 — Slack inbound message processing (event-driven, no schedule)
+      await (boss as any).work('slack-inbound', { teamSize: env.QUEUE_CONCURRENCY, teamConcurrency: 2 }, async (job: any) => {
+        try {
+          const { processSlackInbound } = await import('../jobs/slackInboundJob.js');
+          await withTimeout(processSlackInbound(job.data).then(() => undefined), 120_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'slack-inbound', jobId: job.id });
+          }
+          throw err;
+        }
+      });
       console.log(JSON.stringify({ event: 'maintenance:started', mode: 'pg-boss' }));
     } else {
       // In-memory queue: setInterval + advisory locks prevent duplicate runs

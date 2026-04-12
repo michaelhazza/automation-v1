@@ -103,6 +103,7 @@ import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
 import opsDashboardRouter from './routes/opsDashboard.js';
+import skillStudioRouter from './routes/skillStudio.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
@@ -249,6 +250,7 @@ app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
 app.use(skillAnalyzerRouter);
 app.use(opsDashboardRouter);
+app.use(skillStudioRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production

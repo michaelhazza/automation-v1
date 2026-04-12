@@ -20,6 +20,8 @@ import { hitlService } from './hitlService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
+import * as priorityFeedService from './priorityFeedService.js';
+import * as skillStudioService from './skillStudioService.js';
 import {
   MAX_HANDOFF_DEPTH,
   MAX_TASK_TITLE_LENGTH,
@@ -359,6 +361,72 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       return { success: true, entry };
     }
     return { success: false, error: `Unknown op: ${op}` };
+  },
+  read_priority_feed: async (input, context) => {
+    const op = input.op as string;
+    if (op === 'list') {
+      const items = await priorityFeedService.listFeed(
+        { orgId: context.organisationId, subaccountId: context.subaccountId ?? undefined, agentRunId: context.runId },
+        { limit: (input.limit as number) ?? 20 },
+      );
+      return { success: true, items };
+    } else if (op === 'claim') {
+      const result = await priorityFeedService.claimItem(
+        input.source as string,
+        input.itemId as string,
+        context.runId,
+        (input.ttlMinutes as number) ?? 30,
+      );
+      return { success: result.claimed, ...result };
+    } else if (op === 'release') {
+      await priorityFeedService.releaseItem(
+        input.source as string,
+        input.itemId as string,
+        context.runId,
+      );
+      return { success: true };
+    }
+    return { success: false, error: `Unknown op: ${op}` };
+  },
+  // ── Skill Studio skills (Feature 3) ──────────────────────────────────
+  skill_read_existing: async (input, context) => {
+    const ctx = await skillStudioService.getSkillStudioContext(
+      input.skillId as string, input.scope as 'system' | 'org', context.organisationId,
+    );
+    if (!ctx) return { success: false, error: 'Skill not found' };
+    return { success: true, skill: { id: ctx.id, slug: ctx.slug, name: ctx.name, definition: ctx.definition, instructions: ctx.instructions } };
+  },
+  skill_read_regressions: async (input, context) => {
+    const ctx = await skillStudioService.getSkillStudioContext(
+      input.skillId as string ?? '', 'system', context.organisationId,
+    );
+    return { success: true, regressions: ctx?.regressions ?? [] };
+  },
+  skill_validate: async (input) => {
+    const result = await skillStudioService.validateSkillDefinition(input.definition, input.handlerKey as string);
+    return { success: result.valid, ...result };
+  },
+  skill_simulate: async (input, context) => {
+    const results = await skillStudioService.simulateSkillVersion(
+      input.definition as object, (input.instructions as string) ?? null,
+      (input.regressionCaseIds as string[]) ?? [], context.organisationId,
+    );
+    return { success: true, results };
+  },
+  skill_propose_save: async (input, context) => {
+    const version = await skillStudioService.saveSkillVersion(
+      input.skillId as string, input.scope as 'system' | 'org',
+      context.organisationId, {
+        name: input.name as string,
+        definition: input.definition as object,
+        instructions: (input.instructions as string) ?? null,
+        changeSummary: (input.changeSummary as string) ?? undefined,
+        regressionIds: (input.regressionIds as string[]) ?? undefined,
+        simulationPassCount: (input.simulationPassCount as number) ?? 0,
+        simulationTotalCount: (input.simulationTotalCount as number) ?? 0,
+      }, context.userId ?? '',
+    );
+    return { success: true, version };
   },
   trigger_process: async (input, context) => {
     requireSubaccountContext(context, 'trigger_process');

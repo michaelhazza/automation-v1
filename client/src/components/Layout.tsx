@@ -703,6 +703,7 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
               {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
               {hasOrgPerm('org.executions.view') && <NavItem to="/admin/ops" icon={<Icons.activity />} label="Ops Dashboard" />}
+              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/skill-studio" icon={<Icons.skills />} label="Skill Studio" />}
               {hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
               {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
@@ -718,6 +719,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/playbook-studio" icon={<Icons.automations />} label="Playbook Studio" />
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
               <NavItem to="/system/ops" icon={<Icons.activity />} label="Ops Dashboard" />
+              <NavItem to="/system/skill-studio" icon={<Icons.skills />} label="Skill Studio" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />

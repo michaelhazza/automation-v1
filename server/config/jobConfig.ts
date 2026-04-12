@@ -143,6 +143,19 @@ export const JOB_CONFIG = {
     expireInSeconds: 600,
     idempotencyStrategy: 'fifo' as const,
   },
+  // Feature 2 — daily cleanup of expired priority feed claims
+  'priority-feed-cleanup': {
+    expireInSeconds: 300,
+    idempotencyStrategy: 'fifo' as const,
+  },
+  // Feature 4 — Slack inbound message processing
+  'slack-inbound': {
+    retryLimit: 2,
+    retryDelay: 5,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    idempotencyStrategy: 'payload-key' as const,
+  },
   // Sprint 2 P1.2 — capture a regression_cases row when a human rejects
   // a review item. Best-effort: retries twice then gives up (skipped
   // cases are OK — regression capture is additive, not critical path).
