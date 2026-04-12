@@ -1,6 +1,6 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, orgAgentConfigs, organisations } from '../db/schema/index.js';
+import { subaccountAgents, agents } from '../db/schema/index.js';
 import { agentExecutionService } from './agentExecutionService.js';
 import { setHandoffJobSender } from './skillExecutor.js';
 import { setTriggerJobSender } from './triggerService.js';
@@ -18,9 +18,9 @@ import { env } from '../lib/env.js';
 // ---------------------------------------------------------------------------
 
 const AGENT_RUN_QUEUE = 'agent-scheduled-run';
-const AGENT_ORG_RUN_QUEUE = 'agent-org-scheduled-run';
 const AGENT_HANDOFF_QUEUE = 'agent-handoff-run';
 const AGENT_TRIGGERED_QUEUE = 'agent-triggered-run';
+// AGENT_ORG_RUN_QUEUE removed — org agents now run via AGENT_RUN_QUEUE through the org subaccount
 
 export const agentScheduleService = {
   /**
@@ -86,48 +86,11 @@ export const agentScheduleService = {
       },
     });
 
-    // Register the worker that processes org-level scheduled agent runs
-    await createWorker<{
-      orgAgentConfigId: string;
-      agentId: string;
-      organisationId: string;
-    }>({
-      queue: AGENT_ORG_RUN_QUEUE,
-      boss: pgboss,
-      concurrency: env.QUEUE_CONCURRENCY,
-      handler: async (job) => {
-        const data = job.data;
-        const jobId = job.id;
-
-        // Check kill switch before executing — inside withOrgTx, so the
-        // query runs via the org-scoped handle (RLS-compliant).
-        const tx = getOrgScopedDb('agentScheduleService.orgExecutionCheck');
-        const [org] = await tx
-          .select({ orgExecutionEnabled: organisations.orgExecutionEnabled })
-          .from(organisations)
-          .where(eq(organisations.id, data.organisationId));
-        if (org && !org.orgExecutionEnabled) {
-          logger.info(`[AgentScheduler] Org execution disabled, dropping org scheduled run for agent ${data.agentId}`);
-          return; // Drop silently, don't retry
-        }
-
-        logger.info(`[AgentScheduler] Running org-level scheduled agent: ${data.agentId} for org ${data.organisationId}`);
-
-        // Deterministic idempotency key: use pg-boss job ID (unique per cron tick)
-        const scheduleTickKey = `org-scheduled:${data.agentId}:${data.organisationId}:${jobId}`;
-
-        await agentExecutionService.executeRun({
-          agentId: data.agentId,
-          organisationId: data.organisationId,
-          executionScope: 'org',
-          orgAgentConfigId: data.orgAgentConfigId,
-          runType: 'scheduled',
-          runSource: 'scheduler',
-          executionMode: 'api',
-          idempotencyKey: scheduleTickKey,
-          triggerContext: { source: 'org-schedule' },
-        });
-      },
+    // Temporary: catch any orphan org-scheduled jobs from the old queue.
+    // These will drain naturally. Remove this handler once all old schedules
+    // have been unregistered. See spec §8e.
+    await pgboss.work('agent-org-scheduled-run', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+      logger.warn('Orphan org-scheduled job received post-migration — dropping', { jobId: job.id, data: job.data });
     });
 
     // Register the worker that processes agent handoff runs
@@ -282,43 +245,7 @@ export const agentScheduleService = {
       }
     }
 
-    logger.info(`[AgentScheduler] Registered ${registered} active subaccount schedules`);
-
-    // Also register org-level agent schedules
-    const orgRows = await db
-      .select({
-        config: orgAgentConfigs,
-        agentStatus: agents.status,
-      })
-      .from(orgAgentConfigs)
-      .innerJoin(agents, eq(agents.id, orgAgentConfigs.agentId))
-      .where(
-        and(
-          eq(orgAgentConfigs.scheduleEnabled, true),
-          eq(orgAgentConfigs.isActive, true),
-          eq(agents.status, 'active'),
-          isNull(agents.deletedAt)
-        )
-      );
-
-    let orgRegistered = 0;
-    for (const row of orgRows) {
-      const config = row.config;
-      if (!config.scheduleCron) continue;
-
-      try {
-        await this.registerOrgSchedule(config.id, config.scheduleCron, {
-          orgAgentConfigId: config.id,
-          agentId: config.agentId,
-          organisationId: config.organisationId,
-        });
-        orgRegistered++;
-      } catch (err) {
-        logger.error(`[AgentScheduler] Failed to register org schedule for ${config.id}`, { error: String(err) });
-      }
-    }
-
-    logger.info(`[AgentScheduler] Registered ${orgRegistered} active org schedules`);
+    logger.info(`[AgentScheduler] Registered ${registered} active schedules (includes org subaccount agents)`);
   },
 
   /**
@@ -347,27 +274,8 @@ export const agentScheduleService = {
     await pgboss.unschedule(scheduleName);
   },
 
-  /**
-   * Register or update an org-level agent schedule.
-   */
-  async registerOrgSchedule(
-    orgAgentConfigId: string,
-    cron: string,
-    data: { orgAgentConfigId: string; agentId: string; organisationId: string }
-  ) {
-    const pgboss = await getPgBoss() as any;
-    const scheduleName = `${AGENT_ORG_RUN_QUEUE}:${orgAgentConfigId}`;
-    await pgboss.schedule(scheduleName, cron, data, { tz: 'UTC' });
-  },
-
-  /**
-   * Remove an org-level schedule.
-   */
-  async unregisterOrgSchedule(orgAgentConfigId: string) {
-    const pgboss = await getPgBoss() as any;
-    const scheduleName = `${AGENT_ORG_RUN_QUEUE}:${orgAgentConfigId}`;
-    await pgboss.unschedule(scheduleName);
-  },
+  // registerOrgSchedule / unregisterOrgSchedule removed — org agents now
+  // schedule through the standard registerSchedule() via the org subaccount.
 
   /**
    * Update schedule for a subaccount agent. Handles enable/disable and cron changes.

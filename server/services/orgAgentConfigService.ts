@@ -2,6 +2,12 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { orgAgentConfigs, agents } from '../db/schema/index.js';
 
+/**
+ * @deprecated — Data migrated to `subaccount_agents` via migration 0106.
+ * Callers should use `subaccountAgentService` with the org subaccount ID.
+ * This service is kept during Phase 1 transition. Will be deleted in Phase 2 cleanup.
+ * See: docs/org-subaccount-refactor-spec.md §10c
+ */
 export const orgAgentConfigService = {
   async listByOrg(organisationId: string) {
     const rows = await db

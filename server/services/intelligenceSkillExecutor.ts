@@ -111,9 +111,8 @@ export async function executeQuerySubaccountCohort(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  if (context.subaccountId) {
-    return { error: 'query_subaccount_cohort is only available to org-level agents' };
-  }
+  // Guard removed — cross-subaccount access is now controlled by skill assignment.
+  // Agents in the org subaccount have these skills; regular subaccount agents don't.
 
   const tagFilters = (input.tag_filters ?? []) as Array<{ key: string; value: string }>;
   const explicitIds = input.subaccount_ids as string[] | undefined;
@@ -160,9 +159,6 @@ export async function executeReadOrgInsights(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  if (context.subaccountId) {
-    return { error: 'read_org_insights is only available to org-level agents' };
-  }
 
   const semanticQuery = input.semantic_query as string | undefined;
   const limit = (input.limit as number) ?? 10;
@@ -203,9 +199,6 @@ export async function executeWriteOrgInsight(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  if (context.subaccountId) {
-    return { error: 'write_org_insight is only available to org-level agents' };
-  }
 
   const content = input.content as string;
   const entryType = input.entry_type as string;
@@ -531,9 +524,6 @@ export async function executeGeneratePortfolioReport(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  if (context.subaccountId) {
-    return { error: 'generate_portfolio_report is only available to org-level agents' };
-  }
 
   const reportingPeriodDays = (input.reporting_period_days as number) ?? 7;
   const format = (input.format as string) ?? 'structured';

@@ -19,6 +19,12 @@ export const subaccounts = pgTable(
     // Configurable per subaccount by org admins.
     includeInOrgInbox: boolean('include_in_org_inbox').notNull().default(true),
 
+    // ── Org subaccount flag ──────────────────────────────────────────
+    // When true, this subaccount is the organisation's own workspace.
+    // One per org (enforced by partial unique index). Cannot be soft-deleted
+    // or have status changed away from 'active' (enforced by DB CHECK constraints).
+    isOrgSubaccount: boolean('is_org_subaccount').notNull().default(false),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

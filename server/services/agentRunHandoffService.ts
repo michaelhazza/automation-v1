@@ -229,9 +229,6 @@ export async function getLatestHandoffForAgent(params: {
 
     if (params.subaccountId) {
       conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
-      conditions.push(eq(agentRuns.executionScope, 'subaccount'));
-    } else {
-      conditions.push(eq(agentRuns.executionScope, 'org'));
     }
 
     if (params.excludeRunId) {

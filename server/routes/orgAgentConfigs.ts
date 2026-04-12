@@ -6,7 +6,21 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
 
-// ── Org Agent Config CRUD ─────────────────────────────────────────────────
+// ── Deprecation middleware — all org agent config routes are deprecated ──
+// Data migrated to subaccount_agents via migration 0106.
+// These routes will be removed in Phase 2 cleanup.
+router.use('/api/org/agent-configs', (_req, res, next) => {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', '2026-07-01');
+  next();
+});
+router.use('/api/org/settings/execution-enabled', (_req, res, next) => {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', '2026-07-01');
+  next();
+});
+
+// ── Org Agent Config CRUD (deprecated — use subaccount agent routes) ──────
 
 router.get('/api/org/agent-configs', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW), asyncHandler(async (req, res) => {
   const configs = await orgAgentConfigService.listByOrg(req.orgId!);

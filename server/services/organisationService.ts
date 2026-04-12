@@ -4,6 +4,7 @@ import { organisations, users } from '../db/schema/index.js';
 import { emailService } from './emailService.js';
 import { assignOrgUserRole } from './permissionSeedService.js';
 import { policyEngineService } from './policyEngineService.js';
+import { ensureOrgSubaccount } from './orgSubaccountService.js';
 import crypto from 'crypto';
 import { env } from '../lib/env.js';
 
@@ -76,6 +77,12 @@ export class OrganisationService {
     await policyEngineService.seedFallbackRule(org.id).catch((err) => {
       // Non-fatal — the policy engine falls back to registry defaults if missing
       console.error('[OrganisationService] Failed to seed policy fallback rule:', err);
+    });
+
+    // Create the org subaccount (the org's own workspace)
+    await ensureOrgSubaccount(org.id, org.name).catch((err) => {
+      // Non-fatal at creation time — org subaccount will be created lazily if needed
+      console.error('[OrganisationService] Failed to create org subaccount:', err instanceof Error ? err.message : err);
     });
 
     try {

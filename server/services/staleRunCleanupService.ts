@@ -103,11 +103,7 @@ export const staleRunCleanupService = {
         reason: 'stale_run_cleanup',
       });
 
-      if (run.executionScope === 'org') {
-        emitOrgUpdate(run.organisationId, 'live:agent_failed', {
-          runId: run.id, agentId: run.agentId, reason: 'stale',
-        });
-      } else if (run.subaccountId) {
+      if (run.subaccountId) {
         emitSubaccountUpdate(run.subaccountId, 'agent:run:failed', {
           runId: run.id, agentId: run.agentId, reason: 'stale',
         });

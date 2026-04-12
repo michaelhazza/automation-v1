@@ -39,6 +39,8 @@ export interface AgentDefinition {
   description?: string;
   role?: string;
   executionScope?: 'subaccount' | 'org';
+  /** Hint for hierarchy template: auto-link to org subaccount. See spec §9a. */
+  defaultTarget?: 'org-hq';
   reportsTo: string | null;
   model?: string;
   temperature?: number;
@@ -157,6 +159,7 @@ export async function parseCompanyFolder(companyDir: string): Promise<ParsedComp
         description: fm.description as string | undefined,
         role: fm.role as string | undefined,
         executionScope: fm.executionScope as 'subaccount' | 'org' | undefined,
+        defaultTarget: fm.defaultTarget as 'org-hq' | undefined,
         reportsTo: fm.reportsTo === null || fm.reportsTo === 'null' ? null : String(fm.reportsTo ?? ''),
         model: fm.model as string | undefined,
         temperature: fm.temperature as number | undefined,
@@ -273,6 +276,7 @@ export interface SystemAgentSeedRow {
   defaultMaxToolCalls: number;
   executionMode: 'api' | 'headless';
   executionScope: 'subaccount' | 'org';
+  defaultTarget?: 'org-hq';
   isPublished: boolean;
   status: 'draft' | 'active' | 'inactive';
   defaultScheduleCron: string | null;
@@ -348,7 +352,8 @@ export function toSystemAgentRows(parsed: ParsedCompany): SystemAgentSeedRow[] {
       defaultTokenBudget: a.tokenBudget ?? 30000,
       defaultMaxToolCalls: a.maxToolCalls ?? 20,
       executionMode: 'api' as const,
-      executionScope: a.executionScope ?? 'subaccount',
+      executionScope: a.executionScope ?? (a.defaultTarget === 'org-hq' ? 'org' : 'subaccount'),
+      defaultTarget: a.defaultTarget,
       isPublished: true,
       status: 'active' as const,
       defaultScheduleCron: cron,

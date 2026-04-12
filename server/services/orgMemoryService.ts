@@ -29,6 +29,13 @@ function scoreMemoryEntry(content: string, entryType: string): number {
   return (completeness + relevance + specificity + actionability) / 4;
 }
 
+/**
+ * @deprecated — Data migrated to workspace memory via migration 0106.
+ * No new reads or writes should go through this service.
+ * Kept during Phase 1 transition (in case rollback is needed).
+ * Will be deleted in Phase 2 cleanup.
+ * See: docs/org-subaccount-refactor-spec.md §10d
+ */
 export const orgMemoryService = {
   async getOrCreateMemory(organisationId: string) {
     const [existing] = await db

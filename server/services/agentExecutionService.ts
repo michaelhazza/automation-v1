@@ -4,6 +4,7 @@ import { db } from '../db/index.js';
 import { logger } from '../lib/logger.js';
 import {
   agents,
+  subaccounts,
   subaccountAgents,
   agentRuns,
   agentRunSnapshots,
@@ -75,7 +76,7 @@ import {
   MAX_TOOL_OUTPUT_LOG_LENGTH,
 } from '../config/limits.js';
 import { emitAgentRunUpdate, emitSubaccountUpdate, emitOrgUpdate, emitAgentRunPlan } from '../websocket/emitters.js';
-import { orgAgentConfigService } from './orgAgentConfigService.js';
+// orgAgentConfigService import removed — deprecated post-migration 0106
 import { organisations } from '../db/schema/index.js';
 import { langfuse, withTrace } from '../instrumentation.js';
 import {
@@ -131,13 +132,15 @@ class TraceThrottle {
 
 export interface AgentRunRequest {
   agentId: string;
-  /** Null for org-level runs */
   subaccountId?: string | null;
-  /** Null for org-level runs */
   subaccountAgentId?: string | null;
   organisationId: string;
-  /** Explicit execution scope — never inferred from nullable fields */
-  executionScope: 'subaccount' | 'org';
+  /**
+   * Execution scope. Always 'subaccount' after the org subaccount refactor.
+   * Kept for backward compatibility with historical agent_runs records.
+   * @deprecated — all runs are subaccount-scoped post-migration 0106
+   */
+  executionScope?: 'subaccount';
   runType: 'scheduled' | 'manual' | 'triggered';
   executionMode?: 'api' | 'headless' | 'claude-code' | 'iee_browser' | 'iee_dev';
   /**
@@ -161,8 +164,6 @@ export interface AgentRunRequest {
   parentSpawnRunId?: string;
   /** Optional idempotency key — if provided, duplicate runs with same key return existing result */
   idempotencyKey?: string;
-  /** For org-level runs, the org agent config ID */
-  orgAgentConfigId?: string;
   /** How this run was sourced — for observability */
   runSource?: 'scheduler' | 'manual' | 'trigger' | 'handoff' | 'sub_agent' | 'system';
   /**
@@ -241,25 +242,39 @@ export const agentExecutionService = {
     const startTime = Date.now();
 
     // ── 0a. Execution scope validation ─────────────────────────────────
-    if (request.executionScope === 'org' && request.subaccountId) {
-      throw new Error('Org-level run must not have a subaccountId');
-    }
-    if (request.executionScope === 'subaccount' && !request.subaccountId) {
-      throw new Error('Subaccount-level run requires a subaccountId');
+    // Post-migration 0106: all runs are subaccount-scoped. subaccountId is required.
+    if (!request.subaccountId) {
+      throw new Error('All agent runs require a subaccountId');
     }
 
-    // ── 0b. Org execution kill switch ────────────────────────────────────
-    if (request.executionScope === 'org') {
-      const [org] = await db
-        .select({ orgExecutionEnabled: organisations.orgExecutionEnabled })
-        .from(organisations)
-        .where(eq(organisations.id, request.organisationId));
-      if (org && !org.orgExecutionEnabled) {
-        throw new Error('Org-level execution is disabled for this organisation');
-      }
+    // ── 0b. General org execution kill switch ───────────────────────────
+    // Applies to ALL runs (org subaccount and regular subaccounts alike).
+    const [orgForKillSwitch] = await db
+      .select({ executionEnabled: organisations.orgExecutionEnabled })
+      .from(organisations)
+      .where(eq(organisations.id, request.organisationId));
+    if (orgForKillSwitch && !orgForKillSwitch.executionEnabled) {
+      return {
+        runId: '',
+        status: 'failed',
+        summary: null,
+        totalToolCalls: 0,
+        totalTokens: 0,
+        durationMs: Date.now() - startTime,
+        tasksCreated: 0,
+        tasksUpdated: 0,
+        deliverablesCreated: 0,
+      };
     }
 
-    // ── 0c. Idempotency check — return existing run if key already used ───
+    // ── 0c. Check if this is an org subaccount run (for cross-subaccount access control) ─
+    const [subaccountRow] = await db
+      .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
+      .from(subaccounts)
+      .where(eq(subaccounts.id, request.subaccountId!));
+    const isOrgSubaccountRun = subaccountRow?.isOrgSubaccount ?? false;
+
+    // ── 0d. Idempotency check — return existing run if key already used ───
     if (request.idempotencyKey) {
       const [existing] = await db
         .select()
@@ -283,18 +298,17 @@ export const agentExecutionService = {
     }
 
     // ── 1. Create the run record ──────────────────────────────────────────
-    const isOrgRun = request.executionScope === 'org';
     const [run] = await db
       .insert(agentRuns)
       .values({
         organisationId: request.organisationId,
-        subaccountId: request.subaccountId ?? null,
+        subaccountId: request.subaccountId,
         agentId: request.agentId,
         subaccountAgentId: request.subaccountAgentId ?? null,
         idempotencyKey: request.idempotencyKey ?? null,
         runType: request.runType,
         executionMode: request.executionMode ?? 'api',
-        executionScope: request.executionScope,
+        executionScope: 'subaccount',
         runSource: request.runSource ?? null,
         status: 'running',
         triggerContext: request.triggerContext ?? null,
@@ -316,13 +330,17 @@ export const agentExecutionService = {
       agentId: request.agentId, subaccountId: request.subaccountId ?? null,
       runType: request.runType, status: 'running',
     });
-    if (isOrgRun) {
-      emitOrgUpdate(request.organisationId, 'live:agent_started', {
-        runId: run.id, agentId: request.agentId,
-      });
-    } else {
-      emitSubaccountUpdate(request.subaccountId!, 'live:agent_started', {
-        runId: run.id, agentId: request.agentId,
+    emitSubaccountUpdate(request.subaccountId!, 'live:agent_started', {
+      runId: run.id, agentId: request.agentId,
+    });
+
+    // Observability: temporary metric for org subaccount runs (remove after 2 weeks stable)
+    if (isOrgSubaccountRun) {
+      logger.info('org_subaccount_run', {
+        orgId: request.organisationId,
+        agentId: request.agentId,
+        runId: run.id,
+        runType: request.runType,
       });
     }
 
@@ -336,19 +354,10 @@ export const agentExecutionService = {
       let configSkillSlugs: string[];
       let configCustomInstructions: string | null = null;
 
-      // Branch config loading by execution scope
+      // Single config path — all runs load from subaccountAgents
       let saLink: typeof subaccountAgents.$inferSelect | null = null;
 
-      if (isOrgRun) {
-        // Org-level: load from orgAgentConfigs
-        const orgConfig = await orgAgentConfigService.getByAgentId(request.organisationId, request.agentId);
-        tokenBudget = orgConfig.tokenBudgetPerRun;
-        maxToolCalls = orgConfig.maxToolCallsPerRun;
-        timeoutMs = orgConfig.timeoutSeconds * 1000;
-        configSkillSlugs = (orgConfig.skillSlugs ?? []) as string[];
-        configCustomInstructions = orgConfig.customInstructions;
-      } else {
-        // Subaccount-level: load from subaccountAgents (existing path)
+      {
         const [link] = await db
           .select()
           .from(subaccountAgents)
@@ -371,7 +380,7 @@ export const agentExecutionService = {
         timeoutMs,
         skillSlugs: configSkillSlugs,
         customInstructions: configCustomInstructions,
-        executionScope: request.executionScope,
+        executionScope: 'subaccount' as const,
       };
       const configHashValue = createHash('sha256').update(JSON.stringify(resolvedConfig)).digest('hex');
 
@@ -384,10 +393,7 @@ export const agentExecutionService = {
       }).where(eq(agentRuns.id, run.id));
 
       // ── 2b. Workspace limit check (pre-run guard) ─────────────────────
-      // Skip subaccount limits for org runs; org+global limits still apply via budgetService
-      const limitCheck = isOrgRun
-        ? { allowed: true as const }
-        : await checkWorkspaceLimits(request.subaccountId!, tokenBudget);
+      const limitCheck = await checkWorkspaceLimits(request.subaccountId!, tokenBudget);
       if (!limitCheck.allowed) {
         const durationMs = Date.now() - startTime;
         await db.update(agentRuns).set({
@@ -418,8 +424,7 @@ export const agentExecutionService = {
       }
 
       // ── 2c. Snapshot DEC hash + iteration count into triggerContext ──
-      // Skip for org-level runs (no subaccount dev context)
-      if (!isOrgRun) try {
+      try {
         const { hash: decHash } = await devContextService.getContext(request.subaccountId!);
 
         // Count prior runs for this task to determine current iteration
@@ -583,8 +588,7 @@ export const agentExecutionService = {
         const item = await taskService.getTask(request.taskId, request.organisationId);
         targetItem = item;
         workspaceContext = buildTaskContext(item);
-      } else if (!isOrgRun) {
-        // Only build board context for subaccount runs (org board comes in Phase 5)
+      } else {
         workspaceContext = await buildSmartBoardContext(
           request.organisationId,
           request.subaccountId!,
@@ -639,9 +643,7 @@ export const agentExecutionService = {
 
       // Add team roster (loaded fresh from DB every run)
       // Team roster is placed in the stable prefix (changes only on agent config edit)
-      const teamRoster = isOrgRun
-        ? await buildOrgTeamRoster(request.organisationId, request.agentId)
-        : await buildTeamRoster(request.subaccountId!, request.agentId);
+      const teamRoster = await buildTeamRoster(request.subaccountId!, request.agentId);
       if (teamRoster) {
         systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
       }
@@ -653,19 +655,17 @@ export const agentExecutionService = {
       const dynamicParts: string[] = [];
 
       // Phase 2D: Agent briefing — compact cross-run summary (dynamic — updates after each run)
-      if (!isOrgRun) {
-        try {
-          const briefing = await agentBriefingService.get(
-            request.organisationId,
-            request.subaccountId!,
-            request.agentId,
-          );
-          if (briefing) {
-            dynamicParts.push(`\n\n---\n## Your Briefing\n${briefing}`);
-          }
-        } catch {
-          // Non-fatal — agent runs fine without a briefing
+      try {
+        const briefing = await agentBriefingService.get(
+          request.organisationId,
+          request.subaccountId!,
+          request.agentId,
+        );
+        if (briefing) {
+          dynamicParts.push(`\n\n---\n## Your Briefing\n${briefing}`);
         }
+      } catch {
+        // Non-fatal — agent runs fine without a briefing
       }
 
       // Layer 3.5: Task Instructions (dynamic — changes per scheduled task)
@@ -706,26 +706,20 @@ export const agentExecutionService = {
         ? `${targetItem.title ?? ''}${targetItem.description ? ' ' + targetItem.description : ''}`
         : undefined;
 
-      // Skip subaccount memory for org runs (org memory comes in Phase 3)
       let memory: string | null = null;
-      if (!isOrgRun) {
-        memory = await workspaceMemoryService.getMemoryForPrompt(
-          request.organisationId,
-          request.subaccountId!,
-          taskContextForMemory
-        );
-        if (memory) {
-          dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
-        }
+      memory = await workspaceMemoryService.getMemoryForPrompt(
+        request.organisationId,
+        request.subaccountId!,
+        taskContextForMemory
+      );
+      if (memory) {
+        dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
       }
 
-      // Add workspace entities (subaccount-scoped only)
-      const entities = isOrgRun
-        ? null
-        : await workspaceMemoryService.getEntitiesForPrompt(
-            request.subaccountId!,
-            request.organisationId,
-          );
+      const entities = await workspaceMemoryService.getEntitiesForPrompt(
+        request.subaccountId!,
+        request.organisationId,
+      );
       if (entities) {
         dynamicParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
       }
@@ -735,18 +729,16 @@ export const agentExecutionService = {
       }
 
       // Phase 3B: Subaccount state summary — operational snapshot (task counts, run stats)
-      if (!isOrgRun) {
-        try {
-          const stateSummary = await subaccountStateSummaryService.getOrGenerate(
-            request.organisationId,
-            request.subaccountId!,
-          );
-          if (stateSummary) {
-            dynamicParts.push(`\n\n---\n${stateSummary}`);
-          }
-        } catch {
-          // Non-fatal — agent runs fine without the state summary
+      try {
+        const stateSummary = await subaccountStateSummaryService.getOrGenerate(
+          request.organisationId,
+          request.subaccountId!,
+        );
+        if (stateSummary) {
+          dynamicParts.push(`\n\n---\n${stateSummary}`);
         }
+      } catch {
+        // Non-fatal — agent runs fine without the state summary
       }
 
       dynamicParts.push(buildAutonomousInstructions(request, targetItem));
@@ -984,6 +976,7 @@ export const agentExecutionService = {
             mcpClients,
             mcpLazyRegistry,
             runContextData,
+            isOrgSubaccountRun,
             // Sprint 3 P2.1 Sprint 3A — stable fingerprint of the resolved
             // config, stamped onto every checkpoint so the resume path can
             // refuse to resume runs whose config has drifted.
@@ -1134,10 +1127,8 @@ export const agentExecutionService = {
         });
       }
 
-      // Update lastRunAt on the correct config table
-      if (isOrgRun && request.orgAgentConfigId) {
-        await orgAgentConfigService.updateLastRunAt(request.orgAgentConfigId, request.organisationId);
-      } else if (request.subaccountAgentId) {
+      // Update lastRunAt on subaccount_agents
+      if (request.subaccountAgentId) {
         await db.update(subaccountAgents).set({
           lastRunAt: new Date(),
           updatedAt: new Date(),
@@ -1164,19 +1155,12 @@ export const agentExecutionService = {
       } catch (err) {
         console.error('[AgentExecution] playbook hook failed (non-fatal)', err);
       }
-      if (isOrgRun) {
-        emitOrgUpdate(request.organisationId, 'live:agent_completed', {
-          runId: run.id, agentId: request.agentId, status: finalStatus,
-        });
-      } else {
-        emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
-          runId: run.id, agentId: request.agentId, status: finalStatus,
-        });
-      }
+      emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
+        runId: run.id, agentId: request.agentId, status: finalStatus,
+      });
 
       // ── 10. Extract insights for workspace memory + entities ─────────────
-      // Skip for org runs — org memory extraction comes in Phase 3
-      if (loopResult.summary && !isOrgRun) {
+      if (loopResult.summary) {
         try {
           await workspaceMemoryService.extractRunInsights(
             run.id,
@@ -1230,26 +1214,23 @@ export const agentExecutionService = {
       }
 
       // ── 11. Fire agent_completed triggers (non-blocking) ─────────────────
-      // Skip for org runs — org triggers come in Phase 5
-      if (!isOrgRun) {
-        triggerService.checkAndFire(
-          request.subaccountId!,
-          request.organisationId,
-          'agent_completed',
-          {
-            runId: run.id,
-            agentId: request.agentId,
-            subaccountAgentId: request.subaccountAgentId,
-            status: finalStatus,
-          }
-        ).catch((err: unknown) => {
-          console.error('[AgentExecution] agent_completed trigger failed', {
-            subaccountId: request.subaccountId,
-            eventType: 'agent_completed',
-            error: err instanceof Error ? err.message : String(err),
-          });
+      triggerService.checkAndFire(
+        request.subaccountId!,
+        request.organisationId,
+        'agent_completed',
+        {
+          runId: run.id,
+          agentId: request.agentId,
+          subaccountAgentId: request.subaccountAgentId,
+          status: finalStatus,
+        }
+      ).catch((err: unknown) => {
+        console.error('[AgentExecution] agent_completed trigger failed', {
+          subaccountId: request.subaccountId,
+          eventType: 'agent_completed',
+          error: err instanceof Error ? err.message : String(err),
         });
-      }
+      });
 
       // ── 12. MCP cleanup (guaranteed) ────────────────────────────────────
       if (mcpClients?.size) {
@@ -1299,15 +1280,9 @@ export const agentExecutionService = {
       } catch (hookErr) {
         console.error('[AgentExecution] playbook hook failed (non-fatal)', hookErr);
       }
-      if (isOrgRun) {
-        emitOrgUpdate(request.organisationId, 'live:agent_completed', {
-          runId: run.id, agentId: request.agentId, status: 'failed',
-        });
-      } else {
-        emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
-          runId: run.id, agentId: request.agentId, status: 'failed',
-        });
-      }
+      emitSubaccountUpdate(request.subaccountId!, 'live:agent_completed', {
+        runId: run.id, agentId: request.agentId, status: 'failed',
+      });
 
       return {
         runId: run.id,
@@ -1489,7 +1464,7 @@ export async function resumeAgentRun(
       organisationId: runRow.organisationId,
       subaccountId: runRow.subaccountId ?? undefined,
       runType: runRow.runType,
-      executionScope: runRow.executionScope,
+      executionScope: 'subaccount' as const,
     } as AgentRunRequest,
     agent: {
       modelId: agent.modelId,
@@ -1571,6 +1546,8 @@ interface LoopParams {
    * the next sprint.
    */
   startingIteration?: number;
+  /** Whether this run is in the org subaccount (affects cross-subaccount access control). */
+  isOrgSubaccountRun?: boolean;
 }
 
 interface LoopResult {
@@ -1625,6 +1602,8 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     runId,
     organisationId: request.organisationId,
     subaccountId: request.subaccountId ?? null,
+    // Org subaccount agents get full cross-subaccount access; regular agents are scoped
+    allowedSubaccountIds: params.isOrgSubaccountRun ? null : (request.subaccountId ? [request.subaccountId] : null),
     agentId: request.agentId,
     userId: request.userId,
     orgProcesses,
@@ -2467,34 +2446,8 @@ async function buildTeamRoster(subaccountId: string, currentAgentId: string): Pr
   return lines.join('\n');
 }
 
-async function buildOrgTeamRoster(organisationId: string, currentAgentId: string): Promise<string | null> {
-  const { orgAgentConfigs } = await import('../db/schema/index.js');
-  const roster = await db
-    .select({
-      agentId: agents.id,
-      agentName: agents.name,
-      agentDescription: agents.description,
-    })
-    .from(orgAgentConfigs)
-    .innerJoin(agents, eq(agents.id, orgAgentConfigs.agentId))
-    .where(
-      and(
-        eq(orgAgentConfigs.organisationId, organisationId),
-        eq(orgAgentConfigs.isActive, true),
-        eq(agents.status, 'active'),
-        isNull(agents.deletedAt)
-      )
-    );
-
-  if (roster.length === 0) return null;
-
-  const lines = roster.map(r => {
-    const marker = r.agentId === currentAgentId ? ' ← (you)' : '';
-    return `- ${r.agentName} (${r.agentId}) — ${r.agentDescription ?? 'No description'}${marker}`;
-  });
-
-  return lines.join('\n');
-}
+// buildOrgTeamRoster removed — org agents now run inside the org subaccount
+// and use the standard buildTeamRoster() function. See spec §6d.
 
 // ---------------------------------------------------------------------------
 // Smart Board Context — DB-level filtering instead of loading all tasks

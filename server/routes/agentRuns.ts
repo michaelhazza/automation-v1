@@ -71,7 +71,7 @@ router.post(
   })
 );
 
-// ─── Manual trigger: Run an org-level agent ─────────────────────────────────
+// ─── Manual trigger: Run an org-level agent (via org subaccount) ─────────────
 
 router.post(
   '/api/org/agents/:agentId/run',
@@ -84,20 +84,24 @@ router.post(
       idempotencyKey?: string;
     };
 
-    // Find the org agent config
-    const { orgAgentConfigs } = await import('../db/schema/index.js');
-    const [orgConfig] = await db
+    // Resolve the org subaccount
+    const { requireOrgSubaccount } = await import('../services/orgSubaccountService.js');
+    const orgSa = await requireOrgSubaccount(req.orgId!);
+
+    // Find the subaccount agent link in the org subaccount
+    const { subaccountAgents } = await import('../db/schema/index.js');
+    const [saLink] = await db
       .select()
-      .from(orgAgentConfigs)
+      .from(subaccountAgents)
       .where(
         and(
-          eq(orgAgentConfigs.agentId, agentId),
-          eq(orgAgentConfigs.organisationId, req.orgId!)
+          eq(subaccountAgents.subaccountId, orgSa.id),
+          eq(subaccountAgents.agentId, agentId),
         )
       );
 
-    if (!orgConfig) {
-      res.status(404).json({ error: 'No org-level config found for this agent' });
+    if (!saLink) {
+      res.status(404).json({ error: 'No agent config found for this agent in the organisation workspace' });
       return;
     }
 
@@ -107,15 +111,15 @@ router.post(
     const result = await agentExecutionService.executeRun({
       agentId,
       organisationId: req.orgId!,
-      executionScope: 'org',
-      orgAgentConfigId: orgConfig.id,
+      subaccountId: orgSa.id,
+      subaccountAgentId: saLink.id,
+      executionScope: 'subaccount',
       runType: 'manual',
       executionMode: 'api',
       runSource: 'manual',
       taskId,
       idempotencyKey: effectiveIdempotencyKey,
       triggerContext: { triggeredBy: req.user!.id, source: 'manual-org' },
-      // Review finding #3 — user-scoped runs carry the principal through.
       userId: req.user!.id,
     });
 
