@@ -111,8 +111,12 @@ export async function executeQuerySubaccountCohort(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
-  // Guard removed — cross-subaccount access is now controlled by skill assignment.
-  // Agents in the org subaccount have these skills; regular subaccount agents don't.
+  // Defensive runtime guard: only org-subaccount agents (allowedSubaccountIds = null)
+  // may execute cross-subaccount skills. Skill assignment is the primary gate, but
+  // this prevents privilege escalation if a skill is mis-assigned.
+  if (context.allowedSubaccountIds !== null && context.allowedSubaccountIds !== undefined) {
+    return { error: 'query_subaccount_cohort requires org-level access (org subaccount agent)' };
+  }
 
   const tagFilters = (input.tag_filters ?? []) as Array<{ key: string; value: string }>;
   const explicitIds = input.subaccount_ids as string[] | undefined;
@@ -159,6 +163,9 @@ export async function executeReadOrgInsights(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
+  if (context.allowedSubaccountIds !== null && context.allowedSubaccountIds !== undefined) {
+    return { error: 'read_org_insights requires org-level access (org subaccount agent)' };
+  }
 
   const semanticQuery = input.semantic_query as string | undefined;
   const limit = (input.limit as number) ?? 10;
@@ -199,6 +206,9 @@ export async function executeWriteOrgInsight(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
+  if (context.allowedSubaccountIds !== null && context.allowedSubaccountIds !== undefined) {
+    return { error: 'write_org_insight requires org-level access (org subaccount agent)' };
+  }
 
   const content = input.content as string;
   const entryType = input.entry_type as string;
@@ -524,6 +534,9 @@ export async function executeGeneratePortfolioReport(
   input: Record<string, unknown>,
   context: SkillExecutionContext
 ): Promise<unknown> {
+  if (context.allowedSubaccountIds !== null && context.allowedSubaccountIds !== undefined) {
+    return { error: 'generate_portfolio_report requires org-level access (org subaccount agent)' };
+  }
 
   const reportingPeriodDays = (input.reporting_period_days as number) ?? 7;
   const format = (input.format as string) ?? 'structured';

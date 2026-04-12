@@ -227,8 +227,15 @@ export async function getLatestHandoffForAgent(params: {
       inArray(agentRuns.status, ['completed', 'failed', 'timeout', 'cancelled', 'loop_detected', 'budget_exceeded']),
     ];
 
+    // Always scope to subaccountId. Post org-subaccount refactor every run
+    // has a subaccountId (the org subaccount for org-level runs). Without
+    // this filter, a null subaccountId would match runs from any scope.
     if (params.subaccountId) {
       conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
+    } else {
+      // Defensive: if caller passes null, restrict to runs that also have
+      // null subaccountId (legacy rows only) to prevent cross-scope leakage.
+      conditions.push(sql`${agentRuns.subaccountId} IS NULL`);
     }
 
     if (params.excludeRunId) {
@@ -300,8 +307,11 @@ async function pickNextOpenTask(
     // Open = not in done/cancelled
     sql`${tasks.status} NOT IN ('done', 'cancelled', 'archived')`,
   ];
+  // Always scope to subaccountId to prevent cross-scope leakage.
   if (subaccountId) {
     conditions.push(eq(tasks.subaccountId, subaccountId));
+  } else {
+    conditions.push(sql`${tasks.subaccountId} IS NULL`);
   }
 
   // Priority order: urgent > high > normal > low

@@ -225,7 +225,9 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
             continue;
           }
 
-          await db.insert(workspaceMemoryEntries).values({
+          // onConflictDoNothing targets the workspace_memory_entries_dedup
+          // unique constraint (migration 0107) — re-running is idempotent.
+          const result = await db.insert(workspaceMemoryEntries).values({
             organisationId: entry.organisationId,
             subaccountId: orgSa.id,
             agentRunId: entry.agentRunId,
@@ -237,24 +239,18 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
             accessCount: entry.accessCount,
             lastAccessedAt: entry.lastAccessedAt,
             createdAt: entry.createdAt,
-          });
-          stats.entriesMigrated++;
-        } catch (entryErr) {
-          // Skip duplicates (might be re-running)
-          if (
-            entryErr instanceof Error &&
-            'code' in entryErr &&
-            (entryErr as { code: string }).code === '23505'
-          ) {
+          }).onConflictDoNothing();
+          if (result.rowCount === 0) {
             stats.entriesSkipped++;
-            continue;
+          } else {
+            stats.entriesMigrated++;
           }
+        } catch (entryErr) {
           logger.error('org_migration.entry_error', {
             entryId: entry.id,
             error: entryErr instanceof Error ? entryErr.message : String(entryErr),
           });
           stats.errorCount++;
-        }
       }
     } catch (err) {
       logger.error('org_migration.memory_error', {

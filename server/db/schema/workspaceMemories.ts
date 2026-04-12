@@ -127,6 +127,9 @@ export const workspaceMemoryEntries = pgTable(
     agentRunIdx: index('workspace_memory_entries_run_idx').on(table.agentRunId),
     createdAtIdx: index('workspace_memory_entries_created_idx').on(table.createdAt),
     domainIdx: index('workspace_memory_entries_domain_idx').on(table.subaccountId, table.domain),
+    // Migration 0107: deduplication constraint for idempotent migration + runtime writes.
+    // Actual DB constraint uses md5(content) — Drizzle schema is declarative marker only;
+    // the real constraint is managed by the SQL migration.
   })
 );
 

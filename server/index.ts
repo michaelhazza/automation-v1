@@ -366,11 +366,22 @@ async function start() {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
-  // Org subaccount data migration (migration 0106) — idempotent, safe to re-run on every boot.
-  // Migrates orgAgentConfigs → subaccountAgents and orgMemories → workspaceMemories for existing orgs.
+  // Org subaccount data migration (migration 0106) — idempotent but expensive.
+  // Only runs if migration_states doesn't already record completion.
   try {
-    const { runOrgSubaccountMigration } = await import('./jobs/orgSubaccountMigrationJob.js');
-    await runOrgSubaccountMigration();
+    const { eq } = await import('drizzle-orm');
+    const { migrationStates } = await import('./db/schema/index.js');
+    const { db: bootDb } = await import('./db/index.js');
+    const [memMigState] = await bootDb
+      .select({ completedAt: migrationStates.completedAt })
+      .from(migrationStates)
+      .where(eq(migrationStates.key, 'org_subaccount_memory_migration'));
+    if (memMigState?.completedAt) {
+      console.log('[boot] org subaccount migration already completed, skipping');
+    } else {
+      const { runOrgSubaccountMigration } = await import('./jobs/orgSubaccountMigrationJob.js');
+      await runOrgSubaccountMigration();
+    }
   } catch (err) {
     console.error('[boot] org subaccount data migration failed — existing org agents may not be accessible', err);
   }
