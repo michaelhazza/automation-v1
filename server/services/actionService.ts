@@ -473,6 +473,7 @@ async function resolveGateLevel(
     const [task] = await db
       .select({ reviewRequired: tasks.reviewRequired })
       .from(tasks)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to check reviewRequired flag; taskId comes from agent input already scoped to the run's organisation"
       .where(eq(tasks.id, input.taskId));
 
     if (task?.reviewRequired) {

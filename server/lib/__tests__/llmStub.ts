@@ -99,7 +99,7 @@ export function createLLMStub(scenarios: LLMStubScenario[]): LLMStub {
         `[llmStub] no scenario matched. See err.messages and err.system for the call that was rejected.`,
       ) as Error & { messages: ProviderMessage[]; system?: string };
       err.messages = params.messages;
-      err.system = params.system;
+      err.system = typeof params.system === 'string' ? params.system : params.system ? JSON.stringify(params.system) : undefined;
       throw err;
     }
 
@@ -141,7 +141,8 @@ function matchesScenario(scenario: LLMStubScenario, params: RouterCallParams): b
   }
 
   if (hasSystemMatcher) {
-    if (!params.system || !scenario.matchOnSystem!.test(params.system)) {
+    const systemText = typeof params.system === 'string' ? params.system : params.system?.stablePrefix ?? '';
+    if (!systemText || !scenario.matchOnSystem!.test(systemText)) {
       return false;
     }
   }

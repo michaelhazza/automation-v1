@@ -253,6 +253,7 @@ async function resolvePaymentAdapter(pageId: string) {
   const [connection] = await db
     .select()
     .from(integrationConnections)
+    // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; connectionId obtained from projectIntegrations row which was fetched via org-scoped projectId"
     .where(eq(integrationConnections.id, integration.connectionId))
     .limit(1);
   if (!connection) return null;

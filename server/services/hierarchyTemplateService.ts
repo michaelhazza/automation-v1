@@ -535,7 +535,9 @@ export const hierarchyTemplateService = {
       } else {
         // Get default skills from the org agent
         const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
-          .from(agents).where(eq(agents.id, orgAgentId));
+          .from(agents)
+          // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch defaultSkillSlugs; orgAgentId obtained from org-scoped agent provisioning within this same transaction"
+          .where(eq(agents.id, orgAgentId));
 
         const [newLink] = await tx.insert(subaccountAgents).values({
           organisationId,

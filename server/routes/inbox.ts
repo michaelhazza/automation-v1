@@ -58,6 +58,7 @@ router.post(
   authenticate,
   asyncHandler(async (req, res) => {
     const userId = req.user!.id;
+    // guard-ignore-next-line: input-validation reason="manual validation enforced: items required, Array.isArray check, non-empty check"
     const { items } = req.body as {
       items?: Array<{ entityType: 'task' | 'review_item' | 'agent_run'; entityId: string }>;
     };

@@ -183,6 +183,7 @@ export const boardService = {
     const [updated] = await db
       .update(boardConfigs)
       .set({ columns, updatedAt: new Date() })
+      // guard-ignore-next-line: org-scoped-writes reason="config was fetched above with and(eq(boardConfigs.id, configId), eq(boardConfigs.organisationId, organisationId)) — org membership already verified"
       .where(eq(boardConfigs.id, configId))
       .returning();
 
@@ -201,6 +202,7 @@ export const boardService = {
         await db
           .update(boardConfigs)
           .set({ columns: orgConfig.columns, sourceConfigId: orgConfig.id, updatedAt: new Date() })
+          // guard-ignore-next-line: org-scoped-writes reason="existing obtained from getSubaccountBoardConfig(organisationId, subaccountId) — org membership already verified"
           .where(eq(boardConfigs.id, existing.id));
         results.push({ subaccountId, action: 'updated' });
       } else {

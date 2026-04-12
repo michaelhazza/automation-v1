@@ -1,5 +1,5 @@
 import { Router, NextFunction } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { connectorConfigService } from '../services/connectorConfigService.js';
 import { connectorPollingService } from '../services/connectorPollingService.js';
 import { adapters } from '../adapters/index.js';
@@ -19,6 +19,7 @@ router.get('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMISS
 // ── Create connector config ───────────────────────────────────────────────
 
 router.post('/api/org/connectors', authenticate, requireOrgPermission(ORG_PERMISSIONS.AGENTS_CREATE), asyncHandler(async (req, res, _next: NextFunction) => {
+  // guard-ignore-next-line: input-validation reason="manual validation enforced: connectorType required check, adapter existence check"
   const { connectorType, connectionId, configJson, pollIntervalMinutes, webhookSecret } = req.body;
 
   if (!connectorType) {

@@ -102,6 +102,7 @@ export const formSubmissionService = {
         const [connection] = await db
           .select()
           .from(integrationConnections)
+          // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; connectionId obtained from projectIntegrations row which is org-scoped via projectId"
           .where(eq(integrationConnections.id, integration.connectionId));
 
         if (!connection) {

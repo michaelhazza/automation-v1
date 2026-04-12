@@ -216,6 +216,7 @@ async function maybeSendDataSourceAlert(
   const [agent] = await db
     .select({ id: agents.id, name: agents.name, organisationId: agents.organisationId })
     .from(agents)
+    // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to resolve agent name and org for alert email; agentId sourced from agentDataSources row which is already org-scoped"
     .where(eq(agents.id, source.agentId));
   if (!agent) return;
 
@@ -243,6 +244,7 @@ async function maybeSendDataSourceRecovery(
   const [agent] = await db
     .select({ id: agents.id, name: agents.name, organisationId: agents.organisationId })
     .from(agents)
+    // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to resolve agent name and org for recovery email; agentId sourced from agentDataSources row which is already org-scoped"
     .where(eq(agents.id, source.agentId));
   if (!agent) return;
 
@@ -879,6 +881,7 @@ export const agentService = {
     const [updated] = await db
       .update(agents)
       .set(update)
+      // guard-ignore-next-line: org-scoped-writes reason="existing agent was fetched above with and(eq(agents.id, id), eq(agents.organisationId, organisationId)) — org membership already verified"
       .where(eq(agents.id, id))
       .returning();
 
@@ -901,6 +904,7 @@ export const agentService = {
     const [updated] = await db
       .update(agents)
       .set({ status: 'active', updatedAt: new Date() })
+      // guard-ignore-next-line: org-scoped-writes reason="existing agent was fetched above with and(eq(agents.id, id), eq(agents.organisationId, organisationId)) — org membership already verified"
       .where(eq(agents.id, id))
       .returning();
 
@@ -917,6 +921,7 @@ export const agentService = {
     const [updated] = await db
       .update(agents)
       .set({ status: 'inactive', updatedAt: new Date() })
+      // guard-ignore-next-line: org-scoped-writes reason="existing agent was fetched above with and(eq(agents.id, id), eq(agents.organisationId, organisationId)) — org membership already verified"
       .where(eq(agents.id, id))
       .returning();
 

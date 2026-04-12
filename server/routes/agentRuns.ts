@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSystemAdmin } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
@@ -22,6 +22,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId, agentId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
+    // guard-ignore-next-line: input-validation reason="body fields are all optional; execution service validates agentId/subaccountId via DB lookup before running"
     const { taskId, idempotencyKey, executionMode } = req.body as {
       taskId?: string;
       idempotencyKey?: string;

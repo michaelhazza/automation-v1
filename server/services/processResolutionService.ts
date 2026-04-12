@@ -199,6 +199,7 @@ export const processResolutionService = {
     for (const [key, mapping] of mappingByKey.entries()) {
       const [connection] = await db.select()
         .from(integrationConnections)
+        // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; connectionId obtained from processConnectionMappings row which is org-scoped; subaccount ownership verified on lines below"
         .where(eq(integrationConnections.id, mapping.connectionId));
 
       if (!connection) {

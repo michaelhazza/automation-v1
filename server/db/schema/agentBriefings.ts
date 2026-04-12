@@ -25,7 +25,7 @@ export const agentBriefings = pgTable(
 
     content: text('content').notNull(),
     tokenCount: integer('token_count').notNull().default(0),
-    sourceRunIds: sql<string[]>`uuid[]`.notNull().default(sql`'{}'`),
+    sourceRunIds: uuid('source_run_ids').array().notNull().default(sql`'{}'`),
     version: integer('version').notNull().default(1),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

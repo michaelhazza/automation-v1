@@ -2852,6 +2852,7 @@ async function executeReassignTask(
       handoffContext: handoffContext ? { message: handoffContext } : null,
       handoffDepth: currentDepth + 1,
       updatedAt: new Date(),
+    // guard-ignore-next-line: org-scoped-writes reason="taskId passed through taskService.updateTask above which verifies org membership; this is a supplemental metadata update on the same task"
     }).where(eq(tasks.id, taskId));
 
     await taskService.addActivity(taskId, context.organisationId, {

@@ -185,7 +185,7 @@ async function postWithRetry(
 
       clearTimeout(timer);
 
-      const data = await response.json().catch(() => null);
+      const data = await response.json().catch(() => null); // guard-ignore: no-silent-failures reason="JSON parse failure falls back to null; caller handles null data"
 
       if (response.ok) {
         return { ok: true, status: response.status, data };
@@ -346,6 +346,7 @@ export const webhookAdapterService = {
     }
 
     // Fetch agent name
+    // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch agent name; agentId is sourced from the org-scoped run context"
     const [agent] = await db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId));
     const agentName = agent?.name ?? 'Unknown Agent';
 

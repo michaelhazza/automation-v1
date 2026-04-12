@@ -215,6 +215,7 @@ export const webhookService = {
     if (execution.engineId) {
       const [engine] = await db.select()
         .from(workflowEngines)
+        // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch engine HMAC secret; engineId obtained from execution row"
         .where(eq(workflowEngines.id, execution.engineId));
       engineHmacSecret = engine?.hmacSecret;
     }

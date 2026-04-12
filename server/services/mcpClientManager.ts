@@ -487,7 +487,7 @@ export const mcpClientManager = {
           const rejectedCount = tools.length - validTools.length;
           mcpServerConfigService.updateDiscoveredTools(
             config.id, validTools as McpServerConfig['discoveredToolsJson'], newHash, rejectedCount,
-          ).catch(() => {}); // fire and forget
+          ).catch(() => {}); // guard-ignore: no-silent-failures reason="fire-and-forget background cache update"
         }
       }
 

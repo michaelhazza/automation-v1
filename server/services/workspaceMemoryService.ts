@@ -201,7 +201,7 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
         }
       }
     }
-    queryEmbedding = await generateEmbedding(embeddingInput);
+    queryEmbedding = await generateEmbedding(embeddingInput) ?? undefined;
     if (!queryEmbedding) return [];
   }
 

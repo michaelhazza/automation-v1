@@ -46,7 +46,7 @@ router.post('/api/org/agent-configs', authenticate, requireOrgPermission(ORG_PER
     scheduleEnabled,
     scheduleTimezone,
     allowedSubaccountIds,
-  } = req.body;
+  } = req.body; // guard-ignore: input-validation reason="manual validation enforced: agentId required check; deprecated route being removed in Phase 2"
 
   if (!agentId) {
     return res.status(400).json({ message: 'agentId is required' });

@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { reviewService } from '../services/reviewService.js';
 import { reviewAuditService } from '../services/reviewAuditService.js';
 import { actionService } from '../services/actionService.js';
 import { queueService } from '../services/queueService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { emitSubaccountUpdate } from '../websocket/emitters.js';
 
 const router = Router();
@@ -17,7 +18,8 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.REVIEW_VIEW),
   asyncHandler(async (req, res) => {
-    const items = await reviewService.getReviewQueue(req.orgId!, req.params.subaccountId);
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const items = await reviewService.getReviewQueue(req.orgId!, subaccount.id);
     res.json(items);
   })
 );

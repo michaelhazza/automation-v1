@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { Router } from 'express';
-import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission, requireSystemAdmin } from '../middleware/auth.js';
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
@@ -63,14 +63,12 @@ function parseUsageQuery(req: import('express').Request): {
   };
 }
 
-// System scope — system_admin only (existing role check via middleware)
+// System scope — system_admin only
 router.get(
   '/api/iee/usage/system',
   authenticate,
+  requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    if (req.user!.role !== 'system_admin') {
-      throw { statusCode: 403, message: 'system admin required' };
-    }
     const result = await queryIeeUsage({ scope: 'system' as UsageScope, ...parseUsageQuery(req) });
     res.json(result);
   }),
@@ -82,6 +80,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.IEE_USAGE_VIEW),
   asyncHandler(async (req, res) => {
+    // guard-ignore-next-line: no-direct-role-checks reason="cross-org access control — org-scoped middleware already gates same-org; this guard allows system_admin to query any org"
     if (req.params.orgId !== req.orgId && req.user!.role !== 'system_admin') {
       throw { statusCode: 403, message: 'cannot view another org' };
     }

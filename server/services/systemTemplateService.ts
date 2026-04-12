@@ -506,7 +506,9 @@ export const systemTemplateService = {
           subAgentLink = existingLink;
         } else {
           const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
-            .from(agents).where(eq(agents.id, orgAgentId));
+            .from(agents)
+            // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch defaultSkillSlugs; orgAgentId obtained from org-scoped agent provisioning within this same transaction"
+            .where(eq(agents.id, orgAgentId));
 
           const [newLink] = await tx.insert(subaccountAgents).values({
             organisationId,
@@ -664,7 +666,9 @@ export const systemTemplateService = {
 
         if (!existingLink) {
           const [orgAgent] = await tx.select({ defaultSkillSlugs: agents.defaultSkillSlugs })
-            .from(agents).where(eq(agents.id, orgAgentId));
+            .from(agents)
+            // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to fetch defaultSkillSlugs; orgAgentId obtained from org-scoped agent provisioning within this same transaction"
+            .where(eq(agents.id, orgAgentId));
 
           await tx.insert(subaccountAgents).values({
             organisationId,

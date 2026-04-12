@@ -143,6 +143,7 @@ export const triggerService = {
           triggerCount: trigger.triggerCount + 1,
           updatedAt: new Date(),
         })
+        // guard-ignore-next-line: org-scoped-writes reason="trigger was loaded from prior org-scoped query filtered by organisationId and subaccountId"
         .where(eq(agentTriggers.id, trigger.id));
 
       fired++;

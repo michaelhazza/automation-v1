@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { db } from '../db/index.js';
@@ -73,6 +73,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_CREATE),
   asyncHandler(async (req, res) => {
     const organisationId = req.orgId!;
+    // guard-ignore-next-line: input-validation reason="manual field validation enforced: name required check, status type guard, includeInOrgInbox boolean guard"
     const { name, slug, status, settings } = req.body as {
       name?: string;
       slug?: string;

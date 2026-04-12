@@ -41,6 +41,7 @@ export const subtaskWakeupService = {
         priority: tasks.priority,
       })
       .from(tasks)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; taskId is the entry point validated by the caller who obtained it via org-scoped context"
       .where(eq(tasks.id, taskId))
       .limit(1);
 
@@ -53,6 +54,7 @@ export const subtaskWakeupService = {
     const [parentTask] = await db
       .select({ id: tasks.id, title: tasks.title, status: tasks.status })
       .from(tasks)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; parentTaskId obtained from completedTask which was loaded via org-scoped taskId"
       .where(eq(tasks.id, completedTask.parentTaskId))
       .limit(1);
 

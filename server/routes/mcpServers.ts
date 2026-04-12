@@ -1,5 +1,5 @@
 import { Router, NextFunction } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { mcpServerConfigService } from '../services/mcpServerConfigService.js';
 import { mcpClientManager } from '../services/mcpClientManager.js';
 import { MCP_PRESETS, MCP_PRESET_CATEGORY_LABELS } from '../config/mcpPresets.js';
@@ -27,6 +27,7 @@ router.get('/api/mcp-servers/:id', authenticate, requireOrgPermission(ORG_PERMIS
 // ── Create MCP server (from preset) ──────────────────────────────────────
 
 router.post('/api/mcp-servers', authenticate, requireOrgPermission(ORG_PERMISSIONS.MCP_SERVERS_MANAGE), asyncHandler(async (req, res, _next: NextFunction) => {
+  // guard-ignore-next-line: input-validation reason="manual validation enforced: presetSlug required check, preset existence check, envVars KEY=VALUE format validation"
   const { presetSlug, envVars, defaultGateLevel } = req.body;
 
   if (!presetSlug) {

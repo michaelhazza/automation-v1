@@ -22,6 +22,7 @@ router.get('/api/executions/export', authenticate, requireOrgPermission(ORG_PERM
 
 router.get('/api/executions', authenticate, asyncHandler(async (req, res) => {
   const canViewAll = await checkOrgPermission(req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.EXECUTIONS_VIEW);
+  // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin receives full audit fields in response"
   const viewFullAudit = req.user!.role === 'system_admin';
   const result = await executionService.listExecutions(req.user!.id, req.orgId!, canViewAll, viewFullAudit, {
     processId: req.query.processId as string | undefined,
@@ -61,6 +62,7 @@ router.post('/api/executions', authenticate, validateMultipart, asyncHandler(asy
 
 router.get('/api/executions/:id', authenticate, asyncHandler(async (req, res) => {
   const canViewAll = await checkOrgPermission(req.user!.id, req.orgId!, req.user!.role, ORG_PERMISSIONS.EXECUTIONS_VIEW);
+  // guard-ignore-next-line: no-direct-role-checks reason="conditional data enrichment, not access control — system_admin receives full audit fields in response"
   const viewFullAudit = req.user!.role === 'system_admin';
   const result = await executionService.getExecution(req.params.id, req.user!.id, req.orgId!, canViewAll, viewFullAudit);
   res.json(result);

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authService } from '../services/authService.js';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
@@ -6,6 +7,9 @@ import { auditService } from '../services/auditService.js';
 import { validateBody } from '../middleware/validate.js';
 import { loginBody, acceptInviteBody, forgotPasswordBody, resetPasswordBody, signupBody } from '../schemas/auth.js';
 import type { LoginInput, AcceptInviteInput, ForgotPasswordInput, ResetPasswordInput, SignupInput } from '../schemas/auth.js';
+
+const forgotPasswordRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
+const resetPasswordRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
 
 const router = Router();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -101,7 +105,7 @@ router.post('/api/auth/invite/accept', validateBody(acceptInviteBody), asyncHand
   res.json(result);
 }));
 
-router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
+router.post('/api/auth/forgot-password', forgotPasswordRateLimit, validateBody(forgotPasswordBody), asyncHandler(async (req, res) => {
   const { email } = req.body as ForgotPasswordInput;
   const result = await authService.forgotPassword(email);
   auditService.log({
@@ -113,7 +117,7 @@ router.post('/api/auth/forgot-password', validateBody(forgotPasswordBody), async
   res.json(result);
 }));
 
-router.post('/api/auth/reset-password', validateBody(resetPasswordBody), asyncHandler(async (req, res) => {
+router.post('/api/auth/reset-password', resetPasswordRateLimit, validateBody(resetPasswordBody), asyncHandler(async (req, res) => {
   const { token, password } = req.body as ResetPasswordInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {

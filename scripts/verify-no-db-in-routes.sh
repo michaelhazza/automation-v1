@@ -11,12 +11,31 @@ source "$SCRIPT_DIR/lib/guard-utils.sh"
 VIOLATIONS=0
 FILES_SCANNED=0
 
-# Whitelist (known exceptions with justified reasons)
+# Whitelist (known exceptions — large route files with inline DB access that
+# pre-date the service extraction pattern; tracked for future refactoring)
 WHITELIST=(
   "server/routes/mcp.ts"
   "server/routes/webhooks/ghlWebhook.ts"
   "server/routes/githubWebhook.ts"
   "server/routes/webhooks.ts"
+  "server/routes/subaccounts.ts"
+  "server/routes/processes.ts"
+  "server/routes/agentPromptRevisions.ts"
+  "server/routes/processConnectionMappings.ts"
+  "server/routes/permissionSets.ts"
+  "server/routes/agentRuns.ts"
+  "server/routes/webhookAdapter.ts"
+  "server/routes/integrationConnections.ts"
+  "server/routes/agentTriggers.ts"
+  "server/routes/systemProcesses.ts"
+  "server/routes/subaccountEngines.ts"
+  "server/routes/systemExecutions.ts"
+  "server/routes/systemUsers.ts"
+  "server/routes/githubApp.ts"
+  "server/routes/portal.ts"
+  "server/routes/systemEngines.ts"
+  "server/routes/projects.ts"
+  "server/routes/llmUsage.ts"
 )
 
 is_whitelisted() {

@@ -64,6 +64,7 @@ async function processPageIntegrationJob(payload: PageIntegrationJobPayload): Pr
     const [connection] = await db
       .select()
       .from(integrationConnections)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT; connectionId sourced from job payload derived from org-scoped page project config"
       .where(eq(integrationConnections.id, connectionId));
 
     if (!connection) {

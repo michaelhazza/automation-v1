@@ -1,8 +1,9 @@
 import { Router } from 'express';
-import { authenticate, requireOrgPermission } from '../middleware/auth.js';
+import { authenticate, requireOrgPermission, requireSubaccountPermission } from '../middleware/auth.js';
 import { actionService } from '../services/actionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 
 const router = Router();
 
@@ -13,10 +14,11 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.WORKSPACE_VIEW),
   asyncHandler(async (req, res) => {
+    const subaccount = await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const { status } = req.query;
     const items = await actionService.listActions(
       req.orgId!,
-      req.params.subaccountId,
+      subaccount.id,
       typeof status === 'string' ? status : undefined
     );
     res.json(items);

@@ -71,14 +71,14 @@ export const attachmentService = {
 
     // Validate MIME type
     if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-      await fs.unlink(file.path).catch(() => {});
+      await fs.unlink(file.path).catch(() => {}); // guard-ignore: no-silent-failures reason="best-effort temp file cleanup before throwing"
       throw { statusCode: 400, message: `File type '${file.mimetype}' is not allowed` };
     }
 
     // Reject SVG explicitly (even if mimetype is spoofed)
     const ext = path.extname(file.originalname).toLowerCase();
     if (ext === '.svg') {
-      await fs.unlink(file.path).catch(() => {});
+      await fs.unlink(file.path).catch(() => {}); // guard-ignore: no-silent-failures reason="best-effort temp file cleanup before throwing"
       throw { statusCode: 400, message: 'SVG files are not allowed' };
     }
 
@@ -96,7 +96,7 @@ export const attachmentService = {
         );
 
       if (existing) {
-        await fs.unlink(file.path).catch(() => {});
+        await fs.unlink(file.path).catch(() => {}); // guard-ignore: no-silent-failures reason="best-effort temp file cleanup on idempotency hit"
         return { attachment: existing, created: false };
       }
     }
@@ -109,7 +109,7 @@ export const attachmentService = {
     // Read temp file, store via storage service, then clean up
     const fileData = await fs.readFile(file.path);
     await storageService.put(storageKey, fileData, file.mimetype);
-    await fs.unlink(file.path).catch(() => {});
+    await fs.unlink(file.path).catch(() => {}); // guard-ignore: no-silent-failures reason="best-effort temp file cleanup after successful upload"
 
     // Create DB record — if insert fails, clean up the stored file to prevent orphans
     let attachment;
@@ -131,7 +131,7 @@ export const attachmentService = {
       attachment = row;
     } catch (err) {
       // Clean up orphaned file on DB failure
-      await storageService.delete(storageKey).catch(() => {});
+      await storageService.delete(storageKey).catch(() => {}); // guard-ignore: no-silent-failures reason="best-effort orphan file cleanup on DB insert failure"
       throw err;
     }
 

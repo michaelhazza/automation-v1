@@ -271,6 +271,7 @@ export const agentExecutionService = {
     const [subaccountRow] = await db
       .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
       .from(subaccounts)
+      // guard-ignore-next-line: org-scoped-writes reason="read-only SELECT to check isOrgSubaccount flag; subaccountId comes from authenticated agent run request already validated upstream"
       .where(eq(subaccounts.id, request.subaccountId!));
     const isOrgSubaccountRun = subaccountRow?.isOrgSubaccount ?? false;
 
@@ -1020,7 +1021,7 @@ export const agentExecutionService = {
             startedAt: new Date(startTime).toISOString(),
           });
 
-          langfuse.flushAsync().catch(() => {});
+          langfuse.flushAsync().catch(() => {}); // guard-ignore: no-silent-failures reason="fire-and-forget telemetry flush"
 
           return result;
         });
