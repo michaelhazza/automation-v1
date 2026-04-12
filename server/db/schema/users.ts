@@ -24,6 +24,7 @@ export const users = pgTable(
     passwordResetToken: text('password_reset_token'),
     passwordResetExpiresAt: timestamp('password_reset_expires_at', { withTimezone: true }),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    slackUserId: text('slack_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -39,6 +40,9 @@ export const users = pgTable(
     inviteTokenIdx: uniqueIndex('users_invite_token_idx')
       .on(table.inviteToken)
       .where(sql`${table.inviteToken} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+    slackUserIdIdx: uniqueIndex('users_slack_user_id_idx')
+      .on(table.slackUserId)
+      .where(sql`${table.slackUserId} IS NOT NULL`),
   })
 );
 
