@@ -130,6 +130,39 @@ export class EmailService {
     await this.send(to, subject, textBody, brandedHtml(subject, `Your task execution has ${status}.`, bodyHtml));
   }
 
+  async sendWelcomeEmail(to: string, firstName: string, agencyName: string): Promise<void> {
+    const onboardingUrl = `${APP_BASE_URL}/onboarding`;
+    const subject = `Welcome to ClientPulse — let's get you set up`;
+
+    const bodyHtml = `
+      <h2 style="margin:0 0 16px;font-size:24px;font-weight:700;color:#1e293b;">Welcome, ${firstName}!</h2>
+      <p style="margin:0 0 16px;font-size:15px;color:#475569;line-height:1.6;">
+        Your <strong>${agencyName}</strong> account is ready. You're just a few steps away from your first
+        portfolio health dashboard.
+      </p>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:20px;margin:24px 0;">
+        <p style="margin:0 0 12px;font-size:14px;font-weight:600;color:#1e293b;">Here's what happens next:</p>
+        <ol style="margin:0;padding-left:20px;font-size:14px;color:#475569;line-height:1.8;">
+          <li>Connect your Go High Level agency account</li>
+          <li>Select the client locations to monitor</li>
+          <li>ClientPulse syncs your data and generates your first report</li>
+        </ol>
+      </div>
+      <div style="margin:28px 0;">
+        <a href="${onboardingUrl}" style="display:inline-block;padding:13px 28px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-size:15px;font-weight:600;">
+          Set up your dashboard →
+        </a>
+      </div>
+      <p style="margin:0;font-size:13px;color:#94a3b8;">
+        Your 14-day free trial has started. If you closed the tab, the link above will take you right back.
+      </p>
+    `;
+
+    const textBody = `Welcome to ClientPulse, ${firstName}!\n\nYour ${agencyName} account is ready. Set up your dashboard: ${onboardingUrl}\n\nWhat happens next:\n1. Connect your Go High Level agency account\n2. Select the client locations to monitor\n3. ClientPulse syncs your data and generates your first report\n\nYour 14-day free trial has started.`;
+
+    await this.send(to, subject, textBody, brandedHtml(subject, `Welcome to ClientPulse — let's get you set up`, bodyHtml));
+  }
+
   async sendDataSourceSyncAlert(
     to: string,
     agentName: string,

@@ -177,6 +177,52 @@ function NavSection({ label, action }: { label: string; action?: React.ReactNode
   );
 }
 
+// ── Trial Countdown (sidebar footer) ──────────────────────────────────────
+function TrialCountdown() {
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get('/api/my-subscription').then(({ data }) => {
+      setStatus(data.status ?? null);
+      setTrialEndsAt(data.trialEndsAt ?? null);
+    }).catch(() => { /* not available yet */ });
+  }, []);
+
+  if (status !== 'trialing' || !trialEndsAt) return null;
+
+  const msLeft = new Date(trialEndsAt).getTime() - Date.now();
+  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+
+  let label = '';
+  let cls = 'text-slate-500';
+  if (daysLeft > 7) {
+    label = `${daysLeft} days left in trial`;
+    cls = 'text-slate-500';
+  } else if (daysLeft > 2) {
+    label = `${daysLeft} days left in trial`;
+    cls = 'text-amber-400';
+  } else if (daysLeft === 2) {
+    label = 'Trial ends in 2 days';
+    cls = 'text-red-400';
+  } else if (daysLeft === 1) {
+    label = 'Trial ends tomorrow';
+    cls = 'text-red-400';
+  } else {
+    label = 'Trial ends today';
+    cls = 'text-red-400';
+  }
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-[6px] mx-1.5 my-px text-[11.5px] font-medium ${cls}`}>
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 // ── Main Layout ────────────────────────────────────────────────────────────
 export default function Layout({ user, children }: LayoutProps) {
   const navigate = useNavigate();
@@ -731,6 +777,7 @@ export default function Layout({ user, children }: LayoutProps) {
 
         {/* Footer */}
         <div className="px-1.5 pt-1.5 pb-2 border-t border-white/5">
+          <TrialCountdown />
           <NavItem to="/settings" exact icon={<Icons.settings />} label="Profile Settings" />
           <button
             onClick={handleLogout}
@@ -739,6 +786,15 @@ export default function Layout({ user, children }: LayoutProps) {
             <Icons.logout />
             <span>Sign out</span>
           </button>
+          <a
+            href="mailto:support@synthetos.ai"
+            className="flex items-center gap-[9px] px-3 py-[5px] mx-1.5 my-px rounded-[7px] text-slate-700 text-[12px] no-underline transition-[color,background] duration-100 hover:text-slate-400 hover:bg-white/[0.04]"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>Need help?</span>
+          </a>
         </div>
       </aside>
 

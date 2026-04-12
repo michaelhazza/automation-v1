@@ -1,5 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import api from './lib/api';
 import { isAuthenticated, User, setUserRole, removeUserRole, removeActiveOrg } from './lib/auth';
 import Layout from './components/Layout';
@@ -73,6 +74,16 @@ const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 const OpsDashboardPage = lazy(() => import('./pages/OpsDashboardPage'));
 const SkillStudioPage = lazy(() => import('./pages/SkillStudioPage'));
 
+// ClientPulse pages
+const SignupPage = lazy(() => import('./pages/SignupPage'));
+const OnboardingWizardPage = lazy(() => import('./pages/OnboardingWizardPage'));
+const GhlOAuthInterstitialPage = lazy(() => import('./pages/GhlOAuthInterstitialPage'));
+const OnboardingCelebrationPage = lazy(() => import('./pages/OnboardingCelebrationPage'));
+const ClientPulseDashboardPage = lazy(() => import('./pages/ClientPulseDashboardPage'));
+const ReportsListPage = lazy(() => import('./pages/ReportsListPage'));
+const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'));
+const SystemModulesPage = lazy(() => import('./pages/SystemModulesPage'));
+
 function PageLoader() {
   return (
     <div className="flex justify-center items-center min-h-[300px]">
@@ -141,10 +152,31 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <Toaster position="bottom-right" richColors />
       <Routes>
         <Route path="/login" element={
           <Suspense fallback={<PageLoader />}>
             {user ? <Navigate to="/" replace /> : <LoginPage />}
+          </Suspense>
+        } />
+        <Route path="/signup" element={
+          <Suspense fallback={<PageLoader />}>
+            {user ? <Navigate to="/onboarding" replace /> : <SignupPage />}
+          </Suspense>
+        } />
+        <Route path="/onboarding" element={
+          <Suspense fallback={<PageLoader />}>
+            {!user ? <Navigate to="/login" replace /> : <OnboardingWizardPage />}
+          </Suspense>
+        } />
+        <Route path="/onboarding/connect-ghl" element={
+          <Suspense fallback={<PageLoader />}>
+            {!user ? <Navigate to="/login" replace /> : <GhlOAuthInterstitialPage />}
+          </Suspense>
+        } />
+        <Route path="/onboarding/ready" element={
+          <Suspense fallback={<PageLoader />}>
+            {!user ? <Navigate to="/login" replace /> : <OnboardingCelebrationPage />}
           </Suspense>
         } />
         <Route path="/invite/accept" element={
@@ -224,8 +256,14 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/ops" element={<OpsDashboardPage user={user!} />} />
           </Route>
 
+          {/* ClientPulse routes */}
+          <Route path="/clientpulse" element={<ClientPulseDashboardPage user={user!} />} />
+          <Route path="/reports" element={<ReportsListPage user={user!} />} />
+          <Route path="/reports/:id" element={<ReportDetailPage user={user!} />} />
+
           <Route element={<SystemAdminGuard user={user} />}>
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
+            <Route path="/system/modules" element={<SystemModulesPage user={user!} />} />
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
             <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />

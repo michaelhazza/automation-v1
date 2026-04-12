@@ -1650,6 +1650,34 @@ Consider adding these project-specific verify scripts:
 
 These additions are not new modules — they are UX refinements woven into the existing modules to ensure the first 10 minutes feel exceptional. Ordered by the journey stage they affect.
 
+> **Implementation status (2026-04-12):** All §15 items scaffolded. New client pages and server routes are in place; full functionality depends on the underlying modules (A–G) being built out.
+
+**New files created:**
+
+| File | Purpose |
+|------|---------|
+| `client/src/pages/SignupPage.tsx` | Agency signup form with agency-name field |
+| `client/src/pages/OnboardingWizardPage.tsx` | 4-step onboarding wizard (connect → locations → sync → done) |
+| `client/src/pages/GhlOAuthInterstitialPage.tsx` | Trust-builder before GHL OAuth redirect |
+| `client/src/pages/OnboardingCelebrationPage.tsx` | First-report celebration interstitial |
+| `client/src/pages/ClientPulseDashboardPage.tsx` | Portfolio health dashboard with guided tour + trial banner |
+| `client/src/pages/ReportsListPage.tsx` | Reports history table |
+| `client/src/pages/ReportDetailPage.tsx` | Single report viewer + resend-to-inbox |
+| `client/src/pages/SystemModulesPage.tsx` | System admin module catalogue |
+| `client/src/components/SkeletonLoader.tsx` | Reusable shimmer skeletons (card/table-row/text-block + convenience exports) |
+| `client/src/components/GuidedTour.tsx` | 4-step tooltip tour, localStorage-gated, backdrop highlight |
+
+**Server additions:**
+
+| Addition | File |
+|----------|------|
+| `POST /api/auth/signup` route | `server/routes/auth.ts` |
+| `AuthService.signup()` method | `server/services/authService.ts` |
+| `EmailService.sendWelcomeEmail()` | `server/services/emailService.ts` |
+| `signupBody` Zod schema | `server/schemas/auth.ts` |
+
+**App.tsx additions:** `<Toaster position="bottom-right" richColors />`, routes for `/signup`, `/onboarding`, `/onboarding/connect-ghl`, `/onboarding/ready`, `/clientpulse`, `/reports`, `/reports/:id`, `/system/modules`.
+
 ### 15.1 Signup refinements (Module D — §9.2)
 
 **Collect agency name at signup.** Replace the auto-generated `"${email.split('@')[0]}'s Agency"` with an explicit "Agency name" field in the signup form. This name appears in the sidebar header, report titles, and email subject lines — it must look professional from the start.
@@ -1664,6 +1692,8 @@ async function signup(email: string, password: string, agencyName: string): Prom
 - Uses the existing `emailService` template pattern (header/footer/CTA button)
 
 **New template:** Add a `welcome` email type to `server/services/emailService.ts` alongside the existing `invitation`, `password_reset`, etc.
+
+> **Implemented:** `SignupPage.tsx` renders the form. `POST /api/auth/signup` creates org + user + sends welcome email async. `EmailService.sendWelcomeEmail()` added. First/last name derived from email local-part if not collected separately.
 
 ### 15.2 OAuth trust-builder (Module D — §9.3 Step 1)
 
