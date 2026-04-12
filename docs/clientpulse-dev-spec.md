@@ -24,6 +24,7 @@ revision: 1
 12. Build phases & dependency graph
 13. Verification plan
 14. Open items & pre-implementation gates
+15. UX polish — first-impression and wow-factor improvements
 
 <!-- Sections follow in build-order per the brief's Section 8 -->
 
@@ -1642,3 +1643,209 @@ Consider adding these project-specific verify scripts:
 | First sync takes >10 min for 100+ client agencies | Acceptable per brief — UI must show progress, never appear stuck. Acceptance target is for 20–50 client agencies. |
 | Email deliverability issues | Use existing `send_email` infrastructure; monitor bounce rates. Dedicated sending domain (SPF/DKIM) for `synthetos.ai` |
 | Duplicate template rows in seed | Fixed in migration 0104 cleanup + upsert semantics (§3.6, §6.3) |
+
+---
+
+## 15. UX polish — first-impression and wow-factor improvements
+
+These additions are not new modules — they are UX refinements woven into the existing modules to ensure the first 10 minutes feel exceptional. Ordered by the journey stage they affect.
+
+### 15.1 Signup refinements (Module D — §9.2)
+
+**Collect agency name at signup.** Replace the auto-generated `"${email.split('@')[0]}'s Agency"` with an explicit "Agency name" field in the signup form. This name appears in the sidebar header, report titles, and email subject lines — it must look professional from the start.
+
+```typescript
+async function signup(email: string, password: string, agencyName: string): Promise<...>
+```
+
+**Welcome email.** Immediately after signup (before the user even starts the wizard), send a welcome email:
+- Subject: `Welcome to ClientPulse — let's get you set up`
+- Content: confirmation of account, what to expect (connect GHL → first report in minutes), link back to `/onboarding` if they close the tab
+- Uses the existing `emailService` template pattern (header/footer/CTA button)
+
+**New template:** Add a `welcome` email type to `server/services/emailService.ts` alongside the existing `invitation`, `password_reset`, etc.
+
+### 15.2 OAuth trust-builder (Module D — §9.3 Step 1)
+
+**Pre-redirect explanation screen.** Before bouncing to GHL's consent page, show a brief trust-building interstitial:
+
+- Headline: "Connect your agency in read-only mode"
+- Subtext: "ClientPulse will never modify your GHL data. We only read contacts, deals, conversations, and revenue to generate your reports."
+- Plain-English scope list (not the raw OAuth scope strings):
+  - "View your sub-accounts (locations)"
+  - "Read contact and lead data"
+  - "Read deal and pipeline data"
+  - "Read conversation activity"
+  - "Read payment and revenue data"
+  - "Read business metadata (names, timezones)"
+- Security badge: "256-bit encrypted. SOC 2 pending."
+- CTA button: "Connect Go High Level →"
+
+**"Skip for now" option.** Below the CTA, a text link: "I'll do this later →" that redirects to the Dashboard empty state (§8.2.1 already specifies this empty state with a CTA to connect).
+
+**OAuth failure recovery.** If the user denies scopes or the exchange fails:
+- Redirect to `/onboarding?error=oauth_denied`
+- Show: "Connection wasn't completed. This might happen if you clicked Deny on the previous screen."
+- "Try again" button + "Need help?" link
+
+### 15.3 Location enumeration polish (Module D — §9.3 Step 2)
+
+**Enrich the location list.** When displaying discovered locations, include metadata from the GHL API response alongside the location name:
+
+```typescript
+interface GhlLocationDisplay {
+  id: string;
+  name: string;
+  city?: string;          // from GHL business metadata
+  contactCount?: number;  // from a lightweight count call, if available
+  // No effort to fetch full data here — just what GHL returns in the locations/search response
+}
+```
+
+Even just the city makes the list scannable for a 50-location agency.
+
+**Search/filter.** Add a simple text filter above the location list for agencies with 20+ locations. Filter on name and city.
+
+**Subaccount limit as a soft cap with upgrade prompt.** Instead of blocking at the API level only, surface it in the UI:
+- Show all discovered locations regardless of subscription limit
+- Pre-select up to the limit
+- Locations beyond the limit are visually greyed out with a subtle lock icon
+- Banner above the list: "Your Starter plan monitors up to 10 clients. [Upgrade to Growth →]"
+- The "Confirm" button shows the count: "Start monitoring 10 clients"
+
+### 15.4 Sync progress engagement (Module D — §9.3 Step 3)
+
+**Live data snippets.** As each account syncs, show a one-line preview of what was found:
+- "Client A — 342 contacts, 28 active deals"
+- "Client B — 156 contacts, 12 active deals, $23,400 revenue"
+
+This transforms dead wait time into a satisfying data reveal. Source: the `connectorPollingService` already knows entity counts after each account sync — emit them via WebSocket alongside the sync status.
+
+Update the `SyncStatus` interface:
+
+```typescript
+accounts: Array<{
+  accountId: string;
+  displayName: string;
+  status: 'pending' | 'syncing' | 'complete' | 'error';
+  error?: string;
+  // New: lightweight preview data, populated on completion
+  preview?: {
+    contactCount: number;
+    opportunityCount: number;
+    revenueTotal?: number;   // null if payments not available
+  };
+}>;
+```
+
+**"Email me when ready" option.** Below the progress list, a text link: "Email me when my dashboard is ready — I'll check back later." On click, store a flag and send the email when first report completes. This prevents abandonment for users who can't wait.
+
+**Browser notification on completion.** When the sync completes and the user's tab is not focused, fire a browser Notification (with the user's prior permission): "Your ClientPulse dashboard is ready! 23 clients monitored."
+
+```typescript
+// Client-side, in the sync progress component
+if (syncStatus.phase === 'complete' && document.hidden) {
+  new Notification('ClientPulse is ready', {
+    body: `${syncStatus.totalAccounts} clients monitored. View your dashboard.`,
+    icon: '/logo-192.png',
+  });
+}
+```
+
+Request notification permission at the start of the sync step (when the user is most likely to grant it because they're about to wait).
+
+### 15.5 First-report celebration (Module D — §9.4 / Module E — §8.2.1)
+
+**Success screen before dashboard.** Instead of silently redirecting to `/dashboard`, show a brief celebration interstitial:
+
+- Headline: "Your agency dashboard is ready"
+- Summary: "23 clients monitored. 18 healthy. 3 need attention. 2 at risk."
+- The three health-status numbers in large coloured badges (green/yellow/red) — a preview of the dashboard's main widget
+- CTA: "View your dashboard →"
+- Secondary: "Check your inbox — your first report just arrived"
+
+This screen exists for 5 seconds of emotional payoff. The user has invested 5–10 minutes; reward them.
+
+**First email has a distinct subject.** The first report email subject should differ from subsequent weeks:
+- First: `Your first ClientPulse report is ready — {agencyName}`
+- Subsequent: `ClientPulse Weekly Report — {agencyName} — Week of {date}`
+
+Add a `isFirstReport` flag to the report generation logic (check if any prior `reports` rows exist for the org). If first, use the distinct subject and add a brief intro paragraph in the email: "Welcome to your first weekly portfolio health report. Here's what we found across your agency."
+
+### 15.6 Dashboard guided tour (Module E — §8.2.1)
+
+**Lightweight tooltip tour on first visit.** When a user lands on the dashboard for the first time (track via `localStorage` flag `clientpulse_tour_completed`), show a 4-step tooltip tour:
+
+1. Point at the health breakdown widget: "Portfolio health at a glance — green means healthy, red needs attention"
+2. Point at the high-risk clients widget: "These clients have the highest churn risk this week"
+3. Point at the latest report widget: "Your full weekly report lives here — also delivered to your inbox every Monday"
+4. Point at the sidebar Reports item: "All past reports are saved here"
+
+**Implementation:** A small `GuidedTour` component using absolute-positioned tooltips with a backdrop highlight. No external library needed — 100 lines of React. Dismissible with "Got it" / "Skip tour" buttons.
+
+### 15.7 Trial awareness (Module G — §4)
+
+**Trial countdown in the sidebar.** When `org_subscriptions.status = 'trialing'`, show a subtle badge in the sidebar footer:
+
+- Days 14–8: "12 days left in trial" (grey text, low urgency)
+- Days 7–3: "5 days left in trial" (amber badge, medium urgency)
+- Days 2–0: "Trial ends tomorrow" / "Trial ends today" (red badge, high urgency)
+
+**Data source:** `GET /api/my-subscription` already returns the subscription status and `trial_ends_at`. The Layout component computes days remaining.
+
+**Trial expiry dashboard banner.** When `org_subscriptions.status = 'cancelled'` (trial expired), the Dashboard shows a full-width banner at top: "Your trial has ended. Upgrade to keep monitoring your clients. [Choose a plan →]"
+
+### 15.8 Cross-cutting UX infrastructure
+
+#### Toast notification system
+
+**Add `sonner` to the client.** Lightweight (~4KB), drop-in toast library. Install and wire into the app root:
+
+```bash
+npm install sonner
+```
+
+```tsx
+// In App.tsx or ProtectedLayout
+import { Toaster } from 'sonner';
+<Toaster position="bottom-right" />
+```
+
+Use `toast.success()`, `toast.error()`, `toast.loading()` throughout the new ClientPulse flows:
+- "Connected to Go High Level" (after OAuth)
+- "Syncing 23 clients..." (loading toast)
+- "Sync complete — generating your first report" (success)
+- "Report delivered to your inbox" (success)
+- "Connection failed — please try again" (error)
+
+This replaces ad-hoc inline alerts with consistent, transient notifications.
+
+#### Loading skeletons on all new pages
+
+Every new page (`ClientPulseDashboardPage`, `ReportsListPage`, `ReportDetailPage`, `OnboardingWizardPage`) must implement shimmer skeletons matching the existing `DashboardPage` pattern. No page should ever show a blank white screen during data fetch.
+
+**Create a reusable `SkeletonLoader` component** (3 variants: card, table-row, text-block) extracted from the existing inline shimmer pattern in `DashboardPage.tsx`. Use it consistently across all new pages.
+
+#### Help link in sidebar footer
+
+Add a "Need help?" link in the sidebar footer (below the trial countdown, if present). Links to `mailto:support@synthetos.ai` or a future help centre URL. Visible to all users, always.
+
+### 15.9 Verification
+
+- [ ] Signup form collects agency name — name appears in sidebar header and report titles
+- [ ] Welcome email arrives within 30 seconds of signup
+- [ ] OAuth interstitial shows plain-English scope descriptions before redirect
+- [ ] "Skip for now" on OAuth step → lands on Dashboard empty state with CTA
+- [ ] OAuth denial → error screen with "Try again" button
+- [ ] Location list shows city/metadata, has search filter at 20+ locations
+- [ ] Subaccount limit surfaced as greyed-out locations + upgrade banner, not a hard error
+- [ ] Sync progress shows per-client data snippets as they complete
+- [ ] Browser notification fires when sync completes with tab unfocused
+- [ ] Success interstitial shows before dashboard with health summary
+- [ ] First email has distinct subject line ("Your first ClientPulse report is ready")
+- [ ] Guided tour fires on first dashboard visit, doesn't repeat
+- [ ] Trial countdown visible in sidebar, urgency increases as expiry approaches
+- [ ] Trial expiry banner appears on dashboard after trial ends
+- [ ] Toast notifications fire for key actions (connect, sync, report delivery)
+- [ ] All new pages have shimmer skeletons during data fetch
+- [ ] Help link visible in sidebar footer
