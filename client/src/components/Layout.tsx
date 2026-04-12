@@ -295,13 +295,17 @@ export default function Layout({ user, children }: LayoutProps) {
 
   // Module-driven sidebar config
   const [sidebarItems, setSidebarItems] = useState<Set<string> | null>(null);
+  const [sidebarLoaded, setSidebarLoaded] = useState(false);
 
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
   const hasAnyOrgPerm = orgPerms.size > 0;
   const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has('__org_admin__') || orgPerms.has(key);
   const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has('__org_admin__') || orgPerms.has('__org_admin__') || clientPerms.has(key);
-  /** Check if a nav-item slug is enabled by the module sidebar config. System admins bypass. */
-  const hasSidebarItem = (slug: string) => !sidebarItems || sidebarItems.has(slug);
+  /** Check if a nav-item slug is enabled by the module sidebar config. System admins bypass. Returns false while loading to prevent flash. */
+  const hasSidebarItem = (slug: string) => {
+    if (!sidebarLoaded) return false; // suppress until config loaded
+    return !sidebarItems || sidebarItems.has(slug);
+  };
 
   // Auto-set org context for non-system-admin users who belong to an org
   useEffect(() => {
@@ -355,16 +359,17 @@ export default function Layout({ user, children }: LayoutProps) {
 
   // Fetch module-driven sidebar config
   useEffect(() => {
-    if (isSystemAdmin) { setSidebarItems(null); return; } // System admins see everything
+    if (isSystemAdmin) { setSidebarItems(null); setSidebarLoaded(true); return; }
     if (hasOrgContext) {
+      setSidebarLoaded(false);
       api.get('/api/my-sidebar-config').then(({ data }) => {
         if (data.items && Array.isArray(data.items) && data.items.length > 0) {
           setSidebarItems(new Set(data.items));
         } else {
           setSidebarItems(null); // No module config = show default (all items)
         }
-      }).catch(() => setSidebarItems(null));
-    } else { setSidebarItems(null); }
+      }).catch(() => setSidebarItems(null)).finally(() => setSidebarLoaded(true));
+    } else { setSidebarItems(null); setSidebarLoaded(true); }
   }, [hasOrgContext, activeOrgId, isSystemAdmin]);
 
   // Review queue badge — initial load + WebSocket updates

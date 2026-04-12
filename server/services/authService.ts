@@ -251,34 +251,39 @@ export class AuthService {
       slug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
     }
 
-    const [org] = await db
-      .insert(organisations)
-      .values({
-        name: agencyName.trim(),
-        slug,
-        plan: 'starter',
-        status: 'active',
-      })
-      .returning();
-
     // Derive first/last name from email local-part
     const localPart = normalizedEmail.split('@')[0];
     const nameParts = localPart.split(/[._-]/);
     const firstName = nameParts[0] ? nameParts[0].charAt(0).toUpperCase() + nameParts[0].slice(1) : 'Admin';
     const lastName = nameParts[1] ? nameParts[1].charAt(0).toUpperCase() + nameParts[1].slice(1) : '';
 
-    const [user] = await db
-      .insert(users)
-      .values({
-        organisationId: org.id,
-        email: normalizedEmail,
-        passwordHash,
-        firstName,
-        lastName: lastName || 'User',
-        role: 'org_admin',
-        status: 'active',
-      })
-      .returning();
+    // Wrap org + user creation in a transaction to prevent orphaned org rows
+    const { org, user } = await db.transaction(async (tx) => {
+      const [org] = await tx
+        .insert(organisations)
+        .values({
+          name: agencyName.trim(),
+          slug,
+          plan: 'starter',
+          status: 'active',
+        })
+        .returning();
+
+      const [user] = await tx
+        .insert(users)
+        .values({
+          organisationId: org.id,
+          email: normalizedEmail,
+          passwordHash,
+          firstName,
+          lastName: lastName || 'User',
+          role: 'org_admin',
+          status: 'active',
+        })
+        .returning();
+
+      return { org, user };
+    });
 
     // Send welcome email asynchronously (non-blocking)
     emailService.sendWelcomeEmail(normalizedEmail, firstName, agencyName).catch((err) => {

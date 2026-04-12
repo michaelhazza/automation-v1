@@ -1,8 +1,7 @@
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { reports } from '../db/schema/index.js';
-import type { Report, NewReport } from '../db/schema/index.js';
-import { emailService } from './emailService.js';
+import type { Report } from '../db/schema/index.js';
 
 export class ReportService {
   /** List reports for an org, newest first. */
@@ -88,6 +87,7 @@ export class ReportService {
 
   /** Mark a report as complete with health data and HTML content. */
   async completeReport(
+    orgId: string,
     reportId: string,
     data: {
       totalClients: number;
@@ -105,7 +105,7 @@ export class ReportService {
         generatedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(reports.id, reportId))
+      .where(and(eq(reports.id, reportId), eq(reports.organisationId, orgId)))
       .returning();
 
     if (!report) {
@@ -115,7 +115,7 @@ export class ReportService {
   }
 
   /** Mark a report as failed. */
-  async failReport(reportId: string, error?: string): Promise<void> {
+  async failReport(orgId: string, reportId: string, error?: string): Promise<void> {
     await db
       .update(reports)
       .set({
@@ -123,7 +123,7 @@ export class ReportService {
         metadata: error ? { error } : undefined,
         updatedAt: new Date(),
       })
-      .where(eq(reports.id, reportId));
+      .where(and(eq(reports.id, reportId), eq(reports.organisationId, orgId)));
   }
 
   /** Resend a report email. In the full implementation, fetches the org owner email and sends. */

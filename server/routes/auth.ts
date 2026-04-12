@@ -35,6 +35,11 @@ function validatePasswordStrength(password: string): string | null {
 }
 
 router.post('/api/auth/signup', validateBody(signupBody), asyncHandler(async (req, res) => {
+  const rateKey = `signup:${req.ip}`;
+  if (!enforceLoginRateLimit(rateKey)) {
+    res.status(429).json({ error: 'Too many signup attempts. Please try again later.' });
+    return;
+  }
   const { agencyName, email, password } = req.body as SignupInput;
   const passwordError = validatePasswordStrength(password);
   if (passwordError) {

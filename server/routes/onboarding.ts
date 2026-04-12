@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { onboardingService } from '../services/onboardingService.js';
+import { subscriptionService } from '../services/subscriptionService.js';
 
 const router = Router();
 
@@ -37,6 +38,14 @@ router.post('/api/onboarding/confirm-locations', authenticate, asyncHandler(asyn
   if (!Array.isArray(locationIds) || locationIds.length === 0) {
     throw { statusCode: 400, message: 'locationIds must be a non-empty array' };
   }
+
+  // Server-side subaccount limit enforcement
+  const sub = await subscriptionService.getOrgSubscription(orgId);
+  const limit = sub?.subscription?.subaccountLimit ?? null;
+  if (limit !== null && locationIds.length > limit) {
+    throw { statusCode: 400, message: `Your plan allows up to ${limit} monitored accounts. You selected ${locationIds.length}.` };
+  }
+
   // TODO: Wire to GHL connector service — create subaccounts for each location,
   // trigger initial sync via connectorPollingService.
   // For now, return success to unblock the onboarding UI.

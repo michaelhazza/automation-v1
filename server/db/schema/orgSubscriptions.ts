@@ -3,6 +3,10 @@ import { sql } from 'drizzle-orm';
 import { organisations } from './organisations.js';
 import { subscriptions } from './subscriptions.js';
 
+// NOTE: This table intentionally has NO deletedAt column. Lifecycle is managed
+// entirely via the `status` column (trialing → active → cancelled/paused).
+// The partial unique index on organisationId WHERE status IN (trialing, active, past_due)
+// ensures one active subscription per org without needing a soft-delete mechanism.
 export const orgSubscriptions = pgTable(
   'org_subscriptions',
   {
