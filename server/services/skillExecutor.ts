@@ -19,6 +19,7 @@ import { reviewService } from './reviewService.js';
 import { hitlService } from './hitlService.js';
 import { getActionDefinition } from '../config/actionRegistry.js';
 import { devContextService, assertPathInRoot } from './devContextService.js';
+import { workspaceMemoryService } from './workspaceMemoryService.js';
 import {
   MAX_HANDOFF_DEPTH,
   MAX_TASK_TITLE_LENGTH,
@@ -337,6 +338,27 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   write_workspace: async (input, context) => {
     requireSubaccountContext(context, 'write_workspace');
     return executeWriteWorkspace(input, context);
+  },
+  search_agent_history: async (input, context) => {
+    const op = input.op as string;
+    if (op === 'search') {
+      const results = await workspaceMemoryService.semanticSearchMemories({
+        query: input.query as string,
+        orgId: context.organisationId,
+        subaccountId: context.subaccountId ?? '',
+        includeOtherSubaccounts: (input.includeOtherSubaccounts as boolean) ?? !context.subaccountId,
+        topK: (input.topK as number) ?? 10,
+      });
+      return { success: true, results };
+    } else if (op === 'read') {
+      const entry = await workspaceMemoryService.getMemoryEntry(
+        input.memoryId as string,
+        context.organisationId,
+      );
+      if (!entry) return { success: false, error: 'Memory entry not found' };
+      return { success: true, entry };
+    }
+    return { success: false, error: `Unknown op: ${op}` };
   },
   trigger_process: async (input, context) => {
     requireSubaccountContext(context, 'trigger_process');

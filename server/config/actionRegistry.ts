@@ -1570,6 +1570,40 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     idempotencyStrategy: 'keyed_write',
   },
 
+  // ── Cross-Agent Memory Search (Feature 5) ──────────────────────────────────
+
+  search_agent_history: {
+    actionType: 'search_agent_history',
+    description: 'Search memories and learnings across all agents in the workspace via semantic vector search.',
+    actionCategory: 'worker',
+    topics: ['workspace'],
+    isExternal: false,
+    isUniversal: true,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['op', 'query', 'memoryId'],
+    parameterSchema: z.discriminatedUnion('op', [
+      z.object({
+        op: z.literal('search'),
+        query: z.string().min(1).max(1000),
+        includeOtherSubaccounts: z.boolean().optional(),
+        topK: z.number().int().min(1).max(50).optional(),
+      }),
+      z.object({
+        op: z.literal('read'),
+        memoryId: z.string().uuid(),
+      }),
+    ]),
+    retryPolicy: {
+      maxRetries: 1,
+      strategy: 'fixed',
+      retryOn: ['timeout'],
+      doNotRetryOn: ['validation_failure'],
+    },
+    mcp: { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
+    idempotencyStrategy: 'read_only',
+  },
+
   // ── Methodology skills (pure prompt scaffolds, no side effects) ──────────
   // These entries enable the isMethodology fast-path in the preTool middleware,
   // which bypasses full action proposal and writes a lightweight audit row.
