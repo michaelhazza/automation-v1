@@ -8,6 +8,7 @@ import { decisionTimeGuidanceMiddleware } from './decisionTimeGuidanceMiddleware
 import { reflectionLoopMiddleware } from './reflectionLoopMiddleware.js';
 import { topicFilterMiddleware } from './topicFilterMiddleware.js';
 import { confidenceEscapeMiddleware } from './confidenceEscapeMiddleware.js';
+import { hallucinationDetectionMiddleware } from './hallucinationDetectionMiddleware.js';
 
 export { hashToolCall } from './loopDetection.js';
 export { classifyError, executeWithRetry } from './errorHandling.js';
@@ -63,6 +64,6 @@ export function createDefaultPipeline(): MiddlewarePipeline {
     // APPROVE" contract and escalates to HITL after
     // `MAX_REFLECTION_ITERATIONS` blocked review_code iterations. This is
     // the first inhabitant of the postTool pipeline.
-    postTool: [reflectionLoopMiddleware],
+    postTool: [reflectionLoopMiddleware, hallucinationDetectionMiddleware],
   };
 }

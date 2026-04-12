@@ -22,11 +22,18 @@ const anthropicAdapter: LLMProviderAdapter = {
       messages: params.messages,
     };
 
-    // Prompt caching: mark system prompt boundary for cache_control
+    // Prompt caching: multi-breakpoint when structured, single-breakpoint for plain string
     if (params.system) {
-      body.system = [
-        { type: 'text', text: params.system, cache_control: { type: 'ephemeral' } },
-      ];
+      if (typeof params.system === 'object') {
+        body.system = [
+          { type: 'text', text: params.system.stablePrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: params.system.dynamicSuffix },
+        ];
+      } else {
+        body.system = [
+          { type: 'text', text: params.system, cache_control: { type: 'ephemeral' } },
+        ];
+      }
     } else {
       body.system = '';
     }

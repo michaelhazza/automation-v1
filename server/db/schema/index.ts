@@ -34,6 +34,8 @@ export * from './taskActivities';
 export * from './taskDeliverables';
 export * from './workspaceMemories';
 export * from './workspaceEntities';
+export * from './agentBriefings';
+export * from './subaccountStateSummaries';
 export * from './agentTriggers';
 export * from './scheduledTasks';
 export * from './actions';

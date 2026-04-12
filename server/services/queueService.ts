@@ -607,6 +607,32 @@ export const queueService = {
         }
       });
 
+      // Agent Intelligence Phase 2B — memory dedup daily sweep
+      await (boss as any).work('maintenance:memory-dedup', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryDedup } = await import('../jobs/memoryDedupJob.js');
+          await withTimeout(runMemoryDedup(), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-dedup', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Agent Intelligence Phase 2D — agent briefing update (event-driven)
+      await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runAgentBriefingUpdate } = await import('../jobs/agentBriefingJob.js');
+          await withTimeout(runAgentBriefingUpdate(job.data), 110_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'agent-briefing-update', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Sprint 2 P1.2 — HITL rejection → regression capture. Uses
       // createWorker so the handler runs inside the org-scoped tx +
       // ALS context pulled from job.data.organisationId.
@@ -721,6 +747,7 @@ export const queueService = {
       await boss.schedule('agent-run-cleanup', '0 4 * * *', {});
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
+      await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});
@@ -792,6 +819,14 @@ export const queueService = {
         const { runAgentRunCleanupTick } = await import('../jobs/agentRunCleanupJob.js');
         runAgentRunCleanupTick().catch((err: unknown) => {
           console.error(JSON.stringify({ event: 'maintenance:agent_run_cleanup_error', ...serializeError(err) }));
+        });
+      }, 24 * 60 * 60 * 1000); // daily
+
+      // Agent Intelligence Phase 2B — memory dedup daily sweep (in-memory fallback)
+      setInterval(async () => {
+        const { runMemoryDedup } = await import('../jobs/memoryDedupJob.js');
+        runMemoryDedup().catch((err: unknown) => {
+          console.error(JSON.stringify({ event: 'maintenance:memory_dedup_error', ...serializeError(err) }));
         });
       }, 24 * 60 * 60 * 1000); // daily
 

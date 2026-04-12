@@ -53,6 +53,8 @@ import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
+import { agentBriefingService } from './agentBriefingService.js';
+import { subaccountStateSummaryService } from './subaccountStateSummaryService.js';
 import { triggerService } from './triggerService.js';
 import {
   createDefaultPipeline,
@@ -635,21 +637,45 @@ export const agentExecutionService = {
         systemPromptParts.push(`\n\n---\n## Additional Instructions\n${configCustomInstructions}`);
       }
 
-      // Layer 3.5: Task Instructions — only when run originates from a scheduled task.
-      // Spec §7.2. The scheduled task's description is injected as a dedicated
-      // layer so operators can treat the scheduled task as the "project" and the
-      // agent's master prompt as the generic reporting brain.
+      // Add team roster (loaded fresh from DB every run)
+      // Team roster is placed in the stable prefix (changes only on agent config edit)
+      const teamRoster = isOrgRun
+        ? await buildOrgTeamRoster(request.organisationId, request.agentId)
+        : await buildTeamRoster(request.subaccountId!, request.agentId);
+      if (teamRoster) {
+        systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
+      }
+
+      // ── Stable/dynamic split for multi-breakpoint prompt caching (Phase 0C) ──
+      // Sections 1-6 + team roster = stablePrefix (cached across runs)
+      // Briefing, task instructions, manifest, memory, entities, board, autonomous = dynamicSuffix
+      const stablePrefix = systemPromptParts.join('');
+      const dynamicParts: string[] = [];
+
+      // Phase 2D: Agent briefing — compact cross-run summary (dynamic — updates after each run)
+      if (!isOrgRun) {
+        try {
+          const briefing = await agentBriefingService.get(
+            request.organisationId,
+            request.subaccountId!,
+            request.agentId,
+          );
+          if (briefing) {
+            dynamicParts.push(`\n\n---\n## Your Briefing\n${briefing}`);
+          }
+        } catch {
+          // Non-fatal — agent runs fine without a briefing
+        }
+      }
+
+      // Layer 3.5: Task Instructions (dynamic — changes per scheduled task)
       if (runContextData.taskInstructions) {
-        systemPromptParts.push(
+        dynamicParts.push(
           `\n\n---\n## Task Instructions\nYou are executing a recurring task. Follow these instructions precisely:\n\n${runContextData.taskInstructions}`
         );
       }
 
-      // Layer 3.6: Available Context Sources — the lazy manifest.
-      // Spec §7.3. Shows the agent which reference files exist without
-      // loading their content. The agent fetches on demand via the
-      // read_data_source skill. Capped at MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT;
-      // elided entries remain available via read_data_source op='list'.
+      // Layer 3.6: Available Context Sources — the lazy manifest (dynamic — varies per run)
       if (runContextData.manifestForPrompt.length > 0) {
         const scopeLabels: Record<string, string> = {
           task_instance: 'task attachment',
@@ -669,17 +695,9 @@ export const agentExecutionService = {
           ? `\n\n_${runContextData.manifestElidedCount} additional source(s) are available but not listed here to keep the prompt compact. Call \`read_data_source\` with \`op: 'list'\` to see the full inventory._`
           : '';
 
-        systemPromptParts.push(
+        dynamicParts.push(
           `\n\n---\n## Available Context Sources\nThe following additional reference materials are available. Use the \`read_data_source\` tool to fetch any of them on demand:\n\n${manifestLines}${elidedNote}`
         );
-      }
-
-      // Add team roster (loaded fresh from DB every run)
-      const teamRoster = isOrgRun
-        ? await buildOrgTeamRoster(request.organisationId, request.agentId)
-        : await buildTeamRoster(request.subaccountId!, request.agentId);
-      if (teamRoster) {
-        systemPromptParts.push(`\n\n---\n## Your Team\nYou can reassign tasks to or create tasks for any of these agents:\n${teamRoster}`);
       }
 
       // Add workspace memory (with prompt injection boundaries)
@@ -697,7 +715,7 @@ export const agentExecutionService = {
           taskContextForMemory
         );
         if (memory) {
-          systemPromptParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
+          dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
         }
       }
 
@@ -709,22 +727,38 @@ export const agentExecutionService = {
             request.organisationId,
           );
       if (entities) {
-        systemPromptParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
+        dynamicParts.push(`\n\n---\n## Known Workspace Entities\n${entities}`);
       }
 
       if (workspaceContext) {
-        systemPromptParts.push(`\n\n---\n## Current Board\n${workspaceContext}`);
+        dynamicParts.push(`\n\n---\n## Current Board\n${workspaceContext}`);
       }
 
-      systemPromptParts.push(buildAutonomousInstructions(request, targetItem));
+      // Phase 3B: Subaccount state summary — operational snapshot (task counts, run stats)
+      if (!isOrgRun) {
+        try {
+          const stateSummary = await subaccountStateSummaryService.getOrGenerate(
+            request.organisationId,
+            request.subaccountId!,
+          );
+          if (stateSummary) {
+            dynamicParts.push(`\n\n---\n${stateSummary}`);
+          }
+        } catch {
+          // Non-fatal — agent runs fine without the state summary
+        }
+      }
+
+      dynamicParts.push(buildAutonomousInstructions(request, targetItem));
 
       // agent_decision steps inject a structured decision envelope at the end
       // of the system prompt so the agent sees branch options and output schema.
       if (request.systemPromptAddendum) {
-        systemPromptParts.push(`\n\n---\n${request.systemPromptAddendum}`);
+        dynamicParts.push(`\n\n---\n${request.systemPromptAddendum}`);
       }
 
-      const fullSystemPrompt = systemPromptParts.join('');
+      const dynamicSuffix = dynamicParts.join('');
+      const fullSystemPrompt = stablePrefix + dynamicSuffix;
       const systemPromptTokens = approxTokens(fullSystemPrompt);
 
       // Persist the context sources snapshot (spec §7.5). Captures every
@@ -842,7 +876,7 @@ export const agentExecutionService = {
         });
 
         const ccResult = await claudeCodeRunner.execute({
-          systemPrompt: fullSystemPrompt,
+          systemPrompt: fullSystemPrompt, // Claude Code runner uses flat string
           taskPrompt,
           cwd: projectRoot,
           maxTurns: maxToolCalls,
@@ -937,7 +971,7 @@ export const agentExecutionService = {
               agentName:         agent.name,
               sourceType:        'agent_run',
             },
-            systemPrompt: fullSystemPrompt,
+            systemPrompt: { stablePrefix, dynamicSuffix },
             tools: effectiveTools,
             tokenBudget,
             maxToolCalls,
@@ -1163,6 +1197,35 @@ export const agentExecutionService = {
           loopResult.summary
         ).catch(err => {
           console.error(`[AgentExecution] Entity extraction failed for run ${run.id}:`, err instanceof Error ? err.message : err);
+        });
+
+        // Phase 2D: Enqueue agent briefing update (non-blocking, pg-boss only)
+        import('./queueService.js').then(({ queueService }) => {
+          if ('send' in queueService) {
+            (queueService as { send: (q: string, d: object) => Promise<unknown> }).send('agent-briefing-update', {
+              organisationId: request.organisationId,
+              subaccountId: request.subaccountId,
+              agentId: request.agentId,
+              runId: run.id,
+              handoffJson: { summary: loopResult.summary, status: finalStatus },
+            }).catch((err: unknown) => {
+              console.error(`[AgentExecution] Briefing job enqueue failed for run ${run.id}:`, err instanceof Error ? err.message : String(err));
+            });
+          } else {
+            // In-memory mode: run briefing update directly (fire-and-forget)
+            agentBriefingService.updateAfterRun(
+              request.organisationId,
+              request.subaccountId!,
+              request.agentId,
+              run.id,
+              { summary: loopResult.summary, status: finalStatus },
+            ).catch((err: unknown) => {
+              console.error(`[AgentExecution] Briefing update failed for run ${run.id}:`, err instanceof Error ? err.message : String(err));
+            });
+          }
+        }).catch((err: unknown) => {
+          // fire-and-forget: dynamic import failure is non-fatal (in-memory mode fallback)
+          console.warn('[AgentExecution] Briefing enqueue import failed:', err instanceof Error ? err.message : String(err));
         });
       }
 
@@ -1472,7 +1535,7 @@ interface LoopParams {
   runId: string;
   agent: { modelId: string; modelProvider: string; temperature: number; maxTokens: number; complexityHint?: string | null };
   routerCtx: Omit<LLMCallContext, 'taskType' | 'provider' | 'model' | 'executionPhase' | 'routingMode'>;
-  systemPrompt: string;
+  systemPrompt: string | { stablePrefix: string; dynamicSuffix: string };
   tools: AnthropicTool[];
   tokenBudget: number;
   maxToolCalls: number;
@@ -2093,11 +2156,11 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       // `assertNever` line until a handler is added here.
       let postToolBreakOuter = false;
       for (const mw of pipeline.postTool) {
-        const postResult = mw.execute(
+        const postResult = await Promise.resolve(mw.execute(
           mwCtx,
           { name: toolCall.name, input: toolCall.input },
           { content: resultContent, durationMs: toolDurationMs }
-        );
+        ));
         switch (postResult.action) {
           case 'continue':
             if (postResult.content) {

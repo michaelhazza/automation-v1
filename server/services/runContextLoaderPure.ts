@@ -13,6 +13,47 @@ import {
   MAX_LAZY_MANIFEST_ITEMS_IN_PROMPT,
 } from '../config/limits.js';
 
+// ---------------------------------------------------------------------------
+// Phase 1D: Two-pass context reranking — score data sources by relevance
+// ---------------------------------------------------------------------------
+
+/**
+ * Cosine similarity between two vectors. Returns 0 if either is empty.
+ */
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
+  let dot = 0, magA = 0, magB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magA += a[i] * a[i];
+    magB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+/**
+ * Score each eager source by relevance to the task embedding. Sets a
+ * `relevanceScore` property on each source. processContextPool's budget
+ * walk will re-sort by this score before truncation.
+ *
+ * Pure function — embeddings must be pre-computed by the caller.
+ */
+export function rankContextPoolByRelevance(
+  pool: LoadedDataSource[],
+  taskEmbedding: number[] | undefined,
+): void {
+  if (!taskEmbedding || taskEmbedding.length === 0) return;
+
+  for (const source of pool) {
+    const sourceEmb = (source as LoadedDataSource & { embedding?: number[] }).embedding;
+    if (sourceEmb && sourceEmb.length > 0) {
+      (source as LoadedDataSource & { relevanceScore?: number }).relevanceScore =
+        cosineSimilarity(taskEmbedding, sourceEmb);
+    }
+  }
+}
+
 /**
  * Resolve the scheduled task id from a request's triggerContext, if present.
  * Returns null when the run did not originate from a scheduled task.
@@ -108,7 +149,18 @@ export function processContextPool(
   const eager = activePool.filter((s) => s.loadingMode === 'eager');
   const manifest = activePool.filter((s) => s.loadingMode === 'lazy');
 
-  // 8. Pre-prompt budget walk
+  // 7b. Phase 1D: If relevance scores are present, re-sort eager sources
+  // by relevance descending so the most relevant survive budget truncation.
+  const hasRelevance = eager.some(s => (s as LoadedDataSource & { relevanceScore?: number }).relevanceScore != null);
+  if (hasRelevance) {
+    eager.sort((a, b) => {
+      const ra = (a as LoadedDataSource & { relevanceScore?: number }).relevanceScore ?? 0;
+      const rb = (b as LoadedDataSource & { relevanceScore?: number }).relevanceScore ?? 0;
+      return rb - ra;
+    });
+  }
+
+  // 8. Pre-prompt budget walk (respects relevance ordering from 7b)
   let accumulatedTokens = 0;
   for (const source of eager) {
     if (accumulatedTokens + source.tokenCount <= maxEagerBudget) {

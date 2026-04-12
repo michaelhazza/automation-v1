@@ -110,6 +110,10 @@ export const workspaceMemoryEntries = pgTable(
     lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
     taskSlug:       text('task_slug'),   // null = global memory visible to all tasks
 
+    // Phase 2C: Hierarchical metadata — auto-classified at write time
+    domain: text('domain'),   // e.g. 'crm', 'reporting', 'marketing', 'dev'
+    topic:  text('topic'),    // e.g. 'budget', 'campaign', 'pipeline', 'metrics'
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
@@ -122,6 +126,7 @@ export const workspaceMemoryEntries = pgTable(
     ),
     agentRunIdx: index('workspace_memory_entries_run_idx').on(table.agentRunId),
     createdAtIdx: index('workspace_memory_entries_created_idx').on(table.createdAt),
+    domainIdx: index('workspace_memory_entries_domain_idx').on(table.subaccountId, table.domain),
   })
 );
 
