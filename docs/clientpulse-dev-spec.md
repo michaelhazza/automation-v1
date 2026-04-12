@@ -542,7 +542,50 @@ With the `subscriptions` and `org_subscriptions` tables in place, update `module
 4. `SELECT * FROM modules WHERE id = ANY(s.module_ids) AND deleted_at IS NULL`
 5. Union `allowed_agent_slugs` or short-circuit to `'all'` if any module has `allow_all_agents = true`
 
-### 4.6 Verification
+### 4.6 Trial expiry handling
+
+The spec introduces `org_subscriptions.status = 'trialing'` with `trial_ends_at`, but something must transition expired trials.
+
+**New pg-boss cron job:** `subscription-trial-check`
+
+- **Schedule:** Daily at 2am UTC
+- **Logic:** Find all `org_subscriptions` rows where `status = 'trialing'` AND `trial_ends_at < now()`. Transition to `'cancelled'`. The allowlist resolver already excludes `'cancelled'` status, so the org's agents immediately stop firing on the next scheduling tick.
+- **Notification:** On trial expiry, queue an email to the org owner: "Your ClientPulse trial has ended. Upgrade to keep monitoring your clients."
+- **Grace period:** None in v1 — trial end is a hard cutoff. A 3-day grace period can be added later if churn data suggests it helps conversion.
+
+**Job file:** `server/jobs/subscriptionTrialCheckJob.ts`
+**Job config:** Add to `server/config/jobConfig.ts` with `cron: '0 2 * * *'`, registered in `server/jobs/index.ts`.
+
+### 4.7 Subaccount limit enforcement
+
+`subscriptions.subaccount_limit` caps how many subaccounts (GHL locations) an org can monitor. Enforcement at two points:
+
+#### 4.7.1 Subaccount creation route
+
+**File:** `server/routes/subaccounts.ts` — `POST /api/subaccounts`
+
+Before inserting:
+
+```typescript
+const orgSub = await subscriptionService.getOrgSubscription(req.orgId);
+if (orgSub) {
+  const sub = await subscriptionService.getSubscription(orgSub.subscriptionId);
+  if (sub.subaccountLimit !== null) {
+    const currentCount = await subaccountService.countActive(req.orgId);
+    if (currentCount >= sub.subaccountLimit) {
+      throw { statusCode: 403, message: `Subaccount limit reached (${sub.subaccountLimit}). Upgrade your subscription to add more clients.`, errorCode: 'subaccount_limit_reached' };
+    }
+  }
+}
+```
+
+#### 4.7.2 Onboarding location confirmation
+
+**File:** `server/services/onboardingService.ts` — `confirmLocations()`
+
+Before creating subaccounts from selected GHL locations, check the same limit. If the user selected more locations than the subscription allows, return the cap and let the UI show: "Your Starter plan allows up to 10 clients. You selected 23. Select up to 10, or upgrade to Growth (30) or Scale (100)."
+
+### 4.8 Verification
 
 - [ ] Unit test (pure): `subscriptionServicePure.test.ts` — yearly price auto-calculation, module delta computation
 - [ ] Create a subscription via admin UI → verify it appears in the catalogue
@@ -552,6 +595,9 @@ With the `subscriptions` and `org_subscriptions` tables in place, update `module
 - [ ] Cancel subscription → verify allowlist returns empty set
 - [ ] Comp an org → verify subscription works without Stripe
 - [ ] Archive a subscription with active orgs → verify it's blocked
+- [ ] Trial expiry: create a trialing org with `trial_ends_at` in the past → run the job → verify status transitions to `cancelled` and allowlist contracts
+- [ ] Subaccount limit: org on Starter (limit 10) attempts to create 11th subaccount → verify 403
+- [ ] Onboarding: select more locations than subscription allows → verify UI shows upgrade prompt
 - [ ] `npm run lint` + `npm run typecheck` pass
 
 ---
@@ -925,7 +971,7 @@ if (isInitialSync && allAccountsSynced) {
 
 ### 6.9 WebSocket emissions
 
-Module E's Dashboard (§8.2.1) subscribes to `dashboard:update` events via `useSocketRoom('org', orgId, ['dashboard:update'])`. The **producers** of these events are:
+Module E's Dashboard (§8.2.1) subscribes to `dashboard:update` events via `useSocket('dashboard:update', callback)` (clients are auto-joined to the `org:${orgId}` room on connection — no explicit room join needed). The **producers** of these events are:
 
 1. **Reporting Agent run completion** — after the agent finishes and the `reports` row is written, emit `dashboard:update` to the org's socket room. Best location: in the run-completion handler in `agentExecutionService`, conditioned on the agent being the Portfolio Health Agent.
 2. **Connector sync completion** — after `connectorPollingService.syncConnector()` finishes a sync cycle, emit `dashboard:update` to the org's socket room. Best location: at the end of `syncConnector()`.
@@ -1091,7 +1137,7 @@ interface DashboardData {
 4. **High-risk clients widget** — table of top 5 clients by churn score. Columns: Client name, Health score (colour badge), Churn risk (%), Primary factor.
 5. **Latest report widget** — link to the most recent portfolio report with date and title. "View full report →" link.
 
-**Real-time updates:** `useSocketRoom('org', orgId, ['dashboard:update'])` — emitted by the Reporting Agent on run completion and by `connectorPollingService` on sync completion.
+**Real-time updates:** Clients are auto-joined to an `org:${orgId}` WebSocket room on connection (see `server/websocket/rooms.ts`), so org-level broadcasts are received without an explicit room join. Use `useSocket('dashboard:update', callback)` (the global hook, not `useSocketRoom`) to subscribe. Server emits `dashboard:update` events to the org room from two producers: the Reporting Agent on run completion and `connectorPollingService` on sync completion (documented in §6.9).
 
 **Reusability:** Build the dashboard as a composition of widget components (`HealthBreakdownWidget`, `AnomaliesWidget`, `HighRiskClientsWidget`, `LatestReportWidget`, `SyncStatusWidget`). These same widgets can be used on a future full-tier Synthetos dashboard — they read whatever intelligence data is available.
 
@@ -1353,23 +1399,21 @@ This section is intentionally brief — Stripe integration is not on the critica
 
 ## 11. Migration inventory
 
-All new tables and schema changes required by this spec, in dependency order. Next available migration number: **0104**.
+All new tables and schema changes required by this spec. Next available migration number: **0104**.
 
-| Migration | Tables / Changes | Module | Depends on |
-|-----------|-----------------|--------|------------|
-| 0104 | `modules` table + seed (`client_pulse`, `full_access`). Add `slug` column to `system_hierarchy_templates` (backfill, NOT NULL, unique index). Duplicate template cleanup. Update `run_result_status` TypeScript type to include `'skipped_module_disabled'` (text column, no ALTER TYPE needed). | A | — |
-| 0105 | `subscriptions` table + `org_subscriptions` table + seed (starter, growth, scale, full_access_internal) | G | 0104 (references modules) |
-| 0106 | `reports` table | B | — |
+**Single migration approach:** All four tables, seed data, RLS policies, and the `slug` column addition are combined into one migration. The tables are defined in dependency order within the file (`modules` → `subscriptions` → `org_subscriptions` → `reports`). This is a pre-production codebase with no live data — there's no operational reason to split.
 
-| 0107 | RLS policies for `reports` and `org_subscriptions` (both have `organisation_id`). Add both to `server/config/rlsProtectedTables.ts`. | A+G+B | 0105, 0106 |
+| Migration | Contents |
+|-----------|----------|
+| 0104 | `modules` table + seed (`client_pulse`, `full_access`). `subscriptions` table + `org_subscriptions` table + seed (starter, growth, scale, full_access_internal). `reports` table. RLS policies for `reports` and `org_subscriptions`. Add `slug` column to `system_hierarchy_templates` (backfill, NOT NULL, partial unique index where `deleted_at IS NULL`). Duplicate template cleanup. Update `run_result_status` TypeScript type to include `'skipped_module_disabled'` (text column, no ALTER TYPE needed). Add both org-scoped tables to `server/config/rlsProtectedTables.ts`. |
 
-**No schema changes needed for:** Module C (uses existing tables), Module F (uses reports table from 0106), Module E (reads from existing tables + reports), Module D (writes to existing tables via services).
+**No schema changes needed for:** Module C (uses existing tables), Module F (uses reports table from 0104), Module E (reads from existing tables + reports), Module D (writes to existing tables via services).
 
 **Stripe integration (deferred):** `ALTER TABLE organisations ADD COLUMN stripe_customer_id TEXT` — when Stripe is wired.
 
 **RLS notes:** `modules` and `subscriptions` are system-admin catalogues with no `organisation_id` column — they do NOT need RLS policies. `reports` and `org_subscriptions` are org-scoped and must follow the existing RLS pattern (CREATE POLICY keyed on `current_setting('app.organisation_id', true)`).
 
-**Total new tables:** 4 (`modules`, `subscriptions`, `org_subscriptions`, `reports`). Also adds a `slug` column to the existing `system_hierarchy_templates` table. **Total new migrations:** 4 (0104–0107).
+**Total new tables:** 4 (`modules`, `subscriptions`, `org_subscriptions`, `reports`). Also adds a `slug` column to the existing `system_hierarchy_templates` table. **Single migration: 0104.**
 
 ---
 
@@ -1411,8 +1455,9 @@ Phase 1 (foundation)        Phase 2 (data + intelligence)      Phase 3 (surfaces
 | `subscriptionService.ts` — CRUD + assignment + delta preview | G | 1.5 days |
 | `SystemSubscriptionsPage.tsx` — catalogue editor + per-org management | G | 2 days |
 | Wire allowlist resolver to real subscription data | A+G | 0.5 day |
+| `subscriptionTrialCheckJob` cron + subaccount limit guards | G | 1 day |
 
-**Total Phase 1: ~10 days (can compress to ~7 with parallelism)**
+**Total Phase 1: ~11 days (can compress to ~8 with parallelism)**
 
 ### Phase 2 — Data + Intelligence (Module C + Module B)
 
@@ -1481,11 +1526,11 @@ Phase 1 (foundation)        Phase 2 (data + intelligence)      Phase 3 (surfaces
 
 | Phase | Effort | Compressed (with parallelism) |
 |-------|--------|-------------------------------|
-| Phase 1 | ~10 days | ~7 days |
+| Phase 1 | ~11 days | ~8 days |
 | Phase 2 | ~11 days | ~8 days |
 | Phase 3 | ~8 days | ~5 days |
 | Phase 4 | ~6 days | ~6 days |
-| **Soft launch total** | **~35 days** | **~26 days** |
+| **Soft launch total** | **~36 days** | **~27 days** |
 | Phase 5 (Stripe) | ~3.5 days | ~3.5 days |
 
 **Soft launch can begin at Phase 3** with comped subscriptions (system admin assigns via Module G admin UI). Stripe-gated public launch follows in Phase 5.
