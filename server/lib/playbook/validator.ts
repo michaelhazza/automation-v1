@@ -22,8 +22,11 @@ import type {
   PlaybookStep,
   ValidationError,
   ValidationResult,
+  AgentDecisionStep,
 } from './types.js';
 import { extractReferences, TemplatingError } from './templating.js';
+import { validateDecisionStep } from './agentDecisionPure.js';
+import { MAX_DECISION_BRANCHES_PER_STEP } from '../../config/limits.js';
 
 export const MAX_DAG_DEPTH = 50;
 
@@ -188,6 +191,29 @@ export function validateDefinition(
           });
         }
         break;
+      case 'agent_decision':
+        if (!step.decisionPrompt) {
+          errors.push({
+            rule: 'missing_field',
+            stepId: step.id,
+            message: `agent_decision step '${step.id}' must declare decisionPrompt`,
+          });
+        }
+        if (!step.agentRef) {
+          errors.push({
+            rule: 'missing_field',
+            stepId: step.id,
+            message: `agent_decision step '${step.id}' must declare agentRef`,
+          });
+        }
+        if (!step.branches || step.branches.length === 0) {
+          errors.push({
+            rule: 'missing_field',
+            stepId: step.id,
+            message: `agent_decision step '${step.id}' must declare branches`,
+          });
+        }
+        break;
     }
 
     // Rule 12: irreversible steps cannot have retryPolicy.maxAttempts > 1
@@ -203,6 +229,21 @@ export function validateDefinition(
     }
   }
 
+  // ── Decision step validation (agent_decision rules) ───────────────────────
+  // Delegate to the pure helper for rule-by-rule checks. The helper returns
+  // errors using the canonical ValidationError shape (rule, stepId, message).
+  for (const step of def.steps) {
+    if (step.type !== 'agent_decision') continue;
+    // Belt-and-braces check — the per-step loop above already validated required
+    // fields. Run the full decision-step pure validator for all 10 decision rules.
+    const decisionResult = validateDecisionStep(step as AgentDecisionStep, def);
+    if (!decisionResult.ok) {
+      for (const err of decisionResult.errors) {
+        errors.push(err);
+      }
+    }
+  }
+
   // ── Rule 7: template expression references ─────────────────────────────
   // Each `{{ ... }}` reference must be parseable, must reference a step
   // listed in dependsOn (no transitive deps), and the namespace must be
@@ -213,6 +254,7 @@ export function validateDefinition(
   for (const step of def.steps) {
     const refSources: string[] = [];
     if (step.prompt) refSources.push(step.prompt);
+    if (step.decisionPrompt) refSources.push(step.decisionPrompt);
     if (step.agentInputs) {
       for (const v of Object.values(step.agentInputs)) {
         if (typeof v === 'string') refSources.push(v);

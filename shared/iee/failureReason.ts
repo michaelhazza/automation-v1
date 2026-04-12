@@ -28,6 +28,19 @@ export const FailureReason = z.enum([
   // See docs/improvements-roadmap-spec.md §P1.1 Layer 2 / Layer 3.
   'scope_violation',    // tenant boundary crossed — organisation / subaccount mismatch
   'missing_org_context',// RLS Layer A — service-layer DB access reached without an active org-scoped transaction
+  // Playbook agent_decision step additions (spec docs/playbook-agent-decision-step-spec.md §21, §25.2)
+  'decision_parse_failure',         // agent output failed Zod base schema (missing fields, wrong types, invalid JSON)
+  'decision_unknown_branch',        // output parsed but chosenBranchId is not in declared branches
+  'decision_extra_schema_violation',// base schema passed but extraOutputSchema field missing or wrong type
+  'decision_tool_call_blocked',     // decision agent attempted a tool call — prohibited in decision steps
+  'decision_budget_exceeded',       // playbook run budget exhausted before/during decision dispatch
+  'decision_agent_run_failed',      // underlying agent run failed before emitting any output
+  'decision_step_timeout',          // step timeoutSeconds elapsed before agent run returned
+  'decision_replay_snapshot_missing',// replay mode but no prior decision snapshot for this step id
+  'decision_reviewer_rejected',     // supervised-mode reviewer explicitly rejected the decision
+  'decision_cancelled',             // run cancelled while decision step was in running/awaiting state
+  'decision_invalid_edit',          // mid-run editor provided a chosenBranchId that is not valid
+  'decision_skip_set_collision',    // downstream step found in running/completed state when it should be skipped (DAG bug)
   'unknown',
 ]);
 

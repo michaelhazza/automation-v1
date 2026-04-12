@@ -92,6 +92,18 @@ export function renderPlaybookFile(
     if (step.agentInputs !== undefined) {
       lines.push(`      agentInputs: ${JSON.stringify(step.agentInputs)},`);
     }
+    if (step.decisionPrompt !== undefined) {
+      lines.push(`      decisionPrompt: ${JSON.stringify(String(step.decisionPrompt))},`);
+    }
+    if (step.branches !== undefined) {
+      lines.push(`      branches: ${JSON.stringify(step.branches)},`);
+    }
+    if (step.defaultBranchId !== undefined) {
+      lines.push(`      defaultBranchId: ${JSON.stringify(String(step.defaultBranchId))},`);
+    }
+    if (step.minConfidence !== undefined) {
+      lines.push(`      minConfidence: ${JSON.stringify(step.minConfidence)},`);
+    }
     // formSchema / outputSchema → z.any() placeholders (see module comment)
     if (step.type === 'user_input' || step.formSchema !== undefined) {
       lines.push('      formSchema: z.any(),');
