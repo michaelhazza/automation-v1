@@ -15,20 +15,12 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentBriefings, workspaceMemoryEntries } from '../db/schema/index.js';
 import { routeCall } from './llmRouter.js';
-import { EXTRACTION_MAX_TOKENS } from '../config/limits.js';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Hard token cap for stored briefings. Anything above is truncated. */
-const BRIEFING_TOKEN_HARD_CAP = 1200;
-
-/** Number of recent high-quality memory entries to feed the LLM. */
-const MEMORY_ENTRIES_LIMIT = 5;
-
-/** Minimum quality score for memory entries included in briefing context. */
-const MEMORY_QUALITY_THRESHOLD = 0.5;
+import {
+  EXTRACTION_MAX_TOKENS,
+  BRIEFING_TOKEN_HARD_CAP,
+  BRIEFING_MEMORY_ENTRIES_LIMIT,
+  BRIEFING_MEMORY_QUALITY_THRESHOLD,
+} from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -122,11 +114,11 @@ export const agentBriefingService = {
             eq(workspaceMemoryEntries.organisationId, orgId),
             eq(workspaceMemoryEntries.subaccountId, subaccountId),
             eq(workspaceMemoryEntries.agentId, agentId),
-            sql`${workspaceMemoryEntries.qualityScore} >= ${MEMORY_QUALITY_THRESHOLD}`,
+            sql`${workspaceMemoryEntries.qualityScore} >= ${BRIEFING_MEMORY_QUALITY_THRESHOLD}`,
           ),
         )
         .orderBy(desc(workspaceMemoryEntries.createdAt))
-        .limit(MEMORY_ENTRIES_LIMIT);
+        .limit(BRIEFING_MEMORY_ENTRIES_LIMIT);
 
       // 3. Build LLM prompt
       const entriesBlock =
@@ -141,7 +133,9 @@ export const agentBriefingService = {
 ${currentBriefing ? `Previous briefing:\n${currentBriefing}\n` : 'No previous briefing exists (this is the first run).'}
 
 Latest run outcome:
+<run-outcome-data>
 ${JSON.stringify(handoffJson, null, 2)}
+</run-outcome-data>
 
 Recent observations from workspace memory:
 ${entriesBlock}

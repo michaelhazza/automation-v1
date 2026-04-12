@@ -255,62 +255,67 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
     : topK;
 
   // Hybrid RRF query with candidate pool cap
-  const rows = await db.execute<{
-    id: string; content: string; rrf_score: number;
-    combined_score: number; source_count: number;
-    agent_id: string | null; agent_name: string;
-    subaccount_id: string; created_at: string;
-  }>(sql`
-    WITH candidate_pool AS (
-      SELECT id, content, entry_type, quality_score, created_at,
-             last_accessed_at, embedding, tsv, agent_id, subaccount_id
-      FROM workspace_memory_entries
-      WHERE ${scopeFilter}
-        AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
-        ${taskFilter}
-        ${domainFilter}
-        AND created_at >= NOW() - INTERVAL '${VECTOR_SEARCH_RECENCY_DAYS} days'
-      ORDER BY GREATEST(created_at, COALESCE(last_accessed_at, created_at)) DESC
-      LIMIT ${MAX_MEMORY_SCAN}
-    ),
-    semantic AS (
-      SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
-        ORDER BY embedding <=> ${vectorLiteral}::vector
-      )) AS rrf_component
-      FROM candidate_pool
-      WHERE embedding IS NOT NULL
-      LIMIT ${overRetrieveLimit}
-    )
-    ${fullTextCte}
-    , rrf_scores AS (
-      SELECT id, rrf_component FROM semantic
-      ${fullTextUnion}
-    ),
-    fused AS (
-      SELECT r.id, SUM(r.rrf_component) AS rrf_score, COUNT(*) AS source_count
-      FROM rrf_scores r GROUP BY r.id
-    )
-    SELECT
-      f.id, cp.content, f.rrf_score, f.source_count,
-      cp.agent_id, COALESCE(a.name, 'Unknown') AS agent_name,
-      cp.subaccount_id, cp.created_at::text AS created_at,
-      f.rrf_score * ${weights.rrf}
-        + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
-        + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
-            cp.created_at, COALESCE(cp.last_accessed_at, cp.created_at)
-          ))) / 86400.0 / 30.0)) * ${weights.recency} AS combined_score
-    FROM fused f
-    JOIN candidate_pool cp ON cp.id = f.id
-    LEFT JOIN agents a ON a.id = cp.agent_id
-    WHERE f.rrf_score >= ${RRF_MIN_SCORE}
-    ORDER BY combined_score DESC
-    LIMIT ${retrieveLimit}
-  `);
+  // Use try/finally so the timeout is always reset even if the query throws.
+  let rrfRows: HybridResult[] = [];
+  try {
+    const rows = await db.execute<{
+      id: string; content: string; rrf_score: number;
+      combined_score: number; source_count: number;
+      agent_id: string | null; agent_name: string;
+      subaccount_id: string; created_at: string;
+    }>(sql`
+      WITH candidate_pool AS (
+        SELECT id, content, entry_type, quality_score, created_at,
+               last_accessed_at, embedding, tsv, agent_id, subaccount_id
+        FROM workspace_memory_entries
+        WHERE ${scopeFilter}
+          AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
+          ${taskFilter}
+          ${domainFilter}
+          AND created_at >= NOW() - INTERVAL '${VECTOR_SEARCH_RECENCY_DAYS} days'
+        ORDER BY GREATEST(created_at, COALESCE(last_accessed_at, created_at)) DESC
+        LIMIT ${MAX_MEMORY_SCAN}
+      ),
+      semantic AS (
+        SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
+          ORDER BY embedding <=> ${vectorLiteral}::vector
+        )) AS rrf_component
+        FROM candidate_pool
+        WHERE embedding IS NOT NULL
+        LIMIT ${overRetrieveLimit}
+      )
+      ${fullTextCte}
+      , rrf_scores AS (
+        SELECT id, rrf_component FROM semantic
+        ${fullTextUnion}
+      ),
+      fused AS (
+        SELECT r.id, SUM(r.rrf_component) AS rrf_score, COUNT(*) AS source_count
+        FROM rrf_scores r GROUP BY r.id
+      )
+      SELECT
+        f.id, cp.content, f.rrf_score, f.source_count,
+        cp.agent_id, COALESCE(a.name, 'Unknown') AS agent_name,
+        cp.subaccount_id, cp.created_at::text AS created_at,
+        f.rrf_score * ${weights.rrf}
+          + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
+          + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
+              cp.created_at, COALESCE(cp.last_accessed_at, cp.created_at)
+            ))) / 86400.0 / 30.0)) * ${weights.recency} AS combined_score
+      FROM fused f
+      JOIN candidate_pool cp ON cp.id = f.id
+      LEFT JOIN agents a ON a.id = cp.agent_id
+      WHERE f.rrf_score >= ${RRF_MIN_SCORE}
+      ORDER BY combined_score DESC
+      LIMIT ${retrieveLimit}
+    `);
+    rrfRows = rows as unknown as HybridResult[];
+  } finally {
+    // Reset statement timeout to default (no limit) — must run even on timeout throws
+    await db.execute(sql`SET statement_timeout = '0'`);
+  }
 
-  // Reset statement timeout to default (no limit)
-  await db.execute(sql`SET statement_timeout = '0'`);
-
-  let results = rows as unknown as HybridResult[];
+  let results = rrfRows;
 
   // Safety fallback: if RRF floor removed all results, use semantic-only
   if (results.length === 0) {
@@ -431,7 +436,7 @@ async function _expandByRelation(
     id: string; content: string; agent_id: string | null;
     agent_name: string; subaccount_id: string; created_at: string;
   }>(sql`
-    SELECT DISTINCT ON (e.id)
+    SELECT
       e.id, e.content, e.agent_id,
       COALESCE(a.name, 'Unknown') AS agent_name,
       e.subaccount_id, e.created_at::text AS created_at
@@ -443,7 +448,7 @@ async function _expandByRelation(
         SELECT DISTINCT task_slug FROM workspace_memory_entries
         WHERE id = ANY(${existingIds}) AND task_slug IS NOT NULL
       )
-    ORDER BY e.id, e.created_at DESC
+    ORDER BY e.created_at DESC
     LIMIT ${maxExpansion}
   `);
 
@@ -1426,9 +1431,10 @@ async function deduplicateEntries(
     };
 
     const result: DedupeEntry[] = [];
-    for (let i = 0; i < parsed.ops.length; i++) {
+    const opsLimit = Math.min(parsed.ops.length, newEntries.length);
+    for (let i = 0; i < opsLimit; i++) {
       const op = parsed.ops[i];
-      const source = newEntries[i] ?? newEntries[newEntries.length - 1];
+      const source = newEntries[i];
       result.push({
         content: op.fact ?? source.content,
         entryType: source.entryType,

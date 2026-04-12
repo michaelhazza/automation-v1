@@ -623,17 +623,8 @@ export const queueService = {
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
-          const { agentBriefingService } = await import('./agentBriefingService.js');
-          await withTimeout(
-            agentBriefingService.updateAfterRun(
-              job.data.organisationId,
-              job.data.subaccountId,
-              job.data.agentId,
-              job.data.runId,
-              job.data.handoffJson ?? {},
-            ),
-            110_000,
-          );
+          const { runAgentBriefingUpdate } = await import('../jobs/agentBriefingJob.js');
+          await withTimeout(runAgentBriefingUpdate(job.data), 110_000);
         } catch (err) {
           if (isTimeoutError(err)) {
             logger.error('job_timeout', { queue: 'agent-briefing-update', jobId: job.id });

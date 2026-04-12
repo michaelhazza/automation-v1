@@ -169,6 +169,17 @@ export const PROVIDER_CALL_TIMEOUT_MS = 30000;
 /** How long (ms) a provider stays in cooldown after exhausting retries */
 export const PROVIDER_COOLDOWN_MS = 60000;
 
+// ── Phase 2D: Agent briefing ────────────────────────────────────────────────
+
+/** Hard token cap for stored briefings. Anything above is truncated. */
+export const BRIEFING_TOKEN_HARD_CAP = 1200;
+
+/** Number of recent high-quality memory entries to feed the briefing LLM. */
+export const BRIEFING_MEMORY_ENTRIES_LIMIT = 5;
+
+/** Minimum quality score for memory entries included in briefing context. */
+export const BRIEFING_MEMORY_QUALITY_THRESHOLD = 0.5;
+
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
 /** Max memory entries returned by vector search */

@@ -17,6 +17,10 @@ import type {
   PostToolResult,
 } from './types.js';
 
+// Per-run entity cache keyed by runId to avoid a DB round-trip on every tool call.
+// Entities are stable within a run — they do not change between tool calls.
+const _entityCache = new Map<string, Array<{ name: string; displayName: string }>>();
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -110,22 +114,28 @@ async function executeAsync(ctx: MiddlewareContext): Promise<PostToolResult> {
     return { action: 'continue' };
   }
 
-  // 3. Load valid workspace entities for this subaccount
+  // 3. Load valid workspace entities for this subaccount (cached per run)
   const subaccountId = ctx.request.subaccountId;
+  const organisationId = ctx.request.organisationId;
   if (!subaccountId) {
     return { action: 'continue' };
   }
 
-  const entities = await db
-    .select({ name: workspaceEntities.name, displayName: workspaceEntities.displayName })
-    .from(workspaceEntities)
-    .where(
-      and(
-        eq(workspaceEntities.subaccountId, subaccountId),
-        isNull(workspaceEntities.validTo),
-        isNull(workspaceEntities.deletedAt),
-      ),
-    );
+  let entities = _entityCache.get(ctx.runId);
+  if (!entities) {
+    entities = await db
+      .select({ name: workspaceEntities.name, displayName: workspaceEntities.displayName })
+      .from(workspaceEntities)
+      .where(
+        and(
+          eq(workspaceEntities.organisationId, organisationId),
+          eq(workspaceEntities.subaccountId, subaccountId),
+          isNull(workspaceEntities.validTo),
+          isNull(workspaceEntities.deletedAt),
+        ),
+      );
+    _entityCache.set(ctx.runId, entities);
+  }
 
   if (entities.length === 0) {
     // No known entities — nothing to cross-check against
