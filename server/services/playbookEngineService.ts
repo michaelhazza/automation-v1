@@ -48,9 +48,19 @@ import type {
   PlaybookRun,
   PlaybookStepRun,
 } from '../db/schema/index.js';
-import type { PlaybookDefinition, PlaybookStep, RunContext } from '../lib/playbook/types.js';
+import type { PlaybookDefinition, PlaybookStep, RunContext, AgentDecisionStep } from '../lib/playbook/types.js';
 import { hashValue } from '../lib/playbook/hash.js';
 import { renderString, resolveInputs as resolveTemplateInputs, TemplatingError } from '../lib/playbook/templating.js';
+import {
+  computeSkipSet,
+  parseDecisionOutput,
+} from '../lib/playbook/agentDecisionPure.js';
+import { renderAgentDecisionEnvelope } from '../lib/playbook/agentDecisionEnvelope.js';
+import {
+  MAX_DECISION_RETRIES,
+  DEFAULT_DECISION_STEP_TIMEOUT_SECONDS,
+  DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS,
+} from '../config/limits.js';
 import { logger } from '../lib/logger.js';
 import { emitPlaybookRunUpdate, emitSubaccountUpdate } from '../websocket/emitters.js';
 import { getPgBoss } from '../lib/pgBossInstance.js';
@@ -112,6 +122,87 @@ function computeReadySet(def: PlaybookDefinition, stepRuns: PlaybookStepRun[]): 
     if (depsMet) ready.push(step);
   }
   return ready;
+}
+
+/**
+ * Materialise pending step run rows for any step in the definition that has
+ * all its dependencies in a terminal state (completed or skipped) but does
+ * not yet have a live row of its own.
+ *
+ * This is the "subsequent steps are created by the engine as dependencies
+ * complete" mechanism described in the createStepRunsForNewRun comment.
+ * It is called at the start of every tick, before computeReadySet, so that
+ * the ready-set computation always operates on a fully-materialised view.
+ *
+ * Rules:
+ *   - All deps completed or skipped → create a pending row (step may run).
+ *   - All deps skipped → create a skipped row directly (transitively skipped).
+ *   - Entry steps (no deps) — should already have rows; if missing, create pending.
+ *   - Steps with some deps not yet terminal — do nothing (not ready yet).
+ *
+ * Returns the number of rows materialised (for logging).
+ */
+async function materialisePendingStepRuns(
+  runId: string,
+  def: PlaybookDefinition,
+  liveStepRuns: PlaybookStepRun[]
+): Promise<number> {
+  const existingStepIds = new Set(liveStepRuns.map((s) => s.stepId));
+  const terminalStepIds = new Set(
+    liveStepRuns
+      .filter((s) => s.status === 'completed' || s.status === 'skipped')
+      .map((s) => s.stepId)
+  );
+
+  let materialised = 0;
+  for (const step of def.steps) {
+    if (existingStepIds.has(step.id)) continue; // already has a live row
+
+    if (step.dependsOn.length === 0) {
+      // Entry step with no row — should have been created at run start.
+      // Create it now as a safety net.
+      try {
+        await db.insert(playbookStepRuns).values({
+          runId,
+          stepId: step.id,
+          stepType: step.type,
+          status: 'pending',
+          sideEffectType: step.sideEffectType,
+          dependsOn: step.dependsOn,
+        });
+        materialised++;
+      } catch {
+        // Unique constraint — another tick created it concurrently. Ignore.
+      }
+      continue;
+    }
+
+    const allDepsTerminal = step.dependsOn.every((d) => terminalStepIds.has(d));
+    if (!allDepsTerminal) continue; // not ready yet
+
+    const allDepsSkipped = step.dependsOn.every((d) => {
+      const sr = liveStepRuns.find((s) => s.stepId === d);
+      return sr?.status === 'skipped';
+    });
+    const status = allDepsSkipped ? 'skipped' : 'pending';
+
+    try {
+      await db.insert(playbookStepRuns).values({
+        runId,
+        stepId: step.id,
+        stepType: step.type,
+        status,
+        sideEffectType: step.sideEffectType,
+        dependsOn: step.dependsOn,
+        ...(status === 'skipped' ? { completedAt: new Date() } : {}),
+      });
+      materialised++;
+    } catch {
+      // Unique constraint — concurrent tick handled it. Ignore.
+    }
+  }
+
+  return materialised;
 }
 
 /**
@@ -367,15 +458,30 @@ export const playbookEngineService = {
       return;
     }
 
-    const stepRunRows = await db
+    let stepRunRows = await db
       .select()
       .from(playbookStepRuns)
       .where(eq(playbookStepRuns.runId, runId));
 
     // Group by liveness — invalidated/failed are audit-only.
-    const liveStepRuns = stepRunRows.filter(
+    let liveStepRuns = stepRunRows.filter(
       (s) => s.status !== 'invalidated' && s.status !== 'failed'
     );
+
+    // Materialise pending/skipped rows for steps whose deps are now all terminal.
+    // This is the "subsequent steps are created by the engine as dependencies
+    // complete" mechanism (see materialisePendingStepRuns for full semantics).
+    const materialised = await materialisePendingStepRuns(runId, def, liveStepRuns);
+    if (materialised > 0) {
+      // Reload so computeReadySet sees the newly-created rows.
+      stepRunRows = await db
+        .select()
+        .from(playbookStepRuns)
+        .where(eq(playbookStepRuns.runId, runId));
+      liveStepRuns = stepRunRows.filter(
+        (s) => s.status !== 'invalidated' && s.status !== 'failed'
+      );
+    }
 
     const ready = computeReadySet(def, liveStepRuns);
     const currentlyRunning = liveStepRuns.filter((s) => s.status === 'running').length;
@@ -593,6 +699,168 @@ export const playbookEngineService = {
         const output = result ? step.trueOutput : step.falseOutput;
         const outputHash = hashValue(output);
         await this.completeStepRunInternal(sr, output, outputHash, 'conditional');
+        return;
+      }
+
+      case 'agent_decision': {
+        // Replay mode hard block for decision steps (spec §6, §8).
+        if (run.replayMode) {
+          await this.replayDispatch(run, sr, step);
+          return;
+        }
+
+        // Supervised mode gate — decision steps in supervised mode require
+        // approval after the agent completes (handled in the completion handler),
+        // but the dispatch itself proceeds normally so the agent can make the call.
+        // NOTE: Unlike agent_call, we do NOT gate dispatch for supervised mode here —
+        // the reviewer sees the agent's tentative choice AFTER the agent runs,
+        // not before. The completion handler routes to HITL when appropriate.
+
+        const decisionStep = step as AgentDecisionStep;
+        const ctx = run.contextJson as unknown as RunContext;
+
+        // Resolve decisionPrompt via templating.
+        let resolvedDecisionPrompt: string;
+        try {
+          resolvedDecisionPrompt = step.decisionPrompt
+            ? renderString(step.decisionPrompt, ctx)
+            : 'Choose the most appropriate branch based on the context.';
+        } catch (err) {
+          if (err instanceof TemplatingError) {
+            await this.failStepRunInternal(
+              sr,
+              `templating_error: ${err.reason} ('${err.expression}')`
+            );
+            return;
+          }
+          throw err;
+        }
+
+        // Resolve agentInputs via templating (same as agent_call).
+        let resolvedAgentInputs: Record<string, unknown> = {};
+        try {
+          if (step.agentInputs) {
+            resolvedAgentInputs = resolveTemplateInputs(step.agentInputs, ctx);
+          }
+        } catch (err) {
+          if (err instanceof TemplatingError) {
+            await this.failStepRunInternal(
+              sr,
+              `templating_error: ${err.reason} ('${err.expression}')`
+            );
+            return;
+          }
+          throw err;
+        }
+
+        // Render the decision envelope (system prompt addendum).
+        const envelope = renderAgentDecisionEnvelope({
+          decisionPrompt: resolvedDecisionPrompt,
+          branches: decisionStep.branches,
+          minConfidence: decisionStep.minConfidence,
+          // No priorAttempt on first dispatch — populated on retries.
+        });
+
+        // Resolve the agent.
+        const resolvedAgentId = await this.resolveAgentForStep(run, step);
+        if (!resolvedAgentId) {
+          await this.failStepRunInternal(
+            sr,
+            `agent_not_found: ${step.agentRef?.kind ?? '?'}:${step.agentRef?.slug ?? '?'}`
+          );
+          return;
+        }
+
+        const dispatchInputHash = hashValue({
+          decisionPrompt: resolvedDecisionPrompt,
+          branches: decisionStep.branches,
+          agentInputs: resolvedAgentInputs,
+        });
+
+        // Mark the step as running.
+        await db
+          .update(playbookStepRuns)
+          .set({
+            status: 'running',
+            inputJson: {
+              decisionPrompt: resolvedDecisionPrompt,
+              agentInputs: resolvedAgentInputs,
+            } as unknown as Record<string, unknown>,
+            inputHash: dispatchInputHash,
+            startedAt: new Date(),
+            version: sr.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(playbookStepRuns.id, sr.id));
+
+        // Enqueue onto the playbook-agent-step queue. The worker creates
+        // the agent_runs row (with playbook_step_run_id) and runs executeRun.
+        // The completion hook fires when done.
+        //
+        // Key decision-specific additions:
+        //   - systemPromptAddendum: the rendered decision envelope
+        //   - allowedToolSlugs: [] (empty — no tools in decision steps; §18)
+        //   - timeoutSeconds: per-step override or DEFAULT_DECISION_STEP_TIMEOUT_SECONDS
+        const timeoutSeconds =
+          step.timeoutSeconds ?? DEFAULT_DECISION_STEP_TIMEOUT_SECONDS;
+        const idempotencyKey = `playbook:${run.id}:${step.id}:${sr.attempt}`;
+        const triggerContext: Record<string, unknown> = {
+          source: 'playbook',
+          playbookRunId: run.id,
+          playbookStepRunId: sr.id,
+          stepId: step.id,
+          attempt: sr.attempt,
+          agentInputs: resolvedAgentInputs,
+          isDecisionRun: true,
+        };
+
+        const pgboss = (await getPgBoss()) as unknown as {
+          send: (
+            name: string,
+            data: object,
+            options?: Record<string, unknown>
+          ) => Promise<string | null>;
+        };
+        await pgboss.send(
+          AGENT_STEP_QUEUE,
+          {
+            playbookStepRunId: sr.id,
+            playbookRunId: run.id,
+            organisationId: run.organisationId,
+            subaccountId: run.subaccountId,
+            agentId: resolvedAgentId,
+            stepId: step.id,
+            attempt: sr.attempt,
+            renderedPrompt: null,
+            resolvedAgentInputs,
+            sideEffectType: 'none' as const, // decision steps are always 'none'
+            systemPromptAddendum: envelope,
+            allowedToolSlugs: [] as string[],
+            timeoutSeconds,
+            isDecisionRun: true,
+            triggerContext,
+          },
+          {
+            ...getJobConfig('playbook-agent-step'),
+            singletonKey: idempotencyKey,
+            useSingletonQueue: true,
+          }
+        );
+
+        logger.info('playbook_decision_step_dispatched', {
+          event: 'decision.dispatched',
+          runId: run.id,
+          stepRunId: sr.id,
+          stepId: step.id,
+          resolvedAgentId,
+          branchesCount: decisionStep.branches.length,
+        });
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:decision:dispatched', {
+          stepRunId: sr.id,
+          stepId: step.id,
+          agentRunId: resolvedAgentId, // will be updated when agent run is created
+          branchesCount: decisionStep.branches.length,
+        });
         return;
       }
 
@@ -1555,6 +1823,7 @@ export const playbookEngineService = {
     const PER_STEP_PESSIMISTIC: Record<string, number> = {
       prompt: 20,
       agent_call: 60,
+      agent_decision: 20, // lightweight LLM call; tool-free
       user_input: 0,
       approval: 0,
       conditional: 0,
@@ -1735,8 +2004,11 @@ export const playbookEngineService = {
 
   /**
    * Hook called by the agent run completion path. Looks up the playbook
-   * step run linked to the agent run and routes to completeStepRun /
-   * failStepRun. Wired into agentRunService in step 6.
+   * step run linked to the agent run and routes to the appropriate handler:
+   *   - agent_decision steps → handleDecisionStepCompletion (parse + skip-set)
+   *   - all other types     → completeStepRun / failStepRun
+   *
+   * Wired into agentRunService in step 6.
    */
   async onAgentRunCompleted(
     agentRunId: string,
@@ -1757,11 +2029,285 @@ export const playbookEngineService = {
       });
       return;
     }
+
+    // Route decision steps through their dedicated completion handler.
+    if (sr.stepType === 'agent_decision') {
+      await this.handleDecisionStepCompletion(sr, result, agentRunId);
+      return;
+    }
+
     if (result.ok && result.output !== undefined) {
       await this.completeStepRun(sr.id, { output: result.output, via: 'agent_run' });
     } else {
       await this.failStepRun(sr.id, result.error ?? 'agent_run_failed');
     }
+  },
+
+  /**
+   * Completion handler for `agent_decision` steps.
+   *
+   * Spec §6 algorithm:
+   *   1. Load run + definition.
+   *   2. Parse agent output as AgentDecisionOutput (base schema + branch validation).
+   *   3. On parse failure: retry (up to MAX_DECISION_RETRIES) with the prior-attempt
+   *      envelope; on exhaustion, fail the step.
+   *   4. On success: compute the skip set, write the completed row + skipped rows +
+   *      merged context in a single transaction, then re-tick.
+   */
+  async handleDecisionStepCompletion(
+    sr: PlaybookStepRun,
+    result: { ok: boolean; output?: unknown; error?: string },
+    _agentRunId: string
+  ): Promise<void> {
+    // 1. Load run + definition + step.
+    const [run] = await db.select().from(playbookRuns).where(eq(playbookRuns.id, sr.runId));
+    if (!run) return;
+
+    const def = await loadDefinitionForRun(run);
+    if (!def) {
+      await this.failStepRunInternal(sr, 'decision_replay_snapshot_missing');
+      return;
+    }
+
+    const step = findStepInDefinition(def, sr.stepId);
+    if (!step || step.type !== 'agent_decision') {
+      await this.failStepRunInternal(sr, 'internal: decision step type mismatch');
+      return;
+    }
+    const decisionStep = step as AgentDecisionStep;
+
+    // 2. Handle agent run failure (distinct from a bad parse — the agent didn't run).
+    if (!result.ok) {
+      await this.failStepRunInternal(sr, result.error ?? 'decision_agent_run_failed');
+      return;
+    }
+
+    // 3. Parse agent output.
+    const parseResult = parseDecisionOutput(result.output, decisionStep);
+    const inputJson = (sr.inputJson ?? {}) as Record<string, unknown>;
+    const retryCount = typeof inputJson.retryCount === 'number' ? inputJson.retryCount : 0;
+
+    if (!parseResult.ok) {
+      // Retry path.
+      if (retryCount < MAX_DECISION_RETRIES) {
+        const ctx = run.contextJson as unknown as RunContext;
+        let resolvedDecisionPrompt = decisionStep.decisionPrompt ?? '';
+        try {
+          resolvedDecisionPrompt = renderString(resolvedDecisionPrompt, ctx);
+        } catch {
+          // Use the raw template on render failure.
+        }
+
+        const rawStr =
+          typeof result.output === 'string'
+            ? result.output
+            : JSON.stringify(result.output ?? '');
+        const truncatedRaw = rawStr.slice(0, DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS);
+
+        const envelope = renderAgentDecisionEnvelope({
+          decisionPrompt: resolvedDecisionPrompt,
+          branches: decisionStep.branches,
+          minConfidence: decisionStep.minConfidence,
+          priorAttempt: {
+            errorMessage: parseResult.error.message,
+            rawOutput: truncatedRaw,
+          },
+        });
+
+        const resolvedAgentId = await this.resolveAgentForStep(run, step);
+        if (!resolvedAgentId) {
+          await this.failStepRunInternal(sr, 'decision_agent_run_failed: agent disappeared on retry');
+          return;
+        }
+
+        let resolvedAgentInputs: Record<string, unknown> = {};
+        try {
+          if (step.agentInputs) {
+            resolvedAgentInputs = resolveTemplateInputs(step.agentInputs, ctx);
+          }
+        } catch {
+          // Use empty on error.
+        }
+
+        // Bump retry count in the step run's inputJson.
+        await db
+          .update(playbookStepRuns)
+          .set({
+            inputJson: { ...inputJson, retryCount: retryCount + 1 } as unknown as Record<string, unknown>,
+            updatedAt: new Date(),
+          })
+          .where(eq(playbookStepRuns.id, sr.id));
+
+        const idempotencyKey = `playbook:${run.id}:${step.id}:${sr.attempt}:retry${retryCount + 1}`;
+        const pgboss = (await getPgBoss()) as unknown as {
+          send: (name: string, data: object, options?: Record<string, unknown>) => Promise<string | null>;
+        };
+        await pgboss.send(
+          AGENT_STEP_QUEUE,
+          {
+            playbookStepRunId: sr.id,
+            playbookRunId: run.id,
+            organisationId: run.organisationId,
+            subaccountId: run.subaccountId,
+            agentId: resolvedAgentId,
+            stepId: step.id,
+            attempt: sr.attempt,
+            renderedPrompt: null,
+            resolvedAgentInputs,
+            sideEffectType: 'none' as const,
+            systemPromptAddendum: envelope,
+            allowedToolSlugs: [] as string[],
+            timeoutSeconds: step.timeoutSeconds ?? DEFAULT_DECISION_STEP_TIMEOUT_SECONDS,
+            isDecisionRun: true,
+            triggerContext: {
+              source: 'playbook',
+              playbookRunId: run.id,
+              playbookStepRunId: sr.id,
+              stepId: step.id,
+              attempt: sr.attempt,
+              agentInputs: resolvedAgentInputs,
+              isDecisionRun: true,
+              retryCount: retryCount + 1,
+            },
+          },
+          {
+            ...getJobConfig('playbook-agent-step'),
+            singletonKey: idempotencyKey,
+            useSingletonQueue: true,
+          }
+        );
+
+        logger.info('playbook_decision_step_retrying', {
+          event: 'decision.retry',
+          runId: run.id,
+          stepRunId: sr.id,
+          stepId: step.id,
+          retryCount: retryCount + 1,
+          parseErrorCode: parseResult.error.code,
+        });
+        return;
+      }
+
+      // Max retries exceeded.
+      await this.failStepRunInternal(
+        sr,
+        `decision_parse_failure: ${parseResult.error.code}: ${parseResult.error.message}`
+      );
+      return;
+    }
+
+    // 4. Parse succeeded — apply the decision.
+    const { chosenBranchId, rationale, confidence } = parseResult.value;
+
+    // Compute skip set: all non-chosen branch steps that lack a live chosen ancestor.
+    const skipSet = computeSkipSet(def, step.id, chosenBranchId);
+
+    // Build the enriched step output.
+    const stepOutput: Record<string, unknown> = {
+      chosenBranchId,
+      rationale,
+      skippedStepIds: [...skipSet],
+      retryCount,
+      chosenByAgent: true,
+    };
+    if (confidence !== undefined) stepOutput.confidence = confidence;
+
+    // Context merge + size check.
+    const ctx = run.contextJson as unknown as RunContext;
+    const nextCtx = mergeStepOutputIntoContext(ctx, step.id, stepOutput);
+    const nextBytes = Buffer.byteLength(JSON.stringify(nextCtx), 'utf8');
+    try {
+      assertContextSize(nextBytes, run.id);
+    } catch {
+      await db
+        .update(playbookRuns)
+        .set({
+          status: 'failed',
+          error: 'context_overflow',
+          failedDueToStepId: step.id,
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(playbookRuns.id, run.id));
+      return;
+    }
+
+    const outputHash = hashValue(stepOutput);
+
+    // Single transaction: complete the decision step + create skipped rows + update context.
+    await db.transaction(async (tx) => {
+      // Mark decision step completed.
+      await tx
+        .update(playbookStepRuns)
+        .set({
+          status: 'completed',
+          outputJson: stepOutput as unknown as Record<string, unknown>,
+          outputHash,
+          completedAt: new Date(),
+          version: sr.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(playbookStepRuns.id, sr.id));
+
+      // Create skipped rows for each step in the skip set.
+      // If a row already exists (e.g. from a concurrent tick), mark it skipped.
+      for (const skippedStepId of skipSet) {
+        const skippedStepDef = findStepInDefinition(def, skippedStepId);
+        if (!skippedStepDef) continue;
+        try {
+          await tx.insert(playbookStepRuns).values({
+            runId: run.id,
+            stepId: skippedStepId,
+            stepType: skippedStepDef.type,
+            status: 'skipped',
+            sideEffectType: skippedStepDef.sideEffectType,
+            dependsOn: skippedStepDef.dependsOn,
+            completedAt: new Date(),
+          });
+        } catch {
+          // Unique constraint — row exists; mark it skipped.
+          await tx
+            .update(playbookStepRuns)
+            .set({ status: 'skipped', completedAt: new Date(), updatedAt: new Date() })
+            .where(
+              and(
+                eq(playbookStepRuns.runId, run.id),
+                eq(playbookStepRuns.stepId, skippedStepId)
+              )
+            );
+        }
+      }
+
+      // Update run context.
+      await tx
+        .update(playbookRuns)
+        .set({
+          contextJson: nextCtx as unknown as Record<string, unknown>,
+          contextSizeBytes: nextBytes,
+          updatedAt: new Date(),
+        })
+        .where(eq(playbookRuns.id, run.id));
+    });
+
+    logger.info('playbook_decision_step_completed', {
+      event: 'decision.completed',
+      runId: run.id,
+      stepRunId: sr.id,
+      stepId: step.id,
+      chosenBranchId,
+      skippedCount: skipSet.size,
+      retryCount,
+    });
+
+    await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:decision:completed', {
+      stepRunId: sr.id,
+      stepId: step.id,
+      chosenBranchId,
+      skippedStepIds: [...skipSet],
+      rationale,
+    });
+
+    await this.enqueueTick(run.id);
   },
 
   /**
@@ -1865,6 +2411,12 @@ export const playbookEngineService = {
           renderedPrompt: string | null;
           resolvedAgentInputs: Record<string, unknown>;
           sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible';
+          // Decision-step-specific fields (absent for non-decision steps).
+          systemPromptAddendum?: string;
+          allowedToolSlugs?: string[];
+          timeoutSeconds?: number;
+          isDecisionRun?: boolean;
+          triggerContext?: Record<string, unknown>;
         };
 
         // Re-verify the step run is still live before doing anything.
@@ -1895,7 +2447,9 @@ export const playbookEngineService = {
             );
 
           const idempotencyKey = `playbook:${data.playbookRunId}:${data.stepId}:${data.attempt}`;
-          const triggerContext: Record<string, unknown> = {
+          // Use caller-supplied triggerContext when present (decision retries carry
+          // extra fields like retryCount). Fall back to constructing it fresh.
+          const triggerContext: Record<string, unknown> = data.triggerContext ?? {
             source: 'playbook',
             playbookRunId: data.playbookRunId,
             playbookStepRunId: data.playbookStepRunId,
@@ -1903,7 +2457,7 @@ export const playbookEngineService = {
             attempt: data.attempt,
             agentInputs: data.resolvedAgentInputs,
           };
-          if (data.renderedPrompt) {
+          if (data.renderedPrompt && !triggerContext.prompt) {
             triggerContext.prompt = data.renderedPrompt;
           }
 

@@ -20,3 +20,32 @@ export {
   TemplatingError,
 } from './templating.js';
 export { validateDefinition, MAX_DAG_DEPTH } from './validator.js';
+export {
+  agentDecisionOutputBaseSchema,
+  agentDecisionBranchSchema,
+  composeDecisionOutputSchema,
+  decisionStepRunOutputSchema,
+} from './agentDecisionSchemas.js';
+export type {
+  AgentDecisionOutput,
+  AgentDecisionBranchValidated,
+  DecisionStepRunOutput,
+} from './agentDecisionSchemas.js';
+export {
+  computeSkipSet,
+  computeStepReadiness,
+  parseDecisionOutput,
+  validateDecisionStep,
+  renderBranchesTable,
+} from './agentDecisionPure.js';
+export type {
+  StepReadiness,
+  StepRunStatus,
+  DecisionParseResult,
+  DecisionParseError,
+  DecisionParseErrorCode,
+} from './agentDecisionPure.js';
+export {
+  renderAgentDecisionEnvelope,
+} from './agentDecisionEnvelope.js';
+export type { EnvelopeRenderContext } from './agentDecisionEnvelope.js';

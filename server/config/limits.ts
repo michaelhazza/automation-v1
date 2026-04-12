@@ -412,3 +412,35 @@ export const PLAN_MODE_SKILL_COUNT_THRESHOLD = 15;
  * active rerouting — requires 2-4 weeks of shadow-mode data first.
  */
 export const CRITIQUE_GATE_SHADOW_MODE = true;
+
+// ── Playbook agent_decision step ─────────────────────────────────────────────
+
+/**
+ * Maximum number of times the engine will retry a decision step whose agent
+ * run returned an invalid output (parse failure or unknown branch). After this
+ * many retries the engine falls back to `defaultBranchId` if set, otherwise
+ * the step fails. Spec: docs/playbook-agent-decision-step-spec.md §11, §25.3.
+ */
+export const MAX_DECISION_RETRIES = 3;
+
+/**
+ * Default timeout for a decision step if no per-step `timeoutSeconds` is set.
+ * Decision steps are single-shot LLM calls; 60 s is generous for any model tier.
+ * Spec: docs/playbook-agent-decision-step-spec.md §25.3.
+ */
+export const DEFAULT_DECISION_STEP_TIMEOUT_SECONDS = 60;
+
+/**
+ * Maximum number of branches allowed per `agent_decision` step (phase 1 cap).
+ * Keeps prompt size bounded and skip-set computation fast.
+ * Spec: docs/playbook-agent-decision-step-spec.md §9, §23.2, §25.3.
+ */
+export const MAX_DECISION_BRANCHES_PER_STEP = 8;
+
+/**
+ * Maximum characters of the prior agent output included in the retry envelope.
+ * Limits how much injected content can re-enter the conversation (§22.2).
+ * The `failureDetail` on the persisted failure row is a separate, shorter field.
+ * Spec: docs/playbook-agent-decision-step-spec.md §11, §22.2, §25.3.
+ */
+export const DECISION_RETRY_RAW_OUTPUT_TRUNCATE_CHARS = 1000;

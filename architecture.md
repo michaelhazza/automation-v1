@@ -910,7 +910,7 @@ Soft deletes on templates (`deletedAt`). Runs are append-only history.
 interface PlaybookStep {
   id: string;                    // stable within template version
   name: string;
-  type: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional';
+  type: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision';
   dependsOn: string[];           // ids of prior steps
   humanReviewRequired?: boolean; // pause for edit/approve before downstream consumes output
   outputSchema: JSONSchema;      // zod-validated; downstream steps rely on shape
@@ -921,6 +921,12 @@ interface PlaybookStep {
   formSchema?: JSONSchema;                       // for type: user_input — renders as form in UI
   condition?: string;                            // for type: conditional — JSONLogic expression
   inputs?: Record<string, string>;               // map of paramName -> template expression
+
+  // type: agent_decision
+  decisionPrompt?: string;                       // the question the agent must answer (templated)
+  branches?: AgentDecisionBranch[];              // 2–8 predeclared branches; agent picks one
+  defaultBranchId?: string;                      // fallback branch if all retries are exhausted
+  minConfidence?: number;                        // [0,1] threshold; below this → HITL escalation
 }
 
 interface PlaybookDefinition {
@@ -932,6 +938,34 @@ interface PlaybookDefinition {
 ### Side-effect classification (mandatory)
 
 Every step declares a `sideEffectType`: `none` | `idempotent` | `reversible` | `irreversible`. This drives mid-run editing safety — `none`/`idempotent` re-run automatically, `reversible` requires confirmation, `irreversible` is **default-blocked** with a "skip and reuse previous output" option. Snapshotted to `playbook_step_runs.side_effect_type` so it can't drift after the run starts.
+
+### `agent_decision` step type
+
+An `agent_decision` step lets an agent pick between predeclared downstream branches in the playbook DAG. It is the branching primitive for conditional multi-path playbooks.
+
+**Key properties:**
+- `branches` — array of 2–8 `AgentDecisionBranch` objects (`id`, `label`, `description`, `entrySteps`). Each `entrySteps` list names the first step(s) that belong to that branch; they must declare `dependsOn: [decisionStepId]`.
+- `decisionPrompt` — the templated question the agent answers. Rendered against run context before dispatch.
+- `defaultBranchId` — optional fallback branch when the agent exhausts retries. If absent, exhausted retries fail the step.
+- `minConfidence` — optional `[0,1]` threshold. When the agent returns a `confidence` value below this, the decision is escalated to HITL rather than applied automatically.
+
+**Dispatch flow:**
+1. Engine renders a *decision envelope* (via `renderAgentDecisionEnvelope()`) — a structured system prompt addendum that describes the decision, lists the branches, and includes the JSON output schema the agent must return.
+2. An `agentRun` is created with `systemPromptAddendum = envelope` and `allowedToolSlugs = []` (tool-free; agents read only the context already in the conversation).
+3. `agent_decision` always has `sideEffectType: 'none'`. Irreversible side effects are never valid.
+
+**Completion flow (handled by `handleDecisionStepCompletion`):**
+1. Parse agent output as `{ chosenBranchId, rationale, confidence? }` via `parseDecisionOutput()`.
+2. On parse failure: retry up to `MAX_DECISION_RETRIES` (3) times with a retry envelope that includes the prior-attempt error and raw output wrapped in a code fence (security: `spec §22.3`).
+3. On success: call `computeSkipSet(def, stepId, chosenBranchId)` → the set of non-chosen branch steps to skip.
+4. Single DB transaction: mark step completed, insert `skipped` rows for the skip set, update run context.
+
+**Skip set algorithm (`computeSkipSet`)** — O(V+E) forward BFS:
+- Seed set: entry steps of all non-chosen branches.
+- A step is added to the skip set only if it has no live (chosen-branch) ancestor — the "live ancestor short-circuit" keeps convergence steps alive.
+- Convergence steps (depending on multiple branches) remain `pending` and run normally once the chosen-branch steps complete.
+
+**Pure module:** `server/lib/playbook/agentDecisionPure.ts` is the single source of truth for all decision logic. It is synchronous, deterministic, and side-effect-free. The engine delegates; it never re-implements.
 
 ### Parameterization (Phase 1.5, column reserved in Phase 1)
 
@@ -956,8 +990,10 @@ pending → running → (awaiting_input | awaiting_approval) → running → com
    - `user_input` → set status `awaiting_input`, emit WebSocket event to inbox.
    - `approval` → create `reviewItem`, set status `awaiting_approval`.
    - `conditional` → evaluate JSONLogic synchronously, write output, mark `completed`.
+   - `agent_decision` → enqueue an `agentRun` with `systemPromptAddendum` (decision envelope) and empty `allowedToolSlugs`. On completion, parse `chosenBranchId`, compute skip set via `computeSkipSet()`, atomically mark chosen-branch steps pending and non-chosen-branch steps `skipped`.
 5. On any step completion (webhook from agent run, form submission, approval decision), validate output against `outputSchema`, merge into `run.contextJson`, re-enqueue a tick.
-6. If all steps `completed`, mark run `completed`. If any non-retryable failure and no alternative branch, mark `failed`.
+6. Materialise pending step run rows for newly-unblocked steps (deps all terminal) at the start of every tick. Transitively-skipped steps get a `skipped` row directly.
+7. If all steps `completed` or `skipped`, mark run `completed`. If any non-retryable failure and no alternative branch, mark `failed`.
 
 **Parallelism is free** — multiple ready steps dispatch simultaneously. Linear runs are just DAGs where every step depends on its predecessor.
 
