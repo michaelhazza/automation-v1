@@ -192,6 +192,7 @@ function TrialCountdown() {
   if (status !== 'trialing' || !trialEndsAt) return null;
 
   const msLeft = new Date(trialEndsAt).getTime() - Date.now();
+  if (msLeft <= 0) return null;
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
 
   let label = '';
@@ -746,9 +747,6 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Company" />
               {hasOrgPerm('org.agents.view') && (
                 <NavItem to="/org-chart" icon={<Icons.orgs />} label="Org Chart" />
-              )}
-              {hasOrgPerm('org.agents.view') && (
-                <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
               )}
               {hasOrgPerm('org.subaccounts.view') && (
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />

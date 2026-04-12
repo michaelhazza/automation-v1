@@ -48,11 +48,11 @@ export default function ClientPulseDashboardPage({ user }: Props) {
 
   useEffect(() => {
     Promise.all([
-      api.get('/api/clientpulse/health-summary').catch(() => null),
-      api.get('/api/clientpulse/high-risk').catch(() => null),
-      api.get('/api/reports/latest').catch(() => null),
-      api.get('/api/my-subscription').catch(() => null),
-      api.get('/api/onboarding/status').catch(() => null),
+      api.get('/api/clientpulse/health-summary').catch((e) => { console.warn('health-summary failed', e); return null; }),
+      api.get('/api/clientpulse/high-risk').catch((e) => { console.warn('high-risk failed', e); return null; }),
+      api.get('/api/reports/latest').catch((e) => { console.warn('reports/latest failed', e); return null; }),
+      api.get('/api/my-subscription').catch((e) => { console.warn('my-subscription failed', e); return null; }),
+      api.get('/api/onboarding/status').catch((e) => { console.warn('onboarding/status failed', e); return null; }),
     ]).then(([healthRes, riskRes, reportRes, subRes, onboardingRes]) => {
       if (healthRes?.data) setHealth(healthRes.data);
       if (riskRes?.data?.clients) setHighRisk(riskRes.data.clients);
@@ -64,6 +64,7 @@ export default function ClientPulseDashboardPage({ user }: Props) {
 
   // Live dashboard updates
   useSocket('dashboard:update', useCallback((data: unknown) => {
+    if (!data || typeof data !== 'object') return;
     const update = data as Partial<HealthSummary>;
     setHealth((prev) => prev ? { ...prev, ...update } : prev);
     toast.success('Dashboard updated with latest data');

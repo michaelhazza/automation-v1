@@ -96,27 +96,41 @@ export default function GuidedTour({ forceShow = false }: GuidedTourProps) {
     }
   }, [forceShow]);
 
+  const dismiss = () => {
+    setActive(false);
+    localStorage.setItem(TOUR_KEY, '1');
+  };
+
   useEffect(() => {
     if (!active) return;
     const currentStep = TOUR_STEPS[step];
     if (!currentStep) return;
 
-    const el = document.getElementById(currentStep.targetId);
-    if (!el) {
-      // Target not found — skip to next
-      if (step < TOUR_STEPS.length - 1) setStep((s) => s + 1);
-      return;
-    }
+    const recalc = () => {
+      const el = document.getElementById(currentStep.targetId);
+      if (!el) {
+        // Target not found — skip to next or dismiss if already at last step
+        if (step >= TOUR_STEPS.length - 1) {
+          dismiss();
+        } else {
+          setStep((s) => s + 1);
+        }
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      highlightRef.current = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+      setPos(getTooltipPosition(el, currentStep.placement));
+    };
 
-    const rect = el.getBoundingClientRect();
-    highlightRef.current = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
-    setPos(getTooltipPosition(el, currentStep.placement));
+    recalc();
+    window.addEventListener('scroll', recalc, { passive: true });
+    window.addEventListener('resize', recalc);
+    return () => {
+      window.removeEventListener('scroll', recalc);
+      window.removeEventListener('resize', recalc);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, step]);
-
-  const dismiss = () => {
-    setActive(false);
-    localStorage.setItem(TOUR_KEY, '1');
-  };
 
   const next = () => {
     if (step < TOUR_STEPS.length - 1) {
