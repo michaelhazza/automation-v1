@@ -37,6 +37,7 @@ import {
   RERANKER_MAX_CALLS_PER_RUN,
   HYDE_THRESHOLD,
   HYDE_MAX_TOKENS,
+  DOMINANCE_THRESHOLD,
   type EntryType,
 } from '../config/limits.js';
 import { rerank } from '../lib/reranker.js';
@@ -350,10 +351,9 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
     }));
   }
 
-  // Phase 1B: Dominance-ratio confidence gating — skip reranker when results
-  // are ambiguous (top two scores too close). Prevents LLM reranker from
-  // synthesising confident-sounding results on uncertain retrieval.
-  const DOMINANCE_THRESHOLD = 1.2;
+  // Phase 1B: Dominance-ratio confidence gating — skip reranker and graph
+  // expansion when results are ambiguous (top two scores too close). Prevents
+  // amplifying uncertain retrieval with reranking or relational expansion.
   let dominanceGated = false;
   if (results.length >= 2) {
     const dominanceRatio = results[0].combined_score / results[1].combined_score;
@@ -387,7 +387,9 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
 
   // Phase 1C: Graph-aware context expansion — follow relational edges to
   // surface connected memories that vector search may miss.
-  if (results.length > 0) {
+  // Gated on dominance confidence: when results are ambiguous, expansion
+  // would amplify noise rather than enrich context.
+  if (results.length > 0 && !dominanceGated) {
     const expanded = await _expandByRelation(results, scopeFilter, 5);
     if (expanded.length > 0) {
       const existingIds = new Set(results.map(r => r.id));

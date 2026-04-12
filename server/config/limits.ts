@@ -169,6 +169,15 @@ export const PROVIDER_CALL_TIMEOUT_MS = 30000;
 /** How long (ms) a provider stays in cooldown after exhausting retries */
 export const PROVIDER_COOLDOWN_MS = 60000;
 
+// ── Phase 1B: Dominance-ratio confidence gating ────────────────────────────
+
+/**
+ * Minimum ratio of top-1 score / top-2 score before the retrieval is
+ * considered confident. Below this threshold, reranking and graph expansion
+ * are skipped to prevent amplifying ambiguous results.
+ */
+export const DOMINANCE_THRESHOLD = 1.2;
+
 // ── Phase 2D: Agent briefing ────────────────────────────────────────────────
 
 /** Hard token cap for stored briefings. Anything above is truncated. */

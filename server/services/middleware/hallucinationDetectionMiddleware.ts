@@ -21,6 +21,20 @@ import type {
 // Entities are stable within a run — they do not change between tool calls.
 const _entityCache = new Map<string, Array<{ name: string; displayName: string }>>();
 
+/**
+ * Common phrases that look like entity references but aren't. These appear
+ * frequently in agent output and would generate false-positive hallucination
+ * warnings. All comparisons are case-insensitive.
+ */
+const ENTITY_STOPLIST = new Set([
+  'action items', 'best practices', 'data source', 'data sources',
+  'next steps', 'key findings', 'follow up', 'high priority',
+  'low priority', 'task list', 'time zone', 'status update',
+  'work in progress', 'pull request', 'code review', 'due date',
+  'start date', 'end date', 'team lead', 'project manager',
+  'action plan', 'meeting notes', 'open issues', 'known issues',
+]);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -52,7 +66,8 @@ function extractEntityReferences(text: string): string[] {
     refs.add(match[1]);
   }
 
-  return Array.from(refs);
+  // Filter out common false-positive phrases
+  return Array.from(refs).filter(r => !ENTITY_STOPLIST.has(r.toLowerCase()));
 }
 
 /**

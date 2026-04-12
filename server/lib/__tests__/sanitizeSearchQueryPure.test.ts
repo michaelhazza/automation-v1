@@ -71,5 +71,27 @@ test('short question under 10 chars falls through to last sentence', () => {
   assert(result === 'Check the client platform setup and integration requirements.', `got: ${result}`);
 });
 
+test('long multi-clause query without agent noise preserves structure via head-truncate', () => {
+  const query = 'Compare client A vs client B performance over last 3 months including revenue growth, churn rates, and customer acquisition costs across all product lines and geographic segments. Also include NPS trends and support ticket resolution rates for both accounts.';
+  assert(query.length > 200, `query too short: ${query.length}`);
+  const result = sanitizeSearchQuery(query);
+  // No agent noise → should preserve from the beginning, not extract last sentence
+  assert(result.startsWith('Compare client A vs client B'), `expected head preserved, got: ${result.slice(0, 50)}`);
+  assert(result.length === 200, `expected 200 chars, got: ${result.length}`);
+});
+
+test('long query with agent preamble still extracts meaningful part', () => {
+  const input = 'Let me search the workspace memory for relevant information. I should look at previous run data to find insights about this particular client account and their historical engagement patterns across multiple quarters. ' + 'What are the client retention metrics?';
+  const result = sanitizeSearchQuery(input);
+  // Has agent noise → lossy extraction fires → question gets extracted
+  assert(result === 'What are the client retention metrics?', `got: ${result}`);
+});
+
+test('long query with "searching for" noise applies sentence extraction', () => {
+  const input = 'I am searching for information about pricing strategies and competitive analysis data from prior runs that I stored in the workspace memory system. The client prefers value-based pricing with tiered discounts.';
+  const result = sanitizeSearchQuery(input);
+  assert(result === 'The client prefers value-based pricing with tiered discounts.', `got: ${result}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
