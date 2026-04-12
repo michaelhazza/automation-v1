@@ -150,19 +150,30 @@ ADD CONSTRAINT org_subaccount_active_only
 CHECK (NOT (is_org_subaccount = true AND status != 'active'));
 
 -- 5. Backfill: create org subaccount for every existing org that doesn't have one
--- Slug uses org ID prefix to avoid collision with existing 'org-hq' subaccounts
+--
+-- Slug collision strategy: use full UUID to guarantee uniqueness against the
+-- existing (organisation_id, slug) unique index. A normal subaccount could
+-- already have slug 'org-hq' or 'org-hq-<prefix>', so we use the full
+-- generated ID to make collisions impossible. The slug is internal — users
+-- see the name ("[Org Name] Workspace"), not the slug.
+--
+-- Alternative considered: detect collision and pick another slug. Rejected
+-- because a single deterministic INSERT is simpler and the slug is not
+-- user-facing in practice.
+
 INSERT INTO subaccounts (id, organisation_id, name, slug, status, is_org_subaccount, include_in_org_inbox, created_at, updated_at)
 SELECT
-  gen_random_uuid(),
+  new_id,
   o.id,
   o.name || ' Workspace',
-  'org-hq-' || substring(o.id::text, 1, 8),
+  'org-hq-' || new_id::text,
   'active',
   true,
   true,
   NOW(),
   NOW()
 FROM organisations o
+CROSS JOIN LATERAL (SELECT gen_random_uuid() AS new_id) ids
 WHERE NOT EXISTS (
   SELECT 1 FROM subaccounts s
   WHERE s.organisation_id = o.id
@@ -510,7 +521,7 @@ When a hierarchy template is applied to a subaccount AND includes the Portfolio 
 ### 9d. Org subaccount auto-provisioning
 
 When a new organisation is created:
-1. Create the org subaccount (`isOrgSubaccount: true`, name: `[Org Name] Workspace`, slug: `org-hq-{orgId prefix}`)
+1. Create the org subaccount (`isOrgSubaccount: true`, name: `[Org Name] Workspace`, slug: `org-hq-{generated UUID}`)
 2. Init board config from org template
 3. Create workspace memory for the org subaccount
 4. Auto-link all system agents allowed by the org's subscription tier
@@ -540,7 +551,7 @@ Mark as deprecated. Callers migrate to `subaccountAgentService` with the org sub
 
 ### 10d. `server/services/orgMemoryService.ts` — deprecate
 
-After data migration to workspace memory, this service is no longer needed for new writes. Keep read-only access during transition for any code that still references org memory. Remove in Phase 2.
+Memory migration happens in Phase 1. After migration, this service is fully deprecated — no new reads or writes. Keep the file during Phase 1 (in case rollback is needed) but mark as deprecated. Remove in Phase 2.
 
 ### 10e. `server/routes/subaccounts.ts` — guard org subaccount
 
@@ -585,9 +596,9 @@ Search for client-side references to `/api/org/tasks` or `/api/org/agent-configs
 | Item | Phase 1 (this spec) | Phase 2 (cleanup) |
 |---|---|---|
 | `org_agent_configs` table | Data migrated; table kept read-only | Drop table + migration |
-| `org_memories` / `org_memory_entries` tables | Data migrated; tables kept read-only | Drop tables + migration |
+| `org_memories` / `org_memory_entries` tables | Data migrated to workspace memory; tables kept read-only as backup | Drop tables + migration |
 | `orgAgentConfigService.ts` | Marked deprecated; no new callers | Delete file |
-| `orgMemoryService.ts` | Marked deprecated for writes | Delete file |
+| `orgMemoryService.ts` | Marked deprecated; no new reads or writes | Delete file |
 | `orgWorkspace.ts` routes | Removed (501 stubs) | N/A |
 | `buildOrgTeamRoster()` | Removed | N/A |
 | `AGENT_ORG_RUN_QUEUE` | Removed; schedules migrated | N/A |
@@ -631,13 +642,13 @@ If failure rate for org subaccount agents exceeds 2x the pre-migration baseline 
 
 ## 14. Verification Plan
 
-### 13a. Pre-migration checks
+### 14a. Pre-migration checks
 
 - [ ] Count `org_agent_configs` rows per org — verify all will map to org subaccount
 - [ ] Count `org_memory_entries` — verify data volume is reasonable for migration
 - [ ] Verify no `subaccount_agents` conflicts (same agent already linked to what will be the org subaccount)
 
-### 13b. Post-migration checks
+### 14b. Post-migration checks
 
 - [ ] Every org has exactly one subaccount with `is_org_subaccount = true`
 - [ ] Every `org_agent_configs` row has a corresponding `subaccount_agents` row in the org subaccount
@@ -652,7 +663,7 @@ If failure rate for org subaccount agents exceeds 2x the pre-migration baseline 
 - [ ] `npm run lint` passes
 - [ ] `npm test` passes (all existing tests)
 
-### 13c. New tests to write
+### 14c. New tests to write
 
 - [ ] `orgSubaccountCreation.test.ts` — org creation auto-creates org subaccount
 - [ ] `orgSubaccountGuards.test.ts` — cannot delete, cannot suspend org subaccount (DB constraint rejects)
@@ -666,25 +677,31 @@ If failure rate for org subaccount agents exceeds 2x the pre-migration baseline 
 
 ### Phase 1: Foundation (this spec)
 
-1. Schema migration: `isOrgSubaccount` column + backfill
+1. Schema migration: `isOrgSubaccount` column + backfill + DB constraints
 2. Org creation hook: auto-create org subaccount
-3. Subaccount deletion guard
-4. Data migration: `orgAgentConfigs` → `subaccountAgents`
-5. Execution service: remove `isOrgRun` branching
-6. Scheduling: remove `AGENT_ORG_RUN_QUEUE`, migrate to standard queue
-7. Intelligence skills: remove org-only guards
-8. Seed: update Portfolio Health Agent definition
-9. Remove `orgWorkspace.ts` routes
-10. Verification
+3. Subaccount deletion/status guards (service layer + DB CHECK constraints)
+4. Data migration: `orgAgentConfigs` → `subaccountAgents` (true upsert)
+5. Data migration: `orgMemories` / `orgMemoryEntries` → workspace memory (with provenance metadata)
+6. Execution service: remove `isOrgRun` branching
+7. Scheduling: remove `AGENT_ORG_RUN_QUEUE`, migrate to standard queue + cleanup orphan jobs
+8. Intelligence skills: remove org-only guards + add cross-subaccount access guard
+9. Seed: update Portfolio Health Agent definition
+10. Remove `orgWorkspace.ts` routes
+11. Observability: temporary metrics + rollback signal
+12. Verification (all migration state flags checked, regression test passes)
+
+> Memory migration is in Phase 1 (not deferred) because org agents running in
+> the org subaccount need workspace memory available immediately. Without it,
+> the Portfolio Health Agent loses its accumulated context.
 
 ### Phase 2: Cleanup (follow-up)
 
-1. Data migration: `orgMemories` → workspace memory (lower risk, can be async)
-2. Deprecate `orgAgentConfigService`, `orgMemoryService`
-3. UI: org subaccount visual distinction (pin to top, HQ label)
-4. Drop `org_agent_configs` table
-5. Drop `org_memories` / `org_memory_entries` tables
-6. Clean up `executionScope` column semantics
+1. Deprecate and remove `orgAgentConfigService`, `orgMemoryService`
+2. UI: org subaccount in separate section, "[Org Name] Workspace" label
+3. Drop `org_agent_configs` table (data already migrated + backed up)
+4. Drop `org_memories` / `org_memory_entries` tables (data already migrated + backed up)
+5. Clean up `executionScope` column semantics
+6. Rename `orgExecutionEnabled` → `executionEnabled` on organisations table
 
 ---
 
