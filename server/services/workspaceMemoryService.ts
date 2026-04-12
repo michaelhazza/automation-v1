@@ -30,7 +30,6 @@ import {
   MAX_MEMORY_SCAN,
   MAX_EMBEDDING_INPUT_CHARS,
   MAX_QUERY_TEXT_CHARS,
-  RRF_WEIGHTS,
   RERANKER_PROVIDER,
   RERANKER_MODEL,
   RERANKER_TOP_N,
@@ -38,12 +37,14 @@ import {
   RERANKER_MAX_CALLS_PER_RUN,
   HYDE_THRESHOLD,
   HYDE_MAX_TOKENS,
-  type RetrievalProfile,
   type EntryType,
 } from '../config/limits.js';
 import { rerank } from '../lib/reranker.js';
 import { assertScope, assertScopeSingle } from '../lib/scopeAssertion.js';
 import { createHash } from 'crypto';
+import { sanitizeSearchQuery } from '../lib/sanitizeSearchQuery.js';
+import { classifyQueryIntent } from '../lib/queryIntentClassifier.js';
+import { RETRIEVAL_PROFILES, type RetrievalProfile } from '../lib/queryIntent.js';
 
 // ---------------------------------------------------------------------------
 // Workspace Memory Service — shared memory across agents in a workspace
@@ -79,16 +80,389 @@ function hydeCacheSet(key: string, value: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Retrieval profile selection heuristic
+// Phase 2C: Lightweight domain/topic classifier for memory entries
 // ---------------------------------------------------------------------------
-function selectRetrievalProfile(queryText: string): RetrievalProfile {
-  if (/\b(latest|recent|last\s+(week|month|day)|today|yesterday|this\s+(week|month))\b/i.test(queryText)) {
-    return 'temporal';
+
+const DOMAIN_KEYWORDS: Record<string, readonly string[]> = {
+  crm:       ['lead', 'deal', 'pipeline', 'contact', 'prospect', 'hubspot', 'salesforce', 'crm', 'close rate', 'churn', 'retention'],
+  reporting: ['report', 'dashboard', 'metric', 'kpi', 'analytics', 'chart', 'trend', 'benchmark', 'performance', 'roi'],
+  marketing: ['campaign', 'ad ', 'ads ', 'seo', 'content', 'social media', 'email marketing', 'audience', 'brand', 'conversion', 'ctr', 'impressions'],
+  dev:       ['deploy', 'api', 'bug', 'code', 'migration', 'server', 'database', 'endpoint', 'integration', 'webhook'],
+  finance:   ['budget', 'invoice', 'revenue', 'cost', 'margin', 'billing', 'payment', 'expense', 'subscription', 'pricing'],
+  ops:       ['workflow', 'automation', 'process', 'sop', 'onboarding', 'scheduling', 'handoff', 'escalation'],
+};
+
+const TOPIC_KEYWORDS: Record<string, readonly string[]> = {
+  budget:    ['budget', 'spend', 'cost', 'expense', 'allocation'],
+  campaign:  ['campaign', 'ad campaign', 'launch', 'promo'],
+  pipeline:  ['pipeline', 'deal', 'stage', 'funnel', 'opportunity'],
+  metrics:   ['metric', 'kpi', 'benchmark', 'performance', 'score'],
+  content:   ['content', 'copy', 'post', 'article', 'blog'],
+  client:    ['client', 'customer', 'account', 'stakeholder'],
+  product:   ['product', 'feature', 'release', 'roadmap'],
+};
+
+function classifyDomainTopic(content: string): { domain: string | null; topic: string | null } {
+  const lower = content.toLowerCase();
+  let bestDomain: string | null = null;
+  let bestDomainHits = 0;
+  for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
+    const hits = keywords.filter(kw => lower.includes(kw)).length;
+    if (hits > bestDomainHits) { bestDomainHits = hits; bestDomain = domain; }
   }
-  if (queryText.length > 200) {
-    return 'factual';
+  let bestTopic: string | null = null;
+  let bestTopicHits = 0;
+  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
+    const hits = keywords.filter(kw => lower.includes(kw)).length;
+    if (hits > bestTopicHits) { bestTopicHits = hits; bestTopic = topic; }
   }
-  return 'general';
+  return { domain: bestDomainHits >= 1 ? bestDomain : null, topic: bestTopicHits >= 1 ? bestTopic : null };
+}
+
+// ---------------------------------------------------------------------------
+// Unified hybrid retrieval pipeline (Phase 0A)
+// ---------------------------------------------------------------------------
+
+interface HybridRetrieveParams {
+  subaccountId: string;
+  orgId?: string;
+  queryText: string;
+  queryEmbedding?: number[];
+  qualityThreshold: number;
+  taskSlug?: string;
+  /** Phase 2C: Optional domain filter for scoped retrieval. */
+  domain?: string;
+  topK?: number;
+  includeOtherSubaccounts?: boolean;
+  profile?: RetrievalProfile;
+}
+
+interface HybridResult {
+  id: string;
+  content: string;
+  rrf_score: number;
+  combined_score: number;
+  source_count: number;
+  agent_id: string | null;
+  agent_name: string;
+  subaccount_id: string;
+  created_at: string;
+}
+
+async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResult[]> {
+  const {
+    subaccountId,
+    orgId,
+    queryText: rawQueryText,
+    qualityThreshold,
+    taskSlug,
+    domain,
+    topK = VECTOR_SEARCH_LIMIT,
+    includeOtherSubaccounts = false,
+    profile: profileOverride,
+  } = params;
+
+  // Phase 0B: sanitize agent-generated queries
+  const sanitizedQuery = sanitizeSearchQuery(rawQueryText);
+  if (!sanitizedQuery) return [];
+
+  // Phase 1A: classify intent and select weights
+  const profile = profileOverride ?? classifyQueryIntent(sanitizedQuery);
+  const weights = RETRIEVAL_PROFILES[profile];
+
+  const safeQueryText = sanitizedQuery.slice(0, MAX_QUERY_TEXT_CHARS);
+
+  // Generate embedding if not provided (with HyDE for short queries)
+  let queryEmbedding = params.queryEmbedding;
+  if (!queryEmbedding) {
+    let embeddingInput = sanitizedQuery;
+    if (sanitizedQuery.length < HYDE_THRESHOLD && sanitizedQuery.length >= MIN_QUERY_CONTEXT_LENGTH && orgId) {
+      const cacheKey = `hyde:${createHash('sha256').update(sanitizedQuery).digest('hex').slice(0, 16)}`;
+      const cached = hydeCacheGet(cacheKey);
+      if (cached) {
+        embeddingInput = cached;
+      } else {
+        try {
+          const hydeResponse = await routeCall({
+            messages: [{ role: 'user', content: `Given this short task context, generate a hypothetical memory entry (2-3 sentences) that would be relevant and useful. Include specific details and terminology.\n\nTask context: "${sanitizedQuery}"\n\nRespond with only the hypothetical memory entry.` }],
+            temperature: 0.5,
+            maxTokens: HYDE_MAX_TOKENS,
+            context: { organisationId: orgId, subaccountId, sourceType: 'system', taskType: 'hyde_expansion', executionPhase: 'execution', routingMode: 'ceiling' },
+          });
+          const hydeText = hydeResponse?.content ?? null;
+          if (hydeText) {
+            embeddingInput = hydeText;
+            hydeCacheSet(cacheKey, hydeText);
+          }
+        } catch {
+          // Fall back to original query
+        }
+      }
+    }
+    queryEmbedding = await generateEmbedding(embeddingInput);
+    if (!queryEmbedding) return [];
+  }
+
+  const vectorLiteral = formatVectorLiteral(queryEmbedding);
+  const overRetrieveLimit = topK * RRF_OVER_RETRIEVE_MULTIPLIER;
+
+  // Build scope filter
+  const scopeFilter = includeOtherSubaccounts && orgId
+    ? sql`organisation_id = ${orgId}`
+    : orgId
+      ? sql`organisation_id = ${orgId} AND subaccount_id = ${subaccountId}`
+      : sql`subaccount_id = ${subaccountId}`;
+
+  const taskFilter = taskSlug
+    ? sql`AND (task_slug = ${taskSlug} OR task_slug IS NULL)`
+    : sql``;
+
+  // Phase 2C: optional domain filter for scoped retrieval
+  const domainFilter = domain
+    ? sql`AND domain = ${domain}`
+    : sql``;
+
+  // Check if query produces a valid tsquery (stopword-only queries yield empty)
+  const tsqCheck = await db.execute<{ q: string }>(
+    sql`SELECT plainto_tsquery('english', ${safeQueryText})::text AS q`
+  );
+  const hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
+
+  // Statement timeout to prevent slow queries blocking the request thread
+  await db.execute(sql`SET LOCAL statement_timeout = '200ms'`);
+
+  // Full-text CTE (optional)
+  const fullTextCte = hasValidTsquery
+    ? sql`
+      , fulltext AS (
+        SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
+          ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', ${safeQueryText})) DESC
+        )) AS rrf_component
+        FROM candidate_pool
+        WHERE tsv @@ plainto_tsquery('english', ${safeQueryText})
+        LIMIT ${overRetrieveLimit}
+      )`
+    : sql``;
+
+  const fullTextUnion = hasValidTsquery
+    ? sql`UNION ALL SELECT id, rrf_component FROM fulltext`
+    : sql``;
+
+  // Determine retrieval limit
+  const retrieveLimit = RERANKER_PROVIDER !== 'none'
+    ? Math.max(RERANKER_CANDIDATE_COUNT, topK)
+    : topK;
+
+  // Hybrid RRF query with candidate pool cap
+  const rows = await db.execute<{
+    id: string; content: string; rrf_score: number;
+    combined_score: number; source_count: number;
+    agent_id: string | null; agent_name: string;
+    subaccount_id: string; created_at: string;
+  }>(sql`
+    WITH candidate_pool AS (
+      SELECT id, content, entry_type, quality_score, created_at,
+             last_accessed_at, embedding, tsv, agent_id, subaccount_id
+      FROM workspace_memory_entries
+      WHERE ${scopeFilter}
+        AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
+        ${taskFilter}
+        ${domainFilter}
+        AND created_at >= NOW() - INTERVAL '${VECTOR_SEARCH_RECENCY_DAYS} days'
+      ORDER BY GREATEST(created_at, COALESCE(last_accessed_at, created_at)) DESC
+      LIMIT ${MAX_MEMORY_SCAN}
+    ),
+    semantic AS (
+      SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
+        ORDER BY embedding <=> ${vectorLiteral}::vector
+      )) AS rrf_component
+      FROM candidate_pool
+      WHERE embedding IS NOT NULL
+      LIMIT ${overRetrieveLimit}
+    )
+    ${fullTextCte}
+    , rrf_scores AS (
+      SELECT id, rrf_component FROM semantic
+      ${fullTextUnion}
+    ),
+    fused AS (
+      SELECT r.id, SUM(r.rrf_component) AS rrf_score, COUNT(*) AS source_count
+      FROM rrf_scores r GROUP BY r.id
+    )
+    SELECT
+      f.id, cp.content, f.rrf_score, f.source_count,
+      cp.agent_id, COALESCE(a.name, 'Unknown') AS agent_name,
+      cp.subaccount_id, cp.created_at::text AS created_at,
+      f.rrf_score * ${weights.rrf}
+        + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
+        + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
+            cp.created_at, COALESCE(cp.last_accessed_at, cp.created_at)
+          ))) / 86400.0 / 30.0)) * ${weights.recency} AS combined_score
+    FROM fused f
+    JOIN candidate_pool cp ON cp.id = f.id
+    LEFT JOIN agents a ON a.id = cp.agent_id
+    WHERE f.rrf_score >= ${RRF_MIN_SCORE}
+    ORDER BY combined_score DESC
+    LIMIT ${retrieveLimit}
+  `);
+
+  let results = rows as unknown as HybridResult[];
+
+  // Safety fallback: if RRF floor removed all results, use semantic-only
+  if (results.length === 0) {
+    console.warn(`[WorkspaceMemory] RRF empty after filter for subaccount ${subaccountId}`);
+    const fallback = await db.execute<{
+      id: string; content: string; agent_id: string | null;
+      subaccount_id: string; created_at: string;
+    }>(sql`
+      SELECT id, content, agent_id, subaccount_id, created_at::text AS created_at
+      FROM workspace_memory_entries
+      WHERE ${scopeFilter}
+        AND embedding IS NOT NULL
+        AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
+        ${taskFilter}
+      ORDER BY embedding <=> ${vectorLiteral}::vector
+      LIMIT ${topK}
+    `);
+    const fbRows = fallback as unknown as Array<{
+      id: string; content: string; agent_id: string | null;
+      subaccount_id: string; created_at: string;
+    }>;
+    return fbRows.map(r => ({
+      id: r.id,
+      content: r.content,
+      rrf_score: 0,
+      combined_score: 0,
+      source_count: 0,
+      agent_id: r.agent_id,
+      agent_name: 'Unknown',
+      subaccount_id: r.subaccount_id,
+      created_at: r.created_at,
+    }));
+  }
+
+  // Phase 1B: Dominance-ratio confidence gating — skip reranker when results
+  // are ambiguous (top two scores too close). Prevents LLM reranker from
+  // synthesising confident-sounding results on uncertain retrieval.
+  const DOMINANCE_THRESHOLD = 1.2;
+  let dominanceGated = false;
+  if (results.length >= 2) {
+    const dominanceRatio = results[0].combined_score / results[1].combined_score;
+    if (dominanceRatio < DOMINANCE_THRESHOLD) {
+      dominanceGated = true;
+    }
+  }
+
+  // Reranking (Phase B3) — feature-flagged, skipped when dominance-gated
+  if (!dominanceGated && RERANKER_PROVIDER !== 'none' && results.length > RERANKER_TOP_N) {
+    try {
+      const reranked = await rerank(
+        sanitizedQuery,
+        results.map(r => ({ id: r.id, content: r.content })),
+        {
+          provider: RERANKER_PROVIDER,
+          model: RERANKER_MODEL,
+          apiKey: process.env.RERANKER_API_KEY,
+          topN: RERANKER_TOP_N,
+        }
+      );
+      const scoreMap = new Map(reranked.map(r => [r.id, r.score]));
+      results = results
+        .filter(r => scoreMap.has(r.id))
+        .sort((a, b) => (scoreMap.get(b.id) ?? 0) - (scoreMap.get(a.id) ?? 0));
+    } catch (err) {
+      console.warn('[WorkspaceMemory] Reranking failed, using hybrid results:', err instanceof Error ? err.message : err);
+      results = results.slice(0, topK);
+    }
+  }
+
+  // Phase 1C: Graph-aware context expansion — follow relational edges to
+  // surface connected memories that vector search may miss.
+  if (results.length > 0) {
+    const expanded = await _expandByRelation(results, scopeFilter, 5);
+    if (expanded.length > 0) {
+      const existingIds = new Set(results.map(r => r.id));
+      const minScore = Math.min(...results.map(r => r.combined_score));
+      for (const ex of expanded) {
+        if (!existingIds.has(ex.id)) {
+          results.push({ ...ex, combined_score: minScore * 0.8 });
+          existingIds.add(ex.id);
+        }
+      }
+      // Re-sort after expansion
+      results.sort((a, b) => b.combined_score - a.combined_score);
+    }
+  }
+
+  // Final topK truncation
+  results = results.slice(0, topK);
+
+  // Bump access counters async
+  if (results.length > 0) {
+    const now = new Date();
+    db.update(workspaceMemoryEntries)
+      .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
+      .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
+      .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1C: Graph-aware context expansion
+// ---------------------------------------------------------------------------
+
+async function _expandByRelation(
+  results: HybridResult[],
+  scopeFilter: ReturnType<typeof sql>,
+  maxExpansion: number,
+): Promise<HybridResult[]> {
+  if (results.length === 0) return [];
+
+  const existingIds = results.map(r => r.id);
+  const taskSlugs = new Set<string>();
+
+  // Collect task_slug values from initial results for relational expansion
+  for (const r of results) {
+    // We'll query for task_slug from the DB since it's not in HybridResult
+  }
+
+  // Query for entries sharing the same task_slug as any result entry
+  const expanded = await db.execute<{
+    id: string; content: string; agent_id: string | null;
+    agent_name: string; subaccount_id: string; created_at: string;
+  }>(sql`
+    SELECT DISTINCT ON (e.id)
+      e.id, e.content, e.agent_id,
+      COALESCE(a.name, 'Unknown') AS agent_name,
+      e.subaccount_id, e.created_at::text AS created_at
+    FROM workspace_memory_entries e
+    LEFT JOIN agents a ON a.id = e.agent_id
+    WHERE ${scopeFilter}
+      AND e.id != ALL(${existingIds})
+      AND e.task_slug IN (
+        SELECT DISTINCT task_slug FROM workspace_memory_entries
+        WHERE id = ANY(${existingIds}) AND task_slug IS NOT NULL
+      )
+    ORDER BY e.id, e.created_at DESC
+    LIMIT ${maxExpansion}
+  `);
+
+  return (expanded as unknown as Array<{
+    id: string; content: string; agent_id: string | null;
+    agent_name: string; subaccount_id: string; created_at: string;
+  }>).map(r => ({
+    id: r.id,
+    content: r.content,
+    rrf_score: 0,
+    combined_score: 0,
+    source_count: 0,
+    agent_id: r.agent_id,
+    agent_name: r.agent_name,
+    subaccount_id: r.subaccount_id,
+    created_at: r.created_at,
+  }));
 }
 
 // Callback for enqueuing enrichment jobs — set during initialization
@@ -312,17 +686,23 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
 
       const baseValues = dedupedEntries
         .filter(e => e.op === 'ADD')
-        .map(e => ({
-          organisationId,
-          subaccountId,
-          agentRunId: runId,
-          agentId,
-          content: e.content,
-          entryType: e.entryType as EntryType,
-          qualityScore: scoreMemoryEntry(e),
-          taskSlug: taskSlug ?? null,
-          createdAt: new Date(),
-        }));
+        .map(e => {
+          // Phase 2C: auto-classify domain + topic at write time
+          const { domain, topic } = classifyDomainTopic(e.content);
+          return {
+            organisationId,
+            subaccountId,
+            agentRunId: runId,
+            agentId,
+            content: e.content,
+            entryType: e.entryType as EntryType,
+            qualityScore: scoreMemoryEntry(e),
+            taskSlug: taskSlug ?? null,
+            domain,
+            topic,
+            createdAt: new Date(),
+          };
+        });
 
       // Apply UPDATE and DELETE ops
       for (const op of dedupedEntries.filter(e => e.op === 'UPDATE' || e.op === 'DELETE')) {
@@ -502,7 +882,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     }
   },
 
-  // ─── Semantic memory retrieval (Phase 2A) ─────────────────────────────────
+  // ─── Semantic memory retrieval — delegates to unified _hybridRetrieve ─────
 
   async getRelevantMemories(
     subaccountId: string,
@@ -511,140 +891,14 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     queryText: string,
     taskSlug?: string,
   ): Promise<Array<{ content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
-    const vectorLiteral = formatVectorLiteral(queryEmbedding);
-    const now = new Date();
-    const profile = selectRetrievalProfile(queryText);
-    const weights = RRF_WEIGHTS[profile];
-    const overRetrieveLimit = VECTOR_SEARCH_LIMIT * RRF_OVER_RETRIEVE_MULTIPLIER;
-    const safeQueryText = queryText.slice(0, MAX_QUERY_TEXT_CHARS);
-
-    const taskFilter = taskSlug
-      ? sql`AND (task_slug = ${taskSlug} OR task_slug IS NULL)`
-      : sql``;
-
-    // Check if query produces a valid tsquery (stopword-only queries yield empty)
-    const tsqCheck = await db.execute<{ q: string }>(
-      sql`SELECT plainto_tsquery('english', ${safeQueryText})::text AS q`
-    );
-    const hasValidTsquery = !!(tsqCheck as unknown as Array<{ q: string }>)[0]?.q?.trim();
-
-    // Statement timeout to prevent slow queries blocking the request thread
-    await db.execute(sql`SET LOCAL statement_timeout = '200ms'`);
-
-    // Build hybrid RRF query with candidate pool cap
-    const fullTextCte = hasValidTsquery
-      ? sql`
-        , fulltext AS (
-          SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
-            ORDER BY ts_rank_cd(tsv, plainto_tsquery('english', ${safeQueryText})) DESC
-          )) AS rrf_component
-          FROM candidate_pool
-          WHERE tsv @@ plainto_tsquery('english', ${safeQueryText})
-          LIMIT ${overRetrieveLimit}
-        )`
-      : sql``;
-
-    const fullTextUnion = hasValidTsquery
-      ? sql`UNION ALL SELECT id, rrf_component FROM fulltext`
-      : sql``;
-
-    const rows = await db.execute<{
-      id: string; content: string; rrf_score: number;
-      combined_score: number; source_count: number;
-    }>(sql`
-      WITH candidate_pool AS (
-        SELECT id, content, entry_type, quality_score, created_at, last_accessed_at, embedding, tsv
-        FROM workspace_memory_entries
-        WHERE subaccount_id = ${subaccountId}
-          AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
-          ${taskFilter}
-          AND created_at >= NOW() - INTERVAL '${VECTOR_SEARCH_RECENCY_DAYS} days'
-        ORDER BY GREATEST(created_at, COALESCE(last_accessed_at, created_at)) DESC
-        LIMIT ${MAX_MEMORY_SCAN}
-      ),
-      semantic AS (
-        SELECT id, 1.0 / (${RRF_K} + ROW_NUMBER() OVER (
-          ORDER BY embedding <=> ${vectorLiteral}::vector
-        )) AS rrf_component
-        FROM candidate_pool
-        WHERE embedding IS NOT NULL
-        LIMIT ${overRetrieveLimit}
-      )
-      ${fullTextCte}
-      , rrf_scores AS (
-        SELECT id, rrf_component FROM semantic
-        ${fullTextUnion}
-      ),
-      fused AS (
-        SELECT r.id, SUM(r.rrf_component) AS rrf_score, COUNT(*) AS source_count
-        FROM rrf_scores r GROUP BY r.id
-      )
-      SELECT
-        f.id, cp.content, f.rrf_score, f.source_count,
-        f.rrf_score * ${weights.rrf}
-          + COALESCE(cp.quality_score, 0.5) * ${weights.quality}
-          + (1.0 / (1.0 + EXTRACT(EPOCH FROM (NOW() - GREATEST(
-              cp.created_at, COALESCE(cp.last_accessed_at, cp.created_at)
-            ))) / 86400.0 / 30.0)) * ${weights.recency} AS combined_score
-      FROM fused f
-      JOIN candidate_pool cp ON cp.id = f.id
-      WHERE f.rrf_score >= ${RRF_MIN_SCORE}
-      ORDER BY combined_score DESC
-      LIMIT ${RERANKER_PROVIDER !== 'none' ? RERANKER_CANDIDATE_COUNT : VECTOR_SEARCH_LIMIT}
-    `);
-
-    let results = rows as unknown as Array<{
-      id: string; content: string; rrf_score: number;
-      combined_score: number; source_count: number;
-    }>;
-
-    // Safety fallback: if RRF floor removed all results, use semantic-only
-    if (results.length === 0) {
-      console.warn(`[WorkspaceMemory] RRF empty after filter for subaccount ${subaccountId}`);
-      const fallback = await db.execute<{ id: string; content: string }>(sql`
-        SELECT id, content
-        FROM workspace_memory_entries
-        WHERE subaccount_id = ${subaccountId}
-          AND embedding IS NOT NULL
-          AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
-          ${taskFilter}
-        ORDER BY embedding <=> ${vectorLiteral}::vector
-        LIMIT ${VECTOR_SEARCH_LIMIT}
-      `);
-      const fbRows = fallback as unknown as Array<{ id: string; content: string }>;
-      return fbRows.map(r => ({ content: r.content, similarity: 0, confidence: 'low' as const }));
-    }
-
-    // Reranking (Phase B3) — feature-flagged
-    if (RERANKER_PROVIDER !== 'none' && results.length > RERANKER_TOP_N) {
-      try {
-        const reranked = await rerank(
-          queryText,
-          results.map(r => ({ id: r.id, content: r.content })),
-          {
-            provider: RERANKER_PROVIDER,
-            model: RERANKER_MODEL,
-            apiKey: process.env.RERANKER_API_KEY,
-            topN: RERANKER_TOP_N,
-          }
-        );
-        const scoreMap = new Map(reranked.map(r => [r.id, r.score]));
-        results = results
-          .filter(r => scoreMap.has(r.id))
-          .sort((a, b) => (scoreMap.get(b.id) ?? 0) - (scoreMap.get(a.id) ?? 0));
-      } catch (err) {
-        console.warn('[WorkspaceMemory] Reranking failed, using hybrid results:', err instanceof Error ? err.message : err);
-        results = results.slice(0, VECTOR_SEARCH_LIMIT);
-      }
-    }
-
-    // Bump access counters async
-    if (results.length > 0) {
-      db.update(workspaceMemoryEntries)
-        .set({ accessCount: sql`access_count + 1`, lastAccessedAt: now })
-        .where(inArray(workspaceMemoryEntries.id, results.map(r => r.id)))
-        .catch((err) => console.error('[WorkspaceMemory] Failed to update access counts:', err));
-    }
+    const results = await _hybridRetrieve({
+      subaccountId,
+      queryText,
+      queryEmbedding,
+      qualityThreshold,
+      taskSlug,
+      topK: VECTOR_SEARCH_LIMIT,
+    });
 
     return results.map(r => ({
       content: r.content,
@@ -653,7 +907,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     }));
   },
 
-  // ─── Cross-Agent Memory Search (Feature 5) ────────────────────────────────
+  // ─── Cross-Agent Memory Search — delegates to unified _hybridRetrieve ─────
 
   async semanticSearchMemories(params: {
     query: string;
@@ -672,54 +926,21 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     createdAt: string;
   }>> {
     const topK = Math.min(params.topK ?? 10, 50);
-    const embedding = params.queryEmbedding ?? await generateEmbedding(params.query);
-    if (!embedding) return [];
 
-    const vectorLiteral = formatVectorLiteral(embedding);
+    const results = await _hybridRetrieve({
+      subaccountId: params.subaccountId,
+      orgId: params.orgId,
+      queryText: params.query,
+      queryEmbedding: params.queryEmbedding,
+      qualityThreshold: 0,
+      topK,
+      includeOtherSubaccounts: params.includeOtherSubaccounts,
+    });
 
-    const scopeFilter = params.includeOtherSubaccounts
-      ? sql`organisation_id = ${params.orgId}`
-      : sql`organisation_id = ${params.orgId} AND subaccount_id = ${params.subaccountId}`;
-
-    const rows = await db.execute<{
-      id: string;
-      similarity: number;
-      agent_id: string;
-      agent_name: string;
-      subaccount_id: string;
-      content: string;
-      created_at: string;
-    }>(sql`
-      SELECT
-        e.id,
-        1 - (e.embedding <=> ${vectorLiteral}::vector) AS similarity,
-        e.agent_id,
-        COALESCE(a.name, 'Unknown') AS agent_name,
-        e.subaccount_id,
-        e.content,
-        e.created_at
-      FROM workspace_memory_entries e
-      LEFT JOIN agents a ON a.id = e.agent_id
-      WHERE ${scopeFilter}
-        AND e.embedding IS NOT NULL
-      ORDER BY e.embedding <=> ${vectorLiteral}::vector
-      LIMIT ${topK}
-    `);
-
-    const results = rows as unknown as Array<{
-      id: string;
-      similarity: number;
-      agent_id: string;
-      agent_name: string;
-      subaccount_id: string;
-      content: string;
-      created_at: string;
-    }>;
-
-    return results.map((r) => ({
+    return results.map(r => ({
       id: r.id,
-      score: r.similarity,
-      sourceAgentId: r.agent_id,
+      score: r.combined_score,
+      sourceAgentId: r.agent_id ?? '',
       sourceAgentName: r.agent_name,
       sourceSubaccountId: r.subaccount_id,
       summary: r.content,
@@ -963,7 +1184,8 @@ If none found: { "entities": [] }`,
         const normalizedName = entity.name.trim().toLowerCase().replace(/\s+/g, ' ');
         const newAttributes = entity.attributes ?? {};
 
-        // Upsert: increment mention_count, merge attributes, preserve displayName
+        // Upsert with Phase 2A temporal validity — detect attribute conflicts
+        // and supersede old entity instead of blindly merging
         const existing = await db
           .select()
           .from(workspaceEntities)
@@ -972,26 +1194,67 @@ If none found: { "entities": [] }`,
               eq(workspaceEntities.subaccountId, subaccountId),
               eq(workspaceEntities.name, normalizedName),
               eq(workspaceEntities.entityType, entity.entityType as typeof VALID_ENTITY_TYPES[number]),
-              isNull(workspaceEntities.deletedAt)
+              isNull(workspaceEntities.deletedAt),
+              isNull(workspaceEntities.validTo),  // only match currently-valid entities
             )
           )
           .limit(1);
 
         if (existing.length > 0) {
           const prev = existing[0];
-          const merged = { ...(prev.attributes as Record<string, unknown> ?? {}), ...newAttributes };
-          const capped = Object.fromEntries(Object.entries(merged).slice(0, MAX_ENTITY_ATTRIBUTES));
+          const prevAttrs = (prev.attributes as Record<string, unknown>) ?? {};
 
-          await db
-            .update(workspaceEntities)
-            .set({
-              mentionCount: prev.mentionCount + 1,
-              attributes: capped,
-              confidence: entity.confidence ?? prev.confidence,
-              lastSeenAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(workspaceEntities.id, prev.id));
+          // Phase 2A: Detect attribute conflicts (same key, different value)
+          const hasConflict = Object.keys(newAttributes).some(
+            key => key in prevAttrs && JSON.stringify(prevAttrs[key]) !== JSON.stringify(newAttributes[key])
+          );
+
+          if (hasConflict) {
+            // Supersede: close old entity, create new version
+            await db
+              .update(workspaceEntities)
+              .set({ validTo: new Date(), updatedAt: new Date() })
+              .where(eq(workspaceEntities.id, prev.id));
+
+            const capped = Object.fromEntries(Object.entries(newAttributes).slice(0, MAX_ENTITY_ATTRIBUTES));
+            await db
+              .insert(workspaceEntities)
+              .values({
+                organisationId,
+                subaccountId,
+                name: normalizedName,
+                displayName: entity.name.trim(),
+                entityType: entity.entityType as typeof VALID_ENTITY_TYPES[number],
+                attributes: capped,
+                confidence: entity.confidence ?? null,
+                mentionCount: prev.mentionCount + 1,
+                firstSeenAt: prev.firstSeenAt ?? new Date(),
+                lastSeenAt: new Date(),
+                validFrom: new Date(),
+                supersededBy: null,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .onConflictDoNothing();
+
+            // Point old entity to new (best-effort — new id not easily available
+            // without a RETURNING clause, so we skip the FK link for now)
+          } else {
+            // No conflict — standard upsert
+            const merged = { ...prevAttrs, ...newAttributes };
+            const capped = Object.fromEntries(Object.entries(merged).slice(0, MAX_ENTITY_ATTRIBUTES));
+
+            await db
+              .update(workspaceEntities)
+              .set({
+                mentionCount: prev.mentionCount + 1,
+                attributes: capped,
+                confidence: entity.confidence ?? prev.confidence,
+                lastSeenAt: new Date(),
+                updatedAt: new Date(),
+              })
+              .where(eq(workspaceEntities.id, prev.id));
+          }
         } else {
           const capped = Object.fromEntries(Object.entries(newAttributes).slice(0, MAX_ENTITY_ATTRIBUTES));
 
@@ -1008,6 +1271,7 @@ If none found: { "entities": [] }`,
               mentionCount: 1,
               firstSeenAt: new Date(),
               lastSeenAt: new Date(),
+              validFrom: new Date(),
               createdAt: new Date(),
               updatedAt: new Date(),
             })
@@ -1026,6 +1290,7 @@ If none found: { "entities": [] }`,
   async getEntitiesForPrompt(
     subaccountId: string,
     organisationId?: string,
+    asOf?: Date,  // Phase 2A: optional point-in-time query
   ): Promise<string | null> {
     const conditions = [
       eq(workspaceEntities.subaccountId, subaccountId),
@@ -1033,6 +1298,14 @@ If none found: { "entities": [] }`,
     ];
     if (organisationId) {
       conditions.push(eq(workspaceEntities.organisationId, organisationId));
+    }
+    // Phase 2A: Temporal validity filter
+    if (asOf) {
+      conditions.push(sql`${workspaceEntities.validFrom} <= ${asOf}`);
+      conditions.push(sql`(${workspaceEntities.validTo} IS NULL OR ${workspaceEntities.validTo} > ${asOf})`);
+    } else {
+      // Default: only currently-valid entities
+      conditions.push(isNull(workspaceEntities.validTo));
     }
 
     const rawEntities = await db

@@ -9,9 +9,11 @@ import { loadTaskAttachmentsAsContext } from './taskAttachmentContextService.js'
 import { assertScopeSingle } from '../lib/scopeAssertion.js';
 import {
   processContextPool,
+  rankContextPoolByRelevance,
   resolveScheduledTaskId as resolveScheduledTaskIdPure,
   type ProcessedContextPool,
 } from './runContextLoaderPure.js';
+import { generateEmbedding } from '../lib/embeddings.js';
 
 // Re-export the pure helpers for callers and tests
 export { processContextPool };
@@ -112,6 +114,25 @@ export async function loadRunContextData(
     );
     if (st?.description && st.description.trim().length > 0) {
       taskInstructions = st.description.trim();
+    }
+  }
+
+  // Phase 1D: Compute task embedding for relevance ranking
+  if (taskInstructions) {
+    const taskEmbedding = await generateEmbedding(taskInstructions);
+    if (taskEmbedding) {
+      // Compute content embeddings for eager sources (on-the-fly)
+      const eagerSources = pool.filter(s => s.loadingMode === 'eager');
+      const embeddingPromises = eagerSources.slice(0, 20).map(async (source) => {
+        if (source.content) {
+          const emb = await generateEmbedding(source.content.slice(0, 2000));
+          if (emb) {
+            (source as LoadedDataSource & { embedding?: number[] }).embedding = emb;
+          }
+        }
+      });
+      await Promise.all(embeddingPromises);
+      rankContextPoolByRelevance(pool, taskEmbedding);
     }
   }
 

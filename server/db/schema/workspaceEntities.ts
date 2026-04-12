@@ -30,6 +30,11 @@ export const workspaceEntities = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow(),
 
+    // Phase 2A: Temporal validity — tracks when entity facts were true
+    validFrom: timestamp('valid_from', { withTimezone: true }).defaultNow(),
+    validTo: timestamp('valid_to', { withTimezone: true }),
+    supersededBy: uuid('superseded_by'),  // FK to self — points to the newer version
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -37,12 +42,16 @@ export const workspaceEntities = pgTable(
   (table) => ({
     subaccountIdx: index('workspace_entities_subaccount_idx').on(table.subaccountId),
     orgIdx: index('workspace_entities_org_idx').on(table.organisationId),
-    // M-21: partial unique — excludes soft-deleted rows so names can be reused
-    uniqueEntity: uniqueIndex('workspace_entities_unique').on(
+    validityIdx: index('workspace_entities_validity_idx').on(
+      table.subaccountId,
+      table.validTo
+    ),
+    // Phase 2A: Only one current (valid_to IS NULL) entity per name+type
+    currentUnique: uniqueIndex('workspace_entities_current_unique').on(
       table.subaccountId,
       table.name,
       table.entityType
-    ).where(sql`${table.deletedAt} IS NULL`),
+    ).where(sql`${table.deletedAt} IS NULL AND ${table.validTo} IS NULL`),
   })
 );
 

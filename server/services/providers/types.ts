@@ -26,7 +26,7 @@ export interface ProviderTool {
 export interface ProviderCallParams {
   model:        string;
   messages:     ProviderMessage[];
-  system?:      string;
+  system?:      string | { stablePrefix: string; dynamicSuffix: string };
   tools?:       ProviderTool[];
   maxTokens?:   number;
   temperature?: number;
