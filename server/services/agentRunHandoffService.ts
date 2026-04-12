@@ -34,6 +34,7 @@ import {
   type AgentRunHandoffV1,
   type BuildHandoffInput,
 } from './agentRunHandoffServicePure.js';
+import { getOrgSubaccount } from './orgSubaccountService.js';
 
 /**
  * Build (and validate) a handoff for the given run. Pure builder is called
@@ -233,9 +234,15 @@ export async function getLatestHandoffForAgent(params: {
     if (params.subaccountId) {
       conditions.push(eq(agentRuns.subaccountId, params.subaccountId));
     } else {
-      // Defensive: if caller passes null, restrict to runs that also have
-      // null subaccountId (legacy rows only) to prevent cross-scope leakage.
-      conditions.push(sql`${agentRuns.subaccountId} IS NULL`);
+      // Caller passed null — resolve the org subaccount so we match
+      // post-refactor org-level runs instead of only legacy NULL rows.
+      const orgSa = await getOrgSubaccount(params.organisationId);
+      if (orgSa) {
+        conditions.push(eq(agentRuns.subaccountId, orgSa.id));
+      } else {
+        // No org subaccount yet (pre-migration) — fall back to IS NULL
+        conditions.push(sql`${agentRuns.subaccountId} IS NULL`);
+      }
     }
 
     if (params.excludeRunId) {
@@ -311,7 +318,12 @@ async function pickNextOpenTask(
   if (subaccountId) {
     conditions.push(eq(tasks.subaccountId, subaccountId));
   } else {
-    conditions.push(sql`${tasks.subaccountId} IS NULL`);
+    const orgSa = await getOrgSubaccount(organisationId);
+    if (orgSa) {
+      conditions.push(eq(tasks.subaccountId, orgSa.id));
+    } else {
+      conditions.push(sql`${tasks.subaccountId} IS NULL`);
+    }
   }
 
   // Priority order: urgent > high > normal > low

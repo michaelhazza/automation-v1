@@ -367,17 +367,22 @@ async function start() {
     }
   }
   // Org subaccount data migration (migration 0106) — idempotent but expensive.
-  // Only runs if migration_states doesn't already record completion.
+  // Only runs if migration_states records BOTH config and memory as completed.
   try {
-    const { eq } = await import('drizzle-orm');
+    const { eq, inArray } = await import('drizzle-orm');
     const { migrationStates } = await import('./db/schema/index.js');
     const { db: bootDb } = await import('./db/index.js');
-    const [memMigState] = await bootDb
-      .select({ completedAt: migrationStates.completedAt })
+    const migStates = await bootDb
+      .select({ key: migrationStates.key, completedAt: migrationStates.completedAt })
       .from(migrationStates)
-      .where(eq(migrationStates.key, 'org_subaccount_memory_migration'));
-    if (memMigState?.completedAt) {
-      console.log('[boot] org subaccount migration already completed, skipping');
+      .where(inArray(migrationStates.key, [
+        'org_subaccount_config_migration',
+        'org_subaccount_memory_migration',
+      ]));
+    const configDone = migStates.some(s => s.key === 'org_subaccount_config_migration' && s.completedAt);
+    const memoryDone = migStates.some(s => s.key === 'org_subaccount_memory_migration' && s.completedAt);
+    if (configDone && memoryDone) {
+      console.log('[boot] org subaccount migration already completed (config + memory), skipping');
     } else {
       const { runOrgSubaccountMigration } = await import('./jobs/orgSubaccountMigrationJob.js');
       await runOrgSubaccountMigration();
