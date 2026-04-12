@@ -154,6 +154,7 @@ export const systemTemplateService = {
         .insert(systemHierarchyTemplates)
         .values({
           name: data.name,
+          slug: slugify(data.name),
           sourceType: 'paperclip_import',
           paperclipManifest: manifest,
           manifestHash,

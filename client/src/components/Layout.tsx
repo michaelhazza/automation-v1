@@ -293,10 +293,15 @@ export default function Layout({ user, children }: LayoutProps) {
   // Command palette
   const [cmdOpen, setCmdOpen] = useState(false);
 
+  // Module-driven sidebar config
+  const [sidebarItems, setSidebarItems] = useState<Set<string> | null>(null);
+
   const hasOrgContext = isSystemAdmin ? !!activeOrgId : !!user.organisationId;
   const hasAnyOrgPerm = orgPerms.size > 0;
   const hasOrgPerm = (key: string) => orgPerms.has('__system_admin__') || orgPerms.has('__org_admin__') || orgPerms.has(key);
   const hasClientPerm = (key: string) => clientPerms.has('__system_admin__') || clientPerms.has('__org_admin__') || orgPerms.has('__org_admin__') || clientPerms.has(key);
+  /** Check if a nav-item slug is enabled by the module sidebar config. System admins bypass. */
+  const hasSidebarItem = (slug: string) => !sidebarItems || sidebarItems.has(slug);
 
   // Auto-set org context for non-system-admin users who belong to an org
   useEffect(() => {
@@ -347,6 +352,20 @@ export default function Layout({ user, children }: LayoutProps) {
       api.get(`/api/subaccounts/${activeClientId}/my-permissions`).then(({ data }) => setClientPerms(new Set(data.permissions))).catch((err) => { console.error('[Layout] Failed to fetch client permissions:', err); setClientPerms(new Set()); });
     } else { setClientPerms(new Set()); }
   }, [activeClientId, isSystemAdmin]);
+
+  // Fetch module-driven sidebar config
+  useEffect(() => {
+    if (isSystemAdmin) { setSidebarItems(null); return; } // System admins see everything
+    if (hasOrgContext) {
+      api.get('/api/my-sidebar-config').then(({ data }) => {
+        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+          setSidebarItems(new Set(data.items));
+        } else {
+          setSidebarItems(null); // No module config = show default (all items)
+        }
+      }).catch(() => setSidebarItems(null));
+    } else { setSidebarItems(null); }
+  }, [hasOrgContext, activeOrgId, isSystemAdmin]);
 
   // Review queue badge — initial load + WebSocket updates
   useEffect(() => {
@@ -737,21 +756,30 @@ export default function Layout({ user, children }: LayoutProps) {
             </>
           )}
 
+          {/* ── ClientPulse section — shown when org has client_pulse module */}
+          {hasOrgContext && hasSidebarItem('clientpulse') && (
+            <>
+              <NavSection label="ClientPulse" />
+              <NavItem to="/clientpulse" exact icon={<Icons.dashboard />} label="Dashboard" />
+              {hasSidebarItem('reports') && <NavItem to="/reports" icon={<Icons.skills />} label="Reports" />}
+            </>
+          )}
+
           {/* ── Organisation section — always shown when org context exists */}
           {hasOrgContext && hasAnyOrgPerm && (
             <>
               <NavSection label="Organisation" />
-              {(hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
-              {hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
-              {hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
-              <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />
-              {hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
-              {hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasOrgPerm('org.executions.view') && <NavItem to="/admin/ops" icon={<Icons.activity />} label="Ops Dashboard" />}
-              {hasOrgPerm('org.agents.view') && <NavItem to="/admin/skill-studio" icon={<Icons.skills />} label="Skill Studio" />}
-              {hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
-              {(hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
+              {hasSidebarItem('inbox') && (hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
+              {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
+              {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
+              {hasSidebarItem('workflows') && hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
+              {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
+              {hasSidebarItem('integrations') && hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
+              {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
+              {hasSidebarItem('ops') && hasOrgPerm('org.executions.view') && <NavItem to="/admin/ops" icon={<Icons.activity />} label="Ops Dashboard" />}
+              {hasSidebarItem('skills') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/skill-studio" icon={<Icons.skills />} label="Skill Studio" />}
+              {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
+              {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
             </>
           )}
 
@@ -770,6 +798,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
               <NavItem to="/system/config-templates" icon={<Icons.agents />} label="Config Templates" />
+              <NavItem to="/system/modules" icon={<Icons.boardTpl />} label="Modules" />
               <NavItem to="/system/settings" icon={<Icons.settings />} label="Settings" />
             </>
           )}

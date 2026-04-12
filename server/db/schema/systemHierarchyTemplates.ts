@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, integer, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // System Hierarchy Templates — platform-level company template library
@@ -11,6 +12,7 @@ export const systemHierarchyTemplates = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
 
     name: text('name').notNull(),
+    slug: text('slug').notNull(),
     description: text('description'),
 
     // 'manual' | 'paperclip_import'
@@ -44,6 +46,9 @@ export const systemHierarchyTemplates = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
+    slugUniqueIdx: uniqueIndex('system_hierarchy_templates_slug_unique_idx')
+      .on(table.slug)
+      .where(sql`${table.deletedAt} IS NULL`),
     publishedIdx: index('system_hierarchy_templates_published_idx').on(table.isPublished),
   })
 );

@@ -175,10 +175,10 @@ INSERT INTO modules (slug, display_name, description, allowed_agent_slugs, allow
 VALUES
   ('client_pulse', 'ClientPulse', 'Weekly client health reports and churn-risk alerts for agencies',
    '["portfolio-health-agent"]'::jsonb, false,
-   '["dashboard","inbox","companies","reports","integrations","team","manage_org"]'::jsonb),
-  ('full_access', 'Full Access', 'Unlock every agent and the full operator UI',
+   '["clientpulse","reports","companies","integrations","team","manage_org"]'::jsonb),
+  ('operator', 'Automation OS', 'Full operator UI — every agent, every workflow, every tool',
    NULL, true,
-   '["inbox","companies","agents","workflows","skills","integrations","team","health","manage_org","dashboard","reports"]'::jsonb);
+   '["inbox","companies","agents","workflows","skills","integrations","team","health","manage_org","ops"]'::jsonb);
 ```
 
 ### 3.3 Allowlist resolver
@@ -427,6 +427,7 @@ CREATE UNIQUE INDEX uq_org_subscriptions_active
 -- Requires modules table from migration 0104
 INSERT INTO subscriptions (slug, display_name, description, module_ids, price_monthly_cents, subaccount_limit, trial_days, status)
 VALUES
+  -- ClientPulse tiers (module: client_pulse only)
   ('starter', 'Starter',
    'Monitor up to 10 client accounts with weekly health reports',
    (SELECT jsonb_agg(id) FROM modules WHERE slug = 'client_pulse'),
@@ -439,9 +440,20 @@ VALUES
    'Monitor up to 100 client accounts with weekly health reports',
    (SELECT jsonb_agg(id) FROM modules WHERE slug = 'client_pulse'),
    NULL, 100, 14, 'active'),
-  ('full_access_internal', 'Full Access (Internal)',
-   'Unlock every agent — for Synthetos internal and design-partner orgs',
-   (SELECT jsonb_agg(id) FROM modules WHERE slug = 'full_access'),
+  -- Automation OS (module: operator only — no ClientPulse UI)
+  ('automation_os', 'Automation OS',
+   'Full operator experience — every agent, workflow, and tool',
+   (SELECT jsonb_agg(id) FROM modules WHERE slug = 'operator'),
+   NULL, NULL, 14, 'active'),
+  -- Agency Suite (both modules — full platform + ClientPulse)
+  ('agency_suite', 'Agency Suite',
+   'Automation OS + ClientPulse — the full agency platform',
+   (SELECT jsonb_agg(id) FROM modules WHERE slug IN ('operator', 'client_pulse')),
+   NULL, NULL, 14, 'active'),
+  -- Internal (both modules, comp'd, no trial)
+  ('internal', 'Internal',
+   'Synthetos internal and design-partner orgs — all modules unlocked',
+   (SELECT jsonb_agg(id) FROM modules WHERE slug IN ('operator', 'client_pulse')),
    NULL, NULL, 0, 'draft');
 ```
 
@@ -602,7 +614,9 @@ Before creating subaccounts from selected GHL locations, check the same limit. I
 - [ ] Create a subscription via admin UI → verify it appears in the catalogue
 - [ ] Assign subscription to org → verify `GET /api/my-subscription` returns it
 - [ ] Assign `client_pulse` subscription → verify only `portfolio-health-agent` is in the allowlist
-- [ ] Switch to `full_access_internal` → verify all agents are in the allowlist
+- [ ] Switch to `agency_suite` → verify all agents are in the allowlist AND ClientPulse sidebar items appear
+- [ ] Switch to `automation_os` → verify all agents are in the allowlist BUT no ClientPulse sidebar items
+- [ ] Switch to `internal` → verify all agents + all sidebar items
 - [ ] Cancel subscription → verify allowlist returns empty set
 - [ ] Comp an org → verify subscription works without Stripe
 - [ ] Archive a subscription with active orgs → verify it's blocked
@@ -1442,7 +1456,7 @@ All new tables and schema changes required by this spec. Next available migratio
 
 | Migration | Contents |
 |-----------|----------|
-| 0104 | `modules` table + seed (`client_pulse`, `full_access`). `subscriptions` table + `org_subscriptions` table + seed (starter, growth, scale, full_access_internal). `reports` table. RLS policies for `reports` and `org_subscriptions`. Add `slug` column to `system_hierarchy_templates` (backfill, NOT NULL, partial unique index where `deleted_at IS NULL`). Duplicate template cleanup. Update `run_result_status` TypeScript type to include `'skipped_module_disabled'` (text column, no ALTER TYPE needed). Add both org-scoped tables to `server/config/rlsProtectedTables.ts`. |
+| 0104 | `modules` table + seed (`client_pulse`, `operator`). `subscriptions` table + `org_subscriptions` table + seed (starter, growth, scale, automation_os, agency_suite, internal). `reports` table. RLS policies for `reports` and `org_subscriptions`. Add `slug` column to `system_hierarchy_templates` (backfill, NOT NULL, partial unique index where `deleted_at IS NULL`). Duplicate template cleanup. Update `run_result_status` TypeScript type to include `'skipped_module_disabled'` (text column, no ALTER TYPE needed). Add both org-scoped tables to `server/config/rlsProtectedTables.ts`. |
 
 **No schema changes needed for:** Module C (uses existing tables), Module F (uses reports table from 0104), Module E (reads from existing tables + reports), Module D (writes to existing tables via services).
 

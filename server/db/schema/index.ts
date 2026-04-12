@@ -123,3 +123,9 @@ export * from './skillVersions';
 
 // Feature 4 — Slack Conversational Surface (migrations 0102-0103)
 export * from './slackConversations';
+
+// Modules, Subscriptions, Org Subscriptions, Reports
+export * from './modules.js';
+export * from './subscriptions.js';
+export * from './orgSubscriptions.js';
+export * from './reports.js';
