@@ -178,6 +178,14 @@ CREATE INDEX workspace_entities_validity_idx
   ON workspace_entities (subaccount_id, valid_to)
   WHERE deleted_at IS NULL;
 
+-- Replace the old unique constraint that doesn't account for superseded entities.
+-- Old: (subaccount_id, name, entity_type) WHERE deleted_at IS NULL
+-- New: only one "current" (valid_to IS NULL) entity per (subaccount_id, name, entity_type)
+DROP INDEX IF EXISTS workspace_entities_unique_name_type;  -- adjust name to match actual index name
+CREATE UNIQUE INDEX workspace_entities_current_unique
+  ON workspace_entities (subaccount_id, name, entity_type)
+  WHERE deleted_at IS NULL AND valid_to IS NULL;
+
 -- ── Phase 2C: Hierarchical metadata on workspace_memory_entries ─────────────
 ALTER TABLE workspace_memory_entries
   ADD COLUMN domain  text,    -- auto-classified: crm, reporting, support, dev, marketing, etc.
@@ -303,7 +311,7 @@ export function sanitizeSearchQuery(raw: string): string {
 
 | Job | Phase | Schedule | Queue name |
 |-----|-------|----------|------------|
-| `memoryDedupJob.ts` | 2B | Nightly 3am UTC | `memory-dedup` |
+| `memoryDedupJob.ts` | 2B | Nightly 3am UTC | `maintenance:memory-dedup` |
 | `agentBriefingJob.ts` | 2D | Post-run (event-driven) | `agent-briefing-update` |
 | `subaccountStateSummaryJob.ts` | 3B | Every 4 hours + on-demand | `subaccount-state-summary` |
 
@@ -393,7 +401,7 @@ interface AssembledPrompt {
 }
 ```
 
-Partition the 14 current prompt sections:
+Partition the 14 current prompt sections (plus the Agent Briefing added by 2D):
 
 | Section | Classification | Rationale |
 |---------|---------------|-----------|
@@ -403,16 +411,19 @@ Partition the 14 current prompt sections:
 | 4. Memory blocks (Letta) | Stable | Updated infrequently |
 | 5. Your Capabilities (org skills) | Stable | Org skill config changes only on admin edit |
 | 6. Additional Instructions | Stable | Custom instructions change only on admin edit |
+| Agent Briefing (added by 2D) | Stable | Updates async post-run — stable for the duration of a single run. One-run staleness acceptable; caching efficiency takes priority. |
+| 9. Team roster | Stable | Changes on agent config edit |
 | 7. Task Instructions | **Dynamic** | Changes per scheduled task |
 | 8. Available Context Sources | **Dynamic** | Lazy manifest varies |
-| 9. Team roster | Stable | Changes on agent config edit |
 | 10. Workspace memory | **Dynamic** | Updated after each run |
 | 11. Workspace entities | **Dynamic** | Updated after each run |
 | 12. Board state | **Dynamic** | Changes continuously |
 | 13. Autonomous instructions | **Dynamic** | Varies by request type |
 | 14. Addendum | **Dynamic** | Optional, per-request |
 
-**Breakpoint:** Sections 1-6 + 9 → `stablePrefix`. Sections 7-8, 10-14 → `dynamicSuffix`.
+**Breakpoint:** Sections 1-6 + Agent Briefing + section 9 → `stablePrefix`. Sections 7-8, 10-14 → `dynamicSuffix`.
+
+**Assembly reorder requirement:** The prompt assembly in `agentExecutionService.ts` must reorder sections so that section 9 (Team roster) and the Agent Briefing immediately follow sections 1-6 in the content array, before sections 7-8 and 10-14. The `cache_control` breakpoint is placed after section 9 in the array. This reorder is required for section 9 and the Agent Briefing to be included in the `stablePrefix` cache — without it, they would appear in the dynamic portion and negate cache efficiency.
 
 **Changes to `anthropicAdapter.ts`:**
 
@@ -576,7 +587,9 @@ export function rankContextPoolByRelevance(
 If `taskDescription` is absent or `taskEmbedding` is absent, return pool unchanged (backward compatible).
 
 When both are present:
-1. For each eager source with an embedding (stored in `agent_data_sources.embedding` — new nullable column if not present, or computed on-the-fly), compute cosine similarity against `taskEmbedding`.
+1. For each eager source, compute cosine similarity between the source's content embedding and `taskEmbedding`. The embedding is computed on-the-fly at rank time by calling the existing embedding service (e.g. `generateEmbedding(source.content)`). No schema change is required in Phase 1 — there is no `embedding` column on `agent_data_sources`. If embedding persistence for performance is desired, defer to Phase 2 with a new migration.
+
+   **Latency note:** On-the-fly embedding at rank time introduces one `generateEmbedding()` call per eager source. For agents with many eager data sources (> ~10), this may add noticeable latency to context loading. If latency becomes a concern, cap the number of sources ranked (e.g. rank only the first 20 by name alphabetically) or persist embeddings in a Phase 2 migration.
 2. Sort eager sources by similarity descending.
 3. Return sorted pool (lazy sources unaffected).
 
@@ -651,9 +664,9 @@ When `asOf` is provided: `WHERE valid_from <= asOf AND (valid_to IS NULL OR vali
 Algorithm (greedy, per-subaccount):
 1. Load all entries with embeddings for the subaccount, ordered by `qualityScore DESC, createdAt DESC`.
 2. Initialize `kept: Set<string>` (entry IDs to keep).
-3. For each entry, compute cosine distance against all entries in `kept`. If min distance > `DEDUP_THRESHOLD` (default 0.15, meaning ~85% similarity), add to `kept`. Otherwise, mark for soft-deletion.
+3. For each entry, compute cosine distance against all entries in `kept`. If min distance > `DEDUP_THRESHOLD` (default 0.15, meaning ~85% similarity), add to `kept`. Otherwise, mark for deletion (hard delete — consistent with `pruneStaleMemoryEntries`).
 4. Process in batches of 500 entries per subaccount.
-5. Soft-delete marked entries (`deletedAt = NOW()`). Note: `workspace_memory_entries` doesn't currently have a `deletedAt` column. Options: (a) hard delete, or (b) add `deletedAt` in migration. Since existing decay job hard-deletes, hard delete is consistent here.
+5. Hard-delete marked entries (`DELETE FROM workspace_memory_entries WHERE id = ANY($ids_to_delete)`). Consistent with `pruneStaleMemoryEntries` which also hard-deletes.
 
 **Optimisation:** Use pgvector's `<=>` operator to compute pairwise distances in SQL rather than loading all vectors into JS:
 
@@ -670,7 +683,7 @@ LIMIT 500
 
 This finds all pairs below threshold in one query, avoiding O(n^2) in application code.
 
-**Job registration:** `server/jobs/index.ts` — register as `memory-dedup`, schedule nightly at 3am UTC via `server/services/agentScheduleService.ts`.
+**Job registration:** `server/services/queueService.ts` — register worker as `maintenance:memory-dedup`, schedule nightly at 3am UTC via `boss.schedule('maintenance:memory-dedup', '0 3 * * *', {})` (same pattern as `maintenance:memory-decay`).
 
 **Acceptance criteria:**
 
@@ -767,17 +780,19 @@ export const agentBriefingService = {
 
 **Integration with prompt assembly (`agentExecutionService.ts`):**
 
-At step 10 (workspace memory), prepend the briefing:
+Inject the briefing into the `stablePrefix`, immediately after section 6 (Additional Instructions). The briefing updates async post-run — it is stable for the full duration of a single run and only regenerates once after the previous run completes. One-run staleness is acceptable. This placement preserves the 40-60% prompt token cost reduction goal of 0C; placing the briefing in `dynamicSuffix` would cause cache misses on every run that has a briefing.
 
 ```
+[section 6: Additional Instructions]
+
 ## Agent Briefing
 [briefing content]
 
-## Workspace Memory
-[existing memory content]
+[section 9: Team roster]
+[stablePrefix ends here — cache_control breakpoint]
 ```
 
-If no briefing exists (first run), skip — no change to existing behaviour.
+If no briefing exists (first run), skip — no change to existing behaviour. The stablePrefix still ends after section 9.
 
 **Acceptance criteria:**
 
@@ -813,7 +828,7 @@ export async function enrichContextForTask(params: {
 Algorithm:
 1. Generate embedding for `taskDescription`.
 2. Query workspace memories via `_hybridRetrieve()` with the task description as query text, `topK: 5`.
-3. Query lazy data sources that weren't already loaded: compute cosine similarity between `taskDescription` embedding and each lazy source's content embedding. Take top 3 by similarity (above a minimum threshold of 0.3).
+3. Query lazy data sources that weren't already loaded: compute cosine similarity between `taskDescription` embedding and each lazy source's content embedding (computed on-the-fly via `generateEmbedding(source.content)` — no schema change required). Take top 3 by similarity (above a minimum threshold of 0.3).
 4. Assemble results into a formatted section, respecting `tokenBudget` (truncate from bottom):
    ```
    ## Relevant Context for This Task
@@ -979,8 +994,8 @@ No migration required for Phases 0 or 1.
 | Modify | `server/config/rlsProtectedTables.ts` |
 | Modify | `server/services/workspaceMemoryService.ts` (temporal validity, domain/topic write, domain filter on read) |
 | Modify | `server/services/agentExecutionService.ts` (inject briefing, enqueue briefing job) |
-| Modify | `server/jobs/index.ts` (register new jobs) |
-| Modify | `server/services/agentScheduleService.ts` (schedule dedup job) |
+| Modify | `server/services/queueService.ts` (register job workers + schedule `maintenance:memory-dedup` at 3am UTC) |
+| Modify | `server/config/jobConfig.ts` (add idempotencyStrategy entries for new jobs) |
 
 **Phase 3** (requires migration 0105):
 | Action | File |
@@ -992,7 +1007,8 @@ No migration required for Phases 0 or 1.
 | New | `server/jobs/subaccountStateSummaryJob.ts` |
 | Modify | `server/services/agentExecutionService.ts` (enrichment call, state summary injection, hallucination middleware) |
 | Modify | `server/services/middleware/index.ts` (register hallucination middleware) |
-| Modify | `server/jobs/index.ts` (register new jobs) |
+| Modify | `server/services/queueService.ts` (register job workers + schedule `subaccount-state-summary` every 4 hours) |
+| Modify | `server/config/jobConfig.ts` (add idempotencyStrategy entry for subaccount-state-summary job) |
 
 ### 8.3 Build order and dependency graph
 
@@ -1042,7 +1058,7 @@ Per `CLAUDE.md` verification conventions: lint, typecheck, and test after every 
 |-----------|---------------|-------|
 | `server/lib/__tests__/sanitizeSearchQueryPure.test.ts` | Query sanitisation: passthrough, question extraction, tail sentence, truncation, edge cases | 0B |
 | `server/lib/__tests__/queryIntentClassifierPure.test.ts` | Intent classification: temporal, factual, relational, exploratory, general, edge cases | 1A |
-| `server/services/__tests__/runContextLoaderPure.test.ts` | Relevance ranking: sorted by similarity, budget truncation respects order, no-task-description fallback | 1D |
+| `server/services/__tests__/runContextLoader.test.ts` (add test cases — file exists, tests `runContextLoaderPure.ts`) | Relevance ranking: sorted by similarity, budget truncation respects order, no-task-description fallback | 1D |
 
 ### 9.2 Static gates (existing `scripts/verify-*.sh`)
 
