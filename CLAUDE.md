@@ -254,7 +254,7 @@ For **Significant and Major tasks**, also invoke `dual-reviewer` after `pr-revie
 When a draft spec document is written (roadmaps, implementation specs, architecture plans, phased build plans), invoke `spec-reviewer` before starting implementation against it. This is the spec-document equivalent of the `dual-reviewer` loop for code. The agent:
 
 - Reads `docs/spec-context.md` as framing ground truth before every run.
-- Runs up to **5** Codex review iterations (not 3 — specs need more rounds because they're denser).
+- **Hard lifetime cap: 5 iterations per spec, total, across every invocation.** Not 5-per-invocation — 5 lifetime. If a spec has already seen 5 spec-reviewer iterations (count the `tasks/spec-review-checkpoint-<slug>-<N>-*.md` files or the iteration numbers in their content), do not start a new iteration. If the spec has had substantive edits since the last clean exit and you believe more review is needed, surface that to the user and ask whether to bust the cap — do not silently re-invoke.
 - Stops early on two consecutive mechanical-only rounds.
 - Classifies every finding as **mechanical**, **directional**, or **ambiguous**.
 - **Auto-applies mechanical findings** (contradictions, stale language, file inventory drift, sequencing bugs, under-specified contracts).
@@ -267,8 +267,9 @@ When a draft spec document is written (roadmaps, implementation specs, architect
 
 - After writing any non-trivial spec document
 - Before starting implementation against a spec
-- After a major edit to an existing spec (e.g. incorporating feedback from a stakeholder)
+- After a major edit to an existing spec (e.g. incorporating feedback from a stakeholder) — **but only if the 5-iteration lifetime cap has not been reached**
 - NOT for trivial doc updates (typos, one-line clarifications) — just edit and move on
+- NOT for mid-loop spec additions where the review has already cleanly exited once — the spec-review pipeline is not a perfection engine, and re-invoking after every refinement creates an infinite-loop failure mode that has already burned real session time. Diminishing returns kick in fast. Apply judgement and move on to the architect or build phase.
 
 ---
 
@@ -339,6 +340,7 @@ These are non-negotiable. Violations are blocking issues in any code review.
 - **Lazy loading** — all page components use `lazy()` with `Suspense` fallback
 - **Permissions-driven UI** — visibility gated by `/api/my-permissions` or `/api/subaccounts/:id/my-permissions`
 - **Real-time updates** — new features that update state use WebSocket rooms via `useSocket`
+- **Tables: column-header sort + filter by default** — every data table must have Google Sheets-style column headers: clicking a header opens a dropdown with sort (A→Z / Z→A) and, for columns with a finite value set, filter checkboxes. Sort applies to all columns. Filters apply to columns whose values are categorical (status, visibility, boolean flags, etc.). Active sort shows ↑/↓ next to the label; active filters show an indigo dot. A "Clear all" button appears in the page header when any sort or filter is active. Implementation pattern: `SystemSkillsPage.tsx` — `ColHeader` + `NameColHeader` components, `Set<T>`-based filter state, client-side sort/filter computed before render.
 
 ---
 

@@ -4,6 +4,7 @@ import {
   workspaceMemories,
   workspaceMemoryEntries,
   workspaceEntities,
+  agents,
 } from '../db/schema/index.js';
 import { routeCall } from './llmRouter.js';
 import { taskService } from './taskService.js';
@@ -650,6 +651,118 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       similarity: r.combined_score,
       confidence: (r.source_count >= 2 ? 'high' : r.rrf_score > 0.01 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
     }));
+  },
+
+  // ─── Cross-Agent Memory Search (Feature 5) ────────────────────────────────
+
+  async semanticSearchMemories(params: {
+    query: string;
+    orgId: string;
+    subaccountId: string;
+    includeOtherSubaccounts?: boolean;
+    topK?: number;
+    queryEmbedding?: number[];
+  }): Promise<Array<{
+    id: string;
+    score: number;
+    sourceAgentId: string;
+    sourceAgentName: string;
+    sourceSubaccountId: string;
+    summary: string | null;
+    createdAt: string;
+  }>> {
+    const topK = Math.min(params.topK ?? 10, 50);
+    const embedding = params.queryEmbedding ?? await generateEmbedding(params.query);
+    if (!embedding) return [];
+
+    const vectorLiteral = formatVectorLiteral(embedding);
+
+    const scopeFilter = params.includeOtherSubaccounts
+      ? sql`organisation_id = ${params.orgId}`
+      : sql`organisation_id = ${params.orgId} AND subaccount_id = ${params.subaccountId}`;
+
+    const rows = await db.execute<{
+      id: string;
+      similarity: number;
+      agent_id: string;
+      agent_name: string;
+      subaccount_id: string;
+      content: string;
+      created_at: string;
+    }>(sql`
+      SELECT
+        e.id,
+        1 - (e.embedding <=> ${vectorLiteral}::vector) AS similarity,
+        e.agent_id,
+        COALESCE(a.name, 'Unknown') AS agent_name,
+        e.subaccount_id,
+        e.content,
+        e.created_at
+      FROM workspace_memory_entries e
+      LEFT JOIN agents a ON a.id = e.agent_id
+      WHERE ${scopeFilter}
+        AND e.embedding IS NOT NULL
+      ORDER BY e.embedding <=> ${vectorLiteral}::vector
+      LIMIT ${topK}
+    `);
+
+    const results = rows as unknown as Array<{
+      id: string;
+      similarity: number;
+      agent_id: string;
+      agent_name: string;
+      subaccount_id: string;
+      content: string;
+      created_at: string;
+    }>;
+
+    return results.map((r) => ({
+      id: r.id,
+      score: r.similarity,
+      sourceAgentId: r.agent_id,
+      sourceAgentName: r.agent_name,
+      sourceSubaccountId: r.subaccount_id,
+      summary: r.content,
+      createdAt: r.created_at,
+    }));
+  },
+
+  async getMemoryEntry(entryId: string, orgId: string): Promise<{
+    id: string;
+    content: string;
+    entryType: string;
+    agentId: string;
+    subaccountId: string;
+    createdAt: string;
+  } | null> {
+    const rows = await db
+      .select({
+        id: workspaceMemoryEntries.id,
+        content: workspaceMemoryEntries.content,
+        entryType: workspaceMemoryEntries.entryType,
+        agentId: workspaceMemoryEntries.agentId,
+        subaccountId: workspaceMemoryEntries.subaccountId,
+        createdAt: workspaceMemoryEntries.createdAt,
+      })
+      .from(workspaceMemoryEntries)
+      .where(
+        and(
+          eq(workspaceMemoryEntries.id, entryId),
+          eq(workspaceMemoryEntries.organisationId, orgId),
+        ),
+      )
+      .limit(1);
+
+    if (rows.length === 0) return null;
+    const r = rows[0]!;
+    return {
+      id: r.id,
+      content: r.content,
+      entryType: r.entryType,
+      agentId: r.agentId,
+      subaccountId: r.subaccountId,
+      createdAt: (r.createdAt ?? new Date()).toISOString(),
+    };
   },
 
   // ─── Prompt Builder (with boundary markers for injection protection) ───────

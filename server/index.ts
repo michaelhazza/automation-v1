@@ -102,6 +102,8 @@ import publicPageServingRouter from './routes/public/pageServing.js';
 import publicPagePreviewRouter from './routes/public/pagePreview.js';
 import ieeRouter from './routes/iee.js';
 import skillAnalyzerRouter from './routes/skillAnalyzer.js';
+import opsDashboardRouter from './routes/opsDashboard.js';
+import skillStudioRouter from './routes/skillStudio.js';
 import publicFormSubmissionRouter from './routes/public/formSubmission.js';
 import publicPageTrackingRouter from './routes/public/pageTracking.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
@@ -247,6 +249,8 @@ app.use(publicPageTrackingRouter);
 app.use(publicPagePreviewRouter);
 app.use(ieeRouter);
 app.use(skillAnalyzerRouter);
+app.use(opsDashboardRouter);
+app.use(skillStudioRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
@@ -360,6 +364,21 @@ async function start() {
   } catch (err) {
     console.error('[boot] scheduled task retry reconciliation failed', err);
   }
+  // System skill handler pairing: every active system_skills row must
+  // reference a handler function that exists in SKILL_HANDLERS. This is the
+  // fail-fast gate against the "data refers to code" drift the Phase 0 DB
+  // migration opens up (see docs/skill-analyzer-v2-spec.md §10 Phase 0). If
+  // any row points at a missing handler, the server refuses to boot with a
+  // clear error listing the offending keys so the operator can fix it before
+  // the port binds.
+  try {
+    const { validateSystemSkillHandlers } = await import('./services/systemSkillHandlerValidator.js');
+    await validateSystemSkillHandlers();
+  } catch (err) {
+    console.error('[boot] system skill handler validation failed:', err);
+    throw err;
+  }
+
   initWebSocket(httpServer);
   const PORT = env.NODE_ENV === 'production' ? 5000 : env.PORT;
   httpServer.listen(PORT, '0.0.0.0', () => {

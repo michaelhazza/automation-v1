@@ -113,5 +113,37 @@ function serializeError(err: unknown): Record<string, unknown> {
       message: err.message.slice(0, 500),
     };
   }
+  // Plain object thrown as an error (e.g. service errors of the shape
+  // { statusCode, code, message }). Preserve the well-known diagnostic
+  // fields rather than collapsing to "[object Object]" via String(err).
+  if (err !== null && typeof err === 'object') {
+    const e = err as {
+      statusCode?: unknown;
+      status?: unknown;
+      code?: unknown;
+      errorCode?: unknown;
+      message?: unknown;
+      provider?: unknown;
+    };
+    const serialized: Record<string, unknown> = {};
+    if (e.statusCode !== undefined) serialized.statusCode = e.statusCode;
+    if (e.status !== undefined) serialized.status = e.status;
+    if (e.code !== undefined) serialized.code = e.code;
+    if (e.errorCode !== undefined) serialized.errorCode = e.errorCode;
+    if (e.provider !== undefined) serialized.provider = e.provider;
+    if (typeof e.message === 'string') {
+      serialized.message = e.message.slice(0, 500);
+    }
+    // If none of the known fields were present, fall back to a JSON dump
+    // so the caller at least sees the shape of the object.
+    if (Object.keys(serialized).length === 0) {
+      try {
+        serialized.value = JSON.stringify(err).slice(0, 500);
+      } catch {
+        serialized.value = '[unserialisable object]';
+      }
+    }
+    return serialized;
+  }
   return { value: String(err).slice(0, 500) };
 }

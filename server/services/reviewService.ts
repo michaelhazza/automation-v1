@@ -7,6 +7,7 @@ import { hitlService } from './hitlService.js';
 import { auditService } from './auditService.js';
 import { emitSubaccountUpdate, emitOrgUpdate } from '../websocket/emitters.js';
 import type { Action } from '../db/schema/actions.js';
+import { postReviewItemToSlack } from './slackConversationService.js';
 
 // ---------------------------------------------------------------------------
 // Review Service — manages human review queue for gated actions
@@ -54,6 +55,11 @@ export const reviewService = {
         reviewItemId: item.id, actionType: reviewPayload.actionType,
       });
     }
+
+    // Feature 4 — optionally post to Slack if org has a review channel configured
+    postReviewItemToSlack(item.id, action.organisationId).catch((err) => {
+      console.warn('[ReviewService] Slack posting failed (non-blocking):', err instanceof Error ? err.message : err);
+    });
 
     return item;
   },

@@ -77,10 +77,11 @@ export * from './mcpServerConfigs';
 export * from './mcpServerAgentLinks';
 export * from './goals';
 export * from './agentPromptRevisions';
-// Skill Analyzer (migration 0092)
+// Skill Analyzer (migration 0092, extended in 0098)
 export * from './skillAnalyzerJobs';
 export * from './skillAnalyzerResults';
 export * from './skillEmbeddings';
+export * from './agentEmbeddings';
 export * from './inboxReadStates';
 export * from './feedbackVotes';
 export * from './taskAttachments';
@@ -113,3 +114,12 @@ export * from './memoryBlockAttachments';
 
 // Brain Tree OS adoption P4 — workspace health audit (migration 0096)
 export * from './workspaceHealthFindings';
+
+// Feature 2 — Priority Feed (migration 0100)
+export * from './priorityFeedClaims';
+
+// Feature 3 — Skill Studio (migration 0101)
+export * from './skillVersions';
+
+// Feature 4 — Slack Conversational Surface (migrations 0102-0103)
+export * from './slackConversations';

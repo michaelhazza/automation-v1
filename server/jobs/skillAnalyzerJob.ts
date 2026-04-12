@@ -19,7 +19,11 @@ import { env } from '../lib/env.js';
 import { skillParserService } from '../services/skillParserService.js';
 import { skillEmbeddingService } from '../services/skillEmbeddingService.js';
 import { systemSkillService } from '../services/systemSkillService.js';
-import { skillService } from '../services/skillService.js';
+// Phase 1 of skill-analyzer-v2: the analyzer is system-only. The org-skill
+// library read path was removed; all dedup comparisons happen against
+// system_skills via systemSkillService.listSkills() (which returns all rows
+// regardless of isActive / visibility, so retired skills still participate
+// in dedup detection — see spec §10 Phase 0 listSkills() contract).
 import {
   updateJobProgress,
   getJobById,
@@ -65,7 +69,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'parsing',
     progressPct: 0,
-    progressMessage: 'Parsing skill definitions…',
+    progressMessage: 'Parsing skill definitions...',
   });
 
   let candidates: ParsedSkill[];
@@ -107,7 +111,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   await updateJobProgress(jobId, {
     progressPct: 10,
-    progressMessage: `Found ${candidates.length} skill${candidates.length === 1 ? '' : 's'} — checking for exact duplicates…`,
+    progressMessage: `Found ${candidates.length} skill${candidates.length === 1 ? '' : 's'} - checking for exact duplicates...`,
     candidateCount: candidates.length,
     // Store (possibly freshly parsed) candidates for display/replay
     parsedCandidates: candidates,
@@ -119,37 +123,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'hashing',
     progressPct: 10,
-    progressMessage: 'Computing content hashes…',
+    progressMessage: 'Computing content hashes...',
   });
 
-  // Load all library skills
-  const [systemSkills, orgSkills] = await Promise.all([
-    systemSkillService.listActiveSkills(),
-    skillService.listSkills(organisationId),
-  ]);
+  // Load all library skills from system_skills. listSkills() returns every
+  // row regardless of isActive / visibility so retired skills still
+  // participate in dedup. See spec §10 Phase 0 listSkills() contract.
+  const systemSkillRows = await systemSkillService.listSkills();
 
-  const librarySkills: LibrarySkillSummary[] = [
-    ...systemSkills.map((s) => ({
-      id: null,
-      slug: s.slug,
-      name: s.name,
-      description: s.description,
-      definition: s.definition as object | null,
-      instructions: s.instructions,
-      isSystem: true,
-    })),
-    ...orgSkills
-      .filter((s: { skillType?: string }) => s.skillType !== 'built_in')
-      .map((s) => ({
-        id: s.id,
-        slug: s.slug,
-        name: s.name,
-        description: s.description ?? '',
-        definition: s.definition as object | null,
-        instructions: s.instructions,
-          isSystem: false,
-      })),
-  ];
+  const librarySkills: LibrarySkillSummary[] = systemSkillRows.map((s) => ({
+    id: s.id,
+    slug: s.slug,
+    name: s.name,
+    description: s.description,
+    definition: s.definition as object | null,
+    instructions: s.instructions,
+    // isSystem is now always true (the analyzer is system-only post Phase 1).
+    // Field kept for backwards compatibility with the LibrarySkillSummary
+    // type used by skillAnalyzerServicePure helpers.
+    isSystem: true,
+  }));
 
   // Compute candidate hashes
   const candidateHashes = candidates.map((c) =>
@@ -209,7 +202,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   await updateJobProgress(jobId, {
     progressPct: 20,
-    progressMessage: `${exactDuplicates.length} exact duplicate${exactDuplicates.length === 1 ? '' : 's'} found — embedding ${remainingCandidates.length} remaining…`,
+    progressMessage: `${exactDuplicates.length} exact duplicate${exactDuplicates.length === 1 ? '' : 's'} found - embedding ${remainingCandidates.length} remaining...`,
     exactDuplicateCount: exactDuplicates.length,
   });
 
@@ -219,7 +212,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'embedding',
     progressPct: 20,
-    progressMessage: 'Generating embeddings…',
+    progressMessage: 'Generating embeddings...',
   });
 
   // Gather all content needing embeddings (candidates + library skills)
@@ -299,11 +292,11 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         const pct = 20 + Math.round((Math.min(i + BATCH_SIZE, uniqueUncached.length) / uniqueUncached.length) * 20);
         await updateJobProgress(jobId, {
           progressPct: pct,
-          progressMessage: `Embedded ${Math.min(i + BATCH_SIZE, uniqueUncached.length)} / ${uniqueUncached.length} skills…`,
+          progressMessage: `Embedded ${Math.min(i + BATCH_SIZE, uniqueUncached.length)} / ${uniqueUncached.length} skills...`,
         });
       }
     } else {
-      console.warn('[SkillAnalyzerJob] OPENAI_API_KEY not set — skipping embeddings, all pairs treated as ambiguous');
+      console.warn('[SkillAnalyzerJob] OPENAI_API_KEY not set - skipping embeddings, all pairs treated as ambiguous');
     }
   }
 
@@ -313,7 +306,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'comparing',
     progressPct: 40,
-    progressMessage: 'Computing similarity scores…',
+    progressMessage: 'Computing similarity scores...',
   });
 
   // Build embedding arrays for comparison
@@ -391,17 +384,28 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   await updateJobProgress(jobId, {
     progressPct: 60,
-    progressMessage: `${distinctResults.length} distinct, ${llmQueue.length} need classification…`,
+    progressMessage: `${distinctResults.length} distinct, ${llmQueue.length} need classification...`,
     comparisonCount: bestMatches.length,
   });
 
   // -------------------------------------------------------------------------
   // Stage 5: Classify (60% → 90%)
   // -------------------------------------------------------------------------
+  // When ANTHROPIC_API_KEY is not configured, the LLM classification step
+  // cannot run. Rather than burning 3 backoff retries per candidate on a
+  // call that will always throw PROVIDER_NOT_CONFIGURED (which leaves the
+  // UI hanging on "Classifying with AI..." for minutes), detect the missing
+  // key upfront and route every queued candidate directly to PARTIAL_OVERLAP
+  // for human review. Mirrors the existing OPENAI_API_KEY fallback in the
+  // embedding stage above.
+  const classificationFallback = !env.ANTHROPIC_API_KEY;
+
   await updateJobProgress(jobId, {
     status: 'classifying',
     progressPct: 60,
-    progressMessage: 'Classifying with AI…',
+    progressMessage: classificationFallback
+      ? 'LLM classification unavailable - marking candidates for human review...'
+      : 'Classifying with AI...',
   });
 
   type ClassifiedResult = {
@@ -415,6 +419,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     librarySlug: string | null;
     libraryName: string | null;
     diffSummary: object | null;
+    // Phase 3 of skill-analyzer-v2: LLM-generated merged version of the
+    // candidate + library skill, populated only when the classifier
+    // returns a valid proposedMerge for a PARTIAL_OVERLAP / IMPROVEMENT
+    // result. Null on every other path. The Write stage persists this
+    // into both proposed_merged_content (mutable) and
+    // original_proposed_merge (immutable) on the result row.
+    proposedMerge: object | null;
   };
 
   const classifiedResults: ClassifiedResult[] = [];
@@ -424,107 +435,279 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     librarySkills.map((lib) => [lib.slug, lib])
   );
 
-  const limit = await getPLimit(5);
-  let classifiedCount = 0;
+  if (classificationFallback) {
+    console.warn(
+      '[SkillAnalyzerJob] ANTHROPIC_API_KEY not set - skipping LLM classification; all ambiguous pairs routed to PARTIAL_OVERLAP for human review'
+    );
 
-  await Promise.all(
-    llmQueue.map((match) =>
-      limit(async () => {
-        const candidate = candidates[match.candidateIndex];
-        const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
+    for (const match of llmQueue) {
+      const candidate = candidates[match.candidateIndex];
+      const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
-        if (!matchedLib || !candidate) {
-          classifiedResults.push({
-            candidateIndex: match.candidateIndex,
-            candidate,
-            classification: 'DISTINCT',
-            confidence: 0.5,
-            similarityScore: match.similarity,
-            classificationReasoning: 'Library skill not found — treating as distinct.',
-            libraryId: null,
-            librarySlug: null,
-            libraryName: null,
-            diffSummary: null,
-          });
-          return;
-        }
-
-        const { system, userMessage } = skillAnalyzerServicePure.buildClassificationPrompt(
-          candidate,
-          matchedLib,
-          match.band as 'likely_duplicate' | 'ambiguous'
-        );
-
-        let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponse>;
-
-        try {
-          const response = await withBackoff(
-            () =>
-              anthropicAdapter.call({
-                model: 'claude-haiku-4-5-20251001',
-                system,
-                messages: [{ role: 'user', content: userMessage }],
-                maxTokens: 512,
-                temperature: 0.1,
-              }),
-            {
-              label: `skill-classify-${match.candidateIndex}`,
-              maxAttempts: 3,
-              correlationId: jobId,
-              runId: jobId,
-              isRetryable: (err: unknown) => {
-                const e = err as { statusCode?: number; code?: string };
-                return e?.statusCode === 503 || e?.statusCode === 529 || e?.code === 'PROVIDER_UNAVAILABLE';
-              },
-            }
-          );
-
-          classificationResult = skillAnalyzerServicePure.parseClassificationResponse(response.content);
-        } catch {
-          classificationResult = null;
-        }
-
-        const finalResult = classificationResult ?? {
-          classification: 'PARTIAL_OVERLAP' as const,
-          confidence: 0.3,
-          reasoning: 'LLM classification failed — defaulting to PARTIAL_OVERLAP for human review.',
-        };
-
-        const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
-
+      if (!matchedLib || !candidate) {
         classifiedResults.push({
           candidateIndex: match.candidateIndex,
           candidate,
-          classification: finalResult.classification,
-          confidence: finalResult.confidence,
+          classification: 'DISTINCT',
+          confidence: 0.5,
           similarityScore: match.similarity,
-          classificationReasoning: finalResult.reasoning,
-          libraryId: matchedLib.id,
-          librarySlug: matchedLib.slug,
-          libraryName: matchedLib.name,
-          diffSummary,
+          classificationReasoning: 'Library skill not found - treating as distinct.',
+          libraryId: null,
+          librarySlug: null,
+          libraryName: null,
+          diffSummary: null,
+          proposedMerge: null,
         });
+        continue;
+      }
 
-        classifiedCount++;
-        const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
-        await updateJobProgress(jobId, {
-          progressPct: Math.min(pct, 89),
-          progressMessage: `Classified ${classifiedCount} / ${llmQueue.length}…`,
-        });
-      })
-    )
-  );
+      classifiedResults.push({
+        candidateIndex: match.candidateIndex,
+        candidate,
+        classification: 'PARTIAL_OVERLAP',
+        confidence: 0.3,
+        similarityScore: match.similarity,
+        classificationReasoning:
+          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+        libraryId: matchedLib.id,
+        librarySlug: matchedLib.slug,
+        libraryName: matchedLib.name,
+        diffSummary: skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib),
+        // No LLM = no merge proposal. Row will fail the null guard on
+        // execute (spec §6.3 LLM-fallback path).
+        proposedMerge: null,
+      });
+    }
+
+    await updateJobProgress(jobId, {
+      progressPct: 89,
+      progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
+    });
+  } else {
+    const limit = await getPLimit(5);
+    let classifiedCount = 0;
+
+    await Promise.all(
+      llmQueue.map((match) =>
+        limit(async () => {
+          const candidate = candidates[match.candidateIndex];
+          const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
+
+          if (!matchedLib || !candidate) {
+            classifiedResults.push({
+              candidateIndex: match.candidateIndex,
+              candidate,
+              classification: 'DISTINCT',
+              confidence: 0.5,
+              similarityScore: match.similarity,
+              classificationReasoning: 'Library skill not found - treating as distinct.',
+              libraryId: null,
+              librarySlug: null,
+              libraryName: null,
+              diffSummary: null,
+              proposedMerge: null,
+            });
+            return;
+          }
+
+          // Phase 3: use the merge-aware prompt + parser. The system prompt
+          // is a superset of the base classifier — it adds instructions for
+          // producing a proposedMerge object on PARTIAL_OVERLAP / IMPROVEMENT.
+          const { system, userMessage } = skillAnalyzerServicePure.buildClassifyPromptWithMerge(
+            candidate,
+            matchedLib,
+            match.band as 'likely_duplicate' | 'ambiguous',
+          );
+
+          let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
+
+          try {
+            const response = await withBackoff(
+              () =>
+                anthropicAdapter.call({
+                  model: 'claude-haiku-4-5-20251001',
+                  system,
+                  messages: [{ role: 'user', content: userMessage }],
+                  maxTokens: 512,
+                  temperature: 0.1,
+                }),
+              {
+                label: `skill-classify-${match.candidateIndex}`,
+                maxAttempts: 3,
+                correlationId: jobId,
+                runId: jobId,
+                // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
+                // cannot change between attempts, so retrying just wastes time.
+                // Retry only transient upstream failures.
+                isRetryable: (err: unknown) => {
+                  const e = err as { statusCode?: number; code?: string };
+                  if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+                  return (
+                    e?.statusCode === 503 ||
+                    e?.statusCode === 529 ||
+                    e?.code === 'PROVIDER_UNAVAILABLE'
+                  );
+                },
+              }
+            );
+
+            classificationResult = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+          } catch {
+            classificationResult = null;
+          }
+
+          // Fallback: classification failed entirely (LLM error or
+          // unparseable output). Tag the row as PARTIAL_OVERLAP for human
+          // review with a null merge — execute will fail the null guard
+          // with the spec's standard "merge proposal unavailable" error.
+          const finalResult = classificationResult ?? {
+            classification: 'PARTIAL_OVERLAP' as const,
+            confidence: 0.3,
+            reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
+            proposedMerge: null,
+          };
+
+          const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
+
+          classifiedResults.push({
+            candidateIndex: match.candidateIndex,
+            candidate,
+            classification: finalResult.classification,
+            confidence: finalResult.confidence,
+            similarityScore: match.similarity,
+            classificationReasoning: finalResult.reasoning,
+            libraryId: matchedLib.id,
+            librarySlug: matchedLib.slug,
+            libraryName: matchedLib.name,
+            diffSummary,
+            proposedMerge: finalResult.proposedMerge ?? null,
+          });
+
+          classifiedCount++;
+          const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
+          await updateJobProgress(jobId, {
+            progressPct: Math.min(pct, 89),
+            progressMessage: `Classified ${classifiedCount} / ${llmQueue.length}...`,
+          });
+        })
+      )
+    );
+  }
 
   // -------------------------------------------------------------------------
-  // Stage 6: Write Results (90% → 100%)
+  // Stage 6: Agent-embed (75% → 80%) — Phase 2 of skill-analyzer-v2
+  // -------------------------------------------------------------------------
+  // Refresh embeddings for every active system agent. Lazy invalidation:
+  // anything whose stored content_hash matches the live hash is a cache hit
+  // and skipped. See spec §6 Pipeline + agentEmbeddingService.
+  await updateJobProgress(jobId, {
+    progressPct: 75,
+    progressMessage: 'Refreshing system agent embeddings...',
+  });
+
+  const { agentEmbeddingService } = await import('../services/agentEmbeddingService.js');
+  const { systemAgentService } = await import('../services/systemAgentService.js');
+
+  await agentEmbeddingService.refreshSystemAgentEmbeddings();
+
+  // -------------------------------------------------------------------------
+  // Stage 7: Agent-propose (80% → 90%) — Phase 2 of skill-analyzer-v2
+  // -------------------------------------------------------------------------
+  // For every DISTINCT result, compute cosine similarity against every
+  // system agent embedding and write the top-K=3 to agent_proposals on
+  // the result row. The threshold drives pre-selection only — top-K is
+  // always persisted in full so reviewers can promote a below-threshold
+  // chip with one click. See spec §6.2.
+  await updateJobProgress(jobId, {
+    progressPct: 80,
+    progressMessage: 'Proposing system agent attachments...',
+  });
+
+  // Pre-load every active system agent + its cached embedding into a
+  // single in-memory list so the per-result loop is just N cosine
+  // computations. Zero-agents edge case: empty list → empty proposals.
+  const allSystemAgents = await systemAgentService.listAgents();
+  const rankableAgents: Array<{
+    systemAgentId: string;
+    slug: string;
+    name: string;
+    embedding: number[];
+  }> = [];
+  for (const agent of allSystemAgents) {
+    const embRow = await agentEmbeddingService.getAgentEmbedding(agent.id);
+    if (embRow) {
+      rankableAgents.push({
+        systemAgentId: agent.id,
+        slug: agent.slug,
+        name: agent.name,
+        embedding: embRow.embedding,
+      });
+    }
+  }
+
+  // Compute proposals for every DISTINCT result. Indexed by candidateIndex
+  // so the Write stage below can look them up alongside the existing result
+  // row data.
+  const agentProposalsByCandidateIndex = new Map<
+    number,
+    ReturnType<typeof skillAnalyzerServicePure.rankAgentsForCandidate>
+  >();
+
+  if (rankableAgents.length > 0) {
+    for (const distinctMatch of distinctResults) {
+      const candidateEmbedding = candidateEmbeddingsForCompare.find(
+        (c) => c.index === distinctMatch.candidateIndex,
+      )?.embedding;
+      if (!candidateEmbedding) continue;
+      const proposals = skillAnalyzerServicePure.rankAgentsForCandidate(
+        candidateEmbedding,
+        rankableAgents,
+      );
+      agentProposalsByCandidateIndex.set(distinctMatch.candidateIndex, proposals);
+    }
+    // Also propose for any LLM-classified result that landed on DISTINCT.
+    for (const r of classifiedResults) {
+      if (r.classification !== 'DISTINCT') continue;
+      const candidateEmbedding = candidateEmbeddingsForCompare.find(
+        (c) => c.index === r.candidateIndex,
+      )?.embedding;
+      if (!candidateEmbedding) continue;
+      const proposals = skillAnalyzerServicePure.rankAgentsForCandidate(
+        candidateEmbedding,
+        rankableAgents,
+      );
+      agentProposalsByCandidateIndex.set(r.candidateIndex, proposals);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 8: Write Results (90% → 100%)
   // -------------------------------------------------------------------------
   await updateJobProgress(jobId, {
     progressPct: 90,
-    progressMessage: 'Writing results…',
+    progressMessage: 'Writing results...',
   });
 
   // Collect all result rows
   const resultRows: (typeof skillAnalyzerResults.$inferInsert)[] = [];
+
+  // Helper: look up the SHA-256 hash for a given candidate index. The hash
+  // is computed in Stage 2 (Hash) and was originally only used for dedup.
+  // Phase 1 of skill-analyzer-v2 persists it on the result row so the Phase 4
+  // manual-add PATCH can look up the candidate embedding in skill_embeddings
+  // by content hash without recomputing it. See spec §5.2 candidateContentHash.
+  const hashByIndex = new Map<number, string>();
+  for (let i = 0; i < candidates.length; i++) {
+    hashByIndex.set(i, candidateHashes[i]);
+  }
+  const getCandidateHash = (idx: number): string => {
+    const h = hashByIndex.get(idx);
+    if (h === undefined) {
+      // Should be unreachable — every candidate is hashed in Stage 2.
+      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
+    }
+    return h;
+  };
 
   // Exact duplicates from Stage 2
   for (const dup of exactDuplicates) {
@@ -534,9 +717,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateIndex: dup.candidateIndex,
       candidateName: candidate.name,
       candidateSlug: candidate.slug,
+      candidateContentHash: getCandidateHash(dup.candidateIndex),
       matchedSkillId: dup.matchedLib.id ?? undefined,
-      matchedSystemSkillSlug: dup.matchedLib.isSystem ? dup.matchedLib.slug : undefined,
-      matchedSkillName: dup.matchedLib.name,
       classification: 'DUPLICATE',
       confidence: 1.0,
       similarityScore: 1.0,
@@ -553,14 +735,18 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateIndex: m.candidateIndex,
       candidateName: candidate.name,
       candidateSlug: candidate.slug,
+      candidateContentHash: getCandidateHash(m.candidateIndex),
       matchedSkillId: undefined,
-      matchedSystemSkillSlug: undefined,
-      matchedSkillName: undefined,
       classification: 'DISTINCT',
       confidence: 1 - m.similarity,
       similarityScore: m.similarity,
-      classificationReasoning: `Low embedding similarity (${(m.similarity * 100).toFixed(0)}%) — no existing skill is close.`,
+      classificationReasoning: `Low embedding similarity (${(m.similarity * 100).toFixed(0)}%) - no existing skill is close.`,
       diffSummary: null,
+      // Phase 2: agent proposals from the Agent-propose stage above. The
+      // map only has entries for DISTINCT candidates that had a candidate
+      // embedding; rows with no proposals fall back to the column default
+      // of [].
+      agentProposals: agentProposalsByCandidateIndex.get(m.candidateIndex) ?? [],
     });
   }
 
@@ -571,15 +757,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       candidateIndex: r.candidateIndex,
       candidateName: r.candidate.name,
       candidateSlug: r.candidate.slug,
+      candidateContentHash: getCandidateHash(r.candidateIndex),
       matchedSkillId: r.libraryId ?? undefined,
-      // Only set for system skills (id === null). Org skills are identified by matchedSkillId.
-      matchedSystemSkillSlug: (r.libraryId === null && r.librarySlug != null) ? r.librarySlug : undefined,
-      matchedSkillName: r.libraryName ?? undefined,
       classification: r.classification,
       confidence: r.confidence,
       similarityScore: r.similarityScore ?? undefined,
       classificationReasoning: r.classificationReasoning ?? undefined,
       diffSummary: r.diffSummary ?? undefined,
+      // Phase 2: agent proposals only for LLM-classified DISTINCT results.
+      // The agent-propose stage above populates the map for both bands.
+      agentProposals: agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [],
+      // Phase 3: persist the LLM merge proposal into BOTH the mutable
+      // proposed_merged_content column AND the immutable
+      // original_proposed_merge column. They are identical at write time
+      // and diverge only when the user edits the Recommended column via
+      // the Phase 5 PATCH endpoint. Reset endpoint copies original back
+      // into proposedMergedContent. Null on every non-merge path.
+      proposedMergedContent: r.proposedMerge ?? undefined,
+      originalProposedMerge: r.proposedMerge ?? undefined,
     });
   }
 
@@ -589,7 +784,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   await updateJobProgress(jobId, {
     status: 'completed',
     progressPct: 100,
-    progressMessage: `Analysis complete — ${resultRows.length} result${resultRows.length === 1 ? '' : 's'}.`,
+    progressMessage: `Analysis complete - ${resultRows.length} result${resultRows.length === 1 ? '' : 's'}.`,
     completedAt: new Date(),
   });
 }
