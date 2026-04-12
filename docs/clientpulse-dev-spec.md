@@ -60,7 +60,7 @@ Inventory of existing code that ClientPulse builds on. Every file path verified 
 |-------|------|--------|
 | Schema: templates | `server/db/schema/systemHierarchyTemplates.ts` | Exists — `id`, `name`, `slug`, `description`, `operationalDefaults` (jsonb), `memorySeedsJson` (jsonb), `requiredOperatorInputs` (jsonb), `isPublished`, `createdAt`, `updatedAt`, `deletedAt` |
 | Schema: template slots | `server/db/schema/systemHierarchyTemplateSlots.ts` | Exists — `templateId`, `systemAgentId`, `executionScope`, `skillSlugs` (jsonb), `sortOrder` |
-| Service | `server/services/systemTemplateService.ts` (684 lines) | Exists — `loadToOrg()`, template CRUD, Paperclip import |
+| Service | `server/services/systemTemplateService.ts` (903 lines) | Exists — `loadToOrg()`, template CRUD, Paperclip import |
 | Service | `server/services/hierarchyTemplateService.ts` (676 lines) | Exists — org-level template management |
 | Routes | `server/routes/systemCompanyTemplates.ts` | Exists — `GET/PATCH/DELETE /api/system/company-templates/:id` |
 | UI | `client/src/pages/SystemCompanyTemplatesPage.tsx` | Exists — list/preview/unpublish/delete |
@@ -72,14 +72,14 @@ Inventory of existing code that ClientPulse builds on. Every file path verified 
 
 | Asset | Path | Status |
 |-------|------|--------|
-| Adapter | `server/adapters/ghlAdapter.ts` (342 lines) | Exists — OAuth token exchange, webhook verification, rate limiting, ingestion method stubs (`listAccounts`, `fetchContacts`, `fetchOpportunities`, `fetchConversations`, `fetchRevenue`) |
+| Adapter | `server/adapters/ghlAdapter.ts` (410 lines) | Exists — OAuth token exchange, webhook verification, rate limiting, ingestion methods (`listAccounts`, `fetchContacts`, `fetchOpportunities`, `fetchConversations`, `fetchRevenue`) |
 | Webhook route | `server/routes/webhooks/ghlWebhook.ts` | Exists — HMAC verification, event normalisation via `mapGhlEventType` |
 | Canonical schema | `server/db/schema/canonicalEntities.ts` (170 lines) | Exists — `canonical_contacts`, `canonical_opportunities`, `canonical_conversations`, `canonical_revenue` |
 | Canonical accounts | `server/db/schema/canonicalAccounts.ts` (30 lines) | Exists — `canonical_accounts` with `externalId`, `source`, `orgId`, `subaccountId` |
-| Data service | `server/services/canonicalDataService.ts` (354 lines) | Exists — query layer for metrics aggregation |
-| Connector config | `server/services/connectorConfigService.ts` (131 lines) | Exists — CRUD for connector configs |
-| Polling service | `server/services/connectorPollingService.ts` (157 lines) | Exists — polling job with sync phases |
-| Integration connections | `server/services/integrationConnectionService.ts` (591 lines) | Exists — full OAuth token lifecycle (encrypt/decrypt, refresh, status tracking) |
+| Data service | `server/services/canonicalDataService.ts` (478 lines) | Exists — query layer for metrics aggregation |
+| Connector config | `server/services/connectorConfigService.ts` (165 lines) | Exists — CRUD for connector configs |
+| Polling service | `server/services/connectorPollingService.ts` (216 lines) | Exists — polling job with sync phases |
+| Integration connections | `server/services/integrationConnectionService.ts` (518 lines) | Exists — full OAuth token lifecycle (encrypt/decrypt, refresh, status tracking) |
 
 **Gap:** Ingestion methods are stubs — need real GHL API calls with pagination, error handling, and canonical entity normalisation. Webhook event normalisation incomplete for Opportunity stage/status transitions. Sync-phase state machine not fully wired. Agency-token-vs-location-token exchange unverified. Mount paths need renaming (`/oauth/callback`, `/webhooks/ingest`).
 
@@ -99,7 +99,7 @@ Inventory of existing code that ClientPulse builds on. Every file path verified 
 | Asset | Path | Status |
 |-------|------|--------|
 | Skill definitions | `server/skills/compute_health_score.md`, `compute_churn_risk.md`, `detect_anomaly.md`, `generate_portfolio_report.md`, `trigger_account_intervention.md`, `query_subaccount_cohort.md`, `read_org_insights.md`, `write_org_insight.md` | Exist as markdown definitions |
-| Executor framework | `server/services/intelligenceSkillExecutor.ts` (485 lines) | Exists — framework with registered skills in action registry |
+| Executor framework | `server/services/intelligenceSkillExecutor.ts` (658 lines) | Exists — framework with registered skills in action registry |
 | Action registry | `server/config/actionRegistry.ts` | Intelligence skills registered |
 
 **Gap:** Executor functions are framework-only — need wiring to real `canonicalDataService` queries. Health score calculation, anomaly detection algorithm, churn risk model, and portfolio report generation are not yet implemented against real data.
@@ -173,7 +173,7 @@ CREATE TABLE modules (
 INSERT INTO modules (slug, display_name, description, allowed_agent_slugs, allow_all_agents, sidebar_config)
 VALUES
   ('client_pulse', 'ClientPulse', 'Weekly client health reports and churn-risk alerts for agencies',
-   '["reporting_agent"]'::jsonb, false,
+   '["portfolio-health-agent"]'::jsonb, false,
    '["dashboard","inbox","companies","reports","integrations","team","manage_org"]'::jsonb),
   ('full_access', 'Full Access', 'Unlock every agent and the full operator UI',
    NULL, true,
@@ -243,7 +243,7 @@ if (agent.systemAgentId) {
 }
 ```
 
-New `result_status` enum value: `'skipped_module_disabled'`. Added via ALTER TYPE in the migration.
+New `run_result_status` value: `'skipped_module_disabled'`. This column is a plain `text` type (not a Postgres enum), so no `ALTER TYPE` is needed — just extend the TypeScript type annotation in `server/db/schema/agentRuns.ts` to include the new value.
 
 #### 3.4.3 Agent list UI filtering
 
@@ -307,11 +307,9 @@ Each nav item in `Layout.tsx` gets a `slug` prop mapped to this registry. The si
 
 **Problem:** The UI currently shows two "GHL Agency Intelligence" template rows (one with 1 agent, one with 0).
 
-**Fix:**
-1. Audit `scripts/seed-*.ts` and migration 0068 to find both insertion points.
-2. Ensure the master seed uses upsert semantics keyed on `slug` (not `id`): `INSERT ... ON CONFLICT (slug) DO UPDATE SET ...`.
-3. Write a one-time cleanup migration that deletes the duplicate row (the one with 0 agents) by checking `NOT EXISTS (SELECT 1 FROM system_hierarchy_template_slots WHERE template_id = t.id)`.
-4. Add a unique constraint on `system_hierarchy_templates.slug` if not already present.
+**Root cause:** `system_hierarchy_templates` has no `slug` column and no uniqueness constraint on `name`. Migration 0068 uses `ON CONFLICT DO NOTHING` with an auto-generated `id`, so re-running the seed always inserts a new row.
+
+**Fix:** Consolidated in §6.3 (migration 0104) — adds a `slug` column, backfills from `name`, deletes the duplicate row, and adds a unique constraint. The master seed script is then updated to use `INSERT ... ON CONFLICT (slug) DO UPDATE SET ...`.
 
 ### 3.7 System admin UI for modules
 
@@ -549,7 +547,7 @@ With the `subscriptions` and `org_subscriptions` tables in place, update `module
 - [ ] Unit test (pure): `subscriptionServicePure.test.ts` — yearly price auto-calculation, module delta computation
 - [ ] Create a subscription via admin UI → verify it appears in the catalogue
 - [ ] Assign subscription to org → verify `GET /api/my-subscription` returns it
-- [ ] Assign `client_pulse` subscription → verify only `reporting_agent` is in the allowlist
+- [ ] Assign `client_pulse` subscription → verify only `portfolio-health-agent` is in the allowlist
 - [ ] Switch to `full_access_internal` → verify all agents are in the allowlist
 - [ ] Cancel subscription → verify allowlist returns empty set
 - [ ] Comp an org → verify subscription works without Stripe
@@ -722,7 +720,7 @@ These should have runtime presence checks that throw on startup if any are missi
 
 | Field | Value |
 |-------|-------|
-| System agent slug | `reporting_agent` |
+| System agent slug | `portfolio-health-agent` |
 | `isSystemManaged` | `true` |
 | `executionScope` | `'org'` |
 | Skill bundle | `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `query_subaccount_cohort`, `read_org_insights`, `write_org_insight`, `send_email` |
@@ -737,7 +735,7 @@ When `systemTemplateService.loadToOrg('ghl-agency-intelligence', orgId, {})` is 
 
 1. Look up the "GHL Agency Intelligence" template by slug
 2. For each slot in `system_hierarchy_template_slots`:
-   - Find the corresponding system agent (e.g. `reporting_agent`)
+   - Find the corresponding system agent (e.g. `portfolio-health-agent`)
    - Create an `agents` row: `organisationId = orgId`, `systemAgentId = slot.systemAgentId`, `isSystemManaged = true`, `executionScope = slot.executionScope`
    - Create an `org_agent_configs` row if the slot specifies execution scope `'org'`
    - **Do NOT create `subaccount_agents` links.** The Reporting Agent is org-scoped; it doesn't need per-subaccount links.
@@ -748,23 +746,39 @@ When `systemTemplateService.loadToOrg('ghl-agency-intelligence', orgId, {})` is 
 
 ### 6.3 GHL Agency Intelligence template seed fix
 
-**Problem:** Duplicate "GHL Agency Intelligence" rows in the UI.
+**Problem 1:** Duplicate "GHL Agency Intelligence" rows in the UI.
 
-**Fix (in migration 0104 or 0105):**
+**Problem 2:** The `system_hierarchy_templates` table has NO `slug` column. The spec references template lookup by slug (`loadToOrg('ghl-agency-intelligence', ...)`, seed upsert on slug, unique constraint on slug), but the table only has `name` and `id`. The current `loadToOrg()` takes a UUID, not a slug.
+
+**Fix (in migration 0104):**
 
 ```sql
--- Delete the duplicate template row (the one with zero slots)
+-- Step 1: Add slug column to system_hierarchy_templates
+ALTER TABLE system_hierarchy_templates ADD COLUMN slug TEXT;
+
+-- Step 2: Backfill slugs from names (kebab-case)
+UPDATE system_hierarchy_templates
+SET slug = lower(regexp_replace(name, '[^a-zA-Z0-9]+', '-', 'g'));
+
+-- Step 3: Make slug NOT NULL after backfill
+ALTER TABLE system_hierarchy_templates ALTER COLUMN slug SET NOT NULL;
+
+-- Step 4: Delete the duplicate template row (the one with zero slots)
 DELETE FROM system_hierarchy_templates
-WHERE slug = 'ghl-agency-intelligence'
+WHERE name = 'GHL Agency Intelligence'
   AND id NOT IN (
     SELECT template_id FROM system_hierarchy_template_slots
   );
 
--- Ensure slug uniqueness going forward
-ALTER TABLE system_hierarchy_templates
-  ADD CONSTRAINT uq_system_hierarchy_templates_slug UNIQUE (slug)
+-- Step 5: Add unique constraint on slug (partial — excludes soft-deleted rows)
+CREATE UNIQUE INDEX uq_system_hierarchy_templates_slug
+  ON system_hierarchy_templates (slug)
   WHERE deleted_at IS NULL;
 ```
+
+**Drizzle schema update:** Add `slug: text('slug').notNull()` to `server/db/schema/systemHierarchyTemplates.ts`.
+
+**`loadToOrg()` update:** Add an overload or helper that accepts a slug string and resolves it to a UUID before calling the existing `loadToOrg(systemTemplateId, ...)`. Alternatively, refactor `loadToOrg` to accept either a UUID or slug with a runtime check. The spec's call sites (`§6.2`, `§9.2`) use slug-based calls: `loadToOrg('ghl-agency-intelligence', orgId, {})`.
 
 Update the master seed script to use `INSERT ... ON CONFLICT (slug) DO UPDATE` semantics.
 
@@ -909,7 +923,16 @@ if (isInitialSync && allAccountsSynced) {
 }
 ```
 
-### 6.9 Verification
+### 6.9 WebSocket emissions
+
+Module E's Dashboard (§8.2.1) subscribes to `dashboard:update` events via `useSocketRoom('org', orgId, ['dashboard:update'])`. The **producers** of these events are:
+
+1. **Reporting Agent run completion** — after the agent finishes and the `reports` row is written, emit `dashboard:update` to the org's socket room. Best location: in the run-completion handler in `agentExecutionService`, conditioned on the agent being the Portfolio Health Agent.
+2. **Connector sync completion** — after `connectorPollingService.syncConnector()` finishes a sync cycle, emit `dashboard:update` to the org's socket room. Best location: at the end of `syncConnector()`.
+
+Both emissions use the existing `useSocket` infrastructure — `io.to(orgRoomId).emit('dashboard:update', { timestamp })`.
+
+### 6.10 Verification
 
 - [ ] `loadToOrg('ghl-agency-intelligence', orgId)` creates exactly one org-scoped agent with `isSystemManaged: true`
 - [ ] No `subaccount_agents` links created
@@ -939,9 +962,9 @@ if (isInitialSync && allAccountsSynced) {
 
 ### 7.2 Report HTML template
 
-**New file:** `server/templates/portfolio-report.ts`
+**New file:** `server/lib/reportTemplates/portfolioReport.ts`
 
-A TypeScript function that takes a `PortfolioReportData` object (from §6.5) and returns an HTML string. Not a template engine — a pure function.
+The `server/templates/` directory does not exist in the current project structure. Following the convention of placing pure utility functions under `server/lib/`, this file lives in a new `reportTemplates/` subfolder of `server/lib/`. It is a TypeScript function that takes a `PortfolioReportData` object (from §6.5) and returns an HTML string. Not a template engine — a pure function.
 
 ```typescript
 export function renderPortfolioReportHtml(data: PortfolioReportData, orgName: string): string
@@ -1057,6 +1080,8 @@ interface DashboardData {
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET | `/api/dashboard` | `authenticate` | Dashboard data for current org |
+
+**Empty state:** If the org has a subscription but no canonical accounts (e.g. signup completed but OAuth not yet connected), show a single CTA: "Connect Go High Level to get started" linking to `/onboarding`. If accounts exist but no reports yet (sync in progress or first report not yet generated), show the sync progress bar and a "Your first report is being generated…" message. The dashboard must never appear blank without explanation.
 
 **UI layout (widget-based, data-driven):**
 
@@ -1312,7 +1337,7 @@ This section is intentionally brief — Stripe integration is not on the critica
 ### 10.2 Implementation notes
 
 - **Webhook handler:** `server/routes/webhooks/stripeWebhook.ts` — mount before body parsing (raw body for signature verification)
-- **Stripe SDK:** Use `stripe` npm package (already in `package.json`)
+- **Stripe SDK:** Use `stripe` npm package (must be added to `package.json` — not currently installed)
 - **Customer creation:** On first payment, create Stripe Customer linked to org via `organisations.stripe_customer_id` (new column)
 - **Checkout session:** `POST /api/billing/checkout` → creates Stripe Checkout Session → redirects to Stripe → success redirects to `/dashboard`
 - **Portal session:** `POST /api/billing/portal` → creates Stripe Customer Portal Session → redirects to Stripe
@@ -1332,15 +1357,19 @@ All new tables and schema changes required by this spec, in dependency order. Ne
 
 | Migration | Tables / Changes | Module | Depends on |
 |-----------|-----------------|--------|------------|
-| 0104 | `modules` table + seed (`client_pulse`, `full_access`). `ALTER TYPE agent_run_result_status ADD VALUE 'skipped_module_disabled'`. Template slug uniqueness constraint. Duplicate template cleanup. | A | — |
+| 0104 | `modules` table + seed (`client_pulse`, `full_access`). Add `slug` column to `system_hierarchy_templates` (backfill, NOT NULL, unique index). Duplicate template cleanup. Update `run_result_status` TypeScript type to include `'skipped_module_disabled'` (text column, no ALTER TYPE needed). | A | — |
 | 0105 | `subscriptions` table + `org_subscriptions` table + seed (starter, growth, scale, full_access_internal) | G | 0104 (references modules) |
 | 0106 | `reports` table | B | — |
+
+| 0107 | RLS policies for `reports` and `org_subscriptions` (both have `organisation_id`). Add both to `server/config/rlsProtectedTables.ts`. | A+G+B | 0105, 0106 |
 
 **No schema changes needed for:** Module C (uses existing tables), Module F (uses reports table from 0106), Module E (reads from existing tables + reports), Module D (writes to existing tables via services).
 
 **Stripe integration (deferred):** `ALTER TABLE organisations ADD COLUMN stripe_customer_id TEXT` — when Stripe is wired.
 
-**Total new tables:** 3 (`modules`, `subscriptions`, `org_subscriptions`, `reports` — technically 4 counting `org_subscriptions` separately from `subscriptions`).
+**RLS notes:** `modules` and `subscriptions` are system-admin catalogues with no `organisation_id` column — they do NOT need RLS policies. `reports` and `org_subscriptions` are org-scoped and must follow the existing RLS pattern (CREATE POLICY keyed on `current_setting('app.organisation_id', true)`).
+
+**Total new tables:** 4 (`modules`, `subscriptions`, `org_subscriptions`, `reports`). Also adds a `slug` column to the existing `system_hierarchy_templates` table. **Total new migrations:** 4 (0104–0107).
 
 ---
 
