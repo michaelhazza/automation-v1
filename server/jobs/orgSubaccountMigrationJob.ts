@@ -1,4 +1,4 @@
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   orgAgentConfigs,
@@ -8,6 +8,7 @@ import {
   orgMemoryEntries,
   workspaceMemories,
   workspaceMemoryEntries,
+  migrationStates,
 } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 
@@ -278,25 +279,25 @@ export async function runOrgSubaccountMigration(): Promise<MigrationResult> {
   logger.info('org_migration.configs_complete', configResult);
 
   // Record config migration state
-  await db.execute(sql`
-    INSERT INTO migration_states (key, completed_at, metadata)
-    VALUES ('org_subaccount_config_migration', NOW(), ${JSON.stringify(configResult)}::jsonb)
-    ON CONFLICT (key) DO UPDATE SET completed_at = NOW(), metadata = EXCLUDED.metadata
-  `).catch(() => {
-    // migration_states table may not exist in test env
-  });
+  await db
+    .insert(migrationStates)
+    .values({ key: 'org_subaccount_config_migration', completedAt: new Date(), metadata: configResult })
+    .onConflictDoUpdate({ target: migrationStates.key, set: { completedAt: new Date(), metadata: configResult } })
+    .catch((err) => {
+      logger.warn('org_migration.state_record_failed', { key: 'org_subaccount_config_migration', err: String(err) });
+    });
 
   const memoryResult = await migrateOrgMemories();
   logger.info('org_migration.memories_complete', memoryResult);
 
   // Record memory migration state
-  await db.execute(sql`
-    INSERT INTO migration_states (key, completed_at, metadata)
-    VALUES ('org_subaccount_memory_migration', NOW(), ${JSON.stringify(memoryResult)}::jsonb)
-    ON CONFLICT (key) DO UPDATE SET completed_at = NOW(), metadata = EXCLUDED.metadata
-  `).catch(() => {
-    // migration_states table may not exist in test env
-  });
+  await db
+    .insert(migrationStates)
+    .values({ key: 'org_subaccount_memory_migration', completedAt: new Date(), metadata: memoryResult })
+    .onConflictDoUpdate({ target: migrationStates.key, set: { completedAt: new Date(), metadata: memoryResult } })
+    .catch((err) => {
+      logger.warn('org_migration.state_record_failed', { key: 'org_subaccount_memory_migration', err: String(err) });
+    });
 
   logger.info('org_migration.complete', { configResult, memoryResult });
 

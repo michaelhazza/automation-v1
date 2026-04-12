@@ -366,6 +366,14 @@ async function start() {
       console.error('[boot] failed to register skill-analyzer worker', err);
     }
   }
+  // Org subaccount data migration (migration 0106) — idempotent, safe to re-run on every boot.
+  // Migrates orgAgentConfigs → subaccountAgents and orgMemories → workspaceMemories for existing orgs.
+  try {
+    const { runOrgSubaccountMigration } = await import('./jobs/orgSubaccountMigrationJob.js');
+    await runOrgSubaccountMigration();
+  } catch (err) {
+    console.error('[boot] org subaccount data migration failed — existing org agents may not be accessible', err);
+  }
   // Reconcile any scheduled-task runs left in `retrying` from a previous
   // process — their in-process retry timer was lost on restart.
   try {

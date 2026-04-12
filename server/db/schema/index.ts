@@ -120,6 +120,9 @@ export * from './workspaceHealthFindings';
 // Feature 2 — Priority Feed (migration 0100)
 export * from './priorityFeedClaims';
 
+// Org subaccount refactor — data migration state tracking (migration 0106)
+export * from './migrationStates';
+
 // Feature 3 — Skill Studio (migration 0101)
 export * from './skillVersions';
 

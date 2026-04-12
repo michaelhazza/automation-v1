@@ -242,9 +242,18 @@ export const agentExecutionService = {
     const startTime = Date.now();
 
     // ── 0a. Execution scope validation ─────────────────────────────────
-    // Post-migration 0106: all runs are subaccount-scoped. subaccountId is required.
+    // Post-migration 0106: all runs are subaccount-scoped. Both fields are required.
+    // Use Error instances (not plain objects) so background callers that check
+    // `err instanceof Error` (scheduledTaskService, subtaskWakeupService, etc.)
+    // can read err.message. asyncHandler also accepts Error with statusCode/errorCode
+    // as extra properties.
     if (!request.subaccountId) {
-      throw new Error('All agent runs require a subaccountId');
+      const err = Object.assign(new Error('All agent runs require a subaccountId'), { statusCode: 400, errorCode: 'MISSING_SUBACCOUNT_ID' });
+      throw err;
+    }
+    if (!request.subaccountAgentId) {
+      const err = Object.assign(new Error('All agent runs require a subaccountAgentId post-migration'), { statusCode: 400, errorCode: 'MISSING_SUBACCOUNT_AGENT_ID' });
+      throw err;
     }
 
     // ── 0b. General org execution kill switch ───────────────────────────
@@ -364,7 +373,7 @@ export const agentExecutionService = {
           .from(subaccountAgents)
           .where(eq(subaccountAgents.id, request.subaccountAgentId!));
 
-        if (!link) throw new Error('Subaccount agent link not found');
+        if (!link) throw Object.assign(new Error('Subaccount agent link not found'), { statusCode: 404, errorCode: 'SUBACCOUNT_AGENT_NOT_FOUND' });
         saLink = link;
 
         tokenBudget = link.tokenBudgetPerRun;
