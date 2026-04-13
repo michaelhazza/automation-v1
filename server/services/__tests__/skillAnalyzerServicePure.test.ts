@@ -9,6 +9,7 @@ import {
   parseClassificationResponse,
   generateDiffSummary,
   buildClassificationPrompt,
+  buildClassifyPromptWithMerge,
 } from '../skillAnalyzerServicePure.js';
 import type { LibrarySkillSummary } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
@@ -279,6 +280,18 @@ test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT'
   assert(
     userMessage.includes('Prefer IMPROVEMENT'),
     'likely_duplicate hint should prefer IMPROVEMENT',
+  );
+});
+
+test('buildClassifyPromptWithMerge: likely_duplicate band hint prefers IMPROVEMENT', () => {
+  const { userMessage } = buildClassifyPromptWithMerge(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'likely_duplicate',
+  );
+  assert(
+    userMessage.includes('Prefer IMPROVEMENT'),
+    'likely_duplicate hint should prefer IMPROVEMENT in merge path',
   );
 });
 
