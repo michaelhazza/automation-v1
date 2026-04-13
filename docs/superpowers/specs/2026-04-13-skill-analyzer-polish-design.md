@@ -84,14 +84,13 @@ Add `e?.statusCode === 429` to the `isRetryable` predicate in the classify stage
 Add two columns:
 ```
 classificationFailed: boolean('classification_failed').notNull().default(false)
-classificationFailureReason: text('classification_failure_reason')  -- nullable: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown'
+classificationFailureReason: text('classification_failure_reason')  -- nullable: 'rate_limit' | 'parse_error' | 'unknown'
 ```
 
 **File:** `server/jobs/skillAnalyzerJob.ts`
 
 In the fallback path, inspect the caught error to set the appropriate reason:
 - `statusCode === 429` → `'rate_limit'`
-- timeout/abort signal → `'timeout'`
 - Zod parse failure → `'parse_error'`
 - anything else → `'unknown'`
 

@@ -411,6 +411,7 @@ function ResultSection({
   onBulkAction,
   onProposalsUpdated,
   onResultPatched,
+  onResultsReplaced,
 }: {
   classification: Classification;
   results: AnalysisResult[];
@@ -421,6 +422,7 @@ function ResultSection({
   onBulkAction: (classification: Classification, action: 'approved' | 'rejected' | 'skipped') => void;
   onProposalsUpdated: (resultId: string, proposals: AgentProposal[]) => void;
   onResultPatched: (next: AnalysisResult) => void;
+  onResultsReplaced: (results: AnalysisResult[]) => void;
 }) {
   const [open, setOpen] = useState(SECTION_CONFIG[classification].defaultOpen);
   const cfg = SECTION_CONFIG[classification];
@@ -438,7 +440,7 @@ function ResultSection({
       const { data } = await api.get<{ results: AnalysisResult[] }>(
         `/api/system/skill-analyser/jobs/${jobId}`,
       );
-      data.results.forEach((r) => onResultPatched(r));
+      onResultsReplaced(data.results);
       setBulkRetryStatus(
         retryData.stillFailed === 0
           ? `All ${retryData.retried} retried successfully`
@@ -668,6 +670,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           onBulkAction={handleBulkAction}
           onProposalsUpdated={handleProposalsUpdated}
           onResultPatched={handleResultPatched}
+          onResultsReplaced={onResultsUpdated}
         />
       ))}
 
