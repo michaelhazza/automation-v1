@@ -67,8 +67,8 @@ export default function ExecutionDetailPage({ user }: { user: User }) {
   return (
     <div className="animate-[fadeIn_0.2s_ease-out_both]">
       <div className="mb-4">
-        <Link to="/executions" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
-          ← Back to executions
+        <Link to="/admin/activity" className="text-[13px] text-indigo-600 hover:text-indigo-700 no-underline">
+          ← Back to activity
         </Link>
       </div>
 

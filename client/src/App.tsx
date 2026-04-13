@@ -199,9 +199,6 @@ export default function App() {
           <Route path="/" element={<DashboardPage user={user!} />} />
           <Route path="/processes" element={<ProcessesPage user={user!} />} />
           <Route path="/processes/:id" element={<ProcessExecutionPage user={user!} />} />
-          {/* Compatibility alias — dashboard and execution detail still link to /executions.
-              Renders ActivityPage so existing bookmarks and links keep working. */}
-          <Route path="/executions" element={<ActivityPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
           <Route path="/inbox" element={<InboxPage user={user!} />} />
