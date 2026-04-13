@@ -432,7 +432,8 @@ export function parseClassificationResponseWithMerge(
   // instead of a decimal (0.85). Clamp to [0, 1] — values > 1 are treated as
   // percentages and divided by 100.
   if (typeof p.confidence !== 'number') return null;
-  const confidence = p.confidence > 1 ? p.confidence / 100 : p.confidence;
+  const raw = p.confidence;
+  const confidence = raw > 1 ? raw / 100 : raw;
   if (confidence < 0 || confidence > 1) return null;
   if (typeof p.reasoning !== 'string') return null;
 

@@ -351,7 +351,7 @@ function ResultRow({
               <button
                 type="button"
                 onClick={handleRetry}
-                disabled={retrying}
+                disabled={retrying || !result.classificationFailed}
                 className="px-2 py-1 rounded border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50"
               >
                 {retrying ? 'Retrying…' : 'Retry'}
