@@ -48,8 +48,8 @@ When producing the unified report, lead with the most impactful findings that af
   null,
   60000,
   40,
-  '["audit_geo", "geo_citability", "geo_crawlers", "geo_schema", "geo_platform_optimizer", "geo_brand_authority", "geo_llmstxt", "geo_compare"]'::jsonb,
-  '["audit_seo", "fetch_url", "web_search", "create_task", "add_deliverable"]'::jsonb,
+  '[]'::jsonb,
+  '["audit_geo", "geo_citability", "geo_crawlers", "geo_schema", "geo_platform_optimizer", "geo_brand_authority", "geo_llmstxt", "geo_compare", "audit_seo", "fetch_url", "web_search", "create_task", "add_deliverable"]'::jsonb,
   true,
   now(),
   now()

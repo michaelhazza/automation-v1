@@ -3,9 +3,10 @@
  *
  * Endpoints:
  *   - GET  /api/org/geo-audits                              — list org-wide audits
+ *   - GET  /api/org/geo-audits/url-history                  — trend history for a URL (before :id to avoid param shadowing)
  *   - GET  /api/org/geo-audits/:id                          — get single audit
+ *   - POST /api/org/geo-audits                              — persist a completed audit result
  *   - GET  /api/subaccounts/:subaccountId/geo-audits        — list subaccount audits
- *   - GET  /api/org/geo-audits/url-history                  — trend history for a URL
  *
  * Spec: docs/geo-seo-dev-brief.md
  */
@@ -15,7 +16,8 @@ import { authenticate, requireOrgPermission } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
-import { geoAuditService } from '../services/geoAuditService.js';
+import { geoAuditService, DEFAULT_GEO_WEIGHTS, computeCompositeScore } from '../services/geoAuditService.js';
+import type { GeoDimensionScore } from '../db/schema/geoAudits.js';
 
 const router = Router();
 
@@ -61,7 +63,58 @@ router.get(
   }),
 );
 
+// ─── Persist a completed GEO audit result ───────────────────────────────────
+// Called by agents (via post-processing) or external integrations to store
+// structured audit results for historical tracking and portfolio dashboards.
+
+router.post(
+  '/api/org/geo-audits',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.GEO_AUDIT_RUN),
+  asyncHandler(async (req, res) => {
+    const { url, pageTitle, subaccountId, dimensionScores, platformReadiness,
+            recommendations, agentRunId, auditType, competitorUrls } = req.body;
+
+    if (!url || typeof url !== 'string') {
+      throw { statusCode: 400, message: 'url is required' };
+    }
+    if (!Array.isArray(dimensionScores) || dimensionScores.length === 0) {
+      throw { statusCode: 400, message: 'dimensionScores array is required' };
+    }
+
+    // Validate subaccount belongs to org if provided
+    if (subaccountId) {
+      await resolveSubaccount(subaccountId, req.orgId!);
+    }
+
+    const weightsSnapshot = { ...DEFAULT_GEO_WEIGHTS };
+    const scores = dimensionScores as GeoDimensionScore[];
+
+    // Recompute composite from dimension scores to prevent inconsistency
+    const compositeScore = computeCompositeScore(scores);
+
+    const audit = await geoAuditService.saveAudit({
+      organisationId: req.orgId!,
+      subaccountId: subaccountId || null,
+      url,
+      pageTitle: pageTitle || null,
+      compositeScore,
+      dimensionScores: scores,
+      platformReadiness: platformReadiness || null,
+      recommendations: recommendations || [],
+      agentRunId: agentRunId || null,
+      auditType: auditType || 'full',
+      competitorUrls: competitorUrls || null,
+      weightsSnapshot,
+    });
+
+    res.status(201).json(audit);
+  }),
+);
+
 // ─── List audits for a subaccount ───────────────────────────────────────────
+// Uses org-level permission — GEO audits are an org-wide feature that
+// can be filtered by subaccount, not a subaccount-scoped feature.
 
 router.get(
   '/api/subaccounts/:subaccountId/geo-audits',
