@@ -4,13 +4,15 @@ import api from '../lib/api';
 import { User } from '../lib/auth';
 import SystemBoardTemplatesPage from './SystemBoardTemplatesPage';
 import SystemUsersPage from './SystemUsersPage';
+import SystemModulesPage from './SystemModulesPage';
 
-type SettingsTab = 'general' | 'board-templates' | 'system-admins';
+type SettingsTab = 'general' | 'board-templates' | 'system-admins' | 'modules';
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   general: 'General',
   'board-templates': 'Board Templates',
   'system-admins': 'System Admins',
+  modules: 'Modules',
 };
 
 const VALID_TABS = new Set<string>(Object.keys(TAB_LABELS));
@@ -181,6 +183,7 @@ export default function SystemSettingsPage({ user }: { user: User }) {
 
       {activeTab === 'board-templates' && <SystemBoardTemplatesPage user={user} />}
       {activeTab === 'system-admins' && <SystemUsersPage user={user} />}
+      {activeTab === 'modules' && <SystemModulesPage user={user} />}
     </>
   );
 }
