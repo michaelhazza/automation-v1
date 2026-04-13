@@ -1,7 +1,7 @@
 # Agent Beliefs — Technical Specification
 
 **Date:** 2026-04-13
-**Status:** Final draft — ready for review
+**Status:** Final — ready for build
 **Classification:** Significant
 **Depends on:** Agent briefing service (Phase 2D, shipped)
 **Precursor to:** anda-hippocampus state evolution patterns
@@ -52,6 +52,7 @@ Beliefs are **discrete, agent-maintained facts** — individually readable, upda
 4. **Token-budgeted.** The full belief set must fit within a fixed token budget. When beliefs exceed budget, lowest-confidence beliefs are dropped from prompt injection (but retained in storage).
 5. **Additive to existing infrastructure.** Beliefs use the same prompt injection point as briefings, the same post-run job mechanism, and the same LLM routing. No new infrastructure.
 6. **Designed for supersession.** The schema includes a `superseded_by` column from day one — nullable, unused in Phase 1, wired in Phase 2. Zero migration cost when state evolution lands.
+7. **Scope is locked in Phase 1.** The failure modes this spec addresses (LLM drift, retries, concurrency, oscillation, partial failure) are already covered. No additional complexity — embeddings, scoring layers, cross-agent sharing, contradiction detection — should be introduced in Phase 1 without explicit justification against a failure mode not already handled.
 
 ## 3. Data Model
 
@@ -74,9 +75,11 @@ CREATE TABLE agent_beliefs (
   confidence      REAL NOT NULL DEFAULT 0.7, -- 0.0–1.0
 
   -- Provenance
-  source_run_id   UUID,                    -- run that created/last updated this belief
-  evidence_count  INTEGER NOT NULL DEFAULT 1, -- how many runs have reinforced this belief
-  source          TEXT NOT NULL DEFAULT 'agent', -- 'agent' | 'user_override'
+  source_run_id      UUID,                 -- run that created/last updated this belief
+  evidence_count     INTEGER NOT NULL DEFAULT 1, -- how many runs have reinforced this belief
+  source             TEXT NOT NULL DEFAULT 'agent', -- 'agent' | 'user_override'
+  confidence_reason  TEXT,                 -- optional LLM-provided rationale, e.g. "Seen in 3 consecutive runs"
+  last_reinforced_at TIMESTAMPTZ,          -- last time this belief was confirmed without value change (for Phase 2 decay)
 
   -- Supersession (Phase 2 — nullable in Phase 1)
   superseded_by   UUID REFERENCES agent_beliefs(id),
@@ -123,6 +126,8 @@ export const agentBeliefs = pgTable(
     sourceRunId: uuid('source_run_id'),
     evidenceCount: integer('evidence_count').notNull().default(1),
     source: text('source').notNull().default('agent'),
+    confidenceReason: text('confidence_reason'),
+    lastReinforcedAt: timestamp('last_reinforced_at', { withTimezone: true }),
 
     supersededBy: uuid('superseded_by'),
     supersededAt: timestamp('superseded_at', { withTimezone: true }),
@@ -151,7 +156,9 @@ export const agentBeliefs = pgTable(
 | `category` enum-like text column | Allows grouping beliefs in prompt injection ("Preferences:", "Metrics:", etc.) without a strict enum migration for each new category. |
 | `confidence` from day one | Even in Phase 1 where we don't do contradiction detection, confidence lets us: (a) sort beliefs for token budget trimming, (b) flag low-confidence beliefs in the prompt, (c) weight evidence accumulation. |
 | `superseded_by` nullable from day one | Zero-cost migration when Phase 2 lands. In Phase 1, all active beliefs have `superseded_by IS NULL`. |
-| `evidence_count` | When the same belief is reinforced across multiple runs, increment rather than rewrite. Higher evidence = higher effective confidence. |
+| `evidence_count` | When the same belief is reinforced across multiple runs, increment rather than rewrite. Higher evidence = higher effective confidence. Resets to 1 on value change — a changed claim is not accumulated evidence. |
+| `last_reinforced_at` | Tracks the last time a belief was confirmed without a value change. Distinct from `updated_at` (which changes on updates too). Phase 2 decay uses this to identify staleness without inference. Adding now eliminates a future migration. |
+| `confidence_reason` | Nullable text field, optionally populated by the LLM during extraction. Provides human-readable rationale ("seen in 3 consecutive runs", "confirmed in API response"). Not displayed in Phase 1 UI — used for debugging and audit only. |
 | Scoped per agent-subaccount | Same as briefings. A CRM Agent's beliefs about Client X are separate from a Reporting Agent's beliefs about Client X — they observe different things. |
 
 ## 4. Write Path — Extraction and Merge
@@ -198,6 +205,7 @@ For each belief, output a JSON array. Each element:
   "subject": "what this is about",   // e.g. "Client X", nullable
   "value": "the belief statement",   // concise factual statement
   "confidence": 0.0-1.0,             // how confident based on evidence
+  "confidence_reason": "...",        // optional: brief rationale for the confidence score
   "action": "add|update|reinforce|remove"
 }
 
@@ -209,6 +217,8 @@ Rules:
 - Do not extract beliefs that are trivially obvious or already covered by existing beliefs with no change
 - Maximum 10 beliefs per extraction (focus on highest-signal facts)
 - Keys must be deterministic — same concept should always produce same key
+- Key format: lowercase snake_case only, e.g. "client_platform" not "ecommercePlatform" or "Client Platform"
+- Do not override beliefs with source "user_override" unless this run contains direct contradictory evidence
 
 Respond with only the JSON array. No preamble.
 ```
@@ -219,16 +229,39 @@ Respond with only the JSON array. No preamble.
 
 ### 4.2 Merge — database operations
 
-Parse the LLM response as JSON array. For each belief:
+Parse the LLM response as JSON array. **Before processing, normalize each key:** lowercase, trim, collapse whitespace to `_`. Then apply a `KEY_ALIASES` map for known synonyms (e.g. `ecommerce_platform → client_platform`, `cms → client_platform`). This is the authoritative normalization step — LLM key drift is handled here, not trusted to prompt compliance alone. The alias map starts small and is expanded via observation as drift patterns emerge in production.
 
-| Action | Database operation |
+**KEY_ALIASES constraints:** (1) No chaining — `alias[A] = B` where `B` is itself an alias target is disallowed; the map must resolve in one hop. Validate this at startup. (2) Log when an alias fires (`belief_key_aliased: { from, to }`) — this is a critical normalization layer and needs visibility. (3) Alias collision detection: if an alias fires and the canonical key already has an active belief whose value differs significantly from the aliased belief's value, log a warning (`belief_alias_collision: { from, to, existingValue }`). This flags cases where two genuinely distinct concepts have been incorrectly mapped to the same canonical key — a silent corruption risk that grows as the alias map expands.
+
+**Idempotency guard:** Per-belief, not per-batch. Before applying any action for a given key, check whether the existing belief's `source_run_id` matches the current run ID. If yes, skip that belief — it was already applied in a prior retry. This handles partial failure mid-merge correctly: beliefs that were already applied are skipped individually, not batch-aborted, so a retry completes the remainder rather than leaving inconsistent state.
+
+**Race condition guard:** Concurrent runs for the same agent-subaccount can both read the same belief state and both attempt a merge. Use optimistic concurrency: all updates include `WHERE belief_key = $key AND updated_at = $previousUpdatedAt`. If no rows are affected, the belief was modified concurrently — re-read and retry the merge for that belief only (one retry; log and skip on second conflict). A global `maxRetriesPerRun` cap of 50 applies across all per-belief retries in the batch — if exceeded, abort remaining retries, log a critical-level event (`belief_retry_storm`), and return. This prevents retry amplification under pathological concurrency.
+
+**User override guard:** Before applying any `add`, `update`, or `reinforce` action, check whether the existing belief has `source = 'user_override'`. If yes, skip that belief entirely. User-set beliefs are only modified via the PUT route. `remove` actions are also skipped for user-override beliefs.
+
+**Merge logic is authoritative.** The LLM's `action` field is a hint, not an instruction. The merge layer determines the true action based on database state:
+
+| Actual condition | Effective action |
+|-----------------|-----------------|
+| Key not found in DB | `add` — INSERT new row |
+| Key exists, values match after semantic normalization | `reinforce` — increment evidence, boost confidence |
+| Key exists, values differ after semantic normalization | `update` — overwrite value, reset evidence |
+| LLM says `remove`, key exists, LLM confidence ≥ 0.8 AND LLM confidence ≥ existing confidence | `remove` — soft-delete |
+| LLM says `remove`, any other condition | skipped — single noisy run cannot remove a high-confidence stable belief |
+| LLM says `add`, key already exists | coerced to `update` or `reinforce` per above |
+
+**Semantic normalization for value comparison:** Before comparing `existing.value` to `newValue`, apply: lowercase, trim, collapse whitespace, strip punctuation, strip bracketed text (`/\(.*?\)/g`). This prevents "WooCommerce (WordPress)" vs "WooCommerce" and "Client uses WooCommerce" vs "Client is using WooCommerce" from triggering false `update` actions that reset `evidence_count`. This does not use embeddings — purely lexical normalization.
+
+| Effective action | Database operation |
 |--------|-------------------|
-| `add` | `INSERT` new row. If key conflict (unique index), treat as `update`. |
-| `update` | Load existing row by key. Update `value`, `confidence`, `source_run_id`, `updated_at`. Increment `evidence_count`. |
-| `reinforce` | Load existing row by key. Increment `evidence_count`, update `source_run_id` and `updated_at`. Boost confidence by `min(1.0, confidence + 0.05)`. |
+| `add` | `INSERT` new row. Truncate `value` to `BELIEFS_MAX_VALUE_LENGTH` chars. Store `confidence_reason` if present. |
+| `update` | Load existing row by key. Overwrite `value` (truncated), update `source_run_id`, `updated_at`, `confidence_reason`. **Reset `evidence_count` to 1** (this is a new claim, not a reinforcement). **Set confidence to `min(existing.confidence, newConfidence, BELIEFS_UPDATE_CONFIDENCE_CAP)`** — value changes cap confidence and cannot increase it (oscillation guard). |
+| `reinforce` | Load existing row by key. Increment `evidence_count`, update `source_run_id`, `updated_at`, `last_reinforced_at`. Update `confidence_reason` only if the LLM provided a non-null value — if absent, retain the existing reason (preserves cumulative signal like "seen in 5 consecutive runs"). Boost confidence by `min(BELIEFS_CONFIDENCE_CEILING, confidence + BELIEFS_CONFIDENCE_BOOST)`. |
 | `remove` | Soft-delete: set `deleted_at = now()`. Do NOT hard-delete — the record stays for audit. |
 
-**Conflict handling:** If the LLM outputs a key that matches an existing belief but with `action: "add"`, treat it as `update`. The unique index enforces one active belief per key.
+**Post-merge cleanup:** After processing the batch, enforce hard limits:
+1. Any active belief with `confidence < BELIEFS_CONFIDENCE_FLOOR` → soft-delete.
+2. If active belief count exceeds `BELIEFS_MAX_ACTIVE` → soft-delete lowest-confidence beliefs until at limit.
 
 **Error handling:** Same as briefing — fire-and-forget. Parse failures, LLM errors, and DB errors are logged but never block run completion. If the JSON is malformed, skip the entire extraction for this run.
 
@@ -238,9 +271,12 @@ Parse the LLM response as JSON array. For each belief:
 |-------|-------|-----------|
 | Max beliefs per extraction | 10 | Prevents unbounded growth per run |
 | Max active beliefs per agent-subaccount | 50 | Token budget constraint — 50 beliefs at ~30 tokens each = ~1500 tokens |
-| Max belief value length | 500 chars | Keeps individual beliefs concise |
-| Confidence floor for retention | 0.1 | Below this, soft-delete on next extraction |
-| Confidence boost per reinforcement | +0.05, capped at 1.0 | Gradual confidence growth with evidence |
+| Max belief value length | 500 chars | Keeps individual beliefs concise; enforced by truncation at merge, not trust |
+| Confidence floor for retention | 0.1 | Below this, soft-delete during post-merge cleanup |
+| Confidence boost per reinforcement | +0.05, capped at **0.9** | Gradual confidence growth with evidence; hard ceiling at 0.9 preserves headroom for user corrections and Phase 2 contradiction detection — a belief at 1.0 has no room to be questioned |
+| Max active beliefs before forced cleanup | 50 | Enforced in post-merge cleanup step, not just on extraction input |
+| Min LLM confidence to allow remove | 0.8 | LLMs infer absence poorly; only act on high-confidence remove signals |
+| Confidence cap on value change (update) | 0.7 | Prevents oscillating beliefs from accumulating false certainty across flip-flops |
 
 Add to `server/config/limits.ts`:
 
@@ -250,6 +286,9 @@ export const BELIEFS_MAX_ACTIVE = 50;
 export const BELIEFS_MAX_VALUE_LENGTH = 500;
 export const BELIEFS_CONFIDENCE_FLOOR = 0.1;
 export const BELIEFS_CONFIDENCE_BOOST = 0.05;
+export const BELIEFS_CONFIDENCE_CEILING = 0.9;   // agent-written max; user_override stays at 1.0
+export const BELIEFS_REMOVE_MIN_CONFIDENCE = 0.8; // minimum LLM confidence to act on a remove
+export const BELIEFS_UPDATE_CONFIDENCE_CAP = 0.7;  // confidence cannot rise above this on value change
 export const BELIEFS_TOKEN_BUDGET = 1500;
 ```
 
@@ -287,7 +326,7 @@ if (beliefs.length > 0) {
 }
 ```
 
-**`getActiveBeliefs()`** returns all active beliefs (not superseded, not deleted) for the agent-subaccount, ordered by category then confidence descending. Truncates to `BELIEFS_TOKEN_BUDGET` tokens — drops lowest-confidence beliefs first until the total fits.
+**`getActiveBeliefs()`** returns all active beliefs (not superseded, not deleted) for the agent-subaccount, ordered by category then confidence descending, with `belief_key` as a tie-breaker (alphabetical ascending). The tie-breaker prevents prompt instability when multiple beliefs share the same confidence score — without it, ordering can jitter between runs, producing non-deterministic prompt content. Truncates to `BELIEFS_TOKEN_BUDGET` tokens — drops lowest-confidence beliefs first until the total fits.
 
 **`formatBeliefsForPrompt()`** groups beliefs by category:
 
@@ -325,7 +364,7 @@ function selectBeliefsWithinBudget(
 
   for (const belief of sorted) {
     const beliefTokens = estimateTokens(formatSingleBelief(belief));
-    if (tokens + beliefTokens > tokenBudget) break;
+    if (tokens + beliefTokens > tokenBudget * 0.9) break;  // 10% safety buffer for estimator drift
     selected.push(belief);
     tokens += beliefTokens;
   }
@@ -362,7 +401,7 @@ Middleware: `authenticate`, `requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VI
 
 **GET** returns all active beliefs for the agent-subaccount, ordered by category then confidence. Used by the UI to display what an agent believes.
 
-**PUT** upserts a belief with `source: 'user_override'` and `confidence: 1.0`. User-set beliefs are always maximum confidence. The LLM extraction will see them in the current-beliefs context and should respect them (the prompt instructs: "do not override beliefs with source 'user_override' unless you have strong contradictory evidence").
+**PUT** upserts a belief with `source: 'user_override'` and `confidence: 1.0`. User-set beliefs are always maximum confidence. Protection is enforced at two layers: (1) the extraction prompt instructs the LLM not to output `remove` or `update` actions for user-override beliefs, and (2) the merge layer unconditionally skips `add`/`update`/`reinforce`/`remove` operations when the existing belief has `source = 'user_override'`. Prompt compliance is a hint; the merge guard is the authoritative enforcement.
 
 **DELETE** soft-deletes a belief (`deleted_at = now()`).
 
@@ -380,7 +419,11 @@ With inline edit (pencil icon → modal) and delete (trash icon). When a user ed
 ### 6.4 Observability
 
 - Log belief extraction count per run in the existing run telemetry span
-- Log belief merge operations (add/update/reinforce/remove counts)
+- Log belief merge operations: add/update/reinforce/remove counts per run
+- Log **belief churn rate** per run: `(updates + removes) / total_active`. A spike in churn indicates extraction instability, prompt degradation, or a significant upstream data change — it's the early warning signal for belief system health
+- Log **belief saturation rate** per run: `beliefs_above_0.85 / total_active`. If this trends high over time, the system is becoming overconfident and losing adaptability — the early warning signal for rigidity
+- Log KEY_ALIASES fires: `{ from, to }` whenever a key is aliased during normalization — sampled at 10% in production to prevent log volume explosion in high-throughput orgs
+- Log KEY_ALIASES collision warnings: `{ from, to, existingValue }` when alias fires on a divergent existing belief — always logged (not sampled; collision is a correctness signal, not a routine event)
 - No separate dashboard — beliefs are visible in the UI table and in the agent's prompt (visible in run message history)
 
 ## 7. Migration Path to State Evolution
@@ -401,8 +444,9 @@ Phase 1 (this spec) lays the groundwork. Phase 2 adds anda-hippocampus-style sta
 | **State evolution** | Instead of overwriting on `update`, create a new row and set `superseded_by` on the old one. The unique index already supports this (it filters `WHERE superseded_by IS NULL`). |
 | **Contradiction detection** | During extraction, if the LLM detects a conflict, it outputs `action: "supersede"` with both old and new values. The merge logic creates the supersession chain. |
 | **Belief timeline** | Query: `SELECT * FROM agent_beliefs WHERE belief_key = $1 ORDER BY created_at`. Returns the full evolution of a belief. |
-| **Confidence decay** | A nightly job reduces confidence on beliefs that haven't been reinforced in N runs. Uses `evidence_count` and `updated_at` to compute staleness. |
+| **Confidence decay** | A nightly job reduces confidence on beliefs that haven't been reinforced in N runs. Uses `evidence_count` and `last_reinforced_at` to compute staleness. |
 | **Cross-agent belief sharing** | Read beliefs from other agents on the same subaccount during extraction. Enables: "The CRM Agent believes X — do you agree?" |
+| **Soft-delete archival** | A periodic job moves `deleted_at` and `superseded_at` rows older than 90 days to cold storage or a separate archive table, keeping the active table performant as the system accumulates history over months. |
 
 ### Zero-migration boundary
 
@@ -474,3 +518,30 @@ Phase 2 requires **no schema changes**. Every column it needs (`superseded_by`, 
 - [ ] `test:gates` pass (no RLS/route violations, no job idempotency violations)
 - [ ] Fire-and-forget: LLM extraction failure does NOT block run completion or briefing update
 - [ ] `evidence_count` increments on reinforce, not just on add
+- [ ] Key normalization: LLM output `"Client Platform"` and `"client_platform"` both resolve to the same DB row
+- [ ] Merge logic is authoritative: LLM `action: "add"` on an existing key coerces to update/reinforce, not a duplicate insert
+- [ ] User override protection: re-running agent after PUT does NOT overwrite or delete the `user_override` belief
+- [ ] Confidence ceiling: reinforcing a 0.85 belief never exceeds 0.9 (agent-written ceiling)
+- [ ] Post-merge cleanup: belief with confidence below floor is soft-deleted after extraction
+- [ ] Post-merge cleanup: belief count exceeding BELIEFS_MAX_ACTIVE triggers lowest-confidence culling
+- [ ] Idempotency: replaying the briefing job for the same run_id does not double-increment evidence_count
+- [ ] Idempotency is per-belief: a partial-failure retry applies only the beliefs not yet processed, not the full batch
+- [ ] Value truncation: belief value >500 chars is truncated at merge, not rejected
+- [ ] Remove guard: LLM remove with confidence < 0.8 is skipped, belief is retained
+- [ ] Oscillation guard: updating a belief value caps confidence at 0.7 (cannot rise on value change)
+- [ ] Evidence count resets to 1 on value change (update), only increments on reinforce
+- [ ] KEY_ALIASES map is applied after normalization: known synonyms resolve to canonical key
+- [ ] KEY_ALIASES no-chaining: startup validation rejects alias maps where any target is itself an alias
+- [ ] KEY_ALIASES logging: alias fires produce `belief_key_aliased` log entries
+- [ ] Race condition guard: optimistic concurrency on update; concurrent modification triggers per-belief retry
+- [ ] Remove asymmetry: LLM remove with confidence < existing belief confidence is skipped even if ≥ 0.8 absolute threshold
+- [ ] Semantic no-op: "Client uses WooCommerce" and "Client is using WooCommerce" treated as reinforce, not update
+- [ ] `last_reinforced_at` updated on reinforce, NOT updated on update (value change)
+- [ ] `confidence_reason` stored when LLM provides it; null otherwise — no error if absent
+- [ ] Churn rate logged per run: (updates + removes) / total_active
+- [ ] Saturation rate logged per run: beliefs > 0.85 / total_active
+- [ ] Retry storm guard: per-run retry cap of 50; `belief_retry_storm` logged at critical if exceeded
+- [ ] Alias collision detection: divergent existing value when alias fires produces `belief_alias_collision` warning
+- [ ] Semantic normalization strips bracketed text: "WooCommerce (WordPress)" matches "WooCommerce"
+- [ ] confidence_reason preserved on reinforce when LLM provides null; not overwritten with null
+- [ ] Belief ordering is stable across runs: same confidence beliefs sort alphabetically by key, not by insertion order
