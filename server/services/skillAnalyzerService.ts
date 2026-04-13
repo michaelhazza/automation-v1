@@ -1193,7 +1193,12 @@ export async function retryClassification(
       classificationReasoning: classification.reasoning,
       diffSummary,
       proposedMergedContent: classification.proposedMerge ?? null,
-      originalProposedMerge: classification.proposedMerge ?? null,
+      // Only seed the immutable original if it has never been set — retries
+      // must not overwrite it, otherwise "Reset to AI suggestion" would
+      // restore the retry's output rather than the original job output.
+      ...(result.originalProposedMerge === null && classification.proposedMerge !== null
+        ? { originalProposedMerge: classification.proposedMerge }
+        : {}),
       classificationFailed,
       classificationFailureReason,
     })
@@ -1229,7 +1234,13 @@ export async function bulkRetryFailedClassifications(
     );
 
   for (let i = 0; i < failedResults.length; i++) {
-    await retryClassification(jobId, failedResults[i].id, organisationId);
+    try {
+      await retryClassification(jobId, failedResults[i].id, organisationId);
+    } catch {
+      // Row has a data-integrity problem (missing candidate / matchedSkillId /
+      // similarityScore) — cannot be retried. Leave classificationFailed=true
+      // and continue with remaining rows so one bad row doesn't abort the batch.
+    }
     // Jittered delay: 500–1500ms between calls to avoid re-triggering 429s
     if (i < failedResults.length - 1) {
       await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
