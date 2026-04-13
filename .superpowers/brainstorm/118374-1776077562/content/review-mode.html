@@ -1,0 +1,74 @@
+<h2>How should you move through skills?</h2>
+<p class="subtitle">Pick the review mode that feels right for careful, accurate decisions</p>
+
+<div class="options">
+
+  <div class="option" data-choice="focused" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Focused — one skill at a time</h3>
+      <p>Full screen dedicated to a single skill. Large merge view, all context visible at once. Navigate with Prev / Next. Progress shown as "12 of 37".</p>
+      <div style="margin-top:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; font-size:11px; color:#475569;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-weight:600; color:#1e293b;">free-tool-strategy</span>
+          <span style="color:#94a3b8;">12 of 37</span>
+        </div>
+        <div style="background:#fffbeb; border:1px solid #fcd34d; border-radius:4px; padding:6px 8px; margin-bottom:8px; font-size:10px;">PARTIAL OVERLAP · 66% similar · 91% confidence</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:8px;">
+          <div style="background:#f1f5f9; border-radius:4px; padding:6px; font-size:10px;"><div style="color:#64748b; margin-bottom:2px;">CURRENT</div><div style="color:#334155;">Create Lead Magnet</div></div>
+          <div style="background:#fef3c7; border-radius:4px; padding:6px; font-size:10px;"><div style="color:#64748b; margin-bottom:2px;">INCOMING</div><div style="color:#334155;">free-tool-strategy</div></div>
+          <div style="background:#f0fdf4; border-radius:4px; padding:6px; font-size:10px;"><div style="color:#64748b; margin-bottom:2px;">RECOMMENDED</div><div style="color:#334155;">Free Tool Strategy</div></div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button style="flex:1; padding:5px; background:#16a34a; color:white; border:none; border-radius:4px; font-size:10px; cursor:pointer;">Approve</button>
+          <button style="flex:1; padding:5px; background:white; color:#64748b; border:1px solid #e2e8f0; border-radius:4px; font-size:10px; cursor:pointer;">Reject</button>
+          <button style="flex:1; padding:5px; background:white; color:#64748b; border:1px solid #e2e8f0; border-radius:4px; font-size:10px; cursor:pointer;">Skip →</button>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top:10px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Full attention on each decision</li><li>No visual clutter from other cards</li><li>Merge view has room to breathe</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Can't see related skills nearby</li><li>Slower to batch-reject obvious ones</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="list" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>List with expand-to-review</h3>
+      <p>Scrollable list of all skills grouped by type. Each row shows name, classification, and similarity. Click a row to expand the full merge review inline.</p>
+      <div style="margin-top:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; font-size:11px; color:#475569;">
+        <div style="border-bottom:1px solid #e2e8f0; padding:6px 0; display:flex; justify-content:space-between; align-items:center;">
+          <div><span style="font-weight:600; color:#1e293b;">free-tool-strategy</span> <span style="background:#fef3c7; color:#92400e; border-radius:3px; padding:1px 5px; font-size:9px; margin-left:4px;">PARTIAL</span></div>
+          <span style="color:#94a3b8; font-size:10px;">66% · 91% conf</span>
+        </div>
+        <div style="border:1px solid #6366f1; border-radius:6px; margin:6px 0; padding:8px; background:white;">
+          <div style="font-size:10px; color:#6366f1; margin-bottom:6px; font-weight:600;">▼ expanded</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin-bottom:6px;">
+            <div style="background:#f1f5f9; border-radius:3px; padding:4px; font-size:9px; color:#334155;">Current: Create Lead Magnet</div>
+            <div style="background:#fef3c7; border-radius:3px; padding:4px; font-size:9px; color:#334155;">Incoming: free-tool-strategy</div>
+            <div style="background:#f0fdf4; border-radius:3px; padding:4px; font-size:9px; color:#334155;">Recommended: Free Tool Strategy</div>
+          </div>
+          <div style="display:flex; gap:4px;">
+            <button style="padding:3px 8px; background:#16a34a; color:white; border:none; border-radius:3px; font-size:9px;">Approve</button>
+            <button style="padding:3px 8px; background:white; color:#64748b; border:1px solid #e2e8f0; border-radius:3px; font-size:9px;">Reject</button>
+            <button style="padding:3px 8px; background:white; color:#64748b; border:1px solid #e2e8f0; border-radius:3px; font-size:9px;">Skip</button>
+          </div>
+        </div>
+        <div style="border-bottom:1px solid #e2e8f0; padding:6px 0; display:flex; justify-content:space-between; align-items:center;">
+          <div><span style="font-weight:600; color:#1e293b;">email-sequence</span> <span style="background:#dcfce7; color:#166534; border-radius:3px; padding:1px 5px; font-size:9px; margin-left:4px;">NEW</span></div>
+          <span style="color:#94a3b8; font-size:10px;">new</span>
+        </div>
+        <div style="padding:6px 0; display:flex; justify-content:space-between; align-items:center;">
+          <div><span style="font-weight:600; color:#1e293b;">ab-test-setup</span> <span style="background:#dbeafe; color:#1e40af; border-radius:3px; padding:1px 5px; font-size:9px; margin-left:4px;">IMPROVE</span></div>
+          <span style="color:#94a3b8; font-size:10px;">78% · 87% conf</span>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top:10px;">
+        <div class="pros"><h4>Pros</h4><ul><li>See all skills at a glance</li><li>Quick scan before diving in</li><li>Context of what's nearby</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Merge view cramped when expanded</li><li>Easy to lose your place</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>

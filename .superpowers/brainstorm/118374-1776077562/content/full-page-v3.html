@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Analyzer v3</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif; background: #f1f5f9; color: #1e293b; font-size: 13px; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 24px; }
+
+  /* Page header */
+  .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; gap: 16px; }
+  .page-header h1 { font-size: 20px; font-weight: 600; color: #0f172a; margin-bottom: 4px; }
+  .page-header .subtitle { font-size: 12px; color: #94a3b8; }
+  .progress-pills { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .pill { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: 500; }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pill-new { background: #f0fdf4; color: #15803d; } .pill-new .pill-dot { background: #16a34a; }
+  .pill-replace { background: #eff6ff; color: #1d4ed8; } .pill-replace .pill-dot { background: #3b82f6; }
+  .pill-partial { background: #fffbeb; color: #b45309; } .pill-partial .pill-dot { background: #f59e0b; }
+  .pill-dupe { background: #fef2f2; color: #b91c1c; } .pill-dupe .pill-dot { background: #ef4444; }
+  .btn-execute { padding: 9px 20px; background: #0f172a; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+
+  /* Section — each classification group is visually distinct */
+  .section { margin-bottom: 20px; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+
+  .section-header {
+    padding: 13px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 2px solid transparent;
+  }
+  .section-header:hover { filter: brightness(0.98); }
+
+  /* Each section gets its own distinct color band */
+  .section-partial .section-header { background: #fffbeb; border-bottom-color: #fcd34d; }
+  .section-new .section-header     { background: #f0fdf4; border-bottom-color: #86efac; }
+  .section-replace .section-header { background: #eff6ff; border-bottom-color: #93c5fd; }
+  .section-dupe .section-header    { background: #fef2f2; border-bottom-color: #fca5a5; }
+
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }
+  .section-partial .section-title { color: #92400e; }
+  .section-new .section-title      { color: #166534; }
+  .section-replace .section-title  { color: #1e40af; }
+  .section-dupe .section-title     { color: #991b1c; }
+
+  .section-count { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 20px; }
+  .section-partial .section-count { background: #fde68a; color: #92400e; }
+  .section-new .section-count      { background: #bbf7d0; color: #166534; }
+  .section-replace .section-count  { background: #bfdbfe; color: #1e40af; }
+  .section-dupe .section-count     { background: #fecaca; color: #991b1c; }
+
+  .section-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .section-reviewed { font-size: 11px; color: #94a3b8; }
+  .btn-bulk { font-size: 11px; padding: 4px 10px; border-radius: 5px; border: 1px solid rgba(0,0,0,0.1); background: white; color: #475569; cursor: pointer; }
+  .btn-bulk:hover { background: #f8fafc; }
+  .chevron { font-size: 10px; color: #94a3b8; transition: transform 0.15s; margin-left: 4px; }
+
+  /* Row list — white background, clear separation */
+  .section-body { background: white; }
+
+  .row { border-bottom: 1px solid #f1f5f9; }
+  .row:last-child { border-bottom: none; }
+
+  .row-header { padding: 12px 18px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .row-header:hover { background: #fafafa; }
+
+  .row-name { font-size: 13px; font-weight: 500; color: #1e293b; }
+  .row-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  .row-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .row-conf { font-size: 11px; color: #cbd5e1; }
+  .row-chevron { color: #cbd5e1; font-size: 11px; transition: transform 0.15s; }
+  .row.expanded .row-chevron { transform: rotate(90deg); }
+
+  /* Decided row */
+  .row.decided .row-header { opacity: 0.4; }
+  .row.decided .row-name { text-decoration: line-through; }
+  .status-badge { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+  .status-approved { background: #dcfce7; color: #15803d; }
+  .status-rejected { background: #fee2e2; color: #b91c1c; }
+
+  /* Expanded panel */
+  .row-panel { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px 18px; display: none; }
+  .row.expanded .row-panel { display: block; }
+
+  .reasoning {
+    font-size: 11px; color: #64748b; line-height: 1.6;
+    margin-bottom: 16px; font-style: italic;
+    padding: 10px 14px; background: white;
+    border: 1px solid #e2e8f0; border-radius: 7px;
+    border-left: 3px solid #e2e8f0;
+  }
+
+  /* Three column merge */
+  .merge-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; align-items: start; }
+  .merge-col { background: white; border: 1px solid #e2e8f0; border-radius: 7px; overflow: hidden; }
+  .merge-col.recommended { border-color: #86efac; }
+  .merge-col-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; background: #fafafa; }
+  .merge-col.recommended .merge-col-label { color: #16a34a; background: #f0fdf4; border-bottom-color: #bbf7d0; }
+  .merge-col-body { padding: 12px; max-height: 380px; overflow-y: auto; }
+  .merge-col-name { font-size: 12px; font-weight: 600; color: #1e293b; margin-bottom: 5px; }
+  .merge-col-desc { font-size: 11px; color: #475569; line-height: 1.55; margin-bottom: 10px; }
+  .merge-col-section { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #cbd5e1; margin: 12px 0 5px; }
+  .merge-col-text { font-size: 11px; color: #475569; line-height: 1.65; white-space: pre-wrap; }
+  .diff-add { background: #dcfce7; color: #166534; border-radius: 2px; padding: 0 1px; }
+  .diff-remove { background: #fee2e2; color: #991b1b; border-radius: 2px; padding: 0 1px; text-decoration: line-through; }
+
+  /* Diff legend */
+  .diff-legend { display: flex; gap: 12px; margin-bottom: 10px; }
+  .diff-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #64748b; }
+  .diff-legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+  /* Action bar */
+  .action-bar { display: flex; align-items: center; gap: 6px; }
+  .btn-approve { padding: 7px 16px; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .btn-reject { padding: 7px 16px; background: white; color: #64748b; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .btn-reject:hover { border-color: #fca5a5; color: #dc2626; }
+  .btn-skip { padding: 7px 16px; background: white; color: #64748b; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .btn-reset { padding: 7px 12px; background: white; color: #94a3b8; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px; cursor: pointer; }
+  .btn-view { margin-left: auto; padding: 7px 12px; background: white; color: #6366f1; border: 1px solid #e0e7ff; border-radius: 6px; font-size: 11px; cursor: pointer; }
+
+  /* Collapsed */
+  .section-collapsed .section-body { display: none; }
+  .section-collapsed .chevron { transform: rotate(-90deg); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <h1>Review Skills</h1>
+      <div class="subtitle">37 candidates · approve, reject, or skip each before executing</div>
+      <div class="progress-pills">
+        <span class="pill pill-new"><span class="pill-dot"></span>27 new</span>
+        <span class="pill pill-replace"><span class="pill-dot"></span>4 replacements</span>
+        <span class="pill pill-partial"><span class="pill-dot"></span>10 partial overlaps</span>
+        <span class="pill pill-dupe"><span class="pill-dot"></span>3 duplicates</span>
+      </div>
+    </div>
+    <button class="btn-execute">Continue to Execute &rarr;</button>
+  </div>
+
+  <!-- PARTIAL OVERLAPS -->
+  <div class="section section-partial">
+    <div class="section-header" onclick="toggleSection(this)">
+      <span class="section-title">Partial Overlaps</span>
+      <span class="section-count">10</span>
+      <div class="section-meta">
+        <span class="section-reviewed">3 approved</span>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Approve all</button>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Reject all</button>
+      </div>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="section-body">
+
+      <!-- Long content row — expanded -->
+      <div class="row expanded">
+        <div class="row-header" onclick="toggleRow(this)">
+          <div style="flex:1; min-width:0;">
+            <div class="row-name">seo-content-audit</div>
+            <div class="row-sub">vs. Audit SEO &nbsp;·&nbsp; 71% similar</div>
+          </div>
+          <div class="row-right">
+            <span class="row-conf">88% conf</span>
+            <span class="row-chevron">›</span>
+          </div>
+        </div>
+        <div class="row-panel">
+          <div class="reasoning">Both skills perform SEO auditing but at different scope. <strong>Audit SEO</strong> is a broad on-page checker covering technical factors, meta tags, and content quality. The incoming <strong>seo-content-audit</strong> narrows to editorial content quality — E-E-A-T signals, topical authority, and content gap analysis — while skipping technical crawl checks. Merging is possible; the recommended version preserves both scopes.</div>
+          <div class="diff-legend">
+            <div class="diff-legend-item"><div class="diff-legend-swatch" style="background:#dcfce7; border:1px solid #86efac;"></div> Added from incoming</div>
+            <div class="diff-legend-item"><div class="diff-legend-swatch" style="background:#fee2e2; border:1px solid #fca5a5;"></div> Removed from current</div>
+            <div class="diff-legend-item" style="color:#94a3b8; font-style:italic;">Note: rewritten passages appear fully highlighted — review content carefully</div>
+          </div>
+          <div class="merge-grid">
+            <div class="merge-col">
+              <div class="merge-col-label">Current library — Audit SEO</div>
+              <div class="merge-col-body">
+                <div class="merge-col-name">Audit SEO</div>
+                <div class="merge-col-desc">Performs a comprehensive on-page SEO audit of a website or specific page. Analyses technical SEO factors, meta information, content quality, and keyword alignment to identify issues and prioritise improvements.</div>
+                <div class="merge-col-section">Parameters</div>
+                <div class="merge-col-text">• url (required) — The page or site URL to audit
+• depth — How many pages to crawl (default: 1)
+• keywords — Target keywords to check alignment against
+• include_competitors — Whether to benchmark against top 3 SERP results</div>
+                <div class="merge-col-section">Instructions</div>
+                <div class="merge-col-text">Fetch the target URL using fetch_url. Analyse the following dimensions:
+
+TECHNICAL SEO
+- Page load time (infer from response headers)
+- Mobile viewport meta tag present
+- HTTPS enforced
+- Canonical tag present and self-referencing
+- robots meta tag — check for noindex
+- Structured data (JSON-LD) present and valid
+- XML sitemap discoverable via /sitemap.xml
+
+ON-PAGE SEO
+- Title tag: length (50–60 chars), keyword placement, uniqueness
+- Meta description: length (150–160 chars), call to action, keyword
+- H1 tag: single, contains primary keyword
+- H2–H6 structure: logical hierarchy, keyword variation
+- Image alt text: descriptive, not keyword-stuffed
+- Internal links: minimum 3 contextual links to related pages
+- External links: at least 1 authority source cited
+
+CONTENT QUALITY
+- Word count appropriate for topic (minimum 800 for informational)
+- Reading level appropriate for audience
+- No thin content sections (< 100 words per main section)
+- Clear value proposition in first 100 words
+
+OUTPUT FORMAT
+Produce a prioritised issue list grouped by severity (Critical / Important / Minor) with specific fix recommendations for each issue. End with an Overall SEO Score (0–100) and a 30-day action plan.</div>
+              </div>
+            </div>
+            <div class="merge-col">
+              <div class="merge-col-label">Incoming — seo-content-audit</div>
+              <div class="merge-col-body">
+                <div class="merge-col-name">seo-content-audit</div>
+                <div class="merge-col-desc">Deep editorial content audit focused on E-E-A-T signals, topical authority, and content gap identification. Evaluates whether content demonstrates genuine expertise and satisfies search intent at depth.</div>
+                <div class="merge-col-section">Parameters</div>
+                <div class="merge-col-text">• url (required) — Page URL to audit
+• target_keyword — Primary keyword or topic
+• competitor_urls — Up to 3 competitor pages covering the same topic
+• audience — Intended reader (e.g. "B2B marketers", "first-time homebuyers")</div>
+                <div class="merge-col-section">Instructions</div>
+                <div class="merge-col-text">Fetch the page content using fetch_url. If competitor_urls provided, fetch those too for benchmarking.
+
+E-E-A-T SIGNALS
+- Author byline: named author with credentials visible
+- First-hand experience: does the content cite personal testing, data, or case studies?
+- Publication date and last-updated date present
+- External citations: peer-reviewed or authoritative sources linked
+
+TOPICAL DEPTH
+- Does the page cover the topic more thoroughly than top-ranking competitors?
+- Are common user questions (check People Also Ask) answered?
+- Are related subtopics addressed or linked?
+
+CONTENT GAPS
+- Identify 3–5 subtopics covered by competitors but missing from this page
+- Flag any outdated statistics (> 2 years old)
+- Note any claims made without supporting evidence
+
+READABILITY
+- Flesch reading ease score estimate (aim 60+ for general audiences)
+- Average sentence length (target < 20 words)
+- Paragraph length (target < 4 sentences)
+
+KEYWORD ALIGNMENT
+- Primary keyword in title, first 100 words, at least one H2
+- Semantic keyword variation (avoid exact-match stuffing)
+- Keyword density estimate (target 0.5–1.5%)
+
+OUTPUT FORMAT
+Score each dimension 0–100. Provide an overall Content Quality Score and a prioritised list of improvements with estimated impact (High / Medium / Low).</div>
+              </div>
+            </div>
+            <div class="merge-col recommended">
+              <div class="merge-col-label">Recommended merge</div>
+              <div class="merge-col-body">
+                <div class="merge-col-name">Audit SEO</div>
+                <div class="merge-col-desc">Comprehensive SEO audit covering <span class="diff-add">both technical on-page factors and deep editorial content quality</span>. Analyses technical SEO, meta information, <span class="diff-add">E-E-A-T signals, topical authority, and content gaps</span> to identify issues and prioritise improvements.</div>
+                <div class="merge-col-section">Parameters</div>
+                <div class="merge-col-text">• url (required) — Page or site URL to audit
+• depth — Pages to crawl (default: 1)
+• keywords — Target keywords
+• include_competitors — Benchmark against SERP results
+<span class="diff-add">• audience — Intended reader for readability calibration</span></div>
+                <div class="merge-col-section">Instructions</div>
+                <div class="merge-col-text">Fetch the target URL using fetch_url. Analyse the following dimensions:
+
+TECHNICAL SEO
+- Page load time (infer from response headers)
+- Mobile viewport meta tag present
+- HTTPS enforced
+- Canonical tag present and self-referencing
+- robots meta tag — check for noindex
+- Structured data (JSON-LD) present and valid
+- XML sitemap discoverable
+
+ON-PAGE SEO
+- Title tag: length (50–60 chars), keyword placement
+- Meta description: length (150–160 chars)
+- H1 tag: single, contains primary keyword
+- H2–H6 structure: logical hierarchy
+- Image alt text: descriptive
+- Internal links: minimum 3 contextual links
+- External links: at least 1 authority source
+
+<span class="diff-add">E-E-A-T SIGNALS
+- Author byline with credentials visible
+- First-hand experience: personal testing, data, or case studies cited
+- Publication and last-updated dates present
+- External citations from authoritative sources</span>
+
+CONTENT QUALITY
+- Word count appropriate for topic
+- <span class="diff-add">Topical depth vs top competitors — are PAA questions answered?</span>
+- <span class="diff-add">Content gaps: 3–5 subtopics covered by competitors but missing here</span>
+- No thin content sections
+- <span class="diff-add">Readability: Flesch score estimate, sentence and paragraph length</span>
+
+KEYWORD ALIGNMENT
+- Primary keyword in title, first 100 words, at least one H2
+- <span class="diff-add">Semantic keyword variation — avoid exact-match stuffing</span>
+- <span class="diff-remove">Keyword density (basic)</span> <span class="diff-add">Keyword density estimate (target 0.5–1.5%)</span>
+
+OUTPUT FORMAT
+Prioritised issue list by severity (Critical / Important / Minor). <span class="diff-add">Score each dimension 0–100.</span> Overall SEO Score (0–100) and 30-day action plan.</div>
+              </div>
+            </div>
+          </div>
+          <div class="action-bar">
+            <button class="btn-approve">Approve</button>
+            <button class="btn-reject">Reject</button>
+            <button class="btn-skip">Skip</button>
+            <button class="btn-reset">Reset to AI suggestion</button>
+            <button class="btn-view">View skill</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Decided row -->
+      <div class="row decided">
+        <div class="row-header">
+          <div style="flex:1; min-width:0;">
+            <div class="row-name">landing-page-copy</div>
+            <div class="row-sub">vs. Write Landing Page &nbsp;·&nbsp; 71% similar</div>
+          </div>
+          <span class="status-badge status-approved">approved</span>
+        </div>
+      </div>
+
+      <!-- Collapsed row -->
+      <div class="row">
+        <div class="row-header" onclick="toggleRow(this)">
+          <div style="flex:1; min-width:0;">
+            <div class="row-name">competitor-research</div>
+            <div class="row-sub">vs. Market Research &nbsp;·&nbsp; 63% similar</div>
+          </div>
+          <div class="row-right">
+            <span class="row-conf">84% conf</span>
+            <span class="row-chevron">›</span>
+          </div>
+        </div>
+        <div class="row-panel">
+          <div class="action-bar">
+            <button class="btn-approve">Approve</button>
+            <button class="btn-reject">Reject</button>
+            <button class="btn-skip">Skip</button>
+            <button class="btn-view">View skill</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- REPLACEMENTS (was Improvements) -->
+  <div class="section section-replace">
+    <div class="section-header" onclick="toggleSection(this)">
+      <span class="section-title">Replacements — incoming is strictly better</span>
+      <span class="section-count">4</span>
+      <div class="section-meta">
+        <span class="section-reviewed">1 approved</span>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Approve all</button>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Reject all</button>
+      </div>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="section-body">
+      <div class="row">
+        <div class="row-header" onclick="toggleRow(this)">
+          <div style="flex:1; min-width:0;">
+            <div class="row-name">ab-test-setup</div>
+            <div class="row-sub">replaces A/B Test Setup &nbsp;·&nbsp; 87% similar</div>
+          </div>
+          <div class="row-right">
+            <span class="row-conf">93% conf</span>
+            <span class="row-chevron">›</span>
+          </div>
+        </div>
+        <div class="row-panel">
+          <div class="action-bar">
+            <button class="btn-approve">Approve</button>
+            <button class="btn-reject">Reject</button>
+            <button class="btn-skip">Skip</button>
+            <button class="btn-view">View skill</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEW SKILLS -->
+  <div class="section section-new">
+    <div class="section-header" onclick="toggleSection(this)">
+      <span class="section-title">New Skills</span>
+      <span class="section-count">27</span>
+      <div class="section-meta">
+        <span class="section-reviewed">8 approved</span>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Approve all</button>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Reject all</button>
+      </div>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="section-body">
+      <div class="row decided">
+        <div class="row-header">
+          <div style="flex:1; min-width:0;"><div class="row-name">audit-geo</div><div class="row-sub">Novel — no existing match</div></div>
+          <span class="status-badge status-approved">approved</span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-header" onclick="toggleRow(this)">
+          <div style="flex:1; min-width:0;"><div class="row-name">geo-crawlers</div><div class="row-sub">Novel — no existing match</div></div>
+          <div class="row-right"><span class="row-chevron">›</span></div>
+        </div>
+        <div class="row-panel">
+          <div class="action-bar">
+            <button class="btn-approve">Approve</button>
+            <button class="btn-reject">Reject</button>
+            <button class="btn-skip">Skip</button>
+            <button class="btn-view">View skill</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DUPLICATES -->
+  <div class="section section-dupe section-collapsed">
+    <div class="section-header" onclick="toggleSection(this)">
+      <span class="section-title">Duplicates — already in library</span>
+      <span class="section-count">3</span>
+      <div class="section-meta">
+        <span class="section-reviewed">0 reviewed</span>
+        <button class="btn-bulk" onclick="event.stopPropagation()">Reject all</button>
+      </div>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="section-body">
+      <div class="row">
+        <div class="row-header" onclick="toggleRow(this)">
+          <div style="flex:1; min-width:0;"><div class="row-name">send-email</div><div class="row-sub">vs. Send Email &nbsp;·&nbsp; 98% similar</div></div>
+          <div class="row-right"><span class="row-conf">99% conf</span><span class="row-chevron">›</span></div>
+        </div>
+        <div class="row-panel">
+          <div class="action-bar">
+            <button class="btn-approve">Approve</button>
+            <button class="btn-reject">Reject</button>
+            <button class="btn-skip">Skip</button>
+            <button class="btn-view">View skill</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+function toggleRow(header) { header.closest('.row').classList.toggle('expanded'); }
+function toggleSection(header) {
+  const s = header.closest('.section');
+  s.classList.toggle('section-collapsed');
+}
+</script>
+</body>
+</html>

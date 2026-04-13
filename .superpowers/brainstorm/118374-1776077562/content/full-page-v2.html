@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Analyzer — Long Content</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif; background: #f8fafc; color: #1e293b; font-size: 13px; }
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 24px; }
+
+  .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; gap: 16px; }
+  .page-header h1 { font-size: 20px; font-weight: 600; color: #0f172a; margin-bottom: 4px; }
+  .page-header .subtitle { font-size: 12px; color: #94a3b8; }
+  .progress-pills { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .pill { display: flex; align-items: center; gap: 5px; font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: 500; }
+  .pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pill-partial { background: #fffbeb; color: #b45309; }
+  .pill-partial .pill-dot { background: #f59e0b; }
+  .btn-execute { padding: 9px 20px; background: #0f172a; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; }
+
+  .section { margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; overflow: hidden; }
+  .section-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #f1f5f9; }
+  .section-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #334155; }
+  .section-count { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+  .section-meta { margin-left: auto; font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 10px; }
+  .btn-bulk { font-size: 11px; padding: 4px 10px; border-radius: 5px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; }
+
+  .row { border-bottom: 1px solid #f8fafc; }
+  .row:last-child { border-bottom: none; }
+  .row-header { padding: 11px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .row-header:hover { background: #fafafa; }
+  .row-name { font-size: 13px; font-weight: 500; color: #1e293b; }
+  .row-sub { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+  .row-conf { font-size: 11px; color: #94a3b8; white-space: nowrap; flex-shrink: 0; }
+  .row-chevron { color: #cbd5e1; font-size: 11px; flex-shrink: 0; transition: transform 0.15s; }
+  .row.expanded .row-chevron { transform: rotate(90deg); }
+
+  .row-panel { background: #fafafa; border-top: 1px solid #e2e8f0; padding: 20px; display: none; }
+  .row.expanded .row-panel { display: block; }
+
+  .reasoning { font-size: 11px; color: #64748b; line-height: 1.6; margin-bottom: 16px; font-style: italic; padding: 10px 12px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; }
+
+  /* Three column merge — equal height columns that scroll independently */
+  .merge-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px; align-items: start; }
+  .merge-col { background: white; border: 1px solid #e2e8f0; border-radius: 7px; overflow: hidden; }
+  .merge-col.recommended { border-color: #bbf7d0; }
+  .merge-col-label { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; padding: 8px 12px 6px; border-bottom: 1px solid #f1f5f9; background: #fafafa; }
+  .merge-col.recommended .merge-col-label { color: #16a34a; background: #f0fdf4; border-bottom-color: #d1fae5; }
+  .merge-col-body { padding: 12px; max-height: 420px; overflow-y: auto; }
+  .merge-col-name { font-size: 12px; font-weight: 600; color: #1e293b; margin-bottom: 6px; }
+  .merge-col-desc { font-size: 11px; color: #475569; line-height: 1.55; margin-bottom: 10px; }
+  .merge-col-section { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; margin: 10px 0 4px; }
+  .merge-col-instructions { font-size: 11px; color: #475569; line-height: 1.65; white-space: pre-wrap; }
+  .diff-add { background: #dcfce7; color: #166534; border-radius: 2px; padding: 0 1px; }
+  .diff-remove { background: #fee2e2; color: #991b1b; border-radius: 2px; padding: 0 1px; text-decoration: line-through; }
+
+  .action-bar { display: flex; align-items: center; gap: 6px; padding-top: 2px; }
+  .btn-approve { padding: 7px 16px; background: #0f172a; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; }
+  .btn-reject { padding: 7px 16px; background: white; color: #64748b; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .btn-reject:hover { border-color: #fca5a5; color: #dc2626; }
+  .btn-skip { padding: 7px 16px; background: white; color: #64748b; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .btn-view { margin-left: auto; padding: 7px 12px; background: white; color: #6366f1; border: 1px solid #e0e7ff; border-radius: 6px; font-size: 11px; cursor: pointer; }
+  .btn-reset { padding: 7px 12px; background: white; color: #94a3b8; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-header">
+    <div>
+      <h1>Review Skills</h1>
+      <div class="subtitle">Showing a partial overlap with full-length skill content</div>
+      <div class="progress-pills">
+        <span class="pill pill-partial"><span class="pill-dot"></span>Partial overlap example</span>
+      </div>
+    </div>
+    <button class="btn-execute">Continue to Execute &rarr;</button>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-dot" style="background:#f59e0b;"></div>
+      <span class="section-title">Partial Overlaps</span>
+      <span class="section-count" style="background:#fffbeb; color:#b45309;">10</span>
+      <div class="section-meta">
+        <button class="btn-bulk">Approve all</button>
+        <button class="btn-bulk">Reject all</button>
+      </div>
+    </div>
+
+    <!-- Long content partial overlap — expanded -->
+    <div class="row expanded">
+      <div class="row-header" onclick="toggleRow(this)">
+        <div style="flex:1; min-width:0;">
+          <div class="row-name">seo-content-audit</div>
+          <div class="row-sub">vs. Audit SEO &nbsp;·&nbsp; 71% similar</div>
+        </div>
+        <span class="row-conf">88% conf</span>
+        <span class="row-chevron">›</span>
+      </div>
+      <div class="row-panel">
+        <div class="reasoning">Both skills perform SEO auditing but at different scope. The existing <strong>Audit SEO</strong> skill is a broad on-page SEO checker covering technical factors, meta tags, and content quality across a full site. The incoming <strong>seo-content-audit</strong> narrows to editorial content quality — readability, keyword depth, E-E-A-T signals, and content gap analysis — while skipping technical crawl checks entirely. Merging is possible but the recommended version should preserve both scopes clearly.</div>
+
+        <div class="merge-grid">
+
+          <!-- CURRENT -->
+          <div class="merge-col">
+            <div class="merge-col-label">Current library — Audit SEO</div>
+            <div class="merge-col-body">
+              <div class="merge-col-name">Audit SEO</div>
+              <div class="merge-col-desc">Performs a comprehensive on-page SEO audit of a website or specific page. Analyses technical SEO factors, meta information, content quality, and keyword alignment to identify issues and prioritise improvements.</div>
+              <div class="merge-col-section">Parameters</div>
+              <div class="merge-col-instructions">• url (required) — The page or site URL to audit
+• depth — How many pages to crawl (default: 1)
+• keywords — Target keywords to check alignment against
+• include_competitors — Whether to benchmark against top 3 SERP results</div>
+              <div class="merge-col-section">Instructions</div>
+              <div class="merge-col-instructions">Fetch the target URL using fetch_url. Analyse the following dimensions:
+
+TECHNICAL SEO
+- Page load time (infer from response headers)
+- Mobile viewport meta tag present
+- HTTPS enforced
+- Canonical tag present and self-referencing
+- robots meta tag — check for noindex
+- hreflang tags (if international site)
+- Structured data (JSON-LD) present and valid
+- XML sitemap discoverable via /sitemap.xml
+
+ON-PAGE SEO
+- Title tag: length (50–60 chars), keyword placement, uniqueness
+- Meta description: length (150–160 chars), call to action, keyword
+- H1 tag: single, contains primary keyword
+- H2–H6 structure: logical hierarchy, keyword variation
+- Image alt text: descriptive, not keyword-stuffed
+- Internal links: minimum 3 contextual links to related pages
+- External links: at least 1 authority source cited
+
+CONTENT QUALITY
+- Word count appropriate for topic (minimum 800 for informational)
+- Reading level appropriate for audience
+- No thin content sections (< 100 words per main section)
+- Clear value proposition in first 100 words
+
+OUTPUT FORMAT
+Produce a prioritised issue list grouped by severity (Critical / Important / Minor) with specific fix recommendations for each issue. End with an Overall SEO Score (0–100) and a 30-day action plan.</div>
+            </div>
+          </div>
+
+          <!-- INCOMING -->
+          <div class="merge-col">
+            <div class="merge-col-label">Incoming — seo-content-audit</div>
+            <div class="merge-col-body">
+              <div class="merge-col-name">seo-content-audit</div>
+              <div class="merge-col-desc">Deep editorial content audit focused on E-E-A-T signals, topical authority, and content gap identification. Evaluates whether content demonstrates genuine expertise and satisfies search intent at depth.</div>
+              <div class="merge-col-section">Parameters</div>
+              <div class="merge-col-instructions">• url (required) — Page URL to audit
+• target_keyword — Primary keyword or topic
+• competitor_urls — Up to 3 competitor pages covering the same topic
+• audience — Intended reader (e.g. "B2B marketers", "first-time homebuyers")</div>
+              <div class="merge-col-section">Instructions</div>
+              <div class="merge-col-instructions">Fetch the page content using fetch_url. If competitor_urls provided, fetch those too for benchmarking.
+
+E-E-A-T SIGNALS
+- Author byline: named author with credentials visible
+- First-hand experience: does the content cite personal testing, data, or case studies?
+- Publication date and last-updated date present
+- External citations: peer-reviewed or authoritative sources linked
+- About page or author bio accessible from the article
+
+TOPICAL DEPTH
+- Does the page cover the topic more thoroughly than top-ranking competitors?
+- Are common user questions (check People Also Ask for the keyword) answered?
+- Are related subtopics addressed or appropriately linked?
+- Estimated reading time vs competitor average (aim for parity or better)
+
+CONTENT GAPS
+- Identify 3–5 subtopics covered by competitors but missing from this page
+- Flag any outdated statistics (> 2 years old for fast-moving topics)
+- Note any claims made without supporting evidence
+
+READABILITY
+- Flesch reading ease score estimate (aim 60+ for general audiences)
+- Average sentence length (target < 20 words)
+- Paragraph length (target < 4 sentences)
+- Use of formatting: bullet points, headers, bold for scannability
+
+KEYWORD ALIGNMENT
+- Primary keyword in title, first 100 words, at least one H2
+- Semantic keyword variation throughout (avoid exact-match stuffing)
+- Keyword density estimate (target 0.5–1.5%)
+
+OUTPUT FORMAT
+Score each dimension 0–100. Provide an overall Content Quality Score and a prioritised list of content improvements with estimated impact (High / Medium / Low).</div>
+            </div>
+          </div>
+
+          <!-- RECOMMENDED -->
+          <div class="merge-col recommended">
+            <div class="merge-col-label">Recommended merge</div>
+            <div class="merge-col-body">
+              <div class="merge-col-name">Audit SEO</div>
+              <div class="merge-col-desc">Comprehensive SEO audit covering <span class="diff-add">both technical on-page factors and deep editorial content quality</span>. Analyses technical SEO, meta information, <span class="diff-add">E-E-A-T signals, topical authority, and content gaps</span> to identify issues and prioritise improvements.</div>
+              <div class="merge-col-section">Parameters</div>
+              <div class="merge-col-instructions">• url (required) — Page or site URL to audit
+• depth — Pages to crawl (default: 1)
+• keywords — Target keywords
+• include_competitors — Benchmark against SERP results
+<span class="diff-add">• audience — Intended reader for readability calibration</span></div>
+              <div class="merge-col-section">Instructions</div>
+              <div class="merge-col-instructions">Fetch the target URL using fetch_url. Analyse the following dimensions:
+
+TECHNICAL SEO
+- Page load time (infer from response headers)
+- Mobile viewport meta tag present
+- HTTPS enforced
+- Canonical tag present and self-referencing
+- robots meta tag — check for noindex
+- Structured data (JSON-LD) present and valid
+- XML sitemap discoverable
+
+ON-PAGE SEO
+- Title tag: length (50–60 chars), keyword placement
+- Meta description: length (150–160 chars), keyword
+- H1 tag: single, contains primary keyword
+- H2–H6 structure: logical hierarchy
+- Image alt text: descriptive
+- Internal links: minimum 3 contextual links
+- External links: at least 1 authority source
+
+<span class="diff-add">E-E-A-T SIGNALS
+- Author byline with credentials visible
+- First-hand experience: personal testing, data, or case studies cited
+- Publication and last-updated dates present
+- External citations from authoritative sources
+</span>
+CONTENT QUALITY
+- Word count appropriate for topic
+- <span class="diff-add">Topical depth vs top competitors — are PAA questions answered?</span>
+- <span class="diff-add">Content gaps: 3–5 subtopics covered by competitors but missing here</span>
+- No thin content sections
+- <span class="diff-add">Readability: Flesch score estimate, sentence and paragraph length</span>
+
+KEYWORD ALIGNMENT
+- Primary keyword in title, first 100 words, at least one H2
+- <span class="diff-add">Semantic keyword variation — avoid exact-match stuffing</span>
+- <span class="diff-remove">Keyword density (basic)</span> <span class="diff-add">Keyword density estimate (target 0.5–1.5%)</span>
+
+OUTPUT FORMAT
+Prioritised issue list grouped by severity (Critical / Important / Minor). <span class="diff-add">Score each dimension 0–100.</span> Overall SEO Score (0–100) and 30-day action plan.</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="action-bar">
+          <button class="btn-approve">Approve</button>
+          <button class="btn-reject">Reject</button>
+          <button class="btn-skip">Skip</button>
+          <button class="btn-reset">Reset to AI suggestion</button>
+          <button class="btn-view">View skill</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function toggleRow(header) {
+  header.closest('.row').classList.toggle('expanded');
+}
+</script>
+</body>
+</html>
