@@ -1069,7 +1069,7 @@ async function classifySingleCandidate(
 ): Promise<{
   result: ClassificationOutcome;
   classificationFailed: boolean;
-  classificationFailureReason: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' | null;
+  classificationFailureReason: 'rate_limit' | 'parse_error' | 'unknown' | null;
 }> {
   const band = skillAnalyzerServicePure.classifyBand(similarityScore);
   const { system, userMessage } = skillAnalyzerServicePure.buildClassifyPromptWithMerge(
@@ -1228,11 +1228,8 @@ export async function bulkRetryFailedClassifications(
       ),
     );
 
-  let retried = 0;
-
   for (let i = 0; i < failedResults.length; i++) {
     await retryClassification(jobId, failedResults[i].id, organisationId);
-    retried++;
     // Jittered delay: 500–1500ms between calls to avoid re-triggering 429s
     if (i < failedResults.length - 1) {
       await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
@@ -1249,7 +1246,8 @@ export async function bulkRetryFailedClassifications(
       ),
     );
 
-  return { retried, stillFailed: remaining.length };
+  // retried = number of rows attempted (all failed rows are always attempted once)
+  return { retried: failedResults.length, stillFailed: remaining.length };
 }
 
 export const skillAnalyzerService = {

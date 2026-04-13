@@ -64,7 +64,7 @@ export function classifyBand(similarity: number): SimilarityBand {
  *  (meaning the API call succeeded but the response was unparseable). */
 export function deriveClassificationFailureReason(
   err: unknown,
-): 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' {
+): 'rate_limit' | 'parse_error' | 'unknown' {
   if (err === null || err === undefined) return 'parse_error';
   const e = err as { statusCode?: number; code?: string };
   if (e?.statusCode === 429) return 'rate_limit';

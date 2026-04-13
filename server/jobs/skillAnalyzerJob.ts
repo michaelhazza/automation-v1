@@ -427,7 +427,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // original_proposed_merge (immutable) on the result row.
     proposedMerge: object | null;
     classificationFailed: boolean;
-    classificationFailureReason: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' | null;
+    classificationFailureReason: 'rate_limit' | 'parse_error' | 'unknown' | null;
   };
 
   const classifiedResults: ClassifiedResult[] = [];

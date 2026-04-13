@@ -494,7 +494,7 @@ function ResultSection({
                 disabled={bulkRetrying}
                 className="px-3 py-1 text-xs font-medium border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 transition-colors"
               >
-                {bulkRetrying ? 'Retrying…' : `Retry all failed (${failedResults.length})`}
+                {bulkRetrying ? 'Retrying…' : `Retry all failed classifications (${failedResults.length})`}
               </button>
             )}
             {classification === 'DUPLICATE' && (

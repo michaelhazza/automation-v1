@@ -125,13 +125,13 @@ export interface AnalysisResult {
    *  Null on rows that have never been merge-edited. Echoed back on PATCH requests
    *  as ifUnmodifiedSince for optimistic concurrency. */
   mergeUpdatedAt?: string | null;
-  /** Task 3: true when the Anthropic classification call failed (rate limit,
-   *  timeout, parse error). Distinguishes retryable API failures from genuine
+  /** Task 3: true when the Anthropic classification call failed (rate limit or
+   *  parse error). Distinguishes retryable API failures from genuine
    *  PARTIAL_OVERLAP model output. */
   classificationFailed?: boolean;
-  /** Task 3: reason for the failure: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown'.
+  /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'unknown'.
    *  Null on rows where classificationFailed is false or undefined. */
-  classificationFailureReason?: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' | null;
+  classificationFailureReason?: 'rate_limit' | 'parse_error' | 'unknown' | null;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';
