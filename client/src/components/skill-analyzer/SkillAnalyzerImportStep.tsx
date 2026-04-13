@@ -104,8 +104,9 @@ export default function SkillAnalyzerImportStep({ onJobCreated }: Props) {
 
       onJobCreated(jobId, jobData);
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } }; message?: string };
-      setError(e?.response?.data?.error ?? e?.message ?? 'Failed to create analysis job.');
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const errBody = e?.response?.data?.error;
+      setError((typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Failed to create analysis job.');
     } finally {
       setSubmitting(false);
     }

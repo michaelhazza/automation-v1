@@ -1081,22 +1081,29 @@ async function classifySingleCandidate(
   let parsed: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
   let apiError: unknown = undefined;
 
+  const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
+
   try {
-    const response = await withBackoff(
-      () =>
-        anthropicAdapter.call({
-          model: 'claude-haiku-4-5-20251001',
+    parsed = await withBackoff(
+      async () => {
+        const response = await anthropicAdapter.call({
+          model: 'claude-sonnet-4-6',
           system,
           messages: [{ role: 'user', content: userMessage }],
-          maxTokens: 512,
+          maxTokens: 8192,
           temperature: 0.1,
-        }),
+        });
+        const result = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+        if (result === null) throw PARSE_FAILURE;
+        return result;
+      },
       {
         label: 'skill-classify-retry',
         maxAttempts: 3,
         correlationId: jobId,
         runId: jobId,
         isRetryable: (err: unknown) => {
+          if (err === PARSE_FAILURE) return true;
           const e = err as { statusCode?: number; code?: string };
           if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
           return (
@@ -1108,10 +1115,9 @@ async function classifySingleCandidate(
         },
       },
     );
-    parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
   } catch (err) {
     parsed = null;
-    apiError = err;
+    apiError = err === PARSE_FAILURE ? undefined : err;
   }
 
   const classificationFailed = parsed === null;

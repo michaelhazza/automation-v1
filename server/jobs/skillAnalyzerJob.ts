@@ -530,25 +530,37 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
           let classificationApiError: unknown = undefined;
 
+          // Sentinel thrown inside withBackoff when the LLM response is
+          // structurally valid JSON but fails our schema check. Marked
+          // retryable so the model gets another attempt.
+          const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
+
           try {
-            const response = await withBackoff(
-              () =>
-                anthropicAdapter.call({
-                  model: 'claude-haiku-4-5-20251001',
+            classificationResult = await withBackoff(
+              async () => {
+                const response = await anthropicAdapter.call({
+                  model: 'claude-sonnet-4-6',
                   system,
                   messages: [{ role: 'user', content: userMessage }],
-                  maxTokens: 512,
+                  // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
+                  // with long instructions can never be truncated.
+                  maxTokens: 8192,
                   temperature: 0.1,
-                }),
+                });
+                const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+                if (parsed === null) throw PARSE_FAILURE;
+                return parsed;
+              },
               {
                 label: `skill-classify-${match.candidateIndex}`,
                 maxAttempts: 3,
                 correlationId: jobId,
                 runId: jobId,
-                // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
-                // cannot change between attempts, so retrying just wastes time.
-                // Retry only transient upstream failures.
                 isRetryable: (err: unknown) => {
+                  // Parse failures: model produced unparseable output — worth retrying.
+                  if (err === PARSE_FAILURE) return true;
+                  // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
+                  // cannot change between attempts, so retrying just wastes time.
                   const e = err as { statusCode?: number; code?: string };
                   if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
                   return (
@@ -560,11 +572,9 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                 },
               }
             );
-
-            classificationResult = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
           } catch (err) {
             classificationResult = null;
-            classificationApiError = err;
+            classificationApiError = err === PARSE_FAILURE ? undefined : err;
           }
 
           // null result = either API error (classificationApiError set) or parse failure
