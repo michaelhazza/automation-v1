@@ -752,7 +752,7 @@ export default function Layout({ user, children }: LayoutProps) {
                 <NavItem to={`/portal/${activeClientId}`} icon={<Icons.portal />} label="Portal" />
               )}
               {hasSidebarItem('ops') && (
-                <NavItem to="/executions" icon={<Icons.activity />} label="Activity" />
+                <NavItem to={`/admin/subaccounts/${activeClientId}/activity`} icon={<Icons.activity />} label="Activity" />
               )}
               {hasSidebarItem('companies') && (
                 <NavItem to={`/admin/subaccounts/${activeClientId}/team`} icon={<Icons.team />} label="Team" />
@@ -783,7 +783,7 @@ export default function Layout({ user, children }: LayoutProps) {
               {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}
               {hasSidebarItem('integrations') && hasOrgPerm('org.mcp_servers.view') && <NavItem to="/admin/mcp-servers" icon={<Icons.connections />} label="Integrations" />}
               {hasSidebarItem('team') && hasOrgPerm('org.users.view') && <NavItem to="/admin/users" icon={<Icons.team />} label="Team" />}
-              {hasSidebarItem('ops') && hasOrgPerm('org.executions.view') && <NavItem to="/admin/ops" icon={<Icons.activity />} label="Ops Dashboard" />}
+              {hasSidebarItem('ops') && hasOrgPerm('org.executions.view') && <NavItem to="/admin/activity" icon={<Icons.activity />} label="Activity" />}
               {hasSidebarItem('skills') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/skill-studio" icon={<Icons.skills />} label="Skill Studio" />}
               {hasSidebarItem('health') && hasOrgPerm('org.health_audit.view') && <NavItem to="/admin/health-findings" icon={<Icons.diagnostic />} label="Health" />}
               {hasSidebarItem('manage_org') && (hasOrgPerm('org.categories.view') || hasOrgPerm('org.engines.view') || isSystemAdmin) && <NavItem to="/admin/org-settings" icon={<Icons.settings />} label="Manage Org" />}
@@ -799,9 +799,8 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavItem to="/system/skills" icon={<Icons.skills />} label="Skills" />
               <NavItem to="/system/playbook-studio" icon={<Icons.automations />} label="Playbook Studio" />
               <NavItem to="/system/processes" icon={<Icons.automations />} label="Workflows" />
-              <NavItem to="/system/ops" icon={<Icons.activity />} label="Ops Dashboard" />
-              <NavItem to="/system/skill-studio" icon={<Icons.skills />} label="Skill Studio" />
               <NavItem to="/system/activity" icon={<Icons.activity />} label="Activity" />
+              <NavItem to="/system/skill-studio" icon={<Icons.skills />} label="Skill Studio" />
               <NavItem to="/system/task-queue" icon={<Icons.diagnostic />} label="Diagnostics" />
               <NavItem to="/system/job-queues" icon={<Icons.diagnostic />} label="Job Queues" />
               <NavItem to="/system/config-templates" icon={<Icons.agents />} label="Config Templates" />
