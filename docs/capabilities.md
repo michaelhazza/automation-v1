@@ -270,16 +270,15 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 | | |
 |---|---|
-| **Outcome** | Clients understand and improve their visibility in AI-powered search engines (ChatGPT, Perplexity, Google AI Overviews, Gemini, Bing Copilot) |
+| **Outcome** | Clients know exactly why they're invisible in AI-generated answers — and have a ranked action plan to fix it — not a vague "improve your content" report |
 | **Trigger** | Recurring schedule, on-demand audit request, or competitive analysis |
-| **Deliverable** | Composite GEO Score (0-100) with per-dimension breakdown, platform-specific readiness, prioritised recommendations, 30-day improvement roadmap |
+| **Deliverable** | Composite GEO Score (0-100) with per-dimension breakdown, per-engine readiness assessment, prioritised recommendations, and a 30-day improvement roadmap — delivered as a task deliverable through the existing review pipeline |
 
-- Six-dimension scoring: AI Citability (25%), Brand Authority (20%), Content Quality / E-E-A-T (20%), Technical Infrastructure (15%), Structured Data (10%), Platform-Specific (10%)
-- AI crawler access auditing across 14+ crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended, etc.)
-- Competitive GEO benchmarking against 2-3 competitors
-- llms.txt analysis and generation — the emerging standard for AI-readable site summaries
-- Unified GEO + SEO reporting via the system-managed GEO-SEO Agent
-- Historical score tracking for trend analysis across audits
+- Agencies can offer a genuinely new service vertical — automated AI search auditing — that no competing agency automation platform currently provides
+- Unified GEO + SEO report from a single agent run: clients get one coherent picture of their search visibility, not two separate tools to reconcile
+- Scores track over time per client, so agencies can show measurable improvement and tie GEO work to outcomes
+- Competitive benchmarking shows clients exactly where they trail competitors in AI visibility and what specific changes close the gap
+- llms.txt generation gives clients an immediate, concrete deliverable — a file they can deploy the same day that signals AI-readiness to every major engine
 
 ### Content Creation & Publishing
 
