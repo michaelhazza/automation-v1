@@ -387,18 +387,21 @@ function ResultRow({
           {/* Action bar */}
           <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
             <button
+              type="button"
               onClick={() => setAction('approved')}
               className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
             >
               Approve
             </button>
             <button
+              type="button"
               onClick={() => setAction('rejected')}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-red-300 hover:text-red-600 transition-colors"
             >
               Reject
             </button>
             <button
+              type="button"
               onClick={() => setAction('skipped')}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-slate-400 transition-colors"
             >
@@ -406,6 +409,7 @@ function ResultRow({
             </button>
             {candidate && (
               <button
+                type="button"
                 onClick={() => setShowSkill(true)}
                 className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-200 bg-white text-indigo-600 hover:bg-indigo-50 transition-colors"
               >
@@ -579,7 +583,7 @@ function ResultSection({
         </div>
       )}
 
-      {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && open && (
+      {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && (
         <div className="px-4 py-2 text-xs text-slate-600 border-t border-slate-100">{bulkRetryStatus}</div>
       )}
     </div>
