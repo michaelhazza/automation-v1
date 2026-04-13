@@ -14,8 +14,8 @@ server/
 ├── middleware/      Express middleware (auth, validation, correlation, org scoping)
 ├── lib/             Shared utilities (asyncHandler, permissions, scopeAssertion, orgScopedDb, etc.)
 ├── config/          Environment, action registry, system limits, RLS manifest, topic registry
-├── skills/          File-based skill definitions (99 built-in skills as .md files)
-├── jobs/            Background jobs (cleanup, regression replay, security event pruning, priority feed, slack inbound)
+├── skills/          File-based skill definitions (101 built-in skills as .md files)
+├── jobs/            Background jobs (cleanup, regression replay, security event pruning, priority feed, slack inbound, agent briefing, memory dedup, org subaccount migration)
 ├── tools/           Internal tool implementations (askClarifyingQuestion, readDataSource)
 └── index.ts         Express app setup, route mounting
 
@@ -80,6 +80,10 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Playbook studio | `playbookStudio.ts` |
 | Activity | `activity.ts` |
 | Skill studio | `skillStudio.ts` |
+| Client Pulse reports | `clientpulseReports.ts` |
+| GoHighLevel (GHL) OAuth | `ghl.ts` |
+| Modules & subscriptions | `modules.ts` |
+| Onboarding | `onboarding.ts` |
 
 ### Shared route helpers
 
@@ -1011,9 +1015,15 @@ Test infrastructure: `server/lib/__tests__/llmStub.ts` — shared LLM mock for d
 
 ## Migrations
 
-103 migrations (0001–0103, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
+109 migrations (0001–0109, plus down-migrations). Schema changes go through SQL migration files in `migrations/`. **Migrations are run by the custom forward-only runner at `scripts/migrate.ts`** (`npm run migrate`) — drizzle-kit migrate is no longer used for production. The runner is forward-only by design; rollback is manual against the corresponding `*.down.sql` file in local environments only.
 
 Recent migrations:
+- `0109` — `skill_analyzer_results.classificationFailed` + `classificationFailureReason` — distinguish API failure from genuine partial-overlap in Skill Analyzer Phase 3
+- `0108` — `scraping_selectors` + `scraping_cache` — learned element fingerprints and HTTP response cache for the Scraping Engine
+- `0107` — unique constraint on `workspace_memory_entries` — deduplication key for org subaccount memory migration idempotency
+- `0106` — org subaccount refactor — every org gets a permanent default subaccount for org-level agent execution
+- `0105` — agent intelligence upgrade (Phases 0–3) — `agent_briefings` + related tables for search, memory, context, and briefing
+- `0104` — ClientPulse + module system — `modules`, `subscriptions`, `org_subscriptions`, `reports` tables; slug on `system_hierarchy_templates`
 - `0103` — `users.slack_user_id` — Slack user ↔ org user identity linkage (Feature 4)
 - `0102` — `slack_conversations` — thread → agent conversation mapping (Feature 4)
 - `0101` — `skill_versions` — immutable version history for skill definitions (Feature 3)

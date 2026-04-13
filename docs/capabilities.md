@@ -103,7 +103,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 
 ### Skill System
 
-101 modular skills across 13 categories, cascading from system to org to subaccount.
+100 modular skills across 13 categories, cascading from system to org to subaccount.
 
 - **Three tiers:** System skills (platform-provided), Org skills (custom), Universal skills (always available)
 - **Per-agent allowlists** — Each subaccount-agent link specifies exactly which skills are available
@@ -386,7 +386,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 101 skills.
+Complete list of all 100 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -633,6 +633,7 @@ Complete list of all 101 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-13 | Fix skill count: 100 skills (not 101); add 4 missing route entries (ClientPulse, GHL, Modules, Onboarding) to architecture.md; update migration list to 0109; fix project structure job list | — |
 | 2026-04-13 | Add scrape_url, scrape_structured, monitor_webpage skills; add Scrapling MCP preset; expand Competitor Intelligence with automated monitoring capabilities | — |
 | 2026-04-13 | Tighten Replaces table with "why it's better" column | — |
 | 2026-04-13 | Tighten Product language to benefit-oriented; sharpen Agency with constraints; fix Hybrid type on create_page/update_page; add Replaces / Consolidates section | — |
