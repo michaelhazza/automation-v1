@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-13
+> **Last updated:** 2026-04-13 (GEO skills + GEO-SEO Agent added)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -41,6 +41,7 @@
 - [Agency Capabilities](#agency-capabilities)
   - [Performance Reporting & Analytics](#performance-reporting--analytics)
   - [SEO Management](#seo-management)
+  - [GEO — AI Search Visibility](#geo--ai-search-visibility)
   - [Content Creation & Publishing](#content-creation--publishing)
   - [CRM & Contact Management](#crm--contact-management)
   - [Email Marketing & Outreach](#email-marketing--outreach)
@@ -265,6 +266,20 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 - On-page SEO auditing with per-issue recommendations
 - Integrated with content creation for SEO-optimised output from the same workflow
 
+### GEO — AI Search Visibility
+
+| | |
+|---|---|
+| **Outcome** | Clients know exactly why they're invisible in AI-generated answers — and have a ranked action plan to fix it — not a vague "improve your content" report |
+| **Trigger** | Recurring schedule, on-demand audit request, or competitive analysis |
+| **Deliverable** | Composite GEO Score (0-100) with per-dimension breakdown, per-engine readiness assessment, prioritised recommendations, and a 30-day improvement roadmap — delivered as a task deliverable through the existing review pipeline |
+
+- Agencies can offer a genuinely new service vertical — automated AI search auditing — that no competing agency automation platform currently provides
+- Unified GEO + SEO report from a single agent run: clients get one coherent picture of their search visibility, not two separate tools to reconcile
+- Scores track over time per client, so agencies can show measurable improvement and tie GEO work to outcomes
+- Competitive benchmarking shows clients exactly where they trail competitors in AI visibility and what specific changes close the gap
+- llms.txt generation gives clients an immediate, concrete deliverable — a file they can deploy the same day that signals AI-readiness to every major engine
+
 ### Content Creation & Publishing
 
 | | |
@@ -386,7 +401,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 100 skills.
+Complete list of all 108 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -457,6 +472,14 @@ Complete list of all 100 skills.
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
 | `audit_seo` | Audit page for on-page SEO issues with prioritised findings | LLM | — |
+| `audit_geo` | Composite GEO audit — AI search visibility across six dimensions, produces 0-100 GEO Score | LLM | — |
+| `geo_citability` | Analyse content extraction quality for AI citation (passage structure, claim density) | LLM | — |
+| `geo_crawlers` | Check robots.txt and HTTP headers for 14+ AI crawlers | LLM | — |
+| `geo_schema` | Evaluate JSON-LD structured data coverage for AI search consumption | LLM | — |
+| `geo_platform_optimizer` | Platform-specific readiness scores for Google AIO, ChatGPT, Perplexity, Gemini, Bing Copilot | LLM | — |
+| `geo_brand_authority` | Brand entity recognition, mention density, citation analysis for AI visibility | LLM | — |
+| `geo_llmstxt` | Analyse or generate llms.txt — AI-readable site summaries | LLM | — |
+| `geo_compare` | Competitive GEO analysis — benchmark against 2-3 competitors across GEO dimensions | LLM | — |
 | `generate_competitor_brief` | Research competitor via web search and produce intelligence brief | LLM | — |
 | `increase_budget` | Propose budget increase for high-performing campaign | LLM | HITL |
 | `pause_campaign` | Propose campaign pause with performance evidence | LLM | HITL |

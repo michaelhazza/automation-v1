@@ -987,6 +987,139 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       guidance: 'Follow the audit_seo methodology in your skill context. Evaluate the page content against the on-page SEO checklist, score based on findings, and produce a prioritised list of specific recommendations.',
     });
   },
+
+  // ── GEO (Generative Engine Optimisation) skills ─────────────────────
+  audit_geo: async (input) => {
+    return executeMethodologySkill('audit_geo', input, {
+      template: {
+        url: '',
+        targetKeyword: '',
+        geoScore: 0,
+        executiveSummary: '',
+        dimensionScores: {
+          aiCitability: { score: 0, findings: [], recommendations: [] },
+          brandAuthority: { score: 0, findings: [], recommendations: [] },
+          contentQuality: { score: 0, findings: [], recommendations: [] },
+          technicalInfrastructure: { score: 0, findings: [], recommendations: [] },
+          structuredData: { score: 0, findings: [], recommendations: [] },
+          platformSpecific: { score: 0, findings: [], recommendations: [] },
+        },
+        priorityRecommendations: [],
+        thirtyDayRoadmap: { week1: [], week2to3: [], week4: [] },
+        competitiveBenchmark: null,
+        notes: '',
+      },
+      guidance: 'Follow the audit_geo methodology in your skill context. Use fetch_url to retrieve the page, then evaluate all six GEO dimensions. Compute the composite GEO Score as a weighted sum. Produce specific, actionable recommendations ranked by impact.',
+    });
+  },
+  geo_citability: async (input) => {
+    return executeMethodologySkill('geo_citability', input, {
+      template: {
+        url: '',
+        citabilityScore: 0,
+        passageAnalysis: { total: 0, optimalRange: 0, averageLength: 0 },
+        claimDensity: { verifiableClaims: 0, claimsPer200Words: 0 },
+        quotableStructures: { definitions: 0, faqPairs: 0, lists: 0, summaries: 0 },
+        findings: [],
+        recommendations: [],
+      },
+      guidance: 'Follow the geo_citability methodology. Analyse content for AI citation extractability — focus on passage length (134-167 words optimal), claim density, quotable structures, and semantic clarity.',
+    });
+  },
+  geo_crawlers: async (input) => {
+    return executeMethodologySkill('geo_crawlers', input, {
+      template: {
+        domain: '',
+        accessScore: 0,
+        crawlerMatrix: [],
+        robotsTxtSummary: { found: false, globalBlock: false, aiDirectives: 0 },
+        httpHeaders: { xRobotsTag: '', metaRobotsAi: '' },
+        llmsTxtPresent: false,
+        recommendations: [],
+      },
+      guidance: 'Follow the geo_crawlers methodology. Use fetch_url to check robots.txt and the target page. Evaluate access for all 14+ AI crawlers listed in the methodology. Report the crawler access matrix.',
+    });
+  },
+  geo_schema: async (input) => {
+    return executeMethodologySkill('geo_schema', input, {
+      template: {
+        url: '',
+        pageType: '',
+        schemaScore: 0,
+        schemasFound: [],
+        missingSchemas: [],
+        qualityIssues: [],
+        recommendations: [],
+        jsonLdTemplate: '',
+      },
+      guidance: 'Follow the geo_schema methodology. Use fetch_url to retrieve the page HTML, extract all JSON-LD blocks, validate structure and coverage against page type expectations, and provide ready-to-use templates for missing schemas.',
+    });
+  },
+  geo_platform_optimizer: async (input) => {
+    return executeMethodologySkill('geo_platform_optimizer', input, {
+      template: {
+        url: '',
+        targetKeyword: '',
+        overallScore: 0,
+        platforms: {
+          googleAio: { score: 0, findings: [], topRecommendation: '' },
+          chatgpt: { score: 0, findings: [], topRecommendation: '' },
+          perplexity: { score: 0, findings: [], topRecommendation: '' },
+          gemini: { score: 0, findings: [], topRecommendation: '' },
+          bingCopilot: { score: 0, findings: [], topRecommendation: '' },
+        },
+        crossPlatformRecommendations: [],
+      },
+      guidance: 'Follow the geo_platform_optimizer methodology. Evaluate the page against each AI search platform\'s specific preferences — content format, source signals, and crawler access. Produce per-platform scores and cross-platform recommendations.',
+    });
+  },
+  geo_brand_authority: async (input) => {
+    return executeMethodologySkill('geo_brand_authority', input, {
+      template: {
+        brandName: '',
+        authorityScore: 0,
+        entityRecognition: { wikipedia: false, wikidata: '', knowledgePanel: false, otherSources: [] },
+        mentionAnalysis: { count: 0, topSources: [], sentiment: '', mostRecent: '' },
+        citationProfile: { citationMentions: 0, expertQuotes: 0, originalResearch: 0 },
+        authorSignals: { namedAuthors: 0, withCredentials: 0, schemaMarkup: false },
+        recommendations: [],
+      },
+      guidance: 'Follow the geo_brand_authority methodology. Use web_search to research brand presence across Wikipedia, Wikidata, Knowledge Panel, and authoritative publications. Assess entity recognition, mention density, and citation patterns.',
+    });
+  },
+  geo_llmstxt: async (input) => {
+    return executeMethodologySkill('geo_llmstxt', input, {
+      template: {
+        domain: '',
+        mode: 'analyse',
+        llmsTxtStatus: 'not_found',
+        llmsFullTxtStatus: 'not_found',
+        score: 0,
+        assessment: { structure: '', completeness: '', accuracy: '', length: 0 },
+        issues: [],
+        recommendedContent: '',
+        recommendations: [],
+      },
+      guidance: 'Follow the geo_llmstxt methodology. Use fetch_url to check for llms.txt and llms-full.txt at the domain root. In analyse mode, evaluate structure and quality. In generate mode, produce a complete recommended llms.txt.',
+    });
+  },
+  geo_compare: async (input) => {
+    return executeMethodologySkill('geo_compare', input, {
+      template: {
+        clientUrl: '',
+        competitorUrls: [],
+        targetKeyword: '',
+        comparisonMatrix: [],
+        clientStrengths: [],
+        clientGaps: [],
+        quickWins: [],
+        strategicRecommendations: [],
+        notes: '',
+      },
+      guidance: 'Follow the geo_compare methodology. Use fetch_url to retrieve all pages (client + competitors). Score each across the six comparison dimensions and produce a side-by-side matrix with specific gap analysis and actionable recommendations.',
+    });
+  },
+
   create_lead_magnet: async (input, context) => {
     return proposeReviewGatedAction('create_lead_magnet', input, context);
   },

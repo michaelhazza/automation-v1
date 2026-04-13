@@ -111,6 +111,7 @@ import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
 import clientpulseReportsRouter from './routes/clientpulseReports.js';
 import ghlRouter from './routes/ghl.js';
+import geoAuditsRouter from './routes/geoAudits.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
 
 const app = express();
@@ -261,6 +262,7 @@ app.use(modulesRouter);
 app.use(onboardingRouter);
 app.use(clientpulseReportsRouter);
 app.use(ghlRouter);
+app.use(geoAuditsRouter);
 app.use(publicPageServingRouter); // Must be last — catch-all GET *
 
 // Serve static files in production
