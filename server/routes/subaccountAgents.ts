@@ -260,15 +260,12 @@ router.delete(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const link = await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
-    // Find the belief by key for this agent
-    const beliefs = await agentBeliefService.getActiveBeliefs(
-      req.orgId!,
-      req.params.subaccountId,
-      link.agentId,
+    // Direct DB lookup — not budget-truncated like getActiveBeliefs
+    const target = await agentBeliefService.findBeliefByKey(
+      req.orgId!, req.params.subaccountId, link.agentId, req.params.beliefKey,
     );
-    const target = beliefs.find(b => b.beliefKey === req.params.beliefKey);
     if (!target) { res.status(404).json({ error: 'Belief not found' }); return; }
-    await agentBeliefService.softDelete(req.orgId!, target.id);
+    await agentBeliefService.softDelete(req.orgId!, req.params.subaccountId, link.agentId, target.id);
     res.json({ deleted: true, beliefKey: req.params.beliefKey });
   })
 );

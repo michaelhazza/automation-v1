@@ -226,6 +226,9 @@ export const BELIEFS_UPDATE_CONFIDENCE_CAP = 0.7;
 /** Max tokens for the full belief set injected into the prompt. */
 export const BELIEFS_TOKEN_BUDGET = 1500;
 
+/** Max per-belief retries across the entire merge batch (prevents retry storms). */
+export const BELIEFS_MAX_RETRIES_PER_RUN = 50;
+
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
 /** Max memory entries returned by vector search */

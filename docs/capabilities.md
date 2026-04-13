@@ -157,6 +157,7 @@ Multi-layered memory architecture enabling agents to learn, share context, and b
 - **Memory blocks** — Named shared context (Letta pattern) with per-agent read/write permissions
 - **Cross-agent search** — Agents query what other agents have learned across the org
 - **Agent briefings** — Rolling summaries generated post-run, injected into next run's context
+- **Agent beliefs** — Discrete, confidence-scored facts per agent-subaccount, auto-extracted from run outcomes. Individually addressable (add/update/reinforce/remove), user-correctable, with key normalization and oscillation guards. Injected into prompt alongside briefings. Designed for Phase 2 state evolution (supersession chains).
 - **Org-level insights** — Cross-subaccount patterns stored with scope tags for portfolio intelligence
 - Automated memory decay (90 days) and nightly deduplication; four-scope context cascading with eager/lazy loading
 

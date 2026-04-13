@@ -5,7 +5,7 @@
 // Spec: docs/beliefs-spec.md
 // ---------------------------------------------------------------------------
 
-import { eq, and, isNull, sql, desc, asc } from 'drizzle-orm';
+import { eq, and, isNull, sql, desc, asc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentBeliefs, workspaceMemoryEntries } from '../db/schema/index.js';
 import { routeCall } from './llmRouter.js';
@@ -21,6 +21,7 @@ import {
   BELIEFS_REMOVE_MIN_CONFIDENCE,
   BELIEFS_UPDATE_CONFIDENCE_CAP,
   BELIEFS_TOKEN_BUDGET,
+  BELIEFS_MAX_RETRIES_PER_RUN,
   BRIEFING_MEMORY_ENTRIES_LIMIT,
   BRIEFING_MEMORY_QUALITY_THRESHOLD,
 } from '../config/limits.js';
@@ -273,10 +274,9 @@ export const agentBeliefService = {
       const existingByKey = new Map(existing.map(b => [b.beliefKey, b]));
       let adds = 0, updates = 0, reinforces = 0, removes = 0, skips = 0;
       let retryCount = 0;
-      const MAX_RETRIES_PER_RUN = 50;
 
       for (const raw of parsed.slice(0, BELIEFS_MAX_PER_EXTRACTION)) {
-        if (retryCount >= MAX_RETRIES_PER_RUN) {
+        if (retryCount >= BELIEFS_MAX_RETRIES_PER_RUN) {
           logger.error('belief_retry_storm', { runId, orgId, retryCount });
           break;
         }
@@ -345,8 +345,9 @@ export const agentBeliefService = {
               createdAt: now,
               updatedAt: now,
             }).onConflictDoUpdate({
-              // If key conflict (unique index), treat as update
+              // Match the partial unique index for conflict detection
               target: [agentBeliefs.organisationId, agentBeliefs.subaccountId, agentBeliefs.agentId, agentBeliefs.beliefKey],
+              targetWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
               set: {
                 value,
                 confidence: sql`LEAST(${BELIEFS_UPDATE_CONFIDENCE_CAP}, ${confidence})`,
@@ -355,8 +356,6 @@ export const agentBeliefService = {
                 confidenceReason,
                 updatedAt: now,
               },
-              // Only apply to rows matching the partial index conditions
-              setWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
             });
             adds++;
           } else if (effectiveAction === 'update') {
@@ -388,9 +387,11 @@ export const agentBeliefService = {
                   value, confidence: cappedConfidence, sourceRunId: runId,
                   evidenceCount: 1, confidenceReason, updatedAt: now,
                 }).where(eq(agentBeliefs.id, fresh.id));
-              }
+                updates++;
+              } else { skips++; }
+            } else {
+              updates++;
             }
-            updates++;
           } else if (effectiveAction === 'reinforce') {
             const boostedConfidence = Math.min(BELIEFS_CONFIDENCE_CEILING, existingBelief!.confidence + BELIEFS_CONFIDENCE_BOOST);
             const result = await db.update(agentBeliefs)
@@ -421,9 +422,11 @@ export const agentBeliefService = {
                   sourceRunId: runId, updatedAt: now, lastReinforcedAt: now,
                   ...(confidenceReason ? { confidenceReason } : {}),
                 }).where(eq(agentBeliefs.id, fresh.id));
-              }
+                reinforces++;
+              } else { skips++; }
+            } else {
+              reinforces++;
             }
-            reinforces++;
           } else if (effectiveAction === 'remove') {
             await db.update(agentBeliefs)
               .set({ deletedAt: now })
@@ -468,31 +471,55 @@ export const agentBeliefService = {
       const count = activeCount[0]?.count ?? 0;
       if (count > BELIEFS_MAX_ACTIVE) {
         const excess = count - BELIEFS_MAX_ACTIVE;
-        // Soft-delete lowest-confidence beliefs
-        await db.execute(sql`
-          UPDATE agent_beliefs SET deleted_at = now()
-          WHERE id IN (
-            SELECT id FROM agent_beliefs
-            WHERE organisation_id = ${orgId}
-              AND subaccount_id = ${subaccountId}
-              AND agent_id = ${agentId}
-              AND deleted_at IS NULL
-              AND superseded_by IS NULL
-            ORDER BY confidence ASC, created_at ASC
-            LIMIT ${excess}
+        // Drizzle-native: select IDs to delete, then batch-update
+        const toDelete = await db
+          .select({ id: agentBeliefs.id })
+          .from(agentBeliefs)
+          .where(
+            and(
+              eq(agentBeliefs.organisationId, orgId),
+              eq(agentBeliefs.subaccountId, subaccountId),
+              eq(agentBeliefs.agentId, agentId),
+              isNull(agentBeliefs.deletedAt),
+              isNull(agentBeliefs.supersededBy),
+            ),
           )
-        `);
+          .orderBy(asc(agentBeliefs.confidence), asc(agentBeliefs.createdAt))
+          .limit(excess);
+        if (toDelete.length > 0) {
+          await db.update(agentBeliefs)
+            .set({ deletedAt: new Date() })
+            .where(inArray(agentBeliefs.id, toDelete.map(r => r.id)));
+        }
       }
 
       // 7. Observability
-      const totalActive = count > BELIEFS_MAX_ACTIVE ? BELIEFS_MAX_ACTIVE : count;
+      const totalActive = Math.min(count, BELIEFS_MAX_ACTIVE);
       const churnRate = totalActive > 0 ? (updates + removes) / totalActive : 0;
+
+      // Saturation rate: beliefs above 0.85 / total — early warning for rigidity
+      const saturatedRows = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(agentBeliefs)
+        .where(
+          and(
+            eq(agentBeliefs.organisationId, orgId),
+            eq(agentBeliefs.subaccountId, subaccountId),
+            eq(agentBeliefs.agentId, agentId),
+            isNull(agentBeliefs.deletedAt),
+            isNull(agentBeliefs.supersededBy),
+            sql`${agentBeliefs.confidence} > 0.85`,
+          ),
+        );
+      const saturatedCount = saturatedRows[0]?.count ?? 0;
+      const saturationRate = totalActive > 0 ? saturatedCount / totalActive : 0;
 
       logger.info('belief_extraction_complete', {
         runId, orgId, subaccountId, agentId,
         adds, updates, reinforces, removes, skips,
         totalActive,
         churnRate: churnRate.toFixed(3),
+        saturationRate: saturationRate.toFixed(3),
         retryCount,
       });
 
@@ -508,11 +535,13 @@ export const agentBeliefService = {
     orgId: string,
     subaccountId: string,
     agentId: string,
-    beliefKey: string,
+    rawBeliefKey: string,
     data: { value: string; category?: string; subject?: string },
   ): Promise<AgentBelief | null> {
     const now = new Date();
     const value = data.value.slice(0, BELIEFS_MAX_VALUE_LENGTH);
+    // Normalize key so user-set beliefs land on the canonical slot
+    const { key: beliefKey } = normalizeKey(rawBeliefKey);
 
     const [row] = await db
       .insert(agentBeliefs)
@@ -532,6 +561,7 @@ export const agentBeliefService = {
       })
       .onConflictDoUpdate({
         target: [agentBeliefs.organisationId, agentBeliefs.subaccountId, agentBeliefs.agentId, agentBeliefs.beliefKey],
+        targetWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
         set: {
           value,
           category: data.category ?? 'general',
@@ -540,15 +570,45 @@ export const agentBeliefService = {
           source: 'user_override',
           updatedAt: now,
         },
-        setWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
       })
       .returning();
 
-    return row ?? null;
+    return (row as AgentBelief | undefined) ?? null;
+  },
+
+  /**
+   * Find a single active belief by key — no budget truncation.
+   * Used by DELETE route where budget-gated getActiveBeliefs would 404 on
+   * low-confidence beliefs.
+   */
+  async findBeliefByKey(
+    orgId: string,
+    subaccountId: string,
+    agentId: string,
+    beliefKey: string,
+  ): Promise<AgentBelief | null> {
+    const [row] = await db
+      .select()
+      .from(agentBeliefs)
+      .where(
+        and(
+          eq(agentBeliefs.organisationId, orgId),
+          eq(agentBeliefs.subaccountId, subaccountId),
+          eq(agentBeliefs.agentId, agentId),
+          eq(agentBeliefs.beliefKey, beliefKey),
+          isNull(agentBeliefs.deletedAt),
+          isNull(agentBeliefs.supersededBy),
+        ),
+      )
+      .limit(1);
+
+    return (row as AgentBelief | undefined) ?? null;
   },
 
   async softDelete(
     orgId: string,
+    subaccountId: string,
+    agentId: string,
     beliefId: string,
   ): Promise<boolean> {
     const result = await db.update(agentBeliefs)
@@ -557,6 +617,8 @@ export const agentBeliefService = {
         and(
           eq(agentBeliefs.id, beliefId),
           eq(agentBeliefs.organisationId, orgId),
+          eq(agentBeliefs.subaccountId, subaccountId),
+          eq(agentBeliefs.agentId, agentId),
           isNull(agentBeliefs.deletedAt),
         ),
       )
