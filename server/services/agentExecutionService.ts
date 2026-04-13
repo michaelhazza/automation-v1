@@ -52,7 +52,7 @@ import { fingerprint } from './regressionCaptureServicePure.js';
 import type { AgentRunCheckpoint } from './middleware/types.js';
 import type { SubaccountAgent } from '../db/schema/index.js';
 import { skillExecutor } from './skillExecutor.js';
-import { workspaceMemoryService } from './workspaceMemoryService.js';
+import { workspaceMemoryService, agentRoleToDomain } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
 import { agentBriefingService } from './agentBriefingService.js';
 import { subaccountStateSummaryService } from './subaccountStateSummaryService.js';
@@ -716,11 +716,13 @@ export const agentExecutionService = {
         ? `${targetItem.title ?? ''}${targetItem.description ? ' ' + targetItem.description : ''}`
         : undefined;
 
+      const agentDomain = agentRoleToDomain(agent.agentRole) ?? undefined;
       let memory: string | null = null;
       memory = await workspaceMemoryService.getMemoryForPrompt(
         request.organisationId,
         request.subaccountId!,
-        taskContextForMemory
+        taskContextForMemory,
+        agentDomain,
       );
       if (memory) {
         dynamicParts.push(`\n\n---\n## Workspace Memory\n${memory}`);
@@ -987,6 +989,7 @@ export const agentExecutionService = {
             mcpLazyRegistry,
             runContextData,
             isOrgSubaccountRun,
+            agentDomain,
             // Sprint 3 P2.1 Sprint 3A — stable fingerprint of the resolved
             // config, stamped onto every checkpoint so the resume path can
             // refuse to resume runs whose config has drifted.
@@ -1558,6 +1561,8 @@ interface LoopParams {
   startingIteration?: number;
   /** Whether this run is in the org subaccount (affects cross-subaccount access control). */
   isOrgSubaccountRun?: boolean;
+  /** Phase 2C: agent's memory domain derived from agentRole. */
+  agentDomain?: string;
 }
 
 interface LoopResult {
@@ -1582,7 +1587,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     runId, agent, routerCtx, systemPrompt, tools: initialTools, tokenBudget,
     maxToolCalls, timeoutMs, startTime, request, orgProcesses,
     saLink, pipeline, mcpClients, mcpLazyRegistry, runContextData,
-    configVersion,
+    configVersion, agentDomain,
   } = params;
   const startingIteration = params.startingIteration ?? 0;
 
@@ -1615,6 +1620,7 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     // Org subaccount agents get full cross-subaccount access; regular agents are scoped
     allowedSubaccountIds: params.isOrgSubaccountRun ? null : (request.subaccountId ? [request.subaccountId] : null),
     agentId: request.agentId,
+    agentDomain,
     userId: request.userId,
     orgProcesses,
     handoffDepth: request.handoffDepth,
