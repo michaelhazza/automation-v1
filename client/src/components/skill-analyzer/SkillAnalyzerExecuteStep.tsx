@@ -38,8 +38,9 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
       const res = await api.post(`/api/system/skill-analyser/jobs/${job.id}/execute`);
       onExecuted(res.data as ExecuteResult);
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } }; message?: string };
-      setError(e?.response?.data?.error ?? e?.message ?? 'Execution failed.');
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const errBody = e?.response?.data?.error;
+      setError((typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Execution failed.');
     } finally {
       setExecuting(false);
     }

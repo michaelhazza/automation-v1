@@ -266,11 +266,12 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
         setPatchError(null);
         onResultUpdated(data);
       } catch (err) {
-        const e = err as { response?: { status?: number; data?: { error?: string; message?: string } }; message?: string };
+        const e = err as { response?: { status?: number; data?: { error?: unknown } }; message?: string };
         if (e?.response?.status === 409) {
           setPatchError('This merge was edited in another session. Reload the page to see the latest version.');
         } else {
-          const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Failed to save merge edit.';
+          const errBody = e?.response?.data?.error;
+          const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Failed to save merge edit.';
           console.error('[SkillAnalyzer] Failed to PATCH merge:', err);
           setPatchError(msg);
         }
@@ -339,8 +340,9 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
       );
       onResultUpdated(data);
     } catch (err) {
-      const e = err as { response?: { data?: { error?: string; message?: string } }; message?: string };
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Reset failed.';
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const errBody = e?.response?.data?.error;
+      const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Reset failed.';
       console.error('[SkillAnalyzer] Failed to reset merge:', err);
       setPatchError(msg);
     } finally {

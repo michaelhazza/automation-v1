@@ -127,8 +127,9 @@ function AgentChipBlock({
       // the updated agentProposals array. Push it back to the parent.
       onProposalsUpdated(result.id, data.agentProposals ?? []);
     } catch (err) {
-      const e = err as { response?: { data?: { error?: string; message?: string } }; message?: string };
-      const msg = e?.response?.data?.error ?? e?.response?.data?.message ?? e?.message ?? 'Failed to update agent proposal.';
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const errBody = e?.response?.data?.error;
+      const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Failed to update agent proposal.';
       console.error('[SkillAnalyzer] Failed to PATCH agent proposal:', err);
       setError(msg);
     }
@@ -253,8 +254,9 @@ function ResultCard({
       }
       onActionChange(result.id, next);
     } catch (err) {
-      const e = err as { response?: { data?: { error?: string } }; message?: string };
-      const msg = e?.response?.data?.error ?? e?.message ?? 'Failed to save action.';
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const errBody = e?.response?.data?.error;
+      const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Failed to save action.';
       console.error('[SkillAnalyzer] Failed to set result action:', err);
       setActionError(msg);
     }
@@ -612,8 +614,9 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
         );
       }
     } catch (err) {
-      const e = err as { response?: { data?: { error?: string } }; message?: string };
-      const msg = e?.response?.data?.error ?? e?.message ?? 'Bulk action failed.';
+      const e = err as { response?: { data?: { error?: unknown } }; message?: string };
+      const errBody = e?.response?.data?.error;
+      const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Bulk action failed.';
       console.error('[SkillAnalyzer] Failed to bulk-set actions:', err);
       setBulkError(msg);
     }
