@@ -104,7 +104,7 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 
 ## Definitions
 
-**DUPLICATE** — The skills are functionally identical. Same purpose, same approach, same scope. Different wording is acceptable; the underlying capability is the same. Recommended action: skip the incoming skill.
+**DUPLICATE** — The incoming skill contains no new information whatsoever: no additional context, no broader coverage, no improved guidance, no extra examples — zero additive value. The skills are equivalent in all meaningful respects. If the incoming adds *anything* of value — even a paragraph of richer context — choose IMPROVEMENT instead. Recommended action: skip the incoming skill.
 
 **IMPROVEMENT** — The incoming skill does everything the existing one does, but better. It may have a cleaner definition, better instructions, or improved structure. The existing skill should be replaced. Recommended action: replace existing with incoming.
 
@@ -114,6 +114,7 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are a skill deduplication expert. Your
 
 ## Classification Rules
 
+0. Do not rely solely on embedding similarity. Evaluate actual content differences carefully.
 1. Focus on **functional capability**, not surface-level wording.
 2. A skill that covers a strict subset of another is PARTIAL_OVERLAP, not DUPLICATE.
 3. A skill with a better-structured definition but identical purpose is IMPROVEMENT.
@@ -181,7 +182,7 @@ export function buildClassificationPrompt(
 
   const bandHint =
     band === 'likely_duplicate'
-      ? 'Note: These skills have very high embedding similarity (>0.92). This is likely DUPLICATE or IMPROVEMENT.'
+      ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
       : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
 
   const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship.`;
@@ -360,7 +361,7 @@ export function buildClassifyPromptWithMerge(
 
   const bandHint =
     band === 'likely_duplicate'
-      ? 'Note: These skills have very high embedding similarity (>0.92). This is likely DUPLICATE or IMPROVEMENT.'
+      ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
       : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
 
   const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;

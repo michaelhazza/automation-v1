@@ -243,6 +243,46 @@ test('buildClassificationPrompt: likely_duplicate hint included', () => {
 });
 
 // ---------------------------------------------------------------------------
+// DUPLICATE definition tightening
+// ---------------------------------------------------------------------------
+
+test('CLASSIFICATION_SYSTEM_PROMPT: DUPLICATE definition requires zero additive value', () => {
+  const { system } = buildClassificationPrompt(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'ambiguous',
+  );
+  assert(
+    system.includes('zero additive value'),
+    'DUPLICATE definition should mention "zero additive value"',
+  );
+});
+
+test('CLASSIFICATION_SYSTEM_PROMPT: contains anti-bias instruction', () => {
+  const { system } = buildClassificationPrompt(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'ambiguous',
+  );
+  assert(
+    system.includes('Do not rely solely on embedding similarity'),
+    'system prompt should contain anti-bias instruction',
+  );
+});
+
+test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT', () => {
+  const { userMessage } = buildClassificationPrompt(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'likely_duplicate',
+  );
+  assert(
+    userMessage.includes('Prefer IMPROVEMENT'),
+    'likely_duplicate hint should prefer IMPROVEMENT',
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
