@@ -31,7 +31,7 @@
   - [Unified Inbox](#unified-inbox)
   - [Memory & Knowledge System](#memory--knowledge-system)
   - [Workspace Health & Diagnostics](#workspace-health--diagnostics)
-  - [Ops Dashboard & Analytics](#ops-dashboard--analytics)
+  - [Activity & Analytics](#activity--analytics)
   - [Client Portal](#client-portal)
   - [Pages & Content Builder](#pages--content-builder)
   - [Integration Framework](#integration-framework)
@@ -167,7 +167,7 @@ Automated configuration auditing that detects drift, misconfigurations, and oper
 - Severity levels (critical/warning/info) with deduplicated findings and permission-gated manual resolve
 - On-demand audit via UI or API; findings page grouped by severity with recommendations
 
-### Ops Dashboard & Analytics
+### Activity & Analytics
 
 Unified operational view across all activity types with advanced filtering and real-time updates.
 

@@ -1,6 +1,11 @@
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
+import { withBackoff } from '../lib/withBackoff.js';
+import anthropicAdapter from './providers/anthropicAdapter.js';
+import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
+import type { ParsedSkill } from './skillParserServicePure.js';
+import type { LibrarySkillSummary } from './skillAnalyzerServicePure.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
  *  throw plain objects of shape `{ statusCode, message }` (not Error
@@ -20,8 +25,9 @@ import { getPgBoss } from '../lib/pgBossInstance.js';
 import { skillParserService } from './skillParserService.js';
 // Phase 1 of skill-analyzer-v2: the analyzer is system-only. The
 // org-skill skillService import was removed; executeApproved now writes
-// to system_skills via systemSkillService and gates DISTINCT results
-// against the SKILL_HANDLERS registry to prevent shipping unpaired rows.
+// to system_skills via systemSkillService. DISTINCT results use the
+// generic_methodology handler; SKILL_HANDLERS is checked for IMPROVEMENT
+// / PARTIAL_OVERLAP paths only (existing skills must remain paired).
 import { systemSkillService, type SystemSkill } from './systemSkillService.js';
 import { systemAgentService } from './systemAgentService.js';
 import { SKILL_HANDLERS } from './skillExecutor.js';
@@ -112,20 +118,14 @@ export type EnrichedResult = typeof skillAnalyzerResults.$inferSelect & {
 export interface GetJobResponse {
   job: typeof skillAnalyzerJobs.$inferSelect;
   results: EnrichedResult[];
-  /** Per spec §7.4: candidate slugs in this job's results that have no
-   *  corresponding key in SKILL_HANDLERS at request time. The Review UI
-   *  uses this to disable the Approve button on affected New Skill cards
-   *  and to filter the "Approve all new" bulk action. */
-  unregisteredHandlerSlugs: string[];
   /** Per spec §7.4: live snapshot of all system agents for the
    *  "Add another system agent..." combobox in Phase 4. */
   availableSystemAgents: AvailableSystemAgent[];
 }
 
 /** Get job status and results. Validates that job belongs to the org.
- *  Phase 1 of skill-analyzer-v2 extends the response with three new fields:
+ *  Phase 1 of skill-analyzer-v2 extends the response with two new fields:
  *  - matchedSkillContent on each result with a non-null matchedSkillId
- *  - unregisteredHandlerSlugs on the job (handler-gate state for §7.1 UI)
  *  - availableSystemAgents on the job (combobox source for Phase 4) */
 export async function getJob(
   jobId: string,
@@ -199,13 +199,6 @@ export async function getJob(
     return { ...r, matchedSkillContent };
   });
 
-  // Diff the candidate slugs in this job against the live SKILL_HANDLERS
-  // registry. Any candidate slug whose handler is not registered appears in
-  // unregisteredHandlerSlugs and the Review UI gates approval accordingly.
-  const candidateSlugs = Array.from(new Set(rawResults.map((r) => r.candidateSlug)));
-  const registeredHandlers = new Set(Object.keys(SKILL_HANDLERS));
-  const unregisteredHandlerSlugs = candidateSlugs.filter((slug) => !registeredHandlers.has(slug));
-
   // Live read of system_agents for the "Add another system agent" combobox.
   // Full inventory at request time — not cached.
   const allAgents = await systemAgentService.listAgents();
@@ -215,7 +208,7 @@ export async function getJob(
     name: a.name,
   }));
 
-  return { job, results, unregisteredHandlerSlugs, availableSystemAgents };
+  return { job, results, availableSystemAgents };
 }
 
 /** List jobs for an org (most recent first). */
@@ -414,7 +407,6 @@ export async function updateAgentProposal(
       const { agentEmbeddingService } = await import('./agentEmbeddingService.js');
       const { skillEmbeddingService } = await import('./skillEmbeddingService.js');
       const { systemAgentService } = await import('./systemAgentService.js');
-      const { skillAnalyzerServicePure } = await import('./skillAnalyzerServicePure.js');
 
       const agent = await systemAgentService.getAgent(systemAgentId);
       const agentEmbedding = await agentEmbeddingService.refreshSystemAgentEmbedding(systemAgentId);
@@ -857,13 +849,13 @@ export async function executeApproved(params: {
     // DISTINCT: create a new system skill (+ agent attach in Phase 2)
     // -----------------------------------------------------------------------
     if (result.classification === 'DISTINCT') {
-      // Guard 1: handler must already be registered. The analyzer can stage
-      // an unpaired skill in the DB row but execute will refuse — engineers
-      // must add the handler to skillExecutor.ts SKILL_HANDLERS first.
-      if (!(candidate.slug in SKILL_HANDLERS)) {
+      // Guard 1: generic_methodology requires instructions to function.
+      // An imported skill with no instructions would give the agent nothing
+      // to work with — fail early rather than silently at execution time.
+      if (!candidate.instructions || candidate.instructions.trim().length === 0) {
         await failResult(
           result.id,
-          `No handler registered for skill '${candidate.slug}'. An engineer must add an entry to SKILL_HANDLERS in server/services/skillExecutor.ts before this skill can be imported.`,
+          `Skill '${candidate.slug}' has no instructions. The generic_methodology handler requires instructions to function.`,
         );
         continue;
       }
@@ -908,7 +900,7 @@ export async function executeApproved(params: {
           const created = await systemSkillService.createSystemSkill(
             {
               slug: candidate.slug,
-              handlerKey: candidate.slug,
+              handlerKey: 'generic_methodology',
               name: candidate.name,
               description: candidate.description,
               definition: candidate.definition as never,
@@ -1054,6 +1046,221 @@ export async function insertResults(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Classification retry helpers
+// ---------------------------------------------------------------------------
+
+/** Classification outcome returned by the LLM classify stage. */
+type ClassificationOutcome = {
+  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+  confidence: number;
+  reasoning: string;
+  proposedMerge: object | null;
+};
+
+/** Run LLM classification for a single candidate/library pair.
+ *  Reuses the same model, backoff, and prompt as skillAnalyzerJob.ts Stage 5.
+ *  Returns the classification result plus failure metadata. */
+async function classifySingleCandidate(
+  candidate: ParsedSkill,
+  matchedLib: LibrarySkillSummary,
+  similarityScore: number,
+  jobId: string,
+): Promise<{
+  result: ClassificationOutcome;
+  classificationFailed: boolean;
+  classificationFailureReason: 'rate_limit' | 'parse_error' | 'unknown' | null;
+}> {
+  const band = skillAnalyzerServicePure.classifyBand(similarityScore);
+  const { system, userMessage } = skillAnalyzerServicePure.buildClassifyPromptWithMerge(
+    candidate,
+    matchedLib,
+    band as 'likely_duplicate' | 'ambiguous',
+  );
+
+  let parsed: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
+  let apiError: unknown = undefined;
+
+  try {
+    const response = await withBackoff(
+      () =>
+        anthropicAdapter.call({
+          model: 'claude-haiku-4-5-20251001',
+          system,
+          messages: [{ role: 'user', content: userMessage }],
+          maxTokens: 512,
+          temperature: 0.1,
+        }),
+      {
+        label: 'skill-classify-retry',
+        maxAttempts: 3,
+        correlationId: jobId,
+        runId: jobId,
+        isRetryable: (err: unknown) => {
+          const e = err as { statusCode?: number; code?: string };
+          if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+          return (
+            e?.statusCode === 429 ||
+            e?.statusCode === 503 ||
+            e?.statusCode === 529 ||
+            e?.code === 'PROVIDER_UNAVAILABLE'
+          );
+        },
+      },
+    );
+    parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+  } catch (err) {
+    parsed = null;
+    apiError = err;
+  }
+
+  const classificationFailed = parsed === null;
+  return {
+    result: parsed ?? {
+      classification: 'PARTIAL_OVERLAP',
+      confidence: 0.3,
+      reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
+      proposedMerge: null,
+    },
+    classificationFailed,
+    classificationFailureReason: classificationFailed
+      ? skillAnalyzerServicePure.deriveClassificationFailureReason(apiError ?? null)
+      : null,
+  };
+}
+
+/** Retry classification for a single result row that has classificationFailed=true.
+ *  Idempotent: returns immediately if the row is not in a failed state.
+ *  Uses the stored parsedCandidates + similarityScore — no re-parse or re-embed. */
+export async function retryClassification(
+  jobId: string,
+  resultId: string,
+  organisationId: string,
+): Promise<void> {
+  const jobRows = await db
+    .select()
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+  const job = jobRows[0];
+
+  const resultRows = await db
+    .select()
+    .from(skillAnalyzerResults)
+    .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
+    .limit(1);
+  if (!resultRows[0]) throw { statusCode: 404, message: 'Result not found' };
+  const result = resultRows[0];
+
+  // Idempotency guard: no-op if the row is not in a failed classification state
+  if (!result.classificationFailed) return;
+
+  const candidates = (job.parsedCandidates ?? []) as ParsedSkill[];
+  const candidate = candidates[result.candidateIndex];
+  if (!candidate) throw { statusCode: 422, message: 'Candidate not found in job parsedCandidates' };
+  if (!result.matchedSkillId) throw { statusCode: 422, message: 'No matched skill to classify against' };
+  if (result.similarityScore == null) throw { statusCode: 422, message: 'Missing similarity score' };
+
+  const matchedSkillRows = await db
+    .select()
+    .from(systemSkills)
+    .where(eq(systemSkills.id, result.matchedSkillId))
+    .limit(1);
+  if (!matchedSkillRows[0]) throw { statusCode: 422, message: 'Matched skill no longer exists' };
+  const matchedSkill = matchedSkillRows[0];
+
+  const matchedLib: LibrarySkillSummary = {
+    id: matchedSkill.id,
+    slug: matchedSkill.slug,
+    name: matchedSkill.name,
+    description: matchedSkill.description ?? '',
+    definition: matchedSkill.definition as object,
+    instructions: matchedSkill.instructions ?? null,
+    isSystem: true,
+  };
+
+  const { result: classification, classificationFailed, classificationFailureReason } =
+    await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId);
+
+  const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
+
+  await db
+    .update(skillAnalyzerResults)
+    .set({
+      classification: classification.classification,
+      confidence: classification.confidence,
+      classificationReasoning: classification.reasoning,
+      diffSummary,
+      proposedMergedContent: classification.proposedMerge ?? null,
+      // Only seed the immutable original if it has never been set — retries
+      // must not overwrite it, otherwise "Reset to AI suggestion" would
+      // restore the retry's output rather than the original job output.
+      ...(result.originalProposedMerge === null && classification.proposedMerge !== null
+        ? { originalProposedMerge: classification.proposedMerge }
+        : {}),
+      classificationFailed,
+      classificationFailureReason,
+    })
+    .where(
+      and(
+        eq(skillAnalyzerResults.id, resultId),
+        eq(skillAnalyzerResults.classificationFailed, true), // optimistic concurrency
+      ),
+    );
+}
+
+/** Retry all classificationFailed=true results in a job sequentially
+ *  (no parallel burst) with jittered delay to avoid re-triggering 429s. */
+export async function bulkRetryFailedClassifications(
+  jobId: string,
+  organisationId: string,
+): Promise<{ retried: number; stillFailed: number }> {
+  const jobRows = await db
+    .select({ id: skillAnalyzerJobs.id })
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+
+  const failedResults = await db
+    .select({ id: skillAnalyzerResults.id })
+    .from(skillAnalyzerResults)
+    .where(
+      and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.classificationFailed, true),
+      ),
+    );
+
+  for (let i = 0; i < failedResults.length; i++) {
+    try {
+      await retryClassification(jobId, failedResults[i].id, organisationId);
+    } catch {
+      // Row has a data-integrity problem (missing candidate / matchedSkillId /
+      // similarityScore) — cannot be retried. Leave classificationFailed=true
+      // and continue with remaining rows so one bad row doesn't abort the batch.
+    }
+    // Jittered delay: 500–1500ms between calls to avoid re-triggering 429s
+    if (i < failedResults.length - 1) {
+      await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+    }
+  }
+
+  const remaining = await db
+    .select({ id: skillAnalyzerResults.id })
+    .from(skillAnalyzerResults)
+    .where(
+      and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.classificationFailed, true),
+      ),
+    );
+
+  // retried = number of rows attempted (all failed rows are always attempted once)
+  return { retried: failedResults.length, stillFailed: remaining.length };
+}
+
 export const skillAnalyzerService = {
   createJob,
   getJob,
@@ -1065,6 +1272,8 @@ export const skillAnalyzerService = {
   resetMergeToOriginal,
   executeApproved,
   updateJobProgress,
+  retryClassification,
+  bulkRetryFailedClassifications,
   // Internal — used by job handler only
   getJobById,
   clearResultsForJob,

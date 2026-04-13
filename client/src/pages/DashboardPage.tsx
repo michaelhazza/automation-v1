@@ -265,7 +265,7 @@ export default function DashboardPage({ user }: { user: User }) {
         <div>
           <div className="flex justify-between items-center mb-3.5">
             <h2 className="text-[17px] font-bold text-slate-900 tracking-tight m-0">Recent Activity</h2>
-            <Link to="/executions" className="text-[13px] text-indigo-600 hover:text-indigo-700 font-semibold no-underline">
+            <Link to="/admin/activity" className="text-[13px] text-indigo-600 hover:text-indigo-700 font-semibold no-underline">
               View all →
             </Link>
           </div>

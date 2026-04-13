@@ -846,6 +846,20 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
       guidance: 'Follow the draft_sequence methodology in your skill context. Produce a multi-step outreach sequence with distinct purpose per step. Use enrichment data for personalisation if available; fall back to generic copy if enrichment is a stub. Flag all [VERIFY] items and unresolved personalisation tokens.',
     });
   },
+
+  // ── Generic methodology handler ──────────────────────────────────────────
+  // Used by imported LLM-guided skills. All behaviour comes from the skill's
+  // instructions field, which is injected into the agent's context before any
+  // tool call. No hardcoded template or guidance strings per skill.
+  generic_methodology: async (input) => {
+    const skillName = typeof input.skillName === 'string' ? input.skillName : 'unknown';
+    return {
+      success: true,
+      skillName,
+      guidance: 'Follow the methodology instructions in your skill context to complete this task.',
+    };
+  },
+
   update_crm: async (input, context) => {
     return proposeReviewGatedAction('update_crm', input, context);
   },

@@ -9,6 +9,8 @@ import {
   parseClassificationResponse,
   generateDiffSummary,
   buildClassificationPrompt,
+  buildClassifyPromptWithMerge,
+  deriveClassificationFailureReason,
 } from '../skillAnalyzerServicePure.js';
 import type { LibrarySkillSummary } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
@@ -240,6 +242,74 @@ test('buildClassificationPrompt: returns system and userMessage strings', () => 
 test('buildClassificationPrompt: likely_duplicate hint included', () => {
   const { userMessage } = buildClassificationPrompt(makeCandidate(), makeLibrary(), 'likely_duplicate');
   assert(userMessage.includes('likely_duplicate') || userMessage.includes('very high'), 'hint should mention high similarity');
+});
+
+// ---------------------------------------------------------------------------
+// DUPLICATE definition tightening
+// ---------------------------------------------------------------------------
+
+test('CLASSIFICATION_SYSTEM_PROMPT: DUPLICATE definition requires zero additive value', () => {
+  const { system } = buildClassificationPrompt(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'ambiguous',
+  );
+  assert(
+    system.includes('zero additive value'),
+    'DUPLICATE definition should mention "zero additive value"',
+  );
+});
+
+test('CLASSIFICATION_SYSTEM_PROMPT: contains anti-bias instruction', () => {
+  const { system } = buildClassificationPrompt(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'ambiguous',
+  );
+  assert(
+    system.includes('Do not rely solely on embedding similarity'),
+    'system prompt should contain anti-bias instruction',
+  );
+});
+
+test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT', () => {
+  const { userMessage } = buildClassificationPrompt(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'likely_duplicate',
+  );
+  assert(
+    userMessage.includes('Prefer IMPROVEMENT'),
+    'likely_duplicate hint should prefer IMPROVEMENT',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// deriveClassificationFailureReason
+// ---------------------------------------------------------------------------
+
+test('deriveClassificationFailureReason: null error → parse_error', () => {
+  assert(deriveClassificationFailureReason(null) === 'parse_error', 'null → parse_error');
+});
+
+test('deriveClassificationFailureReason: 429 status → rate_limit', () => {
+  assert(deriveClassificationFailureReason({ statusCode: 429 }) === 'rate_limit', '429 → rate_limit');
+});
+
+test('deriveClassificationFailureReason: unknown error → unknown', () => {
+  assert(deriveClassificationFailureReason(new Error('boom')) === 'unknown', 'Error → unknown');
+});
+
+test('buildClassifyPromptWithMerge: likely_duplicate band hint prefers IMPROVEMENT', () => {
+  const { userMessage } = buildClassifyPromptWithMerge(
+    { name: 'a', slug: 'a', description: '', definition: null, instructions: null, rawSource: '' },
+    { id: null, slug: 'b', name: 'b', description: '', definition: null, instructions: null, isSystem: true },
+    'likely_duplicate',
+  );
+  assert(
+    userMessage.includes('Prefer IMPROVEMENT'),
+    'likely_duplicate hint should prefer IMPROVEMENT in merge path',
+  );
 });
 
 // ---------------------------------------------------------------------------

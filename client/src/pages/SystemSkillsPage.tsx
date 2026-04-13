@@ -342,6 +342,12 @@ export default function SystemSkillsPage({ user }: { user: User }) {
             </button>
           )}
           <button
+            onClick={() => navigate('/system/skill-studio')}
+            className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
+          >
+            Skill Studio
+          </button>
+          <button
             onClick={() => navigate('/system/skill-analyser')}
             className="px-5 py-2.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-[14px] font-medium whitespace-nowrap cursor-pointer transition-colors"
           >

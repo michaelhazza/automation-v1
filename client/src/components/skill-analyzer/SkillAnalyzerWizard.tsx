@@ -74,11 +74,6 @@ export interface AnalysisJob {
    *  these for the Phase 5 three-column merge view's "Incoming" column —
    *  result.candidateIndex indexes into this array. */
   parsedCandidates?: ParsedCandidate[] | null;
-  /** Phase 1 of skill-analyzer-v2: candidate slugs in this job whose handler
-   *  is not registered in skillExecutor.ts SKILL_HANDLERS at request time.
-   *  The Review UI uses this list to disable the Approve button on affected
-   *  New Skill cards and to filter the "Approve all new" bulk action. */
-  unregisteredHandlerSlugs?: string[];
   /** Phase 1 of skill-analyzer-v2: live snapshot of the system_agents
    *  inventory, populated for the Phase 4 "Add another system agent..."
    *  combobox. Empty when there are no system agents. */
@@ -130,6 +125,13 @@ export interface AnalysisResult {
    *  Null on rows that have never been merge-edited. Echoed back on PATCH requests
    *  as ifUnmodifiedSince for optimistic concurrency. */
   mergeUpdatedAt?: string | null;
+  /** Task 3: true when the Anthropic classification call failed (rate limit or
+   *  parse error). Distinguishes retryable API failures from genuine
+   *  PARTIAL_OVERLAP model output. */
+  classificationFailed?: boolean;
+  /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'unknown'.
+   *  Null on rows where classificationFailed is false or undefined. */
+  classificationFailureReason?: 'rate_limit' | 'parse_error' | 'unknown' | null;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

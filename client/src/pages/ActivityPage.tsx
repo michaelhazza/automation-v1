@@ -12,14 +12,12 @@ type ActivityType =
   | 'review_item'
   | 'health_finding'
   | 'inbox_item'
-  | 'decision_log'
   | 'playbook_run'
-  | 'task_event'
   | 'workflow_execution';
 
 type NormalisedStatus = 'active' | 'attention_needed' | 'completed' | 'failed' | 'cancelled';
 
-type OpsDashboardItem = {
+type ActivityItem = {
   id: string;
   type: ActivityType;
   status: NormalisedStatus;
@@ -39,7 +37,7 @@ type Scope = 'subaccount' | 'org' | 'system';
 
 const ACTIVITY_TYPES: ActivityType[] = [
   'agent_run', 'review_item', 'health_finding', 'inbox_item',
-  'decision_log', 'playbook_run', 'task_event', 'workflow_execution',
+  'playbook_run', 'workflow_execution',
 ];
 
 const STATUS_OPTIONS: NormalisedStatus[] = ['active', 'attention_needed', 'completed', 'failed', 'cancelled'];
@@ -192,7 +190,7 @@ function FilterActions({ onAll, onNone }: { onAll: () => void; onNone: () => voi
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function OpsDashboardPage({ user }: { user: User }) {
+export default function ActivityPage({ user }: { user: User }) {
   const { subaccountId: paramSubaccountId } = useParams<{ subaccountId?: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { pathname } = useLocation();
@@ -205,7 +203,7 @@ export default function OpsDashboardPage({ user }: { user: User }) {
       : 'org';
 
   // Data state
-  const [items, setItems] = useState<OpsDashboardItem[]>([]);
+  const [items, setItems] = useState<ActivityItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -248,9 +246,9 @@ export default function OpsDashboardPage({ user }: { user: User }) {
 
   // Build endpoint
   const getEndpoint = useCallback(() => {
-    if (scope === 'subaccount') return `/api/subaccounts/${paramSubaccountId}/ops-dashboard`;
-    if (scope === 'system') return '/api/system/ops-dashboard';
-    return '/api/ops-dashboard';
+    if (scope === 'subaccount') return `/api/subaccounts/${paramSubaccountId}/activity`;
+    if (scope === 'system') return '/api/system/activity';
+    return '/api/activity';
   }, [scope, paramSubaccountId]);
 
   // Load data — server handles sort, search, and date range; column filters are client-side
@@ -339,7 +337,7 @@ export default function OpsDashboardPage({ user }: { user: User }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-[22px] font-bold text-slate-900 mb-0.5">Ops Dashboard</h1>
+          <h1 className="text-[22px] font-bold text-slate-900 mb-0.5">Activity</h1>
           <p className="text-[13.5px] text-slate-500">{scopeLabel}-wide activity across all agents and workflows</p>
         </div>
         <div className="flex items-center gap-2">

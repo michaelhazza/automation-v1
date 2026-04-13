@@ -71,7 +71,7 @@ check "client/src/pages/AcceptInvitePage.tsx exists" "[ -f client/src/pages/Acce
 check "client/src/pages/DashboardPage.tsx exists" "[ -f client/src/pages/DashboardPage.tsx ]"
 check "client/src/pages/TasksPage.tsx exists" "[ -f client/src/pages/TasksPage.tsx ]"
 check "client/src/pages/TaskExecutionPage.tsx exists" "[ -f client/src/pages/TaskExecutionPage.tsx ]"
-check "client/src/pages/ExecutionHistoryPage.tsx exists" "[ -f client/src/pages/ExecutionHistoryPage.tsx ]"
+check "client/src/pages/ActivityPage.tsx exists" "[ -f client/src/pages/ActivityPage.tsx ]"
 check "client/src/pages/ExecutionDetailPage.tsx exists" "[ -f client/src/pages/ExecutionDetailPage.tsx ]"
 check "client/src/pages/ProfileSettingsPage.tsx exists" "[ -f client/src/pages/ProfileSettingsPage.tsx ]"
 check "client/src/pages/AdminEnginesPage.tsx exists" "[ -f client/src/pages/AdminEnginesPage.tsx ]"

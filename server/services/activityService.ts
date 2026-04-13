@@ -12,7 +12,7 @@ import {
 import { workspaceHealthFindings } from '../db/schema/workspaceHealthFindings.js';
 
 // ---------------------------------------------------------------------------
-// Ops Dashboard Service — unified activity feed across all data sources
+// Activity Service — unified activity feed across all data sources
 // ---------------------------------------------------------------------------
 
 export type ActivityType =
@@ -20,9 +20,7 @@ export type ActivityType =
   | 'review_item'
   | 'health_finding'
   | 'inbox_item'
-  | 'decision_log'
   | 'playbook_run'
-  | 'task_event'
   | 'workflow_execution';
 
 export type NormalisedStatus =
@@ -32,7 +30,7 @@ export type NormalisedStatus =
   | 'failed'
   | 'cancelled';
 
-export type OpsDashboardItem = {
+export type ActivityItem = {
   id: string;
   type: ActivityType;
   status: NormalisedStatus;
@@ -48,12 +46,12 @@ export type OpsDashboardItem = {
   detailUrl: string;
 };
 
-export type OpsDashboardScope =
+export type ActivityScope =
   | { type: 'subaccount'; subaccountId: string; orgId: string }
   | { type: 'org'; orgId: string; subaccountId?: string }
   | { type: 'system'; organisationId?: string };
 
-export type OpsDashboardFilters = {
+export type ActivityFilters = {
   type?: string[];
   status?: string[];
   from?: string;
@@ -162,7 +160,7 @@ const STATUS_ORDER: Record<NormalisedStatus, number> = {
 // Org ID resolver for scope
 // ---------------------------------------------------------------------------
 
-function orgIdFromScope(scope: OpsDashboardScope): string | undefined {
+function orgIdFromScope(scope: ActivityScope): string | undefined {
   switch (scope.type) {
     case 'subaccount':
       return scope.orgId;
@@ -173,7 +171,7 @@ function orgIdFromScope(scope: OpsDashboardScope): string | undefined {
   }
 }
 
-function subaccountIdFromScope(scope: OpsDashboardScope): string | undefined {
+function subaccountIdFromScope(scope: ActivityScope): string | undefined {
   switch (scope.type) {
     case 'subaccount':
       return scope.subaccountId;
@@ -189,9 +187,9 @@ function subaccountIdFromScope(scope: OpsDashboardScope): string | undefined {
 // ---------------------------------------------------------------------------
 
 async function fetchAgentRuns(
-  scope: OpsDashboardScope,
-  filters: OpsDashboardFilters,
-): Promise<OpsDashboardItem[]> {
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
   const orgId = orgIdFromScope(scope);
   const subId = subaccountIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [];
@@ -236,9 +234,9 @@ async function fetchAgentRuns(
 }
 
 async function fetchReviewItems(
-  scope: OpsDashboardScope,
-  filters: OpsDashboardFilters,
-): Promise<OpsDashboardItem[]> {
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
   const orgId = orgIdFromScope(scope);
   const subId = subaccountIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [];
@@ -283,9 +281,9 @@ async function fetchReviewItems(
 }
 
 async function fetchHealthFindings(
-  scope: OpsDashboardScope,
-  filters: OpsDashboardFilters,
-): Promise<OpsDashboardItem[]> {
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
   const orgId = orgIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [
     isNull(workspaceHealthFindings.resolvedAt),
@@ -320,9 +318,9 @@ async function fetchHealthFindings(
 }
 
 async function fetchInboxItems(
-  scope: OpsDashboardScope,
-  filters: OpsDashboardFilters,
-): Promise<OpsDashboardItem[]> {
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
   const orgId = orgIdFromScope(scope);
   const subId = subaccountIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [
@@ -367,9 +365,9 @@ async function fetchInboxItems(
 }
 
 async function fetchPlaybookRuns(
-  scope: OpsDashboardScope,
-  filters: OpsDashboardFilters,
-): Promise<OpsDashboardItem[]> {
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
   const orgId = orgIdFromScope(scope);
   const subId = subaccountIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [];
@@ -408,9 +406,9 @@ async function fetchPlaybookRuns(
 }
 
 async function fetchWorkflowExecutions(
-  scope: OpsDashboardScope,
-  filters: OpsDashboardFilters,
-): Promise<OpsDashboardItem[]> {
+  scope: ActivityScope,
+  filters: ActivityFilters,
+): Promise<ActivityItem[]> {
   const orgId = orgIdFromScope(scope);
   const subId = subaccountIdFromScope(scope);
   const conditions: ReturnType<typeof eq>[] = [];
@@ -453,7 +451,7 @@ async function fetchWorkflowExecutions(
 // Sort + filter
 // ---------------------------------------------------------------------------
 
-function sortItems(items: OpsDashboardItem[], sort: string): OpsDashboardItem[] {
+function sortItems(items: ActivityItem[], sort: string): ActivityItem[] {
   return [...items].sort((a, b) => {
     switch (sort) {
       case 'newest':
@@ -480,13 +478,13 @@ function sortItems(items: OpsDashboardItem[], sort: string): OpsDashboardItem[] 
   });
 }
 
-function filterByStatus(items: OpsDashboardItem[], statuses: string[]): OpsDashboardItem[] {
+function filterByStatus(items: ActivityItem[], statuses: string[]): ActivityItem[] {
   if (statuses.length === 0) return items;
   const set = new Set(statuses);
   return items.filter((i) => set.has(i.status));
 }
 
-function filterBySeverity(items: OpsDashboardItem[], severities: string[]): OpsDashboardItem[] {
+function filterBySeverity(items: ActivityItem[], severities: string[]): ActivityItem[] {
   if (severities.length === 0) return items;
   const set = new Set(severities);
   return items.filter((i) => i.severity && set.has(i.severity));
@@ -496,10 +494,10 @@ function filterBySeverity(items: OpsDashboardItem[], severities: string[]): OpsD
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function listOpsDashboardItems(
-  filters: OpsDashboardFilters,
-  scope: OpsDashboardScope,
-): Promise<{ items: OpsDashboardItem[]; total: number; hasMore: boolean }> {
+export async function listActivityItems(
+  filters: ActivityFilters,
+  scope: ActivityScope,
+): Promise<{ items: ActivityItem[]; total: number; hasMore: boolean }> {
   const typeFilter = filters.type ?? [];
   const shouldFetch = (t: ActivityType) => typeFilter.length === 0 || typeFilter.includes(t);
 
@@ -521,7 +519,7 @@ export async function listOpsDashboardItems(
   ]);
 
   // Merge all sources
-  let items: OpsDashboardItem[] = [
+  let items: ActivityItem[] = [
     ...agentRunItems,
     ...reviewItemRows,
     ...healthFindingRows,

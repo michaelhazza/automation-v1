@@ -10,16 +10,17 @@ const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
 const IntegrationsAndCredentialsPage = lazy(() => import('./IntegrationsAndCredentialsPage'));
 const AdminEnginesPage = lazy(() => import('./AdminEnginesPage'));
+const SubaccountTagsPage = lazy(() => import('./SubaccountTagsPage'));
 
 interface Subaccount { id: string; name: string; slug: string; status: string; includeInOrgInbox: boolean; }
 interface Category { id: string; name: string; description: string | null; colour: string | null; }
 interface ProcessLink { linkId: string; processId: string; processName: string; processStatus: string; isActive: boolean; subaccountCategoryId: string | null; }
 interface OrgProcess { id: string; name: string; status: string; }
-type ActiveTab = 'integrations' | 'engines' | 'workflows' | 'agents' | 'categories' | 'board' | 'memory' | 'usage' | 'admin';
+type ActiveTab = 'integrations' | 'engines' | 'workflows' | 'agents' | 'categories' | 'tags' | 'board' | 'memory' | 'usage' | 'admin';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   integrations: 'Integrations', engines: 'Engines', workflows: 'Workflows', agents: 'Agents',
-  categories: 'Categories', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
+  categories: 'Categories', tags: 'Tags', board: 'Board Config', memory: 'Memory', usage: 'Usage & Costs', admin: 'Admin',
 };
 
 const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -36,7 +37,7 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
 
   const visibleTabs: ActiveTab[] = mode === 'client'
     ? ['integrations', 'board', 'categories']
-    : ['integrations', 'engines', 'workflows', 'agents', 'categories', 'board', 'memory', 'usage', 'admin'];
+    : ['integrations', 'engines', 'workflows', 'agents', 'categories', 'tags', 'board', 'memory', 'usage', 'admin'];
   const [activeTab, setActiveTab] = useState<ActiveTab>(visibleTabs[0]);
   const [error, setError] = useState('');
 
@@ -487,6 +488,12 @@ export default function AdminSubaccountDetailPage({ user: _user, mode = 'admin' 
       )}
 
       {/* Memory */}
+      {activeTab === 'tags' && subaccountId && (
+        <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading tags...</div>}>
+          <SubaccountTagsPage />
+        </Suspense>
+      )}
+
       {activeTab === 'memory' && (
         <Suspense fallback={<div className="py-8 text-sm text-slate-500">Loading memory...</div>}>
           <WorkspaceMemoryPage user={_user as any} embedded />

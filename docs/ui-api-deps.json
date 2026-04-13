@@ -131,28 +131,28 @@
       ]
     },
     {
-      "name": "ExecutionHistoryPage",
-      "routePath": "/executions",
-      "filePath": "client/src/pages/ExecutionHistoryPage.tsx",
+      "name": "ActivityPage",
+      "routePath": "/admin/activity | /system/activity | /admin/subaccounts/:subaccountId/activity",
+      "filePath": "client/src/pages/ActivityPage.tsx",
       "authentication": "authenticated",
-      "description": "Execution history and audit trail. Role-scoped: org_admin sees all org executions, manager sees executions for their accessible tasks, user sees only their own. Supports filtering by task, user, status, and date range. CSV export is available to org_admin.",
+      "description": "Unified activity feed across all data sources (agent runs, review items, health findings, inbox items, playbook runs, workflow executions) at org, system, or subaccount scope. Supports filter by type, status, severity, date range, and free-text search. Sort by newest, oldest, severity, or attention_first. Live polling every 10s.",
       "apiCalls": [
         {
-          "endpoint": "/api/executions",
+          "endpoint": "/api/activity",
           "method": "GET",
-          "purpose": "Load paginated execution history with filter options",
+          "purpose": "Load org-scoped activity feed",
           "required": true
         },
         {
-          "endpoint": "/api/tasks",
+          "endpoint": "/api/system/activity",
           "method": "GET",
-          "purpose": "Load task list for filter dropdown",
+          "purpose": "Load system-scoped activity feed (system admin only)",
           "required": false
         },
         {
-          "endpoint": "/api/executions/export",
+          "endpoint": "/api/subaccounts/:subaccountId/activity",
           "method": "GET",
-          "purpose": "Export filtered execution history as CSV (org_admin only)",
+          "purpose": "Load subaccount-scoped activity feed",
           "required": false
         }
       ]

@@ -8,6 +8,7 @@ import AdminBoardConfigPage from './AdminBoardConfigPage';
 import AdminCategoriesPage from './AdminCategoriesPage';
 import AdminEnginesPage from './AdminEnginesPage';
 import OrgMemoryPage from './OrgMemoryPage';
+import IntegrationsAndCredentialsPage from './IntegrationsAndCredentialsPage';
 
 interface OrgData {
   id: string;
@@ -21,13 +22,14 @@ interface OrgData {
   requireAgentApproval: boolean;
 }
 
-type ActiveTab = 'board' | 'categories' | 'engines' | 'memory' | 'general' | 'permissions';
+type ActiveTab = 'board' | 'categories' | 'engines' | 'memory' | 'integrations' | 'general' | 'permissions';
 
 const TAB_LABELS: Record<ActiveTab, string> = {
   board: 'Board Config',
   categories: 'Categories',
   engines: 'Engines',
   memory: 'Org Memory',
+  integrations: 'Integrations',
   general: 'General',
   permissions: 'Permissions',
 };
@@ -37,7 +39,7 @@ const inputCls = 'w-full px-3 py-2 border border-slate-200 rounded-lg text-[13px
 export default function OrgSettingsPage({ user }: { user: User }) {
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const initialTab: ActiveTab = tabParam && ['board', 'categories', 'engines', 'memory', 'general', 'permissions'].includes(tabParam)
+  const initialTab: ActiveTab = tabParam && ['board', 'categories', 'engines', 'memory', 'integrations', 'general', 'permissions'].includes(tabParam)
     ? tabParam as ActiveTab : 'board';
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
 
@@ -48,8 +50,8 @@ export default function OrgSettingsPage({ user }: { user: User }) {
   // Non-system-admins see: board, categories, engines
   // System admins additionally see: general, permissions
   const visibleTabs: ActiveTab[] = isSystemAdmin
-    ? ['board', 'categories', 'engines', 'memory', 'general', 'permissions']
-    : ['board', 'categories', 'engines', 'memory'];
+    ? ['board', 'categories', 'engines', 'memory', 'integrations', 'general', 'permissions']
+    : ['board', 'categories', 'engines', 'memory', 'integrations'];
 
   if (!orgId) {
     return (
@@ -83,6 +85,7 @@ export default function OrgSettingsPage({ user }: { user: User }) {
       {activeTab === 'categories' && <AdminCategoriesPage user={user} embedded />}
       {activeTab === 'engines' && <AdminEnginesPage user={user} embedded />}
       {activeTab === 'memory' && <OrgMemoryPage embedded />}
+      {activeTab === 'integrations' && <IntegrationsAndCredentialsPage user={user} embedded />}
       {activeTab === 'general' && <GeneralTab orgId={orgId} orgName={orgName} />}
       {activeTab === 'permissions' && <PermissionsTab />}
     </div>

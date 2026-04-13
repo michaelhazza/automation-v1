@@ -78,7 +78,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Playbook runs | `playbookRuns.ts` |
 | Playbook templates | `playbookTemplates.ts` |
 | Playbook studio | `playbookStudio.ts` |
-| Ops dashboard | `opsDashboard.ts` |
+| Activity | `activity.ts` |
 | Skill studio | `skillStudio.ts` |
 
 ### Shared route helpers
@@ -327,7 +327,7 @@ The view/resolve permission split is intentional — read-only stakeholders can 
 
 **Frontend:** `client/src/pages/AdminHealthFindingsPage.tsx` lists findings grouped by severity. The "Mark resolved" button is hidden for users without `org.health_audit.resolve` (honoring `__system_admin__` / `__org_admin__` sentinels from `/api/my-permissions`). `client/src/components/HealthAuditWidget.tsx` renders a compact summary on the dashboard.
 
-> **Resolved:** `AdminHealthFindingsPage` now has a sidebar nav entry under the Organisation section (gated by `org.health_audit.view`). Health findings also surface in the Ops Dashboard (`/admin/ops`) as `health_finding` activity type.
+> **Resolved:** `AdminHealthFindingsPage` now has a sidebar nav entry under the Organisation section (gated by `org.health_audit.view`). Health findings also surface in the Activity page (`/admin/activity`) as `health_finding` activity type.
 
 ---
 
@@ -724,7 +724,7 @@ Subaccount configs are **copies**, not live references. Changes to org config do
 - `workspaceMemoryService` handles CRUD, hybrid retrieval, entity extraction, and LLM-assisted deduplication
 - `memoryDecayJob` prunes entries with `quality_score < 0.3` and fewer than 3 accesses after 90 days
 - Embeddings support semantic search via HNSW index; retrieval upgraded to a hybrid RRF pipeline (see below)
-- Used by agents to accumulate cross-run context, exposed to humans via the Ops Dashboard memory search
+- Used by agents to accumulate cross-run context, exposed to humans via the Activity page memory search
 
 ### Hybrid RRF Retrieval Pipeline (Agent Intelligence Upgrade Phases B2–B4)
 
@@ -1367,23 +1367,23 @@ Integrate into the existing permission set UI.
 
 Five features shipped together (spec: `docs/agent-coworker-features-spec.md`) to transform agents from tools into autonomous coworkers. Migrations 0097–0103.
 
-### Ops Dashboard (Feature 1)
+### Activity (Feature 1)
 
 A unified, filter-driven activity table at three scopes (subaccount / org / system), replacing the need to bounce between run history, inbox, review queue, and health findings.
 
-**Service:** `opsDashboardService.ts` — fans out to 6 data sources in parallel (`agentRuns`, `reviewItems`, `workspaceHealthFindings`, `actions` (pending approval), `playbookRuns`, `executions`), normalises each to `OpsDashboardItem`, merge-sorts by requested order (default: `attention_first`), paginates. Soft-delete filters on all agent/subaccount joins.
+**Service:** `activityService.ts` — fans out to 6 data sources in parallel (`agentRuns`, `reviewItems`, `workspaceHealthFindings`, `actions` (pending approval), `playbookRuns`, `executions`), normalises each to `ActivityItem`, merge-sorts by requested order (default: `attention_first`), paginates. Soft-delete filters on all agent/subaccount joins.
 
-**Routes:** `opsDashboard.ts` — 3 endpoints:
+**Routes:** `activity.ts` — 3 endpoints:
 
 | Route | Auth |
 |-------|------|
-| `GET /api/subaccounts/:subaccountId/ops-dashboard` | `requireSubaccountPermission(EXECUTIONS_VIEW)` |
-| `GET /api/ops-dashboard` | `requireOrgPermission(EXECUTIONS_VIEW)` |
-| `GET /api/system/ops-dashboard` | `requireSystemAdmin` |
+| `GET /api/subaccounts/:subaccountId/activity` | `requireSubaccountPermission(EXECUTIONS_VIEW)` |
+| `GET /api/activity` | `requireOrgPermission(EXECUTIONS_VIEW)` |
+| `GET /api/system/activity` | `requireSystemAdmin` |
 
 Query params: `type`, `status`, `from`, `to`, `agentId`, `severity`, `assignee`, `q`, `sort`, `limit`, `offset`.
 
-**Frontend:** `OpsDashboardPage.tsx` — filter bar + ColHeader sort/filter table (matches `SystemSkillsPage` pattern). Client-side exclusion-set column filters, 10s polling. Routes: `/admin/ops`, `/system/ops`, `/admin/subaccounts/:subaccountId/ops`.
+**Frontend:** `ActivityPage.tsx` — filter bar + ColHeader sort/filter table (matches `SystemSkillsPage` pattern). Client-side exclusion-set column filters, 10s polling. Routes: `/admin/activity`, `/system/activity`, `/admin/subaccounts/:subaccountId/activity`.
 
 ### Prioritized Work Feed (Feature 2)
 
