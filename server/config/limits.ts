@@ -197,6 +197,35 @@ export const BRIEFING_MEMORY_ENTRIES_LIMIT = 5;
 /** Minimum quality score for memory entries included in briefing context. */
 export const BRIEFING_MEMORY_QUALITY_THRESHOLD = 0.5;
 
+// ── Agent Beliefs (Phase 1) ────────────────────────────────────────────────
+
+/** Max beliefs extracted per run. */
+export const BELIEFS_MAX_PER_EXTRACTION = 10;
+
+/** Max active beliefs per agent-subaccount pair. Excess soft-deleted by confidence. */
+export const BELIEFS_MAX_ACTIVE = 50;
+
+/** Max character length for a single belief value. Enforced by truncation at merge. */
+export const BELIEFS_MAX_VALUE_LENGTH = 500;
+
+/** Beliefs below this confidence are soft-deleted during post-merge cleanup. */
+export const BELIEFS_CONFIDENCE_FLOOR = 0.1;
+
+/** Confidence boost per reinforcement (same value confirmed again). */
+export const BELIEFS_CONFIDENCE_BOOST = 0.05;
+
+/** Agent-written beliefs cannot exceed this confidence. User overrides stay at 1.0. */
+export const BELIEFS_CONFIDENCE_CEILING = 0.9;
+
+/** Minimum LLM confidence to honour a 'remove' action. LLMs infer absence poorly. */
+export const BELIEFS_REMOVE_MIN_CONFIDENCE = 0.8;
+
+/** On value change (update), confidence is capped at this level. Prevents oscillation. */
+export const BELIEFS_UPDATE_CONFIDENCE_CAP = 0.7;
+
+/** Max tokens for the full belief set injected into the prompt. */
+export const BELIEFS_TOKEN_BUDGET = 1500;
+
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
 /** Max memory entries returned by vector search */

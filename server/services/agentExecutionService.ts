@@ -55,6 +55,7 @@ import { skillExecutor } from './skillExecutor.js';
 import { workspaceMemoryService, agentRoleToDomain } from './workspaceMemoryService.js';
 import * as memoryBlockService from './memoryBlockService.js';
 import { agentBriefingService } from './agentBriefingService.js';
+import { agentBeliefService } from './agentBeliefService.js';
 import { subaccountStateSummaryService } from './subaccountStateSummaryService.js';
 import { triggerService } from './triggerService.js';
 import {
@@ -676,6 +677,20 @@ export const agentExecutionService = {
         }
       } catch {
         // Non-fatal — agent runs fine without a briefing
+      }
+
+      // Phase 1: Agent beliefs — discrete facts (dynamic — updated after each run)
+      try {
+        const beliefs = await agentBeliefService.getActiveBeliefs(
+          request.organisationId,
+          request.subaccountId!,
+          request.agentId,
+        );
+        if (beliefs.length > 0) {
+          dynamicParts.push(`\n\n---\n## Your Beliefs\n${agentBeliefService.formatBeliefsForPrompt(beliefs)}`);
+        }
+      } catch {
+        // Non-fatal — agent runs fine without beliefs
       }
 
       // Layer 3.5: Task Instructions (dynamic — changes per scheduled task)

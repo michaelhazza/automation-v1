@@ -23,6 +23,7 @@ export interface AgentBriefingJobPayload {
 // ---------------------------------------------------------------------------
 
 export async function runAgentBriefingUpdate(payload: AgentBriefingJobPayload): Promise<void> {
+  // 1. Briefing update (existing)
   const { agentBriefingService } = await import('../services/agentBriefingService.js');
   await agentBriefingService.updateAfterRun(
     payload.organisationId,
@@ -31,4 +32,18 @@ export async function runAgentBriefingUpdate(payload: AgentBriefingJobPayload): 
     payload.runId,
     payload.handoffJson ?? {},
   );
+
+  // 2. Belief extraction (Phase 1 — fire-and-forget, independent of briefing)
+  try {
+    const { agentBeliefService } = await import('../services/agentBeliefService.js');
+    await agentBeliefService.extractAndMerge(
+      payload.organisationId,
+      payload.subaccountId,
+      payload.agentId,
+      payload.runId,
+      payload.handoffJson ?? {},
+    );
+  } catch {
+    // Belief extraction failure must never affect briefing or run completion
+  }
 }

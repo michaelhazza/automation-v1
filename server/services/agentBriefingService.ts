@@ -146,6 +146,7 @@ Given the previous briefing, latest run outcome, and recent observations, produc
 - Note what changed in the latest run
 - Be written in second person ("You previously…", "The workspace has…")
 - Omit anything stale or superseded by the latest run
+- Do NOT repeat stable facts that are already captured as beliefs — focus on narrative context (what happened recently, what is in progress, what changed)
 
 Respond with only the briefing text — no preamble, no markdown headers, no quotes.`;
 
