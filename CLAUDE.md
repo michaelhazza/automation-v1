@@ -3,6 +3,8 @@
 This file applies to every project. Project-level CLAUDE.md files extend it with repo-specific context.
 
 > **App-specific architecture**: See [`architecture.md`](./architecture.md) for backend conventions, route patterns, permission system, three-tier agent model, skill system, and all patterns specific to this application. Read it before making backend changes.
+>
+> **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills.
 
 ---
 
@@ -299,6 +301,7 @@ Quick reference for "where do I start when adding X". This is the index, not the
 | Add a new run-time test | `server/services/__tests__/` (pure file pattern: `*Pure.test.ts`) |
 | Modify the agent execution loop | `server/services/agentExecutionService.ts`, `agentExecutionServicePure.ts` |
 | Add a new workspace health detector | `server/services/workspaceHealth/detectors/`, then re-export from `detectors/index.ts` |
+| Add a new feature or skill (docs) | `docs/capabilities.md` — update in the same commit as the code change |
 
 ---
 
