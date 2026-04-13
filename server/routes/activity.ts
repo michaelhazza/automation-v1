@@ -3,8 +3,8 @@ import { authenticate, requireOrgPermission, requireSubaccountPermission, requir
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { listOpsDashboardItems } from '../services/opsDashboardService.js';
-import type { OpsDashboardFilters, OpsDashboardScope } from '../services/opsDashboardService.js';
+import { listOpsDashboardItems } from '../services/activityService.js';
+import type { OpsDashboardFilters, OpsDashboardScope } from '../services/activityService.js';
 
 const router = Router();
 
@@ -37,11 +37,11 @@ function parseFilters(query: Record<string, unknown>): OpsDashboardFilters {
 }
 
 // ---------------------------------------------------------------------------
-// Subaccount-scoped ops dashboard
+// Subaccount-scoped activity
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/api/subaccounts/:subaccountId/ops-dashboard',
+  '/api/subaccounts/:subaccountId/activity',
   authenticate,
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
@@ -57,11 +57,11 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// Org-scoped ops dashboard
+// Org-scoped activity
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/api/ops-dashboard',
+  '/api/activity',
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.EXECUTIONS_VIEW),
   asyncHandler(async (req, res) => {
@@ -75,11 +75,11 @@ router.get(
 );
 
 // ---------------------------------------------------------------------------
-// System-scoped ops dashboard
+// System-scoped activity
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/api/system/ops-dashboard',
+  '/api/system/activity',
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
