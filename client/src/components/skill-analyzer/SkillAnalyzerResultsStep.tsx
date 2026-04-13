@@ -512,77 +512,60 @@ function ResultSection({
 
   if (results.length === 0) return null;
 
+  const approvedInSection = results.filter((r) => r.actionTaken != null).length;
+
   return (
-    <div className={`border rounded-xl overflow-hidden ${cfg.colour}`}>
-      <button
+    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+      {/* Coloured band header */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+        style={{ backgroundColor: cfg.bandBg, borderBottom: `2px solid ${cfg.bandBorder}` }}
         onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center justify-between px-4 py-3 ${cfg.headerColour}`}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold">{cfg.label}</span>
-          <span className="text-xs font-medium px-2 py-0.5 bg-white/60 rounded-full">{results.length}</span>
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-700">{cfg.label}</span>
+        <span
+          className="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={{ backgroundColor: cfg.badgeBg, color: cfg.badgeText }}
+        >
+          {results.length}
+        </span>
+        <span className="text-xs text-slate-400">{approvedInSection} reviewed</span>
+        <div className="ml-auto flex items-center gap-2">
+          {(classification === 'IMPROVEMENT' || classification === 'DISTINCT' || classification === 'PARTIAL_OVERLAP') && (
+            <button
+              className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onBulkAction(classification, 'approved'); }}
+            >
+              Approve all
+            </button>
+          )}
+          {classification === 'DUPLICATE' && (
+            <button
+              className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onBulkAction(classification, 'rejected'); }}
+            >
+              Reject all
+            </button>
+          )}
+          {classification === 'PARTIAL_OVERLAP' && failedResults.length > 0 && (
+            <button
+              type="button"
+              disabled={bulkRetrying}
+              className="text-xs px-2.5 py-1 rounded-md border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); handleBulkRetry(); }}
+            >
+              {bulkRetrying ? 'Retrying…' : `Retry failed (${failedResults.length})`}
+            </button>
+          )}
+          <span className="text-xs text-slate-400">{open ? '▲' : '▼'}</span>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs opacity-70">{cfg.subtitle}</span>
-          <span className="text-xs">{open ? '▲' : '▼'}</span>
-        </div>
-      </button>
+      </div>
 
       {open && (
-        <div className="p-4 space-y-3">
-          {/* Bulk action bar */}
-          <div className="flex items-center gap-2 pb-3 border-b border-white/50">
-            <span className="text-xs text-slate-500 font-medium">Bulk:</span>
-            {classification === 'IMPROVEMENT' && (
-              <button
-                onClick={() => onBulkAction(classification, 'approved')}
-                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                Approve all improvements
-              </button>
-            )}
-            {classification === 'DISTINCT' && (
-              <button
-                onClick={() => onBulkAction(classification, 'approved')}
-                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                Approve all new
-              </button>
-            )}
-            {classification === 'PARTIAL_OVERLAP' && (
-              <button
-                onClick={() => onBulkAction(classification, 'approved')}
-                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                title="Only rows with an LLM merge proposal are eligible — rows without a proposal are skipped client-side."
-              >
-                Approve all partial overlaps (with proposal)
-              </button>
-            )}
-            {classification === 'PARTIAL_OVERLAP' && failedResults.length > 0 && (
-              <button
-                type="button"
-                onClick={handleBulkRetry}
-                disabled={bulkRetrying || failedResults.length === 0}
-                className="px-3 py-1 text-xs font-medium border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 transition-colors"
-              >
-                {bulkRetrying ? 'Retrying…' : `Retry all failed classifications (${failedResults.length})`}
-              </button>
-            )}
-            {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && (
-              <span className="text-xs text-slate-600">{bulkRetryStatus}</span>
-            )}
-            {classification === 'DUPLICATE' && (
-              <button
-                onClick={() => onBulkAction(classification, 'rejected')}
-                className="px-3 py-1 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              >
-                Reject all duplicates
-              </button>
-            )}
-          </div>
-
+        <div className="divide-y divide-slate-50">
           {results.map((r) => (
-            <ResultCard
+            <ResultRow
               key={r.id}
               result={r}
               jobId={jobId}
@@ -594,6 +577,10 @@ function ResultSection({
             />
           ))}
         </div>
+      )}
+
+      {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && open && (
+        <div className="px-4 py-2 text-xs text-slate-600 border-t border-slate-100">{bulkRetryStatus}</div>
       )}
     </div>
   );
