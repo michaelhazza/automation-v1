@@ -17,7 +17,7 @@ import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { geoAuditService, DEFAULT_GEO_WEIGHTS, computeCompositeScore } from '../services/geoAuditService.js';
-import type { GeoDimensionScore } from '../db/schema/geoAudits.js';
+import type { GeoDimension, GeoDimensionScore } from '../db/schema/geoAudits.js';
 
 const router = Router();
 
@@ -87,10 +87,23 @@ router.post(
       await resolveSubaccount(subaccountId, req.orgId!);
     }
 
-    const weightsSnapshot = { ...DEFAULT_GEO_WEIGHTS };
-    const scores = dimensionScores as GeoDimensionScore[];
+    // Validate dimension names against the known set
+    const validDimensions = new Set(Object.keys(DEFAULT_GEO_WEIGHTS));
+    for (const d of dimensionScores) {
+      if (!validDimensions.has(d.dimension)) {
+        throw { statusCode: 400, message: `Invalid GEO dimension: ${d.dimension}` };
+      }
+    }
 
-    // Recompute composite from dimension scores to prevent inconsistency
+    // Normalise weights from defaults — LLM-provided weights are ignored.
+    // This keeps weightsSnapshot and the actual computed weights always in sync.
+    const weightsSnapshot = { ...DEFAULT_GEO_WEIGHTS };
+    const scores: GeoDimensionScore[] = (dimensionScores as GeoDimensionScore[]).map(d => ({
+      ...d,
+      weight: DEFAULT_GEO_WEIGHTS[d.dimension as GeoDimension],
+    }));
+
+    // Recompute composite from normalised scores
     const compositeScore = computeCompositeScore(scores);
 
     const audit = await geoAuditService.saveAudit({

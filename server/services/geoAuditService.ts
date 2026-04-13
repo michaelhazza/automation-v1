@@ -16,6 +16,25 @@ export const DEFAULT_GEO_WEIGHTS: Record<GeoDimension, number> = {
   platform_specific: 0.10,
 };
 
+/**
+ * Normalise a URL for consistent storage and lookup.
+ * Lowercases the hostname and strips trailing slashes from the pathname.
+ * Query params are preserved — they may be meaningful for audited pages.
+ * Falls back to the raw string if parsing fails.
+ */
+export function normalizeAuditUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    u.hostname = u.hostname.toLowerCase();
+    if (u.pathname !== '/') {
+      u.pathname = u.pathname.replace(/\/+$/, '');
+    }
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
 /** Compute weighted composite score from dimension scores */
 export function computeCompositeScore(
   dimensionScores: GeoDimensionScore[],
@@ -30,10 +49,29 @@ export function computeCompositeScore(
 export const geoAuditService = {
   /** Store a completed GEO audit result */
   async saveAudit(data: Omit<NewGeoAudit, 'id' | 'createdAt'>): Promise<GeoAudit> {
+    const url = normalizeAuditUrl(data.url);
+
+    // Deduplicate: if this agentRunId has already produced an audit for this URL, return it
+    if (data.agentRunId) {
+      const [existing] = await db
+        .select()
+        .from(geoAudits)
+        .where(
+          and(
+            eq(geoAudits.organisationId, data.organisationId),
+            eq(geoAudits.agentRunId, data.agentRunId),
+            eq(geoAudits.url, url),
+          ),
+        )
+        .limit(1);
+      if (existing) return existing;
+    }
+
     const [audit] = await db
       .insert(geoAudits)
       .values({
         ...data,
+        url,
         createdAt: new Date(),
       })
       .returning();
@@ -83,7 +121,7 @@ export const geoAuditService = {
       .where(
         and(
           eq(geoAudits.organisationId, organisationId),
-          eq(geoAudits.url, url),
+          eq(geoAudits.url, normalizeAuditUrl(url)),
         ),
       )
       .orderBy(desc(geoAudits.createdAt))
@@ -115,7 +153,7 @@ export const geoAuditService = {
       .where(
         and(
           eq(geoAudits.organisationId, organisationId),
-          eq(geoAudits.url, url),
+          eq(geoAudits.url, normalizeAuditUrl(url)),
         ),
       )
       .orderBy(desc(geoAudits.createdAt))

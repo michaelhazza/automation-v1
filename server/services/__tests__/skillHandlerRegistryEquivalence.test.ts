@@ -39,7 +39,7 @@ function test(name: string, fn: () => void) {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical handler key set (113 entries)
+// Canonical handler key set (114 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -159,6 +159,7 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'geo_brand_authority',
   'geo_llmstxt',
   'geo_compare',
+  'generic_methodology',
 ];
 
 // ---------------------------------------------------------------------------
@@ -194,11 +195,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 113 keys', () => {
+test('SKILL_HANDLERS has exactly 114 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 113) {
+  if (count !== 114) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 113. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 114. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }
