@@ -35,7 +35,11 @@ router.patch(
   authenticate,
   requireSystemAdmin,
   asyncHandler(async (req, res) => {
-    const template = await systemTemplateService.update(req.params.id, req.body);
+    // Explicit allowlist — never pass raw req.body to service
+    const { name, description, isPublished } = req.body as {
+      name?: string; description?: string; isPublished?: boolean;
+    };
+    const template = await systemTemplateService.update(req.params.id, { name, description, isPublished });
     res.json(template);
   })
 );

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../lib/api';
 import { User, getActiveClientId } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -61,8 +62,14 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
 
   const handleDelete = async () => {
     if (!id || !activeClientId) return;
-    await api.delete(`/api/subaccounts/${activeClientId}/projects/${id}`);
-    navigate('/');
+    try {
+      await api.delete(`/api/subaccounts/${activeClientId}/projects/${id}`);
+      toast.success('Project deleted');
+      navigate('/');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error ?? 'Failed to delete project');
+    }
   };
 
   const handleSave = async () => {
@@ -77,8 +84,11 @@ export default function ProjectDetailPage({ user: _user }: { user: User }) {
       });
       setProject(data);
       setEditing(false);
-    } catch { /* ignore */ }
-    finally { setSaving(false); }
+      toast.success('Project saved');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error ?? 'Failed to save project');
+    } finally { setSaving(false); }
   };
 
   if (loading) return <div className="p-12 text-center text-sm text-slate-500">Loading...</div>;

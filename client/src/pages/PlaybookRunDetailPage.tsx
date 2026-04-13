@@ -14,6 +14,8 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
 import { useSocketRoom } from '../hooks/useSocket';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface StepRun {
   id: string;
@@ -93,6 +95,7 @@ export default function PlaybookRunDetailPage(_props: { user: User }) {
   const [formData, setFormData] = useState('{\n  \n}');
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSubmitting, setActionSubmitting] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!runId) return;
@@ -188,12 +191,15 @@ export default function PlaybookRunDetailPage(_props: { user: User }) {
 
   async function cancelRun() {
     if (!runId) return;
-    if (!confirm('Cancel this playbook run?')) return;
     try {
       await api.post(`/api/playbook-runs/${runId}/cancel`);
+      toast.success('Playbook run cancelled');
       await refresh();
     } catch (err) {
+      toast.error('Failed to cancel playbook run');
       setError(err instanceof Error ? err.message : 'Failed to cancel');
+    } finally {
+      setShowCancelConfirm(false);
     }
   }
 
@@ -255,7 +261,7 @@ export default function PlaybookRunDetailPage(_props: { user: User }) {
             </span>
             {!isTerminal && (
               <button
-                onClick={cancelRun}
+                onClick={() => setShowCancelConfirm(true)}
                 className="px-3 py-1.5 text-sm rounded border border-slate-300 hover:bg-slate-50"
               >
                 Cancel run
@@ -414,6 +420,16 @@ export default function PlaybookRunDetailPage(_props: { user: User }) {
           );
         })}
       </div>
+
+      {showCancelConfirm && (
+        <ConfirmDialog
+          title="Cancel Run"
+          message="Cancel this playbook run?"
+          confirmLabel="Cancel"
+          onConfirm={cancelRun}
+          onCancel={() => setShowCancelConfirm(false)}
+        />
+      )}
     </div>
   );
 }

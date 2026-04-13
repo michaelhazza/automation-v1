@@ -8,7 +8,11 @@ interface PreviewTokenPayload {
 }
 
 function getSecret(): string {
-  return process.env.JWT_SECRET || process.env.SESSION_SECRET || 'preview-secret-change-me';
+  const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET or SESSION_SECRET must be set for preview token signing');
+  }
+  return secret;
 }
 
 /**

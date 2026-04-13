@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
@@ -27,12 +28,17 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
   const [error, setError] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
+  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
+
   const load = async () => {
     try {
       const { data } = await api.get('/api/subaccounts');
-      setSubaccounts(data);
+      if (mountedRef.current) setSubaccounts(data);
+    } catch {
+      if (mountedRef.current) toast.error('Failed to load subaccounts');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -47,6 +53,7 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
       });
       setShowForm(false);
       setForm({ name: '', slug: '' });
+      toast.success('Subaccount created');
       load();
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: { error?: string } } };
@@ -64,9 +71,16 @@ export default function AdminSubaccountsPage({ user: _user }: { user: User }) {
 
   const handleDeleteConfirm = async () => {
     if (!deleteId) return;
-    await api.delete(`/api/subaccounts/${deleteId}`);
-    setDeleteId(null);
-    load();
+    try {
+      await api.delete(`/api/subaccounts/${deleteId}`);
+      setDeleteId(null);
+      toast.success('Subaccount deleted');
+      load();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error ?? 'Failed to delete subaccount');
+      setDeleteId(null);
+    }
   };
 
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
