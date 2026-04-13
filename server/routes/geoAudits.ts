@@ -33,19 +33,8 @@ router.get(
   }),
 );
 
-// ─── Get a single audit by ID ───────────────────────────────────────────────
-
-router.get(
-  '/api/org/geo-audits/:id',
-  authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.GEO_AUDIT_VIEW),
-  asyncHandler(async (req, res) => {
-    const audit = await geoAuditService.getAudit(req.params.id, req.orgId!);
-    res.json(audit);
-  }),
-);
-
 // ─── Trend history for a specific URL ───────────────────────────────────────
+// Must be defined before :id to avoid Express matching "url-history" as an id
 
 router.get(
   '/api/org/geo-audits/url-history',
@@ -57,6 +46,18 @@ router.get(
     const limit = Math.min(Number(req.query.limit) || 50, 100);
     const audits = await geoAuditService.listByUrl(req.orgId!, url, { limit });
     res.json(audits);
+  }),
+);
+
+// ─── Get a single audit by ID ───────────────────────────────────────────────
+
+router.get(
+  '/api/org/geo-audits/:id',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.GEO_AUDIT_VIEW),
+  asyncHandler(async (req, res) => {
+    const audit = await geoAuditService.getAudit(req.params.id, req.orgId!);
+    res.json(audit);
   }),
 );
 
