@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-12
+> **Last updated:** 2026-04-13
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -103,7 +103,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 
 ### Skill System
 
-98 modular skills across 13 categories, cascading from system to org to subaccount.
+101 modular skills across 13 categories, cascading from system to org to subaccount.
 
 - **Three tiers:** System skills (platform-provided), Org skills (custom), Universal skills (always available)
 - **Per-agent allowlists** — Each subaccount-agent link specifies exactly which skills are available
@@ -364,8 +364,12 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 | | |
 |---|---|
 | **Outcome** | Structured competitor intelligence delivered on a repeatable schedule — not assembled ad hoc before a pitch |
-| **Trigger** | Scheduled cadence or ad-hoc research request |
+| **Trigger** | Scheduled cadence, ad-hoc research request, or automated change detection on competitor URLs |
 | **Deliverable** | Intelligence brief covering pricing, features, recent news, and positioning analysis in a consistent format |
+
+- **Automated page monitoring** — `monitor_webpage` watches competitor pricing pages, feature lists, or job boards; agent is triggered immediately when content changes
+- **Structured field extraction** — `scrape_structured` extracts specific fields (e.g. pricing tiers, plan names) on every run without re-paying LLM costs after the first scrape
+- **Tiered scraping engine** — HTTP fetch → stealth Playwright browser → Scrapling anti-bot bypass; automatically escalates through tiers when a site blocks simpler methods
 
 ### Portfolio Intelligence
 
@@ -382,7 +386,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 98 skills.
+Complete list of all 101 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -503,7 +507,10 @@ Complete list of all 98 skills.
 |-------|-------------|------|------|
 | `fetch_paywalled_content` | Log into paywalled site and download artifact | Deterministic | — |
 | `fetch_url` | Make HTTP request to URL and return response body | Deterministic | — |
+| `monitor_webpage` | Set up recurring change detection on a URL — fires an agent run each time content changes | Hybrid | HITL |
 | `read_data_source` | List and read context data sources (agent, subaccount, task scopes) | Deterministic | Universal |
+| `scrape_structured` | Extract structured fields from any URL with LLM-assisted first run and adaptive selector healing on subsequent runs | Hybrid | — |
+| `scrape_url` | Scrape a URL with automatic tier escalation (HTTP → stealth browser → anti-bot bypass) | Deterministic | — |
 | `web_search` | Search web for current information using Tavily AI search | Hybrid | — |
 
 ### Memory & Context
@@ -618,6 +625,7 @@ Complete list of all 98 skills.
 | **Tool filtering** | Per-server allowed/blocked tool lists |
 | **Gate overrides** | Per-tool gate level (auto/review/block) |
 | **Connection modes** | Eager (connect at startup) or lazy (connect on first use) |
+| **Scrapling preset** | Anti-bot web scraping sidecar (`uvx scrapling mcp`) — Cloudflare bypass, stealth browsing; used as Tier 3 of the scraping engine |
 
 ---
 
@@ -625,6 +633,7 @@ Complete list of all 98 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-13 | Add scrape_url, scrape_structured, monitor_webpage skills; add Scrapling MCP preset; expand Competitor Intelligence with automated monitoring capabilities | — |
 | 2026-04-13 | Tighten Replaces table with "why it's better" column | — |
 | 2026-04-13 | Tighten Product language to benefit-oriented; sharpen Agency with constraints; fix Hybrid type on create_page/update_page; add Replaces / Consolidates section | — |
 | 2026-04-13 | Add Core Value Proposition; compress Product Capabilities; reframe Agency to outcomes; add Type column to Skills | — |

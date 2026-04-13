@@ -39,7 +39,7 @@ function test(name: string, fn: () => void) {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical pre-refactor case label set (95 entries)
+// Canonical handler key set (105 entries)
 // ---------------------------------------------------------------------------
 // If you are adding a new system skill, append its slug here AND add the
 // corresponding entry to SKILL_HANDLERS in server/services/skillExecutor.ts.
@@ -141,6 +141,16 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'send_to_slack',
   'ask_clarifying_question',
   'update_memory_block',
+  'search_agent_history',
+  'read_priority_feed',
+  'skill_read_existing',
+  'skill_read_regressions',
+  'skill_validate',
+  'skill_simulate',
+  'skill_propose_save',
+  'scrape_url',
+  'scrape_structured',
+  'monitor_webpage',
 ];
 
 // ---------------------------------------------------------------------------
@@ -176,11 +186,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 95 keys (pre-refactor switch case count)', () => {
+test('SKILL_HANDLERS has exactly 105 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 95) {
+  if (count !== 105) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 95. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 105. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

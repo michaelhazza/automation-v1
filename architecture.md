@@ -525,6 +525,155 @@ The agent-level data source routes at `/api/agents/:id/data-sources` are unchang
 
 ---
 
+## Scraping Engine
+
+Multi-tier web scraping with automatic escalation, adaptive CSS selector healing, and recurring change monitoring. Lives in `server/services/scrapingEngine/`.
+
+### Architecture overview
+
+```
+scrape_url / scrape_structured / monitor_webpage   ← skill handlers (skillExecutor.ts)
+        │
+        ▼
+  scrapingEngine.scrape()                          ← orchestrator (index.ts)
+        │
+        ├── Pre-flight: domain allow/blocklist, rate limiter, robots.txt
+        │
+        ├── Tier 1: httpFetcher.ts         (plain HTTP, fastest)
+        ├── Tier 2: browserFetcher.ts      (stealth Playwright via IEE)
+        └── Tier 3: scraplingFetcher.ts    (Scrapling MCP sidecar, anti-bot)
+                                            ↑ only when _mcpCallContext present
+```
+
+### Tier escalation
+
+Each request starts at Tier 1. If a tier fails (non-2xx, empty body, bot-blocked), the engine escalates to the next tier up to `effectiveMax`. JSON output or CSS selectors cap `effectiveMax` at Tier 2 (need rendered DOM). Tier 3 requires `_mcpCallContext` from the agent run — without it, the engine stops at Tier 2.
+
+| Tier | Module | Mechanism | When used |
+|------|--------|-----------|-----------|
+| 1 | `httpFetcher.ts` | Plain `fetch()` with UA rotation | Always tried first |
+| 2 | `browserFetcher.ts` | Headless Playwright via IEE worker | When Tier 1 fails or selectors/JSON requested |
+| 3 | `scraplingFetcher.ts` | Scrapling MCP sidecar (`uvx scrapling mcp`) | When Tiers 1+2 fail, text/markdown only, MCP context available |
+
+### Pre-flight checks
+
+Run before any tier:
+
+1. **Domain allowlist/blocklist** — `OrgScrapingSettings.allowedDomains` / `blockedDomains`. Phase 1 uses hardcoded defaults; Phase 4 loads from DB.
+2. **Rate limiter** — `rateLimiter.ts`, per-domain token bucket, process-local. Multi-process deployments multiply effective rate.
+3. **robots.txt** — `isAllowedByRobots()` with in-process cache (24h TTL). Only when `respectRobotsTxt` is true. Checks root-path disallow only (full path parser deferred).
+
+### Content extraction
+
+`contentExtractor.ts` provides:
+
+- `extractContent(html, url, format, selectors)` — HTML → text/markdown/JSON via Readability + Turndown
+- `computeContentHash(content)` — SHA-256 for change detection
+- `canonicalizeFieldKey(field)` — normalises field names (lowercase, underscores, strip non-alphanumeric)
+
+### Scrapling MCP sidecar (Tier 3)
+
+Optional anti-bot bypass via the Scrapling Python package. Transport: `stdio` via `uvx scrapling mcp`. MCP preset registered in `mcpPresets.ts` (slug: `scrapling`).
+
+- `scraplingFetch(url, mcpContext)` tries `mcp.scrapling.stealthy_fetch`, falls back to `mcp.scrapling.get`
+- Returns `{ available: false }` when the org hasn't configured Scrapling
+- Content capped at 100KB
+
+### Adaptive selector engine
+
+Self-healing CSS selector matching in `adaptiveSelector.ts`. When a stored selector fails (site redesigned), the engine fingerprints all page elements and relocates the target via weighted similarity scoring. Zero LLM calls — pure DOM comparison.
+
+**ElementFingerprint** (stored in `scraping_selectors.element_fingerprint` JSONB):
+
+```typescript
+{
+  tagName, id, classList, attributes,
+  textContentHash, textPreview,
+  domPath,        // ancestor chain
+  parentTag, siblingTags, childTags,
+  position: { index, total }  // nth-of-type
+}
+```
+
+**Similarity scoring** — weighted sum of 9 features:
+
+| Feature | Weight | Method |
+|---------|--------|--------|
+| tagName | 0.15 | Exact match |
+| id | 0.10 | Exact match |
+| classList | 0.15 | Jaccard set similarity |
+| attributes | 0.10 | Key-value overlap ratio |
+| textSim | 0.15 | Token Jaccard on preview |
+| domPath | 0.15 | LCS ratio |
+| parentTag | 0.10 | Exact match |
+| siblings | 0.05 | Jaccard |
+| children | 0.05 | Jaccard |
+
+**Thresholds**: ≥ 0.85 confident match, 0.6–0.85 uncertain (agent may ask for confirmation), < 0.6 no match.
+
+**Algorithm**: O(n) scan over all elements. Pre-filtered by `tagName` when page has >5000 elements. Uses native DOM APIs via jsdom (`Document`/`Element`) — no cheerio dependency.
+
+`resolveSelector(document, cssSelector, storedFingerprint)` tries the original selector first; falls back to adaptive scan only if the selector misses or fingerprint has drifted below the confident threshold.
+
+### Selector persistence
+
+`selectorStore.ts` wraps the `scraping_selectors` table:
+
+- `saveSelector(params)` — select-first-then-update upsert (avoids Drizzle `onConflictDoUpdate` limitations with nullable unique index columns using NULLS NOT DISTINCT)
+- `loadSelectors(params)` — load by org + subaccount + urlPattern + selectorGroup
+- `incrementHit(id)` / `incrementMiss(id)` — atomic counter updates
+- `updateSelector(id, newCss, newFingerprint)` — after adaptive re-match
+
+Unique index: `(organisationId, subaccountId, urlPattern, selectorGroup, selectorName)` with NULLS NOT DISTINCT.
+
+### Schema (migration 0108)
+
+| Table | Purpose |
+|-------|---------|
+| `scraping_selectors` | Adaptive selector storage with hit/miss tracking |
+| `scraping_cache` | Per-URL content cache with TTL (Phase 4 — not yet read by `scrape()`) |
+
+### Skill handlers
+
+Three skill handlers in `skillExecutor.ts`:
+
+**`scrape_url`** — basic scraping. Passes `_mcpCallContext` from `SkillExecutionContext` to enable Tier 3. Returns content, contentHash, tierUsed.
+
+**`scrape_structured`** — structured field extraction with adaptive selectors:
+
+1. Check `selectorStore.loadSelectors()` for existing selectors
+2. If stored: parse HTML via jsdom, extract with `resolveSelector()` per field (per-field try/catch — one broken selector doesn't discard the rest), track hits/misses, apply adaptive updates
+3. If new: send focused DOM to LLM via `routeCall()`, parse field arrays + CSS selectors from response, save selectors via `selectorStore.saveSelector()` if `remember=true`
+4. Returns parallel arrays per field + `selector_confidence` + `adaptive_match_used` + `content_hash`
+
+**`monitor_webpage`** — recurring change detection:
+
+1. Deduplication: queries existing scheduled tasks for same URL + subaccount + agent — returns existing task ID if found
+2. Parses frequency via `parseFrequencyToRRule()` (daily, weekly, every N hours, every [weekday])
+3. Initial scrape: `executeScrapeStructured` for fields-based monitoring, `scrapingEngine.scrape()` for hash-based
+4. Creates scheduled task via `scheduledTaskService.create()` with `MonitorBriefConfig` brief (JSON in `scheduledTasks.brief`)
+5. On each scheduled run: `runContextLoader.ts` detects `"type": "monitor_webpage_run"` in the brief, loads `## Scheduled Run Instructions` from `server/skills/monitor_webpage.md`, injects into agent `taskInstructions`
+
+### Scheduled run protocol injection
+
+`runContextLoader.ts` supports skill-typed scheduled tasks:
+
+1. Parses the task `brief` as JSON
+2. If `parsed.type` matches `/<skill>_run$/` (e.g. `monitor_webpage_run`), extracts the skill slug
+3. Loads `server/skills/<slug>.md`, finds `## Scheduled Run Instructions` section
+4. Appends section content to `taskInstructions` — the agent sees these instructions in its system prompt
+
+### Key invariants
+
+- Tier 3 requires `_mcpCallContext` — never attempted in contexts without MCP access (e.g. API-only calls)
+- `selectorStore` uses select-then-update, not `onConflictDoUpdate`, because the unique index contains nullable columns
+- `monitor_webpage` enforces deduplication by URL — calling it twice for the same URL returns the existing task
+- Baseline metadata fields (`adaptive_match_used`, `selector_uncertain`) are stripped before storage to prevent false-positive change detection
+- `buildCssSelector` recursion is depth-capped at 15 levels
+- Rate limiter is process-local — multi-process deployments see N× the configured rate
+
+---
+
 ## Review Gates & HITL
 
 Tasks can set `reviewRequired: true`. When an agent acts on such a task, actions escalate to the review queue before executing.

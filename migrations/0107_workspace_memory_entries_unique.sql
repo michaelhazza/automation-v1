@@ -8,12 +8,8 @@
 --
 -- The constraint also prevents duplicate entries from normal runtime writes.
 
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
+CREATE UNIQUE INDEX IF NOT EXISTS
   workspace_memory_entries_dedup_idx
   ON workspace_memory_entries (subaccount_id, agent_run_id, agent_id, entry_type, md5(content));
-
--- Wrap in a unique constraint so Drizzle's onConflictDoNothing can target it.
--- Postgres requires the index to exist first for ADD CONSTRAINT ... USING INDEX.
-ALTER TABLE workspace_memory_entries
-  ADD CONSTRAINT workspace_memory_entries_dedup
-  UNIQUE USING INDEX workspace_memory_entries_dedup_idx;
+-- Note: UNIQUE USING INDEX cannot target expression-based indexes in Postgres.
+-- The index alone enforces uniqueness; onConflictDoNothing() needs no named constraint.

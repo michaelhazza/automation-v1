@@ -1,6 +1,7 @@
 import { eq, and, isNull, count, inArray } from 'drizzle-orm';
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
+import { createHash } from 'crypto';
 import { glob } from 'glob';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -9,7 +10,7 @@ import { createSpan, createEvent } from '../lib/tracing.js';
 import { TripWire } from '../lib/tripwire.js';
 import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentRuns, tasks, actions, scheduledTasks } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
 import { agentExecutionService } from './agentExecutionService.js';
@@ -22,6 +23,12 @@ import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as priorityFeedService from './priorityFeedService.js';
 import * as skillStudioService from './skillStudioService.js';
+import { scrapingEngine, parseFrequencyToRRule, serializeMonitorBrief, parseMonitorBrief } from './scrapingEngine/index.js';
+import { loadSelectors, saveSelector, incrementHit, incrementMiss, updateSelector } from './scrapingEngine/selectorStore.js';
+import { buildFingerprint, resolveSelector } from './scrapingEngine/adaptiveSelector.js';
+import { canonicalizeFieldKey, computeContentHash } from './scrapingEngine/contentExtractor.js';
+import { scheduledTaskService } from './scheduledTaskService.js';
+import { routeCall } from './llmRouter.js';
 import {
   MAX_HANDOFF_DEPTH,
   MAX_TASK_TITLE_LENGTH,
@@ -475,6 +482,15 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   fetch_url: async (input, context) => {
     return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
+  },
+  scrape_url: async (input, context) => {
+    return executeWithActionAudit('scrape_url', input, context, () => executeScrapeUrl(input, context));
+  },
+  scrape_structured: async (input, context) => {
+    return executeWithActionAudit('scrape_structured', input, context, () => executeScrapeStructured(input, context));
+  },
+  monitor_webpage: async (input, context) => {
+    return executeWithActionAudit('monitor_webpage', input, context, () => executeMonitorWebpage(input, context));
   },
 
   // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
@@ -3109,6 +3125,478 @@ async function executeFetchUrl(
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Fetch failed: ${errMsg}` };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scrape URL — tiered web scraping with automatic escalation
+// ---------------------------------------------------------------------------
+
+async function executeScrapeUrl(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const url = String(input.url ?? '');
+  if (!url) return { success: false, error: 'url is required' };
+
+  const result = await scrapingEngine.scrape({
+    url,
+    extract: input.extract ? String(input.extract) : undefined,
+    outputFormat: (input.output_format as 'text' | 'markdown' | 'json') ?? 'markdown',
+    selectors: input.css_selectors as string[] | undefined,
+    adaptive: true,
+    orgId: context.organisationId,
+    subaccountId: context.subaccountId ?? undefined,
+    _mcpCallContext: context._mcpClients ? {
+      clients: context._mcpClients,
+      lazyRegistry: context._mcpLazyRegistry ?? new Map(),
+      runContext: {
+        runId: context.runId,
+        organisationId: context.organisationId,
+        agentId: context.agentId,
+        subaccountId: context.subaccountId,
+        taskId: context.taskId,
+        mcpCallCount: context.mcpCallCount,
+      },
+    } : undefined,
+  });
+
+  return {
+    success: result.success,
+    content: result.content,
+    tier_used: result.tierUsed,
+    content_hash: result.contentHash,
+    extracted_data: result.extractedData,
+    url: result.url,
+    metadata: result.metadata,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Scrape Structured — adaptive selector extraction with LLM first-run learning
+// ---------------------------------------------------------------------------
+
+const SCRAPE_STRUCTURED_MAX_HTML_CHARS = 40_000; // ~4000 tokens of focused DOM
+const SCRAPE_STRUCTURED_RETURN_LIMIT = 50_000;   // max response chars returned to agent
+
+/**
+ * Derive a deterministic selectorGroup from the site hostname and field string.
+ * Format: "<hostname>:<sha256(fields.trim().lower).slice(0,8)>"
+ */
+function deriveSelectorGroup(hostname: string, fields: string): string {
+  const hash = createHash('sha256')
+    .update(fields.trim().toLowerCase())
+    .digest('hex')
+    .slice(0, 8);
+  return `${hostname}:${hash}`;
+}
+
+async function executeScrapeStructured(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const url = String(input.url ?? '');
+  const fields = String(input.fields ?? '');
+  const remember = input.remember !== false; // default true
+  const selectorGroupInput = input.selector_group ? String(input.selector_group) : null;
+
+  if (!url) return { success: false, error: 'url is required' };
+  if (!fields) return { success: false, error: 'fields is required' };
+
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return { success: false, error: `Invalid URL: ${url}` };
+  }
+
+  const selectorGroup = selectorGroupInput ?? deriveSelectorGroup(hostname, fields);
+  const urlPattern = hostname; // Use hostname as URL pattern for Phase 2
+
+  // Canonicalize field names
+  const canonicalFields = fields
+    .split(',')
+    .map(f => canonicalizeFieldKey(f))
+    .filter(Boolean);
+
+  // ── 1. Check for existing selectors ──────────────────────────────────────
+  const storedSelectors = await loadSelectors({
+    orgId: context.organisationId,
+    subaccountId: context.subaccountId ?? null,
+    urlPattern,
+    selectorGroup,
+  });
+
+  // ── 2. Fetch the page (max Tier 2 — need raw HTML for DOM extraction) ────
+  const scrapeResult = await scrapingEngine.scrape({
+    url,
+    outputFormat: 'text',
+    maxTier: 2,
+    orgId: context.organisationId,
+    subaccountId: context.subaccountId ?? undefined,
+  });
+
+  if (!scrapeResult.success || !scrapeResult.rawHtml) {
+    return { success: false, error: `Failed to fetch page: ${url}` };
+  }
+
+  const contentHash = computeContentHash(scrapeResult.content);
+
+  // ── 3a. Stored selectors exist — DOM extraction path ─────────────────────
+  if (storedSelectors.length > 0) {
+    try {
+      const { JSDOM } = await import('jsdom');
+      const { document } = new JSDOM(scrapeResult.rawHtml!).window;
+
+      const extracted: Record<string, string[]> = {};
+      let overallScore = 1.0;
+      let adaptiveMatchUsed = false;
+      let selectorUncertain = false;
+      const selectorUpdates: Array<{ id: string; newSelector: string; newFingerprint: import('./scrapingEngine/adaptiveSelector.js').ElementFingerprint }> = [];
+
+      for (const stored of storedSelectors) {
+        const fieldKey = stored.selectorName;
+        const resolution = resolveSelector(document, stored.cssSelector, stored.elementFingerprint);
+
+        if (!resolution.found) {
+          await incrementMiss(stored.id);
+          extracted[fieldKey] = [];
+          overallScore = Math.min(overallScore, 0);
+          continue;
+        }
+
+        if (resolution.adaptiveMatchUsed) {
+          adaptiveMatchUsed = true;
+          if (resolution.cssSelector && resolution.fingerprint) {
+            selectorUpdates.push({
+              id: stored.id,
+              newSelector: resolution.cssSelector,
+              newFingerprint: resolution.fingerprint,
+            });
+          }
+        }
+
+        overallScore = Math.min(overallScore, resolution.score);
+        if (resolution.uncertain) selectorUncertain = true;
+
+        // Extract all matching elements for this selector (per-field try/catch
+        // so a broken selector for one field doesn't discard the rest)
+        try {
+          const matchedEls = document.querySelectorAll(resolution.cssSelector!);
+          const values: string[] = [];
+          matchedEls.forEach((el: Element) => {
+            const text = (el.textContent ?? '').trim();
+            if (text) values.push(text);
+          });
+          extracted[fieldKey] = values;
+          await incrementHit(stored.id);
+        } catch {
+          await incrementMiss(stored.id);
+          extracted[fieldKey] = [];
+          overallScore = Math.min(overallScore, 0);
+        }
+      }
+
+      // Apply adaptive updates if any
+      for (const upd of selectorUpdates) {
+        await updateSelector(upd.id, upd.newSelector, upd.newFingerprint);
+      }
+
+      return {
+        success: true,
+        ...extracted,
+        selector_confidence: overallScore,
+        adaptive_match_used: adaptiveMatchUsed,
+        selector_uncertain: selectorUncertain,
+        content_hash: contentHash,
+        url,
+      };
+    } catch (err) {
+      // If DOM extraction fails, fall through to LLM path
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[scrape_structured] DOM extraction failed, falling back to LLM: ${errMsg}`);
+    }
+  }
+
+  // ── 3b. No stored selectors — LLM extraction path ────────────────────────
+  // Build a focused DOM excerpt for the LLM
+  const htmlForLlm = (scrapeResult.rawHtml ?? '').slice(0, SCRAPE_STRUCTURED_MAX_HTML_CHARS);
+  const fieldList = canonicalFields.join(', ');
+
+  const extractionPrompt = `You are a data extraction assistant. Given the HTML below, extract structured data.
+
+Fields to extract: ${fieldList}
+
+Rules:
+- Return ONLY valid JSON with exactly these keys: ${fieldList}
+- Each key maps to an ARRAY of values (even if there is only one value)
+- For multiple records on the page (e.g. pricing tiers), each field array has one entry per record in the same order
+- Also return a "css_selectors" key mapping each field to the CSS selector that targets those elements
+- If a field cannot be found, use an empty array []
+
+Example response for fields "plan_name, price":
+{"plan_name":["Starter","Pro"],"price":["$9","$29"],"css_selectors":{"plan_name":"h3.plan-name","price":"span.price"}}
+
+HTML:
+${htmlForLlm}`;
+
+  const llmResponse = await routeCall({
+    messages: [{ role: 'user', content: extractionPrompt }],
+    maxTokens: 2000,
+    context: {
+      organisationId: context.organisationId,
+      subaccountId: context.subaccountId ?? '',
+      runId: context.runId,
+      sourceType: 'system',
+      agentName: 'scrape_structured',
+      taskType: 'general',
+      executionPhase: 'execution',
+      routingMode: 'ceiling',
+    },
+  });
+
+  // Parse LLM response
+  let extracted: Record<string, unknown> = {};
+  let cssSelectorsFromLlm: Record<string, string> = {};
+
+  try {
+    const responseText = typeof llmResponse.content === 'string' ? llmResponse.content : '';
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      cssSelectorsFromLlm = (parsed.css_selectors as Record<string, string>) ?? {};
+      delete parsed.css_selectors;
+      extracted = parsed;
+    }
+  } catch {
+    return { success: false, error: 'LLM extraction failed to return valid JSON' };
+  }
+
+  // ── 4. Learn selectors for next time ────────────────────────────────────
+  if (remember && Object.keys(cssSelectorsFromLlm).length > 0 && scrapeResult.rawHtml) {
+    try {
+      const { JSDOM } = await import('jsdom');
+      const { document: learnDoc } = new JSDOM(scrapeResult.rawHtml).window;
+
+      for (const [fieldName, selector] of Object.entries(cssSelectorsFromLlm)) {
+        if (!selector || typeof selector !== 'string') continue;
+        let el: Element | null = null;
+        try { el = learnDoc.querySelector(selector); } catch { continue; }
+        if (el === null) continue;
+
+        const fingerprint = buildFingerprint(el);
+
+        await saveSelector({
+          orgId: context.organisationId,
+          subaccountId: context.subaccountId ?? null,
+          urlPattern,
+          selectorGroup,
+          selectorName: fieldName,
+          cssSelector: selector,
+          fingerprint,
+        }).catch(err => {
+          console.warn(`[scrape_structured] Failed to save selector for "${fieldName}": ${err}`);
+        });
+      }
+    } catch (err) {
+      // Selector learning is best-effort — don't fail the extraction
+      console.warn(`[scrape_structured] Selector learning failed: ${err}`);
+    }
+  }
+
+  const dataWasTruncated = JSON.stringify(extracted).length > SCRAPE_STRUCTURED_RETURN_LIMIT;
+
+  return {
+    success: true,
+    ...extracted,
+    ...(dataWasTruncated ? { data_truncated: true } : {}),
+    selector_confidence: 0,        // 0 = LLM extraction (no stored selectors)
+    adaptive_match_used: false,
+    selector_uncertain: false,
+    content_hash: contentHash,
+    url,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Monitor Webpage — set up recurring monitoring with change detection
+// ---------------------------------------------------------------------------
+
+const MONITOR_SCHEDULE_TIME_DEFAULT = '00:00';
+
+async function executeMonitorWebpage(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const url = String(input.url ?? '');
+  const watchFor = String(input.watch_for ?? '');
+  const frequency = String(input.frequency ?? '');
+  const fields = input.fields ? String(input.fields) : null;
+
+  if (!url) return { success: false, error: 'url is required' };
+  if (!watchFor) return { success: false, error: 'watch_for is required' };
+  if (!frequency) return { success: false, error: 'frequency is required' };
+
+  // requireSubaccountContext check — monitor_webpage needs a subaccount to attach the scheduled task
+  if (!context.subaccountId) {
+    return { success: false, error: 'monitor_webpage requires a subaccount context' };
+  }
+
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return { success: false, error: `Invalid URL: ${url}` };
+  }
+
+  // ── 0. Deduplication — return existing task if one already monitors this URL ──
+  const existingTasks = await db
+    .select({ id: scheduledTasks.id, brief: scheduledTasks.brief })
+    .from(scheduledTasks)
+    .where(
+      and(
+        eq(scheduledTasks.organisationId, context.organisationId),
+        eq(scheduledTasks.subaccountId, context.subaccountId),
+        eq(scheduledTasks.assignedAgentId, context.agentId),
+        eq(scheduledTasks.isActive, true),
+      ),
+    );
+
+  const duplicate = existingTasks.find(t => {
+    try {
+      return parseMonitorBrief(t.brief ?? '').monitorUrl === url;
+    } catch {
+      return false;
+    }
+  });
+
+  if (duplicate) {
+    return {
+      success: true,
+      scheduled_task_id: duplicate.id,
+      already_existed: true,
+      message: `Monitor for ${url} already exists (task ${duplicate.id})`,
+    };
+  }
+
+  // ── 1. Parse frequency to rrule ──────────────────────────────────────────
+  let rrule: string;
+  try {
+    rrule = parseFrequencyToRRule(frequency);
+  } catch (err) {
+    const msg = (err as { message?: string })?.message ?? `Unsupported frequency: "${frequency}"`;
+    return { success: false, error: msg };
+  }
+
+  // Derive scheduleTime from rrule (default 00:00 for simple frequencies)
+  const scheduleTime = MONITOR_SCHEDULE_TIME_DEFAULT;
+
+  // ── 2. Derive selectorGroup ──────────────────────────────────────────────
+  let selectorGroup: string | null = null;
+  if (fields) {
+    selectorGroup = deriveSelectorGroup(hostname, fields);
+  }
+
+  // ── 3. Establish initial baseline ────────────────────────────────────────
+  let baselineContentHash = '';
+  let baselineExtractedData: Record<string, unknown> | null = null;
+
+  if (fields) {
+    // Structured monitoring — use LLM extraction for first run
+    const structuredResult = await executeScrapeStructured(
+      { url, fields, remember: true, selector_group: selectorGroup },
+      context
+    ) as Record<string, unknown>;
+
+    if (structuredResult.success === false) {
+      return {
+        success: false,
+        error: `Failed to establish structured baseline: ${structuredResult.error}`,
+      };
+    }
+
+    baselineContentHash = String(structuredResult.content_hash ?? '');
+    const {
+      success: _s,
+      content_hash: _ch,
+      url: _u,
+      selector_confidence: _sc,
+      adaptive_match_used: _am,
+      selector_uncertain: _su,
+      data_truncated: _dt,
+      ...dataFields
+    } = structuredResult;
+    baselineExtractedData = dataFields as Record<string, unknown>;
+  } else {
+    // Hash-based monitoring
+    const scrapeResult = await scrapingEngine.scrape({
+      url,
+      outputFormat: 'markdown',
+      orgId: context.organisationId,
+      subaccountId: context.subaccountId ?? undefined,
+    });
+
+    if (!scrapeResult.success) {
+      return { success: false, error: `Failed to establish baseline — page could not be fetched: ${url}` };
+    }
+
+    baselineContentHash = scrapeResult.contentHash;
+  }
+
+  // ── 4. Create scheduled task ─────────────────────────────────────────────
+  // The brief carries all config needed by subsequent runs.
+  // A temporary ID placeholder — replaced after insert with actual ID.
+  const briefPlaceholder = serializeMonitorBrief({
+    type: 'monitor_webpage_run',
+    monitorUrl: url,
+    watchFor,
+    fields,
+    selectorGroup,
+    scheduledTaskId: '__PLACEHOLDER__',
+  });
+
+  const title = `Monitor: ${hostname} — ${watchFor.slice(0, 50)}`;
+
+  const scheduledTask = await scheduledTaskService.create(
+    context.organisationId,
+    context.subaccountId,
+    {
+      title,
+      brief: briefPlaceholder, // updated below
+      assignedAgentId: context.agentId, // Strategic Intelligence Agent
+      rrule,
+      timezone: 'UTC',
+      scheduleTime,
+    },
+  );
+
+  // ── 5. Update brief with actual scheduledTaskId ──────────────────────────
+  const finalBrief = serializeMonitorBrief({
+    type: 'monitor_webpage_run',
+    monitorUrl: url,
+    watchFor,
+    fields,
+    selectorGroup,
+    scheduledTaskId: scheduledTask.id,
+    baseline: {
+      contentHash: baselineContentHash,
+      extractedData: baselineExtractedData,
+    },
+  });
+
+  await scheduledTaskService.update(scheduledTask.id, context.organisationId, { brief: finalBrief });
+
+  return {
+    success: true,
+    scheduled_task_id: scheduledTask.id,
+    title,
+    rrule,
+    frequency,
+    url,
+    watch_for: watchFor,
+    fields: fields ?? null,
+    baseline_content_hash: baselineContentHash,
+    message: `Monitoring scheduled. The "${title}" task will run ${frequency} and alert you when ${watchFor} changes.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

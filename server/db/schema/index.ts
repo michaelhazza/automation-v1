@@ -134,3 +134,9 @@ export * from './modules.js';
 export * from './subscriptions.js';
 export * from './orgSubscriptions.js';
 export * from './reports.js';
+
+// Scraping Engine — selectors + cache (migration 0108)
+export { scrapingSelectors } from './scrapingSelectors.js';
+export type { ScrapingSelector, NewScrapingSelector, ElementFingerprint } from './scrapingSelectors.js';
+export { scrapingCache } from './scrapingCache.js';
+export type { ScrapingCache, NewScrapingCache } from './scrapingCache.js';

@@ -436,6 +436,24 @@ export const MCP_PRESETS: McpPreset[] = [
   },
 
   // ── CRM ───────────────────────────────────────────────────────────────────
+  // ── Browser / Scraping ────────────────────────────────────────────────────
+  {
+    slug: 'scrapling',
+    name: 'Scrapling',
+    description: 'Anti-bot web scraping with Cloudflare bypass and stealth browsing.',
+    category: 'browser' as McpPresetCategory,
+    integrationType: 'mcp_server' as const,
+    transport: 'stdio' as const,
+    command: 'uvx',
+    args: ['scrapling', 'mcp'],
+    requiresConnection: false,
+    recommendedGateLevel: 'auto' as const,
+    toolCount: 10,
+    toolHighlights: ['get', 'stealthy_fetch', 'bulk_get', 'open_session'],
+    setupNotes: 'Requires Python 3.10+ and uvx. Automatically installs Scrapling and browser binaries on first run.',
+  },
+
+  // ── CRM ───────────────────────────────────────────────────────────────────
   {
     slug: 'salesforce',
     name: 'Salesforce',

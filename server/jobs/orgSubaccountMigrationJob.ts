@@ -251,6 +251,7 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
             error: entryErr instanceof Error ? entryErr.message : String(entryErr),
           });
           stats.errorCount++;
+        }
       }
     } catch (err) {
       logger.error('org_migration.memory_error', {
