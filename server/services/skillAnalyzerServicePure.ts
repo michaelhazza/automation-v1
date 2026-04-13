@@ -428,7 +428,13 @@ export function parseClassificationResponseWithMerge(
   if (!parsed || typeof parsed !== 'object') return null;
   const p = parsed as Record<string, unknown>;
   if (!isValidClassification(p.classification)) return null;
-  if (typeof p.confidence !== 'number' || p.confidence < 0 || p.confidence > 1) return null;
+  // Normalise confidence: Sonnet occasionally returns a percentage integer (e.g. 85)
+  // instead of a decimal (0.85). Clamp to [0, 1] — values > 1 are treated as
+  // percentages and divided by 100.
+  if (typeof p.confidence !== 'number') return null;
+  const raw = p.confidence;
+  const confidence = raw > 1 ? raw / 100 : raw;
+  if (confidence < 0 || confidence > 1) return null;
   if (typeof p.reasoning !== 'string') return null;
 
   const classification = p.classification;
@@ -444,7 +450,7 @@ export function parseClassificationResponseWithMerge(
 
   return {
     classification,
-    confidence: p.confidence,
+    confidence,
     reasoning: p.reasoning,
     proposedMerge,
   };

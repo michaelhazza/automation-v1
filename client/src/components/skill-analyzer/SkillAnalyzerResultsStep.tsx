@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import api from '../../lib/api';
+import Modal from '../Modal';
 import MergeReviewBlock from './MergeReviewBlock';
 import type {
   AnalysisJob,
@@ -20,38 +21,48 @@ type Classification = 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINC
 
 const SECTION_CONFIG: Record<Classification, {
   label: string;
-  subtitle: string;
-  colour: string;
-  headerColour: string;
+  dot: string;         // Tailwind bg-* class for the section dot
+  bandBg: string;      // hex colour for header band background
+  bandBorder: string;  // hex colour for header band bottom border
+  badgeBg: string;     // hex colour for count badge background
+  badgeText: string;   // hex colour for count badge text
   defaultOpen: boolean;
 }> = {
-  DUPLICATE: {
-    label: 'Duplicates',
-    subtitle: 'Already in your library — recommend skipping',
-    colour: 'border-red-200 bg-red-50/30',
-    headerColour: 'text-red-700 bg-red-50',
-    defaultOpen: false,
-  },
-  IMPROVEMENT: {
-    label: 'Improvements',
-    subtitle: 'Better versions of existing skills — recommend approving',
-    colour: 'border-blue-200 bg-blue-50/30',
-    headerColour: 'text-blue-700 bg-blue-50',
-    defaultOpen: true,
-  },
   PARTIAL_OVERLAP: {
     label: 'Partial Overlaps',
-    subtitle: 'Shared purpose — human judgment required',
-    colour: 'border-amber-200 bg-amber-50/30',
-    headerColour: 'text-amber-700 bg-amber-50',
+    dot: 'bg-amber-400',
+    bandBg: '#fffbeb',
+    bandBorder: '#fcd34d',
+    badgeBg: '#fef3c7',
+    badgeText: '#92400e',
+    defaultOpen: true,
+  },
+  IMPROVEMENT: {
+    label: 'Replacements — incoming is strictly better',
+    dot: 'bg-blue-400',
+    bandBg: '#eff6ff',
+    bandBorder: '#93c5fd',
+    badgeBg: '#dbeafe',
+    badgeText: '#1e40af',
     defaultOpen: true,
   },
   DISTINCT: {
     label: 'New Skills',
-    subtitle: 'Novel skills not in your library — recommend importing',
-    colour: 'border-green-200 bg-green-50/30',
-    headerColour: 'text-green-700 bg-green-50',
+    dot: 'bg-green-400',
+    bandBg: '#f0fdf4',
+    bandBorder: '#86efac',
+    badgeBg: '#dcfce7',
+    badgeText: '#166534',
     defaultOpen: true,
+  },
+  DUPLICATE: {
+    label: 'Duplicates — already in library',
+    dot: 'bg-red-400',
+    bandBg: '#fef2f2',
+    bandBorder: '#fca5a5',
+    badgeBg: '#fee2e2',
+    badgeText: '#991b1b',
+    defaultOpen: false,
   },
 };
 
@@ -167,8 +178,8 @@ function AgentChipBlock({
             key={proposal.systemAgentId}
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition-colors ${
               proposal.selected
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : 'bg-white border-slate-200 text-slate-600'
+                ? 'bg-emerald-600 border-emerald-600 text-white'
+                : 'bg-slate-100 border-slate-200 text-slate-500'
             }`}
           >
             <button
@@ -177,14 +188,13 @@ function AgentChipBlock({
               className="flex items-center gap-1"
               aria-label={proposal.selected ? 'Deselect' : 'Select'}
             >
-              <span aria-hidden="true">{proposal.selected ? '✓' : '○'}</span>
               <span className="font-medium">{proposal.nameSnapshot}</span>
-              <span className="text-[10px] opacity-70">{Math.round(proposal.score * 100)}%</span>
+              <span className={`text-[10px] ${proposal.selected ? 'opacity-80' : 'opacity-60'}`}>{Math.round(proposal.score * 100)}%</span>
             </button>
             <button
               type="button"
               onClick={() => removeProposal(proposal)}
-              className="ml-0.5 text-slate-400 hover:text-red-600"
+              className={`ml-0.5 ${proposal.selected ? 'text-emerald-200 hover:text-white' : 'text-slate-400 hover:text-red-600'}`}
               aria-label="Remove proposal"
             >
               ×
@@ -221,7 +231,7 @@ function AgentChipBlock({
   );
 }
 
-function ResultCard({
+function ResultRow({
   result,
   jobId,
   availableSystemAgents,
@@ -238,26 +248,29 @@ function ResultCard({
   onProposalsUpdated: (resultId: string, proposals: AgentProposal[]) => void;
   onResultPatched: (next: AnalysisResult) => void;
 }) {
-  const [showDiff, setShowDiff] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [showSkill, setShowSkill] = useState(false);
+
+  const confidence = Math.round(result.confidence * 100);
+  const similarity = result.similarityScore != null ? Math.round(result.similarityScore * 100) : null;
+  const isDistinct = result.classification === 'DISTINCT';
+  const isDecided = result.actionTaken != null;
 
   async function setAction(action: 'approved' | 'rejected' | 'skipped') {
-    const next = result.actionTaken === action ? null : action;
     setActionError(null);
     try {
-      if (next) {
-        await api.patch(`/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`, { action: next });
-      } else {
-        // Sending 'skipped' as a neutral reset
-        await api.patch(`/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`, { action: 'skipped' });
-      }
-      onActionChange(result.id, next);
+      await api.patch(
+        `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}`,
+        { actionTaken: action },
+      );
+      onActionChange(result.id, action);
+      setExpanded(false);
     } catch (err) {
       const e = err as { response?: { data?: { error?: unknown } }; message?: string };
       const errBody = e?.response?.data?.error;
-      const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Failed to save action.';
-      console.error('[SkillAnalyzer] Failed to set result action:', err);
+      const msg = (typeof errBody === 'string' ? errBody : (errBody as { message?: string } | null)?.message) ?? e?.message ?? 'Action failed.';
       setActionError(msg);
     }
   }
@@ -280,125 +293,170 @@ function ResultCard({
     }
   }
 
-  const confidence = Math.round(result.confidence * 100);
-  const similarity = result.similarityScore != null ? Math.round(result.similarityScore * 100) : null;
+  // "replaces X" on IMPROVEMENT rows; "vs. X" on all others
+  const matchLine = result.matchedSkillContent
+    ? `${result.classification === 'IMPROVEMENT' ? 'replaces' : 'vs.'} ${result.matchedSkillContent.name}${similarity != null ? ` · ${similarity}% similar` : ''}`
+    : null;
 
-  const isDistinct = result.classification === 'DISTINCT';
+  const statusBadge =
+    result.actionTaken === 'approved' ? (
+      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">approved</span>
+    ) : result.actionTaken === 'rejected' ? (
+      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700">rejected</span>
+    ) : result.actionTaken === 'skipped' ? (
+      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">skipped</span>
+    ) : null;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-lg p-4">
-      <div className="flex items-start justify-between gap-4">
+    <div style={isDecided ? { opacity: 0.4 } : undefined}>
+      {/* Collapsed row header */}
+      <div
+        className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors"
+        onClick={() => { if (!isDecided) setExpanded((v) => !v); }}
+      >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-medium text-slate-800 text-sm">{result.candidateName}</span>
-            <code className="text-xs text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded">{result.candidateSlug}</code>
-          </div>
-          {result.matchedSkillContent && (
-            <p className="text-xs text-slate-500 mb-1">
-              vs. <strong>{result.matchedSkillContent.name}</strong>
-              {similarity != null && ` · ${similarity}% similar`}
-              {` · ${confidence}% confidence`}
+          <p className={`text-sm font-medium text-slate-800 leading-snug${isDecided ? ' line-through' : ''}`}>
+            {result.candidateName}
+          </p>
+          {matchLine && <p className="text-xs text-slate-400 mt-0.5">{matchLine}</p>}
+        </div>
+        {isDecided && statusBadge}
+        {!isDecided && <span className="text-xs text-slate-300 flex-shrink-0">{confidence}%</span>}
+        {!isDecided && (
+          <span
+            className="text-slate-300 text-sm flex-shrink-0 transition-transform duration-150"
+            style={expanded ? { transform: 'rotate(90deg)' } : undefined}
+          >›</span>
+        )}
+      </div>
+
+      {/* Expanded panel */}
+      {expanded && !isDecided && (
+        <div className="bg-slate-50 border-t border-slate-200 px-4 py-4 space-y-3">
+          {/* Reasoning block */}
+          {result.classificationReasoning && (
+            <p className="text-xs text-slate-500 italic leading-relaxed pl-3 py-2 pr-3 bg-white rounded border-l-2 border-slate-200">
+              {result.classificationReasoning}
             </p>
           )}
-          {result.classificationReasoning && (
-            <p className="text-xs text-slate-600 mt-1">{result.classificationReasoning}</p>
-          )}
+
+          {/* Classification failed banner */}
           {result.classificationFailed && (
-            <div className="mt-2 p-2 rounded-lg text-xs bg-amber-50 border border-amber-200 text-amber-800">
-              <p className="font-medium mb-1">
-                Couldn't classify (temporary issue)
-                {result.classificationFailureReason === 'rate_limit' && (
-                  <span className="ml-1 font-normal opacity-70">· Rate limit</span>
-                )}
-                {result.classificationFailureReason === 'parse_error' && (
-                  <span className="ml-1 font-normal opacity-70">· Parse error</span>
-                )}
-              </p>
+            <div className="flex items-center gap-3 p-3 rounded-lg text-xs bg-amber-50 border border-amber-200 text-amber-800">
+              <span className="flex-1">
+                Couldn't classify this skill
+                {result.classificationFailureReason === 'rate_limit' && ' · Rate limit'}
+                {result.classificationFailureReason === 'parse_error' && ' · Parse error'}
+              </span>
               <button
                 type="button"
                 onClick={handleRetry}
                 disabled={retrying || !result.classificationFailed}
-                className="text-xs px-2 py-1 rounded border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                className="px-2 py-1 rounded border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50"
               >
                 {retrying ? 'Retrying…' : 'Retry'}
               </button>
             </div>
           )}
+
+          {/* Three-column merge view (PARTIAL_OVERLAP / IMPROVEMENT) */}
+          {(result.classification === 'PARTIAL_OVERLAP' || result.classification === 'IMPROVEMENT') && candidate && (
+            <MergeReviewBlock
+              result={result}
+              candidate={candidate}
+              jobId={jobId}
+              onResultUpdated={onResultPatched}
+            />
+          )}
+
+          {/* Legacy diff pills — shown when no merge proposal exists */}
+          {result.diffSummary && !result.proposedMergedContent && (
+            <DiffView result={result} />
+          )}
+
+          {/* Agent chips (DISTINCT rows only) */}
+          {isDistinct && (
+            <AgentChipBlock
+              result={result}
+              jobId={jobId}
+              availableSystemAgents={availableSystemAgents}
+              onProposalsUpdated={onProposalsUpdated}
+            />
+          )}
+
+          {/* Action bar */}
+          <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={() => setAction('approved')}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => setAction('rejected')}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-600 hover:border-red-300 hover:text-red-600 transition-colors"
+            >
+              Reject
+            </button>
+            <button
+              type="button"
+              onClick={() => setAction('skipped')}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-slate-400 transition-colors"
+            >
+              Skip
+            </button>
+            {candidate && (
+              <button
+                type="button"
+                onClick={() => setShowSkill(true)}
+                className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg border border-indigo-200 bg-white text-indigo-600 hover:bg-indigo-50 transition-colors"
+              >
+                View skill
+              </button>
+            )}
+          </div>
+
+          {actionError && <p className="text-xs text-red-600 -mt-1">{actionError}</p>}
         </div>
-
-        {/* Action buttons */}
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => setAction('approved')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-              result.actionTaken === 'approved'
-                ? 'bg-green-600 text-white border-green-600'
-                : 'bg-white text-slate-600 border-slate-200 hover:border-green-400 hover:text-green-600'
-            }`}
-          >
-            Approve
-          </button>
-          <button
-            onClick={() => setAction('rejected')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-              result.actionTaken === 'rejected'
-                ? 'bg-red-600 text-white border-red-600'
-                : 'bg-white text-slate-600 border-slate-200 hover:border-red-400 hover:text-red-600'
-            }`}
-          >
-            Reject
-          </button>
-          <button
-            onClick={() => setAction('skipped')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-              result.actionTaken === 'skipped'
-                ? 'bg-slate-400 text-white border-slate-400'
-                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
-            }`}
-          >
-            Skip
-          </button>
-        </div>
-      </div>
-
-      {actionError && (
-        <p className="mt-2 text-xs text-red-600">{actionError}</p>
       )}
 
-      {/* Agent chip block — only on DISTINCT cards. */}
-      {isDistinct && (
-        <AgentChipBlock
-          result={result}
-          jobId={jobId}
-          availableSystemAgents={availableSystemAgents}
-          onProposalsUpdated={onProposalsUpdated}
-        />
+      {/* View skill modal */}
+      {showSkill && candidate && (
+        <Modal title={candidate.name || result.candidateName} onClose={() => setShowSkill(false)} maxWidth={700}>
+          <div className="space-y-4 text-sm">
+            <div>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Slug</p>
+              <code className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700">{result.candidateSlug}</code>
+            </div>
+            {candidate.description && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Description</p>
+                <p className="text-slate-700 text-sm">{candidate.description}</p>
+              </div>
+            )}
+            {candidate.instructions && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Instructions</p>
+                <pre className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto max-h-64 whitespace-pre-wrap text-slate-700">{candidate.instructions}</pre>
+              </div>
+            )}
+            {candidate.definition && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Definition</p>
+                <pre className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto max-h-48 text-slate-700">{JSON.stringify(candidate.definition, null, 2)}</pre>
+              </div>
+            )}
+            {candidate.rawSource && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Raw source</p>
+                <pre className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto max-h-64 whitespace-pre-wrap text-slate-700">{candidate.rawSource}</pre>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
-
-      {/* Phase 5: Three-column merge view — only on PARTIAL_OVERLAP /
-          IMPROVEMENT cards. Reads the candidate from the job's
-          parsedCandidates array indexed by result.candidateIndex. */}
-      {(result.classification === 'PARTIAL_OVERLAP' || result.classification === 'IMPROVEMENT') && candidate && (
-        <MergeReviewBlock
-          result={result}
-          candidate={candidate}
-          jobId={jobId}
-          onResultUpdated={onResultPatched}
-        />
-      )}
-
-      {/* Legacy diff pills — kept for partial overlaps that have no
-          merge proposal yet (LLM fallback path) so the reviewer still
-          sees field-level differences. */}
-      {result.diffSummary && !result.proposedMergedContent && (
-        <button
-          onClick={() => setShowDiff((v) => !v)}
-          className="mt-2 text-xs text-indigo-600 hover:text-indigo-800 transition-colors"
-        >
-          {showDiff ? 'Hide' : 'Show'} field differences
-        </button>
-      )}
-      {showDiff && !result.proposedMergedContent && <DiffView result={result} />}
     </div>
   );
 }
@@ -458,77 +516,60 @@ function ResultSection({
 
   if (results.length === 0) return null;
 
+  const approvedInSection = results.filter((r) => r.actionTaken != null).length;
+
   return (
-    <div className={`border rounded-xl overflow-hidden ${cfg.colour}`}>
-      <button
+    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
+      {/* Coloured band header */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none"
+        style={{ backgroundColor: cfg.bandBg, borderBottom: `2px solid ${cfg.bandBorder}` }}
         onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center justify-between px-4 py-3 ${cfg.headerColour}`}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold">{cfg.label}</span>
-          <span className="text-xs font-medium px-2 py-0.5 bg-white/60 rounded-full">{results.length}</span>
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.dot}`} />
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-700">{cfg.label}</span>
+        <span
+          className="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={{ backgroundColor: cfg.badgeBg, color: cfg.badgeText }}
+        >
+          {results.length}
+        </span>
+        <span className="text-xs text-slate-400">{approvedInSection} reviewed</span>
+        <div className="ml-auto flex items-center gap-2">
+          {(classification === 'IMPROVEMENT' || classification === 'DISTINCT' || classification === 'PARTIAL_OVERLAP') && (
+            <button
+              className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onBulkAction(classification, 'approved'); }}
+            >
+              Approve all
+            </button>
+          )}
+          {classification === 'DUPLICATE' && (
+            <button
+              className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onBulkAction(classification, 'rejected'); }}
+            >
+              Reject all
+            </button>
+          )}
+          {classification === 'PARTIAL_OVERLAP' && failedResults.length > 0 && (
+            <button
+              type="button"
+              disabled={bulkRetrying}
+              className="text-xs px-2.5 py-1 rounded-md border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+              onClick={(e) => { e.stopPropagation(); handleBulkRetry(); }}
+            >
+              {bulkRetrying ? 'Retrying…' : `Retry failed (${failedResults.length})`}
+            </button>
+          )}
+          <span className="text-xs text-slate-400">{open ? '▲' : '▼'}</span>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs opacity-70">{cfg.subtitle}</span>
-          <span className="text-xs">{open ? '▲' : '▼'}</span>
-        </div>
-      </button>
+      </div>
 
       {open && (
-        <div className="p-4 space-y-3">
-          {/* Bulk action bar */}
-          <div className="flex items-center gap-2 pb-3 border-b border-white/50">
-            <span className="text-xs text-slate-500 font-medium">Bulk:</span>
-            {classification === 'IMPROVEMENT' && (
-              <button
-                onClick={() => onBulkAction(classification, 'approved')}
-                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                Approve all improvements
-              </button>
-            )}
-            {classification === 'DISTINCT' && (
-              <button
-                onClick={() => onBulkAction(classification, 'approved')}
-                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                Approve all new
-              </button>
-            )}
-            {classification === 'PARTIAL_OVERLAP' && (
-              <button
-                onClick={() => onBulkAction(classification, 'approved')}
-                className="px-3 py-1 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                title="Only rows with an LLM merge proposal are eligible — rows without a proposal are skipped client-side."
-              >
-                Approve all partial overlaps (with proposal)
-              </button>
-            )}
-            {classification === 'PARTIAL_OVERLAP' && failedResults.length > 0 && (
-              <button
-                type="button"
-                onClick={handleBulkRetry}
-                disabled={bulkRetrying || failedResults.length === 0}
-                className="px-3 py-1 text-xs font-medium border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 transition-colors"
-              >
-                {bulkRetrying ? 'Retrying…' : `Retry all failed classifications (${failedResults.length})`}
-              </button>
-            )}
-            {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && (
-              <span className="text-xs text-slate-600">{bulkRetryStatus}</span>
-            )}
-            {classification === 'DUPLICATE' && (
-              <button
-                onClick={() => onBulkAction(classification, 'rejected')}
-                className="px-3 py-1 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              >
-                Reject all duplicates
-              </button>
-            )}
-          </div>
-
+        <div className="divide-y divide-slate-50">
           {results.map((r) => (
-            <ResultCard
+            <ResultRow
               key={r.id}
               result={r}
               jobId={jobId}
@@ -541,12 +582,16 @@ function ResultSection({
           ))}
         </div>
       )}
+
+      {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && (
+        <div className="px-4 py-2 text-xs text-slate-600 border-t border-slate-100">{bulkRetryStatus}</div>
+      )}
     </div>
   );
 }
 
 export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdated, onContinue }: Props) {
-  const CLASSIFICATIONS: Classification[] = ['IMPROVEMENT', 'DISTINCT', 'PARTIAL_OVERLAP', 'DUPLICATE'];
+  const CLASSIFICATIONS: Classification[] = ['PARTIAL_OVERLAP', 'IMPROVEMENT', 'DISTINCT', 'DUPLICATE'];
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkInfo, setBulkInfo] = useState<string | null>(null);
 
@@ -623,29 +668,49 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
   }
 
   const approvedCount = results.filter((r) => r.actionTaken === 'approved').length;
+  const reviewedCount = results.filter((r) => r.actionTaken != null).length;
 
   return (
     <div className="space-y-4">
-      {/* Summary bar */}
-      <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3">
-        <div className="flex gap-6 text-sm">
-          {CLASSIFICATIONS.map((c) => {
-            const count = results.filter((r) => r.classification === c).length;
-            if (count === 0) return null;
-            const cfg = SECTION_CONFIG[c];
-            return (
-              <span key={c} className={`font-medium ${cfg.headerColour.split(' ')[0]}`}>
-                {count} {cfg.label}
-              </span>
-            );
-          })}
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900 mb-0.5">Review Skills</h1>
+          <p className="text-xs text-slate-400">
+            {results.length} candidates · approve, reject, or skip each skill
+          </p>
+          <div className="flex gap-2 flex-wrap mt-2">
+            {CLASSIFICATIONS.map((c) => {
+              const count = results.filter((r) => r.classification === c).length;
+              if (count === 0) return null;
+              const cfg = SECTION_CONFIG[c];
+              return (
+                <span
+                  key={c}
+                  className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full"
+                  style={{ backgroundColor: cfg.badgeBg, color: cfg.badgeText }}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+                  {count} {cfg.label}
+                </span>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <div className="h-1.5 w-48 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-slate-400 rounded-full transition-all"
+                style={{ width: results.length > 0 ? `${(reviewedCount / results.length) * 100}%` : '0%' }}
+              />
+            </div>
+            <span className="text-xs text-slate-400">{reviewedCount} of {results.length} reviewed</span>
+          </div>
         </div>
         <button
           onClick={onContinue}
-          className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          className="shrink-0 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
         >
-          Continue to Execute
-          {approvedCount > 0 && ` (${approvedCount} approved)`}
+          Continue to Execute →{approvedCount > 0 && ` (${approvedCount})`}
         </button>
       </div>
 

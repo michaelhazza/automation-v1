@@ -372,13 +372,9 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
   }
 
   const matched = result.matchedSkillContent;
-  const reasoning = result.classificationReasoning;
 
   return (
     <div className="mt-3 p-3 bg-white border border-slate-200 rounded-lg">
-      {reasoning && (
-        <p className="text-xs text-slate-600 italic mb-2">{reasoning}</p>
-      )}
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-medium text-slate-600">
           Recommended changes
@@ -399,6 +395,19 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
       </div>
 
       {patchError && <p className="mb-2 text-xs text-red-600">{patchError}</p>}
+
+      {/* Diff legend */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-xs text-slate-400">
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-sm bg-emerald-100 border border-emerald-300 inline-block" />
+          Added from incoming
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-sm bg-red-50 border border-red-300 inline-block" />
+          Removed from current
+        </span>
+        <span className="italic">Rewritten passages appear fully highlighted — review content carefully</span>
+      </div>
 
       <FieldRow
         field="name"
