@@ -11,6 +11,8 @@ import {
   orgMarginConfigs,
   orgBudgets,
   workspaceLimits,
+  agentRuns,
+  subaccounts,
 } from '../db/schema/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { getRoutingLog, getRoutingDistribution, getRequestDetail } from '../services/llmUsageService.js';
@@ -27,7 +29,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
-    const { orgId } = req.params;
+    const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     const [monthly, daily, topSubaccounts] = await Promise.all([
@@ -51,14 +53,19 @@ router.get(
         ),
       ).limit(1),
 
-      // Top 10 subaccounts by monthly spend
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'subaccount'),
-          eq(costAggregates.periodType, 'monthly'),
-          eq(costAggregates.periodKey, billingMonth),
-        ),
-      ).orderBy(desc(costAggregates.totalCostCents)).limit(10),
+      // Top 10 subaccounts by monthly spend — scoped to this org
+      db.select({ costAggregate: costAggregates })
+        .from(costAggregates)
+        .innerJoin(subaccounts, eq(costAggregates.entityId, subaccounts.id))
+        .where(
+          and(
+            eq(costAggregates.entityType, 'subaccount'),
+            eq(costAggregates.periodType, 'monthly'),
+            eq(costAggregates.periodKey, billingMonth),
+            eq(subaccounts.organisationId, orgId),
+          ),
+        ).orderBy(desc(costAggregates.totalCostCents)).limit(10)
+        .then(rows => rows.map(r => r.costAggregate)),
     ]);
 
     res.json({
@@ -79,7 +86,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
-    const { orgId } = req.params;
+    const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     const rows = await db.select().from(costAggregates).where(
@@ -104,7 +111,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
-    const { orgId } = req.params;
+    const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     // Query llm_requests directly for per-model breakdown scoped to this org
@@ -142,16 +149,28 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
-    const { orgId } = req.params;
+    const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
-    const rows = await db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'provider'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents));
+    // Query llmRequests directly for org-scoped provider breakdown
+    // (cost_aggregates provider rows are platform-wide, not per-org)
+    const rows = await db
+      .select({
+        provider:       llmRequests.provider,
+        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})`,
+        requestCount:   sql<number>`count(*)`,
+        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})`,
+        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})`,
+      })
+      .from(llmRequests)
+      .where(
+        and(
+          eq(llmRequests.organisationId, orgId),
+          eq(llmRequests.billingMonth, billingMonth),
+        ),
+      )
+      .groupBy(llmRequests.provider)
+      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
 
     res.json({ period: billingMonth, providers: rows });
   }),
@@ -167,6 +186,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     const [monthly, daily, limits] = await Promise.all([
@@ -208,6 +228,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     const rows = await db
@@ -243,6 +264,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     const rows = await db
@@ -279,13 +301,38 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
-    const rows = await db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'run'),
-        eq(costAggregates.periodType, 'run'),
-      ),
-    ).orderBy(desc(costAggregates.updatedAt)).limit(50);
+    // Join with agentRuns to scope cost data to this subaccount only —
+    // previously this query returned ALL runs globally (missing org/subaccount filter).
+    const rows = await db
+      .select({
+        id: costAggregates.id,
+        entityType: costAggregates.entityType,
+        entityId: costAggregates.entityId,
+        periodType: costAggregates.periodType,
+        periodKey: costAggregates.periodKey,
+        totalCostRaw: costAggregates.totalCostRaw,
+        totalCostWithMargin: costAggregates.totalCostWithMargin,
+        totalCostCents: costAggregates.totalCostCents,
+        totalTokensIn: costAggregates.totalTokensIn,
+        totalTokensOut: costAggregates.totalTokensOut,
+        requestCount: costAggregates.requestCount,
+        errorCount: costAggregates.errorCount,
+        updatedAt: costAggregates.updatedAt,
+      })
+      .from(costAggregates)
+      .innerJoin(agentRuns, eq(costAggregates.entityId, agentRuns.id))
+      .where(
+        and(
+          eq(costAggregates.entityType, 'run'),
+          eq(costAggregates.periodType, 'run'),
+          eq(agentRuns.subaccountId, subaccountId),
+          eq(agentRuns.organisationId, req.orgId!),
+        ),
+      )
+      .orderBy(desc(costAggregates.updatedAt))
+      .limit(50);
 
     res.json({ runs: rows });
   }),
@@ -300,6 +347,13 @@ router.get(
   authenticate,
   asyncHandler(async (req, res) => {
     const { runId } = req.params;
+
+    // Verify the run belongs to the caller's organisation
+    const [run] = await db.select({ organisationId: agentRuns.organisationId })
+      .from(agentRuns).where(eq(agentRuns.id, runId));
+    if (!run || run.organisationId !== req.orgId!) {
+      throw { statusCode: 404, message: 'Run not found' };
+    }
 
     const [runAgg] = await db.select().from(costAggregates).where(
       and(
@@ -483,6 +537,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
     const { subaccountId, period } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
 
     // Reconciliation check
     const ledgerTotal = await db
@@ -587,6 +642,7 @@ router.get(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
   asyncHandler(async (req, res, _next: NextFunction) => {
     const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
     // Get the subaccount agent link for budget config
@@ -653,6 +709,7 @@ router.put(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   asyncHandler(async (req, res, _next: NextFunction) => {
     const { subaccountId, agentId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
     const { maxCostPerRunCents, maxLlmCallsPerRun, tokenBudgetPerRun } = req.body as {
       maxCostPerRunCents?: number | null;
       maxLlmCallsPerRun?: number | null;
@@ -695,7 +752,7 @@ router.get(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_VIEW),
   asyncHandler(async (req, res) => {
-    const { orgId } = req.params;
+    const orgId = req.orgId!;
     const [budget] = await db.select().from(orgBudgets).where(eq(orgBudgets.organisationId, orgId));
     res.json(budget ?? null);
   }),
@@ -706,7 +763,7 @@ router.put(
   authenticate,
   requireOrgPermission(ORG_PERMISSIONS.SETTINGS_EDIT),
   asyncHandler(async (req, res) => {
-    const { orgId } = req.params;
+    const orgId = req.orgId!;
     const { monthlyCostLimitCents, alertThresholdPct } = req.body as {
       monthlyCostLimitCents?: number;
       alertThresholdPct?: number;

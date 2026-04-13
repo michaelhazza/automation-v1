@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface SystemEngine {
   id: string;
@@ -22,6 +24,7 @@ export default function SystemEnginesPage({ user }: { user: User }) {
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', engineType: 'n8n', baseUrl: '', apiKey: '' });
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = () => {
     api.get('/api/system/engines')
@@ -50,10 +53,17 @@ export default function SystemEnginesPage({ user }: { user: User }) {
     load();
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this system engine?')) return;
-    await api.delete(`/api/system/engines/${id}`);
-    load();
+  const handleConfirmDelete = async () => {
+    if (!deleteId) return;
+    try {
+      await api.delete(`/api/system/engines/${deleteId}`);
+      toast.success('Engine deleted');
+      load();
+    } catch {
+      toast.error('Failed to delete engine');
+    } finally {
+      setDeleteId(null);
+    }
   };
 
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
@@ -101,7 +111,7 @@ export default function SystemEnginesPage({ user }: { user: User }) {
                     <button onClick={() => handleToggleStatus(e)} className={`px-3 py-1 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors ${e.status === 'active' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-600 hover:bg-green-700'}`}>
                       {e.status === 'active' ? 'Deactivate' : 'Activate'}
                     </button>
-                    <button onClick={() => handleDelete(e.id)} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Delete</button>
+                    <button onClick={() => setDeleteId(e.id)} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Delete</button>
                   </div>
                 </td>
               </tr>
@@ -145,6 +155,16 @@ export default function SystemEnginesPage({ user }: { user: User }) {
             </div>
           </div>
         </div>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Engine"
+          message="Are you sure? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </>
   );

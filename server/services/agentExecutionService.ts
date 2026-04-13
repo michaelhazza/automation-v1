@@ -1638,6 +1638,9 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
   // Throttle trace events to prevent event floods (max 2/sec)
   const traceThrottle = new TraceThrottle(runId);
 
+  try { // Expanded try/finally scope — guarantees traceThrottle.destroy() even
+        // if middleware setup, seed-from-previous, or planning prelude throws.
+
   const mwCtx: MiddlewareContext = buildMiddlewareContext({
     runId,
     request,
@@ -2323,15 +2326,13 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
       configVersion,
     });
 
-    // Check if we've hit the max iteration limit
+    // Check if we've hit the max iteration limit — enforce the exit
     if (iteration >= MAX_LOOP_ITERATIONS - 1) {
+      finalStatus = finalStatus ?? 'completed';
       emitLoopTermination('max_iterations', { iteration, totalToolCalls });
+      break outerLoop;
     }
   }
-
-  // Flush any pending throttled trace events before returning
-  traceThrottle.destroy();
-
   return {
     summary: lastTextContent || null,
     toolCallsLog,
@@ -2344,6 +2345,12 @@ async function runAgenticLoop(params: LoopParams): Promise<LoopResult> {
     deliverablesCreated,
     finalStatus,
   };
+
+  } finally {
+    // Flush any pending throttled trace events before returning — guaranteed
+    // cleanup even on early exit (timeout, budget, loop_detected, error).
+    traceThrottle.destroy();
+  }
 }
 
 // ---------------------------------------------------------------------------

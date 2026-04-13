@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { toast } from 'sonner';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import Modal from '../components/Modal';
@@ -35,10 +36,16 @@ export default function AdminUsersPage({ user }: { user: User }) {
   const [success, setSuccess] = useState('');
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
+  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
+
   const load = async () => {
-    const { data } = await api.get('/api/users');
-    setUsers(data);
-    setLoading(false);
+    try {
+      const { data } = await api.get('/api/users');
+      if (mountedRef.current) { setUsers(data); setLoading(false); }
+    } catch {
+      if (mountedRef.current) setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -49,6 +56,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
     try {
       await api.post('/api/users/invite', form);
       setSuccess(`Invitation sent to ${form.email}`);
+      toast.success(`Invitation sent to ${form.email}`);
       setShowInviteForm(false);
       setForm({ email: '', role: 'user', firstName: '', lastName: '' });
       load();
@@ -85,6 +93,7 @@ export default function AdminUsersPage({ user }: { user: User }) {
     setError('');
     try {
       await api.delete(`/api/users/${deleteUserId}`);
+      toast.success('User removed');
       setDeleteUserId(null);
       load();
     } catch (err: unknown) {

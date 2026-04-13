@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface OrgMemory {
   id: string;
@@ -40,6 +42,7 @@ export default function OrgMemoryPage({ embedded }: { embedded?: boolean } = {})
   const [editingSummary, setEditingSummary] = useState(false);
   const [summaryDraft, setSummaryDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -67,12 +70,17 @@ export default function OrgMemoryPage({ embedded }: { embedded?: boolean } = {})
     finally { setSaving(false); }
   }
 
-  async function handleDelete(entryId: string) {
-    if (!confirm('Delete this org memory entry?')) return;
+  async function handleConfirmDelete() {
+    if (!deleteId) return;
     try {
-      await api.delete(`/api/org/memory/entries/${entryId}`);
-      setEntries(entries.filter(e => e.id !== entryId));
-    } catch { setError('Failed to delete'); }
+      await api.delete(`/api/org/memory/entries/${deleteId}`);
+      setEntries(entries.filter(e => e.id !== deleteId));
+      toast.success('Entry deleted');
+    } catch {
+      toast.error('Failed to delete entry');
+    } finally {
+      setDeleteId(null);
+    }
   }
 
   if (loading) {
@@ -173,12 +181,22 @@ export default function OrgMemoryPage({ embedded }: { embedded?: boolean } = {})
                       {entry.includedInSummary && <span className="text-green-600">In summary</span>}
                     </div>
                   </div>
-                  <button onClick={() => handleDelete(entry.id)} title="Delete" className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1">&times;</button>
+                  <button onClick={() => setDeleteId(entry.id)} title="Delete" className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1">&times;</button>
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Entry"
+          message="Are you sure? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </div>
   );

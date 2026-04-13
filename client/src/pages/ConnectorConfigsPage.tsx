@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface ConnectorConfig {
   id: string;
@@ -26,6 +28,7 @@ export default function ConnectorConfigsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ connectorType: 'ghl', pollIntervalMinutes: 60 });
   const [creating, setCreating] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -59,12 +62,17 @@ export default function ConnectorConfigsPage() {
     finally { setCreating(false); }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this connector?')) return;
+  async function handleConfirmDelete() {
+    if (!deleteId) return;
     try {
-      await api.delete(`/api/org/connectors/${id}`);
-      setConnectors(connectors.filter(c => c.id !== id));
-    } catch { setError('Failed to delete'); }
+      await api.delete(`/api/org/connectors/${deleteId}`);
+      setConnectors(connectors.filter(c => c.id !== deleteId));
+      toast.success('Connector deleted');
+    } catch {
+      toast.error('Failed to delete connector');
+    } finally {
+      setDeleteId(null);
+    }
   }
 
   if (loading) {
@@ -147,11 +155,21 @@ export default function ConnectorConfigsPage() {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => handleSync(connector.id)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-[12px] text-slate-600 cursor-pointer">Sync</button>
-                <button onClick={() => handleDelete(connector.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
+                <button onClick={() => setDeleteId(connector.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Connector"
+          message="Are you sure? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </div>
   );

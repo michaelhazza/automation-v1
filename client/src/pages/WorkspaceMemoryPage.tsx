@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface WorkspaceMemory {
   id: string;
@@ -50,6 +52,7 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('summary');
+  const [deleteEntryId, setDeleteEntryId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -98,12 +101,14 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
     finally { setSearching(false); }
   }
 
-  async function handleDeleteEntry(entryId: string) {
-    if (!confirm('Delete this memory entry?')) return;
+  async function handleDeleteEntryConfirm() {
+    if (!deleteEntryId) return;
     try {
-      await api.delete(`/api/subaccounts/${subaccountId}/memory/entries/${entryId}`);
-      setEntries(entries.filter((e) => e.id !== entryId));
-    } catch { setError('Failed to delete entry'); }
+      await api.delete(`/api/subaccounts/${subaccountId}/memory/entries/${deleteEntryId}`);
+      setEntries(entries.filter((e) => e.id !== deleteEntryId));
+      toast.success('Memory entry deleted');
+    } catch { toast.error('Failed to delete entry'); }
+    finally { setDeleteEntryId(null); }
   }
 
   if (loading) {
@@ -210,7 +215,7 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
                       {entry.includedInSummary && <span className="text-green-600">Included in summary</span>}
                     </div>
                   </div>
-                  <button onClick={() => handleDeleteEntry(entry.id)} title="Delete entry" className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1 leading-none transition-colors">&times;</button>
+                  <button onClick={() => setDeleteEntryId(entry.id)} title="Delete entry" className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1 leading-none transition-colors">&times;</button>
                 </div>
               ))}
             </div>
@@ -286,6 +291,16 @@ export default function WorkspaceMemoryPage({ user: _user, embedded = false }: {
             </div>
           )}
         </div>
+      )}
+
+      {deleteEntryId && (
+        <ConfirmDialog
+          title="Delete Entry"
+          message="Delete this memory entry? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteEntryConfirm}
+          onCancel={() => setDeleteEntryId(null)}
+        />
       )}
     </div>
   );

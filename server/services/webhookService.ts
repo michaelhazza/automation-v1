@@ -15,7 +15,7 @@
  */
 
 import crypto from 'crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { executionFiles, executions, executionPayloads, users, workflowEngines } from '../db/schema/index.js';
 import { env } from '../lib/env.js';
@@ -284,7 +284,7 @@ export const webhookService = {
     // 7. Send completion notification if the user opted in
     if (execution.notifyOnComplete && execution.triggeredByUserId) {
       try {
-        const [user] = await db.select().from(users).where(eq(users.id, execution.triggeredByUserId));
+        const [user] = await db.select().from(users).where(and(eq(users.id, execution.triggeredByUserId), isNull(users.deletedAt)));
         if (user) {
           const [payloadRow] = await db
             .select({ processSnapshot: executionPayloads.processSnapshot })

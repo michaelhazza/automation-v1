@@ -195,7 +195,7 @@ export function buildClassificationPrompt(
   const bandHint =
     band === 'likely_duplicate'
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
-      : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
+      : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
   const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship.`;
 
@@ -374,7 +374,7 @@ export function buildClassifyPromptWithMerge(
   const bandHint =
     band === 'likely_duplicate'
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
-      : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
+      : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
   const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
 
@@ -428,7 +428,13 @@ export function parseClassificationResponseWithMerge(
   if (!parsed || typeof parsed !== 'object') return null;
   const p = parsed as Record<string, unknown>;
   if (!isValidClassification(p.classification)) return null;
-  if (typeof p.confidence !== 'number' || p.confidence < 0 || p.confidence > 1) return null;
+  // Normalise confidence: Sonnet occasionally returns a percentage integer (e.g. 85)
+  // instead of a decimal (0.85). Clamp to [0, 1] — values > 1 are treated as
+  // percentages and divided by 100.
+  if (typeof p.confidence !== 'number') return null;
+  const raw = p.confidence;
+  const confidence = raw > 1 ? raw / 100 : raw;
+  if (confidence < 0 || confidence > 1) return null;
   if (typeof p.reasoning !== 'string') return null;
 
   const classification = p.classification;
@@ -444,7 +450,7 @@ export function parseClassificationResponseWithMerge(
 
   return {
     classification,
-    confidence: p.confidence,
+    confidence,
     reasoning: p.reasoning,
     proposedMerge,
   };

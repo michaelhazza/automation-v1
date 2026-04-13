@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface HierarchyTemplate {
   id: string;
@@ -17,6 +19,7 @@ export default function HierarchyTemplatesPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', description: '' });
   const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -41,12 +44,17 @@ export default function HierarchyTemplatesPage() {
     finally { setSaving(false); }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this hierarchy template?')) return;
+  async function handleConfirmDelete() {
+    if (!deleteId) return;
     try {
-      await api.delete(`/api/hierarchy-templates/${id}`);
-      setTemplates(templates.filter(t => t.id !== id));
-    } catch { setError('Failed to delete template'); }
+      await api.delete(`/api/hierarchy-templates/${deleteId}`);
+      setTemplates(templates.filter(t => t.id !== deleteId));
+      toast.success('Template deleted');
+    } catch {
+      toast.error('Failed to delete template');
+    } finally {
+      setDeleteId(null);
+    }
   }
 
   if (loading) {
@@ -104,7 +112,7 @@ export default function HierarchyTemplatesPage() {
             <div key={template.id} className="bg-white border border-slate-200 rounded-xl p-5 flex flex-col">
               <div className="flex justify-between items-start mb-2">
                 <h3 className="text-[15px] font-semibold text-slate-800 m-0">{template.name}</h3>
-                <button onClick={() => handleDelete(template.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1">&times;</button>
+                <button onClick={() => setDeleteId(template.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1">&times;</button>
               </div>
               {template.description && <p className="text-[13px] text-slate-500 m-0 mb-3">{template.description}</p>}
               <div className="mt-auto pt-3 border-t border-slate-100 text-[12px] text-slate-400 flex justify-between">
@@ -114,6 +122,16 @@ export default function HierarchyTemplatesPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Template"
+          message="Are you sure? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </div>
   );

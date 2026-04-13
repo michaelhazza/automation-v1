@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface Tag {
   key: string;
@@ -15,6 +17,7 @@ export default function SubaccountTagsPage() {
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteKey, setDeleteKey] = useState<string | null>(null);
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -40,12 +43,17 @@ export default function SubaccountTagsPage() {
     finally { setSaving(false); }
   }
 
-  async function handleDelete(key: string) {
-    if (!confirm(`Delete tag "${key}"?`)) return;
+  async function handleConfirmDelete() {
+    if (!deleteKey) return;
     try {
-      await api.delete(`/api/subaccounts/${subaccountId}/tags/${encodeURIComponent(key)}`);
-      setTags(tags.filter(t => t.key !== key));
-    } catch { setError('Failed to delete tag'); }
+      await api.delete(`/api/subaccounts/${subaccountId}/tags/${encodeURIComponent(deleteKey)}`);
+      setTags(tags.filter(t => t.key !== deleteKey));
+      toast.success('Tag deleted');
+    } catch {
+      toast.error('Failed to delete tag');
+    } finally {
+      setDeleteKey(null);
+    }
   }
 
   if (loading) {
@@ -106,13 +114,23 @@ export default function SubaccountTagsPage() {
                   <td className="px-5 py-3 text-[14px] font-medium text-slate-800">{tag.key}</td>
                   <td className="px-5 py-3 text-[14px] text-slate-600">{tag.value}</td>
                   <td className="px-3 py-3">
-                    <button onClick={() => handleDelete(tag.key)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1">&times;</button>
+                    <button onClick={() => setDeleteKey(tag.key)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-1">&times;</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {deleteKey && (
+        <ConfirmDialog
+          title="Delete Tag"
+          message={`Are you sure you want to delete tag "${deleteKey}"? This cannot be undone.`}
+          confirmLabel="Delete"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteKey(null)}
+        />
       )}
     </div>
   );

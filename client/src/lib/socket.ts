@@ -69,8 +69,11 @@ export function getSocket(): Socket | null {
 
   if (socket?.connected) return socket;
 
-  // If a stale socket exists, disconnect it before creating a new one
+  // If a stale socket exists, remove all listeners and disconnect before
+  // creating a new one to prevent memory leaks from duplicate handlers.
   if (socket) {
+    socket.removeAllListeners();
+    socket.io.removeAllListeners();
     socket.disconnect();
     socket = null;
   }
@@ -123,6 +126,8 @@ export function getSocket(): Socket | null {
  */
 export function disconnectSocket(): void {
   if (socket) {
+    socket.removeAllListeners();
+    socket.io.removeAllListeners();
     socket.disconnect();
     socket = null;
   }

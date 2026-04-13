@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { getActiveClientId, getActiveClientName } from '../lib/auth';
 import { User } from '../lib/auth';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 // Matches PAGES_BASE_DOMAIN on the backend. Change here if the domain changes.
 const PAGES_BASE_DOMAIN = 'synthetos.ai';
@@ -51,6 +53,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
   const [newSlug, setNewSlug] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,14 +86,17 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
 
   const handleDelete = async (id: string) => {
     if (!clientId) return;
-    if (!window.confirm('Are you sure you want to delete this site? This action cannot be undone.')) return;
     setDeleting(id);
     try {
       await api.delete(`/api/subaccounts/${clientId}/page-projects/${id}`);
       setProjects((p) => p.filter((x) => x.id !== id));
+      toast.success('Site deleted');
     } catch {
-      setError('Failed to delete site');
-    } finally { setDeleting(null); }
+      toast.error('Failed to delete site');
+    } finally {
+      setDeleting(null);
+      setConfirmDeleteId(null);
+    }
   };
 
   if (!clientId) {
@@ -180,7 +186,7 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
                   <div className="text-[11px] text-slate-400">{relativeDate(project.createdAt)}</div>
                   <div className="flex-1" />
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleDelete(project.id); }}
+                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(project.id); }}
                     disabled={deleting === project.id}
                     className="px-2.5 py-1 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-md text-[11px] font-medium border-0 cursor-pointer transition-colors disabled:opacity-50"
                   >
@@ -191,6 +197,16 @@ export default function PageProjectsPage({ user: _user }: { user: User }) {
             </div>
           ))}
         </div>
+      )}
+
+      {confirmDeleteId && (
+        <ConfirmDialog
+          title="Delete Site"
+          message="Are you sure you want to delete this site? This action cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={() => handleDelete(confirmDeleteId)}
+          onCancel={() => setConfirmDeleteId(null)}
+        />
       )}
     </div>
   );

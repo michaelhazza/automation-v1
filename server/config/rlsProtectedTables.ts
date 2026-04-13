@@ -158,6 +158,19 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0088_memory_blocks.sql',
     rationale: 'Shared named context blocks — may contain brand voice, client preferences, or SOPs.',
   },
+  // 0108 — Scraping engine
+  {
+    tableName: 'scraping_selectors',
+    schemaFile: 'scrapingSelectors.ts',
+    policyMigration: '0108_scraping_engine.sql',
+    rationale: 'Per-org scraping selectors for data extraction — tenant-isolated selector configs.',
+  },
+  {
+    tableName: 'scraping_cache',
+    schemaFile: 'scrapingCache.ts',
+    policyMigration: '0108_scraping_engine.sql',
+    rationale: 'Per-org scraping cache — cached page content with tenant isolation.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

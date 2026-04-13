@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface SystemProcess {
   id: string;
@@ -28,6 +30,7 @@ export default function SystemProcessesPage({ user }: { user: User }) {
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', webhookPath: '', inputSchema: '', configSchema: '' });
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const load = () => {
     api.get('/api/system/processes')
@@ -61,9 +64,15 @@ export default function SystemProcessesPage({ user }: { user: User }) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this system process?')) return;
-    await api.delete(`/api/system/processes/${id}`);
-    load();
+    try {
+      await api.delete(`/api/system/processes/${id}`);
+      toast.success('System process deleted');
+      load();
+    } catch {
+      toast.error('Failed to delete system process');
+    } finally {
+      setDeleteId(null);
+    }
   };
 
   if (loading) return <div className="p-8 text-sm text-slate-500">Loading...</div>;
@@ -118,7 +127,7 @@ export default function SystemProcessesPage({ user }: { user: User }) {
                     ) : (
                       <button onClick={() => handleDeactivate(p.id)} className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Deactivate</button>
                     )}
-                    <button onClick={() => handleDelete(p.id)} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Delete</button>
+                    <button onClick={() => setDeleteId(p.id)} className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white border-0 rounded-md cursor-pointer text-[13px] transition-colors">Delete</button>
                   </div>
                 </td>
               </tr>
@@ -129,6 +138,16 @@ export default function SystemProcessesPage({ user }: { user: User }) {
           </tbody>
         </table>
       </div>
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete System Process"
+          message="Are you sure? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={() => handleDelete(deleteId)}
+          onCancel={() => setDeleteId(null)}
+        />
+      )}
 
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
