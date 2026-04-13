@@ -13,6 +13,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - Write detailed specs upfront to reduce ambiguity
 - Define both execution steps AND verification steps before starting
+- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Prefer assertions that can be validated automatically (tests, logs, deterministic checks) over subjective evaluation. Strong success criteria let you loop independently; vague instructions ("make it work") require constant clarification.
 - If something goes sideways, STOP and re-plan immediately. Do not keep pushing.
 - **Stuck detection rule:** If you attempt the same approach twice and it fails both times, you are stuck. Do not try a third time.
 - Use plan mode for verification steps, not just building
@@ -73,7 +74,14 @@ Run these after every non-trivial change. No task is complete until all relevant
 - Optimise for long-term maintainability over short-term speed
 - Challenge your own work before presenting it
 
-## 6. Autonomous Bug Fixing
+## 6. Surgical Changes
+
+- Every changed line should trace directly to the user's request. If it doesn't, revert it.
+- If you notice unrelated dead code, mention it in your response — don't delete it. LLMs are overconfident about what's "certainly unused." The cost of a wrong deletion is high; the cost of mentioning it is zero.
+- Remove imports/variables/functions that YOUR changes made unused. Don't remove pre-existing dead code unless asked.
+- Match existing style, even if you'd do it differently. No drive-by reformatting.
+
+## 7. Autonomous Bug Fixing
 
 - When given a bug report: just fix it. Do not ask for hand-holding.
 - Point at logs, errors, and failing tests, then resolve them
@@ -106,7 +114,7 @@ When stuck (same approach fails twice):
 
 ---
 
-## 7. Skills = System Layer
+## 8. Skills = System Layer
 
 - Skills are NOT just markdown files. They are modular systems the agent can explore and execute.
 - Each skill folder can include: reference knowledge, executable scripts, datasets, workflows, and automation
@@ -130,7 +138,7 @@ When stuck (same approach fails twice):
 
 Each skill should have a single clear responsibility.
 
-## 8. File System = Context Engine
+## 9. File System = Context Engine
 
 - Structure is more valuable than volume
 - Use dedicated folders to enable progressive disclosure and better reasoning:
@@ -140,7 +148,7 @@ Each skill should have a single clear responsibility.
   - `tasks/` for plans, progress tracking, and lessons
 - Structure improves reasoning quality. A well-organised filesystem is part of the agent's brain.
 
-## 9. Avoid Over-Constraining the Agent
+## 10. Avoid Over-Constraining the Agent
 
 - Do not force rigid step-by-step instructions for everything
 - Provide high-signal context, not micromanagement
@@ -148,7 +156,7 @@ Each skill should have a single clear responsibility.
 - Flexibility beats strict instruction sets for complex tasks
 - The goal is good outcomes, not instruction compliance
 
-## 10. Docs Stay In Sync With Code
+## 11. Docs Stay In Sync With Code
 
 - If a code change invalidates something described in a doc (`CLAUDE.md`, `architecture.md`, `KNOWLEDGE.md`, skill references, or any file under `references/`), update that doc **in the same session and the same commit** as the code change.
 - Not later. Not "I'll come back to it." Right now, as part of the task.
