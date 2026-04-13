@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import api from '../../lib/api';
+import Modal from '../Modal';
 import MergeReviewBlock from './MergeReviewBlock';
 import type {
   AnalysisJob,
@@ -20,38 +21,48 @@ type Classification = 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINC
 
 const SECTION_CONFIG: Record<Classification, {
   label: string;
-  subtitle: string;
-  colour: string;
-  headerColour: string;
+  dot: string;         // Tailwind bg-* class for the section dot
+  bandBg: string;      // hex colour for header band background
+  bandBorder: string;  // hex colour for header band bottom border
+  badgeBg: string;     // hex colour for count badge background
+  badgeText: string;   // hex colour for count badge text
   defaultOpen: boolean;
 }> = {
-  DUPLICATE: {
-    label: 'Duplicates',
-    subtitle: 'Already in your library — recommend skipping',
-    colour: 'border-red-200 bg-red-50/30',
-    headerColour: 'text-red-700 bg-red-50',
-    defaultOpen: false,
-  },
-  IMPROVEMENT: {
-    label: 'Improvements',
-    subtitle: 'Better versions of existing skills — recommend approving',
-    colour: 'border-blue-200 bg-blue-50/30',
-    headerColour: 'text-blue-700 bg-blue-50',
-    defaultOpen: true,
-  },
   PARTIAL_OVERLAP: {
     label: 'Partial Overlaps',
-    subtitle: 'Shared purpose — human judgment required',
-    colour: 'border-amber-200 bg-amber-50/30',
-    headerColour: 'text-amber-700 bg-amber-50',
+    dot: 'bg-amber-400',
+    bandBg: '#fffbeb',
+    bandBorder: '#fcd34d',
+    badgeBg: '#fef3c7',
+    badgeText: '#92400e',
+    defaultOpen: true,
+  },
+  IMPROVEMENT: {
+    label: 'Replacements — incoming is strictly better',
+    dot: 'bg-blue-400',
+    bandBg: '#eff6ff',
+    bandBorder: '#93c5fd',
+    badgeBg: '#dbeafe',
+    badgeText: '#1e40af',
     defaultOpen: true,
   },
   DISTINCT: {
     label: 'New Skills',
-    subtitle: 'Novel skills not in your library — recommend importing',
-    colour: 'border-green-200 bg-green-50/30',
-    headerColour: 'text-green-700 bg-green-50',
+    dot: 'bg-green-400',
+    bandBg: '#f0fdf4',
+    bandBorder: '#86efac',
+    badgeBg: '#dcfce7',
+    badgeText: '#166534',
     defaultOpen: true,
+  },
+  DUPLICATE: {
+    label: 'Duplicates — already in library',
+    dot: 'bg-red-400',
+    bandBg: '#fef2f2',
+    bandBorder: '#fca5a5',
+    badgeBg: '#fee2e2',
+    badgeText: '#991b1b',
+    defaultOpen: false,
   },
 };
 
@@ -167,8 +178,8 @@ function AgentChipBlock({
             key={proposal.systemAgentId}
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition-colors ${
               proposal.selected
-                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : 'bg-white border-slate-200 text-slate-600'
+                ? 'bg-emerald-600 border-emerald-600 text-white'
+                : 'bg-slate-100 border-slate-200 text-slate-500'
             }`}
           >
             <button
@@ -177,14 +188,13 @@ function AgentChipBlock({
               className="flex items-center gap-1"
               aria-label={proposal.selected ? 'Deselect' : 'Select'}
             >
-              <span aria-hidden="true">{proposal.selected ? '✓' : '○'}</span>
               <span className="font-medium">{proposal.nameSnapshot}</span>
-              <span className="text-[10px] opacity-70">{Math.round(proposal.score * 100)}%</span>
+              <span className={`text-[10px] ${proposal.selected ? 'opacity-80' : 'opacity-60'}`}>{Math.round(proposal.score * 100)}%</span>
             </button>
             <button
               type="button"
               onClick={() => removeProposal(proposal)}
-              className="ml-0.5 text-slate-400 hover:text-red-600"
+              className={`ml-0.5 ${proposal.selected ? 'text-emerald-200 hover:text-white' : 'text-slate-400 hover:text-red-600'}`}
               aria-label="Remove proposal"
             >
               ×
@@ -239,6 +249,7 @@ function ResultCard({
   onResultPatched: (next: AnalysisResult) => void;
 }) {
   const [showDiff, setShowDiff] = useState(false);
+  const [showSkill, setShowSkill] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
 
@@ -328,6 +339,14 @@ function ResultCard({
 
         {/* Action buttons */}
         <div className="flex items-center gap-1 shrink-0">
+          {candidate && (
+            <button
+              onClick={() => setShowSkill(true)}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors bg-white text-slate-500 border-slate-200 hover:border-slate-400 hover:text-slate-700"
+            >
+              View
+            </button>
+          )}
           <button
             onClick={() => setAction('approved')}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
@@ -399,6 +418,41 @@ function ResultCard({
         </button>
       )}
       {showDiff && !result.proposedMergedContent && <DiffView result={result} />}
+
+      {showSkill && candidate && (
+        <Modal title={candidate.name || result.candidateName} onClose={() => setShowSkill(false)} maxWidth={700}>
+          <div className="space-y-4 text-sm">
+            <div>
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Slug</p>
+              <code className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700">{result.candidateSlug}</code>
+            </div>
+            {candidate.description && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Description</p>
+                <p className="text-slate-700 text-sm">{candidate.description}</p>
+              </div>
+            )}
+            {candidate.instructions && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Instructions</p>
+                <pre className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto max-h-64 whitespace-pre-wrap text-slate-700">{candidate.instructions}</pre>
+              </div>
+            )}
+            {candidate.definition && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Definition</p>
+                <pre className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto max-h-48 text-slate-700">{JSON.stringify(candidate.definition, null, 2)}</pre>
+              </div>
+            )}
+            {candidate.rawSource && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Raw source</p>
+                <pre className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto max-h-64 whitespace-pre-wrap text-slate-700">{candidate.rawSource}</pre>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -546,7 +600,7 @@ function ResultSection({
 }
 
 export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdated, onContinue }: Props) {
-  const CLASSIFICATIONS: Classification[] = ['IMPROVEMENT', 'DISTINCT', 'PARTIAL_OVERLAP', 'DUPLICATE'];
+  const CLASSIFICATIONS: Classification[] = ['PARTIAL_OVERLAP', 'IMPROVEMENT', 'DISTINCT', 'DUPLICATE'];
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkInfo, setBulkInfo] = useState<string | null>(null);
 
