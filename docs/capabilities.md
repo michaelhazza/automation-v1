@@ -228,15 +228,15 @@ Integrated Execution Environment for browser automation and development workspac
 
 Automation OS replaces a fragmented stack of point tools with a single, orchestrated system of agents and workflows.
 
-| Replaced | With |
-|----------|------|
-| Zapier / Make / n8n (disconnected automation) | Playbook Engine with structured agent steps and human review gates |
-| ChatGPT / Claude (standalone chat) | Deployed agents with defined skills, budgets, accountability, and memory |
-| Manual monthly reporting | Scheduled agents that draft, review, and deliver reports automatically |
-| Ad-hoc CRM hygiene sprints | Continuous enrichment and pipeline analysis on a recurring cadence |
-| Siloed marketing, CRM, and analytics tools | Unified skill system connecting data, decisions, and actions across platforms |
-| Fragmented client management across orgs | Multi-tenant subaccount hierarchy with strict data isolation per client |
-| Manual churn reviews | Always-on health scoring with anomaly detection and intervention triggers |
+| Replaced | With | Why it's better |
+|----------|------|-----------------|
+| Zapier / Make / n8n | Playbook Engine | Stateful, agent-driven, with structured human review gates — not brittle trigger/action chains |
+| ChatGPT / Claude (standalone chat) | Deployed agents | Defined skills, budgets, memory, and accountability — not ephemeral conversations |
+| Manual monthly reporting | Scheduled reporting agents | Drafted, reviewed, and delivered automatically on cadence — not assembled by hand each month |
+| Ad-hoc CRM hygiene sprints | Continuous enrichment pipeline | Always-on enrichment and pipeline analysis — not a quarterly cleanup |
+| Siloed marketing, CRM, and analytics tools | Unified skill system | One system connects data, decisions, and actions across platforms — no context switching |
+| Fragmented client management across orgs | Multi-tenant subaccount hierarchy | Strict per-client data isolation built in — not enforced by process |
+| Manual churn reviews | Always-on health scoring | Anomaly detection and intervention triggers fire automatically — not discovered on a renewal call |
 
 ---
 
@@ -625,6 +625,7 @@ Complete list of all 98 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-13 | Tighten Replaces table with "why it's better" column | — |
 | 2026-04-13 | Tighten Product language to benefit-oriented; sharpen Agency with constraints; fix Hybrid type on create_page/update_page; add Replaces / Consolidates section | — |
 | 2026-04-13 | Add Core Value Proposition; compress Product Capabilities; reframe Agency to outcomes; add Type column to Skills | — |
 | 2026-04-12 | Initial capabilities registry created from full code audit | — |
