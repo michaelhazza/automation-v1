@@ -308,6 +308,9 @@ function ResultCard({
                 {result.classificationFailureReason === 'rate_limit' && (
                   <span className="ml-1 font-normal opacity-70">· Rate limit</span>
                 )}
+                {result.classificationFailureReason === 'parse_error' && (
+                  <span className="ml-1 font-normal opacity-70">· Parse error</span>
+                )}
               </p>
               <button
                 type="button"
@@ -501,7 +504,7 @@ function ResultSection({
               <button
                 type="button"
                 onClick={handleBulkRetry}
-                disabled={bulkRetrying}
+                disabled={bulkRetrying || failedResults.length === 0}
                 className="px-3 py-1 text-xs font-medium border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 transition-colors"
               >
                 {bulkRetrying ? 'Retrying…' : `Retry all failed classifications (${failedResults.length})`}
