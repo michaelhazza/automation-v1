@@ -94,7 +94,11 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'payload-key' as const, // { idempotencyKey } in payload
   },
   'llm-reconcile-reservations': {
+    retryLimit: 2,
+    retryDelay: 10,
+    retryBackoff: true,
     expireInSeconds: 90,
+    deadLetter: 'llm-reconcile-reservations__dlq',
     idempotencyStrategy: 'fifo' as const, // sweep reads current state each tick
   },
   'llm-monthly-invoices': {
@@ -106,32 +110,56 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const, // cron, one per month-end
   },
   'payment-reconciliation': {
+    retryLimit: 2,
+    retryDelay: 30,
+    retryBackoff: true,
     expireInSeconds: 300,
+    deadLetter: 'payment-reconciliation__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
 
   // ── Tier 3: Maintenance (self-healing on next schedule tick) ────
   'stale-run-cleanup': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
     expireInSeconds: 240,
+    deadLetter: 'stale-run-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   'maintenance:cleanup-execution-files': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
     expireInSeconds: 300,
+    deadLetter: 'maintenance:cleanup-execution-files__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   'maintenance:cleanup-budget-reservations': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
     expireInSeconds: 120,
+    deadLetter: 'maintenance:cleanup-budget-reservations__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   'maintenance:memory-decay': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
     expireInSeconds: 600,
+    deadLetter: 'maintenance:memory-decay__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   // Sprint 2 P1.1 Layer 3 — prune tool_call_security_events per
   // organisations.security_event_retention_days. Admin-bypass job
   // (cross-org sweep), so no job-payload org context.
   'maintenance:security-events-cleanup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
     expireInSeconds: 600,
+    deadLetter: 'maintenance:security-events-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   // Sprint 3 P2.1 Sprint 3A — prune terminal agent_runs (and their
@@ -140,12 +168,20 @@ export const JOB_CONFIG = {
   // sweep). Each tick re-reads the current DB state so duplicate
   // deliveries are a no-op; idempotencyStrategy: 'fifo'.
   'agent-run-cleanup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
     expireInSeconds: 600,
+    deadLetter: 'agent-run-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   // Feature 2 — daily cleanup of expired priority feed claims
   'priority-feed-cleanup': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
     expireInSeconds: 300,
+    deadLetter: 'priority-feed-cleanup__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   // Feature 4 — Slack inbound message processing
@@ -178,13 +214,21 @@ export const JOB_CONFIG = {
     idempotencyStrategy: 'one-shot' as const, // weekly cron tick
   },
   'llm-clean-old-aggregates': {
+    retryLimit: 1,
+    retryDelay: 15,
+    retryBackoff: false,
     expireInSeconds: 120,
+    deadLetter: 'llm-clean-old-aggregates__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
 
   // ── Tier 3b: Memory deduplication (Phase 2B, daily sweep) ──────
   'maintenance:memory-dedup': {
+    retryLimit: 1,
+    retryDelay: 60,
+    retryBackoff: false,
     expireInSeconds: 600,
+    deadLetter: 'maintenance:memory-dedup__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
 
@@ -238,7 +282,11 @@ export const JOB_CONFIG = {
   },
   // §12.3 + §13.6.1.a — periodic orphan and reservation cleanup
   'iee-cleanup-orphans': {
+    retryLimit: 1,
+    retryDelay: 30,
+    retryBackoff: false,
     expireInSeconds: 180,
+    deadLetter: 'iee-cleanup-orphans__dlq',
     idempotencyStrategy: 'fifo' as const,
   },
   // §11.3.5 — daily cost rollup into cost_aggregates

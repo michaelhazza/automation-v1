@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../lib/api';
 import { getActiveClientId, getActiveClientName } from '../lib/auth';
 import { User } from '../lib/auth';
@@ -55,15 +56,22 @@ export default function ProjectsPage({ user: _user }: { user: User }) {
       const { data } = await api.post(`/api/subaccounts/${clientId}/projects`, { name: newName.trim(), description: newDesc.trim() || null, color: newColor, repoUrl: newRepoUrl.trim() || undefined });
       setProjects((p) => [data, ...p]);
       setShowNew(false); setNewName(''); setNewDesc(''); setNewColor('#6366f1'); setNewRepoUrl('');
-    } catch {
-      // TODO: show error toast
+      toast.success('Project created');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error ?? 'Failed to create project');
     } finally { setSaving(false); }
   };
 
   const handleArchive = async (id: string) => {
     if (!clientId) return;
-    await api.patch(`/api/subaccounts/${clientId}/projects/${id}`, { status: 'archived' });
-    setProjects((p) => p.map((x) => x.id === id ? { ...x, status: 'archived' as const } : x));
+    try {
+      await api.patch(`/api/subaccounts/${clientId}/projects/${id}`, { status: 'archived' });
+      setProjects((p) => p.map((x) => x.id === id ? { ...x, status: 'archived' as const } : x));
+      toast.success('Project archived');
+    } catch {
+      toast.error('Failed to archive project');
+    }
   };
 
   const filtered = filter === 'all' ? projects : projects.filter((p) => p.status === filter);

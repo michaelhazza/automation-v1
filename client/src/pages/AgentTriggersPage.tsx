@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Trigger {
   id: string;
@@ -22,6 +24,7 @@ export default function AgentTriggersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', eventType: '', agentId: '', filterExpression: '', cooldownMinutes: '' });
   const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -47,24 +50,28 @@ export default function AgentTriggersPage() {
       });
       setShowCreate(false);
       setForm({ name: '', eventType: '', agentId: '', filterExpression: '', cooldownMinutes: '' });
+      toast.success('Trigger created');
       await load();
-    } catch { setError('Failed to create trigger'); }
+    } catch { toast.error('Failed to create trigger'); }
     finally { setSaving(false); }
   }
 
   async function handleToggle(trigger: Trigger) {
     try {
       await api.patch(`/api/subaccounts/${subaccountId}/triggers/${trigger.id}`, { enabled: !trigger.enabled });
+      toast.success(trigger.enabled ? 'Trigger disabled' : 'Trigger enabled');
       await load();
-    } catch { setError('Failed to update trigger'); }
+    } catch { toast.error('Failed to update trigger'); }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this trigger?')) return;
+  async function handleDeleteConfirm() {
+    if (!deleteId) return;
     try {
-      await api.delete(`/api/subaccounts/${subaccountId}/triggers/${id}`);
-      setTriggers(triggers.filter(t => t.id !== id));
-    } catch { setError('Failed to delete trigger'); }
+      await api.delete(`/api/subaccounts/${subaccountId}/triggers/${deleteId}`);
+      setTriggers(triggers.filter(t => t.id !== deleteId));
+      toast.success('Trigger deleted');
+    } catch { toast.error('Failed to delete trigger'); }
+    finally { setDeleteId(null); }
   }
 
   if (loading) {
@@ -149,10 +156,20 @@ export default function AgentTriggersPage() {
                   {trigger.filterExpression && <span>Filter: <code className="bg-slate-100 px-1.5 py-0.5 rounded text-[11px]">{trigger.filterExpression}</code></span>}
                 </div>
               </div>
-              <button onClick={() => handleDelete(trigger.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
+              <button onClick={() => setDeleteId(trigger.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
             </div>
           ))}
         </div>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Trigger"
+          message="Delete this trigger? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </div>
   );

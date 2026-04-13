@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import api from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface OrgAgentConfig {
   id: string;
@@ -19,6 +21,7 @@ export default function OrgAgentConfigsPage({ embedded }: { embedded?: boolean }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [executionEnabled, setExecutionEnabled] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -39,22 +42,26 @@ export default function OrgAgentConfigsPage({ embedded }: { embedded?: boolean }
     try {
       await api.patch('/api/org/settings/execution-enabled', { enabled: !executionEnabled });
       setExecutionEnabled(!executionEnabled);
-    } catch { setError('Failed to toggle execution'); }
+      toast.success(executionEnabled ? 'Execution disabled' : 'Execution enabled');
+    } catch { toast.error('Failed to toggle execution'); }
   }
 
   async function handleToggleActive(config: OrgAgentConfig) {
     try {
       await api.patch(`/api/org/agent-configs/${config.id}`, { isActive: !config.isActive });
+      toast.success(config.isActive ? 'Agent deactivated' : 'Agent activated');
       await load();
-    } catch { setError('Failed to update config'); }
+    } catch { toast.error('Failed to update config'); }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this org agent config?')) return;
+  async function handleDeleteConfirm() {
+    if (!deleteId) return;
     try {
-      await api.delete(`/api/org/agent-configs/${id}`);
-      setConfigs(configs.filter(c => c.id !== id));
-    } catch { setError('Failed to delete config'); }
+      await api.delete(`/api/org/agent-configs/${deleteId}`);
+      setConfigs(configs.filter(c => c.id !== deleteId));
+      toast.success('Config deleted');
+    } catch { toast.error('Failed to delete config'); }
+    finally { setDeleteId(null); }
   }
 
   if (loading) {
@@ -117,10 +124,19 @@ export default function OrgAgentConfigsPage({ embedded }: { embedded?: boolean }
                   <span className="text-slate-400">{new Date(config.createdAt).toLocaleDateString()}</span>
                 </div>
               </div>
-              <button onClick={() => handleDelete(config.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
+              <button onClick={() => setDeleteId(config.id)} className="bg-transparent border-0 text-slate-300 hover:text-red-400 cursor-pointer text-lg px-2">&times;</button>
             </div>
           ))}
         </div>
+      )}
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Config"
+          message="Delete this org agent config? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </div>
   );

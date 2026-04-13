@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 import { RunActivityChart } from '../components/ActivityCharts';
 import { SkillPickerSection } from '../components/SkillPickerSection';
 import type { AvailableSkill } from '../components/SkillPickerSection';
@@ -2091,6 +2092,7 @@ function PromptHistoryTab({ agentId, onRollback }: { agentId: string; onRollback
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [rollbackTarget, setRollbackTarget] = useState<{ id: string; number: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2107,19 +2109,21 @@ function PromptHistoryTab({ agentId, onRollback }: { agentId: string; onRollback
   useEffect(() => { load(); }, [load]);
 
   const handleRollback = async (revisionId: string, revisionNumber: number) => {
-    if (!confirm(`Roll back to revision #${revisionNumber}? This will update the agent's prompts and create a new revision.`)) return;
     setRollingBack(revisionId);
     setError('');
     setSuccess('');
     try {
       await api.post(`/api/agents/${agentId}/prompt-revisions/${revisionId}/rollback`);
+      toast.success(`Rolled back to revision #${revisionNumber}`);
       setSuccess(`Rolled back to revision #${revisionNumber}.`);
       load();
       onRollback();
     } catch {
+      toast.error('Failed to rollback');
       setError('Failed to rollback.');
     } finally {
       setRollingBack(null);
+      setRollbackTarget(null);
     }
   };
 
@@ -2199,7 +2203,7 @@ function PromptHistoryTab({ agentId, onRollback }: { agentId: string; onRollback
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button
-                      onClick={() => handleRollback(rev.id, rev.revisionNumber)}
+                      onClick={() => setRollbackTarget({ id: rev.id, number: rev.revisionNumber })}
                       disabled={rollingBack === rev.id}
                       className={`px-3 py-1.5 rounded-md text-[12px] font-medium border transition-colors [font-family:inherit] ${
                         rollingBack === rev.id
@@ -2215,6 +2219,16 @@ function PromptHistoryTab({ agentId, onRollback }: { agentId: string; onRollback
             </tbody>
           </table>
         </div>
+      )}
+
+      {rollbackTarget && (
+        <ConfirmDialog
+          title="Roll Back Revision"
+          message={`Roll back to revision #${rollbackTarget.number}? This will update the agent's prompts and create a new revision.`}
+          confirmLabel="Roll Back"
+          onConfirm={() => handleRollback(rollbackTarget.id, rollbackTarget.number)}
+          onCancel={() => setRollbackTarget(null)}
+        />
       )}
     </div>
   );

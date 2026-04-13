@@ -114,6 +114,20 @@ import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
 
+// ── Process-level exception handlers ─────────────────────────────────────────
+// Catch unhandled errors so the process doesn't die silently without logging.
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[WARN] Unhandled promise rejection:', reason);
+  // Do not call process.exit here — some libraries (pg-boss, Socket.IO) emit
+  // non-fatal unhandled rejections (e.g. heartbeat on a closed connection).
+  // In production, the process manager (PM2 / Docker restart policy) handles
+  // truly fatal states.  Logging is sufficient for diagnosis.
+});
+
 const app = express();
 const httpServer = createServer(app);
 

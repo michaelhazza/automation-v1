@@ -178,35 +178,36 @@ export const agentActivityService = {
     let truncated = false;
     let truncationReason: 'cycle' | 'depth_limit' | 'missing_parent' | undefined;
 
-    // Walk UP to find root
-    const chainIds: string[] = [];
-    let currentId: string | null = runId;
+    // Walk UP to find root using a single recursive CTE instead of N+1 queries.
+    // The CTE traverses parentRunId up to MAX_CHAIN_NODES levels.
+    const ancestorRows = await db.execute<{ id: string; parent_run_id: string | null; depth: number }>(sql`
+      WITH RECURSIVE ancestors AS (
+        SELECT id, parent_run_id, 0 AS depth
+        FROM agent_runs
+        WHERE id = ${runId} AND organisation_id = ${organisationId}
+        UNION ALL
+        SELECT ar.id, ar.parent_run_id, a.depth + 1
+        FROM agent_runs ar
+        INNER JOIN ancestors a ON ar.id = a.parent_run_id
+        WHERE ar.organisation_id = ${organisationId}
+          AND a.depth < ${MAX_CHAIN_NODES}
+      )
+      SELECT id, parent_run_id, depth FROM ancestors ORDER BY depth DESC
+    `);
 
-    while (currentId && chainIds.length < MAX_CHAIN_NODES) {
-      if (visited.has(currentId)) {
+    const chainIds: string[] = [];
+    const rows = ancestorRows as unknown as Array<{ id: string; parent_run_id: string | null; depth: number }>;
+    for (const row of rows) {
+      if (visited.has(row.id)) {
         truncated = true;
         truncationReason = 'cycle';
         break;
       }
-      visited.add(currentId);
-      chainIds.unshift(currentId);
-
-      const [run] = await db
-        .select({ parentRunId: agentRuns.parentRunId })
-        .from(agentRuns)
-        .where(and(eq(agentRuns.id, currentId), eq(agentRuns.organisationId, organisationId)));
-
-      if (!run) {
-        if (currentId !== runId) {
-          truncated = true;
-          truncationReason = 'missing_parent';
-        }
-        break;
-      }
-      currentId = run.parentRunId;
+      visited.add(row.id);
+      chainIds.push(row.id);
     }
 
-    if (chainIds.length >= MAX_CHAIN_NODES) {
+    if (rows.length >= MAX_CHAIN_NODES) {
       truncated = true;
       truncationReason = 'depth_limit';
     }

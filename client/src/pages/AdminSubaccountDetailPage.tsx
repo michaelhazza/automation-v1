@@ -5,6 +5,7 @@ import { User } from '../lib/auth';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import BoardColumnEditor, { type BoardColumn } from '../components/BoardColumnEditor';
+import { toast } from 'sonner';
 
 const WorkspaceMemoryPage = lazy(() => import('./WorkspaceMemoryPage'));
 const UsagePage = lazy(() => import('./UsagePage'));
@@ -535,6 +536,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [showRunResult, setShowRunResult] = useState<AgentRunRecord | null>(null);
   const [claudeCodeAvailable, setClaudeCodeAvailable] = useState<boolean | null>(null);
+  const [unlinkAgentId, setUnlinkAgentId] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -572,13 +574,16 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
   };
 
   const handleUnlink = async (agentId: string) => {
-    if (!confirm('Unlink this agent from this company?')) return;
     setError(''); setMsg('');
     try {
       await api.delete(`/api/subaccounts/${subaccountId}/agents/${agentId}`);
-      setMsg('Agent unlinked');
+      toast.success('Agent unlinked');
       load();
-    } catch { setError('Failed to unlink agent'); }
+    } catch {
+      toast.error('Failed to unlink agent');
+    } finally {
+      setUnlinkAgentId(null);
+    }
   };
 
   const handleApplyTemplate = async (templateId: string) => {
@@ -718,7 +723,7 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
                     >
                       {expandedAgent === l.agentId ? 'Hide' : 'History'}
                     </button>
-                    <button onClick={() => handleUnlink(l.agentId)} className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-[12px] font-medium transition-colors">
+                    <button onClick={() => setUnlinkAgentId(l.agentId)} className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-md text-[12px] font-medium transition-colors">
                       Unlink
                     </button>
                   </div>
@@ -824,6 +829,16 @@ function AgentsTab({ subaccountId }: { subaccountId: string }) {
             <button onClick={() => setShowLinkForm(false)} className={btnSecondary}>Cancel</button>
           </div>
         </Modal>
+      )}
+
+      {unlinkAgentId && (
+        <ConfirmDialog
+          title="Unlink Agent"
+          message="Unlink this agent from this company?"
+          confirmLabel="Unlink"
+          onConfirm={() => handleUnlink(unlinkAgentId)}
+          onCancel={() => setUnlinkAgentId(null)}
+        />
       )}
 
       {/* Team Templates modal */}

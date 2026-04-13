@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import Modal from '../components/Modal';
 import RecurrencePicker, { type RecurrenceValue } from '../components/RecurrencePicker';
+import ConfirmDialog from '../components/ConfirmDialog';
+import { toast } from 'sonner';
 
 interface ScheduledTask {
   id: string;
@@ -44,6 +46,7 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...INITIAL_FORM });
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -74,10 +77,17 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
     catch { setError('Failed to toggle'); }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this scheduled task?')) return;
-    try { await api.delete(`/api/subaccounts/${subaccountId}/scheduled-tasks/${id}`); await load(); }
-    catch { setError('Failed to delete'); }
+  async function handleConfirmDelete() {
+    if (!deleteId) return;
+    try {
+      await api.delete(`/api/subaccounts/${subaccountId}/scheduled-tasks/${deleteId}`);
+      toast.success('Scheduled task deleted');
+      await load();
+    } catch {
+      toast.error('Failed to delete scheduled task');
+    } finally {
+      setDeleteId(null);
+    }
   }
 
   async function handleRunNow(id: string) {
@@ -223,7 +233,7 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
                     <div className="flex gap-1.5">
                       <button onClick={() => handleToggle(item.id, !item.isActive)} className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors">{item.isActive ? 'Pause' : 'Resume'}</button>
                       <button onClick={() => handleRunNow(item.id)} className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors">Run Now</button>
-                      <button onClick={() => handleDelete(item.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 rounded text-[12px] text-red-600 cursor-pointer transition-colors">Delete</button>
+                      <button onClick={() => setDeleteId(item.id)} className="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 rounded text-[12px] text-red-600 cursor-pointer transition-colors">Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -231,6 +241,16 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
             </tbody>
           </table>
         </div>
+      )}
+
+      {deleteId && (
+        <ConfirmDialog
+          title="Delete Scheduled Task"
+          message="Are you sure? This cannot be undone."
+          confirmLabel="Delete"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
     </div>
   );
