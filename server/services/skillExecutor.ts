@@ -10,7 +10,7 @@ import { createSpan, createEvent } from '../lib/tracing.js';
 import { TripWire } from '../lib/tripwire.js';
 import type { ProcessorHooks, ProcessorContext } from '../types/processor.js';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentRuns, tasks, actions } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentRuns, tasks, actions, scheduledTasks } from '../db/schema/index.js';
 import { taskService } from './taskService.js';
 import { executeTriggerredProcess } from './llmService.js';
 import { agentExecutionService } from './agentExecutionService.js';
@@ -23,7 +23,7 @@ import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as priorityFeedService from './priorityFeedService.js';
 import * as skillStudioService from './skillStudioService.js';
-import { scrapingEngine, parseFrequencyToRRule, serializeMonitorBrief } from './scrapingEngine/index.js';
+import { scrapingEngine, parseFrequencyToRRule, serializeMonitorBrief, parseMonitorBrief } from './scrapingEngine/index.js';
 import { loadSelectors, saveSelector, incrementHit, incrementMiss, updateSelector } from './scrapingEngine/selectorStore.js';
 import { buildFingerprint, resolveSelector } from './scrapingEngine/adaptiveSelector.js';
 import { canonicalizeFieldKey, computeContentHash } from './scrapingEngine/contentExtractor.js';
@@ -3278,16 +3278,22 @@ async function executeScrapeStructured(
         overallScore = Math.min(overallScore, resolution.score);
         if (resolution.uncertain) selectorUncertain = true;
 
-        // Extract all matching elements for this selector
-        const matchedEls = document.querySelectorAll(resolution.cssSelector!);
-        const values: string[] = [];
-        matchedEls.forEach((el: Element) => {
-          const text = (el.textContent ?? '').trim();
-          if (text) values.push(text);
-        });
-
-        extracted[fieldKey] = values;
-        await incrementHit(stored.id);
+        // Extract all matching elements for this selector (per-field try/catch
+        // so a broken selector for one field doesn't discard the rest)
+        try {
+          const matchedEls = document.querySelectorAll(resolution.cssSelector!);
+          const values: string[] = [];
+          matchedEls.forEach((el: Element) => {
+            const text = (el.textContent ?? '').trim();
+            if (text) values.push(text);
+          });
+          extracted[fieldKey] = values;
+          await incrementHit(stored.id);
+        } catch {
+          await incrementMiss(stored.id);
+          extracted[fieldKey] = [];
+          overallScore = Math.min(overallScore, 0);
+        }
       }
 
       // Apply adaptive updates if any
@@ -3397,14 +3403,12 @@ ${htmlForLlm}`;
     }
   }
 
-  const resultStr = JSON.stringify(extracted);
-  const truncated = resultStr.length > SCRAPE_STRUCTURED_RETURN_LIMIT
-    ? resultStr.slice(0, SCRAPE_STRUCTURED_RETURN_LIMIT) + '...[truncated]'
-    : resultStr;
+  const dataWasTruncated = JSON.stringify(extracted).length > SCRAPE_STRUCTURED_RETURN_LIMIT;
 
   return {
     success: true,
-    ...JSON.parse(truncated.endsWith('...[truncated]') ? '{}' : truncated),
+    ...extracted,
+    ...(dataWasTruncated ? { data_truncated: true } : {}),
     selector_confidence: 0,        // 0 = LLM extraction (no stored selectors)
     adaptive_match_used: false,
     selector_uncertain: false,
@@ -3444,15 +3448,43 @@ async function executeMonitorWebpage(
     return { success: false, error: `Invalid URL: ${url}` };
   }
 
+  // ── 0. Deduplication — return existing task if one already monitors this URL ──
+  const existingTasks = await db
+    .select({ id: scheduledTasks.id, brief: scheduledTasks.brief })
+    .from(scheduledTasks)
+    .where(
+      and(
+        eq(scheduledTasks.organisationId, context.organisationId),
+        eq(scheduledTasks.subaccountId, context.subaccountId),
+        eq(scheduledTasks.assignedAgentId, context.agentId),
+        isNull(scheduledTasks.deletedAt),
+      ),
+    );
+
+  const duplicate = existingTasks.find(t => {
+    try {
+      return parseMonitorBrief(t.brief ?? '').monitorUrl === url;
+    } catch {
+      return false;
+    }
+  });
+
+  if (duplicate) {
+    return {
+      success: true,
+      scheduled_task_id: duplicate.id,
+      already_existed: true,
+      message: `Monitor for ${url} already exists (task ${duplicate.id})`,
+    };
+  }
+
   // ── 1. Parse frequency to rrule ──────────────────────────────────────────
   let rrule: string;
   try {
     rrule = parseFrequencyToRRule(frequency);
-  } catch {
-    return {
-      success: false,
-      error: `Unsupported frequency: "${frequency}". Use: "daily", "weekly", "every N hours", "every Monday"`,
-    };
+  } catch (err) {
+    const msg = (err as { message?: string })?.message ?? `Unsupported frequency: "${frequency}"`;
+    return { success: false, error: msg };
   }
 
   // Derive scheduleTime from rrule (default 00:00 for simple frequencies)
@@ -3461,12 +3493,7 @@ async function executeMonitorWebpage(
   // ── 2. Derive selectorGroup ──────────────────────────────────────────────
   let selectorGroup: string | null = null;
   if (fields) {
-    const { createHash } = await import('crypto');
-    const hash = createHash('sha256')
-      .update(fields.trim().toLowerCase())
-      .digest('hex')
-      .slice(0, 8);
-    selectorGroup = `${hostname}:${hash}`;
+    selectorGroup = deriveSelectorGroup(hostname, fields);
   }
 
   // ── 3. Establish initial baseline ────────────────────────────────────────
@@ -3488,7 +3515,16 @@ async function executeMonitorWebpage(
     }
 
     baselineContentHash = String(structuredResult.content_hash ?? '');
-    const { success: _s, content_hash: _ch, url: _u, selector_confidence: _sc, ...dataFields } = structuredResult;
+    const {
+      success: _s,
+      content_hash: _ch,
+      url: _u,
+      selector_confidence: _sc,
+      adaptive_match_used: _am,
+      selector_uncertain: _su,
+      data_truncated: _dt,
+      ...dataFields
+    } = structuredResult;
     baselineExtractedData = dataFields as Record<string, unknown>;
   } else {
     // Hash-based monitoring

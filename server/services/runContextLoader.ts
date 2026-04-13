@@ -1,6 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { readFile } from 'fs/promises';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { db } from '../db/index.js';
 import { scheduledTasks } from '../db/schema/index.js';
 import {
@@ -30,8 +31,9 @@ export { processContextPool };
 // Phase 4 scope: currently handles `monitor_webpage_run`.
 // ---------------------------------------------------------------------------
 
-const SKILLS_DIR = resolve(new URL(import.meta.url).pathname, '../../skills');
-const SKILL_RUN_TYPE_PATTERN = /^"type"\s*:\s*"([a-z_]+)_run"/;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const SKILLS_DIR = resolve(__dirname, '../skills');
 const SCHEDULED_RUN_SECTION_HEADER = '## Scheduled Run Instructions';
 
 /**
@@ -161,15 +163,21 @@ export async function loadRunContextData(
     if (st) {
       const brief = st.brief;
       if (brief && typeof brief === 'string') {
-        const match = SKILL_RUN_TYPE_PATTERN.exec(brief);
-        if (match) {
-          const skillSlug = match[1]; // e.g. "monitor_webpage"
-          const runInstructions = await loadSkillRunInstructions(skillSlug);
-          if (runInstructions) {
-            taskInstructions = taskInstructions
-              ? `${taskInstructions}\n\n${runInstructions}`
-              : runInstructions;
+        try {
+          const parsed = JSON.parse(brief) as Record<string, unknown>;
+          const briefType = typeof parsed.type === 'string' ? parsed.type : null;
+          const typeMatch = briefType?.match(/^([a-z_]+)_run$/);
+          if (typeMatch) {
+            const skillSlug = typeMatch[1]; // e.g. "monitor_webpage"
+            const runInstructions = await loadSkillRunInstructions(skillSlug);
+            if (runInstructions) {
+              taskInstructions = taskInstructions
+                ? `${taskInstructions}\n\n${runInstructions}`
+                : runInstructions;
+            }
           }
+        } catch {
+          // brief is not valid JSON — skip skill-typed injection
         }
       }
     }

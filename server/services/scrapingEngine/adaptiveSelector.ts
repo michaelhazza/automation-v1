@@ -123,8 +123,10 @@ export function buildFingerprint(el: Element): ElementFingerprint {
 /**
  * Generate a stable CSS selector for a DOM Element.
  * Prefers id-based selector, then class-based, then nth-of-type.
+ * `depth` guards against unbounded recursion on deeply-nested elements
+ * without id/class ancestors (cap at 15 levels).
  */
-export function buildCssSelector(el: Element): string {
+export function buildCssSelector(el: Element, depth = 0): string {
   const tag = el.tagName.toLowerCase();
   if (el.id) {
     const safeId = el.id.replace(/([^\w-])/g, '\\$1');
@@ -137,13 +139,16 @@ export function buildCssSelector(el: Element): string {
     return `${tag}.${classes.join('.')}`;
   }
 
-  // Fallback: tag + nth-of-type
+  // Fallback: tag + nth-of-type (recurse into parent, depth-capped)
   const parent = el.parentElement;
   const idx = parent
     ? Array.from(parent.children).filter(s => s.tagName?.toLowerCase() === tag).indexOf(el) + 1
     : 1;
-  const parentSel = parent?.tagName ? buildCssSelector(parent) : '';
-  return parentSel ? `${parentSel} > ${tag}:nth-of-type(${idx})` : `${tag}:nth-of-type(${idx})`;
+  if (!parent?.tagName || depth >= 15) {
+    return `${tag}:nth-of-type(${idx})`;
+  }
+  const parentSel = buildCssSelector(parent, depth + 1);
+  return `${parentSel} > ${tag}:nth-of-type(${idx})`;
 }
 
 // ---------------------------------------------------------------------------

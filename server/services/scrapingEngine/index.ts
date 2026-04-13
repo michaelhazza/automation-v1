@@ -143,7 +143,7 @@ export function parseFrequencyToRRule(frequency: string): string {
     return `FREQ=WEEKLY;BYDAY=${day}`;
   }
 
-  throw new Error(`Unsupported frequency: ${frequency}`);
+  throw { statusCode: 400, message: `Unsupported frequency: "${frequency}". Use: "daily", "weekly", "every N hours", or "every [weekday]"`, errorCode: 'MONITOR_UNSUPPORTED_FREQUENCY' };
 }
 
 // ---------------------------------------------------------------------------
