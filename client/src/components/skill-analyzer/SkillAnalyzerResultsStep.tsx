@@ -84,38 +84,6 @@ function DiffView({ result }: { result: AnalysisResult }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Phase 4 of skill-analyzer-v2: handler status warning + agent chip block
-// ---------------------------------------------------------------------------
-
-/** Renders the "Handler: registered / unregistered" status above a New Skill
- *  card. Reads job.unregisteredHandlerSlugs.includes(result.candidateSlug) to
- *  decide which state. Per spec §7.1, the warning state hides the agent
- *  chip block and disables the Approve button (handled by the parent). */
-function HandlerStatusBlock({ unregistered }: { unregistered: boolean }) {
-  if (!unregistered) {
-    return (
-      <div className="mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200">
-        <span aria-hidden="true">✓</span>
-        <span>Handler registered</span>
-      </div>
-    );
-  }
-  return (
-    <div className="mt-2 p-2 rounded-lg text-xs bg-red-50 border border-red-200 text-red-800">
-      <p className="font-medium mb-1">
-        <span aria-hidden="true">⚠</span> No handler registered for this skill
-      </p>
-      <p>
-        An engineer must add an entry to{' '}
-        <code className="text-[11px]">SKILL_HANDLERS</code> in{' '}
-        <code className="text-[11px]">server/services/skillExecutor.ts</code>{' '}
-        before this skill can be imported.
-      </p>
-    </div>
-  );
-}
-
 /** Agent chip block on a DISTINCT card. Renders one chip per agentProposals
  *  entry — pre-checked when proposal.selected is true, click toggles selection
  *  via PATCH. Includes an "Add another system agent..." combobox populated
@@ -255,7 +223,6 @@ function AgentChipBlock({
 function ResultCard({
   result,
   jobId,
-  unregisteredHandler,
   availableSystemAgents,
   candidate,
   onActionChange,
@@ -264,7 +231,6 @@ function ResultCard({
 }: {
   result: AnalysisResult;
   jobId: string;
-  unregisteredHandler: boolean;
   availableSystemAgents: AvailableSystemAgent[];
   candidate: ParsedCandidate | undefined;
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
@@ -273,6 +239,7 @@ function ResultCard({
 }) {
   const [showDiff, setShowDiff] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   async function setAction(action: 'approved' | 'rejected' | 'skipped') {
     const next = result.actionTaken === action ? null : action;
@@ -293,23 +260,31 @@ function ResultCard({
     }
   }
 
+  async function handleRetry() {
+    setRetrying(true);
+    try {
+      await api.post(
+        `/api/system/skill-analyser/jobs/${jobId}/results/${result.id}/retry-classification`,
+      );
+      const { data } = await api.get<{ results: AnalysisResult[] }>(
+        `/api/system/skill-analyser/jobs/${jobId}`,
+      );
+      const updated = data.results.find((r) => r.id === result.id);
+      if (updated) onResultPatched(updated);
+    } catch (err) {
+      console.error('[SkillAnalyzer] Retry classification failed:', err);
+    } finally {
+      setRetrying(false);
+    }
+  }
+
   const confidence = Math.round(result.confidence * 100);
   const similarity = result.similarityScore != null ? Math.round(result.similarityScore * 100) : null;
 
-  // Phase 4 of skill-analyzer-v2: Approve is disabled on DISTINCT cards
-  // whose candidate slug has no registered handler. Per spec §7.1 the
-  // gate also hides the agent chip block (no point assigning a broken
-  // skill to agents). Other classifications are unaffected — partial
-  // overlaps target existing rows whose handler is guaranteed by the
-  // boot-time validator.
   const isDistinct = result.classification === 'DISTINCT';
-  const approveDisabled = isDistinct && unregisteredHandler;
-  const approveTooltip = approveDisabled
-    ? 'No handler registered for this skill. An engineer must add an entry to SKILL_HANDLERS in server/services/skillExecutor.ts before this skill can be imported.'
-    : undefined;
 
   return (
-    <div className={`bg-white border rounded-lg p-4 ${approveDisabled ? 'border-red-200' : 'border-slate-200'}`}>
+    <div className="bg-white border border-slate-200 rounded-lg p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -326,20 +301,32 @@ function ResultCard({
           {result.classificationReasoning && (
             <p className="text-xs text-slate-600 mt-1">{result.classificationReasoning}</p>
           )}
-          {/* Handler status badge / warning — only on DISTINCT cards */}
-          {isDistinct && <HandlerStatusBlock unregistered={unregisteredHandler} />}
+          {result.classificationFailed && (
+            <div className="mt-2 p-2 rounded-lg text-xs bg-amber-50 border border-amber-200 text-amber-800">
+              <p className="font-medium mb-1">
+                Couldn't classify (temporary issue)
+                {result.classificationFailureReason === 'rate_limit' && (
+                  <span className="ml-1 font-normal opacity-70">· Rate limit</span>
+                )}
+              </p>
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={retrying}
+                className="text-xs px-2 py-1 rounded border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+              >
+                {retrying ? 'Retrying…' : 'Retry'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Action buttons */}
         <div className="flex items-center gap-1 shrink-0">
           <button
-            onClick={() => !approveDisabled && setAction('approved')}
-            disabled={approveDisabled}
-            title={approveTooltip}
+            onClick={() => setAction('approved')}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
-              approveDisabled
-                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                : result.actionTaken === 'approved'
+              result.actionTaken === 'approved'
                 ? 'bg-green-600 text-white border-green-600'
                 : 'bg-white text-slate-600 border-slate-200 hover:border-green-400 hover:text-green-600'
             }`}
@@ -373,10 +360,8 @@ function ResultCard({
         <p className="mt-2 text-xs text-red-600">{actionError}</p>
       )}
 
-      {/* Phase 4: Agent chip block — only on DISTINCT cards with a registered
-          handler. Hidden when the handler is unregistered (the warning above
-          covers it). */}
-      {isDistinct && !unregisteredHandler && (
+      {/* Agent chip block — only on DISTINCT cards. */}
+      {isDistinct && (
         <AgentChipBlock
           result={result}
           jobId={jobId}
@@ -417,7 +402,6 @@ function ResultSection({
   classification,
   results,
   jobId,
-  unregisteredHandlerSlugs,
   availableSystemAgents,
   parsedCandidates,
   onActionChange,
@@ -428,7 +412,6 @@ function ResultSection({
   classification: Classification;
   results: AnalysisResult[];
   jobId: string;
-  unregisteredHandlerSlugs: Set<string>;
   availableSystemAgents: AvailableSystemAgent[];
   parsedCandidates: ParsedCandidate[];
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
@@ -438,6 +421,23 @@ function ResultSection({
 }) {
   const [open, setOpen] = useState(SECTION_CONFIG[classification].defaultOpen);
   const cfg = SECTION_CONFIG[classification];
+  const failedResults = results.filter((r) => r.classificationFailed);
+  const [bulkRetrying, setBulkRetrying] = useState(false);
+
+  async function handleBulkRetry() {
+    setBulkRetrying(true);
+    try {
+      await api.post(`/api/system/skill-analyser/jobs/${jobId}/retry-failed-classifications`);
+      const { data } = await api.get<{ results: AnalysisResult[] }>(
+        `/api/system/skill-analyser/jobs/${jobId}`,
+      );
+      data.results.forEach((r) => onResultPatched(r));
+    } catch (err) {
+      console.error('[SkillAnalyzer] Bulk retry failed:', err);
+    } finally {
+      setBulkRetrying(false);
+    }
+  }
 
   if (results.length === 0) return null;
 
@@ -487,6 +487,16 @@ function ResultSection({
                 Approve all partial overlaps (with proposal)
               </button>
             )}
+            {classification === 'PARTIAL_OVERLAP' && failedResults.length > 0 && (
+              <button
+                type="button"
+                onClick={handleBulkRetry}
+                disabled={bulkRetrying}
+                className="px-3 py-1 text-xs font-medium border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {bulkRetrying ? 'Retrying…' : `Retry all failed (${failedResults.length})`}
+              </button>
+            )}
             {classification === 'DUPLICATE' && (
               <button
                 onClick={() => onBulkAction(classification, 'rejected')}
@@ -502,7 +512,6 @@ function ResultSection({
               key={r.id}
               result={r}
               jobId={jobId}
-              unregisteredHandler={unregisteredHandlerSlugs.has(r.candidateSlug)}
               availableSystemAgents={availableSystemAgents}
               candidate={parsedCandidates[r.candidateIndex]}
               onActionChange={onActionChange}
@@ -521,14 +530,6 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkInfo, setBulkInfo] = useState<string | null>(null);
 
-  // Phase 4 of skill-analyzer-v2: client-side handler gate. The set is
-  // computed from the live job.unregisteredHandlerSlugs snapshot the GET
-  // response includes; cards in this set get a disabled Approve button +
-  // warning, and the "Approve all new" bulk action filters them out.
-  const unregisteredHandlerSlugs = useMemo(
-    () => new Set(job.unregisteredHandlerSlugs ?? []),
-    [job.unregisteredHandlerSlugs],
-  );
   const availableSystemAgents = job.availableSystemAgents ?? [];
   const parsedCandidates = job.parsedCandidates ?? [];
 
@@ -558,29 +559,19 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     const sectionResults = results.filter((r) => r.classification === classification);
     if (sectionResults.length === 0) return;
 
-    // Phase 4 handler gate: skip DISTINCT cards whose handler is not
-    // registered. Spec §7.1 + §7.2.
     // Phase 5 partial-overlap gate: skip PARTIAL_OVERLAP / IMPROVEMENT
     // cards with no proposedMergedContent (LLM fallback path). The
     // executeApproved server-side path also enforces this, but the
     // client-side filter avoids surfacing the failure as a per-row error
-    // in the response. Spec §7.2.
+    // in the response.
     let eligible = sectionResults;
     let skippedCount = 0;
-    if (classification === 'DISTINCT' && action === 'approved') {
-      eligible = sectionResults.filter((r) => !unregisteredHandlerSlugs.has(r.candidateSlug));
-      skippedCount = sectionResults.length - eligible.length;
-    }
     if ((classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') && action === 'approved') {
       eligible = sectionResults.filter((r) => r.proposedMergedContent != null);
       skippedCount = sectionResults.length - eligible.length;
     }
     if (eligible.length === 0) {
-      setBulkInfo(
-        skippedCount > 0
-          ? `Skipped ${skippedCount} card${skippedCount === 1 ? '' : 's'} (no handler registered — engineer must wire up handlers first).`
-          : 'No eligible rows for this bulk action.',
-      );
+      setBulkInfo('No eligible rows for this bulk action.');
       return;
     }
     const ids = eligible.map((r) => r.id);
@@ -599,7 +590,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
       );
       if (skippedCount > 0) {
         setBulkInfo(
-          `Approved ${eligible.length}, skipped ${skippedCount} (no handler registered — engineer must wire up handlers first).`,
+          `Approved ${eligible.length}, skipped ${skippedCount} (no merge proposal yet).`,
         );
       }
     } catch (err) {
@@ -655,7 +646,6 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           classification={c}
           results={results.filter((r) => r.classification === c)}
           jobId={job.id}
-          unregisteredHandlerSlugs={unregisteredHandlerSlugs}
           availableSystemAgents={availableSystemAgents}
           parsedCandidates={parsedCandidates}
           onActionChange={handleActionChange}
