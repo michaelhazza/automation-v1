@@ -38,15 +38,16 @@
  *           agentRef that bypasses the standard validator — preserved as-is)
  *
  *   [5/5] Dev fixtures (skipped in production)
- *         - Breakout Solutions organisation + org admin user
- *         - 42macro-tracking subaccount
+ *         - Synthetos organisation + org admin user
+ *         - Synthetos Workspace subaccount (16 system agents activated here)
+ *         - Breakout Solutions subaccount (reporting agent only — for testing)
  *         - Reporting Agent (subaccount agent, wired with reporting skill bundle)
  *         - subaccount_agent link
  *         - integration_connection placeholders (web_login + slack, status=error)
  *
  *
  * Usage:
- *   # Full dev seed (includes Breakout Solutions demo org + reporting agent)
+ *   # Full dev seed (includes Synthetos demo org + reporting agent)
  *   npx tsx scripts/seed.ts
  *
  *   # Production seed — Phases 1-4 only, no dev fixtures
@@ -686,16 +687,36 @@ async function seedPortfolioHealthPlaybook(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function phase5_devFixtures(): Promise<void> {
-  logPhase(5, 5, 'Dev fixtures (Breakout Solutions demo org)');
+  logPhase(5, 5, 'Dev fixtures (Synthetos demo org)');
 
-  const ORG_NAME = 'Breakout Solutions';
-  const ORG_SLUG = 'breakout-solutions';
+  const ORG_NAME = 'Synthetos';
+  const ORG_SLUG = 'synthetos';
   const ORG_ADMIN_EMAIL = 'michael@breakoutsolutions.com';
   const ORG_ADMIN_PASSWORD = 'Zu5QzB5vG8!2';
-  const SUBACCOUNT_NAME = 'Breakout Solutions';
-  const SUBACCOUNT_SLUG = '42macro-tracking';
+  // Main workspace — system agents are activated here
+  const MAIN_SUBACCOUNT_NAME = 'Synthetos Workspace';
+  const MAIN_SUBACCOUNT_SLUG = 'synthetos-workspace';
+  // Reporting-agent subaccount — kept separate for testing
+  const REPORTING_SUBACCOUNT_NAME = 'Breakout Solutions';
+  const REPORTING_SUBACCOUNT_SLUG = 'breakout-solutions';
   const AGENT_SLUG = 'reporting-agent';
   const LEGACY_AGENT_SLUG = '42macro-reporting-agent';
+
+  // 5a-migrate. Rename legacy 'breakout-solutions' org slug → 'synthetos' so
+  //             the upsert below finds the existing row rather than creating a
+  //             duplicate. Safe to re-run: no-op when already renamed.
+  const [legacyOrg] = await db
+    .select()
+    .from(organisations)
+    .where(and(eq(organisations.slug, 'breakout-solutions'), isNull(organisations.deletedAt)))
+    .limit(1);
+  if (legacyOrg) {
+    await db
+      .update(organisations)
+      .set({ slug: ORG_SLUG, name: ORG_NAME, updatedAt: new Date() })
+      .where(eq(organisations.id, legacyOrg.id));
+    log(`  [migrate] org 'breakout-solutions' → '${ORG_SLUG}'`);
+  }
 
   // 5a. Organisation — upsert
   const orgId = await upsertOrganisation({
@@ -720,15 +741,43 @@ async function phase5_devFixtures(): Promise<void> {
     role: 'org_admin',
   });
 
-  // 5c. Subaccount — upsert
-  const subaccount = await upsertSubaccount({
+  // 5c-migrate. Rename legacy '42macro-tracking' subaccount → 'synthetos-workspace'
+  //             so the upsert below updates the existing row in place (preserving
+  //             all subaccount_agents / integration_connections linked by UUID).
+  const [legacyMainSubaccount] = await db
+    .select()
+    .from(subaccounts)
+    .where(and(
+      eq(subaccounts.organisationId, org.id),
+      eq(subaccounts.slug, '42macro-tracking'),
+      isNull(subaccounts.deletedAt),
+    ))
+    .limit(1);
+  if (legacyMainSubaccount) {
+    await db
+      .update(subaccounts)
+      .set({ slug: MAIN_SUBACCOUNT_SLUG, name: MAIN_SUBACCOUNT_NAME, updatedAt: new Date() })
+      .where(eq(subaccounts.id, legacyMainSubaccount.id));
+    log(`  [migrate] subaccount '42macro-tracking' → '${MAIN_SUBACCOUNT_SLUG}'`);
+  }
+
+  // 5c. Main subaccount (Synthetos Workspace) — upsert
+  const mainSubaccount = await upsertSubaccount({
     organisationId: org.id,
-    name: SUBACCOUNT_NAME,
-    slug: SUBACCOUNT_SLUG,
+    name: MAIN_SUBACCOUNT_NAME,
+    slug: MAIN_SUBACCOUNT_SLUG,
     status: 'active',
   });
 
-  // 5d. Reporting Agent (subaccount-level agent, not a system agent)
+  // 5c2. Reporting subaccount (Breakout Solutions) — upsert
+  const reportingSubaccount = await upsertSubaccount({
+    organisationId: org.id,
+    name: REPORTING_SUBACCOUNT_NAME,
+    slug: REPORTING_SUBACCOUNT_SLUG,
+    status: 'active',
+  });
+
+  // 5d. Reporting Agent — lives in the Breakout Solutions subaccount
   const SKILL_SLUGS = [
     'fetch_paywalled_content',
     'fetch_url',
@@ -878,13 +927,13 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
     log(`  [ok]   Created Reporting Agent: ${agent.id}`);
   }
 
-  // 5e. Subaccount agent link
+  // 5e. Subaccount agent link — reporting agent lives in the Breakout Solutions subaccount
   const existingSAA = await db
     .select()
     .from(subaccountAgents)
     .where(
       and(
-        eq(subaccountAgents.subaccountId, subaccount.id),
+        eq(subaccountAgents.subaccountId, reportingSubaccount.id),
         eq(subaccountAgents.agentId, agent.id),
       ),
     )
@@ -909,7 +958,7 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
       .insert(subaccountAgents)
       .values({
         organisationId: org.id,
-        subaccountId: subaccount.id,
+        subaccountId: reportingSubaccount.id,
         agentId: agent.id,
         isActive: true,
         skillSlugs: SKILL_SLUGS,
@@ -922,7 +971,7 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
     log(`  [ok]   Created subaccount_agent link: ${row.id}`);
   }
 
-  // 5f. Integration connection placeholders.
+  // 5f. Integration connection placeholders — linked to Breakout Solutions subaccount.
   //
   //     DELIBERATELY uses onConflictDoNothing, NOT upsert.
   //
@@ -936,7 +985,7 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
     .insert(integrationConnections)
     .values({
       organisationId: org.id,
-      subaccountId: subaccount.id,
+      subaccountId: reportingSubaccount.id,
       providerType: 'web_login',
       authType: 'service_account',
       label: '42 Macro paywall login',
@@ -958,7 +1007,7 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
     .insert(integrationConnections)
     .values({
       organisationId: org.id,
-      subaccountId: subaccount.id,
+      subaccountId: reportingSubaccount.id,
       providerType: 'slack',
       authType: 'oauth2',
       label: 'Breakout Solutions Slack',
@@ -970,11 +1019,12 @@ Emit \`done\` once the publish step returns a permalink / message id / deliverab
 
   log(`  [ok]   integration_connections (placeholders, status='error')`);
 
-  // 5g. Activate baseline system agents in the dev org — one `agents` row
-  //     per system agent with `systemAgentId` linking back to the authoritative
-  //     `system_agents` definition. Org admins inherit masterPrompt and skills
-  //     via isSystemManaged=true and can only layer an additionalPrompt on top.
-  await activateBaselineSystemAgents(org.id, subaccount.id);
+  // 5g. Activate baseline system agents in the Synthetos Workspace subaccount —
+  //     one `agents` row per system agent with `systemAgentId` linking back to
+  //     the authoritative `system_agents` definition. Org admins inherit
+  //     masterPrompt and skills via isSystemManaged=true and can only layer an
+  //     additionalPrompt on top.
+  await activateBaselineSystemAgents(org.id, mainSubaccount.id);
 }
 
 /**
