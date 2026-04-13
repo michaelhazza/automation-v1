@@ -55,3 +55,16 @@ Completed competitive analysis (Automation OS vs Polsia.com) and broader strateg
 **Deferred (Bucket 3):** Voice AI (Vapi/Retell), paid ads skills, cold email, MCP protocol, agent marketplace.
 
 Core platform testing must validate existing skills, three-tier agents, heartbeat scheduling, process execution, and HITL before adding proactive autonomy.
+
+### 2026-04-13 Pattern — Capabilities registry structure for product + GTM documentation
+
+`docs/capabilities.md` is the single source of truth for what the platform can do. Structure that works well across all audiences:
+
+1. **Core Value Proposition** — 3-4 bullets anchoring the system before any detail
+2. **Replaces / Consolidates** — three-column table (replaced / with / why it's better); highest leverage section for sales conversations
+3. **Product Capabilities** — benefit-oriented, not config-oriented; one paragraph + 3-5 bullets max per section; deep detail stays in `architecture.md`
+4. **Agency Capabilities** — Outcome / Trigger / Deliverable table per capability; add contrast ("not assembled manually") to differentiate from generic SaaS language; no skill references (that's triple representation)
+5. **Skills Reference** — flat table with Type (LLM/Deterministic/Hybrid) and Gate (HITL/Universal/auto) columns; legend at top
+6. **Integrations Reference** — tables by category (external services, engines, data sources, channels, MCP)
+
+Update rule: update `capabilities.md` in the same commit as any feature or skill change. This is enforced via CLAUDE.md "Key files per domain" table. A CI guard script is a deferred follow-up task.
