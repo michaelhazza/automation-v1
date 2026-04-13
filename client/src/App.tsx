@@ -13,7 +13,7 @@ const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ProcessesPage = lazy(() => import('./pages/TasksPage'));
 const ProcessExecutionPage = lazy(() => import('./pages/TaskExecutionPage'));
-const ExecutionHistoryPage = lazy(() => import('./pages/ExecutionHistoryPage'));
+const ActivityPage = lazy(() => import('./pages/ActivityPage'));
 const ExecutionDetailPage = lazy(() => import('./pages/ExecutionDetailPage'));
 const ProfileSettingsPage = lazy(() => import('./pages/ProfileSettingsPage'));
 const AdminProcessesPage = lazy(() => import('./pages/AdminTasksPage'));
@@ -37,7 +37,7 @@ const McpServersPage = lazy(() => import('./pages/McpServersPage'));
 const IntegrationsAndCredentialsPage = lazy(() => import('./pages/IntegrationsAndCredentialsPage'));
 const AdminSkillEditPage = lazy(() => import('./pages/AdminSkillEditPage'));
 const WorkspaceBoardPage = lazy(() => import('./pages/WorkspaceBoardPage'));
-const SystemActivityPage = lazy(() => import('./pages/SystemActivityPage'));
+
 const SystemAgentsPage = lazy(() => import('./pages/SystemAgentsPage'));
 const SystemAgentEditPage = lazy(() => import('./pages/SystemAgentEditPage'));
 const SystemSkillsPage = lazy(() => import('./pages/SystemSkillsPage'));
@@ -71,7 +71,7 @@ const SkillAnalyzerPage = lazy(() => import('./pages/SkillAnalyzerPage'));
 const AgentRunHistoryPage = lazy(() => import('./pages/AgentRunHistoryPage'));
 const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPage'));
 const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
-const OpsDashboardPage = lazy(() => import('./pages/OpsDashboardPage'));
+
 const SkillStudioPage = lazy(() => import('./pages/SkillStudioPage'));
 
 // ClientPulse pages
@@ -199,7 +199,6 @@ export default function App() {
           <Route path="/" element={<DashboardPage user={user!} />} />
           <Route path="/processes" element={<ProcessesPage user={user!} />} />
           <Route path="/processes/:id" element={<ProcessExecutionPage user={user!} />} />
-          <Route path="/executions" element={<ExecutionHistoryPage user={user!} />} />
           <Route path="/executions/:id" element={<ExecutionDetailPage user={user!} />} />
           <Route path="/settings" element={<ProfileSettingsPage user={user!} />} />
           <Route path="/inbox" element={<InboxPage user={user!} />} />
@@ -248,12 +247,12 @@ export default function App() {
             <Route path="/admin/health-findings" element={<AdminHealthFindingsPage user={user!} />} />
             {/* Per-subaccount action audit log */}
             <Route path="/admin/subaccounts/:subaccountId/actions" element={<AdminActionLogPage user={user!} />} />
-            {/* Ops Dashboard — org scope */}
-            <Route path="/admin/ops" element={<OpsDashboardPage user={user!} />} />
+            {/* Activity — org scope */}
+            <Route path="/admin/activity" element={<ActivityPage user={user!} />} />
+            {/* Activity — subaccount scope */}
+            <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
-            {/* Ops Dashboard — subaccount scope */}
-            <Route path="/admin/subaccounts/:subaccountId/ops" element={<OpsDashboardPage user={user!} />} />
           </Route>
 
           {/* ClientPulse routes */}
@@ -265,7 +264,6 @@ export default function App() {
             <Route path="/system/organisations" element={<SystemOrganisationsPage user={user!} />} />
             <Route path="/system/modules" element={<SystemModulesPage user={user!} />} />
             <Route path="/system/settings" element={<SystemSettingsPage user={user!} />} />
-            <Route path="/system/activity" element={<SystemActivityPage user={user!} />} />
             <Route path="/system/task-queue" element={<SystemTaskQueuePage user={user!} />} />
             <Route path="/system/job-queues" element={<JobQueueDashboardPage />} />
             <Route path="/system/agents" element={<SystemAgentsPage user={user!} />} />
@@ -277,8 +275,8 @@ export default function App() {
             <Route path="/system/processes" element={<SystemProcessesPage user={user!} />} />
             <Route path="/system/engines" element={<SystemEnginesPage user={user!} />} />
             <Route path="/system/config-templates" element={<SystemCompanyTemplatesPage user={user!} />} />
-            {/* Ops Dashboard — system scope */}
-            <Route path="/system/ops" element={<OpsDashboardPage user={user!} />} />
+            {/* Activity — system scope */}
+            <Route path="/system/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — system scope */}
             <Route path="/system/skill-studio" element={<SkillStudioPage user={user!} />} />
           </Route>
