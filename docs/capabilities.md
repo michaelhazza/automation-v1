@@ -103,7 +103,7 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 
 ### Skill System
 
-98 modular skills across 13 categories, cascading from system to org to subaccount.
+101 modular skills across 13 categories, cascading from system to org to subaccount.
 
 - **Three tiers:** System skills (platform-provided), Org skills (custom), Universal skills (always available)
 - **Per-agent allowlists** — Each subaccount-agent link specifies exactly which skills are available
