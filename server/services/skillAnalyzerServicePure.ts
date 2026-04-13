@@ -195,7 +195,7 @@ export function buildClassificationPrompt(
   const bandHint =
     band === 'likely_duplicate'
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
-      : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
+      : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
   const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship.`;
 
@@ -374,7 +374,7 @@ export function buildClassifyPromptWithMerge(
   const bandHint =
     band === 'likely_duplicate'
       ? 'Note: These skills have very high embedding similarity (>0.92). Prefer IMPROVEMENT unless the incoming is genuinely word-for-word equivalent with zero additive value.'
-      : 'Note: These skills have moderate embedding similarity (0.60–0.92). Careful analysis needed.';
+      : 'Note: These skills have moderate embedding similarity (0.60–0.92). At this level, DUPLICATE is rarely the right call — it requires zero additive value and near-identical content. If there is any meaningful difference in scope, framing, or approach, prefer PARTIAL_OVERLAP.';
 
   const userMessage = `${candidateSummary}\n\n${librarySummary}\n\n${bandHint}\n\nClassify their relationship and (if PARTIAL_OVERLAP or IMPROVEMENT) produce a merged version.`;
 

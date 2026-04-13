@@ -24,6 +24,18 @@ import {
 const GITHUB_API_BASE = 'https://api.github.com';
 const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
+// Timeout constants for GitHub fetch operations
+const GITHUB_API_TIMEOUT_MS = 15_000;    // 15s per GitHub API call (metadata, tree)
+const GITHUB_FILE_TIMEOUT_MS = 10_000;   // 10s per raw file fetch
+const GITHUB_PARSE_TIMEOUT_MS = 120_000; // 2min overall cap for parseFromGitHub
+
+/** Wraps fetch with an AbortController timeout. Cleans up the timer on completion. */
+function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 /** Parse uploaded files (handles .md, .json, .zip). */
 async function parseUploadedFiles(files: Express.Multer.File[]): Promise<ParsedSkill[]> {
   const skills: ParsedSkill[] = [];
@@ -151,7 +163,7 @@ const MAX_SKILL_FILES_PER_REPO = 500;
 async function githubApiJson<T>(url: string, label: string, correlationId: string): Promise<T> {
   const response = await withBackoff(
     () =>
-      fetch(url, { headers: GITHUB_HEADERS }).then(async (res) => {
+      fetchWithTimeout(url, { headers: GITHUB_HEADERS }, GITHUB_API_TIMEOUT_MS).then(async (res) => {
         if (!res.ok) {
           const body = await res.text();
           const statusCode = res.status === 403 || res.status === 429 ? 429 : 502;
@@ -181,8 +193,22 @@ async function githubApiJson<T>(url: string, label: string, correlationId: strin
  *  api.github.com rate limit).
  *
  *  When the URL specifies a subdirectory (`/tree/{branch}/{path}`), only
- *  files under that prefix are considered. */
+ *  files under that prefix are considered.
+ *
+ *  Bounded by GITHUB_PARSE_TIMEOUT_MS overall — any individual hung fetch
+ *  will be aborted by its own per-request timeout; the overall deadline
+ *  catches pathological cases (many files × slow network). */
 async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
+  const deadline = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`GitHub import timed out after ${GITHUB_PARSE_TIMEOUT_MS / 1000}s — the repository may be too large or GitHub is unresponsive.`)),
+      GITHUB_PARSE_TIMEOUT_MS
+    )
+  );
+  return Promise.race([_parseFromGitHub(url), deadline]);
+}
+
+async function _parseFromGitHub(url: string): Promise<ParsedSkill[]> {
   const parsed = parseGithubUrl(url);
   if (!parsed) throw { statusCode: 400, message: `Invalid GitHub URL: ${url}` };
 
@@ -243,7 +269,7 @@ async function parseFromGitHub(url: string): Promise<ParsedSkill[]> {
     try {
       content = await withBackoff(
         () =>
-          fetch(rawUrl).then(async (res) => {
+          fetchWithTimeout(rawUrl, {}, GITHUB_FILE_TIMEOUT_MS).then(async (res) => {
             if (!res.ok) throw new Error(`Failed to fetch ${file.path}: ${res.status}`);
             return res.text();
           }),
