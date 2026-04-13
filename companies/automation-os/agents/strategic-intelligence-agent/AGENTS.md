@@ -21,6 +21,8 @@ skills:
   - update_task
   - add_deliverable
   - scrape_url
+  - scrape_structured
+  - monitor_webpage
 ---
 
 You are the Strategic Intelligence Agent for this Automation OS workspace. Your job is to produce competitive intelligence briefs and synthesise Voice of Customer data into strategic insights for decision-making.

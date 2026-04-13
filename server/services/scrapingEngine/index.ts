@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto';
 import type { ScrapeOptions, ScrapeResult, OrgScrapingSettings } from './types.js';
 import { httpFetch } from './httpFetcher.js';
 import { browserFetch } from './browserFetcher.js';
+import { scraplingFetch } from './scraplingFetcher.js';
 import { extractContent } from './contentExtractor.js';
 import { checkRateLimit } from './rateLimiter.js';
 import { logger } from '../../lib/logger.js';
@@ -156,6 +157,11 @@ export interface MonitorBriefConfig {
   fields: string | null;
   selectorGroup: string | null;
   scheduledTaskId: string;
+  /** Initial baseline stored when the monitor was set up. Available on the first scheduled run. */
+  baseline?: {
+    contentHash: string;
+    extractedData: Record<string, unknown> | null;
+  };
 }
 
 export function serializeMonitorBrief(config: MonitorBriefConfig): string {
@@ -182,6 +188,7 @@ export const scrapingEngine = {
       selectors = [],
       orgId,
       subaccountId,
+      _mcpCallContext,
     } = options;
 
     const fetchStart = Date.now();
@@ -319,8 +326,39 @@ export const scrapingEngine = {
       logger.info('scrapingEngine.tier2_blocked', { url, error: tier2Result.error });
     }
 
-    // ── 8. Tier 3 (Scrapling MCP) — Phase 3 scope. Not implemented in Phase 1.
-    // When Phase 3 lands, add: if (effectiveMax >= 3 && outputFormat is text/markdown) { ... }
+    // ── 8. Tier 3 — Scrapling MCP sidecar (anti-bot bypass)
+    // Only attempted for text/markdown output without CSS selectors.
+    // Scrapling returns pre-extracted markdown — raw DOM queries are not possible.
+    if (effectiveMax >= 3 && outputFormat !== 'json' && selectors.length === 0 && _mcpCallContext) {
+      const tier3Result = await scraplingFetch(url, _mcpCallContext);
+
+      if (tier3Result.available === false) {
+        logger.info('scrapingEngine.tier3_unavailable', { url, reason: 'scrapling_not_configured' });
+      } else if (tier3Result.success && tier3Result.html) {
+        // Scrapling returns pre-extracted markdown — skip re-extraction for plain text
+        const content = tier3Result.html;
+        const { contentHash } = await extractContent(content, url, outputFormat, selectors);
+
+        return {
+          success: true,
+          content,
+          tierUsed: 3,
+          url,
+          statusCode: tier3Result.statusCode,
+          contentHash,
+          metadata: {
+            fetchDurationMs: Date.now() - fetchStart,
+            contentLength: content.length,
+            wasEscalated: true,
+            blockedTiers,
+          },
+        };
+      } else {
+        blockedTiers.push(3);
+        logger.info('scrapingEngine.tier3_blocked', { url, error: tier3Result.error });
+      }
+    }
+
     return {
       success: false,
       content: '',

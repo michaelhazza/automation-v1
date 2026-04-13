@@ -11,6 +11,19 @@ export interface ScrapeOptions {
   timeout?: number;
   orgId: string;
   subaccountId?: string;
+  /** MCP client context — threaded from SkillExecutionContext for Tier 3 access */
+  _mcpCallContext?: {
+    clients: Map<string, import('../mcpClientManager.js').McpClientInstance>;
+    lazyRegistry: Map<string, import('../../db/schema/mcpServerConfigs.js').McpServerConfig>;
+    runContext: {
+      runId: string;
+      organisationId: string;
+      agentId: string;
+      subaccountId: string | null;
+      taskId?: string;
+      mcpCallCount?: number;
+    };
+  };
 }
 
 export interface ScrapeResult {

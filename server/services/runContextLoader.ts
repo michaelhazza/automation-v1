@@ -1,4 +1,6 @@
 import { eq, and } from 'drizzle-orm';
+import { readFile } from 'fs/promises';
+import { resolve } from 'path';
 import { db } from '../db/index.js';
 import { scheduledTasks } from '../db/schema/index.js';
 import {
@@ -17,6 +19,42 @@ import { generateEmbedding } from '../lib/embeddings.js';
 
 // Re-export the pure helpers for callers and tests
 export { processContextPool };
+
+// ---------------------------------------------------------------------------
+// Skill-typed scheduled task run instructions
+//
+// When a scheduled task brief contains `"type": "<skill>_run"`, this function
+// loads the corresponding skill markdown file and extracts the
+// `## Scheduled Run Instructions` section to prepend to taskInstructions.
+//
+// Phase 4 scope: currently handles `monitor_webpage_run`.
+// ---------------------------------------------------------------------------
+
+const SKILLS_DIR = resolve(new URL(import.meta.url).pathname, '../../skills');
+const SKILL_RUN_TYPE_PATTERN = /^"type"\s*:\s*"([a-z_]+)_run"/;
+const SCHEDULED_RUN_SECTION_HEADER = '## Scheduled Run Instructions';
+
+/**
+ * Extract `## Scheduled Run Instructions` from a skill markdown file.
+ * Returns null if the section is not present or the skill file doesn't exist.
+ */
+async function loadSkillRunInstructions(skillSlug: string): Promise<string | null> {
+  try {
+    const filePath = resolve(SKILLS_DIR, `${skillSlug}.md`);
+    const content = await readFile(filePath, 'utf8');
+    const headerIdx = content.indexOf(SCHEDULED_RUN_SECTION_HEADER);
+    if (headerIdx === -1) return null;
+
+    // Extract from the header to the next `##` section or end of file
+    const afterHeader = content.slice(headerIdx + SCHEDULED_RUN_SECTION_HEADER.length);
+    const nextSection = afterHeader.search(/\n##\s/);
+    const sectionContent = nextSection === -1 ? afterHeader : afterHeader.slice(0, nextSection);
+
+    return `${SCHEDULED_RUN_SECTION_HEADER}\n${sectionContent.trim()}`;
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Run Context Loader (spec §7.1)
@@ -93,6 +131,7 @@ export async function loadRunContextData(
     const [rawSt] = await db
       .select({
         description: scheduledTasks.description,
+        brief: scheduledTasks.brief,
         organisationId: scheduledTasks.organisationId,
       })
       .from(scheduledTasks)
@@ -114,6 +153,25 @@ export async function loadRunContextData(
     );
     if (st?.description && st.description.trim().length > 0) {
       taskInstructions = st.description.trim();
+    }
+
+    // Inject skill-typed run protocol from skill markdown file.
+    // If the brief is a JSON string with "type": "<skill>_run", load the
+    // corresponding skill file's ## Scheduled Run Instructions section.
+    if (st) {
+      const brief = st.brief;
+      if (brief && typeof brief === 'string') {
+        const match = SKILL_RUN_TYPE_PATTERN.exec(brief);
+        if (match) {
+          const skillSlug = match[1]; // e.g. "monitor_webpage"
+          const runInstructions = await loadSkillRunInstructions(skillSlug);
+          if (runInstructions) {
+            taskInstructions = taskInstructions
+              ? `${taskInstructions}\n\n${runInstructions}`
+              : runInstructions;
+          }
+        }
+      }
     }
   }
 

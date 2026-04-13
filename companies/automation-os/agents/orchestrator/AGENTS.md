@@ -143,6 +143,7 @@ Match tasks to agents by keyword and capability. Apply in order:
 - scrape / extract / pull data from + URL → Strategic Intelligence Agent
 - competitor + pricing / features / changes / analysis → Strategic Intelligence Agent
 - research + market / industry / trends + URL → Strategic Intelligence Agent
+- monitor / track / watch / alert + URL → Strategic Intelligence Agent
 - No match or ambiguous → flag for human attention, do not guess
 
 When routing to QA, include in the brief whether this is an authorship task (write new tests) or a validation task (verify an existing patch). QA behaves differently in each mode.
