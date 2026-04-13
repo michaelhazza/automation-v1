@@ -10,6 +10,7 @@ import {
   generateDiffSummary,
   buildClassificationPrompt,
   buildClassifyPromptWithMerge,
+  deriveClassificationFailureReason,
 } from '../skillAnalyzerServicePure.js';
 import type { LibrarySkillSummary } from '../skillAnalyzerServicePure.js';
 import type { ParsedSkill } from '../skillParserServicePure.js';
@@ -281,6 +282,22 @@ test('buildClassificationPrompt: likely_duplicate band hint prefers IMPROVEMENT'
     userMessage.includes('Prefer IMPROVEMENT'),
     'likely_duplicate hint should prefer IMPROVEMENT',
   );
+});
+
+// ---------------------------------------------------------------------------
+// deriveClassificationFailureReason
+// ---------------------------------------------------------------------------
+
+test('deriveClassificationFailureReason: null error → parse_error', () => {
+  assert(deriveClassificationFailureReason(null) === 'parse_error', 'null → parse_error');
+});
+
+test('deriveClassificationFailureReason: 429 status → rate_limit', () => {
+  assert(deriveClassificationFailureReason({ statusCode: 429 }) === 'rate_limit', '429 → rate_limit');
+});
+
+test('deriveClassificationFailureReason: unknown error → unknown', () => {
+  assert(deriveClassificationFailureReason(new Error('boom')) === 'unknown', 'Error → unknown');
 });
 
 test('buildClassifyPromptWithMerge: likely_duplicate band hint prefers IMPROVEMENT', () => {

@@ -59,6 +59,18 @@ export function classifyBand(similarity: number): SimilarityBand {
   return 'distinct';
 }
 
+/** Derive a human-readable reason for a classification API failure.
+ *  Pass the caught error, or null if the parse step returned null
+ *  (meaning the API call succeeded but the response was unparseable). */
+export function deriveClassificationFailureReason(
+  err: unknown,
+): 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' {
+  if (err === null || err === undefined) return 'parse_error';
+  const e = err as { statusCode?: number; code?: string };
+  if (e?.statusCode === 429) return 'rate_limit';
+  return 'unknown';
+}
+
 /** Compute all pairwise similarities between candidates and library.
  *  For each candidate, returns only the single best-matching library skill.
  *  Results are sorted by candidate index. */
@@ -606,4 +618,5 @@ export const skillAnalyzerServicePure = {
   generateDiffSummary,
   rankAgentsForCandidate,
   deriveDiffRows,
+  deriveClassificationFailureReason,
 };

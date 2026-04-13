@@ -426,6 +426,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // into both proposed_merged_content (mutable) and
     // original_proposed_merge (immutable) on the result row.
     proposedMerge: object | null;
+    classificationFailed: boolean;
+    classificationFailureReason: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' | null;
   };
 
   const classifiedResults: ClassifiedResult[] = [];
@@ -457,6 +459,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           libraryName: null,
           diffSummary: null,
           proposedMerge: null,
+          classificationFailed: false,
+          classificationFailureReason: null,
         });
         continue;
       }
@@ -476,6 +480,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         // No LLM = no merge proposal. Row will fail the null guard on
         // execute (spec §6.3 LLM-fallback path).
         proposedMerge: null,
+        classificationFailed: false,
+        classificationFailureReason: null,
       });
     }
 
@@ -506,6 +512,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               libraryName: null,
               diffSummary: null,
               proposedMerge: null,
+              classificationFailed: false,
+              classificationFailureReason: null,
             });
             return;
           }
@@ -520,6 +528,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           );
 
           let classificationResult: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
+          let classificationApiError: unknown = undefined;
 
           try {
             const response = await withBackoff(
@@ -543,6 +552,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   const e = err as { statusCode?: number; code?: string };
                   if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
                   return (
+                    e?.statusCode === 429 ||
                     e?.statusCode === 503 ||
                     e?.statusCode === 529 ||
                     e?.code === 'PROVIDER_UNAVAILABLE'
@@ -552,9 +562,18 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             );
 
             classificationResult = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-          } catch {
+          } catch (err) {
             classificationResult = null;
+            classificationApiError = err;
           }
+
+          // null result = either API error (classificationApiError set) or parse failure
+          const classificationFailed = classificationResult === null;
+          const classificationFailureReason = classificationFailed
+            ? skillAnalyzerServicePure.deriveClassificationFailureReason(
+                classificationApiError ?? null,
+              )
+            : null;
 
           // Fallback: classification failed entirely (LLM error or
           // unparseable output). Tag the row as PARTIAL_OVERLAP for human
@@ -581,6 +600,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             libraryName: matchedLib.name,
             diffSummary,
             proposedMerge: finalResult.proposedMerge ?? null,
+            classificationFailed,
+            classificationFailureReason,
           });
 
           classifiedCount++;
@@ -775,6 +796,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       // into proposedMergedContent. Null on every non-merge path.
       proposedMergedContent: r.proposedMerge ?? undefined,
       originalProposedMerge: r.proposedMerge ?? undefined,
+      classificationFailed: r.classificationFailed ?? false,
+      classificationFailureReason: r.classificationFailureReason ?? null,
     });
   }
 
