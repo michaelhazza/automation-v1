@@ -293,7 +293,14 @@ export const scrapingEngine = {
     }
 
     blockedTiers.push(1);
-    logger.info('scrapingEngine.tier1_blocked', { url, error: tier1Result.error, statusCode: tier1Result.statusCode });
+    logger.info('scrapingEngine.escalation', {
+      url,
+      fromTier: 1,
+      toTier: 2,
+      reason: tier1Result.error ?? 'non-2xx or no html',
+      wasBlocked: tier1Result.wasBlocked,
+      statusCode: tier1Result.statusCode,
+    });
 
     // ── 7. Tier 2 — IEE browser ───────────────────────────────────────────────
     if (effectiveMax >= 2) {
@@ -334,7 +341,13 @@ export const scrapingEngine = {
       }
 
       blockedTiers.push(2);
-      logger.info('scrapingEngine.tier2_blocked', { url, error: tier2Result.error });
+      logger.info('scrapingEngine.escalation', {
+        url,
+        fromTier: 2,
+        toTier: 3,
+        reason: tier2Result.error ?? 'browser fetch failed',
+        wasBlocked: tier2Result.wasBlocked,
+      });
     }
 
     // ── 8. Tier 3 — Scrapling MCP sidecar (anti-bot bypass)

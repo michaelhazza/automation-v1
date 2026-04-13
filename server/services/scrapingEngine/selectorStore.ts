@@ -62,18 +62,21 @@ export async function saveSelector(params: {
 }): Promise<string> {
   const { orgId, subaccountId, urlPattern, selectorGroup, selectorName, cssSelector, fingerprint } = params;
 
-  // Attempt INSERT; handle conflict by UPDATE on the named unique index.
+  // Non-atomic upsert pattern (SELECT → INSERT → fallback SELECT).
   // We can't use Drizzle's onConflictDoUpdate with a named index containing NULLs,
-  // so we use a select-then-update approach with a single DB round-trip guard.
+  // so we fall back to a manual three-step approach.
   //
-  // Race condition note: two concurrent callers saving different fingerprints for
-  // the same key have a narrow window where both see no existing row, one wins the
-  // INSERT, and the other's onConflictDoNothing silently drops its fingerprint.
-  // The re-fetch below returns the correct ID, but the losing fingerprint is lost.
-  // In practice both callers scraped the same page at the same time so the
-  // fingerprints are equivalent; the winner's value is correct. A true atomic
-  // fix would require raw SQL INSERT ... ON CONFLICT ... DO UPDATE, which is
-  // blocked by Drizzle's inability to target NULLS NOT DISTINCT expression indexes.
+  // Under concurrent writes:
+  //   - Only one INSERT will succeed (unique constraint enforces it).
+  //   - Other concurrent writers hit onConflictDoNothing and re-SELECT.
+  //   - Competing fingerprint updates may be lost (last-writer not guaranteed).
+  //
+  // This is acceptable because selector evolution is eventually consistent and
+  // not correctness-critical — concurrent callers scraped the same page at roughly
+  // the same time, so the winning fingerprint is equivalent. If selector churn
+  // increases under heavy concurrency, revisit with atomic raw SQL UPSERT.
+  // A true fix requires INSERT ... ON CONFLICT ... DO UPDATE, blocked here by
+  // Drizzle's inability to target NULLS NOT DISTINCT expression indexes.
   const existing = await db
     .select({ id: scrapingSelectors.id })
     .from(scrapingSelectors)
