@@ -273,7 +273,7 @@ export const agentActivityService = {
           FROM cost_aggregates
           WHERE entity_id = ANY(${runIds}::uuid[])
             AND entity_type = 'run'
-            AND period = 'total'
+            AND period_type = 'run'
         `);
         const costMap = new Map(
           (costRows as unknown as Array<{ entity_id: string; total_cost_cents: number }>)

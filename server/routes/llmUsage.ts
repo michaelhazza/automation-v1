@@ -12,6 +12,7 @@ import {
   orgBudgets,
   workspaceLimits,
   agentRuns,
+  subaccounts,
 } from '../db/schema/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { getRoutingLog, getRoutingDistribution, getRequestDetail } from '../services/llmUsageService.js';
@@ -52,14 +53,19 @@ router.get(
         ),
       ).limit(1),
 
-      // Top 10 subaccounts by monthly spend
-      db.select().from(costAggregates).where(
-        and(
-          eq(costAggregates.entityType, 'subaccount'),
-          eq(costAggregates.periodType, 'monthly'),
-          eq(costAggregates.periodKey, billingMonth),
-        ),
-      ).orderBy(desc(costAggregates.totalCostCents)).limit(10),
+      // Top 10 subaccounts by monthly spend — scoped to this org
+      db.select({ costAggregate: costAggregates })
+        .from(costAggregates)
+        .innerJoin(subaccounts, eq(costAggregates.entityId, subaccounts.id))
+        .where(
+          and(
+            eq(costAggregates.entityType, 'subaccount'),
+            eq(costAggregates.periodType, 'monthly'),
+            eq(costAggregates.periodKey, billingMonth),
+            eq(subaccounts.organisationId, orgId),
+          ),
+        ).orderBy(desc(costAggregates.totalCostCents)).limit(10)
+        .then(rows => rows.map(r => r.costAggregate)),
     ]);
 
     res.json({
@@ -146,13 +152,25 @@ router.get(
     const orgId = req.orgId!;
     const billingMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
-    const rows = await db.select().from(costAggregates).where(
-      and(
-        eq(costAggregates.entityType, 'provider'),
-        eq(costAggregates.periodType, 'monthly'),
-        eq(costAggregates.periodKey, billingMonth),
-      ),
-    ).orderBy(desc(costAggregates.totalCostCents));
+    // Query llmRequests directly for org-scoped provider breakdown
+    // (cost_aggregates provider rows are platform-wide, not per-org)
+    const rows = await db
+      .select({
+        provider:       llmRequests.provider,
+        totalCostCents: sql<number>`sum(${llmRequests.costWithMarginCents})`,
+        requestCount:   sql<number>`count(*)`,
+        totalTokensIn:  sql<number>`sum(${llmRequests.tokensIn})`,
+        totalTokensOut: sql<number>`sum(${llmRequests.tokensOut})`,
+      })
+      .from(llmRequests)
+      .where(
+        and(
+          eq(llmRequests.organisationId, orgId),
+          eq(llmRequests.billingMonth, billingMonth),
+        ),
+      )
+      .groupBy(llmRequests.provider)
+      .orderBy(desc(sql`sum(${llmRequests.costWithMarginCents})`));
 
     res.json({ period: billingMonth, providers: rows });
   }),

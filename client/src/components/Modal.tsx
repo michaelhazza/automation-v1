@@ -25,7 +25,7 @@ export default function Modal({ title, onClose, children, maxWidth = 520, disabl
         const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         );
-        if (focusable.length === 0) return;
+        if (focusable.length === 0) { e.preventDefault(); return; }
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (e.shiftKey && document.activeElement === first) {
