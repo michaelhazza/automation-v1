@@ -3348,7 +3348,7 @@ ${htmlForLlm}`;
       runId: context.runId,
       sourceType: 'system',
       agentName: 'scrape_structured',
-      taskType: 'extraction',
+      taskType: 'general',
       executionPhase: 'execution',
       routingMode: 'ceiling',
     },
@@ -3457,7 +3457,7 @@ async function executeMonitorWebpage(
         eq(scheduledTasks.organisationId, context.organisationId),
         eq(scheduledTasks.subaccountId, context.subaccountId),
         eq(scheduledTasks.assignedAgentId, context.agentId),
-        isNull(scheduledTasks.deletedAt),
+        eq(scheduledTasks.isActive, true),
       ),
     );
 
