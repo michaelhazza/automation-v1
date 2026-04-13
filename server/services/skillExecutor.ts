@@ -22,6 +22,7 @@ import { devContextService, assertPathInRoot } from './devContextService.js';
 import { workspaceMemoryService } from './workspaceMemoryService.js';
 import * as priorityFeedService from './priorityFeedService.js';
 import * as skillStudioService from './skillStudioService.js';
+import { scrapingEngine } from './scrapingEngine/index.js';
 import {
   MAX_HANDOFF_DEPTH,
   MAX_TASK_TITLE_LENGTH,
@@ -475,6 +476,9 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
   },
   fetch_url: async (input, context) => {
     return executeWithActionAudit('fetch_url', input, context, () => executeFetchUrl(input, context));
+  },
+  scrape_url: async (input, context) => {
+    return executeWithActionAudit('scrape_url', input, context, () => executeScrapeUrl(input, context));
   },
 
   // ── Playbook Studio tools (system-admin only; agent: playbook-author) ──
@@ -3109,6 +3113,38 @@ async function executeFetchUrl(
     const errMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `Fetch failed: ${errMsg}` };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scrape URL — tiered web scraping with automatic escalation
+// ---------------------------------------------------------------------------
+
+async function executeScrapeUrl(
+  input: Record<string, unknown>,
+  context: SkillExecutionContext
+): Promise<unknown> {
+  const url = String(input.url ?? '');
+  if (!url) return { success: false, error: 'url is required' };
+
+  const result = await scrapingEngine.scrape({
+    url,
+    extract: input.extract ? String(input.extract) : undefined,
+    outputFormat: (input.output_format as 'text' | 'markdown' | 'json') ?? 'markdown',
+    selectors: input.css_selectors as string[] | undefined,
+    adaptive: true,
+    orgId: context.organisationId,
+    subaccountId: context.subaccountId ?? undefined,
+  });
+
+  return {
+    success: result.success,
+    content: result.content,
+    tier_used: result.tierUsed,
+    content_hash: result.contentHash,
+    extracted_data: result.extractedData,
+    url: result.url,
+    metadata: result.metadata,
+  };
 }
 
 // ---------------------------------------------------------------------------

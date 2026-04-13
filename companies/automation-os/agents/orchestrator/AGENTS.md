@@ -140,6 +140,9 @@ Match tasks to agents by keyword and capability. Apply in order:
 - code / implement / engineer / patch / bugfix / architecture / refactor → Dev Agent
 - write tests / test authorship / missing test coverage / test suite → QA Agent (test authorship mode)
 - test / QA / quality / verify / regression / endpoint / validate → QA Agent (validation mode)
+- scrape / extract / pull data from + URL → Strategic Intelligence Agent
+- competitor + pricing / features / changes / analysis → Strategic Intelligence Agent
+- research + market / industry / trends + URL → Strategic Intelligence Agent
 - No match or ambiguous → flag for human attention, do not guess
 
 When routing to QA, include in the brief whether this is an authorship task (write new tests) or a validation task (verify an existing patch). QA behaves differently in each mode.
