@@ -140,3 +140,7 @@ export { scrapingSelectors } from './scrapingSelectors.js';
 export type { ScrapingSelector, NewScrapingSelector, ElementFingerprint } from './scrapingSelectors.js';
 export { scrapingCache } from './scrapingCache.js';
 export type { ScrapingCache, NewScrapingCache } from './scrapingCache.js';
+
+// GEO Audits — Generative Engine Optimisation (migration 0110)
+export { geoAudits } from './geoAudits.js';
+export type { GeoAudit, NewGeoAudit, GeoDimension, GeoDimensionScore, GeoPlatformReadiness } from './geoAudits.js';

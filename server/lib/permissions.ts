@@ -72,6 +72,9 @@ export const ORG_PERMISSIONS = {
   // ── Workspace health audit (Brain Tree OS adoption P4) ──────────────────
   HEALTH_AUDIT_VIEW: 'org.health_audit.view',
   HEALTH_AUDIT_RESOLVE: 'org.health_audit.resolve',
+  // ── GEO audits (Generative Engine Optimisation) ─────────────────────────
+  GEO_AUDIT_VIEW: 'org.geo_audit.view',
+  GEO_AUDIT_RUN: 'org.geo_audit.run',
 } as const;
 
 // ─── Subaccount-level permissions ─────────────────────────────────────────────
@@ -177,6 +180,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   // org.health_audit (Brain Tree OS adoption P4)
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_VIEW,    description: 'View workspace health findings and run on-demand audits', groupName: 'org.health_audit' },
   { key: ORG_PERMISSIONS.HEALTH_AUDIT_RESOLVE, description: 'Mark workspace health findings as resolved',              groupName: 'org.health_audit' },
+  // org.geo_audit (Generative Engine Optimisation)
+  { key: ORG_PERMISSIONS.GEO_AUDIT_VIEW, description: 'View GEO audit results and history',        groupName: 'org.geo_audit' },
+  { key: ORG_PERMISSIONS.GEO_AUDIT_RUN,  description: 'Run on-demand GEO audits for subaccounts',  groupName: 'org.geo_audit' },
   // subaccount.processes
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_VIEW,    description: 'View processes in portal',                  groupName: 'subaccount.processes' },
   { key: SUBACCOUNT_PERMISSIONS.PROCESSES_EXECUTE, description: 'Execute processes in portal',                groupName: 'subaccount.processes' },
