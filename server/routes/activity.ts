@@ -3,8 +3,8 @@ import { authenticate, requireOrgPermission, requireSubaccountPermission, requir
 import { ORG_PERMISSIONS, SUBACCOUNT_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
-import { listOpsDashboardItems } from '../services/activityService.js';
-import type { OpsDashboardFilters, OpsDashboardScope } from '../services/activityService.js';
+import { listActivityItems } from '../services/activityService.js';
+import type { ActivityFilters, ActivityScope } from '../services/activityService.js';
 
 const router = Router();
 
@@ -12,7 +12,7 @@ const router = Router();
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseFilters(query: Record<string, unknown>): OpsDashboardFilters {
+function parseFilters(query: Record<string, unknown>): ActivityFilters {
   const asStringArray = (v: unknown): string[] | undefined => {
     if (typeof v === 'string' && v.length > 0) return v.split(',');
     if (Array.isArray(v)) return v.filter((x): x is string => typeof x === 'string');
@@ -29,7 +29,7 @@ function parseFilters(query: Record<string, unknown>): OpsDashboardFilters {
     assignee: typeof query.assignee === 'string' ? query.assignee : undefined,
     q: typeof query.q === 'string' ? query.q : undefined,
     sort: (['newest', 'oldest', 'severity', 'attention_first'].includes(query.sort as string)
-      ? (query.sort as OpsDashboardFilters['sort'])
+      ? (query.sort as ActivityFilters['sort'])
       : undefined),
     limit: typeof query.limit === 'string' ? Math.max(1, Math.min(200, parseInt(query.limit, 10) || 50)) : undefined,
     offset: typeof query.offset === 'string' ? Math.max(0, parseInt(query.offset, 10) || 0) : undefined,
@@ -50,8 +50,8 @@ router.get(
     await resolveSubaccount(subaccountId, organisationId);
 
     const filters = parseFilters(req.query as Record<string, unknown>);
-    const scope: OpsDashboardScope = { type: 'subaccount', subaccountId, orgId: organisationId };
-    const result = await listOpsDashboardItems(filters, scope);
+    const scope: ActivityScope = { type: 'subaccount', subaccountId, orgId: organisationId };
+    const result = await listActivityItems(filters, scope);
     res.json(result);
   }),
 );
@@ -68,8 +68,8 @@ router.get(
     const organisationId = req.orgId!;
     const filters = parseFilters(req.query as Record<string, unknown>);
     const subaccountId = typeof req.query.subaccountId === 'string' ? req.query.subaccountId : undefined;
-    const scope: OpsDashboardScope = { type: 'org', orgId: organisationId, subaccountId };
-    const result = await listOpsDashboardItems(filters, scope);
+    const scope: ActivityScope = { type: 'org', orgId: organisationId, subaccountId };
+    const result = await listActivityItems(filters, scope);
     res.json(result);
   }),
 );
@@ -85,8 +85,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const filters = parseFilters(req.query as Record<string, unknown>);
     const organisationId = typeof req.query.organisationId === 'string' ? req.query.organisationId : undefined;
-    const scope: OpsDashboardScope = { type: 'system', organisationId };
-    const result = await listOpsDashboardItems(filters, scope);
+    const scope: ActivityScope = { type: 'system', organisationId };
+    const result = await listActivityItems(filters, scope);
     res.json(result);
   }),
 );
