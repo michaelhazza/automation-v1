@@ -54,7 +54,7 @@ async function isAllowedByRobots(url: string): Promise<boolean> {
     }
 
     const text = await res.text();
-    const disallowed = isDisallowedByRobots(text, '/');
+    const disallowed = isSiteGloballyDisallowed(text, '/');
     robotsCache.set(hostname, { disallowed, expiresAt: Date.now() + ROBOTS_TTL_MS });
     return !disallowed;
   } catch {
@@ -71,7 +71,7 @@ async function isAllowedByRobots(url: string): Promise<boolean> {
  * Phase 1: only checks root path ('/') to determine general crawlability.
  * A full path-level parser is deferred to a future phase.
  */
-function isDisallowedByRobots(robotsTxt: string, _path: string): boolean {
+function isSiteGloballyDisallowed(robotsTxt: string, _path: string): boolean {
   const lines = robotsTxt.split('\n').map(l => l.trim().toLowerCase());
   let activeAgent = false;
 
@@ -88,6 +88,14 @@ function isDisallowedByRobots(robotsTxt: string, _path: string): boolean {
 
   return false;
 }
+
+// Rate limiter is process-local (in-memory buckets). In a multi-process
+// deployment each process enforces its own limits independently — external
+// targets see N× the configured rate where N = number of server processes.
+// A shared backing store is deferred to a future phase.
+logger.warn('scrapingEngine.rate_limiter_single_instance_mode', {
+  note: 'Rate limits are per-process only. Multi-process deployments multiply effective request rate.',
+});
 
 // ---------------------------------------------------------------------------
 // Phase 1 stub: default org settings. Phase 4 will load these from the DB.
@@ -181,6 +189,9 @@ export function parseMonitorBrief(brief: string): MonitorBriefConfig {
 // ---------------------------------------------------------------------------
 
 export const scrapingEngine = {
+  // NOTE: scraping_cache table exists (Phase 4 scope) but is not consulted here.
+  // Every scrape() call fetches fresh content. Cache read/write logic will be
+  // added in Phase 4 — do not assume cache is active.
   async scrape(options: ScrapeOptions): Promise<ScrapeResult> {
     const {
       url,

@@ -65,6 +65,15 @@ export async function saveSelector(params: {
   // Attempt INSERT; handle conflict by UPDATE on the named unique index.
   // We can't use Drizzle's onConflictDoUpdate with a named index containing NULLs,
   // so we use a select-then-update approach with a single DB round-trip guard.
+  //
+  // Race condition note: two concurrent callers saving different fingerprints for
+  // the same key have a narrow window where both see no existing row, one wins the
+  // INSERT, and the other's onConflictDoNothing silently drops its fingerprint.
+  // The re-fetch below returns the correct ID, but the losing fingerprint is lost.
+  // In practice both callers scraped the same page at the same time so the
+  // fingerprints are equivalent; the winner's value is correct. A true atomic
+  // fix would require raw SQL INSERT ... ON CONFLICT ... DO UPDATE, which is
+  // blocked by Drizzle's inability to target NULLS NOT DISTINCT expression indexes.
   const existing = await db
     .select({ id: scrapingSelectors.id })
     .from(scrapingSelectors)

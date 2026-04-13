@@ -99,14 +99,25 @@ export async function browserFetch(
     }
 
     if (row.status === 'failed') {
+      const reason = row.failureReason ?? 'unknown';
+      // Classify the failure so the engine can decide whether to escalate.
+      // Navigation/bot-detection failures mean the page is likely blocking us —
+      // treat as wasBlocked so Tier 3 is attempted. Infrastructure failures
+      // (timeout waiting for a slot, worker crash) are not blocking signals.
+      const wasBlocked =
+        reason.includes('navigation') ||
+        reason.includes('blocked') ||
+        reason.includes('bot') ||
+        reason.includes('captcha');
       logger.warn('browserFetch.iee_failed', {
         ieeRunId: enqueueResult.ieeRunId,
-        failureReason: row.failureReason,
+        failureReason: reason,
+        wasBlocked,
       });
       return {
         success: false,
-        wasBlocked: false,
-        error: `IEE browser task failed: ${row.failureReason ?? 'unknown'}`,
+        wasBlocked,
+        error: `IEE browser task failed: ${reason}`,
       };
     }
 
