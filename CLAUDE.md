@@ -13,7 +13,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - Write detailed specs upfront to reduce ambiguity
 - Define both execution steps AND verification steps before starting
-- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Strong success criteria let you loop independently; vague instructions ("make it work") require constant clarification.
+- **Rewrite goals as verifiable assertions before starting.** "Add validation" becomes "Write tests for invalid inputs, then make them pass." "Fix the bug" becomes "Write a test that reproduces it, then make it pass." Prefer assertions that can be validated automatically (tests, logs, deterministic checks) over subjective evaluation. Strong success criteria let you loop independently; vague instructions ("make it work") require constant clarification.
 - If something goes sideways, STOP and re-plan immediately. Do not keep pushing.
 - **Stuck detection rule:** If you attempt the same approach twice and it fails both times, you are stuck. Do not try a third time.
 - Use plan mode for verification steps, not just building
