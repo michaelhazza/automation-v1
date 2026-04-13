@@ -1,6 +1,11 @@
 import { eq, desc, inArray, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
+import { withBackoff } from '../lib/withBackoff.js';
+import anthropicAdapter from './providers/anthropicAdapter.js';
+import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
+import type { ParsedSkill } from './skillParserServicePure.js';
+import type { LibrarySkillSummary } from './skillAnalyzerServicePure.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
  *  throw plain objects of shape `{ statusCode, message }` (not Error
@@ -414,7 +419,6 @@ export async function updateAgentProposal(
       const { agentEmbeddingService } = await import('./agentEmbeddingService.js');
       const { skillEmbeddingService } = await import('./skillEmbeddingService.js');
       const { systemAgentService } = await import('./systemAgentService.js');
-      const { skillAnalyzerServicePure } = await import('./skillAnalyzerServicePure.js');
 
       const agent = await systemAgentService.getAgent(systemAgentId);
       const agentEmbedding = await agentEmbeddingService.refreshSystemAgentEmbedding(systemAgentId);
@@ -1054,6 +1058,212 @@ export async function insertResults(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Classification retry helpers
+// ---------------------------------------------------------------------------
+
+/** Classification outcome returned by the LLM classify stage. */
+type ClassificationOutcome = {
+  classification: 'DUPLICATE' | 'IMPROVEMENT' | 'PARTIAL_OVERLAP' | 'DISTINCT';
+  confidence: number;
+  reasoning: string;
+  proposedMerge: object | null;
+};
+
+/** Run LLM classification for a single candidate/library pair.
+ *  Reuses the same model, backoff, and prompt as skillAnalyzerJob.ts Stage 5.
+ *  Returns the classification result plus failure metadata. */
+async function classifySingleCandidate(
+  candidate: ParsedSkill,
+  matchedLib: LibrarySkillSummary,
+  similarityScore: number,
+  jobId: string,
+): Promise<{
+  result: ClassificationOutcome;
+  classificationFailed: boolean;
+  classificationFailureReason: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown' | null;
+}> {
+  const band = skillAnalyzerServicePure.classifyBand(similarityScore);
+  const { system, userMessage } = skillAnalyzerServicePure.buildClassifyPromptWithMerge(
+    candidate,
+    matchedLib,
+    band as 'likely_duplicate' | 'ambiguous',
+  );
+
+  let parsed: ReturnType<typeof skillAnalyzerServicePure.parseClassificationResponseWithMerge>;
+  let apiError: unknown = undefined;
+
+  try {
+    const response = await withBackoff(
+      () =>
+        anthropicAdapter.call({
+          model: 'claude-haiku-4-5-20251001',
+          system,
+          messages: [{ role: 'user', content: userMessage }],
+          maxTokens: 512,
+          temperature: 0.1,
+        }),
+      {
+        label: 'skill-classify-retry',
+        maxAttempts: 3,
+        correlationId: jobId,
+        runId: jobId,
+        isRetryable: (err: unknown) => {
+          const e = err as { statusCode?: number; code?: string };
+          if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+          return (
+            e?.statusCode === 429 ||
+            e?.statusCode === 503 ||
+            e?.statusCode === 529 ||
+            e?.code === 'PROVIDER_UNAVAILABLE'
+          );
+        },
+      },
+    );
+    parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+  } catch (err) {
+    parsed = null;
+    apiError = err;
+  }
+
+  const classificationFailed = parsed === null;
+  return {
+    result: parsed ?? {
+      classification: 'PARTIAL_OVERLAP',
+      confidence: 0.3,
+      reasoning: 'LLM classification failed - defaulting to PARTIAL_OVERLAP for human review.',
+      proposedMerge: null,
+    },
+    classificationFailed,
+    classificationFailureReason: classificationFailed
+      ? skillAnalyzerServicePure.deriveClassificationFailureReason(apiError ?? null)
+      : null,
+  };
+}
+
+/** Retry classification for a single result row that has classificationFailed=true.
+ *  Idempotent: returns immediately if the row is not in a failed state.
+ *  Uses the stored parsedCandidates + similarityScore — no re-parse or re-embed. */
+export async function retryClassification(
+  jobId: string,
+  resultId: string,
+  organisationId: string,
+): Promise<void> {
+  const jobRows = await db
+    .select()
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+  const job = jobRows[0];
+
+  const resultRows = await db
+    .select()
+    .from(skillAnalyzerResults)
+    .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
+    .limit(1);
+  if (!resultRows[0]) throw { statusCode: 404, message: 'Result not found' };
+  const result = resultRows[0];
+
+  // Idempotency guard: no-op if the row is not in a failed classification state
+  if (!result.classificationFailed) return;
+
+  const candidates = (job.parsedCandidates ?? []) as ParsedSkill[];
+  const candidate = candidates[result.candidateIndex];
+  if (!candidate) throw { statusCode: 422, message: 'Candidate not found in job parsedCandidates' };
+  if (!result.matchedSkillId) throw { statusCode: 422, message: 'No matched skill to classify against' };
+  if (result.similarityScore == null) throw { statusCode: 422, message: 'Missing similarity score' };
+
+  const matchedSkillRows = await db
+    .select()
+    .from(systemSkills)
+    .where(eq(systemSkills.id, result.matchedSkillId))
+    .limit(1);
+  if (!matchedSkillRows[0]) throw { statusCode: 422, message: 'Matched skill no longer exists' };
+  const matchedSkill = matchedSkillRows[0];
+
+  const matchedLib: LibrarySkillSummary = {
+    id: matchedSkill.id,
+    slug: matchedSkill.slug,
+    name: matchedSkill.name,
+    description: matchedSkill.description ?? '',
+    definition: matchedSkill.definition as object,
+    instructions: matchedSkill.instructions ?? null,
+    isSystem: true,
+  };
+
+  const { result: classification, classificationFailed, classificationFailureReason } =
+    await classifySingleCandidate(candidate, matchedLib, result.similarityScore, jobId);
+
+  const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
+
+  await db
+    .update(skillAnalyzerResults)
+    .set({
+      classification: classification.classification,
+      confidence: classification.confidence,
+      classificationReasoning: classification.reasoning,
+      diffSummary,
+      proposedMergedContent: classification.proposedMerge ?? null,
+      originalProposedMerge: classification.proposedMerge ?? null,
+      classificationFailed,
+      classificationFailureReason,
+    })
+    .where(
+      and(
+        eq(skillAnalyzerResults.id, resultId),
+        eq(skillAnalyzerResults.classificationFailed, true), // optimistic concurrency
+      ),
+    );
+}
+
+/** Retry all classificationFailed=true results in a job sequentially
+ *  (no parallel burst) with jittered delay to avoid re-triggering 429s. */
+export async function bulkRetryFailedClassifications(
+  jobId: string,
+  organisationId: string,
+): Promise<{ retried: number; stillFailed: number }> {
+  const jobRows = await db
+    .select({ id: skillAnalyzerJobs.id })
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  if (!jobRows[0]) throw { statusCode: 404, message: 'Job not found' };
+
+  const failedResults = await db
+    .select({ id: skillAnalyzerResults.id })
+    .from(skillAnalyzerResults)
+    .where(
+      and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.classificationFailed, true),
+      ),
+    );
+
+  let retried = 0;
+
+  for (let i = 0; i < failedResults.length; i++) {
+    await retryClassification(jobId, failedResults[i].id, organisationId);
+    retried++;
+    // Jittered delay: 500–1500ms between calls to avoid re-triggering 429s
+    if (i < failedResults.length - 1) {
+      await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+    }
+  }
+
+  const remaining = await db
+    .select({ id: skillAnalyzerResults.id })
+    .from(skillAnalyzerResults)
+    .where(
+      and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.classificationFailed, true),
+      ),
+    );
+
+  return { retried, stillFailed: remaining.length };
+}
+
 export const skillAnalyzerService = {
   createJob,
   getJob,
@@ -1065,6 +1275,8 @@ export const skillAnalyzerService = {
   resetMergeToOriginal,
   executeApproved,
   updateJobProgress,
+  retryClassification,
+  bulkRetryFailedClassifications,
   // Internal — used by job handler only
   getJobById,
   clearResultsForJob,

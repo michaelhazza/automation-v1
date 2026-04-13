@@ -311,4 +311,38 @@ router.post(
   })
 );
 
+// ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/results/:resultId/retry-classification
+// Retry LLM classification for a single result row with classificationFailed=true.
+// Idempotent — no-op if the row is not in a failed state.
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/results/:resultId/retry-classification',
+  asyncHandler(async (req, res) => {
+    await skillAnalyzerService.retryClassification(
+      req.params.jobId,
+      req.params.resultId,
+      req.orgId!,
+    );
+    return res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/retry-failed-classifications
+// Retry all classificationFailed=true results in a job sequentially.
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/retry-failed-classifications',
+  asyncHandler(async (req, res) => {
+    const { retried, stillFailed } = await skillAnalyzerService.bulkRetryFailedClassifications(
+      req.params.jobId,
+      req.orgId!,
+    );
+    return res.json({ ok: true, retried, stillFailed });
+  }),
+);
+
 export default router;
