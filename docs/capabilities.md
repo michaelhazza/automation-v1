@@ -37,6 +37,7 @@
   - [Integration Framework](#integration-framework)
   - [Execution Infrastructure](#execution-infrastructure)
   - [Developer Tools (IEE)](#developer-tools-iee)
+- [Replaces / Consolidates](#replaces--consolidates)
 - [Agency Capabilities](#agency-capabilities)
   - [Performance Reporting & Analytics](#performance-reporting--analytics)
   - [SEO Management](#seo-management)
@@ -71,21 +72,21 @@ Automation OS enables organisations to:
 
 ### Multi-Tenant Platform
 
-Three-tier hierarchy that isolates data and configuration at every level.
+Three-tier hierarchy that isolates data and configuration at every level — so agencies never mix client data, and clients never see each other.
 
 - **System tier** — Platform-wide defaults, system-managed agents, global skill library, playbook templates
 - **Organisation tier** — Agency-level workspace with its own users, agents, skills, memory, branding, and billing
 - **Subaccount tier** — Per-client workspace with its own agent links, task board, review queue, data sources, and memory
-- Row-level security on all protected tables; soft deletes preserve audit history
+- Strict data isolation enforced at every layer (database, service, and API) with full audit history preserved
 - Subaccount tags for cohort queries; guided onboarding wizard for new orgs
 
 ### Authentication & Access Control
 
-Five roles, granular permission keys, and a flexible permission-set system.
+Five roles, granular permission keys, and a flexible permission-set system — so every user sees exactly what they need and nothing more.
 
 - **Roles:** `system_admin`, `org_admin`, `manager`, `user`, `client_user`
-- Custom permission sets assignable to roles; permissions checked at both route and UI level
-- JWT auth with refresh tokens, rate-limited login, email invitations, self-service password reset
+- Custom permission sets assignable to roles; access enforced at both API and UI level
+- Secure auth with rate-limited login, email invitations, and self-service password reset
 - Permissions-driven UI — buttons, tabs, and pages hidden when the user lacks the required key
 
 ### AI Agent System
@@ -205,12 +206,12 @@ Extensible connector architecture supporting OAuth, API keys, webhooks, and MCP 
 
 ### Execution Infrastructure
 
-Production-grade job queue, idempotency, and security powering all background operations.
+Production-grade reliability — agents run consistently, recover from failures, and never double-execute.
 
 - **Job queue:** pg-boss or BullMQ; 24+ job types across 10 priority tiers with DLQ and nightly cleanup
-- **Idempotency:** read-only, keyed-write, or PG advisory lock strategies on every action
-- **Budget enforcement:** Per-call middleware enforces token, cost, tool-call, and timeout ceilings
-- **Security:** Three-layer row-level security (Postgres RLS, service-layer scoping, retrieval assertions); every tool call authorisation logged
+- **Idempotency:** every action is deduplicated — safe to retry without side effects
+- **Budget enforcement:** hard ceilings on tokens, cost, tool calls, and timeouts per run
+- **Security:** data isolation enforced at three independent layers; every tool call authorisation logged
 - Loop detection, crash-resume checkpoints, correlation IDs for cross-service tracing
 
 ### Developer Tools (IEE)
@@ -223,17 +224,33 @@ Integrated Execution Environment for browser automation and development workspac
 
 ---
 
+## Replaces / Consolidates
+
+Automation OS replaces a fragmented stack of point tools with a single, orchestrated system of agents and workflows.
+
+| Replaced | With |
+|----------|------|
+| Zapier / Make / n8n (disconnected automation) | Playbook Engine with structured agent steps and human review gates |
+| ChatGPT / Claude (standalone chat) | Deployed agents with defined skills, budgets, accountability, and memory |
+| Manual monthly reporting | Scheduled agents that draft, review, and deliver reports automatically |
+| Ad-hoc CRM hygiene sprints | Continuous enrichment and pipeline analysis on a recurring cadence |
+| Siloed marketing, CRM, and analytics tools | Unified skill system connecting data, decisions, and actions across platforms |
+| Fragmented client management across orgs | Multi-tenant subaccount hierarchy with strict data isolation per client |
+| Manual churn reviews | Always-on health scoring with anomaly detection and intervention triggers |
+
+---
+
 ## Agency Capabilities
 
 ### Performance Reporting & Analytics
 
 | | |
 |---|---|
-| **Outcome** | Clients receive data-driven performance reports with analysis, trends, and actionable recommendations |
+| **Outcome** | Clients receive data-driven performance reports — automatically generated on schedule, not assembled manually each month |
 | **Trigger** | Scheduled agent run, manual request, or pipeline health threshold breach |
-| **Deliverable** | Formatted report delivered via email or portal with executive summary, metric breakdowns, and next steps |
+| **Deliverable** | Formatted report delivered via email or portal with executive summary, metric breakdowns, and prioritised next steps |
 
-- Covers social media, ad campaigns, CRM pipeline velocity, and financial metrics
+- Covers social media, ad campaigns, CRM pipeline velocity, and financial metrics in a single standardised workflow
 - 42 Macro transcript analysis using GRID/KISS framework for research-backed insights
 - All reports pass through human review before delivery
 
@@ -241,126 +258,125 @@ Integrated Execution Environment for browser automation and development workspac
 
 | | |
 |---|---|
-| **Outcome** | Clients receive prioritised SEO audits with specific, actionable fixes |
+| **Outcome** | Clients receive prioritised SEO audits with specific, actionable fixes — not a raw crawl dump |
 | **Trigger** | Recurring schedule or on-demand audit request |
-| **Deliverable** | Prioritised findings report with issue severity, recommendation, and tracking over time |
+| **Deliverable** | Prioritised findings report with issue severity, fix recommendation, and tracking against previous audits |
 
 - On-page SEO auditing with per-issue recommendations
-- Integrated with content creation for SEO-optimised output
+- Integrated with content creation for SEO-optimised output from the same workflow
 
 ### Content Creation & Publishing
 
 | | |
 |---|---|
-| **Outcome** | Publish-ready content across formats and channels from a single brief |
+| **Outcome** | Publish-ready content across formats and channels, generated from a single brief through a standardised workflow |
 | **Trigger** | Content brief submission, scheduled cadence, or campaign launch |
-| **Deliverable** | Long-form content, social posts, ad copy, lead magnets, landing pages — all with approval workflows |
+| **Deliverable** | Long-form content, social posts, ad copy, lead magnets, landing pages — each with a mandatory approval step before publishing |
 
-- Blog posts, case studies, whitepapers, landing pages
-- Platform-specific social variants and ad copy
-- Lead magnets (checklists, templates, guides, scorecards)
-- All publishing actions require human approval
+- One brief → blog post, social variants, ad copy, and lead magnet — no repeated briefing per format
+- Platform-specific social variants optimised per channel
+- All publishing actions gated by human approval; nothing goes live autonomously
 
 ### CRM & Contact Management
 
 | | |
 |---|---|
-| **Outcome** | Clean, enriched CRM data with intelligent pipeline analysis |
+| **Outcome** | Clean, enriched CRM data maintained on an ongoing basis — not reconciled in a quarterly cleanup sprint |
 | **Trigger** | Scheduled sync, new contact event, or pipeline review cadence |
-| **Deliverable** | Updated CRM records, enrichment data, pipeline analysis, and voice-of-customer insight reports |
+| **Deliverable** | Updated CRM records, third-party enrichment data, pipeline analysis, and voice-of-customer insight reports |
 
-- Contact enrichment from third-party providers
-- Pipeline velocity, conversion, and forecast analysis
+- Contact enrichment from third-party providers written back automatically
+- Pipeline velocity, conversion, and forecast analysis on a recurring cadence
 - All CRM writes gated by human approval
 
 ### Email Marketing & Outreach
 
 | | |
 |---|---|
-| **Outcome** | Intelligent email operations from inbound classification to outbound sequences |
-| **Trigger** | Inbound email received, deal goes stale, or sequence cadence hit |
-| **Deliverable** | Classified inbox, drafted follow-ups, multi-step sequences, and support replies — all sent with approval |
+| **Outcome** | Intelligent email operations that respond to signals in real time — not batch-processed at the end of the week |
+| **Trigger** | Inbound email received, deal goes stale, or outreach sequence cadence hit |
+| **Deliverable** | Classified inbox, drafted follow-ups, multi-step sequences, and support replies — all sent with human approval |
 
 - Inbound classification by intent, urgency, and routing category
-- Contextual follow-ups for stale deals and at-risk contacts
-- Knowledge-base-powered support replies
+- Contextual follow-ups triggered automatically when deals go stale
+- Knowledge-base-powered support replies that improve as the knowledge base grows
 
 ### Campaign Management & Optimization
 
 | | |
 |---|---|
-| **Outcome** | Optimised campaign spend through data-driven bid, budget, and copy adjustments |
+| **Outcome** | Campaign spend optimised continuously by data, not reviewed manually once a week |
 | **Trigger** | Performance threshold breach, scheduled review, or manual request |
-| **Deliverable** | Bid adjustments, budget increases, campaign pauses, and copy updates — all with evidence and approval |
+| **Deliverable** | Bid adjustments, budget increases, campaign pauses, and copy updates — each presented with supporting evidence and requiring explicit approval |
 
-- Performance-based recommendations with supporting data
-- Every budget and bid change requires human sign-off
+- Every recommendation backed by performance data, not instinct
+- Every budget and bid change requires human sign-off before execution
 
 ### Financial Analysis & Reporting
 
 | | |
 |---|---|
-| **Outcome** | Structured financial summaries with ratios, trends, and key insights |
+| **Outcome** | Structured financial summaries available on demand — not a multi-hour manual consolidation |
 | **Trigger** | Scheduled reporting cadence or ad-hoc analysis request |
-| **Deliverable** | Financial summary with revenue/expense analysis, metric trends, and budget/forecast updates |
+| **Deliverable** | Financial summary with revenue/expense ratios, trend analysis, and budget/forecast updates requiring approval |
 
-- Revenue and expense data retrieval from accounting systems
-- Record updates (budgets, forecasts, expense notes) gated by approval
+- Revenue and expense data retrieved from connected accounting systems
+- Record updates (budgets, forecasts, expense notes) gated by approval before write-back
 
 ### Churn Detection & Account Health
 
 | | |
 |---|---|
-| **Outcome** | Early warning system that identifies at-risk accounts before they churn |
-| **Trigger** | Health score drop, anomaly detection, or scheduled monitoring cadence |
-| **Deliverable** | Health scores (0-100), risk assessments, anomaly alerts, and intervention recommendations |
+| **Outcome** | At-risk accounts identified and flagged before they churn — not discovered after the fact on a renewal call |
+| **Trigger** | Health score drop below threshold, anomaly detected, or scheduled monitoring cadence |
+| **Deliverable** | Health scores (0-100), risk assessments with contributing factors, anomaly alerts, and intervention recommendations |
 
-- Composite health scoring based on normalised metrics
-- Anomaly detection against historical baselines
-- Automated intervention triggers (check-in, pause, alert) with human gating
-- ClientPulse dashboard for portfolio-wide health visibility
+- Composite health scoring based on normalised CRM, engagement, and activity metrics
+- Anomaly detection compared against each account's own historical baseline
+- Intervention triggers (check-in, pause, escalation alert) proposed with human gating
+- ClientPulse dashboard for portfolio-wide health visibility at a glance
 
 ### Customer Support Automation
 
 | | |
 |---|---|
-| **Outcome** | Faster support responses with consistent quality, powered by the knowledge base |
+| **Outcome** | Faster support responses with consistent quality — drawn from a shared knowledge base, not individual memory |
 | **Trigger** | Inbound query received or untriaged backlog accumulates |
-| **Deliverable** | Classified queries, drafted replies, and triaged backlogs with disposition recommendations |
+| **Deliverable** | Classified queries with routing, drafted replies using knowledge base context, and triaged backlogs with disposition recommendations |
 
-- Knowledge base search for relevant context
-- Intent classification and urgency routing
-- Backlog triage with capture-and-process workflow
+- Knowledge base search surfaces relevant articles before drafting
+- Intent classification and urgency routing ensures the right priority
+- Backlog triage processes accumulations systematically, not ad hoc
 
 ### Landing Page Management
 
 | | |
 |---|---|
-| **Outcome** | Agent-built landing pages from creation through to publishing |
+| **Outcome** | Agents build and manage landing pages end-to-end, reducing turnaround from days to minutes |
 | **Trigger** | Campaign launch, content brief, or manual request |
-| **Deliverable** | Published landing pages with meta tags, forms, and view analytics |
+| **Deliverable** | Published landing pages with meta tags, forms, view analytics, and full version history |
 
-- Full lifecycle: create, update, publish with version history
-- Publishing is irreversible and requires human approval
+- Full lifecycle managed in one place: create, update, publish
+- Publishing is irreversible and always requires human approval — nothing deploys autonomously
 
 ### Competitor Intelligence
 
 | | |
 |---|---|
-| **Outcome** | Structured competitor intelligence for strategic positioning |
+| **Outcome** | Structured competitor intelligence delivered on a repeatable schedule — not assembled ad hoc before a pitch |
 | **Trigger** | Scheduled cadence or ad-hoc research request |
-| **Deliverable** | Intelligence brief covering pricing, features, recent news, and positioning analysis |
+| **Deliverable** | Intelligence brief covering pricing, features, recent news, and positioning analysis in a consistent format |
 
 ### Portfolio Intelligence
 
 | | |
 |---|---|
-| **Outcome** | Cross-client analytics and pattern recognition for agency leadership |
+| **Outcome** | Agency leadership gets a cross-client view in minutes — not assembled from individual account reports |
 | **Trigger** | Scheduled portfolio review or leadership briefing cadence |
-| **Deliverable** | Portfolio intelligence briefing with per-client health, priority actions, and cross-client insights |
+| **Deliverable** | Portfolio intelligence briefing with per-client health scores, priority actions, and cross-client pattern insights |
 
-- Cohort queries filtered by subaccount tags
-- Org-level insight storage for pattern recognition across clients
+- Cohort queries filtered by subaccount tags for segment-level analysis
+- Org-level insight storage compounds pattern recognition across clients over time
 
 ---
 
@@ -394,7 +410,7 @@ Complete list of all 98 skills.
 | Skill | Description | Type | Gate |
 |-------|-------------|------|------|
 | `create_lead_magnet` | Produce complete lead magnet asset (checklist, template, guide, scorecard) | LLM | HITL |
-| `create_page` | Create new page with HTML content, meta tags, and optional form configuration | LLM | — |
+| `create_page` | Create new page with HTML content, meta tags, and optional form configuration | Hybrid | — |
 | `draft_ad_copy` | Draft ad copy variants across platforms with format-specific optimisation | LLM | — |
 | `draft_content` | Draft long-form content (blog, landing page, case study, whitepaper) with SEO | LLM | — |
 | `draft_post` | Draft social media post copy for multiple platforms with variants | LLM | — |
@@ -403,7 +419,7 @@ Complete list of all 98 skills.
 | `publish_page` | Publish draft page to make it publicly accessible | Deterministic | HITL |
 | `publish_post` | Submit approved social post for publishing immediately or scheduled | Deterministic | — |
 | `update_copy` | Upload approved ad copy to ads platform | Hybrid | HITL |
-| `update_page` | Update existing page HTML, meta tags, or form configuration | LLM | — |
+| `update_page` | Update existing page HTML, meta tags, or form configuration | Hybrid | — |
 | `write_docs` | Apply approved documentation update to system | LLM | HITL |
 | `write_spec` | Submit requirements spec for human approval before development | LLM | HITL |
 
@@ -609,5 +625,6 @@ Complete list of all 98 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-13 | Tighten Product language to benefit-oriented; sharpen Agency with constraints; fix Hybrid type on create_page/update_page; add Replaces / Consolidates section | — |
 | 2026-04-13 | Add Core Value Proposition; compress Product Capabilities; reframe Agency to outcomes; add Type column to Skills | — |
 | 2026-04-12 | Initial capabilities registry created from full code audit | — |
