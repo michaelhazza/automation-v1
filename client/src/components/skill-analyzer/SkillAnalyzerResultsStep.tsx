@@ -677,29 +677,49 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
   }
 
   const approvedCount = results.filter((r) => r.actionTaken === 'approved').length;
+  const reviewedCount = results.filter((r) => r.actionTaken != null).length;
 
   return (
     <div className="space-y-4">
-      {/* Summary bar */}
-      <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3">
-        <div className="flex gap-6 text-sm">
-          {CLASSIFICATIONS.map((c) => {
-            const count = results.filter((r) => r.classification === c).length;
-            if (count === 0) return null;
-            const cfg = SECTION_CONFIG[c];
-            return (
-              <span key={c} className={`font-medium ${cfg.headerColour.split(' ')[0]}`}>
-                {count} {cfg.label}
-              </span>
-            );
-          })}
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900 mb-0.5">Review Skills</h1>
+          <p className="text-xs text-slate-400">
+            {results.length} candidates · approve, reject, or skip each skill
+          </p>
+          <div className="flex gap-2 flex-wrap mt-2">
+            {CLASSIFICATIONS.map((c) => {
+              const count = results.filter((r) => r.classification === c).length;
+              if (count === 0) return null;
+              const cfg = SECTION_CONFIG[c];
+              return (
+                <span
+                  key={c}
+                  className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full"
+                  style={{ backgroundColor: cfg.badgeBg, color: cfg.badgeText }}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+                  {count} {cfg.label}
+                </span>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <div className="h-1.5 w-48 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-slate-400 rounded-full transition-all"
+                style={{ width: results.length > 0 ? `${(reviewedCount / results.length) * 100}%` : '0%' }}
+              />
+            </div>
+            <span className="text-xs text-slate-400">{reviewedCount} of {results.length} reviewed</span>
+          </div>
         </div>
         <button
           onClick={onContinue}
-          className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          className="shrink-0 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors"
         >
-          Continue to Execute
-          {approvedCount > 0 && ` (${approvedCount} approved)`}
+          Continue to Execute →{approvedCount > 0 && ` (${approvedCount})`}
         </button>
       </div>
 
