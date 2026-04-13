@@ -48,6 +48,14 @@ export const skillAnalyzerResults = pgTable(
     confidence: real('confidence').notNull(),
     similarityScore: real('similarity_score'),
     classificationReasoning: text('classification_reasoning'),
+    // Tracks API-level failure during the classify stage. True only when the
+    // LLM call failed (429, timeout, parse error) — NOT set for genuine
+    // PARTIAL_OVERLAP results. Used to distinguish retryable failures from
+    // model output.
+    classificationFailed: boolean('classification_failed').notNull().default(false),
+    // Reason for the failure: 'rate_limit' | 'timeout' | 'parse_error' | 'unknown'.
+    // Null on all rows where classificationFailed is false.
+    classificationFailureReason: text('classification_failure_reason'),
 
     // Diff data for side-by-side UI
     diffSummary: jsonb('diff_summary'),
