@@ -1,7 +1,7 @@
 # Agent Beliefs — Technical Specification
 
 **Date:** 2026-04-13
-**Status:** Draft — awaiting review
+**Status:** Final draft — ready for review
 **Classification:** Significant
 **Depends on:** Agent briefing service (Phase 2D, shipped)
 **Precursor to:** anda-hippocampus state evolution patterns
@@ -96,6 +96,11 @@ CREATE UNIQUE INDEX agent_beliefs_active_key_uniq
 CREATE INDEX agent_beliefs_active_lookup
   ON agent_beliefs (organisation_id, subaccount_id, agent_id)
   WHERE deleted_at IS NULL AND superseded_by IS NULL;
+
+-- RLS: tenant isolation (matches agent_briefings pattern)
+ALTER TABLE agent_beliefs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY agent_beliefs_org_isolation ON agent_beliefs
+  USING (organisation_id = current_setting('app.organisation_id', true)::uuid);
 ```
 
 ### Drizzle schema: `server/db/schema/agentBeliefs.ts`
@@ -252,16 +257,20 @@ export const BELIEFS_TOKEN_BUDGET = 1500;
 
 ### Injection point
 
-Beliefs are injected into the agent prompt **alongside the briefing**, in the dynamic parts section of `agentExecutionService.ts`. Order:
+Beliefs are injected into the agent prompt in the dynamic parts section of `agentExecutionService.ts` (lines 665-750). The current dynamic section order and where beliefs slot in:
 
 ```
-## Your Briefing          ← existing (Phase 2D)
-## Your Beliefs            ← NEW
-## Workspace Memory        ← existing (Phase 0A+)
-## Available Context Sources ← existing
+## Your Briefing              ← existing (line 675, Phase 2D)
+## Your Beliefs                ← NEW — inject here
+## Task Instructions           ← existing (line 684, conditional on scheduled tasks)
+## Available Context Sources   ← existing (line 709, lazy manifest)
+## Workspace Memory            ← existing (line 728, Phase 0A+)
+## Known Workspace Entities    ← existing (line 736)
+## Current Board               ← existing (line 740)
+## Subaccount State Summary    ← existing (line 749)
 ```
 
-Beliefs come after the briefing because the briefing provides narrative orientation ("here's what happened recently") and beliefs provide factual state ("here's what I know to be true"). The agent reads the story first, then the facts.
+Beliefs inject immediately after the briefing (after line 679) because the two sections form a natural pair: the briefing provides narrative orientation ("here's what happened recently") and beliefs provide factual state ("here's what I know to be true"). The agent reads the story first, then the facts. Task instructions and memory follow as the operational context.
 
 ### Query and formatting
 
@@ -341,26 +350,23 @@ This prevents duplication between the briefing and belief sections, keeping tota
 
 ### 6.1 User override API
 
-Two routes, both gated by subaccount-level permissions:
+Three routes in `server/routes/subaccountAgents.ts`, gated by org-level permissions (matches existing agent route pattern). All routes call `resolveSubaccount(subaccountId, req.orgId)` per architecture rules.
 
 ```
-PUT  /api/subaccounts/:subaccountId/agents/:agentId/beliefs/:beliefKey
-DELETE /api/subaccounts/:subaccountId/agents/:agentId/beliefs/:beliefKey
+GET    /api/subaccounts/:subaccountId/agents/:linkId/beliefs
+PUT    /api/subaccounts/:subaccountId/agents/:linkId/beliefs/:beliefKey
+DELETE /api/subaccounts/:subaccountId/agents/:linkId/beliefs/:beliefKey
 ```
+
+Middleware: `authenticate`, `requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW)` for GET, `requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT)` for PUT/DELETE.
+
+**GET** returns all active beliefs for the agent-subaccount, ordered by category then confidence. Used by the UI to display what an agent believes.
 
 **PUT** upserts a belief with `source: 'user_override'` and `confidence: 1.0`. User-set beliefs are always maximum confidence. The LLM extraction will see them in the current-beliefs context and should respect them (the prompt instructs: "do not override beliefs with source 'user_override' unless you have strong contradictory evidence").
 
 **DELETE** soft-deletes a belief (`deleted_at = now()`).
 
-Both return the updated/deleted belief row.
-
-### 6.2 Read API
-
-```
-GET /api/subaccounts/:subaccountId/agents/:agentId/beliefs
-```
-
-Returns all active beliefs for the agent-subaccount, ordered by category then confidence. Used by the UI to display what an agent believes.
+Both PUT and DELETE return the updated/deleted belief row. The route uses `:linkId` (subaccount-agent link ID) rather than `:agentId` to match the existing route pattern — the handler resolves the agentId from the link row.
 
 ### 6.3 UI surface
 
@@ -413,28 +419,31 @@ Phase 2 requires **no schema changes**. Every column it needs (`superseded_by`, 
 
 | File | Action | Description |
 |------|--------|-------------|
-| `migrations/0112_agent_beliefs.sql` | Create | Table + indexes |
+| `migrations/0112_agent_beliefs.sql` | Create | Table, indexes, RLS policy |
 | `server/db/schema/agentBeliefs.ts` | Create | Drizzle schema |
-| `server/db/schema/index.ts` | Modify | Re-export `agentBeliefs` |
+| `server/db/schema/index.ts` | Modify | Re-export `agentBeliefs` (after `agentBriefings` line) |
+| `server/config/rlsProtectedTables.ts` | Modify | Add `agent_beliefs` entry (matches `agent_briefings` pattern) |
 | `server/services/agentBeliefService.ts` | Create | Core service: `extractAndMerge()`, `getActiveBeliefs()`, `formatBeliefsForPrompt()`, `upsertUserOverride()`, `softDelete()` |
 | `server/config/limits.ts` | Modify | Add belief limits constants |
-| `server/jobs/agentBriefingJob.ts` | Modify | Add `agentBeliefService.extractAndMerge()` call after briefing update |
+| `server/jobs/agentBriefingJob.ts` | Modify | Add `agentBeliefService.extractAndMerge()` call after briefing update (same handler, same payload) |
 | `server/services/agentExecutionService.ts` | Modify | Inject beliefs into dynamic prompt parts (after briefing, before memory) |
 | `server/services/agentBriefingService.ts` | Modify | Update briefing prompt to avoid duplicating belief facts |
-| `server/routes/subaccountAgents.ts` | Modify | Add GET/PUT/DELETE belief routes |
-| `client/src/pages/AdminSubaccountDetailPage.tsx` | Modify | Add Beliefs tab with table + inline edit |
+| `server/routes/subaccountAgents.ts` | Modify | Add GET/PUT/DELETE belief routes with `resolveSubaccount` + `requireOrgPermission` |
+| `client/src/pages/AdminSubaccountDetailPage.tsx` | Modify | Add Beliefs tab (within agents section) with table + inline edit |
 | `docs/capabilities.md` | Modify | Add beliefs to agent capabilities section |
 | `architecture.md` | Modify | Document beliefs in agent system section |
+
+**Note on job registration:** Belief extraction runs inside the existing `agent-briefing-update` job handler — no new pg-boss queue or `jobConfig.ts` entry needed. The handler in `agentBriefingJob.ts` calls briefing update first, then belief extraction. Both are fire-and-forget with independent error handling, so a failure in beliefs never affects briefings. The existing `expireInSeconds: 120` in `jobConfig.ts` accommodates the additional LLM call (both calls are <30s each under normal conditions).
 
 ### Phasing
 
 **Phase 1a — Backend (2-3 days):**
-1. Migration + schema
+1. Migration + schema + RLS entry in `rlsProtectedTables.ts`
 2. `agentBeliefService.ts` (extract, merge, read, format)
 3. Limits constants
-4. Wire into briefing job
-5. Wire into prompt injection
-6. Update briefing prompt
+4. Wire into briefing job handler
+5. Wire into prompt injection (after briefing, before task instructions)
+6. Update briefing prompt to deduplicate
 
 **Phase 1b — API + UI (1-2 days):**
 7. Belief routes (GET/PUT/DELETE)
@@ -451,14 +460,17 @@ Phase 2 requires **no schema changes**. Every column it needs (`superseded_by`, 
 
 - [ ] Migration applies cleanly: `npm run migrate`
 - [ ] `npm run db:generate` produces no unexpected diff
+- [ ] RLS policy active: `agent_beliefs` in `rlsProtectedTables.ts` and `verify-rls-coverage.sh` passes
 - [ ] Agent run completes and beliefs are extracted (check `agent_beliefs` table)
 - [ ] Subsequent run on same agent-subaccount merges correctly (update/reinforce, not duplicate)
 - [ ] Beliefs appear in agent prompt (check `agent_run_messages` for "Your Beliefs" section)
+- [ ] Beliefs inject after briefing, before task instructions (correct dynamic section order)
 - [ ] Token budget respected: >50 beliefs → lowest-confidence beliefs dropped from prompt
 - [ ] User override via PUT sets `source: 'user_override'` and `confidence: 1.0`
 - [ ] User delete via DELETE sets `deleted_at`, belief disappears from prompt
+- [ ] Belief routes use `resolveSubaccount` + `requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT)`
 - [ ] Beliefs tab renders on subaccount agent detail page
 - [ ] Briefing no longer duplicates facts that are in the belief set
-- [ ] `test:gates` pass (no RLS/route violations introduced)
-- [ ] Fire-and-forget: LLM extraction failure does NOT block run completion
+- [ ] `test:gates` pass (no RLS/route violations, no job idempotency violations)
+- [ ] Fire-and-forget: LLM extraction failure does NOT block run completion or briefing update
 - [ ] `evidence_count` increments on reinforce, not just on add
