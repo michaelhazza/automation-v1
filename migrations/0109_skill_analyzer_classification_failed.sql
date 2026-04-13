@@ -2,11 +2,11 @@
 --
 -- Tracks API-level failure during the classify stage (Phase 3). The boolean
 -- classificationFailed is set to true only when the LLM call failed (429,
--- timeout, parse error) — NOT for genuine PARTIAL_OVERLAP results. This
+-- parse error) — NOT for genuine PARTIAL_OVERLAP results. This
 -- distinguishes retryable failures from model output.
 --
 -- classificationFailureReason stores the failure type:
--- 'rate_limit' | 'timeout' | 'parse_error' | 'unknown'.
+-- 'rate_limit' | 'parse_error' | 'unknown'.
 -- Null on all rows where classificationFailed is false.
 
 ALTER TABLE skill_analyzer_results

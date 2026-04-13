@@ -312,7 +312,7 @@ function ResultCard({
               <button
                 type="button"
                 onClick={handleRetry}
-                disabled={retrying}
+                disabled={retrying || !result.classificationFailed}
                 className="text-xs px-2 py-1 rounded border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-50"
               >
                 {retrying ? 'Retrying…' : 'Retry'}
@@ -423,17 +423,27 @@ function ResultSection({
   const cfg = SECTION_CONFIG[classification];
   const failedResults = results.filter((r) => r.classificationFailed);
   const [bulkRetrying, setBulkRetrying] = useState(false);
+  const [bulkRetryStatus, setBulkRetryStatus] = useState<string | null>(null);
 
   async function handleBulkRetry() {
     setBulkRetrying(true);
+    setBulkRetryStatus(null);
     try {
-      await api.post(`/api/system/skill-analyser/jobs/${jobId}/retry-failed-classifications`);
+      const { data: retryData } = await api.post<{ ok: boolean; retried: number; stillFailed: number }>(
+        `/api/system/skill-analyser/jobs/${jobId}/retry-failed-classifications`,
+      );
       const { data } = await api.get<{ results: AnalysisResult[] }>(
         `/api/system/skill-analyser/jobs/${jobId}`,
       );
       data.results.forEach((r) => onResultPatched(r));
+      setBulkRetryStatus(
+        retryData.stillFailed === 0
+          ? `All ${retryData.retried} retried successfully`
+          : `Retried ${retryData.retried}, ${retryData.stillFailed} still failed`,
+      );
     } catch (err) {
       console.error('[SkillAnalyzer] Bulk retry failed:', err);
+      setBulkRetryStatus('Retry failed — check console for details');
     } finally {
       setBulkRetrying(false);
     }
@@ -496,6 +506,9 @@ function ResultSection({
               >
                 {bulkRetrying ? 'Retrying…' : `Retry all failed classifications (${failedResults.length})`}
               </button>
+            )}
+            {classification === 'PARTIAL_OVERLAP' && bulkRetryStatus && !bulkRetrying && (
+              <span className="text-xs text-slate-600">{bulkRetryStatus}</span>
             )}
             {classification === 'DUPLICATE' && (
               <button
