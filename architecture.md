@@ -83,6 +83,7 @@ Route files are focused on a single domain. If a file exceeds ~200 lines, split 
 | Client Pulse reports | `clientpulseReports.ts` |
 | GoHighLevel (GHL) OAuth | `ghl.ts` |
 | Modules & subscriptions | `modules.ts` |
+| GEO audits | `geoAudits.ts` |
 | Onboarding | `onboarding.ts` |
 
 ### Shared route helpers
@@ -374,7 +375,7 @@ Terminal statuses pruned: `completed`, `failed`, `timeout`, `cancelled`. `loop_d
 
 ### File-based definitions
 
-Skills are defined as Markdown files in `server/skills/*.md`. There are 99 built-in system skills:
+Skills are defined as Markdown files in `server/skills/*.md`. There are 107 built-in system skills:
 
 | Category | Skills |
 |----------|--------|
@@ -389,6 +390,7 @@ Skills are defined as Markdown files in `server/skills/*.md`. There are 99 built
 | Execution | `run_command`, `trigger_process`, `capture_screenshot` |
 | Pages (CMS-style) | `create_page`, `update_page`, `publish_page`, `analyze_endpoint` |
 | Reporting Agent | `read_inbox`, `read_org_insights`, `write_org_insight`, `query_subaccount_cohort`, `compute_health_score`, `compute_churn_risk`, `detect_anomaly`, `generate_portfolio_report`, `trigger_account_intervention`, `review_ux`, `analyse_42macro_transcript` |
+| GEO (AI Search) | `audit_geo`, `geo_citability`, `geo_crawlers`, `geo_schema`, `geo_platform_optimizer`, `geo_brand_authority`, `geo_llmstxt`, `geo_compare` |
 | Playbook Studio | `playbook_read_existing`, `playbook_validate`, `playbook_simulate`, `playbook_estimate_cost`, `playbook_propose_save` |
 | Skill Studio | `skill_read_existing`, `skill_read_regressions`, `skill_validate`, `skill_simulate`, `skill_propose_save` |
 | Priority Feed | `read_priority_feed` (universal — list/claim/release) |
