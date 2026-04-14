@@ -1,6 +1,7 @@
 import { eq, and, or, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
 import type { AnthropicTool } from './llmService.js';
 import { systemSkillService } from './systemSkillService.js';
 import {
@@ -139,6 +140,15 @@ export const skillService = {
       })
       .returning();
 
+    await configHistoryService.recordHistory({
+      entityType: 'skill',
+      entityId: skill.id,
+      organisationId,
+      snapshot: skill as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+    });
+
     return skill;
   },
 
@@ -157,6 +167,15 @@ export const skillService = {
 
     if (!existing) throw { statusCode: 404, message: 'Skill not found' };
     if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot modify built-in skills' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'skill',
+      entityId: id,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+    });
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) update.name = data.name;

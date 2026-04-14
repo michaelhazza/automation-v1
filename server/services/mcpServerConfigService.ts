@@ -2,6 +2,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { mcpServerConfigs, mcpServerAgentLinks } from '../db/schema/index.js';
 import type { McpServerConfig, NewMcpServerConfig } from '../db/schema/mcpServerConfigs.js';
+import { configHistoryService } from './configHistoryService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,16 @@ export const mcpServerConfigService = {
         updatedAt: new Date(),
       })
       .returning();
+
+    await configHistoryService.recordHistory({
+      entityType: 'mcp_server_config',
+      entityId: config.id,
+      organisationId,
+      snapshot: config as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+    });
+
     return config;
   },
 
@@ -122,6 +133,17 @@ export const mcpServerConfigService = {
     organisationId: string,
     updates: Partial<Pick<McpServerConfig, 'envEncrypted' | 'defaultGateLevel' | 'toolGateOverrides' | 'status' | 'allowedTools' | 'blockedTools' | 'priority' | 'maxConcurrency' | 'connectionMode'>>
   ): Promise<McpServerConfig> {
+    // Record pre-mutation snapshot for config history
+    const [preState] = await db.select().from(mcpServerConfigs)
+      .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'mcp_server_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
     const data: Record<string, unknown> = { ...updates, updatedAt: new Date() };
 
     // Encrypt env vars if being updated
@@ -139,6 +161,16 @@ export const mcpServerConfigService = {
   },
 
   async delete(id: string, organisationId: string): Promise<void> {
+    const [preState] = await db.select().from(mcpServerConfigs)
+      .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'mcp_server_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api', changeSummary: 'Entity deleted',
+      });
+    }
+
     const [deleted] = await db
       .delete(mcpServerConfigs)
       .where(and(eq(mcpServerConfigs.id, id), eq(mcpServerConfigs.organisationId, organisationId)))

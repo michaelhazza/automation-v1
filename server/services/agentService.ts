@@ -3,6 +3,7 @@ import { db } from '../db/index.js';
 import { agents, agentDataSources, users, agentPromptRevisions, scheduledTasks } from '../db/schema/index.js';
 import crypto from 'crypto';
 import { auditService } from './auditService.js';
+import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import { getS3Client, getBucketName } from '../lib/storage.js';
@@ -741,6 +742,17 @@ export const agentService = {
       })
       .returning();
 
+    await configHistoryService.recordHistory({
+      entityType: 'agent',
+      entityId: agent.id,
+      organisationId,
+      snapshot: agent as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
+
     return { id: agent.id, name: agent.name, status: agent.status };
   },
 
@@ -784,6 +796,17 @@ export const agentService = {
     if (existing.isSystemManaged && data.masterPrompt !== undefined) {
       throw { statusCode: 400, message: 'Cannot edit master prompt on system-managed agents. Use additionalPrompt instead.' };
     }
+
+    await configHistoryService.recordHistory({
+      entityType: 'agent',
+      entityId: id,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) { update.name = data.name; update.slug = makeSlug(data.name); }
@@ -901,6 +924,17 @@ export const agentService = {
       throw { statusCode: 400, message: 'Cannot activate agent: masterPrompt is required. Add a prompt before activating.' };
     }
 
+    await configHistoryService.recordHistory({
+      entityType: 'agent',
+      entityId: id,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
+
     const [updated] = await db
       .update(agents)
       .set({ status: 'active', updatedAt: new Date() })
@@ -917,6 +951,17 @@ export const agentService = {
       .from(agents)
       .where(and(eq(agents.id, id), eq(agents.organisationId, organisationId), isNull(agents.deletedAt)));
     if (!existing) throw { statusCode: 404, message: 'Agent not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'agent',
+      entityId: id,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
 
     const [updated] = await db
       .update(agents)
@@ -1013,6 +1058,17 @@ export const agentService = {
       })
       .returning();
 
+    await configHistoryService.recordHistory({
+      entityType: 'agent_data_source',
+      entityId: source.id,
+      organisationId,
+      snapshot: source as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
+
     if (source.syncMode === 'proactive') {
       dataSyncScheduler.schedule(source.id, source.cacheMinutes * 60 * 1000);
     }
@@ -1048,6 +1104,17 @@ export const agentService = {
       .from(agentDataSources)
       .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
     if (!existing) throw { statusCode: 404, message: 'Data source not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'agent_data_source',
+      entityId: sourceId,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.name !== undefined) update.name = data.name;
@@ -1098,6 +1165,17 @@ export const agentService = {
       .from(agentDataSources)
       .where(and(eq(agentDataSources.id, sourceId), eq(agentDataSources.agentId, agentId)));
     if (!existing) throw { statusCode: 404, message: 'Data source not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'agent_data_source',
+      entityId: sourceId,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      sessionId: null,
+      changeSummary: null,
+    });
 
     dataSyncScheduler.cancel(sourceId);
     dataSourceCache.delete(sourceId);

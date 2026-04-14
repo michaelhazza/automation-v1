@@ -116,6 +116,9 @@ export const agentRuns = pgTable(
     // Sprint 5 P4.3: Plan emitted during the planning prelude for complex runs.
     planJson: jsonb('plan_json'),
 
+    // Configuration Assistant: approved ConfigPlan JSON for plan replayability (migration 0114)
+    configPlanJson: jsonb('config_plan_json'),
+
     // Brain Tree OS adoption P1 (migration 0095) — structured handoff document
     // produced when the run reaches a terminal state. The shape is versioned;
     // see AgentRunHandoffV1 in server/services/agentRunHandoffServicePure.ts.

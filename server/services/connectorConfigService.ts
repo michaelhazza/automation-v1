@@ -1,6 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { connectorConfigs, canonicalAccounts } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
 
 type ConnectorInsert = typeof connectorConfigs.$inferInsert;
 type ConnectorType = ConnectorInsert['connectorType'];
@@ -69,6 +70,13 @@ export const connectorConfigService = {
         webhookSecret: data.webhookSecret ?? null,
       })
       .returning();
+
+    await configHistoryService.recordHistory({
+      entityType: 'connector_config', entityId: config.id, organisationId,
+      snapshot: config as unknown as Record<string, unknown>,
+      changedBy: null, changeSource: 'api',
+    });
+
     return config;
   },
 
@@ -106,6 +114,16 @@ export const connectorConfigService = {
     lastSyncError: string | null;
     configVersion: string;
   }>) {
+    const [preState] = await db.select().from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'connector_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
     const [updated] = await db
       .update(connectorConfigs)
       .set({ ...data, updatedAt: new Date() })
@@ -116,6 +134,16 @@ export const connectorConfigService = {
   },
 
   async delete(id: string, organisationId: string) {
+    const [preState] = await db.select().from(connectorConfigs)
+      .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'connector_config', entityId: id, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api', changeSummary: 'Entity deleted',
+      });
+    }
+
     const [deleted] = await db
       .delete(connectorConfigs)
       .where(and(eq(connectorConfigs.id, id), eq(connectorConfigs.organisationId, organisationId)))

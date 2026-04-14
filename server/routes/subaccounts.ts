@@ -13,6 +13,7 @@ import {
   permissionSets,
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc } from 'drizzle-orm';
+import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
 
 const router = Router();
@@ -101,6 +102,12 @@ router.post(
       })
       .returning();
 
+    await configHistoryService.recordHistory({
+      entityType: 'subaccount', entityId: sa.id, organisationId,
+      snapshot: sa as unknown as Record<string, unknown>,
+      changedBy: req.user?.id ?? null, changeSource: 'ui',
+    });
+
     // Auto-init board config from org config (if available)
     boardService.initSubaccountBoard(organisationId, sa.id).catch(() => {
       // Non-critical: if org has no board config, skip silently
@@ -154,6 +161,12 @@ router.patch(
       res.status(403).json({ error: 'Cannot change the status of the organisation workspace' });
       return;
     }
+
+    await configHistoryService.recordHistory({
+      entityType: 'subaccount', entityId: sa.id, organisationId: req.orgId!,
+      snapshot: sa as unknown as Record<string, unknown>,
+      changedBy: req.user?.id ?? null, changeSource: 'ui',
+    });
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) update.name = name;

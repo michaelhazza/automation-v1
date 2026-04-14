@@ -1,6 +1,7 @@
 import { eq, and, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { integrationConnections, subaccounts } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
 import { connectionTokenService } from './connectionTokenService.js';
 import type { IntegrationConnection } from '../db/schema/integrationConnections.js';
 
@@ -127,6 +128,13 @@ export const integrationConnectionService = {
       connectionStatus: 'active',
     }).returning();
 
+    // Config history — snapshot uses sanitized (no secrets) version
+    await configHistoryService.recordHistory({
+      entityType: 'integration_connection', entityId: connection.id, organisationId,
+      snapshot: sanitizeConnection(connection) as unknown as Record<string, unknown>,
+      changedBy: null, changeSource: 'api',
+    });
+
     return sanitizeConnection(connection);
   },
 
@@ -139,6 +147,12 @@ export const integrationConnectionService = {
         isNull(integrationConnections.subaccountId),
       ));
     if (!existing) return null;
+
+    await configHistoryService.recordHistory({
+      entityType: 'integration_connection', entityId: id, organisationId,
+      snapshot: sanitizeConnection(existing) as unknown as Record<string, unknown>,
+      changedBy: null, changeSource: 'api',
+    });
 
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (data.label !== undefined) updates.label = data.label;

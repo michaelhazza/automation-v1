@@ -1,6 +1,7 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 
 export const subaccountAgentService = {
@@ -89,6 +90,16 @@ export const subaccountAgentService = {
           updatedAt: new Date(),
         })
         .returning();
+
+      await configHistoryService.recordHistory({
+        entityType: 'subaccount_agent',
+        entityId: link.id,
+        organisationId,
+        snapshot: link as unknown as Record<string, unknown>,
+        changedBy: null,
+        changeSource: 'api',
+      });
+
       return link;
     } catch (err: unknown) {
       const e = err as { code?: string };
@@ -110,6 +121,16 @@ export const subaccountAgentService = {
       );
 
     if (!link) throw { statusCode: 404, message: 'Agent link not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'subaccount_agent',
+      entityId: link.id,
+      organisationId,
+      snapshot: link as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+      changeSummary: 'Entity deleted',
+    });
 
     // Cascade deletes subaccount-level data sources via FK
     await db.delete(subaccountAgents).where(eq(subaccountAgents.id, link.id));
@@ -214,6 +235,15 @@ export const subaccountAgentService = {
       .where(and(eq(subaccountAgents.id, linkId), eq(subaccountAgents.organisationId, organisationId)));
 
     if (!link) throw { statusCode: 404, message: 'Agent link not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'subaccount_agent',
+      entityId: linkId,
+      organisationId,
+      snapshot: link as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+    });
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.isActive !== undefined) update.isActive = data.isActive;
