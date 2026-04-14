@@ -45,6 +45,7 @@ import {
   ParsedSkill,
 } from '../services/skillParserServicePure.js';
 import anthropicAdapter from '../services/providers/anthropicAdapter.js';
+import { logger } from '../lib/logger.js';
 
 // p-limit is ESM; import dynamically to avoid CommonJS issues
 async function getPLimit(concurrency: number) {
@@ -555,7 +556,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       progressMessage: `Routed ${llmQueue.length} candidate${llmQueue.length === 1 ? '' : 's'} to human review (LLM unavailable)`,
     });
   } else {
-    const limit = await getPLimit(5);
+    // Concurrency 3: reduces Anthropic API rate-limit pressure. Each call
+    // may generate a large proposedMerge response; 5 concurrent requests
+    // was causing sustained rate limiting and cascading timeouts.
+    const limit = await getPLimit(3);
     let classifiedCount = 0;
 
     await Promise.all(
@@ -651,7 +655,16 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                     temperature: 0.1,
                   });
                   const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-                  if (parsed === null) throw PARSE_FAILURE;
+                  if (parsed === null) {
+                    logger.warn('skill_classify_parse_failure', {
+                      jobId,
+                      slug: candidate.slug,
+                      rawLength: response.content.length,
+                      // Full raw response so we can see exactly what the LLM produced
+                      raw: response.content,
+                    });
+                    throw PARSE_FAILURE;
+                  }
                   return parsed;
                 },
                 {
@@ -690,6 +703,17 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                 classificationApiError ?? null,
               )
             : null;
+
+          if (classificationFailed) {
+            logger.warn('skill_classify_failed', {
+              jobId,
+              slug: candidate.slug,
+              reason: classificationFailureReason,
+              apiError: classificationApiError
+                ? String((classificationApiError as { message?: string }).message ?? classificationApiError)
+                : null,
+            });
+          }
 
           // Fallback: classification failed entirely (LLM error or
           // unparseable output). Tag the row as PARTIAL_OVERLAP for human

@@ -235,19 +235,14 @@ function formatSkillForPrompt(
 /** Parse LLM classification response. Validates with Zod.
  *  Returns null if response is unparseable. */
 export function parseClassificationResponse(response: string): ClassificationResult | null {
-  // Extract JSON from response (may be wrapped in markdown code block)
+  // Use brace extraction, not code-block regex — same reasoning as
+  // parseClassificationResponseWithMerge. Non-greedy regex breaks on
+  // responses whose string values contain triple backticks.
   let jsonStr = response.trim();
-
-  const jsonBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (jsonBlockMatch) {
-    jsonStr = jsonBlockMatch[1].trim();
-  } else {
-    // Find first { ... } block
-    const start = jsonStr.indexOf('{');
-    const end = jsonStr.lastIndexOf('}');
-    if (start !== -1 && end > start) {
-      jsonStr = jsonStr.slice(start, end + 1);
-    }
+  const start = jsonStr.indexOf('{');
+  const end = jsonStr.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    jsonStr = jsonStr.slice(start, end + 1);
   }
 
   try {
@@ -407,17 +402,17 @@ function isValidProposedMerge(value: unknown): value is ProposedMerge {
 export function parseClassificationResponseWithMerge(
   response: string,
 ): ClassificationResultWithMerge | null {
-  // Extract JSON from response (may be wrapped in markdown code block).
+  // Extract JSON from response using brace matching, not code-block regex.
+  // The code-block regex approach (non-greedy [\s\S]*?) breaks when
+  // proposedMerge.instructions contains triple backticks (markdown code
+  // examples), causing the regex to stop at the first ``` inside the
+  // string and extract truncated JSON. Brace extraction is robust to
+  // wrapping, preamble/postamble, and any content inside string values.
   let jsonStr = response.trim();
-  const jsonBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (jsonBlockMatch) {
-    jsonStr = jsonBlockMatch[1].trim();
-  } else {
-    const start = jsonStr.indexOf('{');
-    const end = jsonStr.lastIndexOf('}');
-    if (start !== -1 && end > start) {
-      jsonStr = jsonStr.slice(start, end + 1);
-    }
+  const start = jsonStr.indexOf('{');
+  const end = jsonStr.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    jsonStr = jsonStr.slice(start, end + 1);
   }
 
   let parsed: unknown;
