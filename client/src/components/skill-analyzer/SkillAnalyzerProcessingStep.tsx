@@ -109,123 +109,127 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
   const inFlight = currentJob.classifyState?.inFlight ?? {};
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-2xl mx-auto">
-      <h2 className="text-base font-semibold text-slate-800 mb-6 text-center">
-        {isFailed ? 'Analysis Failed' : 'Analyzing Skills…'}
-      </h2>
+    <div className="space-y-4">
+      {/* Page header — matches Results step layout */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900 mb-0.5">
+            {isFailed ? 'Analysis Failed' : 'Analyzing Skills…'}
+          </h1>
+          {currentJob.candidateCount != null && (
+            <p className="text-xs text-slate-400">
+              Found {currentJob.candidateCount} skill{currentJob.candidateCount === 1 ? '' : 's'} in the import
+              {currentJob.status === 'classifying' && classifyQueue.length > 0 && classifyQueue.length < currentJob.candidateCount && (
+                <span> · {classifyQueue.length} need AI classification</span>
+              )}
+            </p>
+          )}
+        </div>
+        {isFailed && (
+          <button
+            onClick={onStartNew}
+            className="shrink-0 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Start New Analysis
+          </button>
+        )}
+      </div>
+
+      {isFailed && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {currentJob.errorMessage || 'An unexpected error occurred during processing.'}
+        </div>
+      )}
 
       {!isFailed && (
         <>
           {/* Progress bar */}
-          <div className="mb-4">
-            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-2">
               <div
                 className="h-full bg-indigo-500 rounded-full transition-all duration-700"
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div className="flex justify-between mt-1.5">
+            <div className="flex justify-between">
               <span className="text-xs text-slate-500">
-                {PHASE_LABELS[currentJob.status] ?? currentJob.status}
+                {currentJob.progressMessage ?? PHASE_LABELS[currentJob.status] ?? currentJob.status}
               </span>
               <span className="text-xs text-slate-500">{pct}%</span>
             </div>
+
+            {!(currentJob.status === 'classifying' && classifyQueue.length > 0) && (
+              <div className="flex justify-center mt-4">
+                <div className="w-6 h-6 border-2 border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
+              </div>
+            )}
           </div>
 
-          {currentJob.progressMessage && (
-            <p className="text-sm text-slate-600 text-center">{currentJob.progressMessage}</p>
-          )}
-
-          {currentJob.candidateCount != null && (
-            <p className="text-sm text-slate-500 text-center mt-2">
-              Found <strong>{currentJob.candidateCount}</strong> skill
-              {currentJob.candidateCount === 1 ? '' : 's'} in the import
-            </p>
-          )}
-
+          {/* Per-skill classification rows */}
           {currentJob.status === 'classifying' && classifyQueue.length > 0 && (
-            <div className="mt-4 space-y-1 max-h-80 overflow-y-auto">
-              {classifyQueue.map((slug) => {
-                const status = deriveRowStatus(slug, liveResults, inFlight, nowMs);
-                const result = liveResults.find((r) => r.candidateSlug === slug);
-                return (
-                  <div
-                    key={slug}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-                      status === 'done'        ? 'bg-green-950 text-green-200' :
-                      status === 'failed'      ? 'bg-red-950 text-red-300' :
-                      status === 'stale'       ? 'bg-amber-950 text-amber-300' :
-                      status === 'classifying' ? 'bg-indigo-950 text-indigo-200' :
-                                                 'bg-zinc-900 text-zinc-500'
-                    }`}
-                  >
-                    <span className="w-4 text-center shrink-0">
-                      {status === 'done'        ? <span>✓</span> :
-                       status === 'failed'      ? <span>✗</span> :
-                       status === 'stale'       ? <span>●</span> :
-                       status === 'classifying' ? <span className="animate-pulse">●</span> :
-                                                   <span>○</span>}
-                    </span>
-                    <span className="flex-1 truncate font-mono text-xs">{slug}</span>
-                    <span className="text-xs shrink-0">
-                      {status === 'done'        ? (result?.classification ?? '') :
-                       status === 'failed'      ? failureReasonLabel(result?.classificationFailureReason) :
-                       status === 'stale'       ? 'stalled >30s' :
-                       status === 'classifying' ? 'classifying…' : 'queued'}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="space-y-px">
+                {classifyQueue.map((slug) => {
+                  const status = deriveRowStatus(slug, liveResults, inFlight, nowMs);
+                  const result = liveResults.find((r) => r.candidateSlug === slug);
+                  return (
+                    <div
+                      key={slug}
+                      className={`flex items-center gap-2 px-4 py-2 text-sm ${
+                        status === 'done'        ? 'bg-green-950 text-green-200' :
+                        status === 'failed'      ? 'bg-red-950 text-red-300' :
+                        status === 'stale'       ? 'bg-amber-950 text-amber-300' :
+                        status === 'classifying' ? 'bg-indigo-950 text-indigo-200' :
+                                                   'bg-zinc-900 text-zinc-500'
+                      }`}
+                    >
+                      <span className="w-4 text-center shrink-0">
+                        {status === 'done'        ? <span>✓</span> :
+                         status === 'failed'      ? <span>✗</span> :
+                         status === 'stale'       ? <span>●</span> :
+                         status === 'classifying' ? <span className="animate-pulse">●</span> :
+                                                     <span>○</span>}
+                      </span>
+                      <span className="flex-1 truncate font-mono text-xs">{slug}</span>
+                      <span className="text-xs shrink-0">
+                        {status === 'done'        ? (result?.classification ?? '') :
+                         status === 'failed'      ? failureReasonLabel(result?.classificationFailureReason) :
+                         status === 'stale'       ? 'stalled >30s' :
+                         status === 'classifying' ? 'classifying…' : 'queued'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
 
-          {showPollWarning && (
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 text-center">
-              Connection issue — retrying. Status may be stale.
-            </div>
-          )}
-
-          {!(currentJob.status === 'classifying' && classifyQueue.length > 0) && (
-            <div className="flex justify-center mt-6">
-              <div className="w-8 h-8 border-[3px] border-slate-200 border-t-indigo-500 rounded-full animate-spin" />
+              {/* Footer row: last-update timestamp + stall warning */}
+              <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-950">
+                <p className="text-xs text-zinc-500">
+                  Last update:{' '}
+                  {(() => {
+                    const diffS = Math.floor((nowMs - new Date(currentJob.updatedAt).getTime()) / 1_000);
+                    return diffS < 60 ? `${diffS}s ago` : `${Math.floor(diffS / 60)}m ago`;
+                  })()}
+                </p>
+              </div>
             </div>
           )}
 
           {currentJob.status === 'classifying' && nowMs - lastProgressAt > 45_000 && (
-            <div className="mt-3 flex items-start gap-2 rounded border border-amber-700 bg-amber-950 px-3 py-2 text-sm text-amber-300">
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               <span className="shrink-0">⚠</span>
               <span>
                 No progress for over 45s — one or more classification calls may be stalled.
-                The job will auto-recover via timeout within 60s.
+                The job will auto-recover via timeout within 2 minutes.
               </span>
             </div>
           )}
 
-          {currentJob.status === 'classifying' && (
-            <p className="mt-2 text-xs text-zinc-500">
-              Last update:{' '}
-              {(() => {
-                const diffS = Math.floor((nowMs - new Date(currentJob.updatedAt).getTime()) / 1_000);
-                return diffS < 60 ? `${diffS}s ago` : `${Math.floor(diffS / 60)}m ago`;
-              })()}
-            </p>
+          {showPollWarning && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+              Connection issue — retrying. Status may be stale.
+            </div>
           )}
-        </>
-      )}
-
-      {isFailed && (
-        <>
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-6">
-            {currentJob.errorMessage || 'An unexpected error occurred during processing.'}
-          </div>
-          <div className="flex justify-center">
-            <button
-              onClick={onStartNew}
-              className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              Start New Analysis
-            </button>
-          </div>
         </>
       )}
     </div>

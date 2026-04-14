@@ -238,8 +238,10 @@ export const BELIEFS_MAX_RETRIES_PER_RUN = 50;
 
 // ── Skill Analyzer ──────────────────────────────────────────────────────────
 
-/** Maximum ms budget for a single skill LLM classification call, including all withBackoff retries. */
-export const SKILL_CLASSIFY_TIMEOUT_MS = 60_000;
+/** Maximum ms budget for a single skill LLM classification call, including all withBackoff retries.
+ *  Set to 120s: PARTIAL_OVERLAP/IMPROVEMENT calls must generate a full proposedMerge object
+ *  (merged skill instructions up to 2500 chars each side), which can take 40-90s at peak API load. */
+export const SKILL_CLASSIFY_TIMEOUT_MS = 120_000;
 
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
