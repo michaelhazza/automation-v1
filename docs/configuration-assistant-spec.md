@@ -237,7 +237,7 @@ These tools create or modify configuration entities. All mutation tools use `def
 | 5 | `config_update_link` | Update a subaccount agent link (generic — accepts any subset of override fields) | `subaccountAgentService.updateLink()` | linkId, subaccountId, plus any override fields |
 | 6 | `config_set_link_skills` | Set the skill slugs on a subaccount agent link | `subaccountAgentService.updateLink()` | linkId, subaccountId, skillSlugs (string array) |
 | 7 | `config_set_link_instructions` | Set custom instructions on a subaccount agent link (per-client context and directives) | `subaccountAgentService.updateLink()` | linkId, subaccountId, customInstructions (text, max 10000 chars) |
-| 8 | `config_set_link_schedule` | Set the heartbeat or cron schedule on a subaccount agent link | `subaccountAgentService.updateLink()` + `agentScheduleService.updateSchedule()` | linkId, subaccountId, heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetMinutes, scheduleCron, scheduleEnabled, scheduleTimezone |
+| 8 | `config_set_link_schedule` | Set the heartbeat or cron schedule on a subaccount agent link. Timezone rule: default to org timezone if not specified; always store as IANA timezone + UTC timestamps. | `subaccountAgentService.updateLink()` + `agentScheduleService.updateSchedule()` | linkId, subaccountId, heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetMinutes, scheduleCron, scheduleEnabled, scheduleTimezone |
 | 9 | `config_set_link_limits` | Set execution limits on a subaccount agent link | `subaccountAgentService.updateLink()` | linkId, subaccountId, tokenBudgetPerRun, maxToolCallsPerRun, timeoutSeconds, maxCostPerRunCents, maxLlmCallsPerRun |
 | 10 | `config_create_subaccount` | Create a new subaccount (client workspace) with name and slug | `subaccountService.createSubaccount()` | name, slug (auto-derived if not provided) |
 | 11 | `config_create_scheduled_task` | Create a recurring scheduled task with title, description, assigned agent, and schedule | `scheduledTaskService.createTask()` | title, description, brief, priority, assignedAgentId, subaccountId, rrule, timezone, scheduleTime, isActive |
@@ -321,7 +321,14 @@ Where:
 - `stepNumber` is the step's position in the `ConfigPlan.steps` array (1-based)
 - `entityType` is the string entity type (e.g. `'agent'`, `'subaccount_agent'`)
 - `entityId` is the target entity UUID (or `''` for creates where the ID is not yet known)
-- `normalizedParameters` is the tool call parameters sorted by key and with all whitespace normalised (prevents key divergence from field ordering)
+- `normalizedParameters` is the tool call parameters processed through `canonicalJSON()` (prevents key divergence from field ordering or formatting differences)
+
+**`canonicalJSON()` normalisation rules:**
+- Object keys: sorted alphabetically at all depths (recursive)
+- Arrays: sorted lexicographically **only** when order is not meaningful (e.g. `skillSlugs`). Order-significant arrays (e.g. `dependsOn`) are preserved as-is. The skill handler schema defines which array parameters are order-independent via a `sortForIdempotency: true` annotation.
+- Strings: trimmed of leading/trailing whitespace
+- Null/undefined values: stripped from the object (a missing key and an explicit `null` produce the same hash)
+- Numbers: serialized without trailing zeros
 
 This key is passed to the skill handler and stored on the action record. Duplicate keys within the same session are rejected without re-executing the mutation.
 
@@ -333,6 +340,7 @@ This key is passed to the skill handler and stored on the action record. Duplica
 | **System prompt** | Explicit "you can / you cannot" declaration in the prompt | Agent will not attempt out-of-scope actions conversationally |
 | **Action registry** | Only `config_*` actions are registered. Unknown action types are rejected by `actionService.proposeAction()` | Even if hallucinated, unregistered actions fail |
 | **Topic filtering** | All config tools tagged with `topics: ['configuration']`. Topic classifier surfaces only config tools. | Other tools don't appear in the tool selection context |
+| **Entity ownership assertion** | Every mutation skill handler asserts `entity.organisationId === context.orgId` before writing, independent of the service layer's org scoping. Defence-in-depth — if a service function's WHERE clause is ever missing an org filter, this catches it. | Cross-org data access via config agent |
 
 ---
 
@@ -428,6 +436,14 @@ When recommending a configuration:
 - After completing a configuration, run config_run_health_check to validate
 ```
 
+**Discovery loop cap:**
+```
+During the discovery phase, ask at most 5 clarification rounds before
+proposing a plan. If after 5 rounds the scope is still unclear, propose
+a plan based on what you know so far and mark uncertain steps with
+"[needs confirmation]" in the summary. Do not loop indefinitely.
+```
+
 **Plan-first discipline:**
 ```
 Never execute mutations without a plan. Always:
@@ -511,8 +527,17 @@ interface ConfigPlanStep {
   currentValue?: Record<string, unknown>; // Current entity state for modified fields (null for creates). Read at plan creation time.
   parameters: Record<string, unknown>;  // The actual tool call parameters (intended post-mutation state)
   dependsOn?: number[];        // Step numbers this depends on (for entity ID resolution)
+  riskLevel: 'low' | 'medium' | 'high'; // UI highlights high-risk steps (see classification below)
 }
 ```
+
+**Risk level classification:** The `riskLevel` is deterministic, not LLM-judged:
+
+| Risk level | Criteria | UI treatment |
+|---|---|---|
+| `high` | Modifies `masterPrompt` or `additionalPrompt` (agent behaviour), deactivates an agent, restores a version, deletes a data source | Red accent bar, "⚠ High impact" badge, step expanded by default |
+| `medium` | Changes schedule, execution limits, skill assignments | Yellow accent bar |
+| `low` | Creates new entity, attaches data source, updates name/description | No accent (default) |
 
 **`config_preview_plan` reads current entity state at plan creation time.** For each step that modifies an existing entity (not a create), the tool fetches the relevant current fields and includes them as `currentValue` in the `ConfigPlanStep`. This gives the user a clear before/after view in the plan checklist without requiring a diff renderer. For create steps, `currentValue` is omitted.
 
@@ -542,6 +567,15 @@ The frontend renders this as an **interactive checklist**:
 
 Each item has a checkbox (default: checked). The user can uncheck individual steps to skip them. "Execute Plan" sends the approved subset back to the agent for execution.
 
+**Dependency integrity validation:** Before execution starts, the server validates that no enabled step depends on a disabled step. If a dependency violation is detected, execution is blocked and the UI highlights the conflict:
+
+```
+⚠ Step 4 "Link SEO Auditor → Acme Corp" depends on Step 1 "Create agent 'SEO Auditor'" which is disabled.
+Enable Step 1 or disable Step 4 to proceed.
+```
+
+This check runs client-side for immediate feedback (disable button, show warning) and server-side as a hard gate before `executeApprovedPlan()` runs.
+
 ### 6.4 Plan execution determinism
 
 **Critical design requirement:** Once a plan is approved, execution is **server-driven, not LLM-driven**. The server iterates through `ConfigPlan.steps[]` and calls each skill handler directly using the approved `parameters`. The LLM is NOT re-invoked to "figure out what to do next" — that path risks re-interpretation, parameter drift, and skipped steps.
@@ -564,6 +598,16 @@ async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: s
 
     // Compute idempotency key
     const idempotencyKey = computeIdempotencyKey(sessionId, step.stepNumber, step.entityType, resolvedParams);
+
+    // No-op detection: skip mutations where current state already matches intent
+    if (step.entityId && step.currentValue) {
+      const isNoOp = deepEqualRelevantFields(step.currentValue, resolvedParams);
+      if (isNoOp) {
+        results.push({ stepNumber: step.stepNumber, status: 'skipped', reason: 'no_change' });
+        emitStepProgress(sessionId, step.stepNumber, results[results.length - 1]);
+        continue;
+      }
+    }
 
     // Execute directly — no LLM call
     const result = await skillExecutor.executeSkill(step.action, resolvedParams, { idempotencyKey, orgId, userId });
@@ -599,6 +643,18 @@ async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: s
 
 The LLM is only called after execution completes, to produce a natural-language summary of outcomes. It is never called mid-execution to decide the next step.
 
+**Plan replayability:** The exact approved `ConfigPlan` JSON (including user's step enable/disable selections) is persisted on the `agent_runs` record:
+
+```typescript
+// agent_runs table — new JSONB column
+configPlanJson: jsonb('config_plan_json')  // The full ConfigPlan as approved by the user (null for non-config runs)
+```
+
+This provides:
+- **Debugging:** See exactly what was planned vs. what executed
+- **Replay:** Re-run the same plan on another subaccount or org in a future version
+- **Template extraction:** Common plan patterns can be surfaced as templates after enough usage data accumulates
+
 ### 6.5 Execution progress
 
 During plan execution, each step updates in real-time via WebSocket:
@@ -610,6 +666,7 @@ During plan execution, each step updates in real-time via WebSocket:
 | Completed | Green checkmark |
 | Failed | Red X with error message |
 | Skipped (user unchecked) | Grey strikethrough |
+| Skipped (no-op) | Grey checkmark with "No change needed" tooltip |
 
 Steps that depend on a failed step are automatically marked as "Blocked" with an explanation.
 
@@ -757,7 +814,28 @@ async function recordConfigHistory(params: RecordHistoryParams): Promise<void> {
 }
 ```
 
-### 7.5 Wiring into service update paths
+### 7.5 Change summary format
+
+The `changeSummary` field is **deterministic, not LLM-generated**. It is computed by `configHistoryService` from the diff between the pre-mutation snapshot and the incoming patch:
+
+```
+Format: "fieldName: oldValue → newValue" (one per changed field, semicolon-separated)
+
+Examples:
+  "tokenBudgetPerRun: 20000 → 50000"
+  "masterPrompt: [changed]; defaultSkillSlugs: [+audit_geo, -web_search]"
+  "Entity created"
+  "Entity soft-deleted"
+  "Restored to version 3"
+```
+
+Rules:
+- Long text fields (`masterPrompt`, `customInstructions`): show `[changed]`, not the full text
+- Array fields: show additions with `+` and removals with `-`
+- Boolean fields: show `true → false`
+- This format is machine-parseable and human-readable. No LLM variability.
+
+### 7.6 Wiring into service update paths
 
 Each tracked entity's service needs a `recordConfigHistory()` call **before** every UPDATE and DELETE. The call captures the current state (pre-mutation) so the history record represents what the entity looked like before the change.
 
@@ -786,7 +864,7 @@ async updateAgent(agentId: string, orgId: string, patch: Partial<Agent>, userId?
 
 Config agent tools pass `changeSource: 'config_agent'` and `sessionId: context.runId` so config-agent-driven changes are distinguishable from manual UI/API changes.
 
-### 7.6 History on create and delete
+### 7.7 History on create and delete
 
 - **Create:** The first history record for a new entity is written after the INSERT, with `version: 1` and the initial state as the snapshot. This establishes the baseline.
 - **Soft delete:** A history record is written before setting `deletedAt`, capturing the final state. The `change_summary` reads "Entity soft-deleted".
@@ -1227,6 +1305,7 @@ For an agency configuring 10-20 clients: ~$10-20 in LLM costs for initial setup.
 | **Granular permission key for config agent access** | v1 uses role-based gating (`org_admin` / `system_admin`). A dedicated permission key (e.g. `org.config_assistant.access`) enables manager-level access. | When there's demand for non-admin access |
 | **Conversational onboarding** | The config agent is a natural evolution of the onboarding wizard (`/api/onboarding/*`). This is a deliberate architectural convergence point — new orgs could use the config agent for a conversational first-time setup instead of the rigid step-by-step wizard. The same tools, conversation patterns, and plan-approve-execute flow apply. Design decisions in v1 should not close this path. | After v1 config agent is stable. Design the onboarding flow to reuse the same tools, system prompt patterns, and UX components. |
 | **Concurrent session drift detection** | Re-reading current state before each mutation to detect changes by other admins since plan creation. The read-after-write guard (Section 6.4) catches post-mutation drift; pre-mutation drift remains best-effort. | Phase 2, if concurrent editing becomes a real problem |
+| **History retention / compaction** | Active orgs will generate thousands of `config_history` rows over time. The table is append-only and grows linearly with mutation frequency. Future options: snapshot compression (store diffs instead of full snapshots after version N), archival tier (move records older than 12 months to cold storage), or configurable retention per entity type. No action needed for v1 — PostgreSQL handles this volume comfortably. | After 6+ months of production usage, based on actual table growth rates |
 | **Dry run / preview execution mode** | A true dry run (calling skill handlers but not committing DB writes) requires every handler to be transaction-aware and adds significant testing surface. The plan preview (Section 6.3) with before/after `currentValue` fields covers the primary "show me what will change" use case without the implementation cost. | After v1, if users request it |
 | **Per-org daily mutation rate limiting** | The execution budget (token/cost limits), plan-level `maxSteps` cap, and per-action retry policies provide adequate protection for v1. Per-org daily counters are operational complexity without a proven abuse vector. | If usage data reveals abuse patterns |
 | **Configuration entity locking** | Full entity-level locking during plan execution risks deadlocks and adds significant locking infrastructure. The read-after-write guard in Section 6.4 detects post-mutation state divergence; the plan-creation-time `currentValue` snapshot alerts users to drift before execution. | Phase 2, if concurrent session conflicts become a reported problem |
@@ -1277,6 +1356,7 @@ Files that will be created or modified during implementation:
 | `server/services/connectorConfigService.ts` | Wire `recordConfigHistory()` for connector_config entity type |
 | `server/services/integrationConnectionService.ts` | Wire `recordConfigHistory()` for integration_connection entity type |
 | `server/routes/subaccountAgents.ts` | Add org-subaccount-only link guard |
+| `server/db/schema/agentRuns.ts` | Add `configPlanJson` JSONB column for plan replayability (Section 6.4) |
 | `server/index.ts` | Mount config history routes |
 | `client/src/App.tsx` | Add config assistant and session history routes |
 | `docs/capabilities.md` | Add Configuration Assistant to capabilities |
