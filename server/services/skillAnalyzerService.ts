@@ -1119,19 +1119,29 @@ export async function updateJobAgentRecommendation(
   jobId: string,
   recommendation: AgentRecommendation,
 ): Promise<void> {
-  // Minimal shape guard — shouldCreateAgent must be boolean, reasoning non-empty string.
+  // Minimal shape guard — shouldCreateAgent must be boolean, reasoning non-empty string,
+  // skillSlugs must be an array when present (UI calls .map() on it).
   if (typeof recommendation.shouldCreateAgent !== 'boolean') {
     throw new Error('updateJobAgentRecommendation: shouldCreateAgent must be boolean');
   }
   if (typeof recommendation.reasoning !== 'string' || recommendation.reasoning.trim() === '') {
     throw new Error('updateJobAgentRecommendation: reasoning must be a non-empty string');
   }
+  if (recommendation.skillSlugs !== undefined && !Array.isArray(recommendation.skillSlugs)) {
+    throw new Error('updateJobAgentRecommendation: skillSlugs must be an array if present');
+  }
 
   // Idempotency: only write if the column is still null (first run wins on retry).
-  await db
+  const updated = await db
     .update(skillAnalyzerJobs)
     .set({ agentRecommendation: recommendation })
-    .where(and(eq(skillAnalyzerJobs.id, jobId), isNull(skillAnalyzerJobs.agentRecommendation)));
+    .where(and(eq(skillAnalyzerJobs.id, jobId), isNull(skillAnalyzerJobs.agentRecommendation)))
+    .returning({ id: skillAnalyzerJobs.id });
+
+  if (updated.length === 0) {
+    // Row was skipped — recommendation already written on a previous run.
+    console.info('[SkillAnalyzer] agent_recommendation_already_exists — skipping overwrite', { jobId });
+  }
 }
 
 // ---------------------------------------------------------------------------
