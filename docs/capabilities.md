@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-14 (Positioning & Competitive Differentiation section; IEE reframed as Sandboxed Runtime; Anthropic stack added to Replaces table)
+> **Last updated:** 2026-04-14 (Editorial rules applied — customer-facing sections scrubbed of named LLM providers; generic, vendor-neutral positioning language throughout)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -16,6 +16,18 @@
 | **Marketing / Sales (agency pitch)** | [Agency Capabilities](#agency-capabilities) |
 | **Support** | [Skills Reference](#skills-reference) and [Integrations Reference](#integrations-reference) |
 | **Engineering** | `architecture.md` remains the technical reference; this doc covers *what*, not *how* |
+
+---
+
+## Editorial Rules
+
+This document is written for external-ready, marketing- and sales-appropriate language. Every edit must follow these rules — the full version lives in `CLAUDE.md`:
+
+1. **No specific LLM / AI provider or product names** in customer-facing sections (Core Value Proposition, Positioning & Competitive Differentiation, Product Capabilities, Agency Capabilities, Replaces / Consolidates). Use generic category language — *"LLM providers," "foundation model vendors," "hosted agent platforms," "shared team chat products," "scheduled-prompt tools," "agent SDKs."*
+2. **Named providers are permitted only in the Integrations Reference and Skills Reference** — factual product documentation for support, not marketing.
+3. **Marketing- and sales-ready terminology throughout customer-facing sections.** Write for end-users and agency owners, not engineers. Avoid internal service or library names.
+4. **Vendor-neutral positioning even under objection.** Generic category language holds in written collateral regardless of which provider is named in the question.
+5. **Model-agnostic is the north star.** Frame Syntheos as routing to the best model per task across every frontier and open-source LLM. Never imply a preferred provider in customer-facing copy.
 
 ---
 
@@ -74,67 +86,69 @@ Automation OS enables organisations to:
 
 ## Positioning & Competitive Differentiation
 
-> **Read this before writing any marketing or sales content.** Foundation-model vendors (Anthropic, OpenAI) and horizontal agent platforms are increasingly shipping overlapping primitives — agents, skills, scheduled runs, memory, team chat. The Syntheos pitch is **not** about having those. It is about what sits on top of them.
+> **Read this before writing any marketing or sales content.** LLM providers and horizontal agent platforms are increasingly shipping overlapping primitives — agents, skills, scheduled runs, memory, team chat. The Syntheos pitch is **not** about having those. It is about what sits on top of them.
+>
+> **Editorial reminder:** never name a specific LLM or AI provider (or their products) in this section. Use generic category language — *"LLM providers," "foundation model vendors," "hosted agent platforms," "shared team chat products," "scheduled-prompt tools," "agent SDKs."* See the Editorial Rules at the top of this document and `CLAUDE.md` for the full rule set.
 
 ### The frame
 
-Foundation-model vendors sell **primitives**: a model, an SDK, scheduled runs, hosted agents, a skills format, a team chat surface. They are capability providers.
+LLM providers sell **primitives**: a model, an SDK, scheduled runs, hosted agents, a skills format, a team chat surface. They are capability providers.
 
 **Syntheos sells an operations system that happens to run agents.** That distinction is the whole commercial argument. If the pitch drifts toward "we have agents and skills and scheduling," the pitch loses — those are becoming commodities faster than anyone expected. Keep the pitch on the operations layer: multi-tenant isolation, approval workflows, agency economics, client-facing surfaces, vertical depth.
 
 ### The one-sentence answer
 
-> Claude is a model. Cowork is shared chat. Routines run one prompt on a schedule. Managed Agents give you one agent at a time. **Syntheos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, playbooks, margin tracking, and vertical skills.
+> LLM providers give you a model. Shared team chat products give you group conversations. Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms give you a single agent at a time. **Syntheos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, playbooks, margin tracking, and vertical skills.
 
 ### Messaging north star
 
-> **"Anthropic sells capability. Syntheos sells the business."**
+> **"LLM providers sell capability. Syntheos sells the business."**
 
-Every feature brief, positioning slide, and marketing asset should pass this test: does it reinforce that Syntheos is the system of record for agency operations, with foundation models (and every model vendor) as supply underneath? If the asset only describes agents, skills, or automation in the abstract, it is indistinguishable from a capability provider — rewrite it.
+Every feature brief, positioning slide, and marketing asset should pass this test: does it reinforce that Syntheos is the system of record for agency operations, with LLM providers as supply underneath? If the asset only describes agents, skills, or automation in the abstract, it is indistinguishable from a capability provider — rewrite it.
 
 ### Structural differentiators
 
-These are the moats foundation-model vendors and horizontal agent platforms structurally cannot ship, because their buyer is an individual or an internal team — not an agency serving many clients with strict isolation and service-provider economics.
+These are the moats LLM providers and horizontal agent platforms structurally cannot ship, because their buyer is an individual or an internal team — not an agency serving many clients with strict isolation and service-provider economics.
 
 | Differentiator | Why it's structural |
 |---|---|
-| **Multi-tenant three-tier isolation** (System → Org → Subaccount) | Anthropic's surface assumes one buyer. Syntheos is built for agencies managing many clients with strict data, memory, skill, and billing isolation at every layer (DB, service, API). |
-| **Human-in-the-loop as a system** | 42+ review-gated actions, approve-with-edits, side-effect classification (irreversible steps never auto-retry), rejection-as-training-signal, per-action gate overrides. Agencies cannot deploy unsupervised agents on client accounts. The review system **is** the product. |
-| **Playbook engine with DAG + approval gates** | Routines run one prompt. Managed Agents are single-agent. Syntheos runs multi-step DAGs with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
-| **Client portal / white-label** | Foundation vendors will not build this — their buyer is the producer, not the consumer of the producer's work. Permanent wedge for agencies serving end-clients. |
-| **Agency economics** | LLM usage ledger with full org → subaccount → run → skill attribution, org-level margin config, budget reservations, circuit breaker. Agency P&L (revenue + per-client pricing + per-client margin reporting) is on the roadmap as a first-class surface. Foundation vendors sell tokens; they do not care what you bill. |
-| **Integration framework with managed connectors** | MCP is a protocol. Syntheos is a managed integration product with pre-built OAuth flows for HubSpot, GHL, Teamwork, Stripe, Gmail, Slack — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
-| **Execution infrastructure maturity** | Idempotency keys on every run path, `budgetReservations` with advisory locks, DLQ, loop detection, crash-resume checkpoints, correlation IDs, workspace health detectors surfacing config drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
-| **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, 42 Macro transcript analysis. Foundation vendors ship primitives; Syntheos ships solutions. Verticals compound into pricing power. |
-| **Model-agnostic routing** | Per-skill routing across Claude / GPT / Gemini / OpenRouter / open-source. Building on any one vendor's managed stack locks you to that vendor's pricing and roadmap. Syntheos routes to the best model per task and insulates agencies from provider shifts. |
+| **Multi-tenant three-tier isolation** (System → Org → Subaccount) | LLM provider platforms assume a single buyer. Syntheos is built for agencies managing many clients with strict data, memory, skill, and billing isolation enforced at every layer. |
+| **Human-in-the-loop as a system** | 42+ review-gated actions, approve-with-edits, side-effect classification (irreversible steps never auto-retry), rejection as training signal, per-action gate overrides. Agencies cannot deploy unsupervised agents on client accounts. The review system **is** the product. |
+| **Playbook engine with multi-step approval gates** | Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms are single-agent. Syntheos runs multi-step workflows with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
+| **Client portal and white-label surface** | LLM providers will not build this — their buyer is the producer, not the consumer of the producer's work. A permanent wedge for agencies serving end-clients. |
+| **Agency economics** | LLM usage ledger with full org → subaccount → run → skill cost attribution, org-level margin configuration, pre-reserved budgets, and cost circuit breakers. Agency P&L (revenue, per-client pricing, per-client margin reporting) is on the roadmap as a first-class surface. LLM providers sell tokens; they do not care what agencies bill. |
+| **Integration framework with managed connectors** | Generic integration protocols are just protocols. Syntheos is a managed integration product with pre-built OAuth flows for the tools agencies already use (CRM, ads, accounting, communication, support desks) — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
+| **Execution infrastructure maturity** | Idempotency on every run path, pre-reserved budgets with advisory locks, dead-letter queues, loop detection, crash-resume checkpoints, correlation IDs for tracing, workspace health detectors surfacing configuration drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
+| **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, financial transcript analysis. LLM providers ship primitives; Syntheos ships solutions. Verticals compound into pricing power. |
+| **Model-agnostic routing** | Per-skill routing across every frontier and open-source LLM. Building on any one provider's managed stack locks agencies to that provider's pricing and roadmap. Syntheos routes to the best model per task and insulates agencies from provider shifts. |
 
-### Objection handling — "Why Syntheos when I can just use Claude's tools?"
+### Objection handling — "Why Syntheos when I can just use the tools from my LLM provider?"
 
 | Objection | Response |
 |---|---|
-| *"I'll manage my clients in Cowork."* | Cowork is shared context for internal teams. Your clients would see each other. Syntheos enforces strict isolation at the DB, service, and API layers — every query filters by `organisationId` and `subaccountId`. |
-| *"I'll use Routines for scheduling."* | Routines run one prompt on a cadence. Syntheos runs multi-step playbooks with human approvals, cost ceilings, retry policies, idempotent execution, and DAG parallelism. Different product category. |
-| *"Managed Agents are autonomous — perfect."* | Which is exactly why you can't put them on a client's HubSpot, Google Ads, or accounting system. 42 review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
-| *"I'll build on the Agent SDK directly."* | Great — Syntheos uses foundation-model primitives under the hood. But you still need multi-tenant isolation, approvals, portals, playbooks, integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering you would not be doing client work during. |
-| *"What if Anthropic ships multi-tenant?"* | They won't — their buyer is not agencies. If they did, vertical skills, managed integrations, the client portal, and model-agnostic routing remain. The moat isn't any one feature; it's the operations system. |
-| *"What if a better model than Claude ships?"* | Syntheos routes to it per skill. No migration. Build on a single vendor's managed stack and that question becomes a year-long project. |
-| *"We already use Zapier / Make / n8n."* | Those are stateless trigger-action chains. Syntheos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
+| *"I'll manage my clients in a shared team chat product."* | Shared team chat is built for internal teams sharing context — your clients would see each other's data. Syntheos enforces strict isolation at every layer so per-client data, memory, and configuration never cross. |
+| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Syntheos runs multi-step playbooks with human approvals, cost ceilings, retry policies, idempotent execution, and parallel step execution. Different product category. |
+| *"Hosted agents are autonomous — perfect."* | Which is exactly why agencies can't put them on a client's CRM, ad account, or accounting system. 42+ review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
+| *"I'll build on an agent SDK directly."* | Great — Syntheos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering not spent on client work. |
+| *"What if an LLM provider ships multi-tenant?"* | They won't — their buyer is not agencies. Even if one did, vertical skills, managed integrations, the client portal, and model-agnostic routing remain. The moat isn't any one feature; it's the operations system. |
+| *"What if a better model ships?"* | Syntheos routes to it per skill. No migration. Build on a single provider's managed stack and that question becomes a year-long project. |
+| *"We already use a commodity workflow automation tool."* | Those are stateless trigger-action chains. Syntheos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
 
 ### What Syntheos is NOT trying to be
 
 These are **explicit non-goals**. Competing on them is a losing fight against vendors with more capital and a different buyer.
 
-- **Not a better Agent SDK.** Foundation vendors build the models and the SDKs; consuming them under the hood is cheaper than competing with them.
-- **Not a better general-purpose chat UI.** Claude and Cowork are excellent chat products. The Syntheos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
-- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for organisation-level extensibility (custom apps or scripts that support bespoke processes) — not as a competitor to Claude Code or Cursor.
-- **Not a commodity workflow automation tool.** Zapier / Make / n8n compete on "connect X to Y." Syntheos competes on "run agents responsibly across many clients with approval workflows."
+- **Not a better agent SDK.** LLM providers build the models and the SDKs; consuming them under the hood is cheaper than competing with them.
+- **Not a better general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Syntheos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
+- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for organisation-level extensibility (custom apps or scripts that support bespoke processes) — not as a competitor to general-purpose coding assistants.
+- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Syntheos competes on "run agents responsibly across many clients with approval workflows."
 
 ### How to apply this in GTM content
 
 - **Lead with the operations system, not the agents.** The phrase "Syntheos is an agent platform" is a downgrade. "Syntheos is the operations system agencies run their business on" is the right frame.
 - **Show the client-facing surface early.** Screenshots of the client portal, review queue, and per-client P&L convert better than agent-chat screenshots — they look like a product competitors can't match.
 - **Use "agency" explicitly in headlines.** Horizontal positioning invites horizontal comparisons. "For agencies serving multiple clients" pre-filters for ICP and pre-loads the isolation / approval / portal story.
-- **Name the foundation vendors as supply, not threats.** "Powered by Claude, GPT, Gemini, and open-source models — choose per task." This inoculates against "why not just use Claude?" before it's asked.
+- **Position LLM providers as supply, not threats.** *"Model-agnostic across every frontier and open-source LLM — we route to the best one per task."* This inoculates against "why not just use [provider]?" before it's asked, without naming any individual provider.
 - **Avoid autonomous-agent language.** "Autonomous" is the wrong promise for agencies on client accounts. Prefer "supervised," "approved," "reviewed," "accountable."
 
 ---
@@ -272,7 +286,7 @@ Extensible connector architecture supporting OAuth, API keys, webhooks, and MCP 
 - **Connection scoping** — Org-level (shared) or subaccount-level (client-specific); multiple connections per provider
 - **Data connectors:** GHL, HubSpot, Stripe, Slack, Teamwork with configurable sync lifecycle (backfill > transition > live)
 - **MCP servers** — Model Context Protocol via stdio or HTTP; credential binding to any OAuth provider; per-tool gate overrides
-- **Webhooks** — HMAC-SHA256 signed outbound and verified inbound; workflow engines (n8n, Make, GHL, custom)
+- **Webhooks** — HMAC-SHA256 signed outbound and verified inbound; third-party workflow engines and custom endpoints supported
 - Token encryption with versioned key rotation; credential management UI with tool browser
 - See [Integrations Reference](#integrations-reference) for the full list
 
@@ -303,18 +317,18 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 | Replaced | With | Why it's better |
 |----------|------|-----------------|
-| Zapier / Make / n8n | Playbook Engine | Stateful, agent-driven, with structured human review gates — not brittle trigger/action chains |
-| ChatGPT / Claude (standalone chat) | Deployed agents | Defined skills, budgets, memory, and accountability — not ephemeral conversations |
+| Commodity workflow automation tools | Playbook Engine | Stateful, agent-driven, with structured human review gates — not brittle trigger/action chains |
+| Standalone LLM chat products | Deployed agents | Defined skills, budgets, memory, and accountability — not ephemeral conversations |
 | Manual monthly reporting | Scheduled reporting agents | Drafted, reviewed, and delivered automatically on cadence — not assembled by hand each month |
 | Ad-hoc CRM hygiene sprints | Continuous enrichment pipeline | Always-on enrichment and pipeline analysis — not a quarterly cleanup |
 | Siloed marketing, CRM, and analytics tools | Unified skill system | One system connects data, decisions, and actions across platforms — no context switching |
 | Fragmented client management across orgs | Multi-tenant subaccount hierarchy | Strict per-client data isolation built in — not enforced by process |
 | Manual churn reviews | Always-on health scoring | Anomaly detection and intervention triggers fire automatically — not discovered on a renewal call |
-| Claude Cowork (shared team chat) | Multi-tenant org + subaccount hierarchy with Client Portal | Strict per-client isolation + white-label portals — Cowork is built for internal teams sharing context, not agencies serving many isolated clients |
-| Claude Routines (scheduled prompts) | Playbook Engine + heartbeat and cron scheduling | Multi-step DAGs with approval gates, cost ceilings, templating, retry policies, and idempotent execution — Routines run one prompt on a cadence |
-| Claude Managed Agents (single-agent hosted) | Three-tier agent hierarchy with role-based handoffs | Fleet management with role hierarchy, handoffs up to 5 levels, workspace health monitoring, and per-client skill cascades — Managed Agents are single-agent with no operations layer |
-| Claude Agent SDK (self-build) | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, playbooks, managed integrations, margin tracking, unified inbox |
-| Single-vendor LLM lock-in | Model-agnostic per-skill routing | Route to Claude / GPT / Gemini / open-source per skill; insulated from any one vendor's pricing or roadmap shifts |
+| Shared team chat products used for agent work | Multi-tenant org + subaccount hierarchy with Client Portal | Strict per-client isolation and white-label portals — shared chat products are built for internal teams sharing context, not agencies serving many isolated clients |
+| Scheduled-prompt tools | Playbook Engine with scheduling | Multi-step workflows with approval gates, cost ceilings, templating, retry policies, and idempotent execution — scheduled-prompt tools run one prompt on a cadence |
+| Hosted single-agent platforms | Three-tier agent hierarchy with role-based handoffs | Fleet management with role hierarchy, handoffs up to 5 levels, workspace health monitoring, and per-client skill cascades — hosted single-agent platforms have no operations layer |
+| Self-build on an agent SDK | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, playbooks, managed integrations, margin tracking, unified inbox |
+| Single-provider LLM lock-in | Model-agnostic per-skill routing | Route across every frontier and open-source LLM per skill; insulated from any one provider's pricing or roadmap shifts |
 
 ---
 
@@ -681,7 +695,7 @@ Complete list of all 108 skills.
 | **Teamwork Desk** | OAuth2 | Project and task management | Org or subaccount |
 | **Stripe** | API adapter | Payment transactions and subscription data | Org |
 | **OpenAI** | API key | LLM provider, Whisper transcription | System |
-| **Anthropic (Claude)** | API key | Default LLM provider | System |
+| **Anthropic (Claude)** | API key | LLM provider | System |
 | **OpenRouter** | API key | LLM cost-optimised routing | System |
 | **Tavily** | API key | Web search | System |
 
@@ -733,7 +747,8 @@ Complete list of all 108 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
-| 2026-04-14 | Add Positioning & Competitive Differentiation section (foundation-vendor framing, structural differentiators, objection handling, GTM guidance, messaging north star); reframe Developer Tools (IEE) as Sandboxed Runtime with browser automation as primary mode; extend Replaces / Consolidates table with Claude Cowork, Routines, Managed Agents, Agent SDK, and single-vendor lock-in rows | — |
+| 2026-04-14 | Apply Editorial Rules across customer-facing sections — scrub all named LLM / AI providers and their products from Positioning, Replaces / Consolidates, and Product Capabilities; rewrite in generic, vendor-neutral, marketing-appropriate language. Add Editorial Rules section and neutralise "default provider" language in Integrations Reference. Persist editorial rules in `CLAUDE.md`. | — |
+| 2026-04-14 | Add Positioning & Competitive Differentiation section (framing, structural differentiators, objection handling, GTM guidance, messaging north star); reframe Developer Tools (IEE) as Sandboxed Runtime with browser automation as the primary mode; extend Replaces / Consolidates table with rows covering shared team chat, scheduled-prompt tools, hosted single-agent platforms, self-build agent SDKs, and single-provider lock-in | — |
 | 2026-04-13 | Fix skill count: 100 skills (not 101); add 4 missing route entries (ClientPulse, GHL, Modules, Onboarding) to architecture.md; update migration list to 0109; fix project structure job list | — |
 | 2026-04-13 | Add scrape_url, scrape_structured, monitor_webpage skills; add Scrapling MCP preset; expand Competitor Intelligence with automated monitoring capabilities | — |
 | 2026-04-13 | Tighten Replaces table with "why it's better" column | — |

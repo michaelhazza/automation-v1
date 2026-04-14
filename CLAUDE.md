@@ -5,6 +5,16 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 > **App-specific architecture**: See [`architecture.md`](./architecture.md) for backend conventions, route patterns, permission system, three-tier agent model, skill system, and all patterns specific to this application. Read it before making backend changes.
 >
 > **Capabilities registry**: See [`docs/capabilities.md`](./docs/capabilities.md) for the full catalogue of product capabilities, agency capabilities, skills, and integrations. Update it in the same commit when adding features or skills.
+>
+> **Editorial rules for `docs/capabilities.md` (persistent — apply to every update):**
+>
+> 1. **No specific LLM / AI provider or product names** in the customer-facing sections — Core Value Proposition, Positioning & Competitive Differentiation, Product Capabilities, Agency Capabilities, Replaces / Consolidates. Do not reference Anthropic, Claude, Claude Code, Cowork, Routines, Managed Agents, Agent SDK, OpenAI, ChatGPT, GPT, Gemini, Google, Microsoft Copilot, or any other named provider or their product lines in these sections. Use generic category language instead: *"LLM providers," "foundation model vendors," "hosted agent platforms," "shared team chat products," "scheduled-prompt tools," "agent SDKs,"* etc.
+> 2. **Named provider references are permitted only in the Support-facing sections** — Integrations Reference and Skills Reference — where they are factual product documentation, not marketing. Even there, prefer neutral factual phrasing over marketing language.
+> 3. **Use marketing- and sales-ready terminology throughout the customer-facing sections.** Write for end-users, agency owners, and buyers — not engineers. Avoid internal technical identifiers (table names, service names, library names such as `pg-boss`, `BullMQ`, `Drizzle`) in customer-facing sections. Industry-standard terms (OAuth, HTTP, webhook, Docker, Playwright) are acceptable when they clarify the offering.
+> 4. **Positioning stays vendor-neutral even under objection.** If a prospect asks "why not Anthropic / Claude / OpenAI specifically?", the written collateral still uses generic category language — *"LLM providers sell capability; Syntheos sells the business."* Specific vendor responses belong in live sales conversations, not in the registry.
+> 5. **Model-agnostic is the north star.** When the topic of LLM choice comes up, frame Syntheos as *"model-agnostic across every frontier and open-source LLM — we route to the best one per task."* Never imply a default, preferred, or premium provider in customer-facing copy.
+>
+> Violations of rules 1–5 block the edit — revise before committing.
 
 ---
 
