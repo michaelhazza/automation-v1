@@ -315,9 +315,21 @@ function ResultRow({
         onClick={() => { if (!isDecided) setExpanded((v) => !v); }}
       >
         <div className="flex-1 min-w-0">
-          <p className={`text-sm font-medium text-slate-800 leading-snug${isDecided ? ' line-through' : ''}`}>
-            {result.candidateName}
-          </p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className={`text-sm font-medium text-slate-800 leading-snug${isDecided ? ' line-through' : ''}`}>
+              {result.candidateName}
+            </p>
+            {result.isDocumentationFile && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium shrink-0">
+                doc file
+              </span>
+            )}
+            {result.isContextFile && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium shrink-0">
+                context
+              </span>
+            )}
+          </div>
           {matchLine && <p className="text-xs text-slate-400 mt-0.5">{matchLine}</p>}
         </div>
         {isDecided && statusBadge}
@@ -333,6 +345,23 @@ function ResultRow({
       {/* Expanded panel */}
       {expanded && !isDecided && (
         <div className="bg-slate-50 border-t border-slate-200 px-4 py-4 space-y-3">
+          {/* Non-skill file warnings */}
+          {result.isDocumentationFile && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-orange-50 border border-orange-200 text-xs text-orange-800">
+              <span className="shrink-0">!</span>
+              <span>
+                This file appears to be a <strong>documentation file</strong> (README or similar) rather than an executable skill. Importing it as a skill is likely a mistake — consider rejecting it.
+              </span>
+            </div>
+          )}
+          {result.isContextFile && (
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-purple-50 border border-purple-200 text-xs text-purple-800">
+              <span className="shrink-0">i</span>
+              <span>
+                This file has no tool definition — it is a <strong>context document</strong> rather than an executable skill. It may belong in the Knowledge Management Agent if you have one, not as a standalone skill.
+              </span>
+            </div>
+          )}
           {/* Reasoning block */}
           {result.classificationReasoning && (
             <p className="text-xs text-slate-500 italic leading-relaxed pl-3 py-2 pr-3 bg-white rounded border-l-2 border-slate-200">
@@ -722,6 +751,32 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
       {bulkInfo && (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           {bulkInfo}
+        </div>
+      )}
+
+      {/* Agent cluster recommendation banner */}
+      {job.agentRecommendation?.shouldCreateAgent && (
+        <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-indigo-900 mb-0.5">
+                New agent suggested: {job.agentRecommendation.agentName}
+              </p>
+              {job.agentRecommendation.agentDescription && (
+                <p className="text-xs text-indigo-700 mb-2">{job.agentRecommendation.agentDescription}</p>
+              )}
+              <p className="text-xs text-indigo-600 italic">{job.agentRecommendation.reasoning}</p>
+              {job.agentRecommendation.skillSlugs && job.agentRecommendation.skillSlugs.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {job.agentRecommendation.skillSlugs.map((slug) => (
+                    <span key={slug} className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-mono">
+                      {slug}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
