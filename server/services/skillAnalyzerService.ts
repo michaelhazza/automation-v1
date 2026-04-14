@@ -33,6 +33,7 @@ import { skillParserService } from './skillParserService.js';
 import { systemSkillService, type SystemSkill } from './systemSkillService.js';
 import { systemAgentService } from './systemAgentService.js';
 import { SKILL_HANDLERS } from './skillExecutor.js';
+import { configBackupService } from './configBackupService.js';
 
 // ---------------------------------------------------------------------------
 // Skill Analyzer Service — CRUD for jobs/results + pipeline orchestration
@@ -728,6 +729,7 @@ export async function executeApproved(params: {
   updated: number;
   failed: number;
   errors: Array<{ resultId: string; error: string }>;
+  backupId: string | null;
 }> {
   const { jobId, organisationId } = params;
 
@@ -737,6 +739,19 @@ export async function executeApproved(params: {
     (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed'),
   );
   const parsedCandidates = (job.parsedCandidates as unknown[]) || [];
+
+  // Create a pre-mutation backup if there are approved results to execute
+  let backupId: string | null = null;
+  if (approved.length > 0) {
+    const backup = await configBackupService.createBackup({
+      organisationId,
+      scope: 'skill_analyzer',
+      label: `Skill Analyzer Job ${jobId}`,
+      sourceId: jobId,
+      createdBy: params.userId,
+    });
+    backupId = backup.backupId;
+  }
 
   let created = 0;
   let updated = 0;
@@ -981,7 +996,7 @@ export async function executeApproved(params: {
     }
   }
 
-  return { created, updated, failed, errors };
+  return { created, updated, failed, errors, backupId };
 }
 
 /** Update job progress (used by the job handler). */

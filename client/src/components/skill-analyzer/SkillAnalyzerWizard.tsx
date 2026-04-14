@@ -185,6 +185,7 @@ export default function SkillAnalyzerWizard({ initialJobId, onClose, onJobCreate
     updated: number;
     failed: number;
     errors: Array<{ resultId: string; error: string }>;
+    backupId: string | null;
   } | null>(null);
 
   // Load existing job if jobId provided
