@@ -403,7 +403,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   }
 
   const distinctResults = bestMatches.filter((m) => m.band === 'distinct');
-  const llmQueue = bestMatches.filter((m) => m.band !== 'distinct');
+  // TODO: remove this cap once full-instructions merge is validated in testing.
+  // Limits LLM classification to 3 skills to reduce token cost during QA.
+  const LLM_QUEUE_CAP = 3;
+  const llmQueue = bestMatches.filter((m) => m.band !== 'distinct').slice(0, LLM_QUEUE_CAP);
 
   await updateJobProgress(jobId, {
     progressPct: 60,

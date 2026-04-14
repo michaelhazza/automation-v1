@@ -177,13 +177,15 @@ export function buildClassificationPrompt(
   librarySkill: LibrarySkillSummary,
   band: 'likely_duplicate' | 'ambiguous'
 ): { system: string; userMessage: string } {
+  // Classification-only: 2500-char limit keeps input tokens low.
+  // The full instructions aren't needed to judge similarity.
   const candidateSummary = formatSkillForPrompt('INCOMING SKILL (CANDIDATE)', {
     name: candidate.name,
     slug: candidate.slug,
     description: candidate.description,
     definition: candidate.definition,
     instructions: candidate.instructions,
-  });
+  }, 2500);
 
   const librarySummary = formatSkillForPrompt('EXISTING SKILL (LIBRARY)', {
     name: librarySkill.name,
@@ -191,7 +193,7 @@ export function buildClassificationPrompt(
     description: librarySkill.description,
     definition: librarySkill.definition,
     instructions: librarySkill.instructions,
-  });
+  }, 2500);
 
   const bandHint =
     band === 'likely_duplicate'
@@ -211,7 +213,8 @@ function formatSkillForPrompt(
     description: string;
     definition: object | null;
     instructions: string | null;
-  }
+  },
+  maxInstructionsLength?: number,
 ): string {
   const parts = [`## ${label}`, `**Name:** ${skill.name}`, `**Slug:** ${skill.slug}`];
 
@@ -226,7 +229,14 @@ function formatSkillForPrompt(
 
   if (skill.instructions) {
     parts.push('**Instructions:**');
-    parts.push(skill.instructions.slice(0, 2500)); // truncate for token efficiency
+    // No limit when omitted — the merge path needs the full content to
+    // produce a complete proposedMerge. The classification-only path
+    // passes 2500 to keep input token cost low.
+    parts.push(
+      maxInstructionsLength !== undefined
+        ? skill.instructions.slice(0, maxInstructionsLength)
+        : skill.instructions,
+    );
   }
 
   return parts.join('\n');
@@ -302,20 +312,85 @@ const CLASSIFICATION_WITH_MERGE_SYSTEM_PROMPT = `${CLASSIFICATION_SYSTEM_PROMPT}
 ## Additional task: produce a merged version (PARTIAL_OVERLAP / IMPROVEMENT only)
 
 When classification is PARTIAL_OVERLAP or IMPROVEMENT, ALSO produce a
-\`proposedMerge\` object that takes the best of both — preserve what works in
-the existing library version, incorporate genuine improvements from the
-incoming version. Do NOT hallucinate novel content. Each field of the
-proposed merge MUST be grounded in either the existing library text or the
-incoming candidate text.
+\`proposedMerge\` object using this strategy:
+
+Focus specifically on the \`instructions\` field — this is where the depth
+difference matters most.
+
+1. **Identify the richer instructions base.** Assess the instructions of both
+   skills against these criteria:
+   - More named sections, frameworks, or step-by-step processes
+   - Covers more distinct use cases, scenarios, or edge cases
+   - Contains concrete examples, tool integrations, batch workflows, or
+     "common mistakes / pitfalls" content the other lacks
+   The skill whose instructions score higher on these criteria becomes the BASE.
+   When the INCOMING SKILL's instructions are substantially more comprehensive by
+   these criteria, the INCOMING SKILL is the base — not the existing library skill.
+2. **Start from the base instructions in full.** Copy the base instructions
+   verbatim into \`proposedMerge.instructions\` — do NOT condense, summarise,
+   restructure, or shorten them in any way.
+3. **Layer in unique elements from the non-base skill.** Scan the non-base
+   skill's instructions for named sections, rules, or examples that are genuinely
+   absent from the base. Append or insert them at the logical position. Do NOT
+   remove or shorten base content to make room.
+4. **Deduplicate overlapping sections.** Where both skills cover the same topic
+   (e.g. both have a platform specs table, both list copy principles), keep only
+   the more detailed version. Do not include both — duplication creates
+   contradictions and makes the skill harder to follow.
+5. **Resolve contradictions.** If the two skills give conflicting guidance on the
+   same point, prefer the more specific or more detailed instruction. Do not
+   include both conflicting versions.
+6. **Coherence check.** After assembling, review the merged instructions as a
+   whole. The result must read as a single cohesive document — not two documents
+   concatenated. Section order should follow a logical flow. Remove any
+   structural seams where the two sources were joined.
+7. **Never synthesise or condense within a section.** The merged \`instructions\`
+   must be at least as long and detailed as the richer input. A shorter output
+   means unique content was dropped — that is a failure. The deduplication in
+   step 4 is the only permitted reason for the merged output to be shorter than
+   both inputs combined.
+8. **No hallucination.** Every sentence in the merged output must be grounded in
+   either the existing library text or the incoming candidate text.
+
+### Voice and terminology consistency
+
+After assembling the merged instructions:
+- **Voice** — if the base uses imperative ("Do X", "Return Y"), adapt any
+  inserted content from the non-base to match. Do not leave jarring style
+  shifts at the join points.
+- **Terminology** — if the two skills use different words for the same concept
+  (e.g. "copy" vs "creative", "variant" vs "variation"), normalise throughout
+  to the base skill's terminology.
+
+### Output completeness
+
+The \`instructions\` field may be several thousand characters long. Output it
+in full — do NOT truncate, summarise, or trail off with "..." under any
+circumstances. The entire merged instructions must appear in the JSON response.
 
 For DUPLICATE and DISTINCT classifications, OMIT the \`proposedMerge\` field
 entirely (or set it to null) — there is nothing to merge.
 
 The proposedMerge object has exactly four fields:
-- \`name\` — string
-- \`description\` — string
+- \`name\` — string. Prefer the incoming skill's name/slug if it is more
+  descriptive or better reflects the merged scope; otherwise keep the existing.
+- \`description\` — string. Prefer a trigger-style description (explaining WHEN
+  to invoke this skill) over a one-liner summary if one skill has it and the
+  other does not — trigger descriptions are more useful for agent routing.
 - \`definition\` — the Anthropic tool definition JSON object (\`name\`,
-  \`description\`, \`input_schema\`). NEVER a string.
+  \`description\`, \`input_schema\`). NEVER a string. Merge rules:
+    • \`name\` — match the chosen \`name\` field above (snake_case slug).
+    • \`description\` — use the richer/more complete description.
+    • \`input_schema.required\` — keep all fields that are required in the
+      base; add required fields from the non-base only if they are also
+      semantically mandatory for the merged scope.
+    • \`input_schema.properties\` — union both sets. For parameters that exist
+      in both, use the more detailed \`description\`. For enum fields, union
+      the enum values from both skills (e.g. if one supports google/meta and
+      the other adds tiktok/twitter, the merged enum includes all four).
+      New optional parameters from the non-base are added as optional fields.
+    • Preserve all file path references, tool names, and markdown links
+      exactly as they appear in the source skill — do not alter or invent them.
 - \`instructions\` — string OR null
 
 ## Output Format (PARTIAL_OVERLAP or IMPROVEMENT)
