@@ -32,6 +32,7 @@ import {
   insertSingleResult,
   markSkillInFlight,
   unmarkSkillInFlight,
+  updateResultAgentProposals,
 } from '../services/skillAnalyzerService.js';
 import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
@@ -540,6 +541,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classificationFailed: false,
               classificationFailureReason: null,
             });
+            // Write immediately — Stage 8 no longer writes classifiedResults rows.
+            // Skip if candidate is undefined (should be unreachable).
+            if (candidate) {
+              await insertSingleResult({
+                jobId,
+                candidateIndex: match.candidateIndex,
+                candidateName: candidate.name,
+                candidateSlug: candidate.slug,
+                candidateContentHash: getCandidateHash(match.candidateIndex),
+                matchedSkillId: undefined,
+                classification: 'DISTINCT',
+                confidence: 0.5,
+                similarityScore: match.similarity ?? undefined,
+                classificationReasoning: 'Library skill not found - treating as distinct.',
+                classificationFailed: false,
+                classificationFailureReason: null,
+              });
+            }
             return;
           }
 
@@ -680,7 +699,17 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classificationFailureReason: classificationFailureReason ?? null,
             });
           } finally {
-            await unmarkSkillInFlight(jobId, candidate.slug);
+            // Wrap unmark in its own try/catch — if it throws, the error must
+            // not propagate out of finally and abort the entire Promise.all.
+            try {
+              await unmarkSkillInFlight(jobId, candidate.slug);
+            } catch (unmarkErr) {
+              console.error('[SkillAnalyzer] unmarkSkillInFlight failed', {
+                jobId,
+                slug: candidate.slug,
+                unmarkErr,
+              });
+            }
 
             console.log('[SkillAnalyzer] classify:end', {
               jobId,
@@ -843,6 +872,17 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   // Insert via service (avoids direct db import in jobs)
   await insertResults(resultRows);
+
+  // Backfill agentProposals onto classified-DISTINCT rows. These rows were
+  // written incrementally in Stage 5 (before Stage 7 ran), so their
+  // agentProposals column is still the default []. Patch them now.
+  const classifiedDistinct = classifiedResults.filter(
+    (r) => r.classification === 'DISTINCT',
+  );
+  for (const r of classifiedDistinct) {
+    const proposals = agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [];
+    await updateResultAgentProposals(jobId, r.candidateIndex, proposals);
+  }
 
   await updateJobProgress(jobId, {
     status: 'completed',

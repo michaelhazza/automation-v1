@@ -1091,6 +1091,26 @@ export async function unmarkSkillInFlight(
     .where(eq(skillAnalyzerJobs.id, jobId));
 }
 
+/** Backfill agentProposals onto a result row that was written incrementally
+ *  in Stage 5 (before Stage 7 computed proposals). Used in Stage 8 to
+ *  patch classified-DISTINCT rows. No-op when proposals is empty. */
+export async function updateResultAgentProposals(
+  jobId: string,
+  candidateIndex: number,
+  agentProposals: unknown[],
+): Promise<void> {
+  if (agentProposals.length === 0) return;
+  await db
+    .update(skillAnalyzerResults)
+    .set({ agentProposals })
+    .where(
+      and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.candidateIndex, candidateIndex),
+      ),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Classification retry helpers
 // ---------------------------------------------------------------------------
