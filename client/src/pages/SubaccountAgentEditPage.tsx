@@ -497,14 +497,16 @@ interface Belief {
 function BeliefsTab({ subaccountId, linkId }: { subaccountId: string; linkId: string }) {
   const [beliefs, setBeliefs] = useState<Belief[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [editBelief, setEditBelief] = useState<Belief | null>(null);
   const [editValue, setEditValue] = useState('');
 
   useEffect(() => {
     setLoading(true);
+    setFetchError(null);
     api.get(`/api/subaccounts/${subaccountId}/agents/${linkId}/beliefs`)
       .then(r => { setBeliefs(r.data as Belief[]); })
-      .catch(() => {})
+      .catch(() => { setFetchError('Failed to load beliefs'); })
       .finally(() => setLoading(false));
   }, [subaccountId, linkId]);
 
@@ -530,6 +532,7 @@ function BeliefsTab({ subaccountId, linkId }: { subaccountId: string; linkId: st
   };
 
   if (loading) return <div className="text-[13px] text-slate-500">Loading beliefs…</div>;
+  if (fetchError) return <div className="text-[13px] text-red-600">{fetchError}</div>;
 
   if (beliefs.length === 0) {
     return (

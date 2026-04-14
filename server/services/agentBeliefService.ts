@@ -7,11 +7,9 @@
 
 import { eq, and, isNull, sql, desc, asc, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { agentBeliefs, workspaceMemoryEntries } from '../db/schema/index.js';
-import { routeCall } from './llmRouter.js';
+import { agentBeliefs } from '../db/schema/index.js';
 import { logger } from '../lib/logger.js';
 import {
-  EXTRACTION_MAX_TOKENS,
   BELIEFS_MAX_PER_EXTRACTION,
   BELIEFS_MAX_ACTIVE,
   BELIEFS_MAX_VALUE_LENGTH,
@@ -22,8 +20,6 @@ import {
   BELIEFS_UPDATE_CONFIDENCE_CAP,
   BELIEFS_TOKEN_BUDGET,
   BELIEFS_MAX_RETRIES_PER_RUN,
-  BRIEFING_MEMORY_ENTRIES_LIMIT,
-  BRIEFING_MEMORY_QUALITY_THRESHOLD,
 } from '../config/limits.js';
 import type { AgentBelief } from '../db/schema/agentBeliefs.js';
 import {
@@ -31,7 +27,6 @@ import {
   normalizeValueForComparison,
   formatBeliefsForPrompt as formatBeliefsForPromptPure,
   selectBeliefsWithinBudget as selectBeliefsWithinBudgetPure,
-  parseExtractionResponse,
   KEY_ALIASES,
   validateKeyAliases,
   type BeliefRecord,
@@ -40,63 +35,6 @@ import {
 // Validate alias map at import time
 const aliasError = validateKeyAliases(KEY_ALIASES);
 if (aliasError) throw new Error(`KEY_ALIASES invalid: ${aliasError}`);
-
-// ---------------------------------------------------------------------------
-// Extraction prompt builder (standalone LLM call path — see extractAndMerge)
-// ---------------------------------------------------------------------------
-
-function buildExtractionPrompt(
-  handoffJson: object,
-  recentEntries: Array<{ content: string; entryType: string }>,
-  existingBeliefs: AgentBelief[],
-): string {
-  const entriesBlock = recentEntries.length > 0
-    ? recentEntries.map((e, i) => `  ${i + 1}. [${e.entryType}] ${e.content}`).join('\n')
-    : '  (none)';
-
-  const beliefsBlock = existingBeliefs.length > 0
-    ? existingBeliefs.map(b =>
-      `  - [${b.beliefKey}] (${b.category}, confidence: ${b.confidence}, source: ${b.source}) ${b.value}`
-    ).join('\n')
-    : '  (none)';
-
-  return `You are a belief extractor for an AI agent. Given the outcome of the agent's latest run and recent observations, extract discrete factual beliefs the agent should retain about this workspace.
-
-Latest run outcome:
-<run-outcome-data>
-${JSON.stringify(handoffJson, null, 2)}
-</run-outcome-data>
-
-Recent observations:
-${entriesBlock}
-
-Current beliefs:
-${beliefsBlock}
-
-For each belief, output a JSON array. Each element:
-{
-  "key": "snake_case_slug",
-  "category": "general|preference|workflow|relationship|metric",
-  "subject": "what this is about",
-  "value": "the belief statement",
-  "confidence": 0.0-1.0,
-  "confidence_reason": "...",
-  "action": "add|update|reinforce|remove"
-}
-
-Rules:
-- "add": new belief not in current set
-- "update": existing belief whose value has changed (key matches, value differs)
-- "reinforce": existing belief confirmed by this run (increment evidence, keep value)
-- "remove": belief that is no longer true based on this run's evidence
-- Do not extract beliefs that are trivially obvious or already covered by existing beliefs with no change
-- Maximum ${BELIEFS_MAX_PER_EXTRACTION} beliefs per extraction (focus on highest-signal facts)
-- Keys must be deterministic — same concept should always produce same key
-- Key format: lowercase snake_case only, e.g. "client_platform" not "ecommercePlatform" or "Client Platform"
-- Do not override beliefs with source "user_override" unless this run contains direct contradictory evidence
-
-Respond with only the JSON array. No preamble.`;
-}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -142,8 +80,7 @@ export const agentBeliefService = {
 
   /**
    * Merge a raw beliefs array (already parsed from LLM output) into the DB.
-   * Called by agentBriefingService after the combined briefing+beliefs LLM call,
-   * and internally by extractAndMerge after its standalone LLM call.
+   * Called by agentBriefingService after the combined briefing+beliefs LLM call.
    *
    * Throws on unexpected DB errors — callers must wrap in try/catch.
    */
@@ -386,6 +323,8 @@ export const agentBeliefService = {
     }
 
     // 4. Observability
+    // totalActive reflects the capped count (pre-cleanup count may exceed BELIEFS_MAX_ACTIVE
+    // briefly, but the log reports the post-cleanup effective ceiling)
     const totalActive = Math.min(count, BELIEFS_MAX_ACTIVE);
     const churnRate = totalActive > 0 ? (updates + removes) / totalActive : 0;
 
@@ -413,88 +352,6 @@ export const agentBeliefService = {
       saturationRate: saturationRate.toFixed(3),
       retryCount,
     });
-  },
-
-  // ─── Extract & Merge — standalone LLM path (fallback / direct call) ─────
-
-  /**
-   * Standalone belief extraction: makes its own LLM call then calls
-   * mergeExtracted(). Used as a fallback if the combined briefing+beliefs
-   * path in agentBriefingJob is unavailable or needs to be bypassed.
-   *
-   * Fire-and-forget — all errors are swallowed.
-   */
-  async extractAndMerge(
-    orgId: string,
-    subaccountId: string,
-    agentId: string,
-    runId: string,
-    handoffJson: object,
-  ): Promise<void> {
-    try {
-      // Load existing beliefs
-      const existing: AgentBelief[] = await db
-        .select()
-        .from(agentBeliefs)
-        .where(
-          and(
-            eq(agentBeliefs.organisationId, orgId),
-            eq(agentBeliefs.subaccountId, subaccountId),
-            eq(agentBeliefs.agentId, agentId),
-            isNull(agentBeliefs.deletedAt),
-            isNull(agentBeliefs.supersededBy),
-          ),
-        ) as AgentBelief[];
-
-      // Load recent high-quality memory entries (same as briefing)
-      const recentEntries = await db
-        .select({
-          content: workspaceMemoryEntries.content,
-          entryType: workspaceMemoryEntries.entryType,
-        })
-        .from(workspaceMemoryEntries)
-        .where(
-          and(
-            eq(workspaceMemoryEntries.organisationId, orgId),
-            eq(workspaceMemoryEntries.subaccountId, subaccountId),
-            eq(workspaceMemoryEntries.agentId, agentId),
-            sql`${workspaceMemoryEntries.qualityScore} >= ${BRIEFING_MEMORY_QUALITY_THRESHOLD}`,
-          ),
-        )
-        .orderBy(desc(workspaceMemoryEntries.createdAt))
-        .limit(BRIEFING_MEMORY_ENTRIES_LIMIT);
-
-      // LLM extraction call
-      const prompt = buildExtractionPrompt(handoffJson, recentEntries, existing);
-      const response = await routeCall({
-        messages: [{ role: 'user', content: prompt }],
-        maxTokens: EXTRACTION_MAX_TOKENS,
-        context: {
-          organisationId: orgId,
-          subaccountId,
-          runId,
-          sourceType: 'system',
-          agentName: 'agent-beliefs',
-          taskType: 'belief_extraction',
-          executionPhase: 'execution',
-          routingMode: 'ceiling',
-        },
-      });
-
-      const rawContent = typeof response.content === 'string' ? response.content.trim() : '';
-      if (!rawContent) return;
-
-      const parsed = parseExtractionResponse(rawContent);
-      if (!parsed) {
-        logger.warn('belief_extraction_parse_error', { runId, orgId });
-        return;
-      }
-
-      await this.mergeExtracted(orgId, subaccountId, agentId, runId, parsed);
-    } catch (err) {
-      // Fire-and-forget — never let belief errors bubble up
-      logger.error('belief_extraction_failed', { runId, orgId, error: String(err) });
-    }
   },
 
   // ─── User override ──────────────────────────────────────────────────────
