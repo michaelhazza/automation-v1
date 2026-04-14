@@ -144,13 +144,13 @@ export const skillService = {
       }
     }
 
-    // Any slugs not found in skills table → fall back to systemSkillService
+    // Any slugs not found in skills table → fall back to systemSkillService (batch)
     const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
     const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
     if (missingSlugs.length > 0) {
-      for (const slug of missingSlugs) {
-        const systemSkill = await systemSkillService.getSkillBySlug(slug);
-        if (systemSkill && systemSkill.visibility !== 'none') {
+      const systemMap = await systemSkillService.getActiveBySlugsBatch(missingSlugs);
+      for (const [slug, systemSkill] of systemMap) {
+        if (systemSkill.visibility !== 'none') {
           systemFallbacks.set(slug, {
             definition: systemSkill.definition,
             instructions: systemSkill.instructions,
@@ -412,16 +412,16 @@ export const skillService = {
   // Subaccount skill CRUD
   // ---------------------------------------------------------------------------
 
-  /** List skills visible within a subaccount: system + org + this subaccount's own. */
+  /** List skills visible within a subaccount: own + org + built-in, filtered by visibility cascade. */
   async listSubaccountSkills(organisationId: string, subaccountId: string) {
-    return db
+    const rows = await db
       .select()
       .from(skills)
       .where(and(
         or(
           // Subaccount's own skills
           eq(skills.subaccountId, subaccountId),
-          // Org skills (visible to subaccount via visibility cascade)
+          // Org skills
           and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
           // Built-in skills
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
@@ -430,6 +430,13 @@ export const skillService = {
         isNull(skills.deletedAt),
       ))
       .orderBy(skills.skillType, skills.name);
+
+    // Apply visibility cascade — subaccount viewer sees own skills in full,
+    // org/system skills filtered by their visibility setting.
+    const viewer = { tier: 'subaccount' as SkillTier, hasManagePermission: false };
+    return rows
+      .map((row) => skillService.decorateSkillForViewer(row, viewer))
+      .filter((r): r is NonNullable<typeof r> => r !== null);
   },
 
   /** Get a single skill, validating it belongs to the given subaccount (or org/system). */
@@ -448,7 +455,12 @@ export const skillService = {
         isNull(skills.deletedAt),
       ));
     if (!skill) throw { statusCode: 404, message: 'Skill not found' };
-    return skill;
+
+    // Apply visibility cascade for the single-row case
+    const viewer = { tier: 'subaccount' as SkillTier, hasManagePermission: false };
+    const decorated = skillService.decorateSkillForViewer(skill, viewer);
+    if (!decorated) throw { statusCode: 404, message: 'Skill not found' };
+    return decorated;
   },
 
   /** Create a skill scoped to a subaccount. */

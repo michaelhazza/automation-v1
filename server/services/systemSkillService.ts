@@ -238,6 +238,17 @@ export const systemSkillService = {
     return toPublic(row);
   },
 
+  /** Batch-fetch active system skills by slug. Returns a slug-keyed map.
+   *  Used by skillService.resolveSkillsForAgent for the system-tier fallback. */
+  async getActiveBySlugsBatch(slugs: string[]): Promise<Map<string, SystemSkill>> {
+    if (!slugs.length) return new Map();
+    const rows = await db
+      .select()
+      .from(systemSkills)
+      .where(and(eq(systemSkills.isActive, true), sql`${systemSkills.slug} = ANY(${slugs})`));
+    return new Map(rows.map((r) => [r.slug, toPublic(r)]));
+  },
+
   /** Resolve an array of system skill slugs into Anthropic tool definitions
    *  and prompt instructions. Used by the agent execution path to hydrate a
    *  running agent with its configured system skills. */

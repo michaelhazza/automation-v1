@@ -160,7 +160,6 @@ export async function getSkillStudioContext(
   if (!skill) return null;
 
   // Fetch versions
-  const colName = scope === 'system' ? 'system_skill_id' : 'skill_id';
   const versions = await db
     .select()
     .from(skillVersions)
@@ -271,7 +270,7 @@ export async function saveSkillVersion(
     description: payload.description ?? null,
     definition: payload.definition as Record<string, unknown>,
     instructions: payload.instructions ?? null,
-    changeType: payload.changeSummary?.startsWith('Rollback') ? 'update' : 'update',
+    changeType: payload.changeSummary?.startsWith('Rollback') ? 'restore' : 'update',
     changeSummary: payload.changeSummary ?? null,
     authoredBy: authorUserId,
     simulationPassCount: payload.simulationPassCount ?? 0,
