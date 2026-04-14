@@ -1,6 +1,6 @@
 # Automation OS — Capabilities Registry
 
-> **Last updated:** 2026-04-13 (GEO skills + GEO-SEO Agent added)
+> **Last updated:** 2026-04-14 (Positioning & Competitive Differentiation section; IEE reframed as Sandboxed Runtime; Anthropic stack added to Replaces table)
 >
 > This is the single source of truth for everything the platform can do.
 > Update it in the same commit as any feature or skill change.
@@ -11,6 +11,7 @@
 
 | Audience | Start here |
 |----------|-----------|
+| **Marketing / Sales (positioning & objection handling)** | [Positioning & Competitive Differentiation](#positioning--competitive-differentiation) |
 | **Marketing / Sales (platform pitch)** | [Product Capabilities](#product-capabilities) |
 | **Marketing / Sales (agency pitch)** | [Agency Capabilities](#agency-capabilities) |
 | **Support** | [Skills Reference](#skills-reference) and [Integrations Reference](#integrations-reference) |
@@ -20,6 +21,8 @@
 
 ## Table of Contents
 
+- [Core Value Proposition](#core-value-proposition)
+- [Positioning & Competitive Differentiation](#positioning--competitive-differentiation)
 - [Product Capabilities](#product-capabilities)
   - [Multi-Tenant Platform](#multi-tenant-platform)
   - [Authentication & Access Control](#authentication--access-control)
@@ -36,7 +39,7 @@
   - [Pages & Content Builder](#pages--content-builder)
   - [Integration Framework](#integration-framework)
   - [Execution Infrastructure](#execution-infrastructure)
-  - [Developer Tools (IEE)](#developer-tools-iee)
+  - [Sandboxed Runtime (IEE)](#sandboxed-runtime-iee)
 - [Replaces / Consolidates](#replaces--consolidates)
 - [Agency Capabilities](#agency-capabilities)
   - [Performance Reporting & Analytics](#performance-reporting--analytics)
@@ -66,6 +69,73 @@ Automation OS enables organisations to:
 - **Automate multi-step operations with human oversight** — playbooks, approval gates, and review queues keep humans in control of every sensitive action
 - **Operate across multiple clients with strict isolation** — multi-tenant from the ground up, so agencies can scale without cross-contamination
 - **Build institutional knowledge that compounds** — every agent run feeds memory, briefings, and cross-agent learning back into the system
+
+---
+
+## Positioning & Competitive Differentiation
+
+> **Read this before writing any marketing or sales content.** Foundation-model vendors (Anthropic, OpenAI) and horizontal agent platforms are increasingly shipping overlapping primitives — agents, skills, scheduled runs, memory, team chat. The Syntheos pitch is **not** about having those. It is about what sits on top of them.
+
+### The frame
+
+Foundation-model vendors sell **primitives**: a model, an SDK, scheduled runs, hosted agents, a skills format, a team chat surface. They are capability providers.
+
+**Syntheos sells an operations system that happens to run agents.** That distinction is the whole commercial argument. If the pitch drifts toward "we have agents and skills and scheduling," the pitch loses — those are becoming commodities faster than anyone expected. Keep the pitch on the operations layer: multi-tenant isolation, approval workflows, agency economics, client-facing surfaces, vertical depth.
+
+### The one-sentence answer
+
+> Claude is a model. Cowork is shared chat. Routines run one prompt on a schedule. Managed Agents give you one agent at a time. **Syntheos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, playbooks, margin tracking, and vertical skills.
+
+### Messaging north star
+
+> **"Anthropic sells capability. Syntheos sells the business."**
+
+Every feature brief, positioning slide, and marketing asset should pass this test: does it reinforce that Syntheos is the system of record for agency operations, with foundation models (and every model vendor) as supply underneath? If the asset only describes agents, skills, or automation in the abstract, it is indistinguishable from a capability provider — rewrite it.
+
+### Structural differentiators
+
+These are the moats foundation-model vendors and horizontal agent platforms structurally cannot ship, because their buyer is an individual or an internal team — not an agency serving many clients with strict isolation and service-provider economics.
+
+| Differentiator | Why it's structural |
+|---|---|
+| **Multi-tenant three-tier isolation** (System → Org → Subaccount) | Anthropic's surface assumes one buyer. Syntheos is built for agencies managing many clients with strict data, memory, skill, and billing isolation at every layer (DB, service, API). |
+| **Human-in-the-loop as a system** | 42+ review-gated actions, approve-with-edits, side-effect classification (irreversible steps never auto-retry), rejection-as-training-signal, per-action gate overrides. Agencies cannot deploy unsupervised agents on client accounts. The review system **is** the product. |
+| **Playbook engine with DAG + approval gates** | Routines run one prompt. Managed Agents are single-agent. Syntheos runs multi-step DAGs with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
+| **Client portal / white-label** | Foundation vendors will not build this — their buyer is the producer, not the consumer of the producer's work. Permanent wedge for agencies serving end-clients. |
+| **Agency economics** | LLM usage ledger with full org → subaccount → run → skill attribution, org-level margin config, budget reservations, circuit breaker. Agency P&L (revenue + per-client pricing + per-client margin reporting) is on the roadmap as a first-class surface. Foundation vendors sell tokens; they do not care what you bill. |
+| **Integration framework with managed connectors** | MCP is a protocol. Syntheos is a managed integration product with pre-built OAuth flows for HubSpot, GHL, Teamwork, Stripe, Gmail, Slack — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
+| **Execution infrastructure maturity** | Idempotency keys on every run path, `budgetReservations` with advisory locks, DLQ, loop detection, crash-resume checkpoints, correlation IDs, workspace health detectors surfacing config drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
+| **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, 42 Macro transcript analysis. Foundation vendors ship primitives; Syntheos ships solutions. Verticals compound into pricing power. |
+| **Model-agnostic routing** | Per-skill routing across Claude / GPT / Gemini / OpenRouter / open-source. Building on any one vendor's managed stack locks you to that vendor's pricing and roadmap. Syntheos routes to the best model per task and insulates agencies from provider shifts. |
+
+### Objection handling — "Why Syntheos when I can just use Claude's tools?"
+
+| Objection | Response |
+|---|---|
+| *"I'll manage my clients in Cowork."* | Cowork is shared context for internal teams. Your clients would see each other. Syntheos enforces strict isolation at the DB, service, and API layers — every query filters by `organisationId` and `subaccountId`. |
+| *"I'll use Routines for scheduling."* | Routines run one prompt on a cadence. Syntheos runs multi-step playbooks with human approvals, cost ceilings, retry policies, idempotent execution, and DAG parallelism. Different product category. |
+| *"Managed Agents are autonomous — perfect."* | Which is exactly why you can't put them on a client's HubSpot, Google Ads, or accounting system. 42 review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
+| *"I'll build on the Agent SDK directly."* | Great — Syntheos uses foundation-model primitives under the hood. But you still need multi-tenant isolation, approvals, portals, playbooks, integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering you would not be doing client work during. |
+| *"What if Anthropic ships multi-tenant?"* | They won't — their buyer is not agencies. If they did, vertical skills, managed integrations, the client portal, and model-agnostic routing remain. The moat isn't any one feature; it's the operations system. |
+| *"What if a better model than Claude ships?"* | Syntheos routes to it per skill. No migration. Build on a single vendor's managed stack and that question becomes a year-long project. |
+| *"We already use Zapier / Make / n8n."* | Those are stateless trigger-action chains. Syntheos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
+
+### What Syntheos is NOT trying to be
+
+These are **explicit non-goals**. Competing on them is a losing fight against vendors with more capital and a different buyer.
+
+- **Not a better Agent SDK.** Foundation vendors build the models and the SDKs; consuming them under the hood is cheaper than competing with them.
+- **Not a better general-purpose chat UI.** Claude and Cowork are excellent chat products. The Syntheos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
+- **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for organisation-level extensibility (custom apps or scripts that support bespoke processes) — not as a competitor to Claude Code or Cursor.
+- **Not a commodity workflow automation tool.** Zapier / Make / n8n compete on "connect X to Y." Syntheos competes on "run agents responsibly across many clients with approval workflows."
+
+### How to apply this in GTM content
+
+- **Lead with the operations system, not the agents.** The phrase "Syntheos is an agent platform" is a downgrade. "Syntheos is the operations system agencies run their business on" is the right frame.
+- **Show the client-facing surface early.** Screenshots of the client portal, review queue, and per-client P&L convert better than agent-chat screenshots — they look like a product competitors can't match.
+- **Use "agency" explicitly in headlines.** Horizontal positioning invites horizontal comparisons. "For agencies serving multiple clients" pre-filters for ICP and pre-loads the isolation / approval / portal story.
+- **Name the foundation vendors as supply, not threats.** "Powered by Claude, GPT, Gemini, and open-source models — choose per task." This inoculates against "why not just use Claude?" before it's asked.
+- **Avoid autonomous-agent language.** "Autonomous" is the wrong promise for agencies on client accounts. Prefer "supervised," "approved," "reviewed," "accountable."
 
 ---
 
@@ -216,13 +286,14 @@ Production-grade reliability — agents run consistently, recover from failures,
 - **Security:** data isolation enforced at three independent layers; every tool call authorisation logged
 - Loop detection, crash-resume checkpoints, correlation IDs for cross-service tracing
 
-### Developer Tools (IEE)
+### Sandboxed Runtime (IEE)
 
-Integrated Execution Environment for browser automation and development workspace tasks.
+Integrated Execution Environment for running agent work in isolated Docker containers — primarily for browser automation on client systems, with a secondary mode for organisation-level extensibility.
 
-- **Two modes:** `iee_browser` (Playwright) and `iee_dev` (workspace/shell) running in isolated Docker containers
-- Stateful agentic loops with cost attribution (LLM + runtime), usage explorer, and budget reservations
-- Code review workflow enforced by middleware; test execution and whitelisted shell commands
+- **Primary mode — `iee_browser`** (Playwright): agents execute multi-step browser automation (logins, form submissions, structured scrapes, artefact downloads, paywalled content fetches) inside a fully sandboxed container with per-run cost attribution and budget reservations. This is how agents "do work on systems that don't have APIs."
+- **Secondary mode — `iee_dev`** (workspace/shell): organisation-level extensibility for building custom apps, scripts, or connectors that support bespoke processes. Guarded by a code review workflow enforced in middleware, with whitelisted shell commands and test execution. Not positioned as a standalone IDE.
+- Stateful agentic loops with **dual cost attribution** (LLM tokens + runtime seconds) surfaced in the usage explorer, so agency economics reflect full COGS — not just model spend.
+- All executions run in isolation with enforced gating; no agent touches host state.
 
 ---
 
@@ -239,6 +310,11 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 | Siloed marketing, CRM, and analytics tools | Unified skill system | One system connects data, decisions, and actions across platforms — no context switching |
 | Fragmented client management across orgs | Multi-tenant subaccount hierarchy | Strict per-client data isolation built in — not enforced by process |
 | Manual churn reviews | Always-on health scoring | Anomaly detection and intervention triggers fire automatically — not discovered on a renewal call |
+| Claude Cowork (shared team chat) | Multi-tenant org + subaccount hierarchy with Client Portal | Strict per-client isolation + white-label portals — Cowork is built for internal teams sharing context, not agencies serving many isolated clients |
+| Claude Routines (scheduled prompts) | Playbook Engine + heartbeat and cron scheduling | Multi-step DAGs with approval gates, cost ceilings, templating, retry policies, and idempotent execution — Routines run one prompt on a cadence |
+| Claude Managed Agents (single-agent hosted) | Three-tier agent hierarchy with role-based handoffs | Fleet management with role hierarchy, handoffs up to 5 levels, workspace health monitoring, and per-client skill cascades — Managed Agents are single-agent with no operations layer |
+| Claude Agent SDK (self-build) | The operations system on top of any agent SDK | All the non-agent layer already built — isolation, approvals, portals, playbooks, managed integrations, margin tracking, unified inbox |
+| Single-vendor LLM lock-in | Model-agnostic per-skill routing | Route to Claude / GPT / Gemini / open-source per skill; insulated from any one vendor's pricing or roadmap shifts |
 
 ---
 
@@ -657,6 +733,7 @@ Complete list of all 108 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-14 | Add Positioning & Competitive Differentiation section (foundation-vendor framing, structural differentiators, objection handling, GTM guidance, messaging north star); reframe Developer Tools (IEE) as Sandboxed Runtime with browser automation as primary mode; extend Replaces / Consolidates table with Claude Cowork, Routines, Managed Agents, Agent SDK, and single-vendor lock-in rows | — |
 | 2026-04-13 | Fix skill count: 100 skills (not 101); add 4 missing route entries (ClientPulse, GHL, Modules, Onboarding) to architecture.md; update migration list to 0109; fix project structure job list | — |
 | 2026-04-13 | Add scrape_url, scrape_structured, monitor_webpage skills; add Scrapling MCP preset; expand Competitor Intelligence with automated monitoring capabilities | — |
 | 2026-04-13 | Tighten Replaces table with "why it's better" column | — |
