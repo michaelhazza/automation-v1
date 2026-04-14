@@ -351,7 +351,9 @@ if (totalLength > MAX_TOTAL_SKILL_INSTRUCTIONS) {
     limit: MAX_TOTAL_SKILL_INSTRUCTIONS,
     skillCount: allInstructions.length,
   });
-  // Truncate: include skills in priority order until limit is reached
+  // Truncate: include skills in resolution priority order (subaccount > org >
+  // built-in > system) until limit is reached. Within the same tier, preserve
+  // the original skillSlugs array ordering from the agent config.
   let remaining = MAX_TOTAL_SKILL_INSTRUCTIONS;
   const truncated: string[] = [];
   for (const instr of allInstructions) {
@@ -777,7 +779,14 @@ export const skillVersioningHelper = {
             DO NOTHING
             RETURNING *`
       );
-      return (result.rows?.[0] as SkillVersion) ?? null;
+      const row = (result.rows?.[0] as SkillVersion) ?? null;
+      if (!row) {
+        logger.info('skill_version_idempotent_skip', {
+          idempotencyKey: params.idempotencyKey,
+          skillRef: refId,
+        });
+      }
+      return row;
     }
 
     const [version] = await runner
@@ -830,6 +839,18 @@ idempotencyKey: text('idempotency_key'),        // optional, for retry dedup
 
 **Versioning ownership rule:** Service methods own version writes by default. Callers that need custom version metadata (e.g. the skill analyser with job context and idempotency keys) pass `{ skipVersionWrite: true }` in `opts` and write their own version row via the helper.
 
+**Runtime guard against misuse:** To prevent a future caller from passing `skipVersionWrite: true` and forgetting to write a version, the service methods require a second acknowledgement flag when skipping:
+
+```typescript
+if (opts.skipVersionWrite && !opts.externalVersionWrite) {
+  throw new Error(
+    'skipVersionWrite requires externalVersionWrite: true to confirm the caller owns versioning'
+  );
+}
+```
+
+Callers must pass `{ skipVersionWrite: true, externalVersionWrite: true, tx }`. The double-flag makes silent omission a compile-time-obvious mistake rather than a runtime surprise.
+
 #### 3.2.1 `createSystemSkill`
 
 After the `insert(...).returning()` succeeds, call (unless `opts.skipVersionWrite`):
@@ -875,6 +896,17 @@ if (!opts.skipVersionWrite) {
 ```
 
 Note: both methods already accept `opts: WithTx = {}`, so passing `tx` through requires no signature change.
+
+**Transaction boundary guarantee:** All service write paths that include a version write MUST guarantee a transaction boundary. If `opts.tx` is not provided, the service opens one internally so that the skill mutation and version write are always atomic:
+
+```typescript
+async createSystemSkill(data: ..., opts: WithTx & VersionOpts = {}) {
+  const runner = opts.tx ?? await db.transaction(async (tx) => { /* ... */ });
+  // ... insert skill + version write both use `runner`
+}
+```
+
+This prevents a caller from omitting `tx` and getting a skill mutation without its version row if the second write fails.
 
 ### 3.3 Org/Subaccount Skill Write Paths
 
@@ -969,7 +1001,7 @@ The analyser passes `{ skipVersionWrite: true, tx }` to `systemSkillService` so 
 Call with skip flag, then write a custom version:
 
 ```typescript
-const created = await systemSkillService.createSystemSkill(data, { tx, skipVersionWrite: true });
+const created = await systemSkillService.createSystemSkill(data, { tx, skipVersionWrite: true, externalVersionWrite: true });
 
 await skillVersioningHelper.writeVersion({
   systemSkillId: created.id,
@@ -987,17 +1019,22 @@ await skillVersioningHelper.writeVersion({
 
 #### 3.4.2 PARTIAL_OVERLAP / IMPROVEMENT path (update existing) -- line ~841
 
-Call with skip flag, then write a custom version:
+Call with skip flag, then write a custom version using the **persisted row** (not the input payload):
 
 ```typescript
-await systemSkillService.updateSystemSkill(skillId, mergeData, { tx, skipVersionWrite: true });
+const updated = await systemSkillService.updateSystemSkill(
+  skillId, mergeData, { tx, skipVersionWrite: true, externalVersionWrite: true },
+);
 
+// Version snapshot uses the DB-returned row, not `merge.*`, to guarantee
+// the snapshot matches what was actually persisted (after any DB defaults,
+// triggers, or validation transforms).
 await skillVersioningHelper.writeVersion({
   systemSkillId: result.matchedSkillId!,
-  name: merge.name,
-  description: merge.description,
-  definition: merge.definition as object,
-  instructions: merge.instructions,
+  name: updated.name,
+  description: updated.description,
+  definition: updated.definition as object,
+  instructions: updated.instructions,
   changeType: 'merge',
   changeSummary: `${result.classification} merge from Skill Analyzer job ${jobId}`,
   authoredBy: params.userId,
@@ -1005,6 +1042,8 @@ await skillVersioningHelper.writeVersion({
   tx,
 });
 ```
+
+**Invariant: version snapshots MUST always use the persisted row returned from the database, not the input payload.** This prevents drift if the DB applies defaults, transforms, or validation that the caller's in-memory data does not reflect.
 
 Note: the `tx` is already available from the `db.transaction(async (tx) => { ... })` wrapper on both paths.
 
