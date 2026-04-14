@@ -315,11 +315,14 @@ export const JOB_CONFIG = {
   // One-shot: one job per analysis session. Retry safety handled by the
   // handler itself (deletes results before re-processing). Max 1 retry
   // with 5-minute delay — long enough for transient API failures to clear.
+  // expireInSeconds raised to 1800 (30 min): with up to 50 skills × 120s
+  // per-skill timeout at concurrency 3, worst-case is ceil(50/3) × 120s
+  // ≈ 20 minutes. 1800 gives comfortable headroom.
   'skill-analyzer': {
     retryLimit: 1,
     retryDelay: 300,
     retryBackoff: false,
-    expireInSeconds: 900,
+    expireInSeconds: 1800,
     deadLetter: 'skill-analyzer__dlq',
     idempotencyStrategy: 'one-shot' as const,
   },
