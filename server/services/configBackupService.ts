@@ -21,51 +21,51 @@ import type { ConfigBackupEntity } from '../db/schema/configBackups.js';
 /**
  * Capture all system_skills rows and systemAgent defaultSystemSkillSlugs.
  * This is enough to fully revert a skill analyser apply operation.
+ * Runs inside a transaction so the two reads share a consistent snapshot.
  */
 async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
-  const entities: ConfigBackupEntity[] = [];
+  return db.transaction(async (tx) => {
+    const entities: ConfigBackupEntity[] = [];
 
-  // Snapshot all system_skills (including inactive — analyser can reactivate)
-  const skills = await db.select().from(systemSkills);
-  for (const skill of skills) {
-    entities.push({
-      entityType: 'system_skill',
-      entityId: skill.id,
-      snapshot: {
-        slug: skill.slug,
-        name: skill.name,
-        description: skill.description,
-        definition: skill.definition,
-        instructions: skill.instructions,
-        isActive: skill.isActive,
-        visibility: skill.visibility,
-        handlerKey: skill.handlerKey,
-      },
-    });
-  }
+    // Snapshot all system_skills (including inactive — analyser can reactivate)
+    const skills = await tx.select().from(systemSkills);
+    for (const skill of skills) {
+      entities.push({
+        entityType: 'system_skill',
+        entityId: skill.id,
+        snapshot: {
+          name: skill.name,
+          description: skill.description,
+          definition: skill.definition,
+          instructions: skill.instructions,
+          isActive: skill.isActive,
+          visibility: skill.visibility,
+          handlerKey: skill.handlerKey,
+        },
+      });
+    }
 
-  // Snapshot all systemAgents' skill slug arrays (only the fields the analyser mutates)
-  const agents = await db
-    .select({
-      id: systemAgents.id,
-      slug: systemAgents.slug,
-      defaultSystemSkillSlugs: systemAgents.defaultSystemSkillSlugs,
-    })
-    .from(systemAgents)
-    .where(isNull(systemAgents.deletedAt));
+    // Snapshot all systemAgents' skill slug arrays (only the fields the analyser mutates)
+    const agents = await tx
+      .select({
+        id: systemAgents.id,
+        defaultSystemSkillSlugs: systemAgents.defaultSystemSkillSlugs,
+      })
+      .from(systemAgents)
+      .where(isNull(systemAgents.deletedAt));
 
-  for (const agent of agents) {
-    entities.push({
-      entityType: 'system_agent_skills',
-      entityId: agent.id,
-      snapshot: {
-        slug: agent.slug,
-        defaultSystemSkillSlugs: agent.defaultSystemSkillSlugs,
-      },
-    });
-  }
+    for (const agent of agents) {
+      entities.push({
+        entityType: 'system_agent_skills',
+        entityId: agent.id,
+        snapshot: {
+          defaultSystemSkillSlugs: agent.defaultSystemSkillSlugs,
+        },
+      });
+    }
 
-  return entities;
+    return entities;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +74,7 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
 
 /**
  * Restore system_skills and systemAgent skill slugs from a backup.
+ * Runs inside the caller's transaction for atomicity.
  *
  * Strategy:
  * 1. For system_skills in the backup: restore each to its snapshotted state
@@ -82,7 +83,10 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
  *    to preserve referential integrity with skill_analyzer_results.resultingSkillId
  * 3. For system_agent_skills: restore defaultSystemSkillSlugs to snapshotted value
  */
-async function restoreSkillAnalyzerEntities(entities: ConfigBackupEntity[]): Promise<{
+async function restoreSkillAnalyzerEntities(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  entities: ConfigBackupEntity[],
+): Promise<{
   skillsReverted: number;
   skillsDeactivated: number;
   agentsReverted: number;
@@ -95,62 +99,60 @@ async function restoreSkillAnalyzerEntities(entities: ConfigBackupEntity[]): Pro
   const agentEntities = entities.filter((e) => e.entityType === 'system_agent_skills');
   const backupSkillIds = new Set(skillEntities.map((e) => e.entityId));
 
-  await db.transaction(async (tx) => {
-    // 1. Restore each snapshotted skill
-    for (const entity of skillEntities) {
-      const { snapshot } = entity;
-      const existing = await tx
-        .select({ id: systemSkills.id })
-        .from(systemSkills)
-        .where(eq(systemSkills.id, entity.entityId))
-        .limit(1);
+  // 1. Restore each snapshotted skill
+  for (const entity of skillEntities) {
+    const { snapshot } = entity;
+    const existing = await tx
+      .select({ id: systemSkills.id })
+      .from(systemSkills)
+      .where(eq(systemSkills.id, entity.entityId))
+      .limit(1);
 
-      if (existing[0]) {
-        // Update to snapshotted state
-        await tx
-          .update(systemSkills)
-          .set({
-            name: snapshot.name as string,
-            description: snapshot.description as string | null,
-            definition: snapshot.definition as object,
-            instructions: snapshot.instructions as string | null,
-            isActive: snapshot.isActive as boolean,
-            visibility: snapshot.visibility as string,
-            handlerKey: snapshot.handlerKey as string,
-            updatedAt: new Date(),
-          })
-          .where(eq(systemSkills.id, entity.entityId));
-        skillsReverted++;
-      }
-      // If skill was deleted between backup and now — skip (don't recreate;
-      // the slug may conflict, and recreation would need handler wiring)
-    }
-
-    // 2. Deactivate skills created after the backup
-    const currentSkills = await tx.select({ id: systemSkills.id }).from(systemSkills);
-    for (const skill of currentSkills) {
-      if (!backupSkillIds.has(skill.id)) {
-        await tx
-          .update(systemSkills)
-          .set({ isActive: false, updatedAt: new Date() })
-          .where(eq(systemSkills.id, skill.id));
-        skillsDeactivated++;
-      }
-    }
-
-    // 3. Restore agent skill slug arrays
-    for (const entity of agentEntities) {
-      const { snapshot } = entity;
+    if (existing[0]) {
       await tx
-        .update(systemAgents)
+        .update(systemSkills)
         .set({
-          defaultSystemSkillSlugs: snapshot.defaultSystemSkillSlugs as string[],
+          name: snapshot.name as string,
+          description: snapshot.description as string | null,
+          definition: snapshot.definition as object,
+          instructions: snapshot.instructions as string | null,
+          isActive: snapshot.isActive as boolean,
+          visibility: snapshot.visibility as string,
+          handlerKey: snapshot.handlerKey as string,
           updatedAt: new Date(),
         })
-        .where(and(eq(systemAgents.id, entity.entityId), isNull(systemAgents.deletedAt)));
-      agentsReverted++;
+        .where(eq(systemSkills.id, entity.entityId));
+      skillsReverted++;
     }
-  });
+    // If skill was deleted between backup and now — skip (don't recreate;
+    // the slug may conflict, and recreation would need handler wiring)
+  }
+
+  // 2. Deactivate skills created after the backup
+  const currentSkills = await tx.select({ id: systemSkills.id }).from(systemSkills);
+  for (const skill of currentSkills) {
+    if (!backupSkillIds.has(skill.id)) {
+      await tx
+        .update(systemSkills)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(systemSkills.id, skill.id));
+      skillsDeactivated++;
+    }
+  }
+
+  // 3. Restore agent skill slug arrays (only count if the row was actually updated)
+  for (const entity of agentEntities) {
+    const { snapshot } = entity;
+    const updated = await tx
+      .update(systemAgents)
+      .set({
+        defaultSystemSkillSlugs: snapshot.defaultSystemSkillSlugs as string[],
+        updatedAt: new Date(),
+      })
+      .where(and(eq(systemAgents.id, entity.entityId), isNull(systemAgents.deletedAt)))
+      .returning({ id: systemAgents.id });
+    if (updated.length > 0) agentsReverted++;
+  }
 
   return { skillsReverted, skillsDeactivated, agentsReverted };
 }
@@ -162,6 +164,8 @@ async function restoreSkillAnalyzerEntities(entities: ConfigBackupEntity[]): Pro
 export const configBackupService = {
   /**
    * Create a backup before a bulk mutation.
+   * Throws 409 if a backup for this sourceId already exists (prevents duplicates
+   * from double-click or retry on the same job).
    */
   async createBackup(params: {
     organisationId: string;
@@ -170,6 +174,23 @@ export const configBackupService = {
     sourceId?: string;
     createdBy?: string;
   }): Promise<{ backupId: string }> {
+    // Guard: prevent duplicate backups for the same source
+    if (params.sourceId) {
+      const [existing] = await db
+        .select({ id: configBackups.id })
+        .from(configBackups)
+        .where(
+          and(
+            eq(configBackups.sourceId, params.sourceId),
+            eq(configBackups.organisationId, params.organisationId),
+          )
+        )
+        .limit(1);
+      if (existing) {
+        throw { statusCode: 409, message: 'A backup for this source already exists' };
+      }
+    }
+
     let entities: ConfigBackupEntity[];
 
     switch (params.scope) {
@@ -197,7 +218,16 @@ export const configBackupService = {
   },
 
   /**
+   * Delete a backup row (used to clean up phantom backups when no mutations succeed).
+   */
+  async deleteBackup(backupId: string): Promise<void> {
+    await db.delete(configBackups).where(eq(configBackups.id, backupId));
+  },
+
+  /**
    * Restore configuration from a backup. Marks the backup as 'restored'.
+   * The status check, entity restore, and status flip all run inside a single
+   * transaction to prevent TOCTOU races and partial-restore inconsistency.
    */
   async restoreBackup(params: {
     backupId: string;
@@ -208,43 +238,52 @@ export const configBackupService = {
     skillsDeactivated: number;
     agentsReverted: number;
   }> {
-    const [backup] = await db
-      .select()
-      .from(configBackups)
-      .where(
-        and(
-          eq(configBackups.id, params.backupId),
-          eq(configBackups.organisationId, params.organisationId),
+    return db.transaction(async (tx) => {
+      // Atomically claim the backup: set status='restored' only if currently active
+      const [claimed] = await tx
+        .update(configBackups)
+        .set({
+          status: 'restored' as const,
+          restoredAt: new Date(),
+          restoredBy: params.restoredBy,
+        })
+        .where(
+          and(
+            eq(configBackups.id, params.backupId),
+            eq(configBackups.organisationId, params.organisationId),
+            eq(configBackups.status, 'active'),
+          )
         )
-      );
+        .returning();
 
-    if (!backup) throw { statusCode: 404, message: 'Backup not found' };
-    if (backup.status === 'restored') {
-      throw { statusCode: 409, message: 'Backup has already been restored' };
-    }
+      if (!claimed) {
+        // Either not found or already restored — check which
+        const [row] = await tx
+          .select({ status: configBackups.status })
+          .from(configBackups)
+          .where(
+            and(
+              eq(configBackups.id, params.backupId),
+              eq(configBackups.organisationId, params.organisationId),
+            )
+          );
+        if (!row) throw { statusCode: 404, message: 'Backup not found' };
+        throw { statusCode: 409, message: 'Backup has already been restored' };
+      }
 
-    const entities = backup.entities as ConfigBackupEntity[];
-    let result: { skillsReverted: number; skillsDeactivated: number; agentsReverted: number };
+      const entities = claimed.entities as ConfigBackupEntity[];
+      let result: { skillsReverted: number; skillsDeactivated: number; agentsReverted: number };
 
-    switch (backup.scope) {
-      case 'skill_analyzer':
-        result = await restoreSkillAnalyzerEntities(entities);
-        break;
-      default:
-        throw { statusCode: 400, message: `Unsupported backup scope: ${backup.scope}` };
-    }
+      switch (claimed.scope) {
+        case 'skill_analyzer':
+          result = await restoreSkillAnalyzerEntities(tx, entities);
+          break;
+        default:
+          throw { statusCode: 400, message: `Unsupported backup scope: ${claimed.scope}` };
+      }
 
-    // Mark backup as restored
-    await db
-      .update(configBackups)
-      .set({
-        status: 'restored',
-        restoredAt: new Date(),
-        restoredBy: params.restoredBy,
-      })
-      .where(eq(configBackups.id, params.backupId));
-
-    return result;
+      return result;
+    });
   },
 
   /**
@@ -259,6 +298,8 @@ export const configBackupService = {
     if (params.scope) {
       conditions.push(eq(configBackups.scope, params.scope));
     }
+
+    const limit = Math.min(params.limit ?? 50, 200);
 
     return db
       .select({
@@ -275,7 +316,7 @@ export const configBackupService = {
       .from(configBackups)
       .where(and(...conditions))
       .orderBy(desc(configBackups.createdAt))
-      .limit(params.limit ?? 50);
+      .limit(limit);
   },
 
   /**
@@ -298,6 +339,7 @@ export const configBackupService = {
 
   /**
    * Find the backup associated with a skill analyser job.
+   * Returns the most recent match (defensive against any duplicates).
    */
   async getBackupBySourceId(sourceId: string, organisationId: string) {
     const [row] = await db
@@ -315,7 +357,9 @@ export const configBackupService = {
           eq(configBackups.sourceId, sourceId),
           eq(configBackups.organisationId, organisationId),
         )
-      );
+      )
+      .orderBy(desc(configBackups.createdAt))
+      .limit(1);
 
     return row ?? null;
   },

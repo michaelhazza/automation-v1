@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { users } from './users';
@@ -53,8 +53,8 @@ export const configBackups = pgTable(
   (table) => ({
     orgIdx: index('config_backups_org_idx').on(table.organisationId),
     scopeIdx: index('config_backups_scope_idx').on(table.organisationId, table.scope),
-    sourceIdx: index('config_backups_source_idx')
-      .on(table.sourceId)
+    sourceUniq: uniqueIndex('config_backups_source_uniq')
+      .on(table.organisationId, table.sourceId)
       .where(sql`${table.sourceId} IS NOT NULL`),
   })
 );

@@ -239,7 +239,7 @@ export default function SkillAnalyzerExecuteStep({ job, results, onExecuted, exe
               </button>
               {canRestore && !showRestoreConfirm && (
                 <button
-                  onClick={() => setShowRestoreConfirm(true)}
+                  onClick={() => { setRestoreError(null); setShowRestoreConfirm(true); }}
                   className="px-4 py-2.5 bg-white text-amber-700 text-sm font-medium border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors"
                 >
                   Revert Changes

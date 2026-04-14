@@ -996,6 +996,12 @@ export async function executeApproved(params: {
     }
   }
 
+  // Clean up phantom backup if no mutations actually succeeded
+  if (backupId && created === 0 && updated === 0) {
+    await configBackupService.deleteBackup(backupId);
+    backupId = null;
+  }
+
   return { created, updated, failed, errors, backupId };
 }
 

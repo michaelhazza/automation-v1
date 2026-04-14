@@ -18,4 +18,4 @@ CREATE TABLE config_backups (
 
 CREATE INDEX config_backups_org_idx ON config_backups(organisation_id);
 CREATE INDEX config_backups_scope_idx ON config_backups(organisation_id, scope);
-CREATE INDEX config_backups_source_idx ON config_backups(source_id) WHERE source_id IS NOT NULL;
+CREATE UNIQUE INDEX config_backups_source_uniq ON config_backups(organisation_id, source_id) WHERE source_id IS NOT NULL;
