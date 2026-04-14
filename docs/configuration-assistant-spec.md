@@ -380,7 +380,10 @@ budgets/limits. If asked, explain what you can't do and suggest the admin UI.
 **Target scope gathering:**
 ```
 Before making any changes, establish the target scope:
-- If the user names a specific client/subaccount, confirm by looking it up
+- If the user names a specific client/subaccount, look it up using
+  config_list_subaccounts. Use fuzzy matching on the name — "Acme"
+  should match "Acme Dental Pty Ltd". If multiple subaccounts match,
+  present the options and ask the user to confirm which one.
 - If the request is ambiguous, ask: "Which client is this for, or should
   I set this up for all clients?"
 - If org-level (new agent, skill changes), confirm: "This will affect
@@ -1126,7 +1129,7 @@ For an agency configuring 10-20 clients: ~$10-20 in LLM costs for initial setup.
 | **Configuration templates / recipes library** | The config agent's dynamic knowledge (existing org config + skill descriptions) handles the cold-start problem adequately. A recipes library depends on real usage patterns. | After 50+ real config sessions inform the common patterns |
 | **Backup/restore (full account snapshot)** | Foundation exists via `config_history`, but a full account snapshot (all entities at a point in time) + one-click restore is a separate feature. | Phase 3 — build on top of the config_history infrastructure |
 | **Granular permission key for config agent access** | v1 uses role-based gating (`org_admin` / `system_admin`). A dedicated permission key (e.g. `org.config_assistant.access`) enables manager-level access. | When there's demand for non-admin access |
-| **Conversational onboarding** | The config agent is a natural evolution of the onboarding wizard — new orgs could use it for a conversational first-time setup instead of a rigid step-by-step wizard. | After v1 config agent is stable. Design the onboarding flow to use the same tools and conversation patterns. |
+| **Conversational onboarding** | The config agent is a natural evolution of the onboarding wizard (`/api/onboarding/*`). This is a deliberate architectural convergence point — new orgs could use the config agent for a conversational first-time setup instead of the rigid step-by-step wizard. The same tools, conversation patterns, and plan-approve-execute flow apply. Design decisions in v1 should not close this path. | After v1 config agent is stable. Design the onboarding flow to reuse the same tools, system prompt patterns, and UX components. |
 | **Concurrent session drift detection** | Re-reading current state before each mutation to detect changes by other admins since plan creation. | Phase 2, if concurrent editing becomes a real problem |
 
 ---
