@@ -88,7 +88,7 @@ export const skillService = {
         eq(skills.isActive, true),
         isNull(skills.deletedAt),
         or(
-          eq(skills.subaccountId, subaccountId),
+          and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)),
           and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
         ),
@@ -111,8 +111,8 @@ export const skillService = {
     skillSlugs: string[],
     organisationId: string,
     subaccountId?: string,
-  ): Promise<{ tools: AnthropicTool[]; instructions: string[] }> {
-    if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [] };
+  ): Promise<{ tools: AnthropicTool[]; instructions: string[]; truncated: boolean }> {
+    if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [], truncated: false };
 
     // Batch-fetch all matching skills across tiers in one query
     const candidates = await db
@@ -123,7 +123,7 @@ export const skillService = {
         isNull(skills.deletedAt),
         eq(skills.isActive, true),
         or(
-          subaccountId ? eq(skills.subaccountId, subaccountId) : sql`false`,
+          subaccountId ? and(eq(skills.subaccountId, subaccountId), eq(skills.organisationId, organisationId)) : sql`false`,
           and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
           and(isNull(skills.organisationId), isNull(skills.subaccountId)),
         ),
@@ -148,14 +148,24 @@ export const skillService = {
     const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
     const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
     if (missingSlugs.length > 0) {
-      const systemMap = await systemSkillService.getActiveBySlugsBatch(missingSlugs);
-      for (const [slug, systemSkill] of systemMap) {
-        if (systemSkill.visibility !== 'none') {
-          systemFallbacks.set(slug, {
-            definition: systemSkill.definition,
-            instructions: systemSkill.instructions,
-          });
+      try {
+        const systemMap = await systemSkillService.getActiveBySlugsBatch(missingSlugs);
+        for (const [slug, systemSkill] of systemMap) {
+          if (systemSkill.visibility !== 'none') {
+            systemFallbacks.set(slug, {
+              definition: systemSkill.definition,
+              instructions: systemSkill.instructions,
+            });
+          }
         }
+      } catch (err) {
+        logger.error('[skillService] System skill batch lookup failed', {
+          missingSlugs,
+          organisationId,
+          subaccountId,
+          error: String(err),
+        });
+        throw err;
       }
     }
 
@@ -191,23 +201,23 @@ export const skillService = {
     // Instruction payload size guard
     const totalLength = allInstructions.reduce((sum, i) => sum + i.length, 0);
     if (totalLength > MAX_TOTAL_SKILL_INSTRUCTIONS) {
-      logger.warn('Skill instructions exceed limit', {
+      logger.error('Skill instructions exceed limit — agent capability degraded', {
         totalLength,
         limit: MAX_TOTAL_SKILL_INSTRUCTIONS,
         skillCount: allInstructions.length,
       });
       let remaining = MAX_TOTAL_SKILL_INSTRUCTIONS;
-      const truncated: string[] = [];
+      const truncatedInstructions: string[] = [];
       for (const instr of allInstructions) {
         if (remaining <= 0) break;
         const slice = instr.slice(0, remaining);
-        truncated.push(slice);
+        truncatedInstructions.push(slice);
         remaining -= slice.length;
       }
-      return { tools, instructions: truncated };
+      return { tools, instructions: truncatedInstructions, truncated: true };
     }
 
-    return { tools, instructions: allInstructions };
+    return { tools, instructions: allInstructions, truncated: false };
   },
 
   /**
