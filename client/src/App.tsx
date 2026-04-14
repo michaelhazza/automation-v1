@@ -73,6 +73,8 @@ const AdminHealthFindingsPage = lazy(() => import('./pages/AdminHealthFindingsPa
 const AdminActionLogPage = lazy(() => import('./pages/AdminActionLogPage'));
 
 const SkillStudioPage = lazy(() => import('./pages/SkillStudioPage'));
+const ConfigAssistantPage = lazy(() => import('./pages/ConfigAssistantPage'));
+const ConfigSessionHistoryPage = lazy(() => import('./pages/ConfigSessionHistoryPage'));
 
 // ClientPulse pages
 const SignupPage = lazy(() => import('./pages/SignupPage'));
@@ -253,6 +255,9 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/activity" element={<ActivityPage user={user!} />} />
             {/* Skill Studio — org scope */}
             <Route path="/admin/skill-studio" element={<SkillStudioPage user={user!} />} />
+            {/* Configuration Assistant */}
+            <Route path="/admin/config-assistant" element={<ConfigAssistantPage user={user!} />} />
+            <Route path="/admin/config-history/session/:sessionId" element={<ConfigSessionHistoryPage user={user!} />} />
           </Route>
 
           {/* ClientPulse routes */}

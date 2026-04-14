@@ -109,6 +109,7 @@ import publicPageTrackingRouter from './routes/public/pageTracking.js';
 // ClientPulse module routes
 import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
+import configHistoryRouter from './routes/configHistory.js';
 import clientpulseReportsRouter from './routes/clientpulseReports.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
@@ -274,6 +275,7 @@ app.use(skillStudioRouter);
 // ClientPulse module routes
 app.use(modulesRouter);
 app.use(onboardingRouter);
+app.use(configHistoryRouter);
 app.use(clientpulseReportsRouter);
 app.use(ghlRouter);
 app.use(geoAuditsRouter);

@@ -63,6 +63,11 @@ export const TOPIC_REGISTRY: TopicRule[] = [
     description: 'Customer support actions',
     keywords: [/\bsupport\b/i, /\bhelp\b/i, /\bissue\b/i, /\bcomplaint\b/i],
   },
+  {
+    topic: 'configuration',
+    description: 'Platform configuration via the Configuration Assistant',
+    keywords: [/\bconfig/i, /\bset\s?up\b/i, /\bagent\b/i, /\bskill\b/i, /\bschedule\b/i, /\bsubaccount\b/i, /\blink\b/i, /\bcustom\s?instructions?\b/i, /\bdata\s?source\b/i, /\bheartbeat\b/i, /\bhealth\s?check\b/i, /\brestore\b/i, /\bhistory\b/i],
+  },
 ];
 
 /**

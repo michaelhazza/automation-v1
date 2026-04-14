@@ -102,6 +102,18 @@ Autonomous AI agents organised in a three-tier hierarchy (system > org > subacco
 - **Knowledge sources:** Per-agent data files (R2, S3, HTTP, Google Docs, Dropbox, uploads) with token budgets and caching
 - Agent templates for rapid team deployment; full run history with execution traces; idempotent deduplication on all run paths
 
+### Configuration Assistant
+
+AI-powered conversational configuration for agents, skills, schedules, and data sources. Helps org admins set up and manage their platform through natural language.
+
+- **Org-scoped system agent** — runs at org level with read/write access to all subaccounts
+- **28 dedicated tools** — 15 mutation (review-gated), 9 read-only, 4 validation/history
+- **Plan-approve-execute flow** — agent proposes a structured plan; user reviews and approves; server executes deterministically
+- **Config history** — generic JSONB changelog tracking 14 entity types with version restore
+- **Knowledge architecture** — three-layer knowledge (platform docs, skill descriptions, existing org config) enables cold-start and pattern replication
+- **Safety guards** — self-modification prevention, org subaccount restriction, four-layer scope enforcement
+- **Module-gated** — available in automation_os, agency_suite, and internal subscriptions
+
 ### Skill System
 
 100 modular skills across 13 categories, cascading from system to org to subaccount.
