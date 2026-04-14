@@ -29,15 +29,9 @@ import type { AgentBelief } from '../db/schema/agentBeliefs.js';
 import {
   normalizeKey,
   normalizeValueForComparison,
-  estimateTokens,
-  formatSingleBelief,
   formatBeliefsForPrompt as formatBeliefsForPromptPure,
   selectBeliefsWithinBudget as selectBeliefsWithinBudgetPure,
   parseExtractionResponse,
-  parseExtractionItem,
-  determineEffectiveAction,
-  computeUpdateConfidence,
-  computeReinforceConfidence,
   KEY_ALIASES,
   validateKeyAliases,
   type BeliefRecord,
@@ -48,7 +42,7 @@ const aliasError = validateKeyAliases(KEY_ALIASES);
 if (aliasError) throw new Error(`KEY_ALIASES invalid: ${aliasError}`);
 
 // ---------------------------------------------------------------------------
-// Extraction prompt builder
+// Extraction prompt builder (standalone LLM call path — see extractAndMerge)
 // ---------------------------------------------------------------------------
 
 function buildExtractionPrompt(
@@ -144,8 +138,293 @@ export const agentBeliefService = {
     return formatBeliefsForPromptPure(beliefs as BeliefRecord[]);
   },
 
-  // ─── Extract & Merge (post-run, fire-and-forget) ────────────────────────
+  // ─── Merge extracted beliefs (core merge path, no LLM) ────────────────
 
+  /**
+   * Merge a raw beliefs array (already parsed from LLM output) into the DB.
+   * Called by agentBriefingJob after the combined briefing+beliefs LLM call,
+   * and internally by extractAndMerge after its standalone LLM call.
+   *
+   * Safe to call fire-and-forget — throws on unexpected errors so the caller
+   * can decide whether to swallow or propagate.
+   */
+  async mergeExtracted(
+    orgId: string,
+    subaccountId: string,
+    agentId: string,
+    runId: string,
+    rawItems: unknown[],
+  ): Promise<void> {
+    // 1. Load current active beliefs
+    const existing: AgentBelief[] = await db
+      .select()
+      .from(agentBeliefs)
+      .where(
+        and(
+          eq(agentBeliefs.organisationId, orgId),
+          eq(agentBeliefs.subaccountId, subaccountId),
+          eq(agentBeliefs.agentId, agentId),
+          isNull(agentBeliefs.deletedAt),
+          isNull(agentBeliefs.supersededBy),
+        ),
+      ) as AgentBelief[];
+
+    // 2. Merge loop
+    const existingByKey = new Map(existing.map(b => [b.beliefKey, b]));
+    let adds = 0, updates = 0, reinforces = 0, removes = 0, skips = 0;
+    let retryCount = 0;
+
+    for (const raw of rawItems.slice(0, BELIEFS_MAX_PER_EXTRACTION)) {
+      if (retryCount >= BELIEFS_MAX_RETRIES_PER_RUN) {
+        logger.error('belief_retry_storm', { runId, orgId, retryCount });
+        break;
+      }
+
+      const item = raw as Record<string, unknown>;
+      if (!item.key || !item.value) { skips++; continue; }
+
+      // Normalize key
+      const { key, aliased, originalKey } = normalizeKey(item.key as string);
+      if (aliased) {
+        logger.info('belief_key_aliased', { from: originalKey, to: key, runId });
+        const existingForKey = existingByKey.get(key);
+        if (existingForKey && normalizeValueForComparison(existingForKey.value) !== normalizeValueForComparison(item.value as string)) {
+          logger.warn('belief_alias_collision', { from: originalKey, to: key, existingValue: existingForKey.value, runId });
+        }
+      }
+
+      const value = (item.value as string).slice(0, BELIEFS_MAX_VALUE_LENGTH);
+      const category = typeof item.category === 'string' ? item.category : 'general';
+      const subject = typeof item.subject === 'string' ? item.subject : null;
+      const confidence = typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.7;
+      const confidenceReason = typeof item.confidence_reason === 'string' ? item.confidence_reason : null;
+
+      const existingBelief = existingByKey.get(key);
+
+      // Idempotency guard: skip if already applied by this run
+      if (existingBelief?.sourceRunId === runId) { skips++; continue; }
+
+      // User override guard
+      if (existingBelief?.source === 'user_override') { skips++; continue; }
+
+      // Determine effective action based on DB state (merge logic is authoritative)
+      let effectiveAction: 'add' | 'update' | 'reinforce' | 'remove';
+      if ((item.action as string) === 'remove') {
+        if (!existingBelief || confidence < BELIEFS_REMOVE_MIN_CONFIDENCE || confidence < existingBelief.confidence) {
+          skips++;
+          continue;
+        }
+        effectiveAction = 'remove';
+      } else if (!existingBelief) {
+        effectiveAction = 'add';
+      } else if (normalizeValueForComparison(existingBelief.value) === normalizeValueForComparison(value)) {
+        effectiveAction = 'reinforce';
+      } else {
+        effectiveAction = 'update';
+      }
+
+      const now = new Date();
+
+      try {
+        if (effectiveAction === 'add') {
+          await db.insert(agentBeliefs).values({
+            organisationId: orgId,
+            subaccountId,
+            agentId,
+            beliefKey: key,
+            category,
+            subject,
+            value,
+            confidence: Math.min(confidence, BELIEFS_CONFIDENCE_CEILING),
+            sourceRunId: runId,
+            evidenceCount: 1,
+            source: 'agent',
+            confidenceReason,
+            createdAt: now,
+            updatedAt: now,
+          }).onConflictDoUpdate({
+            target: [agentBeliefs.organisationId, agentBeliefs.subaccountId, agentBeliefs.agentId, agentBeliefs.beliefKey],
+            targetWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
+            set: {
+              value,
+              confidence: sql`LEAST(${BELIEFS_UPDATE_CONFIDENCE_CAP}, ${confidence})`,
+              sourceRunId: runId,
+              evidenceCount: 1,
+              confidenceReason,
+              updatedAt: now,
+            },
+          });
+          adds++;
+        } else if (effectiveAction === 'update') {
+          const cappedConfidence = Math.min(existingBelief!.confidence, confidence, BELIEFS_UPDATE_CONFIDENCE_CAP);
+          const result = await db.update(agentBeliefs)
+            .set({
+              value,
+              confidence: cappedConfidence,
+              sourceRunId: runId,
+              evidenceCount: 1,
+              confidenceReason,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(agentBeliefs.id, existingBelief!.id),
+                eq(agentBeliefs.updatedAt, existingBelief!.updatedAt),
+              ),
+            )
+            .returning({ id: agentBeliefs.id });
+
+          if (result.length === 0) {
+            retryCount++;
+            const [fresh] = await db.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
+            if (fresh && fresh.sourceRunId !== runId && fresh.source !== 'user_override') {
+              await db.update(agentBeliefs).set({
+                value, confidence: cappedConfidence, sourceRunId: runId,
+                evidenceCount: 1, confidenceReason, updatedAt: now,
+              }).where(eq(agentBeliefs.id, fresh.id));
+              updates++;
+            } else { skips++; }
+          } else {
+            updates++;
+          }
+        } else if (effectiveAction === 'reinforce') {
+          const boostedConfidence = Math.min(BELIEFS_CONFIDENCE_CEILING, existingBelief!.confidence + BELIEFS_CONFIDENCE_BOOST);
+          const result = await db.update(agentBeliefs)
+            .set({
+              evidenceCount: sql`${agentBeliefs.evidenceCount} + 1`,
+              confidence: boostedConfidence,
+              sourceRunId: runId,
+              updatedAt: now,
+              lastReinforcedAt: now,
+              ...(confidenceReason ? { confidenceReason } : {}),
+            })
+            .where(
+              and(
+                eq(agentBeliefs.id, existingBelief!.id),
+                eq(agentBeliefs.updatedAt, existingBelief!.updatedAt),
+              ),
+            )
+            .returning({ id: agentBeliefs.id });
+
+          if (result.length === 0) {
+            retryCount++;
+            const [fresh] = await db.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
+            if (fresh && fresh.sourceRunId !== runId && fresh.source !== 'user_override') {
+              await db.update(agentBeliefs).set({
+                evidenceCount: sql`${agentBeliefs.evidenceCount} + 1`,
+                confidence: Math.min(BELIEFS_CONFIDENCE_CEILING, fresh.confidence + BELIEFS_CONFIDENCE_BOOST),
+                sourceRunId: runId, updatedAt: now, lastReinforcedAt: now,
+                ...(confidenceReason ? { confidenceReason } : {}),
+              }).where(eq(agentBeliefs.id, fresh.id));
+              reinforces++;
+            } else { skips++; }
+          } else {
+            reinforces++;
+          }
+        } else if (effectiveAction === 'remove') {
+          await db.update(agentBeliefs)
+            .set({ deletedAt: now })
+            .where(eq(agentBeliefs.id, existingBelief!.id));
+          removes++;
+        }
+      } catch (err) {
+        logger.warn('belief_merge_error', { key, action: effectiveAction, runId, error: String(err) });
+        skips++;
+      }
+    }
+
+    // 3. Post-merge cleanup
+    // a) Soft-delete beliefs below confidence floor
+    await db.update(agentBeliefs)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(agentBeliefs.organisationId, orgId),
+          eq(agentBeliefs.subaccountId, subaccountId),
+          eq(agentBeliefs.agentId, agentId),
+          isNull(agentBeliefs.deletedAt),
+          isNull(agentBeliefs.supersededBy),
+          sql`${agentBeliefs.confidence} < ${BELIEFS_CONFIDENCE_FLOOR}`,
+        ),
+      );
+
+    // b) Enforce max active limit
+    const activeCount = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(agentBeliefs)
+      .where(
+        and(
+          eq(agentBeliefs.organisationId, orgId),
+          eq(agentBeliefs.subaccountId, subaccountId),
+          eq(agentBeliefs.agentId, agentId),
+          isNull(agentBeliefs.deletedAt),
+          isNull(agentBeliefs.supersededBy),
+        ),
+      );
+
+    const count = activeCount[0]?.count ?? 0;
+    if (count > BELIEFS_MAX_ACTIVE) {
+      const excess = count - BELIEFS_MAX_ACTIVE;
+      const toDelete = await db
+        .select({ id: agentBeliefs.id })
+        .from(agentBeliefs)
+        .where(
+          and(
+            eq(agentBeliefs.organisationId, orgId),
+            eq(agentBeliefs.subaccountId, subaccountId),
+            eq(agentBeliefs.agentId, agentId),
+            isNull(agentBeliefs.deletedAt),
+            isNull(agentBeliefs.supersededBy),
+          ),
+        )
+        .orderBy(asc(agentBeliefs.confidence), asc(agentBeliefs.createdAt))
+        .limit(excess);
+      if (toDelete.length > 0) {
+        await db.update(agentBeliefs)
+          .set({ deletedAt: new Date() })
+          .where(inArray(agentBeliefs.id, toDelete.map(r => r.id)));
+      }
+    }
+
+    // 4. Observability
+    const totalActive = Math.min(count, BELIEFS_MAX_ACTIVE);
+    const churnRate = totalActive > 0 ? (updates + removes) / totalActive : 0;
+
+    const saturatedRows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(agentBeliefs)
+      .where(
+        and(
+          eq(agentBeliefs.organisationId, orgId),
+          eq(agentBeliefs.subaccountId, subaccountId),
+          eq(agentBeliefs.agentId, agentId),
+          isNull(agentBeliefs.deletedAt),
+          isNull(agentBeliefs.supersededBy),
+          sql`${agentBeliefs.confidence} > 0.85`,
+        ),
+      );
+    const saturatedCount = saturatedRows[0]?.count ?? 0;
+    const saturationRate = totalActive > 0 ? saturatedCount / totalActive : 0;
+
+    logger.info('belief_extraction_complete', {
+      runId, orgId, subaccountId, agentId,
+      adds, updates, reinforces, removes, skips,
+      totalActive,
+      churnRate: churnRate.toFixed(3),
+      saturationRate: saturationRate.toFixed(3),
+      retryCount,
+    });
+  },
+
+  // ─── Extract & Merge — standalone LLM path (fallback / direct call) ─────
+
+  /**
+   * Standalone belief extraction: makes its own LLM call then calls
+   * mergeExtracted(). Used as a fallback if the combined briefing+beliefs
+   * path in agentBriefingJob is unavailable or needs to be bypassed.
+   *
+   * Fire-and-forget — all errors are swallowed.
+   */
   async extractAndMerge(
     orgId: string,
     subaccountId: string,
@@ -154,7 +433,7 @@ export const agentBeliefService = {
     handoffJson: object,
   ): Promise<void> {
     try {
-      // 1. Load existing beliefs
+      // Load existing beliefs
       const existing: AgentBelief[] = await db
         .select()
         .from(agentBeliefs)
@@ -168,7 +447,7 @@ export const agentBeliefService = {
           ),
         ) as AgentBelief[];
 
-      // 2. Load recent high-quality memory entries (same as briefing)
+      // Load recent high-quality memory entries (same as briefing)
       const recentEntries = await db
         .select({
           content: workspaceMemoryEntries.content,
@@ -186,7 +465,7 @@ export const agentBeliefService = {
         .orderBy(desc(workspaceMemoryEntries.createdAt))
         .limit(BRIEFING_MEMORY_ENTRIES_LIMIT);
 
-      // 3. LLM extraction call
+      // LLM extraction call
       const prompt = buildExtractionPrompt(handoffJson, recentEntries, existing);
       const response = await routeCall({
         messages: [{ role: 'user', content: prompt }],
@@ -206,266 +485,13 @@ export const agentBeliefService = {
       const rawContent = typeof response.content === 'string' ? response.content.trim() : '';
       if (!rawContent) return;
 
-      // 4. Parse JSON — extract array from possible markdown fences
       const parsed = parseExtractionResponse(rawContent);
       if (!parsed) {
         logger.warn('belief_extraction_parse_error', { runId, orgId });
         return;
       }
 
-      // 5. Merge
-      const existingByKey = new Map(existing.map(b => [b.beliefKey, b]));
-      let adds = 0, updates = 0, reinforces = 0, removes = 0, skips = 0;
-      let retryCount = 0;
-
-      for (const raw of parsed.slice(0, BELIEFS_MAX_PER_EXTRACTION)) {
-        if (retryCount >= BELIEFS_MAX_RETRIES_PER_RUN) {
-          logger.error('belief_retry_storm', { runId, orgId, retryCount });
-          break;
-        }
-
-        const item = raw as Record<string, unknown>;
-        if (!item.key || !item.value) { skips++; continue; }
-
-        // Normalize key
-        const { key, aliased, originalKey } = normalizeKey(item.key as string);
-        if (aliased) {
-          logger.info('belief_key_aliased', { from: originalKey, to: key, runId });
-          // Check for alias collision
-          const existingForKey = existingByKey.get(key);
-          if (existingForKey && normalizeValueForComparison(existingForKey.value) !== normalizeValueForComparison(item.value as string)) {
-            logger.warn('belief_alias_collision', { from: originalKey, to: key, existingValue: existingForKey.value, runId });
-          }
-        }
-
-        const value = (item.value as string).slice(0, BELIEFS_MAX_VALUE_LENGTH);
-        const category = typeof item.category === 'string' ? item.category : 'general';
-        const subject = typeof item.subject === 'string' ? item.subject : null;
-        const confidence = typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.7;
-        const confidenceReason = typeof item.confidence_reason === 'string' ? item.confidence_reason : null;
-
-        const existingBelief = existingByKey.get(key);
-
-        // Idempotency guard: skip if already applied by this run
-        if (existingBelief?.sourceRunId === runId) { skips++; continue; }
-
-        // User override guard
-        if (existingBelief?.source === 'user_override') { skips++; continue; }
-
-        // Determine effective action based on DB state (merge logic is authoritative)
-        let effectiveAction: 'add' | 'update' | 'reinforce' | 'remove';
-        if ((item.action as string) === 'remove') {
-          if (!existingBelief || confidence < BELIEFS_REMOVE_MIN_CONFIDENCE || confidence < existingBelief.confidence) {
-            skips++;
-            continue;
-          }
-          effectiveAction = 'remove';
-        } else if (!existingBelief) {
-          effectiveAction = 'add';
-        } else if (normalizeValueForComparison(existingBelief.value) === normalizeValueForComparison(value)) {
-          effectiveAction = 'reinforce';
-        } else {
-          effectiveAction = 'update';
-        }
-
-        const now = new Date();
-
-        try {
-          if (effectiveAction === 'add') {
-            await db.insert(agentBeliefs).values({
-              organisationId: orgId,
-              subaccountId,
-              agentId,
-              beliefKey: key,
-              category,
-              subject,
-              value,
-              confidence: Math.min(confidence, BELIEFS_CONFIDENCE_CEILING),
-              sourceRunId: runId,
-              evidenceCount: 1,
-              source: 'agent',
-              confidenceReason,
-              createdAt: now,
-              updatedAt: now,
-            }).onConflictDoUpdate({
-              // Match the partial unique index for conflict detection
-              target: [agentBeliefs.organisationId, agentBeliefs.subaccountId, agentBeliefs.agentId, agentBeliefs.beliefKey],
-              targetWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
-              set: {
-                value,
-                confidence: sql`LEAST(${BELIEFS_UPDATE_CONFIDENCE_CAP}, ${confidence})`,
-                sourceRunId: runId,
-                evidenceCount: 1,
-                confidenceReason,
-                updatedAt: now,
-              },
-            });
-            adds++;
-          } else if (effectiveAction === 'update') {
-            // Optimistic concurrency: include updated_at in WHERE
-            const cappedConfidence = Math.min(existingBelief!.confidence, confidence, BELIEFS_UPDATE_CONFIDENCE_CAP);
-            const result = await db.update(agentBeliefs)
-              .set({
-                value,
-                confidence: cappedConfidence,
-                sourceRunId: runId,
-                evidenceCount: 1, // Reset on value change
-                confidenceReason,
-                updatedAt: now,
-              })
-              .where(
-                and(
-                  eq(agentBeliefs.id, existingBelief!.id),
-                  eq(agentBeliefs.updatedAt, existingBelief!.updatedAt),
-                ),
-              )
-              .returning({ id: agentBeliefs.id });
-
-            if (result.length === 0) {
-              retryCount++;
-              // Re-read and retry once
-              const [fresh] = await db.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
-              if (fresh && fresh.sourceRunId !== runId && fresh.source !== 'user_override') {
-                await db.update(agentBeliefs).set({
-                  value, confidence: cappedConfidence, sourceRunId: runId,
-                  evidenceCount: 1, confidenceReason, updatedAt: now,
-                }).where(eq(agentBeliefs.id, fresh.id));
-                updates++;
-              } else { skips++; }
-            } else {
-              updates++;
-            }
-          } else if (effectiveAction === 'reinforce') {
-            const boostedConfidence = Math.min(BELIEFS_CONFIDENCE_CEILING, existingBelief!.confidence + BELIEFS_CONFIDENCE_BOOST);
-            const result = await db.update(agentBeliefs)
-              .set({
-                evidenceCount: sql`${agentBeliefs.evidenceCount} + 1`,
-                confidence: boostedConfidence,
-                sourceRunId: runId,
-                updatedAt: now,
-                lastReinforcedAt: now,
-                // Only overwrite confidence_reason if LLM provided one
-                ...(confidenceReason ? { confidenceReason } : {}),
-              })
-              .where(
-                and(
-                  eq(agentBeliefs.id, existingBelief!.id),
-                  eq(agentBeliefs.updatedAt, existingBelief!.updatedAt),
-                ),
-              )
-              .returning({ id: agentBeliefs.id });
-
-            if (result.length === 0) {
-              retryCount++;
-              const [fresh] = await db.select().from(agentBeliefs).where(eq(agentBeliefs.id, existingBelief!.id));
-              if (fresh && fresh.sourceRunId !== runId && fresh.source !== 'user_override') {
-                await db.update(agentBeliefs).set({
-                  evidenceCount: sql`${agentBeliefs.evidenceCount} + 1`,
-                  confidence: Math.min(BELIEFS_CONFIDENCE_CEILING, fresh.confidence + BELIEFS_CONFIDENCE_BOOST),
-                  sourceRunId: runId, updatedAt: now, lastReinforcedAt: now,
-                  ...(confidenceReason ? { confidenceReason } : {}),
-                }).where(eq(agentBeliefs.id, fresh.id));
-                reinforces++;
-              } else { skips++; }
-            } else {
-              reinforces++;
-            }
-          } else if (effectiveAction === 'remove') {
-            await db.update(agentBeliefs)
-              .set({ deletedAt: now })
-              .where(eq(agentBeliefs.id, existingBelief!.id));
-            removes++;
-          }
-        } catch (err) {
-          logger.warn('belief_merge_error', { key, action: effectiveAction, runId, error: String(err) });
-          skips++;
-        }
-      }
-
-      // 6. Post-merge cleanup
-      // a) Soft-delete beliefs below confidence floor
-      await db.update(agentBeliefs)
-        .set({ deletedAt: new Date() })
-        .where(
-          and(
-            eq(agentBeliefs.organisationId, orgId),
-            eq(agentBeliefs.subaccountId, subaccountId),
-            eq(agentBeliefs.agentId, agentId),
-            isNull(agentBeliefs.deletedAt),
-            isNull(agentBeliefs.supersededBy),
-            sql`${agentBeliefs.confidence} < ${BELIEFS_CONFIDENCE_FLOOR}`,
-          ),
-        );
-
-      // b) Enforce max active limit
-      const activeCount = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(agentBeliefs)
-        .where(
-          and(
-            eq(agentBeliefs.organisationId, orgId),
-            eq(agentBeliefs.subaccountId, subaccountId),
-            eq(agentBeliefs.agentId, agentId),
-            isNull(agentBeliefs.deletedAt),
-            isNull(agentBeliefs.supersededBy),
-          ),
-        );
-
-      const count = activeCount[0]?.count ?? 0;
-      if (count > BELIEFS_MAX_ACTIVE) {
-        const excess = count - BELIEFS_MAX_ACTIVE;
-        // Drizzle-native: select IDs to delete, then batch-update
-        const toDelete = await db
-          .select({ id: agentBeliefs.id })
-          .from(agentBeliefs)
-          .where(
-            and(
-              eq(agentBeliefs.organisationId, orgId),
-              eq(agentBeliefs.subaccountId, subaccountId),
-              eq(agentBeliefs.agentId, agentId),
-              isNull(agentBeliefs.deletedAt),
-              isNull(agentBeliefs.supersededBy),
-            ),
-          )
-          .orderBy(asc(agentBeliefs.confidence), asc(agentBeliefs.createdAt))
-          .limit(excess);
-        if (toDelete.length > 0) {
-          await db.update(agentBeliefs)
-            .set({ deletedAt: new Date() })
-            .where(inArray(agentBeliefs.id, toDelete.map(r => r.id)));
-        }
-      }
-
-      // 7. Observability
-      const totalActive = Math.min(count, BELIEFS_MAX_ACTIVE);
-      const churnRate = totalActive > 0 ? (updates + removes) / totalActive : 0;
-
-      // Saturation rate: beliefs above 0.85 / total — early warning for rigidity
-      const saturatedRows = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(agentBeliefs)
-        .where(
-          and(
-            eq(agentBeliefs.organisationId, orgId),
-            eq(agentBeliefs.subaccountId, subaccountId),
-            eq(agentBeliefs.agentId, agentId),
-            isNull(agentBeliefs.deletedAt),
-            isNull(agentBeliefs.supersededBy),
-            sql`${agentBeliefs.confidence} > 0.85`,
-          ),
-        );
-      const saturatedCount = saturatedRows[0]?.count ?? 0;
-      const saturationRate = totalActive > 0 ? saturatedCount / totalActive : 0;
-
-      logger.info('belief_extraction_complete', {
-        runId, orgId, subaccountId, agentId,
-        adds, updates, reinforces, removes, skips,
-        totalActive,
-        churnRate: churnRate.toFixed(3),
-        saturationRate: saturationRate.toFixed(3),
-        retryCount,
-      });
-
+      await this.mergeExtracted(orgId, subaccountId, agentId, runId, parsed);
     } catch (err) {
       // Fire-and-forget — never let belief errors bubble up
       logger.error('belief_extraction_failed', { runId, orgId, error: String(err) });

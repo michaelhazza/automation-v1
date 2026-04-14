@@ -197,6 +197,13 @@ export const BRIEFING_MEMORY_ENTRIES_LIMIT = 5;
 /** Minimum quality score for memory entries included in briefing context. */
 export const BRIEFING_MEMORY_QUALITY_THRESHOLD = 0.5;
 
+/**
+ * Max tokens for the combined briefing + belief extraction LLM call.
+ * Higher than EXTRACTION_MAX_TOKENS because the response contains both a
+ * briefing narrative (≤ 800 tokens) and a belief JSON array (≤ 10 items).
+ */
+export const BRIEFING_COMBINED_MAX_TOKENS = 2048;
+
 // ── Agent Beliefs (Phase 1) ────────────────────────────────────────────────
 
 /** Max beliefs extracted per run. */
