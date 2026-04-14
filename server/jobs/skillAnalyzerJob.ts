@@ -641,35 +641,39 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             classificationFailureReason,
           });
 
-          // Write result immediately — don't wait for Stage 8
-          await insertSingleResult({
-            jobId,
-            candidateIndex: match.candidateIndex,
-            candidateName: candidate.name,
-            candidateSlug: candidate.slug,
-            candidateContentHash: getCandidateHash(match.candidateIndex),
-            matchedSkillId: matchedLib.id ?? undefined,
-            classification: finalResult.classification,
-            confidence: finalResult.confidence,
-            similarityScore: match.similarity ?? undefined,
-            classificationReasoning: finalResult.reasoning ?? undefined,
-            diffSummary: diffSummary ?? undefined,
-            proposedMergedContent: finalResult.proposedMerge ?? undefined,
-            originalProposedMerge: finalResult.proposedMerge ?? undefined,
-            classificationFailed,
-            classificationFailureReason: classificationFailureReason ?? null,
-          });
+          // Write result immediately — don't wait for Stage 8.
+          // unmarkSkillInFlight is in finally so it always runs even if the
+          // DB insert throws, preventing a permanently stale in-flight record.
+          try {
+            await insertSingleResult({
+              jobId,
+              candidateIndex: match.candidateIndex,
+              candidateName: candidate.name,
+              candidateSlug: candidate.slug,
+              candidateContentHash: getCandidateHash(match.candidateIndex),
+              matchedSkillId: matchedLib.id ?? undefined,
+              classification: finalResult.classification,
+              confidence: finalResult.confidence,
+              similarityScore: match.similarity ?? undefined,
+              classificationReasoning: finalResult.reasoning ?? undefined,
+              diffSummary: diffSummary ?? undefined,
+              proposedMergedContent: finalResult.proposedMerge ?? undefined,
+              originalProposedMerge: finalResult.proposedMerge ?? undefined,
+              classificationFailed,
+              classificationFailureReason: classificationFailureReason ?? null,
+            });
+          } finally {
+            await unmarkSkillInFlight(jobId, candidate.slug);
 
-          await unmarkSkillInFlight(jobId, candidate.slug);
-
-          console.log('[SkillAnalyzer] classify:end', {
-            jobId,
-            slug: candidate.slug,
-            durationMs: Date.now() - startMs,
-            classification: finalResult.classification,
-            failed: classificationFailed,
-            failureReason: classificationFailureReason ?? undefined,
-          });
+            console.log('[SkillAnalyzer] classify:end', {
+              jobId,
+              slug: candidate.slug,
+              durationMs: Date.now() - startMs,
+              classification: finalResult.classification,
+              failed: classificationFailed,
+              failureReason: classificationFailureReason ?? undefined,
+            });
+          }
 
           classifiedCount++;
           const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
