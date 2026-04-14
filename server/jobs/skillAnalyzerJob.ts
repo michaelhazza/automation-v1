@@ -842,43 +842,13 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     });
   }
 
-  // LLM-classified from Stage 5
-  for (const r of classifiedResults) {
-    resultRows.push({
-      jobId,
-      candidateIndex: r.candidateIndex,
-      candidateName: r.candidate.name,
-      candidateSlug: r.candidate.slug,
-      candidateContentHash: getCandidateHash(r.candidateIndex),
-      matchedSkillId: r.libraryId ?? undefined,
-      classification: r.classification,
-      confidence: r.confidence,
-      similarityScore: r.similarityScore ?? undefined,
-      classificationReasoning: r.classificationReasoning ?? undefined,
-      diffSummary: r.diffSummary ?? undefined,
-      // Phase 2: agent proposals only for LLM-classified DISTINCT results.
-      // The agent-propose stage above populates the map for both bands.
-      agentProposals: agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [],
-      // Phase 3: persist the LLM merge proposal into BOTH the mutable
-      // proposed_merged_content column AND the immutable
-      // original_proposed_merge column. They are identical at write time
-      // and diverge only when the user edits the Recommended column via
-      // the Phase 5 PATCH endpoint. Reset endpoint copies original back
-      // into proposedMergedContent. Null on every non-merge path.
-      proposedMergedContent: r.proposedMerge ?? undefined,
-      originalProposedMerge: r.proposedMerge ?? undefined,
-      classificationFailed: r.classificationFailed ?? false,
-      classificationFailureReason: r.classificationFailureReason ?? null,
-    });
-  }
-
   // Insert via service (avoids direct db import in jobs)
   await insertResults(resultRows);
 
   await updateJobProgress(jobId, {
     status: 'completed',
     progressPct: 100,
-    progressMessage: `Analysis complete - ${resultRows.length} result${resultRows.length === 1 ? '' : 's'}.`,
+    progressMessage: `Analysis complete - ${candidates.length} result${candidates.length === 1 ? '' : 's'}.`,
     completedAt: new Date(),
   });
 }
