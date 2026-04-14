@@ -1111,6 +1111,19 @@ export async function updateResultAgentProposals(
     );
 }
 
+/** Persist the cluster-level agent recommendation on the job row.
+ *  Written by Stage 8b after all per-skill proposals are finalised.
+ *  Best-effort — the job handler catches errors before calling this. */
+export async function updateJobAgentRecommendation(
+  jobId: string,
+  recommendation: unknown,
+): Promise<void> {
+  await db
+    .update(skillAnalyzerJobs)
+    .set({ agentRecommendation: recommendation })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+}
+
 // ---------------------------------------------------------------------------
 // Classification retry helpers
 // ---------------------------------------------------------------------------
@@ -1352,4 +1365,6 @@ export const skillAnalyzerService = {
   insertSingleResult,
   markSkillInFlight,
   unmarkSkillInFlight,
+  updateResultAgentProposals,
+  updateJobAgentRecommendation,
 };
