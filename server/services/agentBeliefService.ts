@@ -26,56 +26,26 @@ import {
   BRIEFING_MEMORY_QUALITY_THRESHOLD,
 } from '../config/limits.js';
 import type { AgentBelief } from '../db/schema/agentBeliefs.js';
+import {
+  normalizeKey,
+  normalizeValueForComparison,
+  estimateTokens,
+  formatSingleBelief,
+  formatBeliefsForPrompt as formatBeliefsForPromptPure,
+  selectBeliefsWithinBudget as selectBeliefsWithinBudgetPure,
+  parseExtractionResponse,
+  parseExtractionItem,
+  determineEffectiveAction,
+  computeUpdateConfidence,
+  computeReinforceConfidence,
+  KEY_ALIASES,
+  validateKeyAliases,
+  type BeliefRecord,
+} from './agentBeliefServicePure.js';
 
-// ---------------------------------------------------------------------------
-// Key normalization & aliases
-// ---------------------------------------------------------------------------
-
-/** Known key synonyms. No chaining — every target must be a canonical key. */
-const KEY_ALIASES: Record<string, string> = {
-  ecommerce_platform: 'client_platform',
-  cms: 'client_platform',
-  cms_platform: 'client_platform',
-  preferred_reporting_cadence: 'reporting_cadence',
-  report_frequency: 'reporting_cadence',
-};
-
-// Validate no chaining at import time
-for (const target of Object.values(KEY_ALIASES)) {
-  if (target in KEY_ALIASES) {
-    throw new Error(`KEY_ALIASES chaining detected: target "${target}" is itself an alias`);
-  }
-}
-
-function normalizeKey(raw: string): { key: string; aliased: boolean; originalKey?: string } {
-  const normalized = raw.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-  if (normalized in KEY_ALIASES) {
-    return { key: KEY_ALIASES[normalized], aliased: true, originalKey: normalized };
-  }
-  return { key: normalized, aliased: false };
-}
-
-// ---------------------------------------------------------------------------
-// Value normalization for comparison (prevents false updates)
-// ---------------------------------------------------------------------------
-
-function normalizeValueForComparison(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[.,;:!?'"]/g, '')
-    .replace(/\(.*?\)/g, '')
-    .trim();
-}
-
-// ---------------------------------------------------------------------------
-// Token estimation (matches briefing service)
-// ---------------------------------------------------------------------------
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.split(/\s+/).length / 0.75);
-}
+// Validate alias map at import time
+const aliasError = validateKeyAliases(KEY_ALIASES);
+if (aliasError) throw new Error(`KEY_ALIASES invalid: ${aliasError}`);
 
 // ---------------------------------------------------------------------------
 // Extraction prompt builder
@@ -168,33 +138,10 @@ export const agentBeliefService = {
     return selectBeliefsWithinBudget(rows, BELIEFS_TOKEN_BUDGET);
   },
 
-  // ─── Format for prompt ───────────────────────────────────────────────────
+  // ─── Format for prompt (delegates to pure module) ──────────────────────
 
   formatBeliefsForPrompt(beliefs: AgentBelief[]): string {
-    if (beliefs.length === 0) return '';
-
-    const grouped = new Map<string, AgentBelief[]>();
-    for (const b of beliefs) {
-      const list = grouped.get(b.category) ?? [];
-      list.push(b);
-      grouped.set(b.category, list);
-    }
-
-    const parts: string[] = [
-      'These are facts you have formed from previous runs. Treat them as your working knowledge — they may be updated or corrected over time.',
-      '',
-    ];
-
-    for (const [category, items] of grouped) {
-      const label = category.charAt(0).toUpperCase() + category.slice(1);
-      parts.push(`**${label}:**`);
-      for (const b of items) {
-        parts.push(`- [${b.confidence.toFixed(2)}] ${b.value}`);
-      }
-      parts.push('');
-    }
-
-    return parts.join('\n').trimEnd();
+    return formatBeliefsForPromptPure(beliefs as BeliefRecord[]);
   },
 
   // ─── Extract & Merge (post-run, fire-and-forget) ────────────────────────
@@ -260,12 +207,8 @@ export const agentBeliefService = {
       if (!rawContent) return;
 
       // 4. Parse JSON — extract array from possible markdown fences
-      let parsed: unknown[];
-      try {
-        const jsonStr = rawContent.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-        parsed = JSON.parse(jsonStr);
-        if (!Array.isArray(parsed)) return;
-      } catch {
+      const parsed = parseExtractionResponse(rawContent);
+      if (!parsed) {
         logger.warn('belief_extraction_parse_error', { runId, orgId });
         return;
       }
@@ -629,29 +572,9 @@ export const agentBeliefService = {
 };
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — delegate to pure module
 // ---------------------------------------------------------------------------
 
-function formatSingleBelief(b: AgentBelief): string {
-  return `- [${b.confidence.toFixed(2)}] ${b.value}`;
-}
-
-function selectBeliefsWithinBudget(
-  beliefs: AgentBelief[],
-  tokenBudget: number,
-): AgentBelief[] {
-  // Sort by confidence descending — highest confidence survives budget cuts
-  const sorted = [...beliefs].sort((a, b) => b.confidence - a.confidence);
-  const selected: AgentBelief[] = [];
-  let tokens = 0;
-  const safetyBudget = tokenBudget * 0.9; // 10% safety buffer
-
-  for (const belief of sorted) {
-    const beliefTokens = estimateTokens(formatSingleBelief(belief));
-    if (tokens + beliefTokens > safetyBudget) break;
-    selected.push(belief);
-    tokens += beliefTokens;
-  }
-
-  return selected;
+function selectBeliefsWithinBudget(beliefs: AgentBelief[], tokenBudget: number): AgentBelief[] {
+  return selectBeliefsWithinBudgetPure(beliefs as BeliefRecord[], tokenBudget) as AgentBelief[];
 }
