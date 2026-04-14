@@ -60,6 +60,11 @@ export const skillAnalyzerJobs = pgTable(
     // Classification state tracking
     classifyState: jsonb('classify_state').$type<ClassifyState>().notNull().default({}),
 
+    // Agent cluster recommendation — populated by Stage 8b after results are
+    // written. Shape: { shouldCreateAgent, agentName?, agentSlug?,
+    // agentDescription?, reasoning, skillSlugs? }. See migration 0114.
+    agentRecommendation: jsonb('agent_recommendation'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp('completed_at', { withTimezone: true }),

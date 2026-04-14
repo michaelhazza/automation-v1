@@ -85,6 +85,17 @@ export interface AnalysisJob {
     queue?: string[];
     inFlight?: Record<string, number>; // slug → startedAtMs (server ms)
   } | null;
+  /** Agent cluster recommendation from Stage 8b — set after all results are
+   *  written. Null / undefined when fewer than 3 distinct skills lacked a
+   *  good agent match, or when Stage 8b was skipped. */
+  agentRecommendation?: {
+    shouldCreateAgent: boolean;
+    agentName?: string;
+    agentSlug?: string;
+    agentDescription?: string;
+    reasoning: string;
+    skillSlugs?: string[];
+  } | null;
 }
 
 export interface AnalysisResult {
@@ -136,9 +147,18 @@ export interface AnalysisResult {
    *  parse error). Distinguishes retryable API failures from genuine
    *  PARTIAL_OVERLAP model output. */
   classificationFailed?: boolean;
-  /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'unknown'.
+  /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown'.
    *  Null on rows where classificationFailed is false or undefined. */
   classificationFailureReason?: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
+  /** Migration 0114: heuristic flag set during Stage 4b. True for README-style
+   *  files with no tool definition (e.g. a GitHub repo README imported by
+   *  mistake). */
+  isDocumentationFile?: boolean;
+  /** Migration 0114: heuristic flag set during Stage 4b. True for foundation
+   *  skill docs that have no tool definition but have rich instructions (e.g.
+   *  product-marketing-context). These belong in Knowledge Management Agent,
+   *  not as executable skills. */
+  isContextFile?: boolean;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

@@ -1,11 +1,12 @@
-import { eq, desc, inArray, and, sql } from 'drizzle-orm';
+import { eq, desc, inArray, and, sql, isNull } from 'drizzle-orm';
+import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
@@ -1111,6 +1112,39 @@ export async function updateResultAgentProposals(
     );
 }
 
+/** Persist the cluster-level agent recommendation on the job row.
+ *  Written by Stage 8b after all per-skill proposals are finalised.
+ *  Idempotent: no-op if a recommendation is already stored (job retry safety).
+ *  Validates minimum shape before writing to prevent corrupt JSONB. */
+export async function updateJobAgentRecommendation(
+  jobId: string,
+  recommendation: AgentRecommendation,
+): Promise<void> {
+  // Minimal shape guard — shouldCreateAgent must be boolean, reasoning non-empty string,
+  // skillSlugs must be an array when present (UI calls .map() on it).
+  if (typeof recommendation.shouldCreateAgent !== 'boolean') {
+    throw new Error('updateJobAgentRecommendation: shouldCreateAgent must be boolean');
+  }
+  if (typeof recommendation.reasoning !== 'string' || recommendation.reasoning.trim() === '') {
+    throw new Error('updateJobAgentRecommendation: reasoning must be a non-empty string');
+  }
+  if (recommendation.skillSlugs !== undefined && !Array.isArray(recommendation.skillSlugs)) {
+    throw new Error('updateJobAgentRecommendation: skillSlugs must be an array if present');
+  }
+
+  // Idempotency: only write if the column is still null (first run wins on retry).
+  const updated = await db
+    .update(skillAnalyzerJobs)
+    .set({ agentRecommendation: recommendation })
+    .where(and(eq(skillAnalyzerJobs.id, jobId), isNull(skillAnalyzerJobs.agentRecommendation)))
+    .returning({ id: skillAnalyzerJobs.id });
+
+  if (updated.length === 0) {
+    // Row was skipped — recommendation already written on a previous run.
+    logger.info('skill_analyzer_agent_recommendation_already_exists', { jobId });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Classification retry helpers
 // ---------------------------------------------------------------------------
@@ -1352,4 +1386,6 @@ export const skillAnalyzerService = {
   insertSingleResult,
   markSkillInFlight,
   unmarkSkillInFlight,
+  updateResultAgentProposals,
+  updateJobAgentRecommendation,
 };

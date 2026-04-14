@@ -33,6 +33,7 @@ import {
   markSkillInFlight,
   unmarkSkillInFlight,
   updateResultAgentProposals,
+  updateJobAgentRecommendation,
 } from '../services/skillAnalyzerService.js';
 import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
@@ -402,6 +403,25 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Stage 4b: Non-skill detection — heuristic pre-classification
+  // -------------------------------------------------------------------------
+  // Flag any parsed candidates that appear to be documentation files (e.g.
+  // a repo README) or context/foundation documents (e.g.
+  // product-marketing-context) rather than executable tool skills.
+  // These flags travel through the pipeline and are persisted on the result
+  // row so the Review UI can show appropriate badges / warnings.
+  const nonSkillFlagsByIndex = new Map<number, { isDocumentationFile: boolean; isContextFile: boolean }>();
+  for (const m of bestMatches) {
+    const candidate = candidates[m.candidateIndex];
+    if (candidate) {
+      nonSkillFlagsByIndex.set(
+        m.candidateIndex,
+        skillAnalyzerServicePure.detectNonSkillFile(candidate),
+      );
+    }
+  }
+
   const distinctResults = bestMatches.filter((m) => m.band === 'distinct');
   const llmQueue = bestMatches.filter((m) => m.band !== 'distinct');
 
@@ -497,20 +517,25 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           classificationFailed: false,
           classificationFailureReason: null,
         });
-        await insertSingleResult({
-          jobId,
-          candidateIndex: match.candidateIndex,
-          candidateName: candidate.name,
-          candidateSlug: candidate.slug,
-          candidateContentHash: getCandidateHash(match.candidateIndex),
-          matchedSkillId: undefined,
-          classification: 'DISTINCT',
-          confidence: 0.5,
-          similarityScore: match.similarity ?? undefined,
-          classificationReasoning: 'Library skill not found - treating as distinct.',
-          classificationFailed: false,
-          classificationFailureReason: null,
-        });
+        {
+          const flags = nonSkillFlagsByIndex.get(match.candidateIndex);
+          await insertSingleResult({
+            jobId,
+            candidateIndex: match.candidateIndex,
+            candidateName: candidate.name,
+            candidateSlug: candidate.slug,
+            candidateContentHash: getCandidateHash(match.candidateIndex),
+            matchedSkillId: undefined,
+            classification: 'DISTINCT',
+            confidence: 0.5,
+            similarityScore: match.similarity ?? undefined,
+            classificationReasoning: 'Library skill not found - treating as distinct.',
+            classificationFailed: false,
+            classificationFailureReason: null,
+            isDocumentationFile: flags?.isDocumentationFile ?? false,
+            isContextFile: flags?.isContextFile ?? false,
+          });
+        }
         continue;
       }
 
@@ -533,22 +558,27 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         classificationFailed: false,
         classificationFailureReason: null,
       });
-      await insertSingleResult({
-        jobId,
-        candidateIndex: match.candidateIndex,
-        candidateName: candidate.name,
-        candidateSlug: candidate.slug,
-        candidateContentHash: getCandidateHash(match.candidateIndex),
-        matchedSkillId: matchedLib.id ?? undefined,
-        classification: 'PARTIAL_OVERLAP',
-        confidence: 0.3,
-        similarityScore: match.similarity ?? undefined,
-        classificationReasoning:
-          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
-        diffSummary: diffSummary ?? undefined,
-        classificationFailed: false,
-        classificationFailureReason: null,
-      });
+      {
+        const flags = nonSkillFlagsByIndex.get(match.candidateIndex);
+        await insertSingleResult({
+          jobId,
+          candidateIndex: match.candidateIndex,
+          candidateName: candidate.name,
+          candidateSlug: candidate.slug,
+          candidateContentHash: getCandidateHash(match.candidateIndex),
+          matchedSkillId: matchedLib.id ?? undefined,
+          classification: 'PARTIAL_OVERLAP',
+          confidence: 0.3,
+          similarityScore: match.similarity ?? undefined,
+          classificationReasoning:
+            'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+          diffSummary: diffSummary ?? undefined,
+          classificationFailed: false,
+          classificationFailureReason: null,
+          isDocumentationFile: flags?.isDocumentationFile ?? false,
+          isContextFile: flags?.isContextFile ?? false,
+        });
+      }
     }
 
     await updateJobProgress(jobId, {
@@ -592,20 +622,25 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classificationFailureReason: null,
             });
             // Write immediately — Stage 8 no longer writes classifiedResults rows.
-            await insertSingleResult({
-              jobId,
-              candidateIndex: match.candidateIndex,
-              candidateName: candidate.name,
-              candidateSlug: candidate.slug,
-              candidateContentHash: getCandidateHash(match.candidateIndex),
-              matchedSkillId: undefined,
-              classification: 'DISTINCT',
-              confidence: 0.5,
-              similarityScore: match.similarity ?? undefined,
-              classificationReasoning: 'Library skill not found - treating as distinct.',
-              classificationFailed: false,
-              classificationFailureReason: null,
-            });
+            {
+              const flags = nonSkillFlagsByIndex.get(match.candidateIndex);
+              await insertSingleResult({
+                jobId,
+                candidateIndex: match.candidateIndex,
+                candidateName: candidate.name,
+                candidateSlug: candidate.slug,
+                candidateContentHash: getCandidateHash(match.candidateIndex),
+                matchedSkillId: undefined,
+                classification: 'DISTINCT',
+                confidence: 0.5,
+                similarityScore: match.similarity ?? undefined,
+                classificationReasoning: 'Library skill not found - treating as distinct.',
+                classificationFailed: false,
+                classificationFailureReason: null,
+                isDocumentationFile: flags?.isDocumentationFile ?? false,
+                isContextFile: flags?.isContextFile ?? false,
+              });
+            }
             return;
           }
 
@@ -748,6 +783,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           // unmarkSkillInFlight is in finally so it always runs even if the
           // DB insert throws, preventing a permanently stale in-flight record.
           try {
+            const flags = nonSkillFlagsByIndex.get(match.candidateIndex);
             await insertSingleResult({
               jobId,
               candidateIndex: match.candidateIndex,
@@ -764,6 +800,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               originalProposedMerge: finalResult.proposedMerge ?? undefined,
               classificationFailed,
               classificationFailureReason: classificationFailureReason ?? null,
+              isDocumentationFile: flags?.isDocumentationFile ?? false,
+              isContextFile: flags?.isContextFile ?? false,
             });
           } finally {
             // Wrap unmark in its own try/catch — if it throws, the error must
@@ -917,6 +955,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // Distinct from Stage 4
   for (const m of distinctResults) {
     const candidate = candidates[m.candidateIndex];
+    const flags = nonSkillFlagsByIndex.get(m.candidateIndex);
     resultRows.push({
       jobId,
       candidateIndex: m.candidateIndex,
@@ -934,6 +973,8 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       // embedding; rows with no proposals fall back to the column default
       // of [].
       agentProposals: agentProposalsByCandidateIndex.get(m.candidateIndex) ?? [],
+      isDocumentationFile: flags?.isDocumentationFile ?? false,
+      isContextFile: flags?.isContextFile ?? false,
     });
   }
 
@@ -949,6 +990,202 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   for (const r of classifiedDistinct) {
     const proposals = agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [];
     await updateResultAgentProposals(jobId, r.candidateIndex, proposals);
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 7b: LLM agent suggestion (Haiku) — enrich agent proposals
+  // -------------------------------------------------------------------------
+  // For every DISTINCT result that has agent proposals, run a cheap Haiku
+  // call to confirm or override the top cosine-similarity proposal and add
+  // a human-readable reasoning string. This replaces the pure-embedding
+  // ranking with a judgment-based routing decision.
+  //
+  // The Haiku result is written back into the agentProposals JSONB by
+  // patching the top proposal's llmReasoning + llmConfirmed fields. The
+  // pre-selection logic (selected: true/false) is also updated: if Haiku
+  // disagrees with the top cosine pick, the Haiku-preferred agent is promoted.
+  if (env.ANTHROPIC_API_KEY && rankableAgents.length > 0) {
+    await updateJobProgress(jobId, {
+      progressPct: 92,
+      progressMessage: 'Refining agent assignments with AI…',
+    });
+
+    // Collect all DISTINCT result indices to enrich
+    const distinctIndicesToEnrich = new Set<number>([
+      ...distinctResults.map((m) => m.candidateIndex),
+      ...classifiedDistinct.map((r) => r.candidateIndex),
+    ]);
+
+    // Concurrency 3: matches Stage 5 to stay within rate-limit budget.
+    // Haiku calls are cheaper but share the same API key quota.
+    const agentEnrichLimit = await getPLimit(3);
+
+    await Promise.all(
+      [...distinctIndicesToEnrich].map((candidateIndex) =>
+        agentEnrichLimit(async () => {
+          const candidate = candidates[candidateIndex];
+          if (!candidate) return;
+
+          const existingProposals = agentProposalsByCandidateIndex.get(candidateIndex) ?? [];
+          if (existingProposals.length === 0) return;
+
+          try {
+            const { system, userMessage } = skillAnalyzerServicePure.buildAgentSuggestionPrompt(
+              {
+                name: candidate.name,
+                slug: candidate.slug,
+                description: candidate.description,
+                instructions: candidate.instructions,
+              },
+              rankableAgents.map((a) => ({ slug: a.slug, name: a.name })),
+            );
+
+            const response = await anthropicAdapter.call({
+              system,
+              messages: [{ role: 'user', content: userMessage }],
+              // Haiku: cheaper model for simple routing task
+              model: 'claude-haiku-4-5-20251001',
+              maxTokens: 256,
+              temperature: 0.1,
+            });
+
+            const suggestion = skillAnalyzerServicePure.parseAgentSuggestionResponse(response.content);
+            if (!suggestion) return;
+
+            // Enrich agentProposals with Haiku reasoning and re-order if
+            // Haiku picked a different agent than cosine similarity.
+            const enriched = existingProposals.map((p) => {
+              if (p.slugSnapshot === suggestion.suggestedAgentSlug) {
+                return {
+                  ...p,
+                  selected: !suggestion.noGoodMatch,
+                  llmReasoning: suggestion.reasoning,
+                  // llmConfirmed reflects whether Haiku positively confirmed
+                  // the match — false when noGoodMatch is true.
+                  llmConfirmed: !suggestion.noGoodMatch,
+                };
+              }
+              // When Haiku says no good match, deselect all cosine-selected
+              // proposals — the overall verdict is "no home here".
+              if (suggestion.noGoodMatch && p.selected) {
+                return { ...p, selected: false };
+              }
+              // Demote other proposals when Haiku found a clear winner
+              if (!suggestion.noGoodMatch && p.selected) {
+                return { ...p, selected: false };
+              }
+              return p;
+            });
+
+            // If Haiku's choice isn't in the top-3 cosine proposals, add it
+            if (
+              !suggestion.noGoodMatch &&
+              suggestion.suggestedAgentSlug &&
+              !enriched.some((p) => p.slugSnapshot === suggestion.suggestedAgentSlug)
+            ) {
+              const agent = rankableAgents.find((a) => a.slug === suggestion.suggestedAgentSlug);
+              if (agent) {
+                enriched.push({
+                  systemAgentId: agent.systemAgentId,
+                  slugSnapshot: agent.slug,
+                  nameSnapshot: agent.name,
+                  score: 0,
+                  selected: true,
+                  llmReasoning: suggestion.reasoning,
+                  llmConfirmed: true,
+                });
+              }
+            }
+
+            agentProposalsByCandidateIndex.set(candidateIndex, enriched);
+            await updateResultAgentProposals(jobId, candidateIndex, enriched);
+          } catch (err) {
+            // Stage 7b is best-effort — a Haiku failure leaves the cosine
+            // proposals intact. Log and continue.
+            logger.warn('skill_analyzer_agent_suggestion_failed', {
+              jobId,
+              slug: candidate.slug,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })
+      )
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Stage 8b: Agent cluster recommendation (Sonnet)
+  // -------------------------------------------------------------------------
+  // After all proposals are written, check whether a meaningful cluster of
+  // DISTINCT skills has no good agent home. If so, run Sonnet to recommend
+  // whether a new agent should be created to house them.
+  //
+  // "No good home" = every agent proposal for that skill has score < threshold.
+  // "Meaningful cluster" = at least AGENT_RECOMMENDATION_MIN_SKILLS skills.
+  {
+    const { AGENT_RECOMMENDATION_THRESHOLD, AGENT_RECOMMENDATION_MIN_SKILLS } = skillAnalyzerServicePure;
+
+    const allDistinctIndices = new Set<number>([
+      ...distinctResults.map((m) => m.candidateIndex),
+      ...classifiedDistinct.map((r) => r.candidateIndex),
+    ]);
+
+    const weakMatchSkills: Array<{ slug: string; name: string; description: string }> = [];
+    for (const idx of allDistinctIndices) {
+      const proposals = agentProposalsByCandidateIndex.get(idx) ?? [];
+      // "No good home" = no Haiku-confirmed match AND no cosine score above
+      // threshold. Prefer llmConfirmed as the signal when Stage 7b ran; fall
+      // back to cosine score alone when proposals have no llmConfirmed field
+      // (Stage 7b skipped or failed for this skill).
+      const haiku7bRan = proposals.some((p) => 'llmConfirmed' in p);
+      const hasGoodHome = haiku7bRan
+        ? proposals.some((p) => p.llmConfirmed === true)
+        : proposals.some((p) => p.score >= AGENT_RECOMMENDATION_THRESHOLD);
+      if (!hasGoodHome) {
+        const candidate = candidates[idx];
+        if (candidate) {
+          weakMatchSkills.push({
+            slug: candidate.slug,
+            name: candidate.name,
+            description: candidate.description ?? '',
+          });
+        }
+      }
+    }
+
+    if (env.ANTHROPIC_API_KEY && weakMatchSkills.length >= AGENT_RECOMMENDATION_MIN_SKILLS) {
+      try {
+        const { system, userMessage } = skillAnalyzerServicePure.buildAgentClusterRecommendationPrompt(
+          weakMatchSkills,
+          rankableAgents.map((a) => ({ slug: a.slug, name: a.name })),
+        );
+
+        const response = await anthropicAdapter.call({
+          system,
+          messages: [{ role: 'user', content: userMessage }],
+          model: 'claude-sonnet-4-6',
+          maxTokens: 512,
+          temperature: 0.2,
+        });
+
+        const recommendation = skillAnalyzerServicePure.parseAgentClusterRecommendationResponse(response.content);
+        if (recommendation) {
+          await updateJobAgentRecommendation(jobId, recommendation);
+          logger.info('skill_analyzer_agent_recommendation', {
+            jobId,
+            shouldCreateAgent: recommendation.shouldCreateAgent,
+            agentName: recommendation.agentName,
+            skillCount: weakMatchSkills.length,
+          });
+        }
+      } catch (err) {
+        // Best-effort — cluster recommendation failure never fails the job.
+        logger.warn('skill_analyzer_cluster_recommendation_failed', {
+          jobId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   await updateJobProgress(jobId, {

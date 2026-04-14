@@ -61,8 +61,18 @@ export const skillAnalyzerResults = pgTable(
 
     // Agent attachment proposals — populated only for DISTINCT results.
     // Shape: Array<{ systemAgentId: uuid, slugSnapshot: string,
-    // nameSnapshot: string, score: number, selected: boolean }>. See spec §5.2.
+    // nameSnapshot: string, score: number, selected: boolean,
+    // llmReasoning?: string, llmConfirmed?: boolean }>. See spec §5.2 and
+    // migration 0114 (Stage 7b enrichment).
     agentProposals: jsonb('agent_proposals').notNull().default([]),
+
+    // Non-skill file detection flags — set during Stage 4b heuristic scan.
+    // isDocumentationFile: README-style, no tool definition, repo-name slug.
+    // isContextFile: no tool definition but has description + instructions
+    //   (e.g. foundation skill docs like product-marketing-context).
+    // See migration 0114.
+    isDocumentationFile: boolean('is_documentation_file').notNull().default(false),
+    isContextFile: boolean('is_context_file').notNull().default(false),
 
     // LLM-generated merge proposal for PARTIAL_OVERLAP / IMPROVEMENT results.
     // Shape: { name, description, definition: object, instructions: string|null }.
