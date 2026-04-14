@@ -375,11 +375,11 @@ export const agentBeliefService = {
     rawBeliefKey: string,
     data: { value: string; category?: string; subject?: string },
   ): Promise<AgentBelief | null> {
-    const { key: normalizedKey } = normalizeKey(beliefKey);
-    const now = new Date();
-    const value = data.value.slice(0, BELIEFS_MAX_VALUE_LENGTH);
     // Normalize key so user-set beliefs land on the canonical slot
     const { key: beliefKey } = normalizeKey(rawBeliefKey);
+    const normalizedKey = beliefKey;
+    const now = new Date();
+    const value = data.value.slice(0, BELIEFS_MAX_VALUE_LENGTH);
 
     const [row] = await db
       .insert(agentBeliefs)
