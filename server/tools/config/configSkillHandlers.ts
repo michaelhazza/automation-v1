@@ -740,8 +740,13 @@ export async function executeConfigRestoreVersion(
     const snapshot = targetRecord.snapshot as Record<string, unknown>;
 
     // Apply the snapshot based on entity type
+    const notes: string[] = [];
     if (entityType === 'agent') {
       const { name, masterPrompt, description, modelProvider, modelId, responseMode, outputSize, defaultSkillSlugs, icon } = snapshot;
+      // masterPrompt is redacted from snapshots of system-managed agents
+      if (masterPrompt === undefined) {
+        notes.push('masterPrompt was not restored (system-managed agent — masterPrompt is controlled at the system level)');
+      }
       await agentService.updateAgent(entityId, context.organisationId, {
         name: name as string,
         masterPrompt: masterPrompt as string,
@@ -793,7 +798,7 @@ export async function executeConfigRestoreVersion(
     });
 
     const newVersion = await configHistoryService.getLatestVersion(entityType, entityId, context.organisationId);
-    return { success: true, restoredToVersion: version, newVersion };
+    return { success: true, restoredToVersion: version, newVersion, ...(notes.length ? { notes } : {}) };
   } catch (err) {
     const e = err as { message?: string };
     return { success: false, error: e.message ?? String(err) };

@@ -30,7 +30,8 @@ export const configHistory = pgTable(
       .on(table.sessionId)
       .where(sql`${table.sessionId} IS NOT NULL`),
     changedAtIdx: index('config_history_changed_at_idx').on(table.organisationId, table.changedAt),
-    entityVersionUniq: uniqueIndex('config_history_entity_version_uniq').on(
+    entityVersionUniq: uniqueIndex('config_history_org_entity_version_uniq').on(
+      table.organisationId,
       table.entityType,
       table.entityId,
       table.version
