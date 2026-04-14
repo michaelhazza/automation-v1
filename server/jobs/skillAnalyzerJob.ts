@@ -472,7 +472,15 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       const candidate = candidates[match.candidateIndex];
       const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
-      if (!matchedLib || !candidate) {
+      if (!candidate) {
+        // Should be unreachable — every index in llmQueue comes from bestMatches
+        // which is bounded by candidates.length. Log and skip to avoid a ghost
+        // entry in classifiedResults with an undefined candidate.
+        console.warn('[SkillAnalyzerJob] candidate undefined for candidateIndex', match.candidateIndex);
+        continue;
+      }
+
+      if (!matchedLib) {
         classifiedResults.push({
           candidateIndex: match.candidateIndex,
           candidate,
@@ -488,9 +496,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           classificationFailed: false,
           classificationFailureReason: null,
         });
+        await insertSingleResult({
+          jobId,
+          candidateIndex: match.candidateIndex,
+          candidateName: candidate.name,
+          candidateSlug: candidate.slug,
+          candidateContentHash: getCandidateHash(match.candidateIndex),
+          matchedSkillId: undefined,
+          classification: 'DISTINCT',
+          confidence: 0.5,
+          similarityScore: match.similarity ?? undefined,
+          classificationReasoning: 'Library skill not found - treating as distinct.',
+          classificationFailed: false,
+          classificationFailureReason: null,
+        });
         continue;
       }
 
+      const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
       classifiedResults.push({
         candidateIndex: match.candidateIndex,
         candidate,
@@ -502,10 +525,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         libraryId: matchedLib.id,
         librarySlug: matchedLib.slug,
         libraryName: matchedLib.name,
-        diffSummary: skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib),
+        diffSummary,
         // No LLM = no merge proposal. Row will fail the null guard on
         // execute (spec §6.3 LLM-fallback path).
         proposedMerge: null,
+        classificationFailed: false,
+        classificationFailureReason: null,
+      });
+      await insertSingleResult({
+        jobId,
+        candidateIndex: match.candidateIndex,
+        candidateName: candidate.name,
+        candidateSlug: candidate.slug,
+        candidateContentHash: getCandidateHash(match.candidateIndex),
+        matchedSkillId: matchedLib.id ?? undefined,
+        classification: 'PARTIAL_OVERLAP',
+        confidence: 0.3,
+        similarityScore: match.similarity ?? undefined,
+        classificationReasoning:
+          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+        diffSummary: diffSummary ?? undefined,
         classificationFailed: false,
         classificationFailureReason: null,
       });
@@ -525,7 +564,14 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           const candidate = candidates[match.candidateIndex];
           const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
-          if (!matchedLib || !candidate) {
+          if (!candidate) {
+            // Should be unreachable — indices come from bestMatches which is
+            // bounded by candidates.length. Skip to avoid a ghost entry.
+            console.warn('[SkillAnalyzerJob] candidate undefined for candidateIndex', match.candidateIndex);
+            return;
+          }
+
+          if (!matchedLib) {
             classifiedResults.push({
               candidateIndex: match.candidateIndex,
               candidate,
@@ -542,23 +588,20 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classificationFailureReason: null,
             });
             // Write immediately — Stage 8 no longer writes classifiedResults rows.
-            // Skip if candidate is undefined (should be unreachable).
-            if (candidate) {
-              await insertSingleResult({
-                jobId,
-                candidateIndex: match.candidateIndex,
-                candidateName: candidate.name,
-                candidateSlug: candidate.slug,
-                candidateContentHash: getCandidateHash(match.candidateIndex),
-                matchedSkillId: undefined,
-                classification: 'DISTINCT',
-                confidence: 0.5,
-                similarityScore: match.similarity ?? undefined,
-                classificationReasoning: 'Library skill not found - treating as distinct.',
-                classificationFailed: false,
-                classificationFailureReason: null,
-              });
-            }
+            await insertSingleResult({
+              jobId,
+              candidateIndex: match.candidateIndex,
+              candidateName: candidate.name,
+              candidateSlug: candidate.slug,
+              candidateContentHash: getCandidateHash(match.candidateIndex),
+              matchedSkillId: undefined,
+              classification: 'DISTINCT',
+              confidence: 0.5,
+              similarityScore: match.similarity ?? undefined,
+              classificationReasoning: 'Library skill not found - treating as distinct.',
+              classificationFailed: false,
+              classificationFailureReason: null,
+            });
             return;
           }
 
