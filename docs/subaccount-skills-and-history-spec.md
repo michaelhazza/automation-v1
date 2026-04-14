@@ -284,7 +284,23 @@ Return `null` if no layer matches.
 - The `skills` table can hold built-in rows with `organisationId = NULL` (layer 3)
 - The `system_skills` table holds global system skills (layer 4)
 
-**Invariant:** A slug MUST NOT exist in both layers simultaneously. Enforcement: `systemSkillService.createSystemSkill` must reject slugs that already exist in the `skills` table (at any tier), and `skillService.createSkill` (when `organisationId IS NULL`) must reject slugs that exist in `system_skills`. This prevents undefined precedence between layers 3 and 4.
+**Invariant:** A slug MUST NOT exist in both layers simultaneously. Enforcement is **transactional**, not just application-level, to prevent cross-table slug races:
+
+```typescript
+// Inside systemSkillService.createSystemSkill, within the transaction:
+const [conflict] = await tx.execute(
+  sql`SELECT 1 FROM skills WHERE slug = ${slug} AND deleted_at IS NULL FOR UPDATE`
+);
+if (conflict) throw { statusCode: 409, message: 'Slug already exists in skills table' };
+
+// Inside skillService.createSkill (when organisationId IS NULL), within the transaction:
+const [conflict] = await tx.execute(
+  sql`SELECT 1 FROM system_skills WHERE slug = ${slug} AND deleted_at IS NULL FOR UPDATE`
+);
+if (conflict) throw { statusCode: 409, message: 'Slug already exists in system_skills table' };
+```
+
+The `FOR UPDATE` lock prevents two concurrent transactions from both passing validation and creating conflicting slugs across tables. Without this, two concurrent requests could race past application-level checks. This prevents undefined precedence between layers 3 and 4.
 
 This is the key method for runtime skill resolution.
 
@@ -333,7 +349,7 @@ if (missingSlugs.length > 0) {
 }
 ```
 
-Where `tierPrecedence` returns 3 for subaccount, 2 for org, 1 for built-in. This reduces the per-agent resolution from N queries to 1-2 queries regardless of skill count.
+Where `tierPrecedence` returns 3 for subaccount, 2 for org, 1 for built-in. Within the same tier, conflicts are resolved deterministically by `createdAt DESC` (newest wins). This reduces the per-agent resolution from N queries to 1-2 queries regardless of skill count.
 
 **Instruction payload size guard:** After resolving all skills, enforce a total instruction size limit to prevent LLM context blowout when many skills are concatenated:
 
@@ -358,9 +374,14 @@ if (totalLength > MAX_TOTAL_SKILL_INSTRUCTIONS) {
   const truncated: string[] = [];
   for (const instr of allInstructions) {
     if (remaining <= 0) break;
-    truncated.push(instr.slice(0, remaining));
-    remaining -= instr.length;
+    const slice = instr.slice(0, remaining);
+    truncated.push(slice);
+    remaining -= slice.length;  // subtract truncated length, not original
   }
+  metrics.increment('skill_instruction_truncation_count', {
+    skillCount: String(allInstructions.length),
+    totalLength: String(totalLength),
+  });
   return { tools, instructions: truncated };
 }
 ```
@@ -737,6 +758,11 @@ export const skillVersioningHelper = {
       : skillVersions.skillId;
     const refId = params.systemSkillId ?? params.skillId;
 
+    // Defensive: version writes require a persisted skill reference
+    if (!refId) {
+      throw new Error('writeVersion requires a persisted skill reference (systemSkillId or skillId)');
+    }
+
     // Step 1: Lock the parent skill row to serialise concurrent version writes.
     // The parent row always exists because the skill was created/updated in the
     // same transaction. This avoids the empty-table problem where FOR UPDATE on
@@ -1048,6 +1074,8 @@ await skillVersioningHelper.writeVersion({
 Note: the `tx` is already available from the `db.transaction(async (tx) => { ... })` wrapper on both paths.
 
 **Invariant:** Every call to `createSystemSkill` or `updateSystemSkill` with `skipVersionWrite: true` MUST be followed by an explicit `skillVersioningHelper.writeVersion(...)` in the same transaction. If a new caller uses the skip flag without writing a version, the skill mutation has no audit trail.
+
+**Mutation-level idempotency:** The version write idempotency keys prevent duplicate version rows on retry, but the underlying skill mutations (create, update, restore) must also be idempotent at the mutation layer. For the analyser, this is already handled: `executeApproved` tracks per-result execution status, so a retry skips already-processed results. For restore, the `configBackupService.restoreBackup` uses a conditional `UPDATE ... WHERE status = 'active'` that returns 0 rows if already restored, preventing double-application. Any new mutation path that uses `skipVersionWrite` must similarly ensure the mutation itself is safe to retry, not just the version write.
 
 ### 3.5 Config Backup Restore Write Path
 
