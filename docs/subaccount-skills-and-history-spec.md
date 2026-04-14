@@ -710,16 +710,20 @@ export interface WriteVersionParams {
 
 export const skillVersioningHelper = {
   /**
-   * Append a new version row. Auto-increments versionNumber using
-   * SELECT ... FOR UPDATE to prevent concurrent race conditions.
+   * Append a new version row. Auto-increments versionNumber by locking the
+   * parent skill row first, then computing MAX(version_number) + 1.
    *
    * Concurrency strategy:
-   * 1. SELECT MAX(version_number) ... FOR UPDATE locks existing rows for this
-   *    skill within the transaction, serialising concurrent version writes.
-   * 2. A UNIQUE constraint on (COALESCE(system_skill_id, skill_id), version_number)
-   *    acts as a safety net — if a race somehow slips through, the insert fails
+   * 1. Lock the PARENT skill row (in system_skills or skills) with
+   *    SELECT ... FOR UPDATE. This row always exists — it was created in
+   *    the same transaction — so there is never a "no rows to lock" gap.
+   *    This serialises all concurrent version writes for the same skill.
+   * 2. Compute MAX(version_number) + 1 from skill_versions (safe because
+   *    the parent lock prevents concurrent readers from interleaving).
+   * 3. A UNIQUE constraint on (COALESCE(system_skill_id, skill_id), version_number)
+   *    acts as a safety net — if a bug bypasses the lock, the insert fails
    *    with a unique violation rather than creating duplicate version numbers.
-   * 3. When idempotencyKey is provided, ON CONFLICT (skill ref, idempotency_key)
+   * 4. When idempotencyKey is provided, ON CONFLICT (skill ref, idempotency_key)
    *    DO NOTHING prevents duplicate writes on retries.
    *
    * Returns the created SkillVersion row (or null if idempotency key hit).
@@ -731,14 +735,25 @@ export const skillVersioningHelper = {
       : skillVersions.skillId;
     const refId = params.systemSkillId ?? params.skillId;
 
-    // Get next version number with row-level lock to prevent race conditions.
-    // FOR UPDATE locks all matching rows for this skill, serialising concurrent
-    // version writes within overlapping transactions.
+    // Step 1: Lock the parent skill row to serialise concurrent version writes.
+    // The parent row always exists because the skill was created/updated in the
+    // same transaction. This avoids the empty-table problem where FOR UPDATE on
+    // skill_versions would lock nothing for the first version.
+    if (params.systemSkillId) {
+      await runner.execute(
+        sql`SELECT id FROM system_skills WHERE id = ${refId} FOR UPDATE`
+      );
+    } else {
+      await runner.execute(
+        sql`SELECT id FROM skills WHERE id = ${refId} FOR UPDATE`
+      );
+    }
+
+    // Step 2: Compute next version number (safe — parent lock prevents races)
     const [maxRow] = await runner.execute(
       sql`SELECT COALESCE(MAX(version_number), 0) AS max_version
           FROM skill_versions
-          WHERE ${refColumn} = ${refId}
-          FOR UPDATE`
+          WHERE ${refColumn} = ${refId}`
     );
     const nextVersion = ((maxRow as any)?.max_version ?? 0) + 1;
 
@@ -794,9 +809,9 @@ This helper is intentionally thin -- it owns only the version-number increment a
 **Concurrency invariants:**
 
 1. **Transaction required:** `tx` is mandatory. Every caller MUST pass the same transaction used for the skill mutation. If the version write fails, the skill mutation rolls back too.
-2. **FOR UPDATE lock:** The MAX query locks existing version rows for the skill, preventing two concurrent transactions from computing the same `nextVersion`.
-3. **Unique constraint safety net:** `skill_versions_version_uniq` on `(COALESCE(system_skill_id, skill_id), version_number)` catches any edge case where the lock is insufficient.
-4. **Idempotency:** For retry-prone paths (analyser, restore), callers pass an `idempotencyKey` (e.g. `${jobId}:${skillId}:create`). The UNIQUE constraint on `(COALESCE(system_skill_id, skill_id), idempotency_key)` + ON CONFLICT DO NOTHING prevents version spam on retries.
+2. **Parent row lock:** The helper locks the parent skill row (`system_skills` or `skills`) with `SELECT ... FOR UPDATE` before computing the next version number. Because the parent row always exists (the skill create/update precedes the version write in the same transaction), this lock is never empty — even for the very first version of a newly created skill. This serialises all concurrent version writes for the same skill, guaranteeing sequential version numbers.
+3. **Unique constraint safety net:** `skill_versions_version_uniq` on `(COALESCE(system_skill_id, skill_id), version_number)` catches any edge case where the lock is bypassed (e.g. a code path that forgets to use the helper). A unique violation here is a bug, not expected control flow.
+4. **Idempotency:** For retry-prone paths (analyser, restore), callers pass an `idempotencyKey` (e.g. `sa:${jobId}:${skillId}:create`). The UNIQUE constraint on `(COALESCE(system_skill_id, skill_id), idempotency_key)` + ON CONFLICT DO NOTHING prevents version spam on retries.
 
 **Drizzle schema update** (`server/db/schema/skillVersions.ts`): Add the two new columns:
 
@@ -813,42 +828,50 @@ idempotencyKey: text('idempotency_key'),        // optional, for retry dedup
 
 **File:** `server/services/systemSkillService.ts`
 
+**Versioning ownership rule:** Service methods own version writes by default. Callers that need custom version metadata (e.g. the skill analyser with job context and idempotency keys) pass `{ skipVersionWrite: true }` in `opts` and write their own version row via the helper.
+
 #### 3.2.1 `createSystemSkill`
 
-After the `insert(...).returning()` succeeds, call:
+After the `insert(...).returning()` succeeds, call (unless `opts.skipVersionWrite`):
 
 ```typescript
-await skillVersioningHelper.writeVersion({
-  systemSkillId: row.id,
-  name: row.name,
-  description: row.description,
-  definition: row.definition as object,
-  instructions: row.instructions,
-  changeType: 'create',
-  changeSummary: 'System skill created',
-  authoredBy: null,   // system-initiated
-  tx,                  // MUST be inside a transaction
-});
+if (!opts.skipVersionWrite) {
+  await skillVersioningHelper.writeVersion({
+    systemSkillId: row.id,
+    name: row.name,
+    description: row.description,
+    definition: row.definition as object,
+    instructions: row.instructions,
+    changeType: 'create',
+    changeSummary: 'System skill created',
+    authoredBy: null,   // system-initiated
+    tx,                  // MUST be inside a transaction
+  });
+}
 ```
 
 The version write uses the same `tx` as the create so it is atomic. If the caller does not currently use a transaction, wrap the create + version write in one.
 
+**Signature change:** Add `skipVersionWrite?: boolean` to the `WithTx` opts type (or to a local extended type).
+
 #### 3.2.2 `updateSystemSkill`
 
-After the `update(...).returning()` succeeds, call:
+After the `update(...).returning()` succeeds, call (unless `opts.skipVersionWrite`):
 
 ```typescript
-await skillVersioningHelper.writeVersion({
-  systemSkillId: row.id,
-  name: row.name,
-  description: row.description ?? null,
-  definition: row.definition as object,
-  instructions: row.instructions,
-  changeType: 'update',
-  changeSummary: 'System skill updated',
-  authoredBy: null,
-  tx,                  // MUST be inside a transaction
-});
+if (!opts.skipVersionWrite) {
+  await skillVersioningHelper.writeVersion({
+    systemSkillId: row.id,
+    name: row.name,
+    description: row.description ?? null,
+    definition: row.definition as object,
+    instructions: row.instructions,
+    changeType: 'update',
+    changeSummary: 'System skill updated',
+    authoredBy: null,
+    tx,                  // MUST be inside a transaction
+  });
+}
 ```
 
 Note: both methods already accept `opts: WithTx = {}`, so passing `tx` through requires no signature change.
@@ -939,11 +962,15 @@ Add optional `userId?: string` to the existing `createSkill` and `updateSkill` m
 
 **File:** `server/services/skillAnalyzerService.ts` -- `executeApproved` function (line ~723)
 
+The analyser passes `{ skipVersionWrite: true, tx }` to `systemSkillService` so that the service does NOT write its own generic version row. Instead, the analyser writes a custom version row with richer context (job ID, `changeType: 'merge'`, idempotency key). This avoids double-writing: exactly one version row per logical mutation.
+
 #### 3.4.1 DISTINCT path (create new system skill) -- line ~916
 
-After `systemSkillService.createSystemSkill(...)` returns `created`, add inside the transaction:
+Call with skip flag, then write a custom version:
 
 ```typescript
+const created = await systemSkillService.createSystemSkill(data, { tx, skipVersionWrite: true });
+
 await skillVersioningHelper.writeVersion({
   systemSkillId: created.id,
   name: created.name,
@@ -960,10 +987,11 @@ await skillVersioningHelper.writeVersion({
 
 #### 3.4.2 PARTIAL_OVERLAP / IMPROVEMENT path (update existing) -- line ~841
 
-After `systemSkillService.updateSystemSkill(...)` returns, add inside the transaction:
+Call with skip flag, then write a custom version:
 
 ```typescript
-// The merge was applied -- read the final state from the merge object
+await systemSkillService.updateSystemSkill(skillId, mergeData, { tx, skipVersionWrite: true });
+
 await skillVersioningHelper.writeVersion({
   systemSkillId: result.matchedSkillId!,
   name: merge.name,
@@ -979,6 +1007,8 @@ await skillVersioningHelper.writeVersion({
 ```
 
 Note: the `tx` is already available from the `db.transaction(async (tx) => { ... })` wrapper on both paths.
+
+**Invariant:** Every call to `createSystemSkill` or `updateSystemSkill` with `skipVersionWrite: true` MUST be followed by an explicit `skillVersioningHelper.writeVersion(...)` in the same transaction. If a new caller uses the skip flag without writing a version, the skill mutation has no audit trail.
 
 ### 3.5 Config Backup Restore Write Path
 
@@ -1249,6 +1279,8 @@ The restore flow from the job list follows the same path as clicking the job and
 | Sequence | File | What it does |
 |----------|------|-------------|
 | `0118` | `0118_subaccount_skills_and_versioning.sql` | Subaccount skills schema + skill_versions integrity + permission seeds (single consolidated migration) |
+
+**Deliberate tradeoff: single migration.** These three concerns (subaccount skills schema, skill_versions integrity, permission seeds) are consolidated into one migration because the branch has not been migrated yet — no production database has run 0118, 0119, or 0120. Consolidating avoids sequence-gap confusion and reduces migration overhead. The tradeoff is higher blast radius: a failure in any one part (e.g. permission seeding) blocks the others. This is acceptable given the migration has never been applied and can be fixed atomically. If the branch were already partially migrated, these would need to remain separate files.
 
 Feature C requires no schema migration -- it uses existing tables and endpoints.
 
@@ -1526,7 +1558,7 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 - `getSkillBySlugForSubaccount` resolution order: subaccount -> org -> built-in -> system
 - `getSkillBySlugForSubaccount` returns subaccount skill when both org and subaccount have same slug
 - `createSubaccountSkill` sets `skillType: 'custom'`, `organisationId` from subaccount's org
-- `deleteSubaccountSkill` sets `deletedAt` (soft delete), does not remove slug uniqueness conflict
+- `deleteSubaccountSkill` sets `deletedAt` (soft delete), immediately frees the slug for reuse (partial unique indexes exclude `deleted_at IS NOT NULL` rows)
 - Config history is recorded for all subaccount skill CRUD
 
 **Routes:**
@@ -1562,19 +1594,25 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 
 **Concurrency (critical):**
 - Two concurrent updates to the same skill produce sequential version numbers (not duplicates)
-- The unique constraint `skill_versions_version_uniq` rejects duplicate `(skill_ref, version_number)` pairs
+- Parent row lock (`SELECT ... FROM system_skills/skills WHERE id = ? FOR UPDATE`) serialises concurrent version writes — including the first version where no skill_versions rows exist yet
+- The unique constraint `skill_versions_version_uniq` rejects duplicate `(skill_ref, version_number)` pairs (safety net, not primary mechanism)
 - The unique constraint `skill_versions_idempotency_uniq` rejects duplicate `(skill_ref, idempotency_key)` pairs
-- FOR UPDATE lock on MAX query serialises concurrent version writes within overlapping transactions
+
+**No double-writes:**
+- `systemSkillService.createSystemSkill` called normally → service writes version row (exactly 1)
+- `systemSkillService.createSystemSkill` called with `{ skipVersionWrite: true }` → caller writes version row (exactly 1)
+- The analyser and restore paths always use `skipVersionWrite: true` and write their own version with richer context
+- **Test:** calling `createSystemSkill` without `skipVersionWrite` followed by an explicit `writeVersion` must NOT happen — this produces 2 version rows for 1 mutation
 
 **Write path coverage:**
-- `systemSkillService.createSystemSkill` produces v1 row with `changeType: 'create'`
-- `systemSkillService.updateSystemSkill` produces new version with `changeType: 'update'`
+- `systemSkillService.createSystemSkill` (default) produces v1 row with `changeType: 'create'`
+- `systemSkillService.updateSystemSkill` (default) produces new version with `changeType: 'update'`
 - `skillService.createSkill` (org) produces v1 row with `changeType: 'create'`
 - `skillService.updateSkill` (org) produces new version with `changeType: 'update'`
 - `skillService.createSubaccountSkill` produces v1 row with `changeType: 'create'`
 - `skillService.updateSubaccountSkill` produces new version with `changeType: 'update'`
-- `executeApproved` DISTINCT path produces v1 row with `changeType: 'create'` and idempotencyKey
-- `executeApproved` PARTIAL_OVERLAP/IMPROVEMENT path produces new version with `changeType: 'merge'` and idempotencyKey
+- `executeApproved` DISTINCT path: `skipVersionWrite: true` + explicit `writeVersion` with `changeType: 'create'` and idempotencyKey
+- `executeApproved` PARTIAL_OVERLAP/IMPROVEMENT path: `skipVersionWrite: true` + explicit `writeVersion` with `changeType: 'merge'` and idempotencyKey
 - `configBackupService.restoreSkillAnalyzerEntities` produces version rows with `changeType: 'restore'` for reverts and `changeType: 'deactivate'` for deactivations, both with idempotencyKey
 
 **Chronological correctness:**
