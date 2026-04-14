@@ -1,4 +1,4 @@
-import { eq, desc, inArray, and } from 'drizzle-orm';
+import { eq, desc, inArray, and, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { withBackoff } from '../lib/withBackoff.js';
@@ -6,6 +6,7 @@ import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
 import type { LibrarySkillSummary } from './skillAnalyzerServicePure.js';
+import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
  *  throw plain objects of shape `{ statusCode, message }` (not Error
@@ -995,6 +996,7 @@ export async function updateJobProgress(
     comparisonCount?: number;
     parsedCandidates?: unknown;
     completedAt?: Date;
+    classifyState?: ClassifyState;
   }
 ): Promise<void> {
   type JobUpdate = typeof skillAnalyzerJobs.$inferInsert;
@@ -1008,6 +1010,7 @@ export async function updateJobProgress(
   if (update.comparisonCount !== undefined) values.comparisonCount = update.comparisonCount;
   if (update.parsedCandidates !== undefined) values.parsedCandidates = update.parsedCandidates as JobUpdate['parsedCandidates'];
   if (update.completedAt !== undefined) values.completedAt = update.completedAt;
+  if (update.classifyState !== undefined) values.classifyState = update.classifyState;
 
   await db
     .update(skillAnalyzerJobs)
@@ -1046,6 +1049,48 @@ export async function insertResults(
   }
 }
 
+/** Insert a single result row for a job. */
+export async function insertSingleResult(
+  row: typeof skillAnalyzerResults.$inferInsert,
+): Promise<void> {
+  await db.insert(skillAnalyzerResults).values(row);
+}
+
+/** Record that a slug's LLM classification is in-flight.
+ *  Writes startedAtMs into classify_state.inFlight[slug] via a JSONB merge.
+ *  The slug is a parameterized bind value — no sql.raw, injection-safe. */
+export async function markSkillInFlight(
+  jobId: string,
+  slug: string,
+  startedAtMs: number,
+): Promise<void> {
+  await db
+    .update(skillAnalyzerJobs)
+    .set({
+      classifyState: sql`jsonb_set(
+        coalesce(classify_state, '{}'),
+        ARRAY['inFlight', ${slug}]::text[],
+        ${String(startedAtMs)}::jsonb
+      )`,
+      updatedAt: new Date(),
+    })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+}
+
+/** Remove a slug from classify_state.inFlight once classification completes. */
+export async function unmarkSkillInFlight(
+  jobId: string,
+  slug: string,
+): Promise<void> {
+  await db
+    .update(skillAnalyzerJobs)
+    .set({
+      classifyState: sql`coalesce(classify_state, '{}') #- ARRAY['inFlight', ${slug}]::text[]`,
+      updatedAt: new Date(),
+    })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+}
+
 // ---------------------------------------------------------------------------
 // Classification retry helpers
 // ---------------------------------------------------------------------------
@@ -1069,7 +1114,7 @@ async function classifySingleCandidate(
 ): Promise<{
   result: ClassificationOutcome;
   classificationFailed: boolean;
-  classificationFailureReason: 'rate_limit' | 'parse_error' | 'unknown' | null;
+  classificationFailureReason: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
 }> {
   const band = skillAnalyzerServicePure.classifyBand(similarityScore);
   const { system, userMessage } = skillAnalyzerServicePure.buildClassifyPromptWithMerge(
@@ -1284,4 +1329,7 @@ export const skillAnalyzerService = {
   getJobById,
   clearResultsForJob,
   insertResults,
+  insertSingleResult,
+  markSkillInFlight,
+  unmarkSkillInFlight,
 };
