@@ -349,9 +349,20 @@ for (const row of candidates) {
 const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
 if (missingSlugs.length > 0) {
   const systemSkills = await systemSkillService.getSkillsBySlugs(missingSlugs);
-  // ... merge into result
+  // ... merge into resolvedBySlug map (same map as skills-table results,
+  // so final ordering reconstruction sees all tiers in one place)
+}
+
+// 4. Log missing slugs for observability (config drift, deleted skills still referenced)
+const missingSlugs2 = skillSlugs.filter(s => !resolvedBySlug.has(s));
+for (const slug of missingSlugs2) {
+  metrics.increment('skill_resolution_missing_slug', {
+    slug, orgId, subaccountId: subaccountId ?? 'none',
+  });
 }
 ```
+
+**Locked set invariant:** Any change to skill tiering MUST update all three in lockstep: (1) the batch resolution query WHERE clause, (2) `tierPrecedence()` logic, and (3) the ordering reconstruction via `skillSlugs.map(...)`. These three are a locked set — changing one without the others produces silent precedence or ordering bugs.
 
 Where `tierPrecedence` returns 3 for subaccount, 2 for org, 1 for built-in. Within the same tier, conflicts are resolved deterministically by `createdAt DESC` (newest wins). This reduces the per-agent resolution from N queries to 1-2 queries regardless of skill count.
 
