@@ -25,6 +25,7 @@ This file applies to every project. Project-level CLAUDE.md files extend it with
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
 - Parallelize thinking, not just execution
+- **After writing an implementation plan, do not ask "which execution option?" — proceed immediately with `superpowers:subagent-driven-development`.** Never prompt the user to choose between subagent-driven and inline execution. This overrides the writing-plans skill's default "offer execution choice" step.
 
 ## 3. Self-Improvement Loop
 
