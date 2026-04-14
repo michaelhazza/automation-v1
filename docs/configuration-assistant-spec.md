@@ -308,6 +308,23 @@ config_create_agent: {
 
 All 16 action entries follow this pattern. The `topics: ['configuration']` assignment ensures topic filtering surfaces only config tools during config conversations.
 
+### 4.5 Idempotency key format
+
+All mutation tools use `idempotencyStrategy: 'keyed_write'`. The idempotency key is a deterministic hash of the plan context and step identity:
+
+```
+key = sha256(sessionId + ":" + stepNumber + ":" + entityType + ":" + entityId + ":" + canonicalJSON(normalizedParameters))
+```
+
+Where:
+- `sessionId` is the config agent conversation/run ID
+- `stepNumber` is the step's position in the `ConfigPlan.steps` array (1-based)
+- `entityType` is the string entity type (e.g. `'agent'`, `'subaccount_agent'`)
+- `entityId` is the target entity UUID (or `''` for creates where the ID is not yet known)
+- `normalizedParameters` is the tool call parameters sorted by key and with all whitespace normalised (prevents key divergence from field ordering)
+
+This key is passed to the skill handler and stored on the action record. Duplicate keys within the same session are rejected without re-executing the mutation.
+
 ### 4.5 Scope enforcement — four independent layers
 
 | Layer | Mechanism | What it prevents |
@@ -382,13 +399,18 @@ budgets/limits. If asked, explain what you can't do and suggest the admin UI.
 Before making any changes, establish the target scope:
 - If the user names a specific client/subaccount, look it up using
   config_list_subaccounts. Use fuzzy matching on the name — "Acme"
-  should match "Acme Dental Pty Ltd". If multiple subaccounts match,
-  present the options and ask the user to confirm which one.
+  should match "Acme Dental Pty Ltd".
+- If multiple subaccounts match, you MUST stop and list the matches,
+  asking the user to confirm the exact one before proceeding. Do not
+  guess. Do not proceed with any match. Wait for explicit confirmation.
+- If a single match is found, confirm it: "I found 'Acme Dental Pty Ltd'
+  — is that the right client?"
+- If no match is found, say so and ask the user to provide the exact name.
 - If the request is ambiguous, ask: "Which client is this for, or should
   I set this up for all clients?"
 - If org-level (new agent, skill changes), confirm: "This will affect
   the org-level agent available to all subaccounts. Proceed?"
-- Never assume scope. Always confirm before executing.
+- Never assume scope. Never proceed on an unconfirmed match.
 ```
 
 **Configuration reasoning:**
@@ -473,6 +495,10 @@ interface ConfigPlan {
     subaccountIds?: string[];
     subaccountNames?: string[];
   };
+  planBudget: {
+    maxSteps: number;          // Hard cap on mutations in this plan (default: 30). Enforced server-side at execution start.
+  };
+  failFast: boolean;           // If true (default), stop execution on first non-retryable error. If false, skip the failed step and continue.
   steps: ConfigPlanStep[];
 }
 
@@ -480,11 +506,15 @@ interface ConfigPlanStep {
   stepNumber: number;
   action: string;              // e.g. 'config_create_agent'
   entityType: string;          // e.g. 'agent'
+  entityId?: string;           // Target entity UUID for updates (null for creates)
   summary: string;             // Human-readable: "Create agent 'SEO Auditor'"
-  parameters: Record<string, unknown>;  // The actual tool call parameters
+  currentValue?: Record<string, unknown>; // Current entity state for modified fields (null for creates). Read at plan creation time.
+  parameters: Record<string, unknown>;  // The actual tool call parameters (intended post-mutation state)
   dependsOn?: number[];        // Step numbers this depends on (for entity ID resolution)
 }
 ```
+
+**`config_preview_plan` reads current entity state at plan creation time.** For each step that modifies an existing entity (not a create), the tool fetches the relevant current fields and includes them as `currentValue` in the `ConfigPlanStep`. This gives the user a clear before/after view in the plan checklist without requiring a diff renderer. For create steps, `currentValue` is omitted.
 
 The frontend renders this as an **interactive checklist**:
 
@@ -496,13 +526,14 @@ The frontend renders this as an **interactive checklist**:
 │                                                      │
 │ Scope: All subaccounts (8)                          │
 │                                                      │
-│ ☑ 1. Create agent "SEO Auditor"                     │
-│ ☑ 2. Create agent "Performance Reporter"            │
-│ ☑ 3. Link SEO Auditor → Acme Corp                   │
-│ ☑ 4. Link SEO Auditor → Beta Inc                    │
+│ ☑ 1. Create agent "SEO Auditor"          [new]      │
+│ ☑ 2. Create agent "Performance Reporter" [new]      │
+│ ☑ 3. Link SEO Auditor → Acme Corp        [new]      │
+│ ☑ 4. Update Acme Corp: token budget                 │
+│      was: 20000 → will be: 50000                    │
 │   ...                                                │
-│ ☑ 19. Create task "Weekly SEO Audit" → Acme Corp    │
-│ ☑ 20. Create task "Weekly SEO Audit" → Beta Inc     │
+│ ☑ 19. Create task "Weekly SEO Audit" → Acme Corp   │
+│ ☑ 20. Create task "Weekly SEO Audit" → Beta Inc    │
 │   ...                                                │
 │                                                      │
 │          [ Execute Plan ]    [ Cancel ]              │
@@ -511,7 +542,64 @@ The frontend renders this as an **interactive checklist**:
 
 Each item has a checkbox (default: checked). The user can uncheck individual steps to skip them. "Execute Plan" sends the approved subset back to the agent for execution.
 
-### 6.4 Execution progress
+### 6.4 Plan execution determinism
+
+**Critical design requirement:** Once a plan is approved, execution is **server-driven, not LLM-driven**. The server iterates through `ConfigPlan.steps[]` and calls each skill handler directly using the approved `parameters`. The LLM is NOT re-invoked to "figure out what to do next" — that path risks re-interpretation, parameter drift, and skipped steps.
+
+The execution loop:
+
+```typescript
+async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: string, userId: string) {
+  // Enforce plan budget before starting
+  if (plan.steps.length > plan.planBudget.maxSteps) {
+    throw { statusCode: 400, message: `Plan exceeds maxSteps limit (${plan.planBudget.maxSteps})` };
+  }
+
+  const results: StepResult[] = [];
+  const entityIdMap: Record<number, string> = {}; // stepNumber → created entity ID
+
+  for (const step of plan.steps) {
+    // Resolve entity IDs from earlier create steps
+    const resolvedParams = resolveStepDependencies(step.parameters, step.dependsOn, entityIdMap);
+
+    // Compute idempotency key
+    const idempotencyKey = computeIdempotencyKey(sessionId, step.stepNumber, step.entityType, resolvedParams);
+
+    // Execute directly — no LLM call
+    const result = await skillExecutor.executeSkill(step.action, resolvedParams, { idempotencyKey, orgId, userId });
+
+    // Read-after-write consistency check
+    if (result.entityId) {
+      const confirmed = await confirmEntityState(step.entityType, result.entityId, resolvedParams, orgId);
+      if (!confirmed) {
+        result.warning = 'Entity state after write did not match expected values';
+      }
+      entityIdMap[step.stepNumber] = result.entityId;
+    }
+
+    results.push({ stepNumber: step.stepNumber, status: result.success ? 'completed' : 'failed', ...result });
+
+    // Emit real-time progress via WebSocket
+    emitStepProgress(sessionId, step.stepNumber, results[results.length - 1]);
+
+    if (!result.success) {
+      if (plan.failFast) {
+        // Mark remaining steps as blocked
+        markRemainingStepsBlocked(plan.steps, step.stepNumber, results);
+        break;
+      }
+      // failFast: false — skip failed step and continue independent steps
+    }
+  }
+
+  // Re-invoke LLM only to generate a human-readable summary of the execution
+  return results;
+}
+```
+
+The LLM is only called after execution completes, to produce a natural-language summary of outcomes. It is never called mid-execution to decide the next step.
+
+### 6.5 Execution progress
 
 During plan execution, each step updates in real-time via WebSocket:
 
@@ -525,7 +613,7 @@ During plan execution, each step updates in real-time via WebSocket:
 
 Steps that depend on a failed step are automatically marked as "Blocked" with an explanation.
 
-### 6.5 Context indicator
+### 6.6 Context indicator
 
 Once the agent establishes the target scope through conversation, the chat header shows a persistent context badge:
 
@@ -551,7 +639,7 @@ The frontend renders this as the header badge. The `[change]` link allows the us
 For multi-subaccount operations: `Scope: 8 subaccounts`
 For org-level operations: `Scope: Organisation`
 
-### 6.6 Suggested actions
+### 6.7 Suggested actions
 
 The chat input area includes optional quick-action pills, contextualised to the conversation phase:
 
@@ -563,7 +651,7 @@ The chat input area includes optional quick-action pills, contextualised to the 
 
 These are rendered as clickable pills below the input box (matching the Freedom Planner UX pattern). Clicking a pill pre-fills and sends the message.
 
-### 6.7 Conversation persistence
+### 6.8 Conversation persistence
 
 Config conversations are stored in `agent_conversations` + `agent_messages` (existing tables). The `agentConversations.subaccountId` is set to the org subaccount ID.
 
@@ -731,10 +819,18 @@ Version 4: Restore to version 1        ← new record, same content as v1
 The restore flow:
 
 1. Fetch the snapshot from the target version
-2. Validate the snapshot is compatible with the current schema (field names still exist)
-3. Record a new history entry for the current state (pre-restore snapshot)
-4. Apply the snapshot fields as an UPDATE to the entity
-5. Return the restored entity
+2. **Pre-restore dependency validation** — check that every foreign key reference in the snapshot still exists:
+   - `agentId` references in `subaccount_agent` or `scheduled_task` snapshots: confirm agent not deleted
+   - `subaccountId` references: confirm subaccount not deleted
+   - If any reference is invalid, **fail the restore** with a message listing the unresolvable references (e.g., "Agent 'SEO Auditor' referenced in this snapshot no longer exists — it was deleted after this version was created")
+3. Record a new history entry for the current state (pre-restore snapshot) — this ensures the state before the restore is always recoverable
+4. Apply the snapshot to the entity using **loose restore mode**:
+   - **Unknown fields** (fields in the snapshot that don't exist in the current schema) — silently ignored
+   - **Missing optional fields** (fields in the current schema but absent from the snapshot) — left unchanged or set to current schema defaults
+   - **Missing required fields** — restore fails with a specific error identifying the field
+5. Return the restored entity and the new version number
+
+**Schema evolution policy — loose restore mode:** The platform schema will evolve after history records are written. Snapshots are not expected to be forward-compatible. Loose mode allows history records to remain useful even as columns are added or renamed. A field that no longer exists in the schema does not prevent a restore — it is dropped on the floor. A new required field added after the snapshot was taken will use its column default.
 
 For `permission_set` restores (entity type 7), the `permissionKeys` array in the snapshot is denormalized. The restore must: update the `permission_sets` row AND reconcile `permission_set_items` (delete removed keys, insert added keys).
 
@@ -1130,7 +1226,13 @@ For an agency configuring 10-20 clients: ~$10-20 in LLM costs for initial setup.
 | **Backup/restore (full account snapshot)** | Foundation exists via `config_history`, but a full account snapshot (all entities at a point in time) + one-click restore is a separate feature. | Phase 3 — build on top of the config_history infrastructure |
 | **Granular permission key for config agent access** | v1 uses role-based gating (`org_admin` / `system_admin`). A dedicated permission key (e.g. `org.config_assistant.access`) enables manager-level access. | When there's demand for non-admin access |
 | **Conversational onboarding** | The config agent is a natural evolution of the onboarding wizard (`/api/onboarding/*`). This is a deliberate architectural convergence point — new orgs could use the config agent for a conversational first-time setup instead of the rigid step-by-step wizard. The same tools, conversation patterns, and plan-approve-execute flow apply. Design decisions in v1 should not close this path. | After v1 config agent is stable. Design the onboarding flow to reuse the same tools, system prompt patterns, and UX components. |
-| **Concurrent session drift detection** | Re-reading current state before each mutation to detect changes by other admins since plan creation. | Phase 2, if concurrent editing becomes a real problem |
+| **Concurrent session drift detection** | Re-reading current state before each mutation to detect changes by other admins since plan creation. The read-after-write guard (Section 6.4) catches post-mutation drift; pre-mutation drift remains best-effort. | Phase 2, if concurrent editing becomes a real problem |
+| **Dry run / preview execution mode** | A true dry run (calling skill handlers but not committing DB writes) requires every handler to be transaction-aware and adds significant testing surface. The plan preview (Section 6.3) with before/after `currentValue` fields covers the primary "show me what will change" use case without the implementation cost. | After v1, if users request it |
+| **Per-org daily mutation rate limiting** | The execution budget (token/cost limits), plan-level `maxSteps` cap, and per-action retry policies provide adequate protection for v1. Per-org daily counters are operational complexity without a proven abuse vector. | If usage data reveals abuse patterns |
+| **Configuration entity locking** | Full entity-level locking during plan execution risks deadlocks and adds significant locking infrastructure. The read-after-write guard in Section 6.4 detects post-mutation state divergence; the plan-creation-time `currentValue` snapshot alerts users to drift before execution. | Phase 2, if concurrent session conflicts become a reported problem |
+| **Quality telemetry dashboard** | The raw data to compute plan approval rate, restore frequency, and session success rate already lives in `config_history`, `audit_events`, and `agent_runs`. A telemetry layer that aggregates and surfaces these metrics is low priority until the feature has meaningful usage. | After 3 months of production usage |
+| **Safe defaults registry (`configDefaults.ts`)** | The system prompt already encodes sensible defaults (tokenBudgetPerRun: 30000, maxToolCallsPerRun: 20, etc.). A typed defaults registry is useful but premature — defaults should emerge from real usage patterns, not be hard-coded upfront. | Phase 2, once real usage reveals which defaults matter |
+| **Activity feed diff summary** | The activity feed summary currently shows a count ("completed 12 changes"). Per-change diff summaries (e.g. "tokenBudget 20000 → 50000") are derivable from `config_history` records tagged with the session ID, but adding them to the activity feed requires extra rendering work. | Phase 2, low priority |
 
 ---
 
