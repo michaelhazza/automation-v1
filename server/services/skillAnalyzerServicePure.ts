@@ -317,56 +317,74 @@ When classification is PARTIAL_OVERLAP or IMPROVEMENT, ALSO produce a
 Focus specifically on the \`instructions\` field — this is where the depth
 difference matters most.
 
-1. **Identify the richer instructions base.** Assess the instructions of both
-   skills against these criteria:
-   - More named sections, frameworks, or step-by-step processes
-   - Covers more distinct use cases, scenarios, or edge cases
-   - Contains concrete examples, tool integrations, batch workflows, or
-     "common mistakes / pitfalls" content the other lacks
-   The skill whose instructions score higher on these criteria becomes the BASE.
-   When the INCOMING SKILL's instructions are substantially more comprehensive by
-   these criteria, the INCOMING SKILL is the base — not the existing library skill.
-2. **Start from the base instructions in full.** Copy the base instructions
-   verbatim into \`proposedMerge.instructions\` — do NOT condense, summarise,
-   restructure, or shorten them in any way.
-3. **Layer in unique elements from the non-base skill.** Scan the non-base
-   skill's instructions for named sections, rules, or examples that are genuinely
-   absent from the base. Append or insert them at the logical position. Do NOT
-   remove or shorten base content to make room.
-4. **Deduplicate overlapping sections.** Where both skills cover the same topic
-   (e.g. both have a platform specs table, both list copy principles), keep only
-   the more detailed version. Do not include both — duplication creates
-   contradictions and makes the skill harder to follow.
-5. **Resolve contradictions.** If the two skills give conflicting guidance on the
-   same point, prefer the more specific or more detailed instruction. Do not
-   include both conflicting versions.
-6. **Coherence check.** After assembling, review the merged instructions as a
-   whole. The result must read as a single cohesive document — not two documents
-   concatenated. Section order should follow a logical flow. Remove any
-   structural seams where the two sources were joined.
-7. **Never synthesise or condense within a section.** The merged \`instructions\`
-   must be at least as long and detailed as the richer input. A shorter output
-   means unique content was dropped — that is a failure. The deduplication in
-   step 4 is the only permitted reason for the merged output to be shorter than
-   both inputs combined.
-8. **No hallucination.** Every sentence in the merged output must be grounded in
-   either the existing library text or the incoming candidate text.
+### Hard constraints (never violate)
 
-### Voice and terminology consistency
+- **No content loss.** Every piece of unique information from the richer skill
+  must appear in the merged output. The only permitted reason for the merged
+  output to be shorter than the richer input is deduplication of genuinely
+  identical content.
+- **No hallucination.** Every sentence must be grounded in either the existing
+  library text or the incoming candidate text.
+- **Scope discipline.** Only include content that directly serves the core
+  purpose of the merged skill. Exclude tool integrations, CLI workflows, or
+  references to external systems unless they are essential for the skill to
+  function. A skill about ad copy generation should not inherit a video
+  production section just because the incoming skill happened to include one.
 
-After assembling the merged instructions:
-- **Voice** — if the base uses imperative ("Do X", "Return Y"), adapt any
-  inserted content from the non-base to match. Do not leave jarring style
-  shifts at the join points.
-- **Terminology** — if the two skills use different words for the same concept
-  (e.g. "copy" vs "creative", "variant" vs "variation"), normalise throughout
-  to the base skill's terminology.
+### Soft constraints (follow unless they conflict with hard constraints)
+
+- **You may lightly restructure or rewrite sections for clarity and flow** as
+  long as no meaning or unique information is lost. Preserving clarity is more
+  important than preserving exact sentence structure.
+- **You may reorder sections** so the merged instructions follow a logical
+  progression (context-gathering → how the skill works → execution → output).
+- **Voice** — normalise inserted content to match the base skill's register
+  (imperative, second-person, etc.). Do not leave jarring style shifts at join
+  points.
+- **Terminology** — normalise to the base skill's vocabulary where both skills
+  use different words for the same concept.
+
+### Assembly steps
+
+1. **Identify the richer instructions base.** Assess both skills' instructions
+   against these criteria: more named sections or frameworks; covers more
+   distinct use cases or edge cases; contains concrete examples, batch
+   workflows, or "common mistakes" content. The skill scoring higher becomes
+   the BASE. When the INCOMING SKILL is substantially more comprehensive, it is
+   the base — not the existing library skill.
+2. **Start from the base.** The base instructions form the foundation of
+   \`proposedMerge.instructions\`.
+3. **Layer in unique elements from the non-base skill.** Scan for named
+   sections, rules, or examples genuinely absent from the base. Insert at the
+   logical position. Apply the scope discipline hard constraint — do not import
+   sections that are outside the merged skill's core purpose.
+4. **Deduplicate.** Where both skills cover the same topic, keep only the
+   stronger version. Do not include both. To decide which version wins, prefer
+   in this order: (a) more structured — has clear headings, numbered steps, or
+   tables; (b) includes concrete examples; (c) covers constraints or edge cases.
+5. **Resolve contradictions.** Conflicting guidance on the same point: prefer
+   the more specific or more detailed instruction.
+6. **Edit for coherence.** Apply the soft constraints — rewrite for flow,
+   normalise voice and terminology, remove seams. The output must read as a
+   single authored document.
 
 ### Output completeness
 
 The \`instructions\` field may be several thousand characters long. Output it
 in full — do NOT truncate, summarise, or trail off with "..." under any
 circumstances. The entire merged instructions must appear in the JSON response.
+
+### Final self-check (required before returning)
+
+Before writing the JSON response, verify:
+- No section appears more than once (e.g. two platform specs tables)
+- No broken or half-merged sentences at any join point
+- No conflicting instructions remain (e.g. two different rules for the same scenario)
+- Section order follows a logical flow: context-gathering → how the skill works → execution → output format
+- Instructions read cleanly from start to finish as a single authored document
+- \`definition.input_schema\` is valid JSON with no duplicate keys
+- The response is complete — no trailing "..." or cut-off content
+If any issue is found, fix it before returning.
 
 For DUPLICATE and DISTINCT classifications, OMIT the \`proposedMerge\` field
 entirely (or set it to null) — there is nothing to merge.
@@ -382,8 +400,9 @@ The proposedMerge object has exactly four fields:
     • \`name\` — match the chosen \`name\` field above (snake_case slug).
     • \`description\` — use the richer/more complete description.
     • \`input_schema.required\` — keep all fields that are required in the
-      base; add required fields from the non-base only if they are also
-      semantically mandatory for the merged scope.
+      base. Never introduce new required fields from the non-base unless they
+      are required for ALL valid uses of the merged skill. When uncertain,
+      default to optional — it is always the safer choice.
     • \`input_schema.properties\` — union both sets. For parameters that exist
       in both, use the more detailed \`description\`. For enum fields, union
       the enum values from both skills (e.g. if one supports google/meta and
