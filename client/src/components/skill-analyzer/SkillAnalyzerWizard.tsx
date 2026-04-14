@@ -147,7 +147,7 @@ export interface AnalysisResult {
    *  parse error). Distinguishes retryable API failures from genuine
    *  PARTIAL_OVERLAP model output. */
   classificationFailed?: boolean;
-  /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'unknown'.
+  /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown'.
    *  Null on rows where classificationFailed is false or undefined. */
   classificationFailureReason?: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
   /** Migration 0114: heuristic flag set during Stage 4b. True for README-style

@@ -1,4 +1,5 @@
 import { eq, desc, inArray, and, sql, isNull } from 'drizzle-orm';
+import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { withBackoff } from '../lib/withBackoff.js';
@@ -1140,7 +1141,7 @@ export async function updateJobAgentRecommendation(
 
   if (updated.length === 0) {
     // Row was skipped — recommendation already written on a previous run.
-    console.info('[SkillAnalyzer] agent_recommendation_already_exists — skipping overwrite', { jobId });
+    logger.info('skill_analyzer_agent_recommendation_already_exists', { jobId });
   }
 }
 
