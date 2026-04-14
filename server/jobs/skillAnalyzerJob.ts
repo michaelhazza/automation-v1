@@ -29,7 +29,11 @@ import {
   getJobById,
   clearResultsForJob,
   insertResults,
+  insertSingleResult,
+  markSkillInFlight,
+  unmarkSkillInFlight,
 } from '../services/skillAnalyzerService.js';
+import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
 import {
   skillAnalyzerServicePure,
@@ -522,6 +526,21 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             return;
           }
 
+          const startMs = Date.now();
+          console.log('[SkillAnalyzer] classify:start', {
+            jobId,
+            slug: candidate.slug,
+            candidateIndex: match.candidateIndex,
+          });
+          await markSkillInFlight(jobId, candidate.slug, startMs);
+
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(Object.assign(new Error('LLM classify timed out'), { code: 'CLASSIFY_TIMEOUT' })),
+              SKILL_CLASSIFY_TIMEOUT_MS,
+            )
+          );
+
           // Phase 3: use the merge-aware prompt + parser. The system prompt
           // is a superset of the base classifier — it adds instructions for
           // producing a proposedMerge object on PARTIAL_OVERLAP / IMPROVEMENT.
@@ -540,42 +559,46 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
 
           try {
-            classificationResult = await withBackoff(
-              async () => {
-                const response = await anthropicAdapter.call({
-                  model: 'claude-sonnet-4-6',
-                  system,
-                  messages: [{ role: 'user', content: userMessage }],
-                  // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
-                  // with long instructions can never be truncated.
-                  maxTokens: 8192,
-                  temperature: 0.1,
-                });
-                const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-                if (parsed === null) throw PARSE_FAILURE;
-                return parsed;
-              },
-              {
-                label: `skill-classify-${match.candidateIndex}`,
-                maxAttempts: 3,
-                correlationId: jobId,
-                runId: jobId,
-                isRetryable: (err: unknown) => {
-                  // Parse failures: model produced unparseable output — worth retrying.
-                  if (err === PARSE_FAILURE) return true;
-                  // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
-                  // cannot change between attempts, so retrying just wastes time.
-                  const e = err as { statusCode?: number; code?: string };
-                  if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-                  return (
-                    e?.statusCode === 429 ||
-                    e?.statusCode === 503 ||
-                    e?.statusCode === 529 ||
-                    e?.code === 'PROVIDER_UNAVAILABLE'
-                  );
+            classificationResult = await Promise.race([
+              withBackoff(
+                async () => {
+                  const response = await anthropicAdapter.call({
+                    model: 'claude-sonnet-4-6',
+                    system,
+                    messages: [{ role: 'user', content: userMessage }],
+                    // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
+                    // with long instructions can never be truncated.
+                    maxTokens: 8192,
+                    temperature: 0.1,
+                  });
+                  const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+                  if (parsed === null) throw PARSE_FAILURE;
+                  return parsed;
                 },
-              }
-            );
+                {
+                  label: `skill-classify-${match.candidateIndex}`,
+                  maxAttempts: 3,
+                  correlationId: jobId,
+                  runId: jobId,
+                  isRetryable: (err: unknown) => {
+                    // Parse failures: model produced unparseable output — worth retrying.
+                    if (err === PARSE_FAILURE) return true;
+                    // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
+                    // cannot change between attempts, so retrying just wastes time.
+                    const e = err as { statusCode?: number; code?: string };
+                    if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+                    if (e?.code === 'CLASSIFY_TIMEOUT') return false;
+                    return (
+                      e?.statusCode === 429 ||
+                      e?.statusCode === 503 ||
+                      e?.statusCode === 529 ||
+                      e?.code === 'PROVIDER_UNAVAILABLE'
+                    );
+                  },
+                }
+              ),
+              timeoutPromise,
+            ]);
           } catch (err) {
             classificationResult = null;
             classificationApiError = err === PARSE_FAILURE ? undefined : err;
@@ -616,6 +639,36 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             proposedMerge: finalResult.proposedMerge ?? null,
             classificationFailed,
             classificationFailureReason,
+          });
+
+          // Write result immediately — don't wait for Stage 8
+          await insertSingleResult({
+            jobId,
+            candidateIndex: match.candidateIndex,
+            candidateName: candidate.name,
+            candidateSlug: candidate.slug,
+            candidateContentHash: getCandidateHash(match.candidateIndex),
+            matchedSkillId: matchedLib.id ?? undefined,
+            classification: finalResult.classification,
+            confidence: finalResult.confidence,
+            similarityScore: match.similarity ?? undefined,
+            classificationReasoning: finalResult.reasoning ?? undefined,
+            diffSummary: diffSummary ?? undefined,
+            proposedMergedContent: finalResult.proposedMerge ?? undefined,
+            originalProposedMerge: finalResult.proposedMerge ?? undefined,
+            classificationFailed,
+            classificationFailureReason: classificationFailureReason ?? null,
+          });
+
+          await unmarkSkillInFlight(jobId, candidate.slug);
+
+          console.log('[SkillAnalyzer] classify:end', {
+            jobId,
+            slug: candidate.slug,
+            durationMs: Date.now() - startMs,
+            classification: finalResult.classification,
+            failed: classificationFailed,
+            failureReason: classificationFailureReason ?? undefined,
           });
 
           classifiedCount++;
