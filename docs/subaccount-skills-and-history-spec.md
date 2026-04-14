@@ -712,7 +712,7 @@ Phase 2 options:
 
 - **Subaccount skill count limit is a soft cap.** Two concurrent creates can both pass the count check and exceed `MAX_SKILLS_PER_SUBACCOUNT` by 1. Accepted: strict enforcement would require a transactional lock on count, adding complexity for negligible benefit.
 - **Cross-table slug guard ignores soft-deleted rows.** A transient race is theoretically possible where a soft-delete commit interleaves with a cross-table slug check. Accepted: partial indexes already exclude deleted rows for same-table uniqueness, and the cross-table case requires two simultaneous creates of the same slug across different tables — vanishingly unlikely.
-- **Partial restore produces multi-pass version history.** If a restore fails mid-loop and retries, version history may contain entries from the partial attempt followed by the complete attempt. Accepted: idempotency keys on version writes prevent duplicates, and the version timeline accurately reflects what happened. No data corruption; just verbose history.
+- **Partial restore produces multi-pass version history.** If a restore fails mid-loop and retries, version history may contain entries from the partial attempt followed by the complete attempt. Accepted: idempotency keys on version writes prevent duplicates, and the version timeline accurately reflects what happened. No data corruption; just verbose history. Observability: emit `metrics.increment('skill_restore_partial_detected', { backupId, orgId })` when the restore loop detects an entity already at target state, to surface partial-restore retries in monitoring.
 - **Definition validation is structural, not schema-conformant.** `input_schema` is validated as a JSON object but not against JSON Schema Draft-07. Full schema validation is deferred to Phase 2.
 
 ---
@@ -878,6 +878,7 @@ This helper is intentionally thin -- it owns only the version-number increment a
 3. **Unique constraint safety net:** `skill_versions_version_uniq` on `(COALESCE(system_skill_id, skill_id), version_number)` catches any edge case where the lock is bypassed (e.g. a code path that forgets to use the helper). A unique violation here is a bug, not expected control flow.
 4. **Idempotency:** For retry-prone paths (analyser, restore), callers pass an `idempotencyKey` (e.g. `sa:${jobId}:${skillId}:create`). The UNIQUE constraint on `(COALESCE(system_skill_id, skill_id), idempotency_key)` + ON CONFLICT DO NOTHING prevents version spam on retries.
 5. **Write placement:** Version writes MUST occur immediately after the skill mutation within the same transactional scope, with no intermediate async boundaries or interleaved logic. This prevents subtle drift if a future refactor moves the version write away from the mutation.
+6. **Snapshot immutability:** The version snapshot MUST be taken from the persisted row returned by the DB and MUST NOT be mutated between the DB read and the version write. No enrichment, normalisation, or middleware may modify the row reference in between.
 
 **Drizzle schema update** (`server/db/schema/skillVersions.ts`): Add the two new columns:
 
