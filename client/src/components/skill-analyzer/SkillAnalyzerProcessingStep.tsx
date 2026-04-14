@@ -76,7 +76,7 @@ export default function SkillAnalyzerProcessingStep({ jobId, initialJob, onCompl
         setCurrentJob(j);
         setLiveResults(r);
         setLastProgressAt((prev) => {
-          const newTs = new Date((j as AnalysisJob & { updatedAt: string }).updatedAt).getTime();
+          const newTs = new Date(j.updatedAt).getTime();
           return newTs > prev ? newTs : prev;
         });
         setPollErrorCount(0);
