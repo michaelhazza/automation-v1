@@ -406,6 +406,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     progressMessage: classificationFallback
       ? 'LLM classification unavailable - marking candidates for human review...'
       : 'Classifying with AI...',
+    classifyState: {
+      queue: llmQueue.map((m) => candidates[m.candidateIndex].slug),
+      inFlight: {},
+    },
   });
 
   type ClassifiedResult = {
@@ -427,7 +431,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // original_proposed_merge (immutable) on the result row.
     proposedMerge: object | null;
     classificationFailed: boolean;
-    classificationFailureReason: 'rate_limit' | 'parse_error' | 'unknown' | null;
+    classificationFailureReason: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
   };
 
   const classifiedResults: ClassifiedResult[] = [];
