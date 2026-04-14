@@ -1,11 +1,11 @@
-import { eq, desc, inArray, and, sql } from 'drizzle-orm';
+import { eq, desc, inArray, and, sql, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
@@ -1113,15 +1113,25 @@ export async function updateResultAgentProposals(
 
 /** Persist the cluster-level agent recommendation on the job row.
  *  Written by Stage 8b after all per-skill proposals are finalised.
- *  Best-effort — the job handler catches errors before calling this. */
+ *  Idempotent: no-op if a recommendation is already stored (job retry safety).
+ *  Validates minimum shape before writing to prevent corrupt JSONB. */
 export async function updateJobAgentRecommendation(
   jobId: string,
-  recommendation: unknown,
+  recommendation: AgentRecommendation,
 ): Promise<void> {
+  // Minimal shape guard — shouldCreateAgent must be boolean, reasoning non-empty string.
+  if (typeof recommendation.shouldCreateAgent !== 'boolean') {
+    throw new Error('updateJobAgentRecommendation: shouldCreateAgent must be boolean');
+  }
+  if (typeof recommendation.reasoning !== 'string' || recommendation.reasoning.trim() === '') {
+    throw new Error('updateJobAgentRecommendation: reasoning must be a non-empty string');
+  }
+
+  // Idempotency: only write if the column is still null (first run wins on retry).
   await db
     .update(skillAnalyzerJobs)
     .set({ agentRecommendation: recommendation })
-    .where(eq(skillAnalyzerJobs.id, jobId));
+    .where(and(eq(skillAnalyzerJobs.id, jobId), isNull(skillAnalyzerJobs.agentRecommendation)));
 }
 
 // ---------------------------------------------------------------------------
