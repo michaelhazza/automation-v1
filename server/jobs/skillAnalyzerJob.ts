@@ -210,6 +210,23 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     exactDuplicateCount: exactDuplicates.length,
   });
 
+  // Helper: look up the SHA-256 hash for a given candidate index. Defined
+  // here (after Stage 2) so it is available in Stage 5's incremental inserts
+  // as well as Stage 8's batch writes. The hash is computed in Stage 2 and
+  // persisted on each result row for the Phase 4 manual-add PATCH path.
+  const hashByIndex = new Map<number, string>();
+  for (let i = 0; i < candidates.length; i++) {
+    hashByIndex.set(i, candidateHashes[i]);
+  }
+  const getCandidateHash = (idx: number): string => {
+    const h = hashByIndex.get(idx);
+    if (h === undefined) {
+      // Should be unreachable — every candidate is hashed in Stage 2.
+      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
+    }
+    return h;
+  };
+
   // -------------------------------------------------------------------------
   // Stage 3: Embed (20% → 40%)
   // -------------------------------------------------------------------------
@@ -782,24 +799,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
   // Collect all result rows
   const resultRows: (typeof skillAnalyzerResults.$inferInsert)[] = [];
-
-  // Helper: look up the SHA-256 hash for a given candidate index. The hash
-  // is computed in Stage 2 (Hash) and was originally only used for dedup.
-  // Phase 1 of skill-analyzer-v2 persists it on the result row so the Phase 4
-  // manual-add PATCH can look up the candidate embedding in skill_embeddings
-  // by content hash without recomputing it. See spec §5.2 candidateContentHash.
-  const hashByIndex = new Map<number, string>();
-  for (let i = 0; i < candidates.length; i++) {
-    hashByIndex.set(i, candidateHashes[i]);
-  }
-  const getCandidateHash = (idx: number): string => {
-    const h = hashByIndex.get(idx);
-    if (h === undefined) {
-      // Should be unreachable — every candidate is hashed in Stage 2.
-      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
-    }
-    return h;
-  };
 
   // Exact duplicates from Stage 2
   for (const dup of exactDuplicates) {
