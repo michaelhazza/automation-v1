@@ -144,9 +144,15 @@ ALTER TABLE skills ADD CONSTRAINT skills_tier_check CHECK (
 
 #### 2.1.4 Migration SQL
 
-**Migration file:** `migrations/0118_subaccount_skills.sql`
+**Migration file:** `migrations/0118_subaccount_skills_and_versioning.sql`
+
+This is a single consolidated migration covering all schema changes for this feature set: subaccount skills, skill_versions integrity, and permission seeds.
 
 ```sql
+-- =============================================================================
+-- Part 1: Subaccount skills — schema changes on `skills` table
+-- =============================================================================
+
 -- Add subaccount_id column to skills
 ALTER TABLE skills ADD COLUMN subaccount_id uuid REFERENCES subaccounts(id);
 
@@ -174,9 +180,46 @@ CREATE UNIQUE INDEX skills_slug_subaccount_uniq
 
 -- Index for subaccount skill queries
 CREATE INDEX skills_subaccount_idx ON skills (subaccount_id);
+
+-- =============================================================================
+-- Part 2: Skill versions — integrity columns and constraints
+-- =============================================================================
+
+-- Add structured change type for filtering and audit clarity
+ALTER TABLE skill_versions ADD COLUMN change_type TEXT;
+-- Backfill existing rows (all from Skill Studio) as 'update'
+UPDATE skill_versions SET change_type = 'update' WHERE change_type IS NULL;
+-- Make NOT NULL after backfill
+ALTER TABLE skill_versions ALTER COLUMN change_type SET NOT NULL;
+
+-- Add idempotency key for retry-safe version writes
+ALTER TABLE skill_versions ADD COLUMN idempotency_key TEXT;
+
+-- Unique constraint: prevent duplicate version numbers per skill (safety net for FOR UPDATE lock)
+CREATE UNIQUE INDEX skill_versions_version_uniq
+  ON skill_versions (COALESCE(system_skill_id, skill_id), version_number);
+
+-- Unique constraint: prevent duplicate idempotency keys per skill (retry dedup)
+CREATE UNIQUE INDEX skill_versions_idempotency_uniq
+  ON skill_versions (COALESCE(system_skill_id, skill_id), idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+-- =============================================================================
+-- Part 3: Subaccount skill permissions
+-- =============================================================================
+
+-- Seed new permission keys (follows existing seed pattern)
+INSERT INTO permissions (key, description, group_name)
+VALUES
+  ('subaccount.skills.view', 'View subaccount-scoped skills', 'subaccount.skills'),
+  ('subaccount.skills.manage', 'Create, edit, and delete subaccount-scoped skills', 'subaccount.skills')
+ON CONFLICT (key) DO NOTHING;
 ```
 
-**Backwards compatibility:** All existing rows have `subaccount_id = NULL`, so they pass the CHECK constraint. The new partial indexes cover the same uniqueness guarantee as the old `skills_slug_org_idx` for existing rows.
+**Backwards compatibility:**
+- All existing `skills` rows have `subaccount_id = NULL`, so they pass the CHECK constraint. The new partial indexes cover the same uniqueness guarantee as the old `skills_slug_org_idx` for existing rows.
+- Existing `skill_versions` rows get `change_type = 'update'` (safe default). `idempotency_key` is nullable so existing rows are unaffected. The `COALESCE` in the unique indexes correctly handles the dual-FK pattern (exactly one of `system_skill_id` or `skill_id` is set).
+- Permission INSERT uses `ON CONFLICT DO NOTHING` for idempotency.
 
 ### 2.2 Service Changes
 
@@ -1205,38 +1248,9 @@ The restore flow from the job list follows the same path as clicking the job and
 
 | Sequence | File | What it does |
 |----------|------|-------------|
-| `0118` | `0118_subaccount_skills.sql` | Add `subaccount_id` to `skills`, replace slug uniqueness indexes, add CHECK constraint |
-| `0119` | `0119_subaccount_skill_permissions.sql` | Seed `subaccount.skills.view` and `subaccount.skills.manage` into `permissions` table |
-| `0120` | `0120_skill_versions_integrity.sql` | Add `change_type`, `idempotency_key` columns + unique constraints to `skill_versions` |
-
-Feature B now requires migration `0120` for new columns and constraints on `skill_versions`.
+| `0118` | `0118_subaccount_skills_and_versioning.sql` | Subaccount skills schema + skill_versions integrity + permission seeds (single consolidated migration) |
 
 Feature C requires no schema migration -- it uses existing tables and endpoints.
-
-#### 5.1.1 Migration 0120: skill_versions integrity
-
-```sql
--- Add structured change type for filtering and audit clarity
-ALTER TABLE skill_versions ADD COLUMN change_type TEXT;
--- Backfill existing rows (all from Skill Studio) as 'update'
-UPDATE skill_versions SET change_type = 'update' WHERE change_type IS NULL;
--- Make NOT NULL after backfill
-ALTER TABLE skill_versions ALTER COLUMN change_type SET NOT NULL;
-
--- Add idempotency key for retry-safe version writes
-ALTER TABLE skill_versions ADD COLUMN idempotency_key TEXT;
-
--- Unique constraint: prevent duplicate version numbers per skill (safety net for FOR UPDATE lock)
-CREATE UNIQUE INDEX skill_versions_version_uniq
-  ON skill_versions (COALESCE(system_skill_id, skill_id), version_number);
-
--- Unique constraint: prevent duplicate idempotency keys per skill (retry dedup)
-CREATE UNIQUE INDEX skill_versions_idempotency_uniq
-  ON skill_versions (COALESCE(system_skill_id, skill_id), idempotency_key)
-  WHERE idempotency_key IS NOT NULL;
-```
-
-**Backwards compatibility:** Existing rows get `change_type = 'update'` (safe default). `idempotency_key` is nullable so existing rows are unaffected. The `COALESCE` in the unique indexes correctly handles the dual-FK pattern (exactly one of `system_skill_id` or `skill_id` is set).
 
 ### 5.2 Backwards compatibility
 
@@ -1250,7 +1264,16 @@ CREATE UNIQUE INDEX skill_versions_idempotency_uniq
 If the migration needs to be reverted:
 
 ```sql
--- Reverse of 0118
+-- Reverse Part 3: permissions
+DELETE FROM permissions WHERE key IN ('subaccount.skills.view', 'subaccount.skills.manage');
+
+-- Reverse Part 2: skill_versions integrity
+DROP INDEX IF EXISTS skill_versions_idempotency_uniq;
+DROP INDEX IF EXISTS skill_versions_version_uniq;
+ALTER TABLE skill_versions DROP COLUMN IF EXISTS idempotency_key;
+ALTER TABLE skill_versions DROP COLUMN IF EXISTS change_type;
+
+-- Reverse Part 1: subaccount skills
 DROP INDEX IF EXISTS skills_slug_subaccount_uniq;
 DROP INDEX IF EXISTS skills_slug_org_uniq;
 DROP INDEX IF EXISTS skills_slug_system_uniq;
@@ -1267,68 +1290,54 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 
 ## 6. Implementation Chunks
 
-### Chunk 1: Schema migration and Drizzle schema update
+### Chunk 1: Consolidated schema migration + Drizzle schema + permissions
 
-**Scope:** Migration file + Drizzle schema changes. No service/route changes.
+**Scope:** Single migration file covering all three schema change areas. Drizzle schema updates. Permission key registration.
 
 **Files to create:**
-- `migrations/0118_subaccount_skills.sql`
-- `migrations/0119_subaccount_skill_permissions.sql`
+- `migrations/0118_subaccount_skills_and_versioning.sql`
 
 **Files to modify:**
 - `server/db/schema/skills.ts` -- add `subaccountId` column, update indexes in the table definition
+- `server/db/schema/skillVersions.ts` -- add `changeType`, `idempotencyKey` columns
+- `server/lib/permissions.ts` -- add `SKILLS_VIEW` and `SKILLS_MANAGE` to `SUBACCOUNT_PERMISSIONS`, add to `ALL_PERMISSIONS`, update default templates
 
 **Dependencies:** None. Must be done first.
 
-**Verification:** `npm run db:generate` succeeds, `npm run typecheck` passes.
+**Verification:** `npm run db:generate` succeeds, `npm run typecheck` passes. Permission keys are correctly typed.
 
 ---
 
-### Chunk 2: Permission keys and seed data
+### Chunk 2: Skill versioning helper + limits constants
 
-**Scope:** Add new permission keys and update default permission set templates.
-
-**Files to modify:**
-- `server/lib/permissions.ts` -- add `SKILLS_VIEW` and `SKILLS_MANAGE` to `SUBACCOUNT_PERMISSIONS`, add to `ALL_PERMISSIONS`, update default templates
-
-**Dependencies:** Chunk 1 (migration that seeds the permissions).
-
-**Verification:** `npm run typecheck` passes. Permission keys are correctly typed.
-
----
-
-### Chunk 3: Skill versioning helper + schema changes
-
-**Scope:** Create the reusable version-write helper, add `change_type` and `idempotency_key` columns + unique constraints to `skill_versions`.
+**Scope:** Create the reusable version-write helper. Add limit constants.
 
 **Files to create:**
 - `server/services/skillVersioningHelper.ts`
-- `migrations/0120_skill_versions_integrity.sql`
 
 **Files to modify:**
-- `server/db/schema/skillVersions.ts` -- add `changeType`, `idempotencyKey` columns
 - `server/config/limits.ts` -- add `MAX_TOTAL_SKILL_INSTRUCTIONS`, `MAX_SKILL_DEFINITION_SIZE`, `MAX_SKILLS_PER_SUBACCOUNT`
 
-**Dependencies:** None (uses existing `skillVersions` schema).
+**Dependencies:** Chunk 1 (schema changes for `changeType`, `idempotencyKey` columns, permissions).
 
-**Verification:** `npm run db:generate` succeeds, `npm run typecheck` passes.
+**Verification:** `npm run typecheck` passes.
 
 ---
 
-### Chunk 4: Wire versioning into system skill service
+### Chunk 3: Wire versioning into system skill service
 
 **Scope:** Add version writes to `createSystemSkill` and `updateSystemSkill`.
 
 **Files to modify:**
 - `server/services/systemSkillService.ts` -- import helper, add version writes
 
-**Dependencies:** Chunk 3.
+**Dependencies:** Chunk 2.
 
 **Verification:** `npm run typecheck` passes. Manual test: create/update a system skill, check that `skill_versions` has new rows.
 
 ---
 
-### Chunk 5: Wire versioning into org skill service
+### Chunk 4: Wire versioning into org skill service
 
 **Scope:** Add version writes to `createSkill` and `updateSkill`. Add `userId` parameter threading.
 
@@ -1336,54 +1345,54 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 - `server/services/skillService.ts` -- import helper, add version writes, add userId param
 - `server/routes/skills.ts` -- pass `req.user.id` to createSkill/updateSkill
 
-**Dependencies:** Chunk 3.
+**Dependencies:** Chunk 2.
 
 **Verification:** `npm run typecheck` passes. Manual test: create/update an org skill, check `skill_versions`.
 
 ---
 
-### Chunk 6: Wire versioning into skill analyser
+### Chunk 5: Wire versioning into skill analyser
 
 **Scope:** Add version writes to `executeApproved` for DISTINCT, PARTIAL_OVERLAP, and IMPROVEMENT paths.
 
 **Files to modify:**
 - `server/services/skillAnalyzerService.ts` -- import helper, add writes in executeApproved
 
-**Dependencies:** Chunk 3.
+**Dependencies:** Chunk 2.
 
 **Verification:** `npm run typecheck` passes.
 
 ---
 
-### Chunk 7: Wire versioning into config backup restore
+### Chunk 6: Wire versioning into config backup restore
 
 **Scope:** Add version writes to `restoreSkillAnalyzerEntities`.
 
 **Files to modify:**
 - `server/services/configBackupService.ts` -- import helper, add writes in restore loop
 
-**Dependencies:** Chunk 3.
+**Dependencies:** Chunk 2.
 
 **Verification:** `npm run typecheck` passes.
 
 ---
 
-### Chunk 8: Subaccount skill service methods
+### Chunk 7: Subaccount skill service methods
 
 **Scope:** Add CRUD methods for subaccount skills, modify `resolveSkillsForAgent` for three-tier batch resolution with instruction size guard, add `getSkillBySlugForSubaccount`, add skill count limit enforcement.
 
 **Files to modify:**
 - `server/services/skillService.ts` -- add new methods, rewrite resolve to batch pattern, add instruction size guard
 - `server/services/systemSkillService.ts` -- add `getSkillsBySlugs` batch method, add slug overlap guard in `createSystemSkill`
-- `server/config/limits.ts` -- reference limits added in Chunk 3
+- `server/config/limits.ts` -- reference limits added in Chunk 2
 
-**Dependencies:** Chunk 1 (schema), Chunk 3 (versioning + limits).
+**Dependencies:** Chunk 1 (schema), Chunk 2 (versioning + limits).
 
 **Verification:** `npm run typecheck` passes. Unit-testable: batch resolution precedence order, instruction size truncation, skill count limit.
 
 ---
 
-### Chunk 9: Subaccount skill routes
+### Chunk 8: Subaccount skill routes
 
 **Scope:** Create route file, Zod schemas, register in index.
 
@@ -1394,26 +1403,26 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 **Files to modify:**
 - `server/index.ts` -- register new route file
 
-**Dependencies:** Chunk 2 (permissions), Chunk 8 (service methods).
+**Dependencies:** Chunk 1 (permissions), Chunk 7 (service methods).
 
 **Verification:** `npm run typecheck` passes. Manual test: CRUD operations via API.
 
 ---
 
-### Chunk 10: Runtime skill resolution (three-tier merge)
+### Chunk 9: Runtime skill resolution (three-tier merge)
 
 **Scope:** Pass `subaccountId` through in `agentExecutionService`.
 
 **Files to modify:**
 - `server/services/agentExecutionService.ts` -- pass `request.subaccountId` to `resolveSkillsForAgent`
 
-**Dependencies:** Chunk 8 (three-tier resolution in service).
+**Dependencies:** Chunk 7 (three-tier resolution in service).
 
 **Verification:** `npm run typecheck` passes. Existing agent runs still work (regression check).
 
 ---
 
-### Chunk 11: Skill Studio adjustments
+### Chunk 10: Skill Studio adjustments
 
 **Scope:** Add subaccount scope to `listSkillsForStudio` and `getSkillStudioContext`.
 
@@ -1426,7 +1435,7 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 
 ---
 
-### Chunk 12: Skill analyser UI -- backup status in job list
+### Chunk 11: Skill analyser UI -- backup status in job list
 
 **Scope:** Extend `listJobs` API with `backupStatus`, update frontend.
 
@@ -1440,7 +1449,7 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 
 ---
 
-### Chunk 13: Skill analyser UI -- persistent restore from completed job
+### Chunk 12: Skill analyser UI -- persistent restore from completed job
 
 **Scope:** Re-enter execute step for completed+executed jobs, fetch backup from API.
 
@@ -1448,13 +1457,13 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 - `client/src/components/skill-analyzer/SkillAnalyzerWizard.tsx` -- reconstruct executeResult from results
 - `client/src/components/skill-analyzer/SkillAnalyzerExecuteStep.tsx` -- fetch backup status on mount, handle already-restored state
 
-**Dependencies:** Chunk 12.
+**Dependencies:** Chunk 11.
 
 **Verification:** `npm run build` passes. Click a past completed job, see execution summary and restore button.
 
 ---
 
-### Chunk 14: Frontend -- subaccount skills page
+### Chunk 13: Frontend -- subaccount skills page
 
 **Scope:** New page component, router registration, navigation link.
 
@@ -1465,13 +1474,13 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 - `client/src/App.tsx` -- add lazy-loaded route
 - Subaccount admin navigation component -- add "Skills" link
 
-**Dependencies:** Chunk 9 (routes available).
+**Dependencies:** Chunk 8 (routes available).
 
 **Verification:** `npm run build` passes. Page renders, CRUD works.
 
 ---
 
-### Chunk 15: Frontend -- skill picker subaccount support
+### Chunk 14: Frontend -- skill picker subaccount support
 
 **Scope:** Update SkillPickerSection to show subaccount skills when in subaccount context.
 
@@ -1479,13 +1488,13 @@ Note: rollback is only safe if no subaccount skills have been created. Once data
 - `client/src/components/SkillPickerSection.tsx` -- accept subaccountId, fetch from subaccount endpoint
 - `client/src/pages/SubaccountAgentEditPage.tsx` -- pass subaccountId to skill picker
 
-**Dependencies:** Chunk 9 (routes available), Chunk 14.
+**Dependencies:** Chunk 8 (routes available), Chunk 13.
 
 **Verification:** `npm run build` passes. Skill picker in SubaccountAgentEditPage shows subaccount skills.
 
 ---
 
-### Chunk 16: Documentation updates
+### Chunk 15: Documentation updates
 
 **Scope:** Update architecture.md, docs/capabilities.md, CLAUDE.md key files table.
 
