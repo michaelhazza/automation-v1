@@ -121,17 +121,13 @@ router.get(
 
     const jobs = await skillAnalyzerService.listJobs(orgId, limit, offset);
 
-    // Enrich jobs with backup status for UI badges
-    const jobsWithBackup = await Promise.all(
-      jobs.map(async (job) => {
-        const backup = await configBackupService.getBackupBySourceId(job.id, orgId);
-        return {
-          ...job,
-          backupId: backup?.id ?? null,
-          backupStatus: backup?.status ?? null,
-        };
-      }),
-    );
+    // Enrich jobs with backup status for UI badges (single batch query)
+    const jobIds = jobs.map((j) => j.id);
+    const backupMap = await configBackupService.getBackupsBySourceIds(jobIds, orgId);
+    const jobsWithBackup = jobs.map((job) => {
+      const backup = backupMap.get(job.id);
+      return { ...job, backupId: backup?.id ?? null, backupStatus: backup?.status ?? null };
+    });
 
     return res.json({ jobs: jobsWithBackup });
   })

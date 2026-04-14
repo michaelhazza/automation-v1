@@ -148,7 +148,9 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Sort state
   const [sortCol, setSortCol] = useState<SortCol | null>(null);
@@ -166,11 +168,13 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
   const load = useCallback(async () => {
     if (!subaccountId) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await api.get(`/api/subaccounts/${subaccountId}/skills`);
       setSkills(res.data);
     } catch (err) {
       console.error('[SubaccountSkills] Failed to load:', err);
+      setLoadError('Failed to load skills. Please refresh the page.');
     } finally {
       setLoading(false);
     }
@@ -216,10 +220,12 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
     if (!deleteTarget || !subaccountId) return;
     try {
       await api.delete(`/api/subaccounts/${subaccountId}/skills/${deleteTarget.id}`);
+      setDeleteError(null);
       setDeleteTarget(null);
       load();
     } catch (err) {
       console.error('[SubaccountSkills] Delete failed:', err);
+      setDeleteError('Failed to delete skill. Please try again.');
     }
   }
 
@@ -285,6 +291,10 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-14 bg-slate-100 rounded-lg animate-pulse" />
           ))}
+        </div>
+      ) : loadError ? (
+        <div className="text-center py-16 border border-dashed border-red-200 rounded-xl">
+          <p className="text-red-500 text-sm">{loadError}</p>
         </div>
       ) : skills.length === 0 ? (
         <div className="text-center py-16 border border-dashed border-slate-200 rounded-xl">
@@ -411,13 +421,19 @@ export default function SubaccountSkillsPage({ user: _user }: { user: User }) {
         </div>
       )}
 
+      {deleteError && (
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {deleteError}
+        </div>
+      )}
+
       {deleteTarget && (
         <ConfirmDialog
           title="Delete Skill"
           message={`Are you sure you want to delete "${deleteTarget.name}"? This cannot be undone.`}
           confirmLabel="Delete"
           onConfirm={handleDelete}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={() => { setDeleteError(null); setDeleteTarget(null); }}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   configBackups,
@@ -367,6 +367,41 @@ export const configBackupService = {
 
     if (!row) throw { statusCode: 404, message: 'Backup not found' };
     return row;
+  },
+
+  /**
+   * Batch fetch backups for multiple source IDs. Returns a Map from sourceId to backup summary.
+   * Used to enrich job list responses without N+1 queries.
+   */
+  async getBackupsBySourceIds(
+    sourceIds: string[],
+    organisationId: string,
+  ): Promise<Map<string, { id: string; status: string }>> {
+    if (sourceIds.length === 0) return new Map();
+
+    const rows = await db
+      .select({
+        id: configBackups.id,
+        sourceId: configBackups.sourceId,
+        status: configBackups.status,
+      })
+      .from(configBackups)
+      .where(
+        and(
+          inArray(configBackups.sourceId, sourceIds),
+          eq(configBackups.organisationId, organisationId),
+        )
+      )
+      .orderBy(desc(configBackups.createdAt));
+
+    // Keep only the most recent backup per sourceId (defensive against duplicates)
+    const result = new Map<string, { id: string; status: string }>();
+    for (const row of rows) {
+      if (row.sourceId && !result.has(row.sourceId)) {
+        result.set(row.sourceId, { id: row.id, status: row.status });
+      }
+    }
+    return result;
   },
 
   /**
