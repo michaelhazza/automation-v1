@@ -102,6 +102,7 @@ function stripSensitiveFields(snapshot: Record<string, unknown>): Record<string,
 async function redactSystemAgentSnapshot(
   entityType: string,
   entityId: string,
+  organisationId: string,
   snapshot: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   if (entityType !== 'agent') return snapshot;
@@ -109,7 +110,7 @@ async function redactSystemAgentSnapshot(
     const [agent] = await db
       .select({ isSystemManaged: agents.isSystemManaged })
       .from(agents)
-      .where(eq(agents.id, entityId));
+      .where(and(eq(agents.id, entityId), eq(agents.organisationId, organisationId)));
     if (agent?.isSystemManaged) {
       const { masterPrompt: _, ...rest } = snapshot;
       return rest;
@@ -159,6 +160,7 @@ export const configHistoryService = {
             and(
               eq(configHistory.entityType, params.entityType),
               eq(configHistory.entityId, params.entityId),
+              eq(configHistory.organisationId, params.organisationId),
               eq(configHistory.version, nextVersion - 1),
             )
           );
@@ -252,7 +254,7 @@ export const configHistoryService = {
 
     if (!row) return null;
     // Redact system-managed agent masterPrompt from API-facing responses
-    const snapshot = await redactSystemAgentSnapshot(entityType, entityId, row.snapshot as Record<string, unknown>);
+    const snapshot = await redactSystemAgentSnapshot(entityType, entityId, organisationId, row.snapshot as Record<string, unknown>);
     return { ...row, snapshot };
   },
 
@@ -277,7 +279,7 @@ export const configHistoryService = {
     // Redact system-managed agent masterPrompts
     const redacted = await Promise.all(
       rows.map(async (row: typeof rows[number]) => {
-        const snapshot = await redactSystemAgentSnapshot(row.entityType, row.entityId, row.snapshot as Record<string, unknown>);
+        const snapshot = await redactSystemAgentSnapshot(row.entityType, row.entityId, organisationId, row.snapshot as Record<string, unknown>);
         return { ...row, snapshot };
       })
     );
