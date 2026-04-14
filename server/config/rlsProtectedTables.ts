@@ -145,6 +145,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0105_agent_intelligence.sql',
     rationale: 'Per-agent cross-run briefing — contains summarised workspace context and recent activity.',
   },
+  // 0112 — Agent Beliefs (Phase 1)
+  {
+    tableName: 'agent_beliefs',
+    schemaFile: 'agentBeliefs.ts',
+    policyMigration: '0112_agent_beliefs.sql',
+    rationale: 'Per-agent discrete beliefs — facts extracted from runs, scoped per subaccount-agent.',
+  },
   {
     tableName: 'subaccount_state_summaries',
     schemaFile: 'subaccountStateSummaries.ts',

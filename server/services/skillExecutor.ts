@@ -86,6 +86,8 @@ export interface SkillExecutionContext {
    */
   allowedSubaccountIds?: string[] | null;
   agentId: string;
+  /** Phase 2C: agent's memory domain derived from agentRole. Used to scope memory search. */
+  agentDomain?: string;
   /**
    * The principal that initiated this run, when known. Populated by
    * agentExecutionService when the AgentRunRequest carries a userId.
@@ -362,6 +364,7 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
         subaccountId: context.subaccountId ?? '',
         includeOtherSubaccounts: (input.includeOtherSubaccounts as boolean) ?? !context.subaccountId,
         topK: (input.topK as number) ?? 10,
+        domain: context.agentDomain,
       });
       return { success: true, results };
     } else if (op === 'read') {

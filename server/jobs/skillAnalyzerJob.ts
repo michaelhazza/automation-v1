@@ -29,7 +29,12 @@ import {
   getJobById,
   clearResultsForJob,
   insertResults,
+  insertSingleResult,
+  markSkillInFlight,
+  unmarkSkillInFlight,
+  updateResultAgentProposals,
 } from '../services/skillAnalyzerService.js';
+import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
 import {
   skillAnalyzerServicePure,
@@ -205,6 +210,23 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     progressMessage: `${exactDuplicates.length} exact duplicate${exactDuplicates.length === 1 ? '' : 's'} found - embedding ${remainingCandidates.length} remaining...`,
     exactDuplicateCount: exactDuplicates.length,
   });
+
+  // Helper: look up the SHA-256 hash for a given candidate index. Defined
+  // here (after Stage 2) so it is available in Stage 5's incremental inserts
+  // as well as Stage 8's batch writes. The hash is computed in Stage 2 and
+  // persisted on each result row for the Phase 4 manual-add PATCH path.
+  const hashByIndex = new Map<number, string>();
+  for (let i = 0; i < candidates.length; i++) {
+    hashByIndex.set(i, candidateHashes[i]);
+  }
+  const getCandidateHash = (idx: number): string => {
+    const h = hashByIndex.get(idx);
+    if (h === undefined) {
+      // Should be unreachable — every candidate is hashed in Stage 2.
+      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
+    }
+    return h;
+  };
 
   // -------------------------------------------------------------------------
   // Stage 3: Embed (20% → 40%)
@@ -406,6 +428,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     progressMessage: classificationFallback
       ? 'LLM classification unavailable - marking candidates for human review...'
       : 'Classifying with AI...',
+    classifyState: {
+      queue: llmQueue.map((m) => candidates[m.candidateIndex].slug),
+      inFlight: {},
+    },
   });
 
   type ClassifiedResult = {
@@ -427,7 +453,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     // original_proposed_merge (immutable) on the result row.
     proposedMerge: object | null;
     classificationFailed: boolean;
-    classificationFailureReason: 'rate_limit' | 'parse_error' | 'unknown' | null;
+    classificationFailureReason: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
   };
 
   const classifiedResults: ClassifiedResult[] = [];
@@ -446,7 +472,15 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
       const candidate = candidates[match.candidateIndex];
       const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
-      if (!matchedLib || !candidate) {
+      if (!candidate) {
+        // Should be unreachable — every index in llmQueue comes from bestMatches
+        // which is bounded by candidates.length. Log and skip to avoid a ghost
+        // entry in classifiedResults with an undefined candidate.
+        console.warn('[SkillAnalyzerJob] candidate undefined for candidateIndex', match.candidateIndex);
+        continue;
+      }
+
+      if (!matchedLib) {
         classifiedResults.push({
           candidateIndex: match.candidateIndex,
           candidate,
@@ -462,9 +496,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           classificationFailed: false,
           classificationFailureReason: null,
         });
+        await insertSingleResult({
+          jobId,
+          candidateIndex: match.candidateIndex,
+          candidateName: candidate.name,
+          candidateSlug: candidate.slug,
+          candidateContentHash: getCandidateHash(match.candidateIndex),
+          matchedSkillId: undefined,
+          classification: 'DISTINCT',
+          confidence: 0.5,
+          similarityScore: match.similarity ?? undefined,
+          classificationReasoning: 'Library skill not found - treating as distinct.',
+          classificationFailed: false,
+          classificationFailureReason: null,
+        });
         continue;
       }
 
+      const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
       classifiedResults.push({
         candidateIndex: match.candidateIndex,
         candidate,
@@ -476,10 +525,26 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
         libraryId: matchedLib.id,
         librarySlug: matchedLib.slug,
         libraryName: matchedLib.name,
-        diffSummary: skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib),
+        diffSummary,
         // No LLM = no merge proposal. Row will fail the null guard on
         // execute (spec §6.3 LLM-fallback path).
         proposedMerge: null,
+        classificationFailed: false,
+        classificationFailureReason: null,
+      });
+      await insertSingleResult({
+        jobId,
+        candidateIndex: match.candidateIndex,
+        candidateName: candidate.name,
+        candidateSlug: candidate.slug,
+        candidateContentHash: getCandidateHash(match.candidateIndex),
+        matchedSkillId: matchedLib.id ?? undefined,
+        classification: 'PARTIAL_OVERLAP',
+        confidence: 0.3,
+        similarityScore: match.similarity ?? undefined,
+        classificationReasoning:
+          'LLM classification unavailable (ANTHROPIC_API_KEY not configured) - routed for human review.',
+        diffSummary: diffSummary ?? undefined,
         classificationFailed: false,
         classificationFailureReason: null,
       });
@@ -499,7 +564,14 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           const candidate = candidates[match.candidateIndex];
           const matchedLib = match.librarySlug ? libraryBySlug.get(match.librarySlug) : null;
 
-          if (!matchedLib || !candidate) {
+          if (!candidate) {
+            // Should be unreachable — indices come from bestMatches which is
+            // bounded by candidates.length. Skip to avoid a ghost entry.
+            console.warn('[SkillAnalyzerJob] candidate undefined for candidateIndex', match.candidateIndex);
+            return;
+          }
+
+          if (!matchedLib) {
             classifiedResults.push({
               candidateIndex: match.candidateIndex,
               candidate,
@@ -515,8 +587,38 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               classificationFailed: false,
               classificationFailureReason: null,
             });
+            // Write immediately — Stage 8 no longer writes classifiedResults rows.
+            await insertSingleResult({
+              jobId,
+              candidateIndex: match.candidateIndex,
+              candidateName: candidate.name,
+              candidateSlug: candidate.slug,
+              candidateContentHash: getCandidateHash(match.candidateIndex),
+              matchedSkillId: undefined,
+              classification: 'DISTINCT',
+              confidence: 0.5,
+              similarityScore: match.similarity ?? undefined,
+              classificationReasoning: 'Library skill not found - treating as distinct.',
+              classificationFailed: false,
+              classificationFailureReason: null,
+            });
             return;
           }
+
+          const startMs = Date.now();
+          console.log('[SkillAnalyzer] classify:start', {
+            jobId,
+            slug: candidate.slug,
+            candidateIndex: match.candidateIndex,
+          });
+          await markSkillInFlight(jobId, candidate.slug, startMs);
+
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(Object.assign(new Error('LLM classify timed out'), { code: 'CLASSIFY_TIMEOUT' })),
+              SKILL_CLASSIFY_TIMEOUT_MS,
+            )
+          );
 
           // Phase 3: use the merge-aware prompt + parser. The system prompt
           // is a superset of the base classifier — it adds instructions for
@@ -536,42 +638,46 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
           const PARSE_FAILURE = { code: 'CLASSIFICATION_PARSE_FAILURE' } as const;
 
           try {
-            classificationResult = await withBackoff(
-              async () => {
-                const response = await anthropicAdapter.call({
-                  model: 'claude-sonnet-4-6',
-                  system,
-                  messages: [{ role: 'user', content: userMessage }],
-                  // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
-                  // with long instructions can never be truncated.
-                  maxTokens: 8192,
-                  temperature: 0.1,
-                });
-                const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
-                if (parsed === null) throw PARSE_FAILURE;
-                return parsed;
-              },
-              {
-                label: `skill-classify-${match.candidateIndex}`,
-                maxAttempts: 3,
-                correlationId: jobId,
-                runId: jobId,
-                isRetryable: (err: unknown) => {
-                  // Parse failures: model produced unparseable output — worth retrying.
-                  if (err === PARSE_FAILURE) return true;
-                  // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
-                  // cannot change between attempts, so retrying just wastes time.
-                  const e = err as { statusCode?: number; code?: string };
-                  if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
-                  return (
-                    e?.statusCode === 429 ||
-                    e?.statusCode === 503 ||
-                    e?.statusCode === 529 ||
-                    e?.code === 'PROVIDER_UNAVAILABLE'
-                  );
+            classificationResult = await Promise.race([
+              withBackoff(
+                async () => {
+                  const response = await anthropicAdapter.call({
+                    model: 'claude-sonnet-4-6',
+                    system,
+                    messages: [{ role: 'user', content: userMessage }],
+                    // 8192 is the Sonnet 4.6 output ceiling — ensures proposedMerge
+                    // with long instructions can never be truncated.
+                    maxTokens: 8192,
+                    temperature: 0.1,
+                  });
+                  const parsed = skillAnalyzerServicePure.parseClassificationResponseWithMerge(response.content);
+                  if (parsed === null) throw PARSE_FAILURE;
+                  return parsed;
                 },
-              }
-            );
+                {
+                  label: `skill-classify-${match.candidateIndex}`,
+                  maxAttempts: 3,
+                  correlationId: jobId,
+                  runId: jobId,
+                  isRetryable: (err: unknown) => {
+                    // Parse failures: model produced unparseable output — worth retrying.
+                    if (err === PARSE_FAILURE) return true;
+                    // PROVIDER_NOT_CONFIGURED is not retryable — the configuration
+                    // cannot change between attempts, so retrying just wastes time.
+                    const e = err as { statusCode?: number; code?: string };
+                    if (e?.code === 'PROVIDER_NOT_CONFIGURED') return false;
+                    if (e?.code === 'CLASSIFY_TIMEOUT') return false;
+                    return (
+                      e?.statusCode === 429 ||
+                      e?.statusCode === 503 ||
+                      e?.statusCode === 529 ||
+                      e?.code === 'PROVIDER_UNAVAILABLE'
+                    );
+                  },
+                }
+              ),
+              timeoutPromise,
+            ]);
           } catch (err) {
             classificationResult = null;
             classificationApiError = err === PARSE_FAILURE ? undefined : err;
@@ -613,6 +719,50 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             classificationFailed,
             classificationFailureReason,
           });
+
+          // Write result immediately — don't wait for Stage 8.
+          // unmarkSkillInFlight is in finally so it always runs even if the
+          // DB insert throws, preventing a permanently stale in-flight record.
+          try {
+            await insertSingleResult({
+              jobId,
+              candidateIndex: match.candidateIndex,
+              candidateName: candidate.name,
+              candidateSlug: candidate.slug,
+              candidateContentHash: getCandidateHash(match.candidateIndex),
+              matchedSkillId: matchedLib.id ?? undefined,
+              classification: finalResult.classification,
+              confidence: finalResult.confidence,
+              similarityScore: match.similarity ?? undefined,
+              classificationReasoning: finalResult.reasoning ?? undefined,
+              diffSummary: diffSummary ?? undefined,
+              proposedMergedContent: finalResult.proposedMerge ?? undefined,
+              originalProposedMerge: finalResult.proposedMerge ?? undefined,
+              classificationFailed,
+              classificationFailureReason: classificationFailureReason ?? null,
+            });
+          } finally {
+            // Wrap unmark in its own try/catch — if it throws, the error must
+            // not propagate out of finally and abort the entire Promise.all.
+            try {
+              await unmarkSkillInFlight(jobId, candidate.slug);
+            } catch (unmarkErr) {
+              console.error('[SkillAnalyzer] unmarkSkillInFlight failed', {
+                jobId,
+                slug: candidate.slug,
+                unmarkErr,
+              });
+            }
+
+            console.log('[SkillAnalyzer] classify:end', {
+              jobId,
+              slug: candidate.slug,
+              durationMs: Date.now() - startMs,
+              classification: finalResult.classification,
+              failed: classificationFailed,
+              failureReason: classificationFailureReason ?? undefined,
+            });
+          }
 
           classifiedCount++;
           const pct = 60 + Math.round((classifiedCount / llmQueue.length) * 30);
@@ -722,24 +872,6 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
   // Collect all result rows
   const resultRows: (typeof skillAnalyzerResults.$inferInsert)[] = [];
 
-  // Helper: look up the SHA-256 hash for a given candidate index. The hash
-  // is computed in Stage 2 (Hash) and was originally only used for dedup.
-  // Phase 1 of skill-analyzer-v2 persists it on the result row so the Phase 4
-  // manual-add PATCH can look up the candidate embedding in skill_embeddings
-  // by content hash without recomputing it. See spec §5.2 candidateContentHash.
-  const hashByIndex = new Map<number, string>();
-  for (let i = 0; i < candidates.length; i++) {
-    hashByIndex.set(i, candidateHashes[i]);
-  }
-  const getCandidateHash = (idx: number): string => {
-    const h = hashByIndex.get(idx);
-    if (h === undefined) {
-      // Should be unreachable — every candidate is hashed in Stage 2.
-      throw new Error(`candidateContentHash missing for candidateIndex=${idx}`);
-    }
-    return h;
-  };
-
   // Exact duplicates from Stage 2
   for (const dup of exactDuplicates) {
     const candidate = candidates[dup.candidateIndex];
@@ -781,43 +913,24 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
     });
   }
 
-  // LLM-classified from Stage 5
-  for (const r of classifiedResults) {
-    resultRows.push({
-      jobId,
-      candidateIndex: r.candidateIndex,
-      candidateName: r.candidate.name,
-      candidateSlug: r.candidate.slug,
-      candidateContentHash: getCandidateHash(r.candidateIndex),
-      matchedSkillId: r.libraryId ?? undefined,
-      classification: r.classification,
-      confidence: r.confidence,
-      similarityScore: r.similarityScore ?? undefined,
-      classificationReasoning: r.classificationReasoning ?? undefined,
-      diffSummary: r.diffSummary ?? undefined,
-      // Phase 2: agent proposals only for LLM-classified DISTINCT results.
-      // The agent-propose stage above populates the map for both bands.
-      agentProposals: agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [],
-      // Phase 3: persist the LLM merge proposal into BOTH the mutable
-      // proposed_merged_content column AND the immutable
-      // original_proposed_merge column. They are identical at write time
-      // and diverge only when the user edits the Recommended column via
-      // the Phase 5 PATCH endpoint. Reset endpoint copies original back
-      // into proposedMergedContent. Null on every non-merge path.
-      proposedMergedContent: r.proposedMerge ?? undefined,
-      originalProposedMerge: r.proposedMerge ?? undefined,
-      classificationFailed: r.classificationFailed ?? false,
-      classificationFailureReason: r.classificationFailureReason ?? null,
-    });
-  }
-
   // Insert via service (avoids direct db import in jobs)
   await insertResults(resultRows);
+
+  // Backfill agentProposals onto classified-DISTINCT rows. These rows were
+  // written incrementally in Stage 5 (before Stage 7 ran), so their
+  // agentProposals column is still the default []. Patch them now.
+  const classifiedDistinct = classifiedResults.filter(
+    (r) => r.classification === 'DISTINCT',
+  );
+  for (const r of classifiedDistinct) {
+    const proposals = agentProposalsByCandidateIndex.get(r.candidateIndex) ?? [];
+    await updateResultAgentProposals(jobId, r.candidateIndex, proposals);
+  }
 
   await updateJobProgress(jobId, {
     status: 'completed',
     progressPct: 100,
-    progressMessage: `Analysis complete - ${resultRows.length} result${resultRows.length === 1 ? '' : 's'}.`,
+    progressMessage: `Analysis complete - ${candidates.length} result${candidates.length === 1 ? '' : 's'}.`,
     completedAt: new Date(),
   });
 }

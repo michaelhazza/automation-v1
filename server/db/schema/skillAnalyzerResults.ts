@@ -52,7 +52,7 @@ export const skillAnalyzerResults = pgTable(
     // LLM call failed (429, parse error) — NOT set for genuine PARTIAL_OVERLAP
     // results. Used to distinguish retryable failures from model output.
     classificationFailed: boolean('classification_failed').notNull().default(false),
-    // Reason for the failure: 'rate_limit' | 'parse_error' | 'unknown'.
+    // Reason for the failure: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown'.
     // Null on all rows where classificationFailed is false.
     classificationFailureReason: text('classification_failure_reason'),
 

@@ -78,6 +78,13 @@ export interface AnalysisJob {
    *  inventory, populated for the Phase 4 "Add another system agent..."
    *  combobox. Empty when there are no system agents. */
   availableSystemAgents?: AvailableSystemAgent[];
+  updatedAt: string;
+  /** Phase UX: per-skill classification state written at Stage 5 start.
+   *  Used by the processing step to show live per-skill rows. */
+  classifyState?: {
+    queue?: string[];
+    inFlight?: Record<string, number>; // slug → startedAtMs (server ms)
+  } | null;
 }
 
 export interface AnalysisResult {
@@ -131,7 +138,7 @@ export interface AnalysisResult {
   classificationFailed?: boolean;
   /** Task 3: reason for the failure: 'rate_limit' | 'parse_error' | 'unknown'.
    *  Null on rows where classificationFailed is false or undefined. */
-  classificationFailureReason?: 'rate_limit' | 'parse_error' | 'unknown' | null;
+  classificationFailureReason?: 'rate_limit' | 'parse_error' | 'timed_out' | 'unknown' | null;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

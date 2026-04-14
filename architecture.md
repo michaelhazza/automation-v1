@@ -787,6 +787,37 @@ The `handoffJson` block in the briefing LLM prompt is delimited by `<run-outcome
 
 ---
 
+## Agent Beliefs (Phase 1)
+
+Discrete, confidence-scored facts per agent-subaccount — individually addressable, auto-extracted from run outcomes, designed for Phase 2 state evolution.
+
+### Schema
+
+`agent_beliefs` table (`server/db/schema/agentBeliefs.ts`) — one row per belief. Partial unique index on `(organisationId, subaccountId, agentId, beliefKey)` where `deletedAt IS NULL AND supersededBy IS NULL` ensures one active belief per key. RLS-protected.
+
+### Key columns
+
+`beliefKey` (stable slug), `category` (general|preference|workflow|relationship|metric), `subject`, `value`, `confidence` (0-1), `evidenceCount`, `source` (agent|user_override), `confidenceReason`, `lastReinforcedAt`, `supersededBy`/`supersededAt` (nullable Phase 1, wired Phase 2).
+
+### How it works
+
+1. **Extraction** — after every run, the `agent-briefing-update` job calls `agentBeliefService.extractAndMerge()` (fire-and-forget, after briefing). An LLM call extracts up to 10 beliefs with actions: add/update/reinforce/remove.
+2. **Merge** — authoritative merge logic. LLM action is a hint; the service determines the effective action from DB state. Key normalization via `KEY_ALIASES` map. Semantic value comparison prevents false updates. Optimistic concurrency with per-belief retry. User-override beliefs are never modified by agents.
+3. **Injection** — at run start, `agentBeliefService.getActiveBeliefs()` fetches beliefs ordered by category/confidence/key, budget-truncated to `BELIEFS_TOKEN_BUDGET` (1500 tokens). Injected as `## Your Beliefs` in the dynamic suffix, after briefing.
+4. **User override** — PUT route sets `source: 'user_override'` with `confidence: 1.0`. Agent extraction skips user-override beliefs entirely.
+5. **Post-merge cleanup** — beliefs below `BELIEFS_CONFIDENCE_FLOOR` (0.1) soft-deleted. Excess above `BELIEFS_MAX_ACTIVE` (50) trimmed by lowest confidence.
+
+### Files
+
+- Service: `server/services/agentBeliefService.ts`
+- Schema: `server/db/schema/agentBeliefs.ts`
+- Migration: `migrations/0112_agent_beliefs.sql`
+- Limits: `server/config/limits.ts` (BELIEFS_* constants)
+- Routes: `server/routes/subaccountAgents.ts` (GET/PUT/DELETE)
+- Spec: `docs/beliefs-spec.md`
+
+---
+
 ## Subaccount State Summary (Agent Intelligence Upgrade Phase 3B)
 
 A structured operational snapshot injected into the system prompt so agents have immediate situational awareness without running data-fetching tool calls first.

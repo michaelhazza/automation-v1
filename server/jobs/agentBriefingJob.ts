@@ -4,6 +4,10 @@
  * Payload contract and handler for the `agent-briefing-update` queue.
  * The worker is registered in queueService.ts alongside all other workers.
  * Enqueued after run completion (no cron schedule).
+ *
+ * updateAfterRun() makes a single combined LLM call that produces both the
+ * briefing narrative and a belief extraction array, then merges the beliefs
+ * internally. No separate belief extraction step is needed here.
  */
 
 // ---------------------------------------------------------------------------

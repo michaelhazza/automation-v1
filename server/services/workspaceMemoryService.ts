@@ -104,6 +104,28 @@ const TOPIC_KEYWORDS: Record<string, readonly string[]> = {
   product:   ['product', 'feature', 'release', 'roadmap'],
 };
 
+/**
+ * Map an agent's role (from agents.agentRole) to a memory domain.
+ * Returns null when the role doesn't map to a known domain — callers
+ * should treat null as "no domain scoping" (search everything).
+ */
+export function agentRoleToDomain(role: string | null | undefined): string | null {
+  if (!role) return null;
+  const lower = role.toLowerCase();
+  // Direct matches first
+  for (const domain of Object.keys(DOMAIN_KEYWORDS)) {
+    if (lower.includes(domain)) return domain;
+  }
+  // Common role names that map to domains
+  if (/sales|account.exec|bdr|sdr|business.dev/.test(lower)) return 'crm';
+  if (/analyst|intelligence|data/.test(lower)) return 'reporting';
+  if (/seo|content|social|brand|geo/.test(lower)) return 'marketing';
+  if (/engineer|developer|devops/.test(lower)) return 'dev';
+  if (/accounting|bookkeep|cfo/.test(lower)) return 'finance';
+  if (/coordinator|operations|admin|onboard/.test(lower)) return 'ops';
+  return null;
+}
+
 function classifyDomainTopic(content: string): { domain: string | null; topic: string | null } {
   const lower = content.toLowerCase();
   let bestDomain: string | null = null;
@@ -332,6 +354,7 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
         AND embedding IS NOT NULL
         AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
         ${taskFilter}
+        ${domainFilter}
       ORDER BY embedding <=> ${vectorLiteral}::vector
       LIMIT ${topK}
     `);
@@ -898,6 +921,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     queryText: string,
     taskSlug?: string,
     orgId?: string,
+    domain?: string,
   ): Promise<Array<{ content: string; similarity: number; confidence: 'high' | 'medium' | 'low' }>> {
     const results = await _hybridRetrieve({
       subaccountId,
@@ -906,6 +930,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       queryEmbedding,
       qualityThreshold,
       taskSlug,
+      domain,
       topK: VECTOR_SEARCH_LIMIT,
     });
 
@@ -925,6 +950,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
     includeOtherSubaccounts?: boolean;
     topK?: number;
     queryEmbedding?: number[];
+    domain?: string;
   }): Promise<Array<{
     id: string;
     score: number;
@@ -944,6 +970,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       qualityThreshold: 0,
       topK,
       includeOtherSubaccounts: params.includeOtherSubaccounts,
+      domain: params.domain,
     });
 
     return results.map(r => ({
@@ -1000,7 +1027,8 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
   async getMemoryForPrompt(
     organisationId: string,
     subaccountId: string,
-    taskContext?: string
+    taskContext?: string,
+    domain?: string,
   ): Promise<string | null> {
     const memory = await this.getMemory(organisationId, subaccountId);
 
@@ -1025,6 +1053,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
             queryText,
             undefined,
             organisationId,
+            domain,
           );
 
           recallSpan.end({

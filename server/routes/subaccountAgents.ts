@@ -3,6 +3,7 @@ import { authenticate, requireOrgPermission, requireSubaccountPermission } from 
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { subaccountAgentService } from '../services/subaccountAgentService.js';
+import { agentBeliefService } from '../services/agentBeliefService.js';
 import { agentScheduleService } from '../services/agentScheduleService.js';
 import { resolveSubaccount } from '../lib/resolveSubaccount.js';
 import { validateBody } from '../middleware/validate.js';
@@ -211,6 +212,61 @@ router.delete(
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     await subaccountAgentService.removeSubaccountDataSource(req.params.sourceId, req.params.linkId);
     res.json({ message: 'Data source removed' });
+  })
+);
+
+// ─── Beliefs ─────────────────────────────────────────────────────────────────
+
+router.get(
+  '/api/subaccounts/:subaccountId/agents/:linkId/beliefs',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_VIEW),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const link = await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
+    const beliefs = await agentBeliefService.listAllActiveBeliefs(
+      req.orgId!,
+      req.params.subaccountId,
+      link.agentId,
+    );
+    res.json(beliefs);
+  })
+);
+
+router.put(
+  '/api/subaccounts/:subaccountId/agents/:linkId/beliefs/:beliefKey',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const link = await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
+    const { value, category, subject } = req.body as { value?: string; category?: string; subject?: string };
+    if (!value || typeof value !== 'string') { res.status(400).json({ error: 'value is required' }); return; }
+    const belief = await agentBeliefService.upsertUserOverride(
+      req.orgId!,
+      req.params.subaccountId,
+      link.agentId,
+      req.params.beliefKey,
+      { value, category, subject },
+    );
+    res.json(belief);
+  })
+);
+
+router.delete(
+  '/api/subaccounts/:subaccountId/agents/:linkId/beliefs/:beliefKey',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.SUBACCOUNTS_EDIT),
+  asyncHandler(async (req, res) => {
+    await resolveSubaccount(req.params.subaccountId, req.orgId!);
+    const link = await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
+    // Direct DB lookup — not budget-truncated like getActiveBeliefs
+    const target = await agentBeliefService.findBeliefByKey(
+      req.orgId!, req.params.subaccountId, link.agentId, req.params.beliefKey,
+    );
+    if (!target) { res.status(404).json({ error: 'Belief not found' }); return; }
+    await agentBeliefService.softDelete(req.orgId!, req.params.subaccountId, link.agentId, target.id);
+    res.json({ deleted: true, beliefKey: req.params.beliefKey });
   })
 );
 

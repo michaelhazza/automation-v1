@@ -506,6 +506,42 @@ These exist in the source repos but don't transfer to our architecture.
 
 ---
 
+## MemPalace Post-Mortem (2026-04-13)
+
+> Community debunked MemPalace's benchmark claims within 24 hours of launch. This section corrects the record.
+
+### What fell apart
+
+| Claim | Reality |
+|-------|---------|
+| 96.6% LongMemEval / 100% LoCoMo | LoCoMo 100% was meaningless — top-k exceeded corpus size, so it returned the entire dataset. LongMemEval score not independently reproduced. |
+| "30x lossless compression" (AAAK dialect) | Actually lossy summarisation. Independent tests show >10% retrieval accuracy drop. Save pennies on input tokens, spend dollars on agent retries from mangled context. |
+| Palace structure drives retrieval quality | Vanilla ChromaDB did most of the work. The wing/room/drawer hierarchy contributed only marginally to retrieval accuracy. |
+| Independent BEAM 100K benchmark | 49% answer quality — the honest number, vs the 96.6% marketing claim. |
+
+### Code quality assessment
+
+The repo is AI-generated spaghetti. Many "advanced" features (automated memory conflict resolution, etc.) are empty stubs or placeholder functions. It's a prototype masquerading as a finished product. The "Memory Palace" metaphor is a hierarchical folder structure any dev could build over a weekend on top of ChromaDB.
+
+### What it actually is
+
+A retrieval layer, not a reasoning engine. Works locally and has a functional MCP server for Claude Desktop. If you want a visual dashboard for local RAG, it's a neat toy — nothing more.
+
+### What we're keeping from the analysis
+
+The patterns extracted in this doc (query sanitization, temporal validity, similarity dedup, hierarchical metadata, agent briefing) remain valid — they're well-established retrieval patterns that MemPalace happened to implement. They don't depend on MemPalace's benchmark claims being true.
+
+### What replaces it for Brain's world model layer
+
+- **Week 1:** `beliefs.json` via AgentOS persistence. Simple, working, proven. Close the loop on flat JSON first.
+- **Next:** [anda-hippocampus (ldclabs)](https://github.com/ldclabs/anda-hippocampus) — graph-native, bio-inspired sleep consolidation, contradiction detection with state evolution (not overwrite), complete cognitive timeline. Swap once the loop is stable, not before.
+
+### Status
+
+**WATCH.** The method of loci concept is still interesting, the contradiction detection pattern is worth stealing, but the benchmarks didn't hold up. No integration planned.
+
+---
+
 ## Executive Summary
 
 ### The core insight
@@ -513,7 +549,7 @@ These exist in the source repos but don't transfer to our architecture.
 All three repos converge on the same thesis: **AI agents are bottlenecked by context quality, not model capability.** Better retrieval, better memory organisation, and better pre-computed intelligence produce dramatically better agent outputs — often at lower cost.
 
 - **Repowise** proves this for code: pre-computed structure (AST, dependency graph, git analytics) enables 27x fewer tokens per query than raw code dumping.
-- **MemPalace** proves this for memory: verbatim storage with good metadata (temporal validity, hierarchical tags) scores 96.6% retrieval vs 84% for summarisation-based systems.
+- **MemPalace** claimed this for memory: verbatim storage with metadata scores 96.6% retrieval — but benchmarks were debunked (see Post-Mortem above; honest independent score: 49% on BEAM 100K). The underlying patterns (temporal validity, hierarchical tags, query sanitization) remain sound even though the product didn't deliver.
 - **engraph** proves this for search: multi-lane retrieval with intent-adaptive fusion produces markedly better results than any single search method.
 
 ### What this means for Automation OS

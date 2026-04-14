@@ -14,6 +14,11 @@ import { users } from './users';
 // Skill Analyzer Jobs — tracks import/analysis sessions (one row per import)
 // ---------------------------------------------------------------------------
 
+export interface ClassifyState {
+  queue?: string[];                   // slugs entering LLM queue, written once at Stage 5 start
+  inFlight?: Record<string, number>;  // slug → startedAtMs (server Date.now())
+}
+
 export const skillAnalyzerJobs = pgTable(
   'skill_analyzer_jobs',
   {
@@ -51,6 +56,9 @@ export const skillAnalyzerJobs = pgTable(
 
     // Raw parsed candidates (JSONB array for replay/debug)
     parsedCandidates: jsonb('parsed_candidates'),
+
+    // Classification state tracking
+    classifyState: jsonb('classify_state').$type<ClassifyState>().notNull().default({}),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

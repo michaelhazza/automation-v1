@@ -135,6 +135,8 @@ export const TASK_TYPES = [
   // post-retrieval context enrichment, both issued by workspaceMemoryService.
   'hyde_expansion',
   'context_enrichment',
+  // Agent beliefs extraction — LLM call to extract/merge discrete facts after a run.
+  'belief_extraction',
 ] as const;
 
 export type TaskType = typeof TASK_TYPES[number];
