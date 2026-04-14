@@ -48,7 +48,7 @@ router.post(
       .where(and(eq(agents.id, agentId), eq(agents.organisationId, req.orgId!)));
     if (targetAgent?.systemAgentSlug === 'configuration-assistant') {
       const [sa] = await db.select({ isOrgSubaccount: subaccounts.isOrgSubaccount }).from(subaccounts)
-        .where(eq(subaccounts.id, req.params.subaccountId));
+        .where(and(eq(subaccounts.id, req.params.subaccountId), eq(subaccounts.organisationId, req.orgId!)));
       if (!sa?.isOrgSubaccount) {
         throw { statusCode: 400, message: 'Configuration Assistant can only be linked to the org subaccount' };
       }

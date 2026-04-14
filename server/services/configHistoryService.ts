@@ -1,6 +1,14 @@
 import { eq, and, desc, max, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { configHistory } from '../db/schema/index.js';
+import { configHistory, agents } from '../db/schema/index.js';
+
+/** Canonical set of entity types tracked by config history. */
+export const CONFIG_HISTORY_ENTITY_TYPES = new Set([
+  'agent', 'subaccount_agent', 'scheduled_task', 'agent_data_source',
+  'skill', 'policy_rule', 'permission_set', 'subaccount',
+  'workspace_limits', 'org_budget', 'mcp_server_config',
+  'agent_trigger', 'connector_config', 'integration_connection',
+]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,6 +95,31 @@ function stripSensitiveFields(snapshot: Record<string, unknown>): Record<string,
   return clean;
 }
 
+/**
+ * Redact masterPrompt from agent snapshots when the agent is system-managed.
+ * System agent masterPrompts are platform IP and should not be exposed to org admins.
+ */
+async function redactSystemAgentSnapshot(
+  entityType: string,
+  entityId: string,
+  snapshot: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (entityType !== 'agent') return snapshot;
+  try {
+    const [agent] = await db
+      .select({ isSystemManaged: agents.isSystemManaged })
+      .from(agents)
+      .where(eq(agents.id, entityId));
+    if (agent?.isSystemManaged) {
+      const { masterPrompt: _, ...rest } = snapshot;
+      return rest;
+    }
+  } catch {
+    // Agent may have been deleted — return snapshot unmodified
+  }
+  return snapshot;
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -99,54 +132,64 @@ export const configHistoryService = {
    */
   async recordHistory(params: RecordHistoryParams): Promise<void> {
     const snapshot = stripSensitiveFields(params.snapshot);
+    const MAX_RETRIES = 3;
 
-    // Compute next version for this entity
-    const [maxRow] = await db
-      .select({ maxVersion: max(configHistory.version) })
-      .from(configHistory)
-      .where(
-        and(
-          eq(configHistory.entityType, params.entityType),
-          eq(configHistory.entityId, params.entityId),
-        )
-      );
-
-    const nextVersion = (maxRow?.maxVersion ?? 0) + 1;
-
-    // Compute change summary if not provided
-    let changeSummary = params.changeSummary;
-    if (!changeSummary && nextVersion > 1) {
-      // Fetch previous snapshot for diff
-      const [prev] = await db
-        .select({ snapshot: configHistory.snapshot })
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      // Read current max version (scoped by org for correctness)
+      const [maxRow] = await db
+        .select({ maxVersion: max(configHistory.version) })
         .from(configHistory)
         .where(
           and(
             eq(configHistory.entityType, params.entityType),
             eq(configHistory.entityId, params.entityId),
-            eq(configHistory.version, nextVersion - 1),
+            eq(configHistory.organisationId, params.organisationId),
           )
         );
-      changeSummary = generateChangeSummary(
-        params.entityType,
-        prev?.snapshot as Record<string, unknown> | null,
-        snapshot,
-      );
-    } else if (!changeSummary) {
-      changeSummary = 'Entity created';
-    }
 
-    await db.insert(configHistory).values({
-      organisationId: params.organisationId,
-      entityType: params.entityType,
-      entityId: params.entityId,
-      version: nextVersion,
-      snapshot,
-      changedBy: params.changedBy,
-      changeSource: params.changeSource,
-      sessionId: params.sessionId ?? null,
-      changeSummary,
-    });
+      const nextVersion = (maxRow?.maxVersion ?? 0) + 1;
+
+      // Compute change summary if not provided
+      let changeSummary = params.changeSummary;
+      if (!changeSummary && nextVersion > 1) {
+        const [prev] = await db
+          .select({ snapshot: configHistory.snapshot })
+          .from(configHistory)
+          .where(
+            and(
+              eq(configHistory.entityType, params.entityType),
+              eq(configHistory.entityId, params.entityId),
+              eq(configHistory.version, nextVersion - 1),
+            )
+          );
+        changeSummary = generateChangeSummary(
+          params.entityType,
+          prev?.snapshot as Record<string, unknown> | null,
+          snapshot,
+        );
+      } else if (!changeSummary) {
+        changeSummary = 'Entity created';
+      }
+
+      try {
+        await db.insert(configHistory).values({
+          organisationId: params.organisationId,
+          entityType: params.entityType,
+          entityId: params.entityId,
+          version: nextVersion,
+          snapshot,
+          changedBy: params.changedBy,
+          changeSource: params.changeSource,
+          sessionId: params.sessionId ?? null,
+          changeSummary,
+        });
+        return; // Success — exit retry loop
+      } catch (err) {
+        const isUniqueViolation = (err as { code?: string }).code === '23505';
+        if (!isUniqueViolation || attempt === MAX_RETRIES - 1) throw err;
+        // Unique constraint violation on (entity_type, entity_id, version) — retry with new version
+      }
+    }
   },
 
   /**
@@ -207,7 +250,10 @@ export const configHistoryService = {
         )
       );
 
-    return row ?? null;
+    if (!row) return null;
+    // Redact system-managed agent masterPrompt from API-facing responses
+    const snapshot = await redactSystemAgentSnapshot(entityType, entityId, row.snapshot as Record<string, unknown>);
+    return { ...row, snapshot };
   },
 
   /**
@@ -228,13 +274,20 @@ export const configHistoryService = {
       )
       .orderBy(desc(configHistory.changedAt));
 
-    return rows;
+    // Redact system-managed agent masterPrompts
+    const redacted = await Promise.all(
+      rows.map(async (row: typeof rows[number]) => {
+        const snapshot = await redactSystemAgentSnapshot(row.entityType, row.entityId, row.snapshot as Record<string, unknown>);
+        return { ...row, snapshot };
+      })
+    );
+    return redacted;
   },
 
   /**
    * Get the latest version number for an entity (0 if no history exists).
    */
-  async getLatestVersion(entityType: string, entityId: string): Promise<number> {
+  async getLatestVersion(entityType: string, entityId: string, organisationId: string): Promise<number> {
     const [row] = await db
       .select({ maxVersion: max(configHistory.version) })
       .from(configHistory)
@@ -242,6 +295,7 @@ export const configHistoryService = {
         and(
           eq(configHistory.entityType, entityType),
           eq(configHistory.entityId, entityId),
+          eq(configHistory.organisationId, organisationId),
         )
       );
 

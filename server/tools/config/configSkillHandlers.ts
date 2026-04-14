@@ -13,6 +13,7 @@ import { scheduledTaskService } from '../../services/scheduledTaskService.js';
 import { systemSkillService } from '../../services/systemSkillService.js';
 import { skillService } from '../../services/skillService.js';
 import { configHistoryService } from '../../services/configHistoryService.js';
+import { boardService } from '../../services/boardService.js';
 import { db } from '../../db/index.js';
 import { subaccounts, agents } from '../../db/schema/index.js';
 import { eq, and, isNull } from 'drizzle-orm';
@@ -188,9 +189,10 @@ export async function executeConfigSetLinkInstructions(
 ): Promise<unknown> {
   const linkId = String(input.linkId ?? '');
   if (!linkId) return { success: false, error: 'linkId is required' };
-  const customInstructions = String(input.customInstructions ?? '');
-  if (!customInstructions) return { success: false, error: 'customInstructions is required' };
-  if (customInstructions.length > 10000) return { success: false, error: 'customInstructions exceeds 10000 characters' };
+  // Allow empty string to clear custom instructions; only reject if not provided at all
+  if (input.customInstructions === undefined) return { success: false, error: 'customInstructions is required' };
+  const customInstructions = input.customInstructions === null ? null : String(input.customInstructions);
+  if (customInstructions && customInstructions.length > 10000) return { success: false, error: 'customInstructions exceeds 10000 characters' };
 
   try {
     const result = await subaccountAgentService.updateLink(context.organisationId, linkId, { customInstructions });
@@ -265,6 +267,11 @@ export async function executeConfigCreateSubaccount(
         updatedAt: new Date(),
       })
       .returning();
+
+    // Auto-init board config (matches subaccount creation route behaviour)
+    boardService.initSubaccountBoard(context.organisationId, sa.id).catch(() => {
+      // Non-critical: if org has no board config, skip silently
+    });
 
     await configHistoryService.recordHistory({
       entityType: 'subaccount',
@@ -395,9 +402,13 @@ export async function executeConfigUpdateDataSource(
   }
 
   try {
-    // Data source updates require agentId — look up from the data source
+    // Data source updates require agentId — look up with org scoping
     const { agentDataSources } = await import('../../db/schema/index.js');
-    const [ds] = await db.select().from(agentDataSources).where(eq(agentDataSources.id, dataSourceId));
+    const [ds] = await db
+      .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
+      .from(agentDataSources)
+      .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+      .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
     const result = await agentService.updateDataSource(dataSourceId, ds.agentId, context.organisationId, patch as Parameters<typeof agentService.updateDataSource>[3]);
@@ -417,7 +428,11 @@ export async function executeConfigRemoveDataSource(
 
   try {
     const { agentDataSources } = await import('../../db/schema/index.js');
-    const [ds] = await db.select().from(agentDataSources).where(eq(agentDataSources.id, dataSourceId));
+    const [ds] = await db
+      .select({ id: agentDataSources.id, agentId: agentDataSources.agentId })
+      .from(agentDataSources)
+      .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+      .where(and(eq(agentDataSources.id, dataSourceId), eq(agents.organisationId, context.organisationId)));
     if (!ds) return { success: false, error: 'Data source not found' };
 
     await agentService.deleteDataSource(dataSourceId, ds.agentId, context.organisationId);
@@ -530,11 +545,29 @@ export async function executeConfigListDataSources(
     let rows;
 
     if (input.agentId) {
-      rows = await db.select().from(agentDataSources)
-        .where(eq(agentDataSources.agentId, String(input.agentId)));
+      // Org-scoped: join through agents to verify ownership
+      rows = await db
+        .select({
+          id: agentDataSources.id, name: agentDataSources.name,
+          sourceType: agentDataSources.sourceType, sourcePath: agentDataSources.sourcePath,
+          loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
+        })
+        .from(agentDataSources)
+        .innerJoin(agents, eq(agentDataSources.agentId, agents.id))
+        .where(and(eq(agentDataSources.agentId, String(input.agentId)), eq(agents.organisationId, context.organisationId)));
     } else if (input.subaccountAgentId) {
-      rows = await db.select().from(agentDataSources)
-        .where(eq(agentDataSources.subaccountAgentId, String(input.subaccountAgentId)));
+      // Org-scoped: subaccountAgentService.getLinkById verifies org ownership
+      const { subaccountAgents } = await import('../../db/schema/index.js');
+      rows = await db
+        .select({
+          id: agentDataSources.id, name: agentDataSources.name,
+          sourceType: agentDataSources.sourceType, sourcePath: agentDataSources.sourcePath,
+          loadingMode: agentDataSources.loadingMode, priority: agentDataSources.priority,
+        })
+        .from(agentDataSources)
+        .innerJoin(subaccountAgents, eq(agentDataSources.subaccountAgentId, subaccountAgents.id))
+        .innerJoin(agents, eq(subaccountAgents.agentId, agents.id))
+        .where(and(eq(agentDataSources.subaccountAgentId, String(input.subaccountAgentId)), eq(agents.organisationId, context.organisationId)));
     } else {
       return { success: false, error: 'One of agentId or subaccountAgentId is required' };
     }
@@ -759,7 +792,7 @@ export async function executeConfigRestoreVersion(
       changeSummary: `Restored to version ${version}`,
     });
 
-    const newVersion = await configHistoryService.getLatestVersion(entityType, entityId);
+    const newVersion = await configHistoryService.getLatestVersion(entityType, entityId, context.organisationId);
     return { success: true, restoredToVersion: version, newVersion };
   } catch (err) {
     const e = err as { message?: string };

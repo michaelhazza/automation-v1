@@ -148,18 +148,18 @@ function formatConvDate(dateStr: string): string {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-/** Try to extract a JSON config plan from an assistant message. */
+/** Try to extract a JSON config plan from a code block in an assistant message. */
 function extractPlan(content: string): ConfigPlan | null {
-  // Look for JSON in code blocks first
+  // Only parse JSON from code blocks — avoids false positives on free-text JSON
   const codeBlockMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-  const candidate = codeBlockMatch ? codeBlockMatch[1] : content;
+  if (!codeBlockMatch) return null;
   try {
-    const parsed = JSON.parse(candidate);
+    const parsed = JSON.parse(codeBlockMatch[1]);
     if (parsed && typeof parsed === 'object' && Array.isArray(parsed.steps) && parsed.summary) {
       return parsed as ConfigPlan;
     }
   } catch {
-    // Not a plan — normal message
+    // Not valid JSON or not a plan
   }
   return null;
 }
@@ -380,7 +380,10 @@ export default function ConfigAssistantPage({ user: _user }: { user: User }) {
 
   const handleCancelPlan = () => {
     setActivePlan(null);
-    handleSend('Cancel the proposed plan.');
+    // Only send cancel message if not currently mid-send (avoids silent no-op)
+    if (!sending) {
+      handleSend('Cancel the proposed plan.');
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
