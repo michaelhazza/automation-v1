@@ -204,6 +204,10 @@ CREATE UNIQUE INDEX skill_versions_idempotency_uniq
   ON skill_versions (COALESCE(system_skill_id, skill_id), idempotency_key)
   WHERE idempotency_key IS NOT NULL;
 
+-- Performance index for Skill Studio history queries (version timeline)
+CREATE INDEX skill_versions_skill_created_idx
+  ON skill_versions (COALESCE(system_skill_id, skill_id), created_at DESC);
+
 -- =============================================================================
 -- Part 3: Subaccount skill permissions
 -- =============================================================================
@@ -350,6 +354,14 @@ if (missingSlugs.length > 0) {
 ```
 
 Where `tierPrecedence` returns 3 for subaccount, 2 for org, 1 for built-in. Within the same tier, conflicts are resolved deterministically by `createdAt DESC` (newest wins). This reduces the per-agent resolution from N queries to 1-2 queries regardless of skill count.
+
+**Output ordering:** The final resolved skills array MUST preserve the original `skillSlugs` ordering after precedence resolution. Build the result by mapping over the input array, not by iterating the resolution map:
+
+```typescript
+const resolved = skillSlugs
+  .map(slug => resolvedBySlug.get(slug))
+  .filter(Boolean);
+```
 
 **Instruction payload size guard:** After resolving all skills, enforce a total instruction size limit to prevent LLM context blowout when many skills are concatenated:
 
@@ -685,6 +697,13 @@ Phase 2 options:
 - **Hard delete with grace period:** After 30 days in soft-deleted state, permanently delete
 - **No action needed short-term:** Partial indexes mean slug reuse works immediately after soft delete. Table bloat is a long-term concern, not an immediate one.
 
+#### 2.9.3 Accepted tradeoffs (conscious decisions, not gaps)
+
+- **Subaccount skill count limit is a soft cap.** Two concurrent creates can both pass the count check and exceed `MAX_SKILLS_PER_SUBACCOUNT` by 1. Accepted: strict enforcement would require a transactional lock on count, adding complexity for negligible benefit.
+- **Cross-table slug guard ignores soft-deleted rows.** A transient race is theoretically possible where a soft-delete commit interleaves with a cross-table slug check. Accepted: partial indexes already exclude deleted rows for same-table uniqueness, and the cross-table case requires two simultaneous creates of the same slug across different tables — vanishingly unlikely.
+- **Partial restore produces multi-pass version history.** If a restore fails mid-loop and retries, version history may contain entries from the partial attempt followed by the complete attempt. Accepted: idempotency keys on version writes prevent duplicates, and the version timeline accurately reflects what happened. No data corruption; just verbose history.
+- **Definition validation is structural, not schema-conformant.** `input_schema` is validated as a JSON object but not against JSON Schema Draft-07. Full schema validation is deferred to Phase 2.
+
 ---
 
 ## 3. Feature B: Comprehensive Skill Version History
@@ -847,6 +866,7 @@ This helper is intentionally thin -- it owns only the version-number increment a
 2. **Parent row lock:** The helper locks the parent skill row (`system_skills` or `skills`) with `SELECT ... FOR UPDATE` before computing the next version number. Because the parent row always exists (the skill create/update precedes the version write in the same transaction), this lock is never empty — even for the very first version of a newly created skill. This serialises all concurrent version writes for the same skill, guaranteeing sequential version numbers.
 3. **Unique constraint safety net:** `skill_versions_version_uniq` on `(COALESCE(system_skill_id, skill_id), version_number)` catches any edge case where the lock is bypassed (e.g. a code path that forgets to use the helper). A unique violation here is a bug, not expected control flow.
 4. **Idempotency:** For retry-prone paths (analyser, restore), callers pass an `idempotencyKey` (e.g. `sa:${jobId}:${skillId}:create`). The UNIQUE constraint on `(COALESCE(system_skill_id, skill_id), idempotency_key)` + ON CONFLICT DO NOTHING prevents version spam on retries.
+5. **Write placement:** Version writes MUST occur immediately after the skill mutation within the same transactional scope, with no intermediate async boundaries or interleaved logic. This prevents subtle drift if a future refactor moves the version write away from the mutation.
 
 **Drizzle schema update** (`server/db/schema/skillVersions.ts`): Add the two new columns:
 
@@ -1367,6 +1387,7 @@ If the migration needs to be reverted:
 DELETE FROM permissions WHERE key IN ('subaccount.skills.view', 'subaccount.skills.manage');
 
 -- Reverse Part 2: skill_versions integrity
+DROP INDEX IF EXISTS skill_versions_skill_created_idx;
 DROP INDEX IF EXISTS skill_versions_idempotency_uniq;
 DROP INDEX IF EXISTS skill_versions_version_uniq;
 ALTER TABLE skill_versions DROP COLUMN IF EXISTS idempotency_key;
