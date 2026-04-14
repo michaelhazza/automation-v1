@@ -142,11 +142,10 @@ export const agentBeliefService = {
 
   /**
    * Merge a raw beliefs array (already parsed from LLM output) into the DB.
-   * Called by agentBriefingJob after the combined briefing+beliefs LLM call,
+   * Called by agentBriefingService after the combined briefing+beliefs LLM call,
    * and internally by extractAndMerge after its standalone LLM call.
    *
-   * Safe to call fire-and-forget — throws on unexpected errors so the caller
-   * can decide whether to swallow or propagate.
+   * Throws on unexpected DB errors — callers must wrap in try/catch.
    */
   async mergeExtracted(
     orgId: string,

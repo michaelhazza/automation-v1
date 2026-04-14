@@ -7,9 +7,9 @@
 // orientation document (≤ 1200 tokens) injected into the agent prompt so it
 // instantly knows context without re-reading history.
 //
-// The same LLM call also produces a belief extraction array, eliminating the
-// second separate call that previously ran immediately after briefing. The job
-// handler uses the returned array to drive belief merging in agentBeliefService.
+// The same LLM call also produces a belief extraction array. After saving the
+// briefing, updateAfterRun() calls agentBeliefService.mergeExtracted() directly
+// — all callers automatically get belief merging without a separate step.
 //
 // Pattern: Mem0 rolling summary + CrewAI agent memory.
 // ---------------------------------------------------------------------------
@@ -25,7 +25,10 @@ import {
   BRIEFING_MEMORY_QUALITY_THRESHOLD,
   BRIEFING_COMBINED_MAX_TOKENS,
   BELIEFS_MAX_PER_EXTRACTION,
+  BELIEFS_TOKEN_BUDGET,
 } from '../config/limits.js';
+import { selectBeliefsWithinBudget } from './agentBeliefServicePure.js';
+import type { BeliefRecord } from './agentBeliefServicePure.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,13 +70,14 @@ function truncateToTokens(text: string, maxTokens: number): string {
  * If beliefs JSON is malformed but briefing text is recoverable, returns
  * `{ briefing: string, beliefs: null }` so the briefing is still saved.
  */
-function parseCombinedResponse(rawContent: string): {
+export function parseCombinedResponse(rawContent: string): {
   briefing: string | null;
   beliefs: unknown[] | null;
 } {
   if (!rawContent.trim()) return { briefing: null, beliefs: null };
 
-  const stripped = rawContent.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '').trim();
+  // Strip markdown fences anchored at the very start/end of the string
+  const stripped = rawContent.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
 
   try {
     const parsed = JSON.parse(stripped);
@@ -138,13 +142,12 @@ export const agentBriefingService = {
    * briefing, the latest run outcome (handoff JSON), recent memory entries,
    * and current beliefs into a single LLM call that produces both:
    *   1. An updated briefing narrative (saved to DB)
-   *   2. A raw belief extraction array (returned to the caller)
+   *   2. A raw belief extraction array (merged via agentBeliefService internally)
    *
-   * The caller (agentBriefingJob) passes the returned array to
-   * agentBeliefService.mergeExtracted() — no second LLM call needed.
+   * All callers automatically get belief merging — no separate step required.
    *
-   * Returns the raw beliefs array (may be empty). Never throws — all errors
-   * are swallowed so a failure here never blocks run completion.
+   * Never throws — all errors are swallowed so a failure here never blocks
+   * run completion or the job queue.
    */
   async updateAfterRun(
     orgId: string,
@@ -152,7 +155,7 @@ export const agentBriefingService = {
     agentId: string,
     runId: string,
     handoffJson: object,
-  ): Promise<unknown[]> {
+  ): Promise<void> {
     try {
       // 1. Load current briefing (may be null for first run)
       const currentBriefing = await this.get(orgId, subaccountId, agentId);
@@ -175,15 +178,23 @@ export const agentBriefingService = {
         .orderBy(desc(workspaceMemoryEntries.createdAt))
         .limit(BRIEFING_MEMORY_ENTRIES_LIMIT);
 
-      // 3. Load active beliefs — shown to LLM so it can avoid repeating them
-      //    in the briefing and so it knows what to reinforce vs. add.
-      const existingBeliefs = await db
+      // 3. Load active beliefs — shown in prompt context so the LLM can avoid
+      //    repeating stable facts in the briefing and knows what to reinforce.
+      //    Apply token budget so the beliefs block stays within BELIEFS_TOKEN_BUDGET
+      //    regardless of how many active beliefs exist.
+      const allActiveBeliefs = await db
         .select({
           beliefKey: agentBeliefs.beliefKey,
           category: agentBeliefs.category,
+          subject: agentBeliefs.subject,
           value: agentBeliefs.value,
           confidence: agentBeliefs.confidence,
           source: agentBeliefs.source,
+          // Fields required by BeliefRecord but not used in formatting — provide stubs
+          id: agentBeliefs.id,
+          sourceRunId: agentBeliefs.sourceRunId,
+          evidenceCount: agentBeliefs.evidenceCount,
+          updatedAt: agentBeliefs.updatedAt,
         })
         .from(agentBeliefs)
         .where(
@@ -198,6 +209,11 @@ export const agentBriefingService = {
         .orderBy(desc(agentBeliefs.confidence))
         .limit(50);
 
+      const budgetedBeliefs = selectBeliefsWithinBudget(
+        allActiveBeliefs as BeliefRecord[],
+        BELIEFS_TOKEN_BUDGET,
+      );
+
       // 4. Build combined prompt
       const entriesBlock =
         recentEntries.length > 0
@@ -207,8 +223,8 @@ export const agentBriefingService = {
           : '  (none)';
 
       const beliefsBlock =
-        existingBeliefs.length > 0
-          ? existingBeliefs
+        budgetedBeliefs.length > 0
+          ? budgetedBeliefs
               .map(
                 b =>
                   `  - [${b.beliefKey}] (${b.category}, confidence: ${b.confidence}, source: ${b.source}) ${b.value}`,
@@ -283,7 +299,7 @@ Respond with ONLY the JSON object. No preamble, no markdown fences.`;
       const rawContent =
         typeof response.content === 'string' ? response.content.trim() : '';
 
-      // 6. Parse combined response — independent briefing and beliefs extraction
+      // 6. Parse combined response — briefing and beliefs are parsed independently
       const { briefing: newBriefing, beliefs: rawBeliefs } =
         parseCombinedResponse(rawContent);
 
@@ -321,11 +337,18 @@ Respond with ONLY the JSON object. No preamble, no markdown fences.`;
           });
       }
 
-      // 8. Return raw beliefs for the job to pass to agentBeliefService.mergeExtracted()
-      return rawBeliefs ?? [];
+      // 8. Merge extracted beliefs — dynamic import avoids circular module init issues.
+      //    Failure is independent of briefing success.
+      if (rawBeliefs && rawBeliefs.length > 0) {
+        try {
+          const { agentBeliefService } = await import('./agentBeliefService.js');
+          await agentBeliefService.mergeExtracted(orgId, subaccountId, agentId, runId, rawBeliefs);
+        } catch {
+          // Belief merge failure must never affect briefing or run completion
+        }
+      }
     } catch {
       // Fire-and-forget — never let briefing errors bubble up to the caller
-      return [];
     }
   },
 };
