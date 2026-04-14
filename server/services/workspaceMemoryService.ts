@@ -354,6 +354,7 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
         AND embedding IS NOT NULL
         AND (quality_score IS NULL OR quality_score >= ${qualityThreshold})
         ${taskFilter}
+        ${domainFilter}
       ORDER BY embedding <=> ${vectorLiteral}::vector
       LIMIT ${topK}
     `);

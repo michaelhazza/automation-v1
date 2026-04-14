@@ -224,7 +224,7 @@ router.get(
   asyncHandler(async (req, res) => {
     await resolveSubaccount(req.params.subaccountId, req.orgId!);
     const link = await subaccountAgentService.getLinkById(req.orgId!, req.params.subaccountId, req.params.linkId);
-    const beliefs = await agentBeliefService.getActiveBeliefs(
+    const beliefs = await agentBeliefService.listAllActiveBeliefs(
       req.orgId!,
       req.params.subaccountId,
       link.agentId,

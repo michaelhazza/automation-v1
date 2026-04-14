@@ -46,14 +46,15 @@ export const agentBeliefService = {
   /**
    * Get all active beliefs for an agent-subaccount, ordered by category then
    * confidence desc, with belief_key as tie-breaker for deterministic ordering.
-   * Truncated to BELIEFS_TOKEN_BUDGET.
+   * Returns ALL active beliefs with no token budget applied — use for admin
+   * reads (list, delete) where every belief must be visible.
    */
-  async getActiveBeliefs(
+  async listAllActiveBeliefs(
     orgId: string,
     subaccountId: string,
     agentId: string,
   ): Promise<AgentBelief[]> {
-    const rows = await db
+    return db
       .select()
       .from(agentBeliefs)
       .where(
@@ -66,7 +67,18 @@ export const agentBeliefService = {
         ),
       )
       .orderBy(asc(agentBeliefs.category), desc(agentBeliefs.confidence), asc(agentBeliefs.beliefKey));
+  },
 
+  /**
+   * Get active beliefs truncated to BELIEFS_TOKEN_BUDGET — use only for
+   * agent prompt injection where the token cost must be bounded.
+   */
+  async getActiveBeliefs(
+    orgId: string,
+    subaccountId: string,
+    agentId: string,
+  ): Promise<AgentBelief[]> {
+    const rows = await this.listAllActiveBeliefs(orgId, subaccountId, agentId);
     return selectBeliefsWithinBudget(rows, BELIEFS_TOKEN_BUDGET);
   },
 
@@ -363,6 +375,7 @@ export const agentBeliefService = {
     rawBeliefKey: string,
     data: { value: string; category?: string; subject?: string },
   ): Promise<AgentBelief | null> {
+    const { key: normalizedKey } = normalizeKey(beliefKey);
     const now = new Date();
     const value = data.value.slice(0, BELIEFS_MAX_VALUE_LENGTH);
     // Normalize key so user-set beliefs land on the canonical slot
@@ -374,7 +387,7 @@ export const agentBeliefService = {
         organisationId: orgId,
         subaccountId,
         agentId,
-        beliefKey,
+        beliefKey: normalizedKey,
         category: data.category ?? 'general',
         subject: data.subject ?? null,
         value,
@@ -385,6 +398,7 @@ export const agentBeliefService = {
         updatedAt: now,
       })
       .onConflictDoUpdate({
+        // Target the partial unique index: (org, subaccount, agent, key) WHERE deleted_at IS NULL AND superseded_by IS NULL
         target: [agentBeliefs.organisationId, agentBeliefs.subaccountId, agentBeliefs.agentId, agentBeliefs.beliefKey],
         targetWhere: sql`${agentBeliefs.deletedAt} IS NULL AND ${agentBeliefs.supersededBy} IS NULL`,
         set: {
