@@ -236,6 +236,11 @@ export const BELIEFS_TOKEN_BUDGET = 1500;
 /** Max per-belief retries across the entire merge batch (prevents retry storms). */
 export const BELIEFS_MAX_RETRIES_PER_RUN = 50;
 
+// ── Skill Analyzer ──────────────────────────────────────────────────────────
+
+/** Maximum ms budget for a single skill LLM classification call, including all withBackoff retries. */
+export const SKILL_CLASSIFY_TIMEOUT_MS = 60_000;
+
 // ── Phase 2A: Vector memory search ──────────────────────────────────────────
 
 /** Max memory entries returned by vector search */
