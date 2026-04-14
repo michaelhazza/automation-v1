@@ -3,6 +3,7 @@ import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } fr
 // helper that plays nicely with our migration style; check constraint lives
 // in the SQL migration).
 import { organisations } from './organisations';
+import { subaccounts } from './subaccounts';
 
 // ---------------------------------------------------------------------------
 // Skills — reusable capability definitions attached to agents
@@ -17,6 +18,11 @@ export const skills = pgTable(
     // null = system/built-in skill, set = org-level custom skill
     organisationId: uuid('organisation_id')
       .references(() => organisations.id),
+    // null = org-level or system skill, set = subaccount-scoped skill
+    // Tier semantics: system (both null), org (orgId set, subaccountId null),
+    // subaccount (both set). Enforced by CHECK constraint in migration 0117.
+    subaccountId: uuid('subaccount_id')
+      .references(() => subaccounts.id),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     description: text('description'),
@@ -40,8 +46,11 @@ export const skills = pgTable(
   },
   (table) => ({
     orgIdx: index('skills_org_idx').on(table.organisationId),
-    slugIdx: uniqueIndex('skills_slug_org_idx').on(table.organisationId, table.slug),
+    // Slug uniqueness is handled by three partial unique indexes in migration 0117
+    // (skills_slug_system_uniq, skills_slug_org_uniq, skills_slug_subaccount_uniq)
+    // instead of a single composite index, to correctly handle NULL semantics.
     typeIdx: index('skills_type_idx').on(table.skillType),
+    subaccountIdx: index('skills_subaccount_idx').on(table.subaccountId),
   })
 );
 

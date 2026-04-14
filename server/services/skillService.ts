@@ -1,5 +1,5 @@
-import { eq, and, or, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { eq, and, or, isNull, sql, inArray } from 'drizzle-orm';
+import { db, type OrgScopedTx } from '../db/index.js';
 import { skills } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import type { AnthropicTool } from './llmService.js';
@@ -12,6 +12,12 @@ import {
   type SkillTier,
   type SkillVisibility,
 } from '../lib/skillVisibility.js';
+import { skillVersioningHelper } from './skillVersioningHelper.js';
+import { logger } from '../lib/logger.js';
+import {
+  MAX_TOTAL_SKILL_INSTRUCTIONS,
+  MAX_SKILLS_PER_SUBACCOUNT,
+} from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
 // Skill Service — manages the skill library and resolves skills for agents
@@ -67,20 +73,98 @@ export const skillService = {
   },
 
   /**
+   * Resolve a slug with subaccount fallback chain: subaccount -> org -> built-in -> system.
+   */
+  async getSkillBySlugForSubaccount(
+    slug: string,
+    organisationId: string,
+    subaccountId: string,
+  ): Promise<typeof skills.$inferSelect | null> {
+    const rows = await db
+      .select()
+      .from(skills)
+      .where(and(
+        eq(skills.slug, slug),
+        eq(skills.isActive, true),
+        isNull(skills.deletedAt),
+        or(
+          eq(skills.subaccountId, subaccountId),
+          and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
+          and(isNull(skills.organisationId), isNull(skills.subaccountId)),
+        ),
+      ));
+
+    // Precedence: subaccount > org > built-in
+    const subaccount = rows.find(s => s.subaccountId === subaccountId);
+    if (subaccount) return subaccount;
+    const org = rows.find(s => s.organisationId === organisationId && !s.subaccountId);
+    if (org) return org;
+    const builtIn = rows.find(s => !s.organisationId && !s.subaccountId);
+    return builtIn ?? null;
+  },
+
+  /**
    * Resolve an array of skill slugs into Anthropic tool definitions + prompt instructions.
+   * Batch resolution: single query for all slugs, then in-memory precedence.
    */
   async resolveSkillsForAgent(
     skillSlugs: string[],
-    organisationId: string
+    organisationId: string,
+    subaccountId?: string,
   ): Promise<{ tools: AnthropicTool[]; instructions: string[] }> {
     if (!skillSlugs || skillSlugs.length === 0) return { tools: [], instructions: [] };
 
+    // Batch-fetch all matching skills across tiers in one query
+    const candidates = await db
+      .select()
+      .from(skills)
+      .where(and(
+        inArray(skills.slug, skillSlugs),
+        isNull(skills.deletedAt),
+        eq(skills.isActive, true),
+        or(
+          subaccountId ? eq(skills.subaccountId, subaccountId) : sql`false`,
+          and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
+          and(isNull(skills.organisationId), isNull(skills.subaccountId)),
+        ),
+      ));
+
+    // Tier precedence: subaccount (3) > org (2) > built-in (1)
+    function tierPrecedence(row: typeof skills.$inferSelect): number {
+      if (subaccountId && row.subaccountId === subaccountId) return 3;
+      if (row.organisationId && !row.subaccountId) return 2;
+      return 1;
+    }
+
+    const bySlug = new Map<string, typeof skills.$inferSelect>();
+    for (const row of candidates) {
+      const existing = bySlug.get(row.slug);
+      if (!existing || tierPrecedence(row) > tierPrecedence(existing)) {
+        bySlug.set(row.slug, row);
+      }
+    }
+
+    // Any slugs not found in skills table → fall back to systemSkillService
+    const missingSlugs = skillSlugs.filter(s => !bySlug.has(s));
+    const systemFallbacks = new Map<string, { definition: AnthropicTool; instructions: string | null }>();
+    if (missingSlugs.length > 0) {
+      for (const slug of missingSlugs) {
+        const systemSkill = await systemSkillService.getSkillBySlug(slug);
+        if (systemSkill && systemSkill.visibility !== 'none') {
+          systemFallbacks.set(slug, {
+            definition: systemSkill.definition,
+            instructions: systemSkill.instructions,
+          });
+        }
+      }
+    }
+
+    // Build tools and instructions in resolution-priority order (original slug array order)
     const tools: AnthropicTool[] = [];
-    const instructions: string[] = [];
+    const allInstructions: string[] = [];
 
     for (const slug of skillSlugs) {
-      const skill = await this.getSkillBySlug(slug, organisationId);
-
+      const skill = bySlug.get(slug);
       if (skill) {
         const def = skill.definition as { name: string; description: string; input_schema: AnthropicTool['input_schema'] };
         if (def && def.name) {
@@ -90,29 +174,40 @@ export const skillService = {
             input_schema: def.input_schema,
           });
         }
-
-        if (skill.instructions) {
-          instructions.push(skill.instructions);
-        }
+        if (skill.instructions) allInstructions.push(skill.instructions);
       } else {
-        // Fall back to system skills (file-based) for platform-provided skill slugs.
-        // Enforce visibility gate: skills marked `visibility: none` must never be
-        // resolvable at runtime, even if an org somehow persisted the slug.
-        const systemSkill = await systemSkillService.getSkillBySlug(slug);
-        if (systemSkill && systemSkill.visibility !== 'none') {
+        const fallback = systemFallbacks.get(slug);
+        if (fallback) {
           tools.push({
-            name: systemSkill.definition.name,
-            description: systemSkill.definition.description,
-            input_schema: systemSkill.definition.input_schema,
+            name: fallback.definition.name,
+            description: fallback.definition.description,
+            input_schema: fallback.definition.input_schema,
           });
-          if (systemSkill.instructions) {
-            instructions.push(systemSkill.instructions);
-          }
+          if (fallback.instructions) allInstructions.push(fallback.instructions);
         }
       }
     }
 
-    return { tools, instructions };
+    // Instruction payload size guard
+    const totalLength = allInstructions.reduce((sum, i) => sum + i.length, 0);
+    if (totalLength > MAX_TOTAL_SKILL_INSTRUCTIONS) {
+      logger.warn('Skill instructions exceed limit', {
+        totalLength,
+        limit: MAX_TOTAL_SKILL_INSTRUCTIONS,
+        skillCount: allInstructions.length,
+      });
+      let remaining = MAX_TOTAL_SKILL_INSTRUCTIONS;
+      const truncated: string[] = [];
+      for (const instr of allInstructions) {
+        if (remaining <= 0) break;
+        const slice = instr.slice(0, remaining);
+        truncated.push(slice);
+        remaining -= slice.length;
+      }
+      return { tools, instructions: truncated };
+    }
+
+    return { tools, instructions: allInstructions };
   },
 
   /**
@@ -124,28 +219,52 @@ export const skillService = {
     description?: string;
     definition: object;
     instructions?: string;
-  }) {
-    const [skill] = await db
-      .insert(skills)
-      .values({
-        organisationId,
-        name: data.name,
-        slug: data.slug,
-        description: data.description ?? null,
-        skillType: 'custom',
-        definition: data.definition,
-        instructions: data.instructions ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+  }, userId?: string) {
+    const skill = await db.transaction(async (tx) => {
+      // Cross-table slug guard when creating a built-in (org=null) skill
+      if (!organisationId) {
+        const [conflict] = await tx.execute(
+          sql`SELECT 1 FROM system_skills WHERE slug = ${data.slug} AND deleted_at IS NULL FOR UPDATE`,
+        );
+        if (conflict) throw { statusCode: 409, message: 'Slug already exists in system_skills table' };
+      }
+
+      const [row] = await tx
+        .insert(skills)
+        .values({
+          organisationId,
+          name: data.name,
+          slug: data.slug,
+          description: data.description ?? null,
+          skillType: 'custom',
+          definition: data.definition,
+          instructions: data.instructions ?? null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      await skillVersioningHelper.writeVersion({
+        skillId: row.id,
+        name: row.name,
+        description: row.description,
+        definition: row.definition as object,
+        instructions: row.instructions,
+        changeType: 'create',
+        changeSummary: 'Org skill created',
+        authoredBy: userId ?? null,
+        tx,
+      });
+
+      return row;
+    });
 
     await configHistoryService.recordHistory({
       entityType: 'skill',
       entityId: skill.id,
       organisationId,
       snapshot: skill as unknown as Record<string, unknown>,
-      changedBy: null,
+      changedBy: userId ?? null,
       changeSource: 'api',
     });
 
@@ -159,7 +278,7 @@ export const skillService = {
     instructions: string;
     isActive: boolean;
     visibility: SkillVisibility;
-  }>) {
+  }>, userId?: string) {
     const [existing] = await db
       .select()
       .from(skills)
@@ -173,24 +292,44 @@ export const skillService = {
       entityId: id,
       organisationId,
       snapshot: existing as unknown as Record<string, unknown>,
-      changedBy: null,
+      changedBy: userId ?? null,
       changeSource: 'api',
     });
 
-    const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (data.name !== undefined) update.name = data.name;
-    if (data.description !== undefined) update.description = data.description;
-    if (data.definition !== undefined) update.definition = data.definition;
-    if (data.instructions !== undefined) update.instructions = data.instructions;
-    if (data.isActive !== undefined) update.isActive = data.isActive;
     if (data.visibility !== undefined) {
       if (!isSkillVisibility(data.visibility)) {
         throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
       }
-      update.visibility = data.visibility;
     }
 
-    const [updated] = await db.update(skills).set(update).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId))).returning();
+    const updated = await db.transaction(async (tx) => {
+      const update: Record<string, unknown> = { updatedAt: new Date() };
+      if (data.name !== undefined) update.name = data.name;
+      if (data.description !== undefined) update.description = data.description;
+      if (data.definition !== undefined) update.definition = data.definition;
+      if (data.instructions !== undefined) update.instructions = data.instructions;
+      if (data.isActive !== undefined) update.isActive = data.isActive;
+      if (data.visibility !== undefined) update.visibility = data.visibility;
+
+      const [row] = await tx.update(skills).set(update).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId))).returning();
+
+      if (row) {
+        await skillVersioningHelper.writeVersion({
+          skillId: row.id,
+          name: row.name,
+          description: row.description,
+          definition: row.definition as object,
+          instructions: row.instructions,
+          changeType: 'update',
+          changeSummary: 'Org skill updated',
+          authoredBy: userId ?? null,
+          tx,
+        });
+      }
+
+      return row;
+    });
+
     return updated;
   },
 
@@ -236,7 +375,11 @@ export const skillService = {
     row: typeof skills.$inferSelect,
     viewer: { tier: SkillTier; hasManagePermission: boolean },
   ): (Record<string, unknown> & { id: string }) | null {
-    const ownerTier: SkillTier = row.organisationId === null ? 'system' : 'organisation';
+    const ownerTier: SkillTier = row.organisationId === null
+      ? 'system'
+      : row.subaccountId !== null
+        ? 'subaccount'
+        : 'organisation';
     const vis = { ownerTier, visibility: row.visibility };
     if (!isSkillVisibleToViewer(vis, viewer)) return null;
     const view = canViewContentsHelper(vis, viewer);
@@ -263,6 +406,204 @@ export const skillService = {
       canViewContents: false,
       canManageSkill: false,
     };
+  },
+
+  // ---------------------------------------------------------------------------
+  // Subaccount skill CRUD
+  // ---------------------------------------------------------------------------
+
+  /** List skills visible within a subaccount: system + org + this subaccount's own. */
+  async listSubaccountSkills(organisationId: string, subaccountId: string) {
+    return db
+      .select()
+      .from(skills)
+      .where(and(
+        or(
+          // Subaccount's own skills
+          eq(skills.subaccountId, subaccountId),
+          // Org skills (visible to subaccount via visibility cascade)
+          and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
+          // Built-in skills
+          and(isNull(skills.organisationId), isNull(skills.subaccountId)),
+        ),
+        eq(skills.isActive, true),
+        isNull(skills.deletedAt),
+      ))
+      .orderBy(skills.skillType, skills.name);
+  },
+
+  /** Get a single skill, validating it belongs to the given subaccount (or org/system). */
+  async getSubaccountSkill(id: string, organisationId: string, subaccountId: string) {
+    const [skill] = await db
+      .select()
+      .from(skills)
+      .where(and(
+        eq(skills.id, id),
+        or(
+          eq(skills.subaccountId, subaccountId),
+          and(eq(skills.organisationId, organisationId), isNull(skills.subaccountId)),
+          and(isNull(skills.organisationId), isNull(skills.subaccountId)),
+        ),
+        eq(skills.isActive, true),
+        isNull(skills.deletedAt),
+      ));
+    if (!skill) throw { statusCode: 404, message: 'Skill not found' };
+    return skill;
+  },
+
+  /** Create a skill scoped to a subaccount. */
+  async createSubaccountSkill(organisationId: string, subaccountId: string, data: {
+    name: string;
+    slug: string;
+    description?: string;
+    definition: object;
+    instructions?: string;
+  }, userId?: string) {
+    const skill = await db.transaction(async (tx) => {
+      // Enforce per-subaccount skill count limit
+      const [countRow] = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(skills)
+        .where(and(eq(skills.subaccountId, subaccountId), isNull(skills.deletedAt)));
+      if ((countRow?.count ?? 0) >= MAX_SKILLS_PER_SUBACCOUNT) {
+        throw { statusCode: 400, message: `Subaccount skill limit (${MAX_SKILLS_PER_SUBACCOUNT}) reached` };
+      }
+
+      const [row] = await tx
+        .insert(skills)
+        .values({
+          organisationId,
+          subaccountId,
+          name: data.name,
+          slug: data.slug,
+          description: data.description ?? null,
+          skillType: 'custom',
+          definition: data.definition,
+          instructions: data.instructions ?? null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      await skillVersioningHelper.writeVersion({
+        skillId: row.id,
+        name: row.name,
+        description: row.description,
+        definition: row.definition as object,
+        instructions: row.instructions,
+        changeType: 'create',
+        changeSummary: 'Subaccount skill created',
+        authoredBy: userId ?? null,
+        tx,
+      });
+
+      return row;
+    });
+
+    await configHistoryService.recordHistory({
+      entityType: 'skill',
+      entityId: skill.id,
+      organisationId,
+      snapshot: { ...skill, subaccountId } as unknown as Record<string, unknown>,
+      changedBy: userId ?? null,
+      changeSource: 'api',
+    });
+
+    return skill;
+  },
+
+  /** Update a subaccount-scoped skill. */
+  async updateSubaccountSkill(id: string, organisationId: string, subaccountId: string, data: Partial<{
+    name: string;
+    description: string;
+    definition: object;
+    instructions: string;
+    isActive: boolean;
+    visibility: SkillVisibility;
+  }>, userId?: string) {
+    const [existing] = await db
+      .select()
+      .from(skills)
+      .where(and(
+        eq(skills.id, id),
+        eq(skills.organisationId, organisationId),
+        eq(skills.subaccountId, subaccountId),
+        isNull(skills.deletedAt),
+      ));
+
+    if (!existing) throw { statusCode: 404, message: 'Skill not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'skill',
+      entityId: id,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: userId ?? null,
+      changeSource: 'api',
+    });
+
+    if (data.visibility !== undefined) {
+      if (!isSkillVisibility(data.visibility)) {
+        throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
+      }
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const update: Record<string, unknown> = { updatedAt: new Date() };
+      if (data.name !== undefined) update.name = data.name;
+      if (data.description !== undefined) update.description = data.description;
+      if (data.definition !== undefined) update.definition = data.definition;
+      if (data.instructions !== undefined) update.instructions = data.instructions;
+      if (data.isActive !== undefined) update.isActive = data.isActive;
+      if (data.visibility !== undefined) update.visibility = data.visibility;
+
+      const [row] = await tx.update(skills).set(update).where(and(
+        eq(skills.id, id),
+        eq(skills.organisationId, organisationId),
+        eq(skills.subaccountId, subaccountId),
+      )).returning();
+
+      if (row) {
+        await skillVersioningHelper.writeVersion({
+          skillId: row.id,
+          name: row.name,
+          description: row.description,
+          definition: row.definition as object,
+          instructions: row.instructions,
+          changeType: 'update',
+          changeSummary: 'Subaccount skill updated',
+          authoredBy: userId ?? null,
+          tx,
+        });
+      }
+
+      return row;
+    });
+
+    return updated;
+  },
+
+  /** Soft-delete a subaccount-scoped skill. */
+  async deleteSubaccountSkill(id: string, organisationId: string, subaccountId: string) {
+    const [existing] = await db
+      .select()
+      .from(skills)
+      .where(and(
+        eq(skills.id, id),
+        eq(skills.organisationId, organisationId),
+        eq(skills.subaccountId, subaccountId),
+        isNull(skills.deletedAt),
+      ));
+
+    if (!existing) throw { statusCode: 404, message: 'Skill not found' };
+
+    const now = new Date();
+    await db.update(skills).set({ deletedAt: now, updatedAt: now }).where(and(
+      eq(skills.id, id),
+      eq(skills.organisationId, organisationId),
+      eq(skills.subaccountId, subaccountId),
+    ));
+    return { message: 'Skill deleted' };
   },
 
   async deleteSkill(id: string, organisationId: string) {

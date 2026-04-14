@@ -520,7 +520,8 @@ export const agentExecutionService = {
       const skillSlugs = configSkillSlugs;
       const { tools: skillTools, instructions: skillInstructions } = await skillService.resolveSkillsForAgent(
         skillSlugs,
-        request.organisationId
+        request.organisationId,
+        request.subaccountId,
       );
 
       // For trigger_process, inject the process enum dynamically

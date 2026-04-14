@@ -87,6 +87,7 @@ import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
 import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
 import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
+import subaccountSkillsRouter from './routes/subaccountSkills.js';
 import orgMemoryRouter from './routes/orgMemory.js';
 // orgWorkspaceRouter removed — org tasks now live in the org subaccount's task board (migration 0106)
 import mcpServersRouter from './routes/mcpServers.js';
@@ -254,6 +255,7 @@ app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
 // ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
 app.use(subaccountTagsRouter);
+app.use(subaccountSkillsRouter);
 app.use(orgMemoryRouter);
 // orgWorkspaceRouter mount removed (migration 0106)
 app.use(mcpServersRouter);

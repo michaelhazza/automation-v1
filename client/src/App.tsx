@@ -63,6 +63,7 @@ const PageProjectDetailPage = lazy(() => import('./pages/PageProjectDetailPage')
 const JobQueueDashboardPage = lazy(() => import('./pages/JobQueueDashboardPage'));
 const AgentTriggersPage = lazy(() => import('./pages/AgentTriggersPage'));
 const SubaccountTagsPage = lazy(() => import('./pages/SubaccountTagsPage'));
+const SubaccountSkillsPage = lazy(() => import('./pages/SubaccountSkillsPage'));
 
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const SystemCompanyTemplatesPage = lazy(() => import('./pages/SystemCompanyTemplatesPage'));
@@ -239,6 +240,7 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/page-projects/:projectId" element={<PageProjectDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/triggers" element={<AgentTriggersPage />} />
             <Route path="/admin/subaccounts/:subaccountId/tags" element={<SubaccountTagsPage />} />
+            <Route path="/admin/subaccounts/:subaccountId/skills" element={<SubaccountSkillsPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/goals" element={<GoalsPage user={user!} />} />
             <Route path="/admin/org-settings" element={<OrgSettingsPage user={user!} />} />
             <Route path="/admin/org-memory" element={<Navigate to="/admin/org-settings?tab=memory" replace />} />

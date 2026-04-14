@@ -1,6 +1,7 @@
 import { eq, desc, inArray, and, sql, isNull } from 'drizzle-orm';
 import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
+import { skillVersioningHelper } from './skillVersioningHelper.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
@@ -839,7 +840,7 @@ export async function executeApproved(params: {
       // multi-statement extensions.
       try {
         await db.transaction(async (tx) => {
-          await systemSkillService.updateSystemSkill(
+          const updated_skill = await systemSkillService.updateSystemSkill(
             result.matchedSkillId!,
             {
               name: merge.name,
@@ -847,8 +848,23 @@ export async function executeApproved(params: {
               definition: merge.definition as never,
               instructions: merge.instructions,
             },
-            { tx },
+            { tx, skipVersionWrite: true, externalVersionWrite: true },
           );
+
+          // Version snapshot uses the DB-returned row, not `merge.*`, to guarantee
+          // the snapshot matches what was actually persisted.
+          await skillVersioningHelper.writeVersion({
+            systemSkillId: result.matchedSkillId!,
+            name: updated_skill.name,
+            description: updated_skill.description,
+            definition: updated_skill.definition as object,
+            instructions: updated_skill.instructions,
+            changeType: 'merge',
+            changeSummary: `${result.classification} merge from Skill Analyzer job ${jobId}`,
+            authoredBy: params.userId,
+            idempotencyKey: `sa:${jobId}:${result.matchedSkillId}:merge`,
+            tx,
+          });
         });
         await db
           .update(skillAnalyzerResults)
@@ -923,8 +939,21 @@ export async function executeApproved(params: {
               definition: candidate.definition as never,
               instructions: candidate.instructions,
             },
-            { tx },
+            { tx, skipVersionWrite: true, externalVersionWrite: true },
           );
+
+          await skillVersioningHelper.writeVersion({
+            systemSkillId: created.id,
+            name: created.name,
+            description: created.description,
+            definition: created.definition as object,
+            instructions: created.instructions,
+            changeType: 'create',
+            changeSummary: `Created by Skill Analyzer job ${jobId}`,
+            authoredBy: params.userId,
+            idempotencyKey: `sa:${jobId}:${created.id}:create`,
+            tx,
+          });
 
           // Phase 2: read agentProposals off the result row, filter to
           // the selected ones, and attach the new skill's slug to each

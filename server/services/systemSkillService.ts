@@ -5,6 +5,7 @@ import type { AnthropicTool } from './llmService.js';
 import { isSkillVisibility, type SkillVisibility } from '../lib/skillVisibility.js';
 import { isValidToolDefinitionShape } from '../../shared/skillParameters.js';
 import { SKILL_HANDLERS } from './skillExecutor.js';
+import { skillVersioningHelper, assertVersionOwnership, type VersionOpts } from './skillVersioningHelper.js';
 
 // ---------------------------------------------------------------------------
 // System Skill Service — DB-backed
@@ -277,8 +278,10 @@ export const systemSkillService = {
    *  skill rows become DB-editable. */
   async createSystemSkill(
     input: CreateSystemSkillInput,
-    opts: WithTx = {},
+    opts: WithTx & VersionOpts = {},
   ): Promise<SystemSkill> {
+    if (opts.skipVersionWrite) assertVersionOwnership(opts);
+
     if (input.handlerKey !== input.slug) {
       throw {
         statusCode: 400,
@@ -289,24 +292,50 @@ export const systemSkillService = {
     assertValidDefinition(input.definition);
     if (input.visibility !== undefined) assertValidVisibility(input.visibility);
 
-    const runner = opts.tx ?? db;
-    const rows = await runner
-      .insert(systemSkills)
-      .values({
-        slug: input.slug,
-        handlerKey: input.handlerKey,
-        name: input.name,
-        description: input.description,
-        definition: input.definition as unknown as object,
-        instructions: input.instructions ?? null,
-        visibility: input.visibility ?? 'none',
-        isActive: input.isActive ?? true,
-      })
-      .returning();
+    // Ensure atomicity: skill create + version write in the same transaction.
+    const doCreate = async (tx: OrgScopedTx): Promise<SystemSkill> => {
+      // Cross-table slug guard: prevent slug collisions between system_skills and skills tables
+      const [conflict] = await tx.execute(
+        sql`SELECT 1 FROM skills WHERE slug = ${input.slug} AND deleted_at IS NULL FOR UPDATE`,
+      );
+      if (conflict) throw { statusCode: 409, message: 'Slug already exists in skills table' };
 
-    const row = rows[0];
-    if (!row) throw { statusCode: 500, message: 'createSystemSkill: insert returned no rows' };
-    return toPublic(row);
+      const rows = await tx
+        .insert(systemSkills)
+        .values({
+          slug: input.slug,
+          handlerKey: input.handlerKey,
+          name: input.name,
+          description: input.description,
+          definition: input.definition as unknown as object,
+          instructions: input.instructions ?? null,
+          visibility: input.visibility ?? 'none',
+          isActive: input.isActive ?? true,
+        })
+        .returning();
+
+      const row = rows[0];
+      if (!row) throw { statusCode: 500, message: 'createSystemSkill: insert returned no rows' };
+
+      if (!opts.skipVersionWrite) {
+        await skillVersioningHelper.writeVersion({
+          systemSkillId: row.id,
+          name: row.name,
+          description: row.description,
+          definition: row.definition as object,
+          instructions: row.instructions,
+          changeType: 'create',
+          changeSummary: 'System skill created',
+          authoredBy: null,
+          tx,
+        });
+      }
+
+      return toPublic(row);
+    };
+
+    if (opts.tx) return doCreate(opts.tx);
+    return db.transaction(doCreate);
   },
 
   /** Patch an existing system skill by DB UUID. Only the columns present in
@@ -315,28 +344,48 @@ export const systemSkillService = {
   async updateSystemSkill(
     id: string,
     patch: UpdateSystemSkillPatch,
-    opts: WithTx = {},
+    opts: WithTx & VersionOpts = {},
   ): Promise<SystemSkill> {
+    if (opts.skipVersionWrite) assertVersionOwnership(opts);
     if (patch.definition !== undefined) assertValidDefinition(patch.definition);
     if (patch.visibility !== undefined) assertValidVisibility(patch.visibility);
 
-    const runner = opts.tx ?? db;
-    const update: Record<string, unknown> = { updatedAt: new Date() };
-    if (patch.name !== undefined) update.name = patch.name;
-    if (patch.description !== undefined) update.description = patch.description;
-    if (patch.definition !== undefined) update.definition = patch.definition;
-    if (patch.instructions !== undefined) update.instructions = patch.instructions;
-    if (patch.visibility !== undefined) update.visibility = patch.visibility;
-    if (patch.isActive !== undefined) update.isActive = patch.isActive;
+    const doUpdate = async (tx: OrgScopedTx): Promise<SystemSkill> => {
+      const update: Record<string, unknown> = { updatedAt: new Date() };
+      if (patch.name !== undefined) update.name = patch.name;
+      if (patch.description !== undefined) update.description = patch.description;
+      if (patch.definition !== undefined) update.definition = patch.definition;
+      if (patch.instructions !== undefined) update.instructions = patch.instructions;
+      if (patch.visibility !== undefined) update.visibility = patch.visibility;
+      if (patch.isActive !== undefined) update.isActive = patch.isActive;
 
-    const rows = await runner
-      .update(systemSkills)
-      .set(update)
-      .where(eq(systemSkills.id, id))
-      .returning();
+      const rows = await tx
+        .update(systemSkills)
+        .set(update)
+        .where(eq(systemSkills.id, id))
+        .returning();
 
-    const row = rows[0];
-    if (!row) throw { statusCode: 404, message: 'System skill not found' };
-    return toPublic(row);
+      const row = rows[0];
+      if (!row) throw { statusCode: 404, message: 'System skill not found' };
+
+      if (!opts.skipVersionWrite) {
+        await skillVersioningHelper.writeVersion({
+          systemSkillId: row.id,
+          name: row.name,
+          description: row.description ?? null,
+          definition: row.definition as object,
+          instructions: row.instructions,
+          changeType: 'update',
+          changeSummary: 'System skill updated',
+          authoredBy: null,
+          tx,
+        });
+      }
+
+      return toPublic(row);
+    };
+
+    if (opts.tx) return doUpdate(opts.tx);
+    return db.transaction(doUpdate);
   },
 };

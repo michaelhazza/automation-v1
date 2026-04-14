@@ -6,6 +6,7 @@ import {
   systemAgents,
 } from '../db/schema/index.js';
 import type { ConfigBackupEntity } from '../db/schema/configBackups.js';
+import { skillVersioningHelper } from './skillVersioningHelper.js';
 
 // ---------------------------------------------------------------------------
 // Config Backup Service — create and restore point-in-time configuration
@@ -86,6 +87,7 @@ async function captureSkillAnalyzerEntities(): Promise<ConfigBackupEntity[]> {
 async function restoreSkillAnalyzerEntities(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   entities: ConfigBackupEntity[],
+  backupId: string,
 ): Promise<{
   skillsReverted: number;
   skillsDeactivated: number;
@@ -122,6 +124,20 @@ async function restoreSkillAnalyzerEntities(
           updatedAt: new Date(),
         })
         .where(eq(systemSkills.id, entity.entityId));
+
+      await skillVersioningHelper.writeVersion({
+        systemSkillId: entity.entityId,
+        name: snapshot.name as string,
+        description: (snapshot.description as string) ?? null,
+        definition: snapshot.definition as object,
+        instructions: (snapshot.instructions as string) ?? null,
+        changeType: 'restore',
+        changeSummary: 'Reverted to backup snapshot',
+        authoredBy: null,
+        idempotencyKey: `restore:${backupId}:${entity.entityId}:revert`,
+        tx,
+      });
+
       skillsReverted++;
     }
     // If skill was deleted between backup and now — skip (don't recreate;
@@ -129,13 +145,29 @@ async function restoreSkillAnalyzerEntities(
   }
 
   // 2. Deactivate skills created after the backup
-  const currentSkills = await tx.select({ id: systemSkills.id }).from(systemSkills);
+  const currentSkills = await tx
+    .select({ id: systemSkills.id, name: systemSkills.name, description: systemSkills.description, definition: systemSkills.definition, instructions: systemSkills.instructions })
+    .from(systemSkills);
   for (const skill of currentSkills) {
     if (!backupSkillIds.has(skill.id)) {
       await tx
         .update(systemSkills)
         .set({ isActive: false, updatedAt: new Date() })
         .where(eq(systemSkills.id, skill.id));
+
+      await skillVersioningHelper.writeVersion({
+        systemSkillId: skill.id,
+        name: skill.name,
+        description: skill.description,
+        definition: skill.definition as object,
+        instructions: skill.instructions,
+        changeType: 'deactivate',
+        changeSummary: 'Deactivated during backup restore (created after backup)',
+        authoredBy: null,
+        idempotencyKey: `restore:${backupId}:${skill.id}:deactivate`,
+        tx,
+      });
+
       skillsDeactivated++;
     }
   }
@@ -276,7 +308,7 @@ export const configBackupService = {
 
       switch (claimed.scope) {
         case 'skill_analyzer':
-          result = await restoreSkillAnalyzerEntities(tx, entities);
+          result = await restoreSkillAnalyzerEntities(tx, entities, params.backupId);
           break;
         default:
           throw { statusCode: 400, message: `Unsupported backup scope: ${claimed.scope}` };

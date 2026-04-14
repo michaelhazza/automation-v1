@@ -118,9 +118,14 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 
 100 modular skills across 13 categories, cascading from system to org to subaccount.
 
-- **Three tiers:** System skills (platform-provided), Org skills (custom), Universal skills (always available)
+- **Four-tier resolution:** System skills (system_skills table) -> Built-in skills (skills table, org=null) -> Org skills (custom) -> Subaccount skills (custom, workspace-scoped)
+- **Subaccount-level skills** — Workspaces can create custom skills that shadow org/system skills by slug. Managed via dedicated API routes and SubaccountSkillsPage
 - **Per-agent allowlists** — Each subaccount-agent link specifies exactly which skills are available
-- **Skill Studio** — Authoring environment with definition editor, regression simulation, version history, and rollback
+- **Skill Studio** — Authoring environment with definition editor, regression simulation, version history, and rollback. Supports system, org, and subaccount scopes
+- **Comprehensive version history** — Every skill mutation (create, update, merge, restore, deactivate) writes an immutable `skill_versions` row via `skillVersioningHelper`. Parent-row locking prevents version number races. Idempotency keys on retry-prone paths (analyzer, restore)
+- **Batch resolution** — `resolveSkillsForAgent` resolves all slugs in a single query with in-memory precedence, replacing N+1 per-slug queries
+- **Instruction payload guard** — Total skill instructions capped at 100K chars to prevent LLM context blowout
+- **Config backup/restore** — Skill analyzer jobs produce point-in-time backups; restore writes version history with `changeType: 'restore'` / `'deactivate'`
 - **Review gating** — 42+ skills require human approval; 6 deterministic skills run without LLM
 - Topic filtering dynamically reorders skills per message; skill modules enable bulk management
 - See [Skills Reference](#skills-reference) for the full catalogue

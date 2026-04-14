@@ -236,6 +236,20 @@ export const BELIEFS_TOKEN_BUDGET = 1500;
 /** Max per-belief retries across the entire merge batch (prevents retry storms). */
 export const BELIEFS_MAX_RETRIES_PER_RUN = 50;
 
+// ── Subaccount skills & version history ────────────────────────────────────
+
+/** Maximum total instruction characters across all resolved skills for a single agent run.
+ *  Prevents LLM context blowout when many skills are concatenated. */
+export const MAX_TOTAL_SKILL_INSTRUCTIONS = 100_000;
+
+/** Maximum JSON-serialised size (chars) of a single skill definition payload.
+ *  Prevents arbitrarily large payloads that bloat the database. */
+export const MAX_SKILL_DEFINITION_SIZE = 256_000;
+
+/** Maximum number of skills per subaccount. Soft cap — concurrent creates may
+ *  exceed by 1 (accepted tradeoff vs transactional count lock). */
+export const MAX_SKILLS_PER_SUBACCOUNT = 200;
+
 // ── Skill Analyzer ──────────────────────────────────────────────────────────
 
 /** Maximum ms budget for a single skill LLM classification call, including all withBackoff retries.

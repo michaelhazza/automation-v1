@@ -18,7 +18,11 @@ export const skillVersions = pgTable(
     description: text('description'),
     definition: jsonb('definition').notNull(),
     instructions: text('instructions'),
+    // Structured change type: 'create' | 'update' | 'merge' | 'restore' | 'deactivate'
+    changeType: text('change_type').notNull().$type<'create' | 'update' | 'merge' | 'restore' | 'deactivate'>(),
     changeSummary: text('change_summary'),
+    // Idempotency key for retry-safe version writes (nullable; unique per skill when set)
+    idempotencyKey: text('idempotency_key'),
     authoredBy: uuid('authored_by')
       .references(() => users.id, { onDelete: 'set null' }),
     regressionIds: uuid('regression_ids').array(),
