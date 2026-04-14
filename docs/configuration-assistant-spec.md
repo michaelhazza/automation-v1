@@ -330,7 +330,7 @@ Where:
 - Null/undefined values: stripped from the object (a missing key and an explicit `null` produce the same hash)
 - Numbers: serialized without trailing zeros
 
-This key is passed to the skill handler and stored on the action record. Duplicate keys within the same session are rejected without re-executing the mutation.
+This key is passed to the skill handler and stored on the action record. Duplicate keys within the same session are rejected without re-executing the mutation. **Idempotency is scoped to the session** — identical operations across different sessions are treated as distinct and execute independently. This prevents cross-run suppression when the same configuration is intentionally applied in separate sessions.
 
 ### 4.5 Scope enforcement — four independent layers
 
@@ -451,7 +451,8 @@ Never execute mutations without a plan. Always:
 2. Call config_preview_plan with the proposed changes
 3. Wait for user approval
 4. Execute the approved plan step by step
-5. Run config_run_health_check after completion
+5. Run config_run_health_check after completion (only if at least one
+   mutation was executed — skip for read-only sessions or fully no-op plans)
 ```
 
 ### 5.5 Orchestrator awareness
@@ -499,6 +500,8 @@ The Configuration Assistant runs through `agentExecutionService`, which provides
 
 The frontend renders streamed text progressively (not atomically) for a responsive conversational feel. This matches the Freedom Planner UX pattern where AI responses appear token by token.
 
+**WebSocket reliability:** If the socket connection drops mid-execution, the UI must be able to re-fetch execution state from `agent_runs` (status, step results, `configPlanJson`) on reconnect. Execution continues server-side regardless of client connectivity — the WebSocket is for real-time display, not for control flow.
+
 ### 6.3 Plan preview UX
 
 When the agent calls `config_preview_plan`, it emits a structured plan:
@@ -538,6 +541,18 @@ interface ConfigPlanStep {
 | `high` | Modifies `masterPrompt` or `additionalPrompt` (agent behaviour), deactivates an agent, restores a version, deletes a data source | Red accent bar, "⚠ High impact" badge, step expanded by default |
 | `medium` | Changes schedule, execution limits, skill assignments | Yellow accent bar |
 | `low` | Creates new entity, attaches data source, updates name/description | No accent (default) |
+
+**Step summary format:** The `summary` field follows a consistent pattern for scannability:
+
+```
+<Action verb> <entity type> "<entity name>" [— <scope>]
+
+Examples:
+  "Create agent 'SEO Auditor'"
+  "Link SEO Auditor → Acme Corp"
+  "Update token budget — Acme Corp"
+  "Create scheduled task 'Weekly SEO Audit' — Beta Inc"
+```
 
 **`config_preview_plan` reads current entity state at plan creation time.** For each step that modifies an existing entity (not a create), the tool fetches the relevant current fields and includes them as `currentValue` in the `ConfigPlanStep`. This gives the user a clear before/after view in the plan checklist without requiring a diff renderer. For create steps, `currentValue` is omitted.
 
@@ -580,10 +595,34 @@ This check runs client-side for immediate feedback (disable button, show warning
 
 **Critical design requirement:** Once a plan is approved, execution is **server-driven, not LLM-driven**. The server iterates through `ConfigPlan.steps[]` and calls each skill handler directly using the approved `parameters`. The LLM is NOT re-invoked to "figure out what to do next" — that path risks re-interpretation, parameter drift, and skipped steps.
 
+**Execution guarantees:**
+- Steps are executed strictly in ascending `stepNumber` order. No parallel execution in v1.
+- Execution is NOT wrapped in a global database transaction. Each step commits independently. If step 5 fails after steps 1-4 succeeded, steps 1-4 remain committed. Rollback is manual via `config_restore_version`.
+- All tool parameters are re-validated against the action registry Zod schema at execution time, even though they were validated at plan creation. This guards against stale plans and payload tampering.
+
 The execution loop:
 
 ```typescript
-async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: string, userId: string) {
+type StepStatus = 'completed' | 'completed_with_warnings' | 'failed' | 'skipped' | 'blocked';
+type FailureType = 'validation_error' | 'dependency_failed' | 'execution_error' | 'idempotency_rejected';
+
+interface StepResult {
+  stepNumber: number;
+  status: StepStatus;
+  entityId?: string;
+  warning?: string;
+  failureType?: FailureType;
+  error?: string;
+  skippedReason?: 'no_change' | 'user_disabled';
+}
+
+async function executeApprovedPlan(plan: ConfigPlan, planHash: string, sessionId: string, orgId: string, userId: string) {
+  // Verify plan was not modified between approval and execution
+  const currentHash = sha256(JSON.stringify(plan));
+  if (currentHash !== planHash) {
+    throw { statusCode: 409, message: 'Plan was modified after approval. Re-submit for approval.' };
+  }
+
   // Enforce plan budget before starting
   if (plan.steps.length > plan.planBudget.maxSteps) {
     throw { statusCode: 400, message: `Plan exceeds maxSteps limit (${plan.planBudget.maxSteps})` };
@@ -596,6 +635,28 @@ async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: s
     // Resolve entity IDs from earlier create steps
     const resolvedParams = resolveStepDependencies(step.parameters, step.dependsOn, entityIdMap);
 
+    // Dependency resolution guard: if a depended-on step's output is missing, fail early
+    if (step.dependsOn?.length) {
+      const missingDep = step.dependsOn.find(dep => !entityIdMap[dep]);
+      if (missingDep !== undefined) {
+        results.push({ stepNumber: step.stepNumber, status: 'failed', failureType: 'dependency_failed',
+          error: `Dependency step ${missingDep} did not produce an entity ID` });
+        emitStepProgress(sessionId, step.stepNumber, results[results.length - 1]);
+        if (plan.failFast) { markRemainingStepsBlocked(plan.steps, step.stepNumber, results); break; }
+        continue;
+      }
+    }
+
+    // Re-validate parameters against action registry schema
+    const validation = actionRegistry[step.action].parameterSchema.safeParse(resolvedParams);
+    if (!validation.success) {
+      results.push({ stepNumber: step.stepNumber, status: 'failed', failureType: 'validation_error',
+        error: `Parameter validation failed: ${validation.error.message}` });
+      emitStepProgress(sessionId, step.stepNumber, results[results.length - 1]);
+      if (plan.failFast) { markRemainingStepsBlocked(plan.steps, step.stepNumber, results); break; }
+      continue;
+    }
+
     // Compute idempotency key
     const idempotencyKey = computeIdempotencyKey(sessionId, step.stepNumber, step.entityType, resolvedParams);
 
@@ -603,7 +664,7 @@ async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: s
     if (step.entityId && step.currentValue) {
       const isNoOp = deepEqualRelevantFields(step.currentValue, resolvedParams);
       if (isNoOp) {
-        results.push({ stepNumber: step.stepNumber, status: 'skipped', reason: 'no_change' });
+        results.push({ stepNumber: step.stepNumber, status: 'skipped', skippedReason: 'no_change' });
         emitStepProgress(sessionId, step.stepNumber, results[results.length - 1]);
         continue;
       }
@@ -613,7 +674,7 @@ async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: s
     const result = await skillExecutor.executeSkill(step.action, resolvedParams, { idempotencyKey, orgId, userId });
 
     // Read-after-write consistency check
-    if (result.entityId) {
+    if (result.success && result.entityId) {
       const confirmed = await confirmEntityState(step.entityType, result.entityId, resolvedParams, orgId);
       if (!confirmed) {
         result.warning = 'Entity state after write did not match expected values';
@@ -621,18 +682,21 @@ async function executeApprovedPlan(plan: ConfigPlan, sessionId: string, orgId: s
       entityIdMap[step.stepNumber] = result.entityId;
     }
 
-    results.push({ stepNumber: step.stepNumber, status: result.success ? 'completed' : 'failed', ...result });
+    const status: StepStatus = !result.success ? 'failed'
+      : result.warning ? 'completed_with_warnings'
+      : 'completed';
+    results.push({ stepNumber: step.stepNumber, status, entityId: result.entityId,
+      warning: result.warning, failureType: result.success ? undefined : 'execution_error',
+      error: result.error });
 
     // Emit real-time progress via WebSocket
     emitStepProgress(sessionId, step.stepNumber, results[results.length - 1]);
 
     if (!result.success) {
       if (plan.failFast) {
-        // Mark remaining steps as blocked
         markRemainingStepsBlocked(plan.steps, step.stepNumber, results);
         break;
       }
-      // failFast: false — skip failed step and continue independent steps
     }
   }
 
@@ -664,9 +728,11 @@ During plan execution, each step updates in real-time via WebSocket:
 | Pending | Grey checkbox |
 | In progress | Spinning indicator |
 | Completed | Green checkmark |
-| Failed | Red X with error message |
-| Skipped (user unchecked) | Grey strikethrough |
+| Completed with warnings | Yellow checkmark with warning tooltip (e.g. "Write confirmed but state mismatch detected") |
+| Failed | Red X with error message and `failureType` badge (`validation_error`, `dependency_failed`, `execution_error`, `idempotency_rejected`) |
+| Skipped (user disabled) | Grey strikethrough |
 | Skipped (no-op) | Grey checkmark with "No change needed" tooltip |
+| Blocked | Grey lock icon with "Depends on failed step N" |
 
 Steps that depend on a failed step are automatically marked as "Blocked" with an explanation.
 
