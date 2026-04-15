@@ -27,6 +27,7 @@ import {
 } from '../db/schema/index.js';
 import type { PlaybookRunStatus } from '../db/schema/playbookRuns.js';
 import { playbookRunService } from './playbookRunService.js';
+import { upsertSubaccountOnboardingState } from '../lib/playbook/onboardingStateHelpers.js';
 
 export interface OwedOnboardingPlaybook {
   slug: string;
@@ -370,6 +371,24 @@ class SubaccountOnboardingService {
     `)) as unknown as Array<{ definition?: { autoStartOnOnboarding?: boolean } }>;
     const sysDef = sysRows[0]?.definition;
     return sysDef?.autoStartOnOnboarding === true;
+  }
+
+  /**
+   * §10.3 — upsert the `subaccount_onboarding_state` row for an onboarding
+   * run transition. Delegates to the helper module so internal services can
+   * call the helper directly without creating a cycle with this service.
+   */
+  async recordRunTransition(params: {
+    runId: string;
+    organisationId: string;
+    subaccountId: string;
+    playbookSlug: string | null;
+    isOnboardingRun: boolean;
+    runStatus: PlaybookRunStatus;
+    startedAt: Date | null;
+    completedAt: Date | null;
+  }): Promise<void> {
+    return upsertSubaccountOnboardingState(params);
   }
 }
 

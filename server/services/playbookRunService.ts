@@ -32,6 +32,7 @@ import type { PlaybookDefinition, PlaybookStep, RunContext } from '../lib/playbo
 import { logger } from '../lib/logger.js';
 import { playbookEngineService } from './playbookEngineService.js';
 import { playbookTemplateService } from './playbookTemplateService.js';
+import { upsertSubaccountOnboardingState } from '../lib/playbook/onboardingStateHelpers.js';
 
 // ─── Definition rehydration ──────────────────────────────────────────────────
 
@@ -270,6 +271,20 @@ export const playbookRunService = {
       subaccountId: input.subaccountId,
       templateVersionId,
     });
+
+    // §10.3 — mark onboarding runs in_progress the moment they're created.
+    if (input.isOnboardingRun === true && slug) {
+      await upsertSubaccountOnboardingState({
+        runId,
+        organisationId: input.organisationId,
+        subaccountId: input.subaccountId,
+        playbookSlug: slug,
+        isOnboardingRun: true,
+        runStatus: 'pending',
+        startedAt,
+        completedAt: null,
+      });
+    }
 
     // Enqueue the first tick.
     await playbookEngineService.enqueueTick(runId);

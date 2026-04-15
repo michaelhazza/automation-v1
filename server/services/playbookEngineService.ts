@@ -76,6 +76,7 @@ import {
 } from './playbookActionCallExecutor.js';
 import type { ActionCallStep } from '../lib/playbook/types.js';
 import { upsertFromPlaybook } from './memoryBlockService.js';
+import { upsertSubaccountOnboardingState } from '../lib/playbook/onboardingStateHelpers.js';
 import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
 import { writeReferenceFromBinding } from './knowledgeService.js';
 
@@ -685,10 +686,22 @@ export const playbookEngineService = {
         .from(playbookStepRuns)
         .where(and(eq(playbookStepRuns.runId, runId), eq(playbookStepRuns.status, 'running')));
       if (stillRunning.length === 0) {
+        const cancelledAt = new Date();
         await db
           .update(playbookRuns)
-          .set({ status: 'cancelled', completedAt: new Date(), updatedAt: new Date() })
+          .set({ status: 'cancelled', completedAt: cancelledAt, updatedAt: cancelledAt })
           .where(eq(playbookRuns.id, runId));
+        // §10.3 — onboarding-state bookkeeping for the terminal cancel.
+        await upsertSubaccountOnboardingState({
+          runId,
+          organisationId: run.organisationId,
+          subaccountId: run.subaccountId,
+          playbookSlug: run.playbookSlug,
+          isOnboardingRun: run.isOnboardingRun,
+          runStatus: 'cancelled',
+          startedAt: run.startedAt,
+          completedAt: cancelledAt,
+        });
         logger.info('playbook_run_cancelled', { event: 'run.cancelled', runId });
         await emitPlaybookEvent(runId, run.subaccountId, 'playbook:run:status', {
           status: 'cancelled',
@@ -780,10 +793,22 @@ export const playbookEngineService = {
           });
         }
 
+        const completedAt = new Date();
         await db
           .update(playbookRuns)
-          .set({ status: finalStatus, completedAt: new Date(), updatedAt: new Date() })
+          .set({ status: finalStatus, completedAt, updatedAt: completedAt })
           .where(eq(playbookRuns.id, runId));
+        // §10.3 — onboarding-state bookkeeping (best-effort).
+        await upsertSubaccountOnboardingState({
+          runId,
+          organisationId: run.organisationId,
+          subaccountId: run.subaccountId,
+          playbookSlug: run.playbookSlug,
+          isOnboardingRun: run.isOnboardingRun,
+          runStatus: finalStatus,
+          startedAt: run.startedAt,
+          completedAt,
+        });
         logger.info('playbook_run_completed', {
           event: finalStatus === 'completed' ? 'run.completed' : 'run.completed_with_errors',
           runId,
@@ -2087,16 +2112,29 @@ export const playbookEngineService = {
     }));
 
     const existingContext = run.contextJson as Record<string, unknown>;
+    const bulkCompletedAt = new Date();
 
     await db
       .update(playbookRuns)
       .set({
         status: parentStatus as PlaybookRun['status'],
         contextJson: { ...existingContext, bulkResults } as Record<string, unknown>,
-        completedAt: new Date(),
-        updatedAt: new Date(),
+        completedAt: bulkCompletedAt,
+        updatedAt: bulkCompletedAt,
       })
       .where(eq(playbookRuns.id, run.id));
+
+    // §10.3 — onboarding-state bookkeeping for the bulk-parent terminal.
+    await upsertSubaccountOnboardingState({
+      runId: run.id,
+      organisationId: run.organisationId,
+      subaccountId: run.subaccountId,
+      playbookSlug: run.playbookSlug,
+      isOnboardingRun: run.isOnboardingRun,
+      runStatus: parentStatus as PlaybookRun['status'],
+      startedAt: run.startedAt,
+      completedAt: bulkCompletedAt,
+    });
 
     logger.info('playbook_bulk_parent_completed', {
       event: 'bulk.parent_completed',
@@ -2339,16 +2377,28 @@ export const playbookEngineService = {
       assertContextSize(nextBytes, run.id);
     } catch (err) {
       logger.error('playbook_context_overflow', { runId: run.id, bytes: nextBytes });
+      const failedAt = new Date();
       await db
         .update(playbookRuns)
         .set({
           status: 'failed',
           error: 'context_overflow',
           failedDueToStepId: sr.stepId,
-          completedAt: new Date(),
-          updatedAt: new Date(),
+          completedAt: failedAt,
+          updatedAt: failedAt,
         })
         .where(eq(playbookRuns.id, run.id));
+      // §10.3 — onboarding-state bookkeeping for the terminal fail.
+      await upsertSubaccountOnboardingState({
+        runId: run.id,
+        organisationId: run.organisationId,
+        subaccountId: run.subaccountId,
+        playbookSlug: run.playbookSlug,
+        isOnboardingRun: run.isOnboardingRun,
+        runStatus: 'failed',
+        startedAt: run.startedAt,
+        completedAt: failedAt,
+      });
       return;
     }
 
@@ -2739,16 +2789,28 @@ export const playbookEngineService = {
         try {
           assertContextSize(nextBytes, run.id);
         } catch {
+          const failedAt = new Date();
           await db
             .update(playbookRuns)
             .set({
               status: 'failed',
               error: 'context_overflow',
               failedDueToStepId: step.id,
-              completedAt: new Date(),
-              updatedAt: new Date(),
+              completedAt: failedAt,
+              updatedAt: failedAt,
             })
             .where(eq(playbookRuns.id, run.id));
+          // §10.3 — onboarding-state bookkeeping for the terminal fail.
+          await upsertSubaccountOnboardingState({
+            runId: run.id,
+            organisationId: run.organisationId,
+            subaccountId: run.subaccountId,
+            playbookSlug: run.playbookSlug,
+            isOnboardingRun: run.isOnboardingRun,
+            runStatus: 'failed',
+            startedAt: run.startedAt,
+            completedAt: failedAt,
+          });
           return;
         }
         const outputHash = hashValue(stepOutput);
@@ -2887,16 +2949,28 @@ export const playbookEngineService = {
     try {
       assertContextSize(nextBytes, run.id);
     } catch {
+      const failedAt = new Date();
       await db
         .update(playbookRuns)
         .set({
           status: 'failed',
           error: 'context_overflow',
           failedDueToStepId: step.id,
-          completedAt: new Date(),
-          updatedAt: new Date(),
+          completedAt: failedAt,
+          updatedAt: failedAt,
         })
         .where(eq(playbookRuns.id, run.id));
+      // §10.3 — onboarding-state bookkeeping for the terminal fail.
+      await upsertSubaccountOnboardingState({
+        runId: run.id,
+        organisationId: run.organisationId,
+        subaccountId: run.subaccountId,
+        playbookSlug: run.playbookSlug,
+        isOnboardingRun: run.isOnboardingRun,
+        runStatus: 'failed',
+        startedAt: run.startedAt,
+        completedAt: failedAt,
+      });
       return;
     }
 
