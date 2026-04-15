@@ -159,7 +159,7 @@ export default definePlaybook({
       model: 'claude-haiku-4-5-20251001',
       prompt:
         'You are drafting a concise intelligence brief for "{{ run.subaccount.name }}" based on the following research findings:\n\n' +
-        '{{ steps.research.output.findings | json }}\n\n' +
+        '{{ steps.research.output.findings }}\n\n' +
         'Write 3–5 crisp bullet points that an executive can act on. ' +
         'Then write a 200–400 word detailed summary in markdown. ' +
         'Return JSON with: ' +
@@ -187,7 +187,7 @@ export default definePlaybook({
       actionInputs: {
         playbookSlug: 'daily-intelligence-brief',
         title: '{{ steps.draft.output.title }}',
-        bullets: '{{ steps.draft.output.bullets | json }}',
+        bullets: '{{ steps.draft.output.bullets }}',
         detailMarkdown: '{{ steps.draft.output.detailMarkdown }}',
       },
       outputSchema: z.object({
@@ -207,7 +207,7 @@ export default definePlaybook({
       retryPolicy: { maxAttempts: 1 },
       actionSlug: 'config_send_playbook_email_digest',
       actionInputs: {
-        to: '{{ run.input.deliveryEmails | json }}',
+        to: '{{ run.input.deliveryEmails }}',
         subject: '{{ steps.draft.output.title }}',
         bodyMarkdown: '{{ steps.draft.output.detailMarkdown }}',
       },

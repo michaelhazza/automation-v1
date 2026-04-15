@@ -531,7 +531,7 @@ async function seedOnboardingModuleSlugs(): Promise<void> {
   const [mod] = await db
     .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })
     .from(modules)
-    .where(eq(modules.slug, REPORTING_MODULE_SLUG))
+    .where(and(eq(modules.slug, REPORTING_MODULE_SLUG), isNull(modules.deletedAt)))
     .limit(1);
 
   if (!mod) {

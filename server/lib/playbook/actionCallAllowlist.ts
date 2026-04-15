@@ -11,9 +11,9 @@
  *   - `config_publish_playbook_output_to_portal`
  *   - `config_send_playbook_email_digest`
  *
- * Those skills live in `server/skills/playbookPortal.ts` and
- * `server/skills/playbookEmail.ts` and are NOT callable from human-initiated
- * Configuration Assistant sessions (enforced via `ACTIONS_NOT_AGENT_DIRECTLY_CALLABLE`).
+ * Those skills' handlers live in `server/tools/config/playbookSkillHandlers.ts`
+ * and are NOT callable from human-initiated Configuration Assistant sessions
+ * (enforced via `visibility: none` in their .md skill definitions).
  *
  * Side-effect classification is NOT stored here — it lives on the step's
  * `sideEffectType` field and is cross-checked by the validator (§4.10). This

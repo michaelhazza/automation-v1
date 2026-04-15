@@ -326,7 +326,7 @@ export async function executeConfigCreateScheduledTask(
   if (taskSlug) {
     const existing = await scheduledTaskService.findActiveBySlug(subaccountId, taskSlug);
     if (existing) {
-      if (input.runNow === true) {
+      if (input.runNow === true || input.runNow === 'true') {
         await scheduledTaskService.enqueueRunNow(existing.id, context.organisationId);
       }
       return { success: true, entityId: existing.id, title: existing.title };
@@ -349,7 +349,7 @@ export async function executeConfigCreateScheduledTask(
         : undefined,
       firstRunAt: input.firstRunAt ? new Date(String(input.firstRunAt)) : undefined,
       firstRunAtTz: input.firstRunAtTz ? String(input.firstRunAtTz) : undefined,
-      runNow: input.runNow === true,
+      runNow: input.runNow === true || input.runNow === 'true',
     });
 
     if (input.isActive === false) {

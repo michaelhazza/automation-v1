@@ -14,7 +14,7 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { modules } from '../server/db/schema/modules.js';
 
 const REPORTING_MODULE_SLUG = 'client_pulse';
@@ -27,7 +27,7 @@ async function seedOnboardingModules(): Promise<void> {
   const [mod] = await db
     .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })
     .from(modules)
-    .where(eq(modules.slug, REPORTING_MODULE_SLUG))
+    .where(and(eq(modules.slug, REPORTING_MODULE_SLUG), isNull(modules.deletedAt)))
     .limit(1);
 
   if (!mod) {

@@ -61,7 +61,7 @@ while IFS= read -r slug; do
   in_registry=0
   in_executor=0
 
-  grep -q "^  ${slug}:" "$REGISTRY_FILE" 2>/dev/null && in_registry=1 || true
+  grep -qE "^\s+${slug}:" "$REGISTRY_FILE" 2>/dev/null && in_registry=1 || true
   grep -q "${slug}:" "$EXECUTOR_FILE" 2>/dev/null && in_executor=1 || true
 
   if [ "$in_registry" -eq 0 ] && [ "$in_executor" -eq 0 ]; then

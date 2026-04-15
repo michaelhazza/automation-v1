@@ -88,7 +88,7 @@ export async function executeConfigPublishPlaybookOutputToPortal(
           isPortalVisible: true,
           publishedAt: now,
           updatedAt: now,
-          retractedAt: null as unknown as undefined,
+          retractedAt: sql`NULL`,
         },
       })
       .returning();
