@@ -351,14 +351,53 @@ difference matters most.
   references to external systems unless they are essential for the skill to
   function. A skill about ad copy generation should not inherit a video
   production section just because the incoming skill happened to include one.
+  Additionally: the merged instructions must not substantially exceed the length
+  of the richer source skill. If the merged output is more than 30% longer than
+  the richer source, you have likely imported out-of-scope content. Revisit and
+  trim.
+- **Invocation trigger preservation.** If either source skill opens with a block
+  that states when to invoke the skill — recognisable by phrases such as "Invoke
+  this skill when", "Use this skill when", "Call this skill when", "Trigger this
+  skill when", or any block whose primary purpose is listing conditions that cause
+  an agent to select this skill — the merged instructions must open with an
+  equivalent block. Merge the trigger conditions from both sources (removing
+  duplicates). Do not move this block into the body or omit it.
+- **Human review gate preservation.** Any instruction that requires a human to
+  approve, review, or confirm output before it is sent or acted on must be
+  preserved verbatim. These are identifiable by phrases such as "do not send
+  directly", "do not post without approval", "review before sending", "human
+  approval required", "present to user for confirmation", or any sentence that
+  explicitly prohibits the skill from taking an action without human sign-off.
+  These phrases must survive the merge unchanged. They may be consolidated if
+  both source skills contain equivalent gates, but neither may be softened or
+  removed.
+- **Tool reference preservation.** Any backtick-wrapped name that refers to
+  another skill (e.g., \`skill-name\`, \`tool-name\`) in either source skill
+  represents an explicit dependency. All such references must appear in the
+  merged output. If the reference appears in a sentence that is being rewritten,
+  rewrite the sentence to preserve the reference. Do not remove a tool reference
+  in the name of de-duplication unless the identical reference already exists
+  elsewhere in the merged output.
 
 ### Soft constraints (follow unless they conflict with hard constraints)
 
 - **You may lightly restructure or rewrite sections for clarity and flow** as
   long as no meaning or unique information is lost. Preserving clarity is more
   important than preserving exact sentence structure.
-- **You may reorder sections** so the merged instructions follow a logical
-  progression (context-gathering → how the skill works → execution → output).
+- **Section ordering.** Reorder sections so the merged instructions follow this
+  canonical sequence:
+  1. Invocation trigger / When to use (if present — must be first)
+  2. Context / Background / How the skill works
+  3. Step-by-step workflow / Execution
+  4. Examples (if present)
+  5. Output format / Response format / Template (if present — must be last before
+     Related Skills)
+  6. Related Skills / See Also (if present — always last)
+
+  Sections that do not fit cleanly into categories 2–4 should preserve their
+  order relative to the base skill. "Output format" is any section whose primary
+  content is a structural template or schema for the skill's response — it always
+  goes in position 5 regardless of where it appeared in the source skills.
 - **Voice** — normalise inserted content to match the base skill's register
   (imperative, second-person, etc.). Do not leave jarring style shifts at join
   points.
@@ -401,7 +440,11 @@ Before writing the JSON response, verify:
 - No section appears more than once (e.g. two platform specs tables)
 - No broken or half-merged sentences at any join point
 - No conflicting instructions remain (e.g. two different rules for the same scenario)
-- Section order follows a logical flow: context-gathering → how the skill works → execution → output format
+- Section order follows the canonical sequence: trigger → context → workflow → examples → output format → related skills.
+- If either source had an invocation trigger block, the merged instructions open with one.
+- All human-review-gate instructions from both sources are preserved verbatim.
+- Every backtick-wrapped tool/skill reference from both sources appears in the merged output.
+- The output format / template section (if present) is the last substantive section before Related Skills.
 - Instructions read cleanly from start to finish as a single authored document
 - \`definition.input_schema\` is valid JSON with no duplicate keys
 - The response is complete — no trailing "..." or cut-off content
@@ -410,7 +453,7 @@ If any issue is found, fix it before returning.
 For DUPLICATE and DISTINCT classifications, OMIT the \`proposedMerge\` field
 entirely (or set it to null) — there is nothing to merge.
 
-The proposedMerge object has exactly four fields:
+The proposedMerge object has exactly five fields:
 - \`name\` — string. Prefer the incoming skill's name/slug if it is more
   descriptive or better reflects the merged scope; otherwise keep the existing.
 - \`description\` — string. Prefer a trigger-style description (explaining WHEN
@@ -420,10 +463,11 @@ The proposedMerge object has exactly four fields:
   \`description\`, \`input_schema\`). NEVER a string. Merge rules:
     • \`name\` — match the chosen \`name\` field above (snake_case slug).
     • \`description\` — use the richer/more complete description.
-    • \`input_schema.required\` — keep all fields that are required in the
-      base. Never introduce new required fields from the non-base unless they
-      are required for ALL valid uses of the merged skill. When uncertain,
-      default to optional — it is always the safer choice.
+    • \`input_schema.required\` — preserve all required fields from **both**
+      source skills. You may not silently demote a required field to optional.
+      The merged required array must be a superset of the union of required
+      arrays from both skills. If dropping a field is genuinely necessary,
+      justify it in \`mergeRationale\`.
     • \`input_schema.properties\` — union both sets. For parameters that exist
       in both, use the more detailed \`description\`. For enum fields, union
       the enum values from both skills (e.g. if one supports google/meta and
@@ -432,6 +476,10 @@ The proposedMerge object has exactly four fields:
     • Preserve all file path references, tool names, and markdown links
       exactly as they appear in the source skill — do not alter or invent them.
 - \`instructions\` — string OR null
+- \`mergeRationale\` — string (2–5 sentences). Which skill became the base and
+  why. What unique content was added from the non-base. What, if anything, was
+  dropped during deduplication and the justification. Write for a human reviewer
+  who needs to quickly assess whether the merge is trustworthy.
 
 ## Output Format (PARTIAL_OVERLAP or IMPROVEMENT)
 
@@ -444,7 +492,8 @@ Respond with ONLY a JSON object in this exact format:
     "name": "...",
     "description": "...",
     "definition": { "name": "...", "description": "...", "input_schema": { ... } },
-    "instructions": "..."
+    "instructions": "...",
+    "mergeRationale": "..."
   }
 }
 
