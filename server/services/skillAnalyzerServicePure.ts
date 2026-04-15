@@ -734,9 +734,15 @@ export interface NonSkillFlags {
 /** Heuristically flag parsed skills that are not executable tools. Pure —
  *  no DB, no clock. Returns { false, false } for normal skills. */
 export function detectNonSkillFile(skill: ParsedSkill): NonSkillFlags {
-  // All executable skills have a tool definition (input_schema).
-  // Files without one are either docs or context files.
-  if (skill.definition !== null) {
+  // Only skip detection when the definition is a real Anthropic tool schema
+  // (requires input_schema). The parser's extractJsonBlock is greedy and picks
+  // up any JSON object in the body (config blocks, metadata, index entries),
+  // so definition !== null alone is not a reliable signal of an executable skill.
+  const hasRealDefinition =
+    skill.definition !== null &&
+    typeof (skill.definition as Record<string, unknown>).input_schema !== 'undefined';
+
+  if (hasRealDefinition) {
     return { isDocumentationFile: false, isContextFile: false };
   }
 

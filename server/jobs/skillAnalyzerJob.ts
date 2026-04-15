@@ -1078,6 +1078,12 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             });
 
             // If Haiku's choice isn't in the top-3 cosine proposals, add it
+            // informational-only: do NOT mark it llmConfirmed or selected.
+            // A 0%-cosine agent picked by Haiku is a weak signal — cosine and
+            // LLM strongly disagree, so the skill likely has no good home yet.
+            // Leaving llmConfirmed=false ensures Stage 8b includes these skills
+            // in the cluster recommendation rather than falsely treating them as
+            // homed. The cosine-top proposal's selection is also preserved.
             if (
               !suggestion.noGoodMatch &&
               suggestion.suggestedAgentSlug &&
@@ -1090,10 +1096,15 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   slugSnapshot: agent.slug,
                   nameSnapshot: agent.name,
                   score: 0,
-                  selected: true,
+                  selected: false,
                   llmReasoning: suggestion.reasoning,
-                  llmConfirmed: true,
+                  llmConfirmed: false,
                 });
+                // Restore selection on the highest-scoring cosine proposal since
+                // Haiku's out-of-top-K pick is not a confirmed home.
+                const topCosine = enriched.reduce((best, p) =>
+                  p.score > (best?.score ?? -1) ? p : best, enriched[0]);
+                if (topCosine) topCosine.selected = true;
               }
             }
 
