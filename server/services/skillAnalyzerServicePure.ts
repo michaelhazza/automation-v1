@@ -590,11 +590,11 @@ export function parseClassificationResponseWithMerge(
   const p = parsed as Record<string, unknown>;
   if (!isValidClassification(p.classification)) return null;
   // Normalise confidence: Sonnet occasionally returns a percentage integer (e.g. 85)
-  // instead of a decimal (0.85). Clamp to [0, 1] — values > 1 are treated as
-  // percentages and divided by 100.
+  // instead of a decimal (0.85). Only normalise when raw >= 2 (clearly a percentage
+  // integer) — values in (1, 2) are genuinely out of range and should return null.
   if (typeof p.confidence !== 'number') return null;
   const raw = p.confidence;
-  const confidence = raw > 1 ? raw / 100 : raw;
+  const confidence = raw >= 2 ? raw / 100 : raw;
   if (confidence < 0 || confidence > 1) return null;
   if (typeof p.reasoning !== 'string') return null;
 
