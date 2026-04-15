@@ -155,13 +155,14 @@ export function HelpHint(props: HelpHintProps) {
     const next = e.relatedTarget as Node | null;
     if (popoverRef.current?.contains(next)) return;
     // Microtask deferral: on fast pointer interactions blur fires before
-    // pointerdown settles. Defer so we can check if the popover is still
-    // hovered before scheduling close, preventing flicker.
-    setTimeout(() => {
+    // pointerdown settles. queueMicrotask runs before the next macrotask so
+    // we get tighter timing than setTimeout(0) while still allowing the
+    // pointerdown handler to have already run.
+    queueMicrotask(() => {
       if (!popoverRef.current?.matches(':hover')) {
         scheduleClose();
       }
-    }, 0);
+    });
   }, [scheduleClose]);
 
   // Measure + position on open, and on resize / scroll while open.
