@@ -154,7 +154,14 @@ export function HelpHint(props: HelpHintProps) {
     // link inside the tooltip content).
     const next = e.relatedTarget as Node | null;
     if (popoverRef.current?.contains(next)) return;
-    scheduleClose();
+    // Microtask deferral: on fast pointer interactions blur fires before
+    // pointerdown settles. Defer so we can check if the popover is still
+    // hovered before scheduling close, preventing flicker.
+    setTimeout(() => {
+      if (!popoverRef.current?.matches(':hover')) {
+        scheduleClose();
+      }
+    }, 0);
   }, [scheduleClose]);
 
   // Measure + position on open, and on resize / scroll while open.
@@ -222,10 +229,14 @@ export function HelpHint(props: HelpHintProps) {
     return () => clearTimers();
   }, [clearTimers]);
 
-  const portalRoot =
-    typeof document !== 'undefined'
-      ? document.getElementById('help-hint-portal') ?? document.body
-      : null;
+  const portalRoot = (() => {
+    if (typeof document === 'undefined') return null;
+    const el = document.getElementById('help-hint-portal');
+    if (!el && process.env.NODE_ENV === 'development') {
+      console.warn('[HelpHint] #help-hint-portal not found — falling back to document.body. Add <div id="help-hint-portal" /> to App.tsx.');
+    }
+    return el ?? document.body;
+  })();
 
   return (
     <>
@@ -272,6 +283,7 @@ export function HelpHint(props: HelpHintProps) {
               id={popoverId}
               ref={popoverRef}
               role="tooltip"
+              aria-live="polite"
               onMouseEnter={clearTimers}
               onMouseLeave={scheduleClose}
               style={{
