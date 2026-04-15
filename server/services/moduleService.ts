@@ -1,6 +1,12 @@
 import { eq, and, isNull, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { modules, subscriptions, orgSubscriptions } from '../db/schema/index.js';
+import {
+  modules,
+  subscriptions,
+  orgSubscriptions,
+  playbookTemplates,
+  systemPlaybookTemplates,
+} from '../db/schema/index.js';
 import type { Module, NewModule } from '../db/schema/index.js';
 
 class ModuleService {
@@ -136,6 +142,9 @@ class ModuleService {
   }
 
   async createModule(data: Omit<NewModule, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>): Promise<Module> {
+    if (Array.isArray(data.onboardingPlaybookSlugs) && data.onboardingPlaybookSlugs.length > 0) {
+      await this.validateOnboardingPlaybookSlugs(data.onboardingPlaybookSlugs);
+    }
     const now = new Date();
     const [row] = await db
       .insert(modules)
@@ -157,6 +166,12 @@ class ModuleService {
       throw { statusCode: 404, message: 'Module not found' };
     }
 
+    // Phase F — §10.3: validate every slug in `onboardingPlaybookSlugs`
+    // resolves to a published system or org template before writing.
+    if (Array.isArray(data.onboardingPlaybookSlugs) && data.onboardingPlaybookSlugs.length > 0) {
+      await this.validateOnboardingPlaybookSlugs(data.onboardingPlaybookSlugs);
+    }
+
     const [updated] = await db
       .update(modules)
       .set({ ...data, updatedAt: new Date() })
@@ -164,6 +179,50 @@ class ModuleService {
       .returning();
 
     return updated;
+  }
+
+  /**
+   * §10.3 — validate onboarding playbook slugs resolve to at least one
+   * published template (system or any org). Throws `invalid_slug: <slug>`
+   * on the first unresolved slug so the admin sees the exact problem.
+   */
+  private async validateOnboardingPlaybookSlugs(slugs: string[]): Promise<void> {
+    const deduped = Array.from(new Set(slugs));
+    if (deduped.length === 0) return;
+
+    // Collect slugs that resolve to a system template with a published version.
+    const sysRows = await db
+      .select({ slug: systemPlaybookTemplates.slug })
+      .from(systemPlaybookTemplates)
+      .where(
+        and(
+          inArray(systemPlaybookTemplates.slug, deduped),
+          isNull(systemPlaybookTemplates.deletedAt),
+        ),
+      );
+    const sysResolved = new Set(sysRows.map((r) => r.slug));
+
+    // Collect slugs that resolve to at least one org template with a published version.
+    const orgRows = await db
+      .select({ slug: playbookTemplates.slug })
+      .from(playbookTemplates)
+      .where(
+        and(
+          inArray(playbookTemplates.slug, deduped),
+          isNull(playbookTemplates.deletedAt),
+        ),
+      );
+    const orgResolved = new Set(orgRows.map((r) => r.slug));
+
+    for (const slug of deduped) {
+      if (!sysResolved.has(slug) && !orgResolved.has(slug)) {
+        throw {
+          statusCode: 422,
+          message: `invalid_slug: ${slug}`,
+          errorCode: 'invalid_slug',
+        };
+      }
+    }
   }
 }
 

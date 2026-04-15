@@ -15,6 +15,8 @@ import {
 import { eq, and, isNull, desc } from 'drizzle-orm';
 import { configHistoryService } from '../services/configHistoryService.js';
 import { boardService } from '../services/boardService.js';
+import { subaccountOnboardingService } from '../services/subaccountOnboardingService.js';
+import { logger } from '../lib/logger.js';
 
 const router = Router();
 
@@ -112,6 +114,45 @@ router.post(
     boardService.initSubaccountBoard(organisationId, sa.id).catch(() => {
       // Non-critical: if org has no board config, skip silently
     });
+
+    // Phase F — spec §10.5: auto-start onboarding playbooks whose templates
+    // declare `autoStartOnOnboarding: true`. Isolated from the main creation
+    // flow so a failing enqueue never blocks subaccount creation (§5.8 pattern).
+    if (req.user?.id) {
+      subaccountOnboardingService
+        .autoStartOwedOnboardingPlaybooks({
+          organisationId,
+          subaccountId: sa.id,
+          startedByUserId: req.user.id,
+        })
+        .then((result) => {
+          if (result.errors.length > 0) {
+            logger.warn('onboarding_auto_start_partial_failure', {
+              event: 'onboarding.auto_start.partial_failure',
+              subaccountId: sa.id,
+              organisationId,
+              errors: result.errors,
+            });
+          }
+          if (result.startedRunIds.length > 0) {
+            logger.info('onboarding_auto_start_success', {
+              event: 'onboarding.auto_start.success',
+              subaccountId: sa.id,
+              organisationId,
+              startedRunIds: result.startedRunIds,
+              skippedSlugs: result.skippedSlugs,
+            });
+          }
+        })
+        .catch((err) => {
+          logger.warn('onboarding_auto_start_failed', {
+            event: 'onboarding.auto_start.failed',
+            subaccountId: sa.id,
+            organisationId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
 
     res.status(201).json({
       id: sa.id,

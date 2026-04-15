@@ -69,6 +69,7 @@ import webLoginConnectionsRouter from './routes/webLoginConnections.js';
 import playbookTemplatesRouter from './routes/playbookTemplates.js';
 import playbookRunsRouter from './routes/playbookRuns.js';
 import playbookStudioRouter from './routes/playbookStudio.js';
+import subaccountOnboardingRouter from './routes/subaccountOnboarding.js';
 import processConnectionMappingsRouter from './routes/processConnectionMappings.js';
 // Brain Tree OS adoption P4 — workspace health audit
 import workspaceHealthRouter from './routes/workspaceHealth.js';
@@ -241,6 +242,7 @@ app.use(webLoginConnectionsRouter);
 app.use(playbookTemplatesRouter);
 app.use(playbookRunsRouter);
 app.use(playbookStudioRouter);
+app.use(subaccountOnboardingRouter);
 app.use(processConnectionMappingsRouter);
 app.use(workspaceHealthRouter);
 app.use(subaccountEnginesRouter);
