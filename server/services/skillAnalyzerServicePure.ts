@@ -294,6 +294,26 @@ export interface ProposedMerge {
   // Anthropic tool definition object — never a string.
   definition: object;
   instructions: string | null;
+  mergeRationale?: string;   // optional — omitted before storage, surfaced in UI
+}
+
+export type MergeWarningCode =
+  | 'REQUIRED_FIELD_DEMOTED'
+  | 'CAPABILITY_OVERLAP'
+  | 'SCOPE_EXPANSION'
+  | 'SCOPE_EXPANSION_CRITICAL'
+  | 'TABLE_ROWS_DROPPED'
+  | 'INVOCATION_LOST'
+  | 'HITL_LOST'
+  | 'OUTPUT_FORMAT_LOST';
+
+export type MergeWarningSeverity = 'warning' | 'critical';
+
+export interface MergeWarning {
+  code: MergeWarningCode;
+  severity: MergeWarningSeverity;
+  message: string;
+  detail?: string;
 }
 
 /** Result returned by parseClassificationResponseWithMerge. The classification
@@ -532,7 +552,12 @@ export function parseClassificationResponseWithMerge(
   if (classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') {
     if (p.proposedMerge !== undefined && p.proposedMerge !== null) {
       if (isValidProposedMerge(p.proposedMerge)) {
-        proposedMerge = p.proposedMerge;
+        proposedMerge = {
+          ...p.proposedMerge,
+          mergeRationale: typeof p.proposedMerge.mergeRationale === 'string'
+            ? p.proposedMerge.mergeRationale
+            : undefined,
+        };
       }
       // Otherwise leave as null — null-fallback path on execute.
     }
