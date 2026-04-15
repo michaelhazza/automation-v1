@@ -26,6 +26,7 @@ const router = Router();
 const promoteBody = z.object({
   label: z.string().min(1).max(MEMORY_BLOCK_LABEL_MAX),
   content: z.string().min(1).max(MEMORY_BLOCK_CONTENT_MAX),
+  autoAttach: z.boolean().optional(),
 });
 
 const demoteBody = z.object({
@@ -137,7 +138,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { subaccountId, referenceId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
-    const { label, content } = req.body as z.infer<typeof promoteBody>;
+    const { label, content, autoAttach } = req.body as z.infer<typeof promoteBody>;
 
     const result = await promoteReferenceToBlock({
       referenceId,
@@ -145,6 +146,7 @@ router.post(
       organisationId: req.orgId!,
       label,
       content,
+      autoAttach,
       actorUserId: req.user?.id ?? null,
     });
     res.status(201).json(result);

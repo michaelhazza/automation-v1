@@ -124,12 +124,19 @@ export interface PromoteReferenceParams {
   label: string;
   content: string;
   actorUserId: string | null;
+  /**
+   * Phase G / §7.4 / G7.1 — when true, the promoted block is created with
+   * `autoAttach=true` and materialises read-only attachments for every
+   * currently-linked agent in the sub-account.
+   */
+  autoAttach?: boolean;
 }
 
 export async function promoteReferenceToBlock(
   params: PromoteReferenceParams,
 ): Promise<{ blockId: string }> {
   const { referenceId, subaccountId, organisationId, label, content, actorUserId } = params;
+  const autoAttach = params.autoAttach === true;
 
   if (!label || label.length > MEMORY_BLOCK_LABEL_MAX) {
     throw { statusCode: 400, message: `Label must be 1–${MEMORY_BLOCK_LABEL_MAX} characters` };
@@ -181,8 +188,17 @@ export async function promoteReferenceToBlock(
       content,
       sourceReferenceId: referenceId,
       isReadOnly: false,
+      autoAttach,
     })
     .returning();
+
+  // Phase G / §7.4 / G7.1 — materialise attachments for every linked agent
+  // in the sub-account. Imports from memoryBlockService lazily to avoid
+  // cycling on startup.
+  if (autoAttach) {
+    const { materialiseAutoAttachForBlock } = await import('./memoryBlockService.js');
+    await materialiseAutoAttachForBlock(created.id, subaccountId);
+  }
 
   await configHistoryService.recordHistory({
     entityType: 'memory_block',
@@ -194,6 +210,7 @@ export async function promoteReferenceToBlock(
       subaccountId: created.subaccountId,
       sourceReferenceId: created.sourceReferenceId,
       promotedFromReferenceId: referenceId,
+      autoAttach,
     },
     changedBy: actorUserId,
     changeSource: 'ui',

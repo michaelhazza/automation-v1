@@ -3,6 +3,8 @@ import { db } from '../db/index.js';
 import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
+import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
+import { logger } from '../lib/logger.js';
 
 export const subaccountAgentService = {
   async listSubaccountAgents(organisationId: string, subaccountId: string) {
@@ -99,6 +101,19 @@ export const subaccountAgentService = {
         changedBy: null,
         changeSource: 'api',
       });
+
+      // Phase G / §7.4 / G7.2 — newly-linked agent inherits every
+      // auto-attach memory block in the sub-account. Best-effort: failures
+      // here are logged but do not undo the link.
+      try {
+        await materialiseAutoAttachForAgent(agentId, subaccountId);
+      } catch (err) {
+        logger.error('subaccount_agent_auto_attach_failed', {
+          agentId,
+          subaccountId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
       return link;
     } catch (err: unknown) {

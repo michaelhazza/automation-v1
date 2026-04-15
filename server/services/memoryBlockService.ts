@@ -17,9 +17,9 @@
  *   `detachBlock`, `listBlocks`.
  */
 
-import { eq, and, asc, isNull, count } from 'drizzle-orm';
+import { eq, and, asc, isNull, count, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { memoryBlocks, memoryBlockAttachments } from '../db/schema/index.js';
+import { memoryBlocks, memoryBlockAttachments, subaccountAgents } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
 import {
   decideUpsert,
@@ -59,6 +59,9 @@ export async function getBlocksForAgent(
         eq(memoryBlockAttachments.agentId, agentId),
         eq(memoryBlocks.organisationId, organisationId),
         isNull(memoryBlocks.deletedAt),
+        // Phase G / §7.4 — skip tombstoned attachments so a detached
+        // auto-attach row does not reappear in the agent's prompt.
+        isNull(memoryBlockAttachments.deletedAt),
       ),
     )
     .orderBy(asc(memoryBlocks.name));
@@ -160,7 +163,15 @@ export async function createBlock(input: {
   content: string;
   ownerAgentId?: string | null;
   isReadOnly?: boolean;
+  /**
+   * Phase G / §7.4 / G7.1 — when true, materialise a read-only attachment
+   * for every currently-linked agent in the sub-account. Requires
+   * `subaccountId` to be set.
+   */
+  autoAttach?: boolean;
 }): Promise<MemoryBlock> {
+  const autoAttach = input.autoAttach === true && !!input.subaccountId;
+
   const [created] = await db
     .insert(memoryBlocks)
     .values({
@@ -170,10 +181,86 @@ export async function createBlock(input: {
       content: input.content,
       ownerAgentId: input.ownerAgentId ?? null,
       isReadOnly: input.isReadOnly ?? false,
+      autoAttach,
     })
     .returning();
 
+  if (autoAttach && input.subaccountId) {
+    await materialiseAutoAttachForBlock(created.id, input.subaccountId);
+  }
+
   return created;
+}
+
+/**
+ * Phase G / §7.4 / G7.1 — attach a memory block to every currently-linked
+ * agent in the sub-account. Uses ON CONFLICT DO NOTHING so a tombstoned
+ * attachment (user has explicitly detached) is NOT revived.
+ *
+ * Safe to call repeatedly (idempotent by unique index on (block_id, agent_id)).
+ */
+export async function materialiseAutoAttachForBlock(
+  blockId: string,
+  subaccountId: string,
+): Promise<void> {
+  const links = await db
+    .select({ agentId: subaccountAgents.agentId })
+    .from(subaccountAgents)
+    .where(
+      and(
+        eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.isActive, true),
+      ),
+    );
+  if (links.length === 0) return;
+
+  const values = links.map((l) => ({
+    blockId,
+    agentId: l.agentId,
+    permission: 'read' as const,
+    source: 'auto_attach' as const,
+  }));
+  await db
+    .insert(memoryBlockAttachments)
+    .values(values)
+    .onConflictDoNothing({
+      target: [memoryBlockAttachments.blockId, memoryBlockAttachments.agentId],
+    });
+}
+
+/**
+ * Phase G / §7.4 / G7.2 — called by `subaccountAgentService.linkAgent`.
+ * Iterates every `auto_attach=true` memory block in the sub-account and
+ * materialises an attachment for the newly-linked agent.
+ */
+export async function materialiseAutoAttachForAgent(
+  agentId: string,
+  subaccountId: string,
+): Promise<void> {
+  const blocks = await db
+    .select({ id: memoryBlocks.id })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.autoAttach, true),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+  if (blocks.length === 0) return;
+
+  const values = blocks.map((b) => ({
+    blockId: b.id,
+    agentId,
+    permission: 'read' as const,
+    source: 'auto_attach' as const,
+  }));
+  await db
+    .insert(memoryBlockAttachments)
+    .values(values)
+    .onConflictDoNothing({
+      target: [memoryBlockAttachments.blockId, memoryBlockAttachments.agentId],
+    });
 }
 
 export async function updateBlockAdmin(
@@ -257,10 +344,16 @@ export async function attachBlock(
 
   const [row] = await db
     .insert(memoryBlockAttachments)
-    .values({ blockId, agentId, permission })
+    .values({ blockId, agentId, permission, source: 'manual' })
     .onConflictDoUpdate({
       target: [memoryBlockAttachments.blockId, memoryBlockAttachments.agentId],
-      set: { permission },
+      set: {
+        permission,
+        source: 'manual',
+        // §7.4 — a manual attach revives a tombstoned row so the agent sees
+        // the block again. This is the intended user-initiated re-attach path.
+        deletedAt: null,
+      },
     })
     .returning({ id: memoryBlockAttachments.id });
 
@@ -285,6 +378,14 @@ export interface UpsertFromPlaybookParams {
   actorAgentId: string | null;
   /** 'low' on firstRunOnly bindings, 'normal' otherwise. */
   confidence: BlockConfidence;
+  /**
+   * Phase G / §7.4 / spec line 319 — default `true` for blocks created via
+   * `knowledgeBindings[]`. When a block is first created by this path the
+   * flag is persisted and a read-only attachment is materialised for every
+   * currently-linked agent in the sub-account. Ignored on the `update` path
+   * — existing blocks keep whatever `autoAttach` they were created with.
+   */
+  autoAttach?: boolean;
 }
 
 export type UpsertFromPlaybookResult =
@@ -319,6 +420,11 @@ export async function upsertFromPlaybook(
     actorAgentId,
     confidence,
   } = params;
+  // Spec line 319: "Toggle: autoAttach (default: true for blocks created via
+  // knowledgeBindings[])". The caller can override; when omitted, create paths
+  // default to true so baseline facts are visible to every agent in the
+  // sub-account without manual attachment.
+  const autoAttach = params.autoAttach ?? true;
 
   // Count how many blocks this run has already written — the per-run quota.
   const [{ value: blocksUpsertedThisRun }] = await db
@@ -386,8 +492,12 @@ export async function upsertFromPlaybook(
           lastEditedByAgentId: actorAgentId,
           lastWrittenByPlaybookSlug: playbookSlug,
           confidence,
+          autoAttach,
         })
         .returning({ id: memoryBlocks.id });
+      if (autoAttach) {
+        await materialiseAutoAttachForBlock(created.id, subaccountId);
+      }
       return { kind: 'created', blockId: created.id, truncated: decision.truncated };
     }
     case 'update': {
@@ -433,15 +543,20 @@ export async function detachBlock(blockId: string, agentId: string, orgId: strin
     throw { statusCode: 404, message: 'Memory block not found' };
   }
 
-  const deleted = await db
-    .delete(memoryBlockAttachments)
+  // §7.4 / G7.3 — soft-delete so future auto-attach iterations (via
+  // ON CONFLICT DO NOTHING on the (block_id, agent_id) unique index) do NOT
+  // revive the row. User intent to detach is durable.
+  const updated = await db
+    .update(memoryBlockAttachments)
+    .set({ deletedAt: new Date() })
     .where(
       and(
         eq(memoryBlockAttachments.blockId, blockId),
         eq(memoryBlockAttachments.agentId, agentId),
+        isNull(memoryBlockAttachments.deletedAt),
       ),
     )
     .returning({ id: memoryBlockAttachments.id });
 
-  return deleted.length > 0;
+  return updated.length > 0;
 }
