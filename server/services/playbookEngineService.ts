@@ -67,6 +67,12 @@ import { getPgBoss } from '../lib/pgBossInstance.js';
 import { getJobConfig } from '../config/jobConfig.js';
 import type { PlaybookRunMode } from '../db/schema/playbookRuns.js';
 import { playbookStepReviewService } from './playbookStepReviewService.js';
+import {
+  executeActionCall,
+  resolveConfigurationAssistantAgentId,
+  ActionTimeoutError,
+} from './playbookActionCallExecutor.js';
+import type { ActionCallStep } from '../lib/playbook/types.js';
 
 const TICK_QUEUE = 'playbook-run-tick';
 const WATCHDOG_QUEUE = 'playbook-watchdog';
@@ -626,11 +632,12 @@ export const playbookEngineService = {
     }
 
     // ── Sprint 4 P3.1: supervised mode gate ──────────────────────────────
-    // In supervised mode, every agent_call/prompt step requires approval
-    // before dispatch. Conditional and user_input steps proceed normally.
+    // In supervised mode, every agent_call/prompt/action_call step requires
+    // approval before dispatch. Conditional and user_input steps proceed
+    // normally.
     if (
       run.runMode === 'supervised' &&
-      (step.type === 'agent_call' || step.type === 'prompt') &&
+      (step.type === 'agent_call' || step.type === 'prompt' || step.type === 'action_call') &&
       sr.status === 'pending'
     ) {
       await playbookStepReviewService.requireApproval(sr, {
@@ -861,6 +868,169 @@ export const playbookEngineService = {
           agentId: resolvedAgentId, // the agent entity; agentRunId is populated by agentExecutionService
           branchesCount: decisionStep.branches.length,
         });
+        return;
+      }
+
+      case 'action_call': {
+        // Replay mode short-circuits to the recorded output.
+        if (run.replayMode) {
+          await this.replayDispatch(run, sr, step);
+          return;
+        }
+
+        const actionStep = step as ActionCallStep;
+        const ctx = run.contextJson as unknown as RunContext;
+
+        // Resolve templated inputs against run context.
+        let resolvedActionInputs: Record<string, unknown>;
+        try {
+          resolvedActionInputs = actionStep.actionInputs
+            ? resolveTemplateInputs(actionStep.actionInputs, ctx)
+            : {};
+        } catch (err) {
+          if (err instanceof TemplatingError) {
+            await this.failStepRunInternal(
+              sr,
+              `templating_error: ${err.reason} ('${err.expression}')`,
+            );
+            return;
+          }
+          throw err;
+        }
+
+        const dispatchInputHash = hashValue({
+          actionSlug: actionStep.actionSlug,
+          actionInputs: resolvedActionInputs,
+        });
+
+        // Input-hash reuse path — never for irreversible steps.
+        if (step.sideEffectType !== 'irreversible') {
+          const reuse = await this.findReusableOutputForStep(
+            run.id,
+            step.id,
+            dispatchInputHash,
+          );
+          if (reuse) {
+            logger.info('playbook_action_call_input_hash_reuse', {
+              event: 'step.completed',
+              runId: run.id,
+              stepRunId: sr.id,
+              stepId: step.id,
+              reusedFromAttempt: reuse.attempt,
+            });
+            await this.completeStepRunInternal(
+              sr,
+              reuse.output,
+              reuse.outputHash,
+              `input_hash_reuse:from_attempt_${reuse.attempt}`,
+            );
+            return;
+          }
+        }
+
+        // Resolve the Configuration Assistant agent id (cache → live).
+        const meta = ctx?._meta ?? ({} as RunContext['_meta']);
+        let configAgentId = meta.resolvedActionAgents?.configuration_assistant ?? null;
+        if (!configAgentId) {
+          configAgentId = await resolveConfigurationAssistantAgentId(run.organisationId);
+        }
+        if (!configAgentId) {
+          await this.failStepRunInternal(sr, 'configuration_assistant_agent_not_found');
+          return;
+        }
+
+        // Mark the step as running.
+        await db
+          .update(playbookStepRuns)
+          .set({
+            status: 'running',
+            inputJson: {
+              actionSlug: actionStep.actionSlug,
+              actionInputs: resolvedActionInputs,
+            } as unknown as Record<string, unknown>,
+            inputHash: dispatchInputHash,
+            startedAt: new Date(),
+            version: sr.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(playbookStepRuns.id, sr.id));
+
+        // Idempotency key — entity-scoped for singleton resources, run-scoped otherwise.
+        const idempotencyKey =
+          actionStep.idempotencyScope === 'entity' && actionStep.entityKey
+            ? `entity:${actionStep.entityKey}`
+            : `playbook:${run.id}:${step.id}:${sr.attempt}`;
+
+        logger.info('playbook_action_call_dispatched', {
+          event: 'step.dispatched',
+          runId: run.id,
+          stepRunId: sr.id,
+          stepId: step.id,
+          actionSlug: actionStep.actionSlug,
+          idempotencyKey,
+        });
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:step:dispatched', {
+          stepRunId: sr.id,
+          stepId: step.id,
+          stepType: step.type,
+          actionSlug: actionStep.actionSlug,
+        });
+
+        // Execute synchronously via the action pipeline.
+        try {
+          const result = await executeActionCall({
+            organisationId: run.organisationId,
+            subaccountId: run.subaccountId,
+            agentId: configAgentId,
+            playbookStepRunId: sr.id,
+            playbookRunId: run.id,
+            actionSlug: actionStep.actionSlug,
+            actionInputs: resolvedActionInputs,
+            idempotencyKey,
+            timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
+          });
+
+          if (result.status === 'blocked') {
+            await this.failStepRunInternal(
+              sr,
+              `blocked_by_policy${result.reason ? `: ${result.reason}` : ''}`,
+            );
+            return;
+          }
+          if (result.status === 'pending_approval') {
+            await db
+              .update(playbookStepRuns)
+              .set({
+                status: 'awaiting_approval',
+                updatedAt: new Date(),
+              })
+              .where(eq(playbookStepRuns.id, sr.id));
+            await emitPlaybookEvent(
+              run.id,
+              run.subaccountId,
+              'playbook:step:awaiting_approval',
+              { stepRunId: sr.id, stepId: step.id, actionId: result.actionId },
+            );
+            return;
+          }
+          if (result.status === 'failed') {
+            await this.failStepRunInternal(sr, `action_failed: ${result.error}`);
+            return;
+          }
+          // approved_and_executed
+          await this.completeStepRunInternal(
+            sr,
+            result.output,
+            hashValue(result.output),
+            'action_call',
+          );
+        } catch (err) {
+          const reason =
+            err instanceof ActionTimeoutError
+              ? 'action_timeout'
+              : `action_call_error: ${err instanceof Error ? err.message : String(err)}`;
+          await this.failStepRunInternal(sr, reason);
+        }
         return;
       }
 
@@ -1938,6 +2108,30 @@ export const playbookEngineService = {
     });
 
     await this.enqueueTick(run.id);
+  },
+
+  /**
+   * Completion entry used by the HITL resumption path (§4.7). Accepts the
+   * already-loaded step run row to avoid a redundant SELECT at the callsite.
+   * Reuses the `invalidated` hard-discard rule from `completeStepRun`.
+   */
+  async completeStepRunFromReview(
+    sr: PlaybookStepRun,
+    output: unknown,
+    via: string,
+    _decidedByUserId?: string,
+  ): Promise<void> {
+    if (sr.status === 'invalidated') {
+      logger.warn('playbook_step_result_discarded_invalidated', {
+        event: 'step.result_discarded_invalidated',
+        runId: sr.runId,
+        stepRunId: sr.id,
+        stepId: sr.stepId,
+      });
+      return;
+    }
+    const outputHash = hashValue(output);
+    await this.completeStepRunInternal(sr, output, outputHash, via);
   },
 
   /** Public completion entry — used by run service. */

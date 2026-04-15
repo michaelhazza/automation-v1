@@ -135,10 +135,30 @@ export const reviewService = {
 
     // Dispatch execution outside the approval transaction
     let execResult;
+    // ─── Playbook action_call HITL resumption branch (spec §4.7) ──────────
+    // When the action was proposed by a playbook's action_call step, route
+    // execution through the playbook resumption path instead of the default
+    // adapter-based executionLayerService. The resumption path invokes the
+    // raw config_* skill handler (bypassing a duplicate audit row), marks
+    // the action completed / failed on the same row, and resumes the
+    // playbook step run via the engine.
+    const actionForBranch = await actionService.getAction(item.actionId, organisationId);
+    const branchMeta = (actionForBranch.metadataJson ?? null) as Record<string, unknown> | null;
+    const isPlaybookActionCall = branchMeta?.source === 'playbook_action_call';
     try {
-      execResult = await executionLayerService.executeAction(item.actionId, organisationId);
-      // Mark review item as completed after successful execution
-      await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
+      if (isPlaybookActionCall) {
+        const { resumeActionCallAfterApproval } = await import('./playbookActionCallExecutor.js');
+        const resumed = await resumeActionCallAfterApproval({
+          action: actionForBranch,
+          approverUserId: userId,
+        });
+        execResult = resumed ?? null;
+        await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
+      } else {
+        execResult = await executionLayerService.executeAction(item.actionId, organisationId);
+        // Mark review item as completed after successful execution
+        await db.update(reviewItems).set({ reviewStatus: 'completed' }).where(eq(reviewItems.id, reviewItemId));
+      }
     } catch (err) {
       // Execution failure is recorded on the action — review item stays approved
       console.error(`[ReviewService] Execution failed for action ${item.actionId}:`, err);

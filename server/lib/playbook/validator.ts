@@ -27,6 +27,17 @@ import type {
 import { extractReferences, TemplatingError } from './templating.js';
 import { validateDecisionStep } from './agentDecisionPure.js';
 import { MAX_DECISION_BRANCHES_PER_STEP } from '../../config/limits.js';
+import {
+  isActionCallSlugAllowed,
+  isSingletonResourceAction,
+  isReadOnlyAction,
+} from './actionCallAllowlist.js';
+
+/** Matches the Memory Block label format (§8.3). */
+const KNOWLEDGE_BLOCK_LABEL_RE = /^[a-zA-Z0-9 _-]{1,80}$/;
+
+/** Matches a dot-separated output path, optionally with array indices. */
+const KNOWLEDGE_OUTPUT_PATH_RE = /^[a-zA-Z_][a-zA-Z0-9_]*(?:(?:\.[a-zA-Z_][a-zA-Z0-9_]*)|(?:\[\d+\]))*$/;
 
 export const MAX_DAG_DEPTH = 50;
 
@@ -214,6 +225,97 @@ export function validateDefinition(
           });
         }
         break;
+      case 'action_call':
+        if (!step.actionSlug) {
+          errors.push({
+            rule: 'missing_field',
+            stepId: step.id,
+            message: `action_call step '${step.id}' must declare actionSlug`,
+          });
+        } else {
+          if (!isActionCallSlugAllowed(step.actionSlug)) {
+            errors.push({
+              rule: 'action_slug_not_allowed',
+              stepId: step.id,
+              message: `action_call step '${step.id}' references action '${step.actionSlug}', which is not on the action_call allowlist. See server/lib/playbook/actionCallAllowlist.ts.`,
+            });
+          }
+          if (
+            isSingletonResourceAction(step.actionSlug) &&
+            step.idempotencyScope !== 'entity'
+          ) {
+            errors.push({
+              rule: 'entity_idempotency_required',
+              stepId: step.id,
+              message: `action_call step '${step.id}' calls '${step.actionSlug}' which creates a singleton resource. Set idempotencyScope: 'entity' and provide entityKey to prevent duplicate creation across runs.`,
+            });
+          }
+          if (step.idempotencyScope === 'entity' && !step.entityKey) {
+            errors.push({
+              rule: 'missing_field',
+              stepId: step.id,
+              message: `action_call step '${step.id}' has idempotencyScope: 'entity' but no entityKey. Provide a stable identifier like 'task:\${subaccountId}:\${taskSlug}'.`,
+            });
+          }
+          // sideEffectType cross-check (§4.4 / §4.10)
+          if (step.sideEffectType) {
+            const isRead = isReadOnlyAction(step.actionSlug);
+            if (
+              isRead &&
+              step.sideEffectType !== 'none' &&
+              step.sideEffectType !== 'idempotent'
+            ) {
+              errors.push({
+                rule: 'action_side_effect_mismatch',
+                stepId: step.id,
+                message: `action_call step '${step.id}' calls read-only action '${step.actionSlug}' but declares sideEffectType '${step.sideEffectType}'. Use 'none' or 'idempotent'.`,
+              });
+            }
+            if (
+              !isRead &&
+              step.sideEffectType !== 'reversible' &&
+              step.sideEffectType !== 'irreversible' &&
+              step.sideEffectType !== 'idempotent'
+            ) {
+              errors.push({
+                rule: 'action_side_effect_mismatch',
+                stepId: step.id,
+                message: `action_call step '${step.id}' calls mutating action '${step.actionSlug}' but declares sideEffectType '${step.sideEffectType}'. Use 'reversible', 'irreversible', or 'idempotent'.`,
+              });
+            }
+          }
+        }
+        break;
+    }
+
+    // ── referenceBinding validation (§G8) ────────────────────────────────────
+    if (step.referenceBinding) {
+      if (step.type !== 'user_input') {
+        errors.push({
+          rule: 'reference_binding_wrong_step_type',
+          stepId: step.id,
+          message: `referenceBinding is only valid on user_input steps; step '${step.id}' has type '${step.type}'`,
+        });
+      } else if (step.formSchema) {
+        // Best-effort field presence check. We only inspect the schema's
+        // top-level shape when it exposes one (ZodObject) — deeper paths
+        // are not supported in v1.
+        const schema = step.formSchema as unknown as {
+          _def?: { shape?: () => Record<string, unknown>; typeName?: string };
+          shape?: Record<string, unknown>;
+        };
+        const shape =
+          typeof schema._def?.shape === 'function'
+            ? schema._def.shape()
+            : schema.shape;
+        if (shape && typeof shape === 'object' && !(step.referenceBinding.field in shape)) {
+          errors.push({
+            rule: 'reference_binding_field_not_in_schema',
+            stepId: step.id,
+            message: `referenceBinding.field '${step.referenceBinding.field}' is not present in step '${step.id}' formSchema`,
+          });
+        }
+      }
     }
 
     // Rule 12: irreversible steps cannot have retryPolicy.maxAttempts > 1
@@ -260,6 +362,11 @@ export function validateDefinition(
         if (typeof v === 'string') refSources.push(v);
       }
     }
+    if (step.actionInputs) {
+      for (const v of Object.values(step.actionInputs)) {
+        if (typeof v === 'string') refSources.push(v);
+      }
+    }
     for (const source of refSources) {
       let refs;
       try {
@@ -293,6 +400,72 @@ export function validateDefinition(
           }
         }
       }
+    }
+  }
+
+  // ── Knowledge bindings (onboarding-playbooks-spec §8.3) ──────────────────
+  if (def.knowledgeBindings && def.knowledgeBindings.length > 0) {
+    const seenLabels = new Set<string>();
+    for (const binding of def.knowledgeBindings) {
+      const sourceStep = stepById.get(binding.stepId);
+      if (!sourceStep) {
+        errors.push({
+          rule: 'knowledge_binding_step_not_found',
+          message: `knowledgeBinding references step '${binding.stepId}' which does not exist in steps[]`,
+        });
+        continue;
+      }
+      if (!binding.blockLabel || !KNOWLEDGE_BLOCK_LABEL_RE.test(binding.blockLabel)) {
+        errors.push({
+          rule: 'knowledge_binding_invalid_label',
+          message: `knowledgeBinding blockLabel '${binding.blockLabel}' must be 1-80 chars matching [a-zA-Z0-9 _-]`,
+        });
+      } else if (seenLabels.has(binding.blockLabel)) {
+        errors.push({
+          rule: 'knowledge_binding_duplicate_label',
+          message: `knowledgeBinding duplicate blockLabel '${binding.blockLabel}' (labels must be unique within a definition)`,
+        });
+      } else {
+        seenLabels.add(binding.blockLabel);
+      }
+      if (!binding.outputPath || !KNOWLEDGE_OUTPUT_PATH_RE.test(binding.outputPath)) {
+        errors.push({
+          rule: 'knowledge_binding_invalid_output_path',
+          message: `knowledgeBinding outputPath '${binding.outputPath}' is invalid (must be dot-notation like 'result.summary' or 'items[0].name')`,
+        });
+      }
+      // 'merge' strategy requires object-typed output — best-effort introspection
+      if (binding.mergeStrategy === 'merge' && sourceStep.outputSchema) {
+        const schema = sourceStep.outputSchema as unknown as {
+          _def?: { typeName?: string };
+        };
+        const typeName = schema._def?.typeName;
+        // ZodObject is the only shape where merge is well-defined. We don't
+        // fail on ZodAny (too restrictive) — only on explicit non-object types
+        // we can recognise.
+        if (
+          typeName === 'ZodString' ||
+          typeName === 'ZodNumber' ||
+          typeName === 'ZodBoolean' ||
+          typeName === 'ZodArray' ||
+          typeName === 'ZodNull'
+        ) {
+          errors.push({
+            rule: 'knowledge_binding_merge_requires_object',
+            message: `knowledgeBinding for step '${binding.stepId}' uses mergeStrategy: 'merge' but the step's outputSchema is '${typeName}', not an object`,
+          });
+        }
+      }
+    }
+  }
+
+  // ── Portal presentation (§9.4 / §11.5) ───────────────────────────────────
+  if (def.portalPresentation) {
+    if (!stepById.has(def.portalPresentation.headlineStepId)) {
+      errors.push({
+        rule: 'portal_presentation_step_not_found',
+        message: `portalPresentation.headlineStepId '${def.portalPresentation.headlineStepId}' does not exist in steps[]`,
+      });
     }
   }
 

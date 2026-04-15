@@ -21,7 +21,8 @@ export type StepType =
   | 'user_input'
   | 'approval'
   | 'conditional'
-  | 'agent_decision';
+  | 'agent_decision'
+  | 'action_call';
 
 export type SideEffectType =
   | 'none'
@@ -149,6 +150,62 @@ export interface PlaybookStep {
    */
   minConfidence?: number;
 
+  // ── type: action_call ─────────────────────────────────────────────────────
+  /**
+   * Slug of the skill/action invoked directly. Must be on the
+   * ACTION_CALL_ALLOWED_SLUGS allowlist (`server/lib/playbook/actionCallAllowlist.ts`).
+   * Validator rejects any other slug. Spec §4.
+   */
+  actionSlug?: string;
+  /**
+   * Templated inputs resolved against run context and passed as the skill
+   * handler's `input` argument. Same templating surface as `agentInputs`:
+   *   { cron: '{{ steps.schedule.output.cron }}', subaccountId: '{{ run.subaccount.id }}' }
+   */
+  actionInputs?: Record<string, string>;
+  /**
+   * Idempotency scope for an action_call step. Defaults to 'run' (keyed on
+   * `playbook:${runId}:${stepId}:${attempt}`). Set to 'entity' when the call
+   * creates a singleton business resource (e.g. `config_create_scheduled_task`)
+   * and cross-run replay must deduplicate against the same entity. Spec §4.5.
+   */
+  idempotencyScope?: 'run' | 'entity';
+  /**
+   * Entity-scoped idempotency key used when `idempotencyScope === 'entity'`.
+   * Format: `task:${subaccountId}:${taskSlug}` or similar stable identifier.
+   */
+  entityKey?: string;
+  /**
+   * When true and `type === 'action_call'`, the action is skipped on runs
+   * other than the first successful run for the subaccount + playbook slug.
+   * Used by onboarding-only side effects. Spec §11.4 (setup_schedule pattern).
+   */
+  firstRunOnly?: boolean;
+
+  /**
+   * Terminal-step marker. When `true`, the step's output is eligible to be
+   * the canonical output consumed by downstream systems (portal card, email
+   * digest). If multiple `final: true` steps succeed, the last in topological
+   * order wins. Spec §4.12.
+   */
+  final?: boolean;
+
+  // ── type: user_input (reference binding) ──────────────────────────────────
+  /**
+   * When set on a `user_input` step, the engine writes the named form field's
+   * value to a Workspace Memory Entry (Reference note) on step completion.
+   * Spec §G8 / §7.4. Validator rejects on any non-user_input step type.
+   */
+  referenceBinding?: {
+    target: 'reference_note';
+    /** The Reference note title. 1–200 chars. */
+    name: string;
+    /** Auto-attach the created Reference to the subaccount knowledge tab. */
+    autoAttach: boolean;
+    /** The form field whose value we write. Must exist in formSchema. */
+    field: string;
+  };
+
   /**
    * REQUIRED for every step type. Validator-validated. Engine parses agent /
    * prompt outputs through this schema; failures retry up to N times then
@@ -171,6 +228,57 @@ export type AgentDecisionStep = PlaybookStep & {
   agentRef: AgentRef;
 };
 
+/**
+ * Narrowed view of a PlaybookStep for `action_call` steps.
+ * Spec: docs/onboarding-playbooks-spec.md §4.2.
+ */
+export type ActionCallStep = PlaybookStep & {
+  type: 'action_call';
+  actionSlug: string;
+  /** `{}` is allowed; `undefined` is not after validation. */
+  actionInputs: Record<string, string>;
+};
+
+/**
+ * Playbook-level declarative binding from a step's output to a Memory Block.
+ * Spec: docs/onboarding-playbooks-spec.md §8.2.
+ */
+export interface PlaybookKnowledgeBinding {
+  /** The step id whose output we read from. Must exist in steps[]. */
+  stepId: string;
+  /** JSON path within the step output (dot notation, array indices allowed). */
+  outputPath: string;
+  /** The Memory Block label to upsert. 1–80 chars, [a-zA-Z0-9 _-]. */
+  blockLabel: string;
+  /**
+   * How to combine this output with existing block content:
+   *   - 'replace' — overwrite (default)
+   *   - 'append'  — newline-separated append; truncated to 2000 chars from the end
+   *   - 'merge'   — JSON-aware merge; falls back to 'replace' on non-object inputs
+   */
+  mergeStrategy?: 'replace' | 'append' | 'merge';
+  /**
+   * When true, the binding only fires on the first successful run for this
+   * sub-account + playbook slug. Subsequent runs skip the upsert. Used for
+   * baseline facts captured once during onboarding.
+   */
+  firstRunOnly?: boolean;
+}
+
+/**
+ * Portal card declaration — spec §9.4 / §11.5.
+ */
+export interface PlaybookPortalPresentation {
+  /** Card title shown to sub-account users. */
+  cardTitle: string;
+  /** Step id whose output drives the card preview. */
+  headlineStepId: string;
+  /** JSON path within that step's output for the headline content. */
+  headlineOutputPath: string;
+  /** Deep link within the portal; falls back to the run modal when omitted. */
+  detailRoute?: string;
+}
+
 export interface PlaybookDefinition {
   /** Matches filename: server/playbooks/<slug>.playbook.ts */
   slug: string;
@@ -190,6 +298,22 @@ export interface PlaybookDefinition {
 
   /** Optional per-template parallelism cap; bounded by system MAX_PARALLEL_STEPS. */
   maxParallelSteps?: number;
+
+  /**
+   * Playbook-level declarative bindings from step outputs to Memory Blocks.
+   * Fire on run completion inside `finaliseRun()`. Spec §8.
+   */
+  knowledgeBindings?: PlaybookKnowledgeBinding[];
+
+  /** Portal card declaration. Spec §9.4 / §11.5. */
+  portalPresentation?: PlaybookPortalPresentation;
+
+  /**
+   * When true, a run of this playbook is auto-started on sub-account creation
+   * (or when a module contributing this slug is enabled) in `runMode: 'supervised'`.
+   * Default false. Spec §10.5.
+   */
+  autoStartOnOnboarding?: boolean;
 }
 
 // ─── Validation result types (used by validator + UI surfacing) ──────────────
@@ -221,7 +345,22 @@ export type ValidationRule =
   | 'decision_branch_entry_collision'
   | 'decision_side_effect_not_none'
   | 'decision_default_branch_invalid'
-  | 'decision_min_confidence_out_of_range';
+  | 'decision_min_confidence_out_of_range'
+  // action_call step rules (onboarding-playbooks-spec §4)
+  | 'action_slug_not_allowed'
+  | 'action_side_effect_mismatch'
+  | 'entity_idempotency_required'
+  // knowledgeBindings rules (onboarding-playbooks-spec §8)
+  | 'knowledge_binding_step_not_found'
+  | 'knowledge_binding_duplicate_label'
+  | 'knowledge_binding_invalid_label'
+  | 'knowledge_binding_invalid_output_path'
+  | 'knowledge_binding_merge_requires_object'
+  // referenceBinding rules (onboarding-playbooks-spec §G8)
+  | 'reference_binding_wrong_step_type'
+  | 'reference_binding_field_not_in_schema'
+  // portalPresentation rules (onboarding-playbooks-spec §9.4)
+  | 'portal_presentation_step_not_found';
 
 export interface ValidationError {
   rule: ValidationRule;
@@ -254,6 +393,14 @@ export interface RunContext {
     templateVersionId: string;
     startedAt: string;
     resolvedAgents?: Record<string, string>;
+    /**
+     * Per-run cache of agents resolved for action_call dispatch. The engine
+     * looks up the org's Configuration Assistant agent row once at run start
+     * and re-reads from this cache on every dispatch. Spec §4.8.
+     */
+    resolvedActionAgents?: {
+      configuration_assistant?: string;
+    };
     isReplay?: boolean;
     replaySourceRunId?: string;
   };
