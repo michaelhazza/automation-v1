@@ -216,13 +216,20 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 
 ### Playbook Engine
 
-Multi-step workflow automation with dependency graphs, parallel execution, and human review gates.
+Multi-step workflow automation with dependency graphs, parallel execution, branching logic, and human review gates.
 
-- **Step types:** `user_input` (forms), `agent_call` (run an agent), `approval` (blocking gate), `prompt` (direct LLM call)
-- **DAG execution** — Steps run in parallel when independent; templating passes data between steps
-- **Safety controls:** Irreversible steps cannot be auto-retried; per-step retry policy; side-effect classification on every step
-- **Playbook Studio** — Chat-based authoring (system admin) with validation, simulation, cost estimation, and save-as-PR
-- System and org templates with versioning; fork and parameterise per org; self-healing watchdog
+- **Six step types:**
+    - `user_input` — structured form captured from a human operator or client
+    - `prompt` — direct one-shot LLM generation
+    - `agent_call` — hand the step off to a full agent with its skill surface
+    - `agent_decision` — small, schema-bound agent call that returns a structured choice (e.g. routing, classification, approve/edit/reject) the engine uses to branch
+    - `conditional` — deterministic branching on expressions over prior step outputs
+    - `approval` — blocking human review gate before downstream steps run
+- **Five run modes:** `auto` (hands-off), `supervised` (pauses at every approval), `background` (silent batch), `bulk` (one run per item in a list), `replay` (re-execute a prior run with the same inputs)
+- **DAG execution** — Steps declare dependencies; independent branches run in parallel; templating passes outputs between steps
+- **Safety controls** — Irreversible steps cannot be auto-retried; per-step retry policy; every step declares a side-effect class; concurrency guards prevent double execution
+- **Run-now + schedule** — Any recurring playbook can be launched immediately on setup; the normal schedule continues afterward
+- **Playbook Studio** — Chat-based authoring with validation, simulation, and cost estimation; system and org templates with versioning; fork-and-parameterise per org; self-healing watchdog sweeps stuck runs
 
 ### Human-in-the-Loop
 
