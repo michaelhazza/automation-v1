@@ -68,7 +68,7 @@ import { resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { glob } from 'glob';
 import bcrypt from 'bcryptjs';
 
@@ -83,6 +83,7 @@ import {
   systemPlaybookTemplates,
   systemPlaybookTemplateVersions,
 } from '../server/db/schema/index.js';
+import { modules } from '../server/db/schema/modules.js';
 import { parseCompanyFolder, toSystemAgentRows, type ParsedCompany } from './lib/companyParser.js';
 import { classifySkill } from './lib/skillClassification.js';
 import { playbookTemplateService } from '../server/services/playbookTemplateService.js';
@@ -516,6 +517,43 @@ async function phase4_playbookTemplates(): Promise<void> {
 
   await seedPlaybookFiles();
   await seedPortfolioHealthPlaybook();
+  await seedOnboardingModuleSlugs();
+}
+
+/**
+ * Sets `onboarding_playbook_slugs` on the `client_pulse` module (Phase G / §10.6).
+ * Idempotent — no-op when the slug is already present.
+ */
+async function seedOnboardingModuleSlugs(): Promise<void> {
+  const REPORTING_MODULE_SLUG = 'client_pulse';
+  const PLAYBOOK_SLUG = 'daily-intelligence-brief';
+
+  const [mod] = await db
+    .select({ id: modules.id, onboardingPlaybookSlugs: modules.onboardingPlaybookSlugs })
+    .from(modules)
+    .where(eq(modules.slug, REPORTING_MODULE_SLUG))
+    .limit(1);
+
+  if (!mod) {
+    log(`  [skip] module '${REPORTING_MODULE_SLUG}' not found`);
+    return;
+  }
+
+  const already = (mod.onboardingPlaybookSlugs ?? []).includes(PLAYBOOK_SLUG);
+  if (already) {
+    log(`  [skip] '${PLAYBOOK_SLUG}' already in '${REPORTING_MODULE_SLUG}'`);
+    return;
+  }
+
+  await db
+    .update(modules)
+    .set({
+      onboardingPlaybookSlugs: sql`array_append(${modules.onboardingPlaybookSlugs}, ${PLAYBOOK_SLUG})`,
+      updatedAt: new Date(),
+    })
+    .where(eq(modules.id, mod.id));
+
+  log(`  [ok]   added '${PLAYBOOK_SLUG}' to module '${REPORTING_MODULE_SLUG}'`);
 }
 
 async function seedPlaybookFiles(): Promise<void> {

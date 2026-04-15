@@ -1016,7 +1016,7 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
       id: r.id,
       content: r.content,
       entryType: r.entryType,
-      agentId: r.agentId,
+      agentId: r.agentId ?? '',
       subaccountId: r.subaccountId,
       createdAt: (r.createdAt ?? new Date()).toISOString(),
     };

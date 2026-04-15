@@ -2164,6 +2164,59 @@ export const ACTION_REGISTRY: Record<string, ActionDefinition> = {
     },
     idempotencyStrategy: 'keyed_write',
   },
+
+  // ── Phase G — portal + email skills (spec §11.6) — action_call only ────────
+  // NOT callable from human-initiated Configuration Assistant sessions; only
+  // reachable via action_call steps in playbook templates.
+
+  config_publish_playbook_output_to_portal: {
+    actionType: 'config_publish_playbook_output_to_portal',
+    description: 'Publish a playbook step\'s output to the sub-account portal card. Creates or updates the portal_briefs row for this run and marks the run portal-visible.',
+    actionCategory: 'api',
+    topics: ['portal', 'playbook'],
+    isExternal: false,
+    defaultGateLevel: 'auto',
+    createsBoardTask: false,
+    payloadFields: ['runId', 'playbookSlug', 'title', 'bullets', 'detailMarkdown'],
+    parameterSchema: z.object({
+      runId: z.string().optional().describe('The playbook run ID producing this output (injected from context when absent)'),
+      playbookSlug: z.string().describe('Slug of the playbook template'),
+      title: z.string().describe('Card title shown on the portal'),
+      bullets: z.array(z.string()).describe('Headline bullet points'),
+      detailMarkdown: z.string().optional().describe('Long-form markdown shown in the run modal'),
+    }),
+    retryPolicy: {
+      maxRetries: 3,
+      strategy: 'exponential_backoff',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'auth_error'],
+    },
+    idempotencyStrategy: 'keyed_write',
+  },
+
+  config_send_playbook_email_digest: {
+    actionType: 'config_send_playbook_email_digest',
+    description: 'Send a markdown email digest to a list of recipients. Deduplicated per (runId, sorted recipients) so retries never double-send.',
+    actionCategory: 'api',
+    topics: ['email', 'playbook'],
+    isExternal: true,
+    defaultGateLevel: 'review',
+    createsBoardTask: false,
+    payloadFields: ['runId', 'to', 'subject', 'bodyMarkdown'],
+    parameterSchema: z.object({
+      runId: z.string().optional().describe('The playbook run ID issuing this email (injected from context when absent)'),
+      to: z.array(z.string().email()).describe('Recipient email addresses'),
+      subject: z.string().describe('Email subject line'),
+      bodyMarkdown: z.string().describe('Email body in Markdown'),
+    }),
+    retryPolicy: {
+      maxRetries: 2,
+      strategy: 'exponential_backoff',
+      retryOn: ['timeout', 'network_error'],
+      doNotRetryOn: ['validation_error', 'auth_error'],
+    },
+    idempotencyStrategy: 'locked',
+  },
 };
 
 /** Check if an action type is known */

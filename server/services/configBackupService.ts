@@ -349,7 +349,7 @@ export const configBackupService = {
   }) {
     const conditions = [eq(configBackups.organisationId, params.organisationId)];
     if (params.scope) {
-      conditions.push(eq(configBackups.scope, params.scope));
+      conditions.push(eq(configBackups.scope, params.scope as 'skill_analyzer' | 'manual' | 'config_agent'));
     }
 
     const limit = Math.min(params.limit ?? 50, 200);
