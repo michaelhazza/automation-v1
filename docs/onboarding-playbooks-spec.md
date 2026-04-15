@@ -153,7 +153,7 @@ Declared as a top-level array on `PlaybookDefinition`. Each entry maps a named s
 
 ### G11. `modules.onboardingPlaybookSlugs`
 
-- **G11.1** The `modules` table gains a `onboarding_playbook_slugs jsonb` column defaulting to `[]`.
+- **G11.1** The `modules` table gains a `onboarding_playbook_slugs text[]` column defaulting to `'{}'` (see §10.2 for rationale — Postgres array semantics drive the owed-list query).
 - **G11.2** The admin module editor UI exposes the column as a multi-select over system playbook slugs.
 - **G11.3** Adding a slug to a module causes every active subaccount subscribed to a subscription containing that module to see the playbook in its Onboarding tab.
 
@@ -253,7 +253,7 @@ The following are explicitly out of scope for this spec and must not be added du
 | `PlaybookStep.actionSlug` / `.actionInputs` | new fields | Populated on `action_call` steps |
 | `PlaybookStep.referenceBinding` | new field | Populated on `user_input` steps that should write form values to a Reference note (workspace_memory_entries) |
 | `ValidationRule` | extended | Add `action_slug_not_allowed`, `knowledge_binding_on_wrong_step_type`, `knowledge_binding_field_not_in_schema` |
-| `modules.onboarding_playbook_slugs` | new column | `jsonb` default `[]`, admin-editable |
+| `modules.onboarding_playbook_slugs` | new column | `text[] NOT NULL DEFAULT '{}'`, admin-editable (see §10.2) |
 | `subaccount_onboarding_state` | new table | `(subaccountId, playbookSlug, status, lastRunId, completedAt)` |
 | `memory_blocks.auto_attach` | new column | `boolean` default `false`, drives inheritance on agent-link |
 | `memory_block_attachments.source` | new column | `'manual' \| 'auto_attach'` so we can tell inherited attachments from manual ones |
@@ -356,8 +356,12 @@ Files the build will create, modify, or delete. Drift between this list and real
 | modify | `server/services/subaccountAgentService.ts` | On link creation, inherit `autoAttach: true` Reference notes |
 | modify | `server/services/memoryBlocksService.ts` (or create if absent) | CRUD + promote-from-insight + auto-attach semantics |
 | create | `migrations/0118_memory_block_source_reference.sql` | `memory_blocks.auto_attach`, `memory_block_attachments.source`, `memory_blocks.sourceReferenceId` FK (see §7.3) |
-| create | `migrations/0119_modules_onboarding_playbook_slugs.sql` | `modules.onboarding_playbook_slugs text[] NOT NULL DEFAULT '{}'`, `subaccount_onboarding_state` table (see §10.2) |
-| create | `migrations/0120_portal_briefs.sql` | `portal_briefs` table, `playbook_runs.is_portal_visible`, `playbook_runs.is_onboarding_run` (see §11.6) |
+| create | `migrations/0119_modules_onboarding_playbook_slugs.sql` | `scheduled_tasks.task_slug` + `created_by_playbook_slug` + `first_run_at`/`first_run_at_tz`, partial-unique and by-playbook-slug indexes (see §5.4.1 / §5.4.2) — repurposed from the original single-migration plan; modules column split into `0122` (see below) |
+| create | `migrations/0120_memory_block_playbook_fields.sql` | Playbook-owned memory-block columns used by `knowledgeBindings[]` finalisation (see §8) |
+| create | `migrations/0121_playbook_runs_portal_onboarding.sql` | `playbook_runs.is_portal_visible`, `playbook_runs.is_onboarding_run` (see §9, §11.6) |
+| create | `migrations/0122_modules_onboarding_playbook_slugs.sql` | `modules.onboarding_playbook_slugs text[] NOT NULL DEFAULT '{}'` + GIN index + duplicate-run guard unique index (see §10.2, §10.5.1) |
+| create | `migrations/0123_portal_briefs.sql` | `portal_briefs` table (see §11.6) |
+| create | `migrations/0124_subaccount_onboarding_state.sql` | `subaccount_onboarding_state` table — per-(subaccount, playbook slug) completion tracking (see §10.3 / §10.4) |
 | create | `server/playbooks/daily-intelligence-brief.playbook.ts` | System playbook definition |
 | create | `server/scripts/seedOnboardingModuleBindings.ts` (or inline migration) | Register the Daily Brief slug in the right module(s) |
 | create | `client/src/components/ui/HelpHint.tsx` | Hover help icon primitive |
@@ -1505,7 +1509,7 @@ A sub-account is configured by its module set — each module represents a bundl
 
 ### 10.2 Schema change
 
-New column on `modules` table (migration `0119_modules_onboarding_playbook_slugs.sql`):
+New column on `modules` table (migration `0122_modules_onboarding_playbook_slugs.sql`):
 
 ```sql
 ALTER TABLE modules
@@ -1578,7 +1582,7 @@ CREATE UNIQUE INDEX playbook_runs_active_per_subaccount_slug
 
 The index makes the constraint race-safe — concurrent inserts at the DB level produce a unique violation, which `startRun()` catches and converts to an existing-run lookup. The caller receives the existing run, not an error.
 
-The index is added to migration `0120_portal_briefs.sql` (alongside other `playbookRuns` schema additions).
+The index is added to migration `0122_modules_onboarding_playbook_slugs.sql` (alongside the `modules.onboarding_playbook_slugs` column). The `playbookRuns.isPortalVisible` / `isOnboardingRun` column additions ship in `0121_playbook_runs_portal_onboarding.sql`; the `portal_briefs` table ships in `0123_portal_briefs.sql`.
 
 ### 10.6 Migration / backfill
 
@@ -1677,7 +1681,7 @@ autoStartOnOnboarding: true,
 
 Two new actions ship with this playbook. Both are added to the `config_*` allowlist (§4.2) because they are Configuration Assistant surface-area actions:
 
-- **`config_publish_playbook_output_to_portal`** — inputs: `{ runId, title, bullets, detailMarkdown }`. Creates a row in `portalBriefs` (new table, migration `0120_portal_briefs.sql`) and sets the associated `playbookRuns.isPortalVisible = true`. Idempotency strategy: `upsert_by_run_id`. Gate level: `auto` (reversible — can be retracted by setting the portal row `retractedAt`).
+- **`config_publish_playbook_output_to_portal`** — inputs: `{ runId, title, bullets, detailMarkdown }`. Creates a row in `portalBriefs` (new table, migration `0123_portal_briefs.sql`) and sets the associated `playbookRuns.isPortalVisible = true` (column added in `0121_playbook_runs_portal_onboarding.sql`). Idempotency strategy: `upsert_by_run_id`. Gate level: `auto` (reversible — can be retracted by setting the portal row `retractedAt`).
 - **`config_send_playbook_email_digest`** — inputs: `{ runId, to: string[], subject, bodyMarkdown }`. Sends via the existing email provider adapter. Idempotency strategy: `dedupe_by_composite_key` over `(runId, to.sort().join(','))`. Gate level: `review` on first send, `auto` on subsequent re-enqueues of the same composite key. Audited through the same `proposeAction` pipeline (§4.7).
 
 Both skills live under `server/skills/playbookPortal.ts` and `server/skills/playbookEmail.ts` respectively and register in `server/config/actionRegistry.ts`. They are not callable from human-initiated Configuration Assistant sessions directly (add to `ACTIONS_NOT_AGENT_DIRECTLY_CALLABLE` set); only reachable via `action_call` from playbook steps. This narrows blast radius.
@@ -1887,9 +1891,13 @@ Every phase is independently reversible because every phase ships behind a featu
 
 | Migration                                        | Reversal plan                                                                  |
 |--------------------------------------------------|---------------------------------------------------------------------------------|
-| `0118_memory_block_source_reference.sql` (§7.3) | Column stays; nullable; ignored by old code. No reversal needed.                |
-| `0119_modules_onboarding_playbook_slugs.sql`    | Column stays; default `'{}'`; ignored by old code. No reversal needed.          |
-| `0120_portal_briefs.sql` (§11.6)                | Table stays; unread when `feature.daily_brief_template` is off.                 |
+| `0118_memory_block_source_reference.sql` (§7.3)          | Column stays; nullable; ignored by old code. No reversal needed.                |
+| `0119_modules_onboarding_playbook_slugs.sql` (§5.4.1/§5.4.2) | Scheduled-task columns stay; nullable + indexed by partial predicate, ignored by old code. No reversal needed. |
+| `0120_memory_block_playbook_fields.sql` (§8)             | Columns stay; nullable; ignored by old code. No reversal needed.                |
+| `0121_playbook_runs_portal_onboarding.sql` (§9, §11.6)   | Boolean columns stay; default `false`; ignored by old code. No reversal needed. |
+| `0122_modules_onboarding_playbook_slugs.sql` (§10.2)     | Column stays; `text[] NOT NULL DEFAULT '{}'`; ignored by old code. No reversal needed. |
+| `0123_portal_briefs.sql` (§11.6)                         | Table stays; unread when `feature.daily_brief_template` is off.                 |
+| `0124_subaccount_onboarding_state.sql` (§10.3 / §10.4)   | Table stays; unread when `feature.onboarding_tab` is off. No reversal needed.   |
 
 We do not ship `DROP COLUMN` / `DROP TABLE` backout migrations because:
 
