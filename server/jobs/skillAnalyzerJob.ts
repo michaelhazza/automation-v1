@@ -1111,6 +1111,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             const suggestion = skillAnalyzerServicePure.parseAgentSuggestionResponse(response.content);
             if (!suggestion) return;
 
+            // Capture whether any cosine proposal was originally selected before
+            // enrichment so we can restore selection if Haiku's pick is out-of-top-K.
+            const hadSelected = existingProposals.some((p) => p.selected);
+
             // Enrich agentProposals with Haiku reasoning and re-order if
             // Haiku picked a different agent than cosine similarity.
             const enriched = existingProposals.map((p) => {
@@ -1159,11 +1163,14 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   llmReasoning: suggestion.reasoning,
                   llmConfirmed: false,
                 });
-                // Restore selection on the highest-scoring cosine proposal since
-                // Haiku's out-of-top-K pick is not a confirmed home.
-                const topCosine = enriched.reduce((best, p) =>
-                  p.score > (best?.score ?? -1) ? p : best, enriched[0]);
-                if (topCosine) topCosine.selected = true;
+                // Restore selection on the highest-scoring cosine proposal only
+                // if a selection existed before enrichment — if no proposal was
+                // originally selected, there is no good home to restore.
+                if (hadSelected) {
+                  const topCosine = enriched.reduce((best, p) =>
+                    p.score > (best?.score ?? -1) ? p : best, enriched[0]);
+                  if (topCosine) topCosine.selected = true;
+                }
               }
             }
 

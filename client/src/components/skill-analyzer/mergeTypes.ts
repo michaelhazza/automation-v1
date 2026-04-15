@@ -30,7 +30,8 @@ export interface MergeWarning {
  *  merged content — they are not safety gates.
  *  REQUIRED_FIELD_DEMOTED, INVOCATION_LOST, and HITL_LOST represent safety-critical
  *  regressions (broken API contracts, lost routing signals, removed human review gates)
- *  that must be fixed before approving. */
+ *  that must be fixed before approving.
+ *  MUST stay in sync with BLOCKING_CODES in server/services/skillAnalyzerService.ts */
 export const BLOCKING_WARNING_CODES = new Set<MergeWarningCode>([
   'REQUIRED_FIELD_DEMOTED',
   'INVOCATION_LOST',
