@@ -144,3 +144,9 @@ export type { ScrapingCache, NewScrapingCache } from './scrapingCache.js';
 
 // GEO Audits — Generative Engine Optimisation (migration 0110)
 export * from './geoAudits.js';
+
+// Config History — generic JSONB changelog for configuration entities (migration 0114)
+export * from './configHistory.js';
+
+// Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
+export * from './configBackups.js';

@@ -118,6 +118,9 @@ export const SUBACCOUNT_PERMISSIONS = {
   PLAYBOOK_RUNS_CANCEL: 'subaccount.playbook_runs.cancel',
   PLAYBOOK_RUNS_EDIT_OUTPUT: 'subaccount.playbook_runs.edit_output',
   PLAYBOOK_RUNS_APPROVE: 'subaccount.playbook_runs.approve',
+  // Skills (subaccount-scoped skill management; migration 0117)
+  SKILLS_VIEW: 'subaccount.skills.view',
+  SKILLS_MANAGE: 'subaccount.skills.manage',
 } as const;
 
 export type OrgPermissionKey = typeof ORG_PERMISSIONS[keyof typeof ORG_PERMISSIONS];
@@ -228,6 +231,9 @@ export const ALL_PERMISSIONS: Array<{ key: string; description: string; groupNam
   { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_CANCEL,      description: 'Cancel running Playbooks',                   groupName: 'subaccount.playbooks' },
   { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_EDIT_OUTPUT, description: 'Edit completed step outputs (mid-run edit)', groupName: 'subaccount.playbooks' },
   { key: SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_APPROVE,     description: 'Decide on Playbook approval gates',          groupName: 'subaccount.playbooks' },
+  // subaccount.skills (subaccount-scoped skill management; migration 0117)
+  { key: SUBACCOUNT_PERMISSIONS.SKILLS_VIEW,   description: 'View subaccount-scoped skills',                          groupName: 'subaccount.skills' },
+  { key: SUBACCOUNT_PERMISSIONS.SKILLS_MANAGE, description: 'Create, edit, and delete subaccount-scoped skills',      groupName: 'subaccount.skills' },
 ];
 
 // ─── Default permission set templates ─────────────────────────────────────────
@@ -299,6 +305,8 @@ export const DEFAULT_PERMISSION_SET_TEMPLATES: Array<{
       SUBACCOUNT_PERMISSIONS.CATEGORIES_MANAGE,
       SUBACCOUNT_PERMISSIONS.WORKSPACE_VIEW,
       SUBACCOUNT_PERMISSIONS.WORKSPACE_MANAGE,
+      SUBACCOUNT_PERMISSIONS.SKILLS_VIEW,
+      SUBACCOUNT_PERMISSIONS.SKILLS_MANAGE,
     ],
   },
   {

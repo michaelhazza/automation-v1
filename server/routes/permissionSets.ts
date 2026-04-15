@@ -12,6 +12,7 @@ import {
   subaccountUserAssignments,
 } from '../db/schema/index.js';
 import { eq, and, isNull, inArray } from 'drizzle-orm';
+import { configHistoryService } from '../services/configHistoryService.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 
 const router = Router();
@@ -126,6 +127,12 @@ router.post(
       );
     }
 
+    await configHistoryService.recordHistory({
+      entityType: 'permission_set', entityId: ps.id, organisationId,
+      snapshot: { ...ps, permissionKeys: permissionKeys ?? [] } as unknown as Record<string, unknown>,
+      changedBy: req.user?.id ?? null, changeSource: 'ui',
+    });
+
     res.status(201).json({
       id: ps.id,
       name: ps.name,
@@ -207,6 +214,12 @@ router.patch(
       return;
     }
 
+    await configHistoryService.recordHistory({
+      entityType: 'permission_set', entityId: ps.id, organisationId,
+      snapshot: ps as unknown as Record<string, unknown>,
+      changedBy: req.user?.id ?? null, changeSource: 'ui',
+    });
+
     const { name, description } = req.body as { name?: string; description?: string };
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) update.name = name;
@@ -258,6 +271,12 @@ router.delete(
       res.status(409).json({ error: 'Cannot delete a permission set that is assigned to one or more users' });
       return;
     }
+
+    await configHistoryService.recordHistory({
+      entityType: 'permission_set', entityId: ps.id, organisationId,
+      snapshot: ps as unknown as Record<string, unknown>,
+      changedBy: req.user?.id ?? null, changeSource: 'ui', changeSummary: 'Entity soft-deleted',
+    });
 
     const now = new Date();
     await db.update(permissionSets).set({ deletedAt: now, updatedAt: now }).where(eq(permissionSets.id, ps.id));

@@ -3,6 +3,7 @@ import multer from 'multer';
 import { authenticate, requireSystemAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { skillAnalyzerService } from '../services/skillAnalyzerService.js';
+import { configBackupService } from '../services/configBackupService.js';
 
 const router = Router();
 
@@ -120,7 +121,15 @@ router.get(
 
     const jobs = await skillAnalyzerService.listJobs(orgId, limit, offset);
 
-    return res.json({ jobs });
+    // Enrich jobs with backup status for UI badges (single batch query)
+    const jobIds = jobs.map((j) => j.id);
+    const backupMap = await configBackupService.getBackupsBySourceIds(jobIds, orgId);
+    const jobsWithBackup = jobs.map((job) => {
+      const backup = backupMap.get(job.id);
+      return { ...job, backupId: backup?.id ?? null, backupStatus: backup?.status ?? null };
+    });
+
+    return res.json({ jobs: jobsWithBackup });
   })
 );
 
@@ -342,6 +351,47 @@ router.post(
       req.orgId!,
     );
     return res.json({ ok: true, retried, stillFailed });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/system/skill-analyser/jobs/:jobId/backup — Get backup for a job
+// ---------------------------------------------------------------------------
+
+router.get(
+  '/api/system/skill-analyser/jobs/:jobId/backup',
+  asyncHandler(async (req, res) => {
+    const backup = await configBackupService.getBackupBySourceId(
+      req.params.jobId,
+      req.orgId!,
+    );
+    if (!backup) return res.json({ backup: null });
+    return res.json({ backup });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/system/skill-analyser/jobs/:jobId/restore — Restore pre-apply backup
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/api/system/skill-analyser/jobs/:jobId/restore',
+  asyncHandler(async (req, res) => {
+    const backup = await configBackupService.getBackupBySourceId(
+      req.params.jobId,
+      req.orgId!,
+    );
+    if (!backup) {
+      throw { statusCode: 404, message: 'No backup found for this job' };
+    }
+
+    const result = await configBackupService.restoreBackup({
+      backupId: backup.id,
+      organisationId: req.orgId!,
+      restoredBy: req.user!.id,
+    });
+
+    return res.json(result);
   }),
 );
 

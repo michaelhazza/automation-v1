@@ -775,6 +775,7 @@ export default function Layout({ user, children }: LayoutProps) {
               <NavSection label="Organisation" />
               {hasSidebarItem('inbox') && (hasOrgPerm('org.review.view') || hasOrgPerm('org.subaccounts.view')) && <NavItem to="/inbox" icon={<Icons.inbox />} label="Inbox" />}
               {hasSidebarItem('companies') && hasOrgPerm('org.subaccounts.view') && <NavItem to="/admin/subaccounts" exact icon={<Icons.clients />} label="Companies" />}
+              {hasSidebarItem('config_assistant') && <NavItem to="/admin/config-assistant" icon={<Icons.settings />} label="Config Assistant" />}
               {hasSidebarItem('agents') && hasOrgPerm('org.agents.view') && <NavItem to="/admin/agents" icon={<Icons.agents />} label="Agents" />}
               {hasSidebarItem('workflows') && hasOrgPerm('org.processes.view') && <NavItem to="/admin/processes" icon={<Icons.automations />} label="Workflows" />}
               {hasSidebarItem('skills') && <NavItem to="/admin/skills" icon={<Icons.skills />} label="Skills" />}

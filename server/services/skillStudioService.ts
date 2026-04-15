@@ -1,6 +1,9 @@
 import { eq, and, desc, sql, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { skillVersions } from '../db/schema/skillVersions.js';
+import { systemSkills } from '../db/schema/systemSkills.js';
+import { skills } from '../db/schema/index.js';
+import { skillVersioningHelper } from './skillVersioningHelper.js';
 
 // ---------------------------------------------------------------------------
 // Skill Studio Service — Feature 3
@@ -13,7 +16,7 @@ export type SkillStudioListItem = {
   id: string;
   slug: string;
   name: string;
-  scope: 'system' | 'org';
+  scope: 'system' | 'org' | 'subaccount';
   lastVersionAt: string | null;
   openRegressionCount: number;
 };
@@ -61,8 +64,9 @@ export type SaveSkillVersionPayload = {
  * List all skills with their open-regression count.
  */
 export async function listSkillsForStudio(
-  scope: 'system' | 'org',
+  scope: 'system' | 'org' | 'subaccount',
   orgId?: string,
+  subaccountId?: string,
 ): Promise<SkillStudioListItem[]> {
   if (scope === 'system') {
     const rows = await db.execute<{
@@ -88,6 +92,31 @@ export async function listSkillsForStudio(
     }));
   }
 
+  if (scope === 'subaccount') {
+    const rows = await db.execute<{
+      id: string; slug: string; name: string;
+      last_version_at: string | null; regression_count: number;
+    }>(sql`
+      SELECT
+        s.id, s.slug, s.name,
+        (SELECT MAX(sv.created_at)::text FROM skill_versions sv WHERE sv.skill_id = s.id) AS last_version_at,
+        0::int AS regression_count
+      FROM skills s
+      WHERE s.subaccount_id = ${subaccountId}
+        AND s.deleted_at IS NULL
+      ORDER BY s.name
+    `);
+
+    return (rows as unknown as Array<any>).map((r: any) => ({
+      id: r.id,
+      slug: r.slug,
+      name: r.name,
+      scope: 'subaccount' as const,
+      lastVersionAt: r.last_version_at,
+      openRegressionCount: r.regression_count ?? 0,
+    }));
+  }
+
   // Org scope
   const rows = await db.execute<{
     id: string; slug: string; name: string;
@@ -99,6 +128,8 @@ export async function listSkillsForStudio(
       0::int AS regression_count
     FROM skills s
     WHERE s.organisation_id = ${orgId}
+      AND s.subaccount_id IS NULL
+      AND s.deleted_at IS NULL
     ORDER BY s.name
   `);
 
@@ -117,22 +148,32 @@ export async function listSkillsForStudio(
  */
 export async function getSkillStudioContext(
   skillId: string,
-  scope: 'system' | 'org',
+  scope: 'system' | 'org' | 'subaccount',
   orgId?: string,
 ): Promise<SkillStudioContext | null> {
-  // Fetch skill record
-  const table = scope === 'system' ? 'system_skills' : 'skills';
-  const skillRows = await db.execute<{
-    id: string; slug: string; name: string;
-    description: string | null; definition: unknown;
-    instructions: string | null;
-  }>(sql.raw(`SELECT id, slug, name, description, definition, instructions FROM ${table} WHERE id = '${skillId}' LIMIT 1`));
+  // Fetch skill record — subaccount and org both use the `skills` table
+  let skillRow: { id: string; slug: string; name: string; description: string | null; definition: unknown; instructions: string | null } | undefined;
 
-  const skill = (skillRows as unknown as Array<any>)[0];
+  if (scope === 'system') {
+    const rows = await db
+      .select({ id: systemSkills.id, slug: systemSkills.slug, name: systemSkills.name, description: systemSkills.description, definition: systemSkills.definition, instructions: systemSkills.instructions })
+      .from(systemSkills)
+      .where(eq(systemSkills.id, skillId))
+      .limit(1);
+    skillRow = rows[0];
+  } else {
+    const rows = await db
+      .select({ id: skills.id, slug: skills.slug, name: skills.name, description: skills.description, definition: skills.definition, instructions: skills.instructions })
+      .from(skills)
+      .where(eq(skills.id, skillId))
+      .limit(1);
+    skillRow = rows[0];
+  }
+
+  const skill = skillRow;
   if (!skill) return null;
 
   // Fetch versions
-  const colName = scope === 'system' ? 'system_skill_id' : 'skill_id';
   const versions = await db
     .select()
     .from(skillVersions)
@@ -221,53 +262,63 @@ export async function simulateSkillVersion(
  */
 export async function saveSkillVersion(
   skillId: string,
-  scope: 'system' | 'org',
+  scope: 'system' | 'org' | 'subaccount',
   orgId: string | null,
   payload: SaveSkillVersionPayload,
   authorUserId: string,
 ): Promise<SkillVersionSummary> {
-  // Get next version number
-  const maxVersionRows = await db
-    .select({ maxVersion: sql<number>`COALESCE(MAX(version_number), 0)` })
-    .from(skillVersions)
-    .where(eq(scope === 'system' ? skillVersions.systemSkillId : skillVersions.skillId, skillId));
+  const changeType = payload.changeSummary?.startsWith('Rollback') ? 'restore' : 'update';
 
-  const nextVersion = ((maxVersionRows[0] as any)?.maxVersion ?? 0) + 1;
+  return await db.transaction(async (tx) => {
+    // Insert version row — uses FOR UPDATE lock to prevent version number races
+    const version = await skillVersioningHelper.writeVersion({
+      systemSkillId: scope === 'system' ? skillId : undefined,
+      skillId: scope !== 'system' ? skillId : undefined,
+      name: payload.name,
+      description: payload.description ?? null,
+      definition: payload.definition,
+      instructions: payload.instructions ?? null,
+      changeType,
+      changeSummary: payload.changeSummary ?? '',
+      authoredBy: authorUserId,
+      tx,
+    });
 
-  // Insert version row
-  const [version] = await db.insert(skillVersions).values({
-    systemSkillId: scope === 'system' ? skillId : undefined,
-    skillId: scope === 'org' ? skillId : undefined,
-    versionNumber: nextVersion,
-    name: payload.name,
-    description: payload.description ?? null,
-    definition: payload.definition as Record<string, unknown>,
-    instructions: payload.instructions ?? null,
-    changeSummary: payload.changeSummary ?? null,
-    authoredBy: authorUserId,
-    simulationPassCount: payload.simulationPassCount ?? 0,
-    simulationTotalCount: payload.simulationTotalCount ?? 0,
-  }).returning();
+    if (!version) {
+      throw new Error('Failed to write skill version');
+    }
 
-  // Update the skill's live definition
-  const table = scope === 'system' ? 'system_skills' : 'skills';
-  await db.execute(sql.raw(`
-    UPDATE ${table}
-    SET definition = '${JSON.stringify(payload.definition)}'::jsonb,
-        instructions = ${payload.instructions ? `'${payload.instructions.replace(/'/g, "''")}'` : 'NULL'},
-        updated_at = NOW()
-    WHERE id = '${skillId}'
-  `));
+    // Update the live skill definition inside the same transaction
+    if (scope === 'system') {
+      await tx.update(systemSkills).set({
+        definition: payload.definition as Record<string, unknown>,
+        instructions: payload.instructions ?? null,
+        updatedAt: new Date(),
+      }).where(eq(systemSkills.id, skillId));
+    } else if (scope === 'org') {
+      await tx.update(skills).set({
+        definition: payload.definition as Record<string, unknown>,
+        instructions: payload.instructions ?? null,
+        updatedAt: new Date(),
+      }).where(and(eq(skills.id, skillId), isNull(skills.subaccountId)));
+    } else {
+      await tx.update(skills).set({
+        definition: payload.definition as Record<string, unknown>,
+        instructions: payload.instructions ?? null,
+        updatedAt: new Date(),
+      }).where(eq(skills.id, skillId));
+    }
 
-  return {
-    id: version!.id,
-    versionNumber: version!.versionNumber,
-    name: version!.name,
-    changeSummary: version!.changeSummary,
-    simulationPassCount: version!.simulationPassCount,
-    simulationTotalCount: version!.simulationTotalCount,
-    createdAt: (version!.createdAt ?? new Date()).toISOString(),
-  };
+    return {
+      id: version.id,
+      versionNumber: version.versionNumber,
+      name: version.name,
+      changeSummary: version.changeSummary,
+      simulationPassCount: version.simulationPassCount,
+      simulationTotalCount: version.simulationTotalCount,
+      createdAt: (version.createdAt ?? new Date()).toISOString(),
+    };
+  });
 }
 
 /**
@@ -275,7 +326,7 @@ export async function saveSkillVersion(
  */
 export async function listSkillVersions(
   skillId: string,
-  scope: 'system' | 'org',
+  scope: 'system' | 'org' | 'subaccount',
 ): Promise<SkillVersionSummary[]> {
   const versions = await db
     .select()
@@ -299,7 +350,7 @@ export async function listSkillVersions(
  */
 export async function rollbackSkillVersion(
   skillId: string,
-  scope: 'system' | 'org',
+  scope: 'system' | 'org' | 'subaccount',
   versionId: string,
   authorUserId: string,
 ): Promise<void> {

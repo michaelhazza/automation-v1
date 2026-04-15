@@ -90,7 +90,7 @@ export default function SubaccountAgentEditPage({ user: _user }: { user: User })
       try {
         const [linkRes, skillsRes] = await Promise.all([
           api.get(`/api/subaccounts/${subaccountId}/agents/${linkId}/detail`),
-          api.get('/api/skills/all'),
+          api.get(`/api/subaccounts/${subaccountId}/skills`),
         ]);
         const detail: LinkDetail = linkRes.data;
         setLink(detail);

@@ -1,6 +1,7 @@
 import { eq, and, isNull, gte, sql } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { agentTriggers, agentRuns, subaccountAgents } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
 import { MAX_TRIGGERED_RUNS_PER_MINUTE } from '../config/limits.js';
 
 // ---------------------------------------------------------------------------
@@ -253,6 +254,13 @@ export const triggerService = {
         updatedAt: new Date(),
       })
       .returning();
+
+    await configHistoryService.recordHistory({
+      entityType: 'agent_trigger', entityId: trigger.id, organisationId: data.organisationId,
+      snapshot: trigger as unknown as Record<string, unknown>,
+      changedBy: null, changeSource: 'api',
+    });
+
     return trigger;
   },
 
@@ -266,6 +274,17 @@ export const triggerService = {
       isActive?: boolean;
     }
   ) {
+    // Pre-mutation snapshot for config history
+    const [preState] = await db.select().from(agentTriggers)
+      .where(and(eq(agentTriggers.id, triggerId), eq(agentTriggers.organisationId, organisationId), isNull(agentTriggers.deletedAt)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'agent_trigger', entityId: triggerId, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api',
+      });
+    }
+
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.eventFilter !== undefined) update.eventFilter = data.eventFilter;
     if (data.cooldownSeconds !== undefined) update.cooldownSeconds = data.cooldownSeconds;
@@ -289,6 +308,16 @@ export const triggerService = {
   },
 
   async deleteTrigger(triggerId: string, organisationId: string, subaccountId: string) {
+    const [preState] = await db.select().from(agentTriggers)
+      .where(and(eq(agentTriggers.id, triggerId), eq(agentTriggers.organisationId, organisationId), isNull(agentTriggers.deletedAt)));
+    if (preState) {
+      await configHistoryService.recordHistory({
+        entityType: 'agent_trigger', entityId: triggerId, organisationId,
+        snapshot: preState as unknown as Record<string, unknown>,
+        changedBy: null, changeSource: 'api', changeSummary: 'Entity soft-deleted',
+      });
+    }
+
     const [deleted] = await db
       .update(agentTriggers)
       .set({ deletedAt: new Date(), updatedAt: new Date() })

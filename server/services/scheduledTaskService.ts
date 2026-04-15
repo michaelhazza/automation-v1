@@ -5,6 +5,7 @@ import {
   scheduledTaskRuns,
   agents,
 } from '../db/schema/index.js';
+import { configHistoryService } from './configHistoryService.js';
 import { taskService } from './taskService.js';
 import { agentExecutionService, type AgentRunRequest } from './agentExecutionService.js';
 import { DEFAULT_RETRY_POLICY } from '../config/limits.js';
@@ -100,6 +101,15 @@ export const scheduledTaskService = {
       })
       .returning();
 
+    await configHistoryService.recordHistory({
+      entityType: 'scheduled_task',
+      entityId: created.id,
+      organisationId,
+      snapshot: created as unknown as Record<string, unknown>,
+      changedBy: userId ?? null,
+      changeSource: 'api',
+    });
+
     return created;
   },
 
@@ -127,6 +137,15 @@ export const scheduledTaskService = {
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
 
     if (!existing) throw { statusCode: 404, message: 'Scheduled task not found' };
+
+    await configHistoryService.recordHistory({
+      entityType: 'scheduled_task',
+      entityId: id,
+      organisationId,
+      snapshot: existing as unknown as Record<string, unknown>,
+      changedBy: null,
+      changeSource: 'api',
+    });
 
     const update: Record<string, unknown> = { updatedAt: new Date() };
     if (data.title !== undefined) update.title = data.title;
@@ -254,6 +273,23 @@ export const scheduledTaskService = {
   },
 
   async delete(id: string, organisationId: string) {
+    const [existing] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)));
+
+    if (existing) {
+      await configHistoryService.recordHistory({
+        entityType: 'scheduled_task',
+        entityId: id,
+        organisationId,
+        snapshot: existing as unknown as Record<string, unknown>,
+        changedBy: null,
+        changeSource: 'api',
+        changeSummary: 'Entity deleted',
+      });
+    }
+
     const [deleted] = await db
       .delete(scheduledTasks)
       .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.organisationId, organisationId)))

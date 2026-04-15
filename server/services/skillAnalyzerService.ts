@@ -1,6 +1,7 @@
 import { eq, desc, inArray, and, sql, isNull } from 'drizzle-orm';
 import { logger } from '../lib/logger.js';
 import { db } from '../db/index.js';
+import { skillVersioningHelper } from './skillVersioningHelper.js';
 import { systemSkills } from '../db/schema/systemSkills.js';
 import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
@@ -33,6 +34,7 @@ import { skillParserService } from './skillParserService.js';
 import { systemSkillService, type SystemSkill } from './systemSkillService.js';
 import { systemAgentService } from './systemAgentService.js';
 import { SKILL_HANDLERS } from './skillExecutor.js';
+import { configBackupService } from './configBackupService.js';
 
 // ---------------------------------------------------------------------------
 // Skill Analyzer Service — CRUD for jobs/results + pipeline orchestration
@@ -473,8 +475,17 @@ export async function updateAgentProposal(
           instructions: matched.instructions,
         },
       };
-    } catch {
-      // Library skill deleted — leave matchedSkillContent omitted.
+    } catch (err: unknown) {
+      const status = (err as { statusCode?: number })?.statusCode;
+      if (status === 404) {
+        // Library skill deleted — leave matchedSkillContent omitted.
+      } else {
+        logger.error('[skillAnalyzer] Unexpected error fetching matched skill', {
+          matchedSkillId: updated.matchedSkillId,
+          error: String(err),
+        });
+        throw err;
+      }
     }
   }
   return enriched;
@@ -615,8 +626,17 @@ export async function patchMergeFields(
           instructions: matched.instructions,
         },
       };
-    } catch {
-      // Library skill deleted — leave matchedSkillContent omitted.
+    } catch (err: unknown) {
+      const status = (err as { statusCode?: number })?.statusCode;
+      if (status === 404) {
+        // Library skill deleted — leave matchedSkillContent omitted.
+      } else {
+        logger.error('[skillAnalyzer] Unexpected error fetching matched skill', {
+          matchedSkillId: updated.matchedSkillId,
+          error: String(err),
+        });
+        throw err;
+      }
     }
   }
   return enriched;
@@ -698,8 +718,17 @@ export async function resetMergeToOriginal(params: {
           instructions: matched.instructions,
         },
       };
-    } catch {
-      // Library skill deleted — leave matchedSkillContent omitted.
+    } catch (err: unknown) {
+      const status = (err as { statusCode?: number })?.statusCode;
+      if (status === 404) {
+        // Library skill deleted — leave matchedSkillContent omitted.
+      } else {
+        logger.error('[skillAnalyzer] Unexpected error fetching matched skill', {
+          matchedSkillId: updated.matchedSkillId,
+          error: String(err),
+        });
+        throw err;
+      }
     }
   }
   return enriched;
@@ -728,6 +757,7 @@ export async function executeApproved(params: {
   updated: number;
   failed: number;
   errors: Array<{ resultId: string; error: string }>;
+  backupId: string | null;
 }> {
   const { jobId, organisationId } = params;
 
@@ -737,6 +767,26 @@ export async function executeApproved(params: {
     (r) => r.actionTaken === 'approved' && (!r.executionResult || r.executionResult === 'failed'),
   );
   const parsedCandidates = (job.parsedCandidates as unknown[]) || [];
+
+  // Create a pre-mutation backup if there are approved results to execute.
+  // On retry, a backup may already exist for this jobId — reuse it rather
+  // than attempting a second create (which throws 409).
+  let backupId: string | null = null;
+  if (approved.length > 0) {
+    const existing = await configBackupService.getBackupBySourceId(jobId, organisationId);
+    if (existing) {
+      backupId = existing.id;
+    } else {
+      const created = await configBackupService.createBackup({
+        organisationId,
+        scope: 'skill_analyzer',
+        label: `Skill Analyzer Job ${jobId}`,
+        sourceId: jobId,
+        createdBy: params.userId,
+      });
+      backupId = created.backupId;
+    }
+  }
 
   let created = 0;
   let updated = 0;
@@ -824,7 +874,7 @@ export async function executeApproved(params: {
       // multi-statement extensions.
       try {
         await db.transaction(async (tx) => {
-          await systemSkillService.updateSystemSkill(
+          const updated_skill = await systemSkillService.updateSystemSkill(
             result.matchedSkillId!,
             {
               name: merge.name,
@@ -832,8 +882,23 @@ export async function executeApproved(params: {
               definition: merge.definition as never,
               instructions: merge.instructions,
             },
-            { tx },
+            { tx, skipVersionWrite: true, externalVersionWrite: true },
           );
+
+          // Version snapshot uses the DB-returned row, not `merge.*`, to guarantee
+          // the snapshot matches what was actually persisted.
+          await skillVersioningHelper.writeVersion({
+            systemSkillId: result.matchedSkillId!,
+            name: updated_skill.name,
+            description: updated_skill.description,
+            definition: updated_skill.definition as object,
+            instructions: updated_skill.instructions,
+            changeType: 'merge',
+            changeSummary: `${result.classification} merge from Skill Analyzer job ${jobId}`,
+            authoredBy: params.userId,
+            idempotencyKey: `sa:${jobId}:${result.matchedSkillId}:merge`,
+            tx,
+          });
         });
         await db
           .update(skillAnalyzerResults)
@@ -908,8 +973,21 @@ export async function executeApproved(params: {
               definition: candidate.definition as never,
               instructions: candidate.instructions,
             },
-            { tx },
+            { tx, skipVersionWrite: true, externalVersionWrite: true },
           );
+
+          await skillVersioningHelper.writeVersion({
+            systemSkillId: created.id,
+            name: created.name,
+            description: created.description,
+            definition: created.definition as object,
+            instructions: created.instructions,
+            changeType: 'create',
+            changeSummary: `Created by Skill Analyzer job ${jobId}`,
+            authoredBy: params.userId,
+            idempotencyKey: `sa:${jobId}:${created.id}:create`,
+            tx,
+          });
 
           // Phase 2: read agentProposals off the result row, filter to
           // the selected ones, and attach the new skill's slug to each
@@ -933,7 +1011,7 @@ export async function executeApproved(params: {
               agent = await systemAgentService.getAgent(proposal.systemAgentId, { tx });
             } catch {
               // 404 — agent was deleted between analysis and execute.
-              console.info('[skillAnalyzer] agent attach skipped — missing', {
+              logger.warn('[skillAnalyzer] agent attach skipped — missing', {
                 resultId: result.id,
                 systemAgentId: proposal.systemAgentId,
                 outcome: 'skipped-missing',
@@ -946,10 +1024,10 @@ export async function executeApproved(params: {
               : [];
             if (currentSlugs.includes(created.slug)) {
               // Already attached — idempotent no-op.
-              console.info('[skillAnalyzer] agent attach already-present', {
+              logger.info('[skillAnalyzer] agent attach already-present', {
                 resultId: result.id,
                 systemAgentId: proposal.systemAgentId,
-                outcome: 'attached',
+                outcome: 'already-present',
               });
               continue;
             }
@@ -959,7 +1037,7 @@ export async function executeApproved(params: {
               { defaultSystemSkillSlugs: nextSlugs },
               { tx },
             );
-            console.info('[skillAnalyzer] agent attach succeeded', {
+            logger.info('[skillAnalyzer] agent attach succeeded', {
               resultId: result.id,
               systemAgentId: proposal.systemAgentId,
               outcome: 'attached',
@@ -981,7 +1059,21 @@ export async function executeApproved(params: {
     }
   }
 
-  return { created, updated, failed, errors };
+  // Clean up phantom backup if no mutations actually succeeded
+  if (backupId && created === 0 && updated === 0) {
+    try {
+      await configBackupService.deleteBackup(backupId);
+      backupId = null;
+    } catch (err) {
+      logger.warn('[skillAnalyzer] Failed to clean up phantom backup', {
+        backupId,
+        error: String(err),
+      });
+      // Non-fatal — execution results are the primary return value
+    }
+  }
+
+  return { created, updated, failed, errors, backupId };
 }
 
 /** Update job progress (used by the job handler). */

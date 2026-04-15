@@ -518,10 +518,18 @@ export const agentExecutionService = {
 
       // Layer 2+3: Org skills + sub-account/org skills
       const skillSlugs = configSkillSlugs;
-      const { tools: skillTools, instructions: skillInstructions } = await skillService.resolveSkillsForAgent(
+      const { tools: skillTools, instructions: skillInstructions, truncated: skillInstructionsTruncated } = await skillService.resolveSkillsForAgent(
         skillSlugs,
-        request.organisationId
+        request.organisationId,
+        request.subaccountId,
       );
+      if (skillInstructionsTruncated) {
+        logger.warn('[agentExecutionService] Skill instructions were truncated — agent may have reduced capability', {
+          organisationId: request.organisationId,
+          subaccountId: request.subaccountId,
+          skillSlugs,
+        });
+      }
 
       // For trigger_process, inject the process enum dynamically
       const allSkillTools = [...systemSkillTools, ...skillTools];

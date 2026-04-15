@@ -14,6 +14,8 @@ interface JobSummary {
   comparisonCount: number | null;
   createdAt: string;
   completedAt: string | null;
+  backupId: string | null;
+  backupStatus: 'active' | 'restored' | 'expired' | null;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -144,6 +146,16 @@ export default function SkillAnalyzerPage({ user: _user }: { user: User }) {
               </div>
               <div className="flex items-center gap-3">
                 <StatusBadge status={job.status} />
+                {job.backupStatus === 'active' && (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                    backup available
+                  </span>
+                )}
+                {job.backupStatus === 'restored' && (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                    restored
+                  </span>
+                )}
                 <span className="text-xs text-slate-400">
                   {new Date(job.createdAt).toLocaleDateString()}
                 </span>

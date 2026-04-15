@@ -87,6 +87,7 @@ import ghlWebhookRouter from './routes/webhooks/ghlWebhook.js';
 import teamworkWebhookRouter from './routes/webhooks/teamworkWebhook.js';
 import slackWebhookRouter from './routes/webhooks/slackWebhook.js';
 import subaccountTagsRouter from './routes/subaccountTags.js';
+import subaccountSkillsRouter from './routes/subaccountSkills.js';
 import orgMemoryRouter from './routes/orgMemory.js';
 // orgWorkspaceRouter removed — org tasks now live in the org subaccount's task board (migration 0106)
 import mcpServersRouter from './routes/mcpServers.js';
@@ -109,6 +110,7 @@ import publicPageTrackingRouter from './routes/public/pageTracking.js';
 // ClientPulse module routes
 import modulesRouter from './routes/modules.js';
 import onboardingRouter from './routes/onboarding.js';
+import configHistoryRouter from './routes/configHistory.js';
 import clientpulseReportsRouter from './routes/clientpulseReports.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
@@ -253,6 +255,7 @@ app.use(orgAgentConfigsRouter);
 app.use(connectorConfigsRouter);
 // ghl/teamwork/slack webhook routers mounted before body parsing (need raw body for HMAC)
 app.use(subaccountTagsRouter);
+app.use(subaccountSkillsRouter);
 app.use(orgMemoryRouter);
 // orgWorkspaceRouter mount removed (migration 0106)
 app.use(mcpServersRouter);
@@ -274,6 +277,7 @@ app.use(skillStudioRouter);
 // ClientPulse module routes
 app.use(modulesRouter);
 app.use(onboardingRouter);
+app.use(configHistoryRouter);
 app.use(clientpulseReportsRouter);
 app.use(ghlRouter);
 app.use(geoAuditsRouter);
