@@ -87,6 +87,8 @@ run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
 
 # ── Onboarding playbooks spec (docs/onboarding-playbooks-spec.md) gates ──
 run_gate "$SCRIPT_DIR/verify-help-hint-length.mjs"
+run_gate "$SCRIPT_DIR/verify-action-call-allowlist.sh"
+run_gate "$SCRIPT_DIR/verify-playbook-portal-presentation.mjs"
 
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="

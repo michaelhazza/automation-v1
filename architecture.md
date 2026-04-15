@@ -1327,8 +1327,11 @@ Playbook Run (playbookRuns)
 | `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
+| `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_playbook_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
 
 Soft deletes on templates (`deletedAt`). Runs are append-only history.
+
+`modules.onboarding_playbook_slugs` (`text[]`, added migration 0122) lists playbook slugs that should be started or offered during sub-account onboarding for any sub-account whose org holds an active subscription to that module. The union of slugs across all active modules drives the Onboarding tab. `subaccountOnboardingService.autoStartOwedOnboardingPlaybooks()` is called fire-and-forget on sub-account creation.
 
 ### Step definition shape (stored in `definitionJson`)
 
@@ -1336,17 +1339,28 @@ Soft deletes on templates (`deletedAt`). Runs are append-only history.
 interface PlaybookStep {
   id: string;                    // stable within template version
   name: string;
-  type: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision';
+  type: 'prompt' | 'agent_call' | 'action_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision';
   dependsOn: string[];           // ids of prior steps
+  sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible'; // mandatory on all steps
   humanReviewRequired?: boolean; // pause for edit/approve before downstream consumes output
   outputSchema: JSONSchema;      // zod-validated; downstream steps rely on shape
+  retryPolicy?: { maxAttempts: number };
 
-  // type-specific
+  // type: prompt / agent_call
   prompt?: string;                               // prompt with {{ templating }}
-  agentId?: string;                              // for type: agent_call — references org or system agent
-  formSchema?: JSONSchema;                       // for type: user_input — renders as form in UI
+  model?: string;                                // optional model override for type: prompt
+  agentRef?: { kind: 'system' | 'org'; slug: string }; // for type: agent_call
+  agentInputs?: Record<string, string>;          // map of paramName -> template expression
+
+  // type: action_call — invokes a skill handler from the actionCallAllowlist
+  actionSlug?: string;                           // must be in ACTION_CALL_ALLOWED_SLUGS
+  actionInputs?: Record<string, string>;         // template expressions resolved against run context
+  idempotencyScope?: 'run' | 'entity';           // 'entity' required for singleton-resource actions
+  entityKey?: string;                            // stable key for entity-scoped idempotency
+
+  // type: user_input
+  formSchema?: JSONSchema;                       // renders as form in UI
   condition?: string;                            // for type: conditional — JSONLogic expression
-  inputs?: Record<string, string>;               // map of paramName -> template expression
 
   // type: agent_decision
   decisionPrompt?: string;                       // the question the agent must answer (templated)
@@ -1356,8 +1370,27 @@ interface PlaybookStep {
 }
 
 interface PlaybookDefinition {
+  slug: string;
+  name: string;
+  version: number;
   steps: PlaybookStep[];
-  initialInputSchema: JSONSchema;  // what the user provides when kicking off the run
+  initialInputSchema: JSONSchema;   // what the user provides when kicking off the run
+
+  // Onboarding-playbooks spec (§10–§11)
+  autoStartOnOnboarding?: boolean;  // engine auto-starts this playbook in supervised mode for new sub-accounts
+  portalPresentation?: {            // drives the §9.4 portal card
+    cardTitle: string;
+    headlineStepId: string;         // step whose output provides the card headline
+    headlineOutputPath: string;     // dot-path into that step's outputSchema
+    detailRoute?: string;           // optional deep-link; run modal is the fallback
+  };
+  knowledgeBindings?: Array<{       // write step output back to Workspace Memory on completion
+    stepId: string;
+    outputPath: string;             // dot-path into the step's outputSchema
+    blockLabel: string;             // Memory Block label (1–80 chars)
+    mergeStrategy: 'replace' | 'merge' | 'append';
+    firstRunOnly?: boolean;         // only write on the first successful run per subaccount+slug
+  }>;
 }
 ```
 
@@ -1477,6 +1510,10 @@ Three layers, all required:
 | `/api/system/playbook-studio/simulate` | `playbookStudio.ts` | `simulate_run` tool — dry-run side-effect classification |
 | `/api/system/playbook-studio/estimate` | `playbookStudio.ts` | `estimate_cost` tool — optimistic/pessimistic cost bounds |
 | `/api/system/playbook-studio/render` | `playbookStudio.ts` | Deterministic file preview — what the save endpoint would commit |
+| `/api/subaccounts/:subaccountId/onboarding/owed` | `subaccountOnboarding.ts` | List playbooks owed by this sub-account's active modules (with latest run status) |
+| `/api/subaccounts/:subaccountId/onboarding/start` | `subaccountOnboarding.ts` | Start a specific owed onboarding playbook (idempotent — returns existing run if already active) |
+| `/api/portal/:subaccountId/playbook-runs` | `portal.ts` | List portal-visible playbook runs for the sub-account portal card |
+| `/api/portal/:subaccountId/playbook-runs/:runId/run-now` | `portal.ts` | Start a fresh run of the same template (portal-visible), requires `PLAYBOOK_RUNS_START` |
 
 All routes follow the standard conventions: `asyncHandler`, `authenticate`, `resolveSubaccount` where applicable, org scoping via `req.orgId`, no direct `db` access, service errors as `{ statusCode, message, errorCode }`.
 
@@ -1490,6 +1527,7 @@ All routes follow the standard conventions: `asyncHandler`, `authenticate`, `res
 | `playbookAgentRunHook` | Post-run hook that bridges `agent_call` step completion back into the engine tick |
 | `playbookStudioService` | Chat authoring back-end: sessions, `validate`/`simulate`/`estimate`/`render` tools, `saveAndOpenPr` trust boundary |
 | `playbookStudioGithub` | Real GitHub PR creation path used by `saveAndOpenPr` (deferred #5) |
+| `subaccountOnboardingService` | Resolves owed onboarding playbooks for a sub-account (`listOwedOnboardingPlaybooks`, `startOwedOnboardingPlaybook`, `autoStartOwedOnboardingPlaybooks`). Called fire-and-forget from sub-account creation. Idempotent via 23505 unique-violation catch on the partial unique index `(subaccount_id, playbook_slug) WHERE active_statuses`. |
 
 The templating/validator/renderer/hash primitives live under `server/lib/playbook/` (`templating.ts`, `validator.ts`, `renderer.ts`, `canonicalJson.ts`, `hash.ts`, `definePlaybook.ts`) so they can be imported by both the engine and the Studio tools without pulling in service layer state. They are pure and unit-tested (`server/lib/playbook/__tests__/playbook.test.ts`).
 

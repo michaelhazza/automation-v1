@@ -218,10 +218,11 @@ AI-powered conversational configuration for agents, skills, schedules, and data 
 
 Multi-step workflow automation with dependency graphs, parallel execution, branching logic, and human review gates.
 
-- **Six step types:**
+- **Seven step types:**
     - `user_input` — structured form captured from a human operator or client
     - `prompt` — direct one-shot LLM generation
     - `agent_call` — hand the step off to a full agent with its skill surface
+    - `action_call` — invoke a registered platform action directly (e.g. publish to client portal, send email digest, create a scheduled task); side-effect class and idempotency enforced by the allowlist
     - `agent_decision` — small, schema-bound agent call that returns a structured choice (e.g. routing, classification, approve/edit/reject) the engine uses to branch
     - `conditional` — deterministic branching on expressions over prior step outputs
     - `approval` — blocking human review gate before downstream steps run
@@ -229,6 +230,10 @@ Multi-step workflow automation with dependency graphs, parallel execution, branc
 - **DAG execution** — Steps declare dependencies; independent branches run in parallel; templating passes outputs between steps
 - **Safety controls** — Irreversible steps cannot be auto-retried; per-step retry policy; every step declares a side-effect class; concurrency guards prevent double execution
 - **Run-now + schedule** — Any recurring playbook can be launched immediately on setup; the normal schedule continues afterward
+- **Portal publishing** — Playbooks can publish their output to the client portal card via `action_call` steps; the portal card displays the most recent published brief per subaccount
+- **Email digest delivery** — Playbooks can send markdown email digests to configured recipients with deduplication (no double-sends on retry)
+- **Knowledge bindings** — Steps can write their output back to Workspace Memory Blocks on completion; `firstRunOnly` option captures baseline facts once
+- **Onboarding auto-start** — Playbooks with `autoStartOnOnboarding: true` are automatically launched in supervised mode when a new sub-account is created under an org whose module set includes the playbook slug; the Onboarding tab on the sub-account detail page tracks progress
 - **Playbook Studio** — Chat-based authoring with validation, simulation, and cost estimation; system and org templates with versioning; fork-and-parameterise per org; self-healing watchdog sweeps stuck runs
 
 ### Human-in-the-Loop
@@ -293,6 +298,8 @@ White-label client-facing interface scoped per subaccount, enabling agencies to 
 
 - Subaccount selector, workflow browser with category filtering, self-service execution, and run history
 - `client_user` role sees only portal routes; per-org brand colour inherited by portal styling
+- **Playbook brief cards** — Published playbook outputs appear on the portal as rich summary cards (headline bullets, full brief in modal); each card shows status and last-run timestamp; "Run now" triggers a fresh run and navigates to results
+- Portal briefs are isolated per subaccount; retracted briefs do not appear; most-recent non-retracted brief per (subaccount, playbook slug) is displayed
 
 ### Pages & Content Builder
 
@@ -516,7 +523,7 @@ Automation OS replaces a fragmented stack of point tools with a single, orchestr
 
 ## Skills Reference
 
-Complete list of all 108 skills.
+Complete list of all 110 skills.
 
 | Column | Meaning |
 |--------|---------|
@@ -677,6 +684,8 @@ Complete list of all 108 skills.
 |-------|-------------|------|------|
 | `configure_integration` | Guide workspace integration setup with review gating | LLM | HITL |
 | `update_financial_record` | Write financial record update (budget/forecast/expense note) | Deterministic | HITL |
+| `config_publish_playbook_output_to_portal` | Publish a playbook step's output to the sub-account portal card; upserts the portal brief and marks the run portal-visible (playbook `action_call` steps only) | Deterministic | — |
+| `config_send_playbook_email_digest` | Send a markdown email digest to configured recipients with per-run deduplication; irreversible (playbook `action_call` steps only) | Deterministic | HITL |
 
 ### Playbook Studio
 
@@ -771,6 +780,7 @@ Complete list of all 108 skills.
 
 | Date | Change | Commit |
 |------|--------|--------|
+| 2026-04-15 | Phase G onboarding-playbooks: add `action_call` step type + portal publishing + email digest + knowledge bindings + onboarding auto-start to Playbook Engine; add portal brief cards to Client Portal; add `config_publish_playbook_output_to_portal` and `config_send_playbook_email_digest` to Configuration & Integration skills; update skill count 108→110 | — |
 | 2026-04-14 | Apply Editorial Rules across customer-facing sections — scrub all named LLM / AI providers and their products from Positioning, Replaces / Consolidates, and Product Capabilities; rewrite in generic, vendor-neutral, marketing-appropriate language. Add Editorial Rules section and neutralise "default provider" language in Integrations Reference. Persist editorial rules in `CLAUDE.md`. | — |
 | 2026-04-14 | Add Positioning & Competitive Differentiation section (framing, structural differentiators, objection handling, GTM guidance, messaging north star); reframe Developer Tools (IEE) as Sandboxed Runtime with browser automation as the primary mode; extend Replaces / Consolidates table with rows covering shared team chat, scheduled-prompt tools, hosted single-agent platforms, self-build agent SDKs, and single-provider lock-in | — |
 | 2026-04-13 | Fix skill count: 100 skills (not 101); add 4 missing route entries (ClientPulse, GHL, Modules, Onboarding) to architecture.md; update migration list to 0109; fix project structure job list | — |
