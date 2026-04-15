@@ -89,6 +89,48 @@ router.get(
   })
 );
 
+// §9.2 — single round-trip fetch used by the PlaybookRunPage modal. Returns
+// the run row, ordered step-run rows, the resolved template definition, the
+// resolved agent id map, and an empty events list (events arrive over WS).
+router.get(
+  '/api/subaccounts/:subaccountId/playbook-runs/:runId/envelope',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, runId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const envelope = await playbookRunService.getEnvelope(
+      req.orgId!,
+      subaccountId,
+      runId,
+    );
+    res.json(envelope);
+  })
+);
+
+// §9.4 — admin toggles whether a run is shown on the sub-account portal.
+router.patch(
+  '/api/subaccounts/:subaccountId/playbook-runs/:runId/portal-visibility',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, runId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const { isPortalVisible } = req.body as { isPortalVisible?: boolean };
+    if (typeof isPortalVisible !== 'boolean') {
+      res.status(400).json({ error: 'isPortalVisible (boolean) is required' });
+      return;
+    }
+    const run = await playbookRunService.setPortalVisibility(
+      req.orgId!,
+      subaccountId,
+      runId,
+      isPortalVisible,
+    );
+    res.json({ ok: true, run });
+  })
+);
+
 router.post(
   '/api/playbook-runs/:runId/cancel',
   authenticate,

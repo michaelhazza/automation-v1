@@ -62,6 +62,7 @@ export const playbookRunService = {
   }): Promise<{
     templateVersionId: string;
     definition: PlaybookDefinition;
+    slug: string;
   }> {
     if (input.templateId) {
       // Org template path.
@@ -82,6 +83,7 @@ export const playbookRunService = {
       return {
         templateVersionId: version.id,
         definition: rehydrateDefinition(version.definitionJson as Record<string, unknown>),
+        slug: template.slug,
       };
     }
 
@@ -100,6 +102,7 @@ export const playbookRunService = {
       return {
         templateVersionId: sysVer.id,
         definition: rehydrateDefinition(sysVer.definitionJson as Record<string, unknown>),
+        slug: sys.slug,
       };
     }
 
@@ -126,6 +129,11 @@ export const playbookRunService = {
     startedByUserId: string;
     runMode?: 'auto' | 'supervised' | 'background' | 'bulk';
     bulkTargets?: string[];
+    /** Mark the run as the onboarding instance for §9.3 Onboarding tab. */
+    isOnboardingRun?: boolean;
+    /** Mark the run as visible in the sub-account portal (§9.4). Defaults to
+     *  `true` when the template declares a `portalPresentation`. */
+    isPortalVisible?: boolean;
   }): Promise<{ runId: string; status: PlaybookRunStatus }> {
     // Verify the subaccount belongs to the org.
     const [sub] = await db
@@ -137,7 +145,7 @@ export const playbookRunService = {
       throw { statusCode: 404, message: 'Subaccount not found' };
     }
 
-    const { templateVersionId, definition } = await this.resolveTemplateForRun(input);
+    const { templateVersionId, definition, slug } = await this.resolveTemplateForRun(input);
 
     // Build initial context.
     const startedAt = new Date();
@@ -197,6 +205,11 @@ export const playbookRunService = {
         ? { ...initialContext, _meta: { ...initialContext._meta }, bulkTargets: input.bulkTargets }
         : { ...initialContext, _meta: { ...initialContext._meta } };
 
+      // Portal visibility defaults: true when the template declares a
+      // portalPresentation and the caller didn't explicitly set the flag.
+      const portalVisibleDefault = definition.portalPresentation !== undefined;
+      const isPortalVisible = input.isPortalVisible ?? portalVisibleDefault;
+
       const [run] = await tx
         .insert(playbookRuns)
         .values({
@@ -209,6 +222,9 @@ export const playbookRunService = {
           contextSizeBytes: contextBytes,
           startedByUserId: input.startedByUserId,
           startedAt,
+          isOnboardingRun: input.isOnboardingRun ?? false,
+          isPortalVisible,
+          playbookSlug: slug,
         })
         .returning();
       runId = run.id;
@@ -300,6 +316,91 @@ export const playbookRunService = {
     }
 
     return { run, stepRuns: stepRunRows, definition };
+  },
+
+  /**
+   * Envelope endpoint payload for the run modal (spec §9.2). Single round-trip
+   * that returns everything the PlaybookRunPage needs to render: run row,
+   * ordered step-run rows, resolved template definition, resolved agent slugs
+   * per step, and the (limited) per-step event list. Events are not persisted,
+   * so `events` is always empty — the client fills it from the WS stream.
+   */
+  async getEnvelope(
+    organisationId: string,
+    subaccountId: string,
+    runId: string
+  ): Promise<{
+    run: PlaybookRun;
+    stepRuns: PlaybookStepRun[];
+    definition: PlaybookDefinition | null;
+    resolvedAgents: Record<string, string>;
+    events: Array<unknown>;
+  }> {
+    const [run] = await db
+      .select()
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.id, runId),
+          eq(playbookRuns.organisationId, organisationId),
+          eq(playbookRuns.subaccountId, subaccountId),
+        ),
+      );
+    if (!run) throw { statusCode: 404, message: 'Playbook run not found' };
+
+    const stepRunRows = await db
+      .select()
+      .from(playbookStepRuns)
+      .where(eq(playbookStepRuns.runId, runId))
+      .orderBy(playbookStepRuns.createdAt);
+
+    let definition: PlaybookDefinition | null = null;
+    const [version] = await db
+      .select()
+      .from(playbookTemplateVersions)
+      .where(eq(playbookTemplateVersions.id, run.templateVersionId));
+    if (version) {
+      definition = rehydrateDefinition(version.definitionJson as Record<string, unknown>);
+    } else {
+      const [sysVer] = await db
+        .select()
+        .from(systemPlaybookTemplateVersions)
+        .where(eq(systemPlaybookTemplateVersions.id, run.templateVersionId));
+      if (sysVer) {
+        definition = rehydrateDefinition(sysVer.definitionJson as Record<string, unknown>);
+      }
+    }
+
+    // The run-context `_meta.resolvedAgents` cache is populated at startRun.
+    const ctx = run.contextJson as { _meta?: { resolvedAgents?: Record<string, string> } };
+    const resolvedAgents = ctx._meta?.resolvedAgents ?? {};
+
+    return { run, stepRuns: stepRunRows, definition, resolvedAgents, events: [] };
+  },
+
+  /**
+   * Admin toggle for §9.4 portal visibility. Flips the `isPortalVisible`
+   * column on the given run. Org + subaccount scoped; 404 on mismatch.
+   */
+  async setPortalVisibility(
+    organisationId: string,
+    subaccountId: string,
+    runId: string,
+    isPortalVisible: boolean,
+  ): Promise<PlaybookRun> {
+    const [updated] = await db
+      .update(playbookRuns)
+      .set({ isPortalVisible, updatedAt: new Date() })
+      .where(
+        and(
+          eq(playbookRuns.id, runId),
+          eq(playbookRuns.organisationId, organisationId),
+          eq(playbookRuns.subaccountId, subaccountId),
+        ),
+      )
+      .returning();
+    if (!updated) throw { statusCode: 404, message: 'Playbook run not found' };
+    return updated;
   },
 
   /** List runs for a subaccount. */
