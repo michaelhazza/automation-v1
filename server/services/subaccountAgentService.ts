@@ -1,12 +1,41 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { subaccountAgents, agents, agentDataSources } from '../db/schema/index.js';
+import { subaccountAgents, agents, agentDataSources, subaccounts, systemAgents } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 import { validateHierarchy, buildTree } from './hierarchyService.js';
 import { materialiseAutoAttachForAgent } from './memoryBlockService.js';
 import { logger } from '../lib/logger.js';
 
 export const subaccountAgentService = {
+  /**
+   * Configuration Assistant subaccount restriction guard. Rejects linking the
+   * Configuration Assistant system agent to any subaccount that is not the
+   * org subaccount. Centralised here so the route layer does not touch the
+   * database directly (RLS contract — see server/lib/orgScopedDb.ts).
+   */
+  async assertCanLinkAgentToSubaccount(
+    organisationId: string,
+    subaccountId: string,
+    agentId: string,
+  ): Promise<void> {
+    const [targetAgent] = await db
+      .select({ systemAgentSlug: systemAgents.slug })
+      .from(agents)
+      .leftJoin(systemAgents, eq(agents.systemAgentId, systemAgents.id))
+      .where(and(eq(agents.id, agentId), eq(agents.organisationId, organisationId)));
+
+    if (targetAgent?.systemAgentSlug !== 'configuration-assistant') return;
+
+    const [sa] = await db
+      .select({ isOrgSubaccount: subaccounts.isOrgSubaccount })
+      .from(subaccounts)
+      .where(and(eq(subaccounts.id, subaccountId), eq(subaccounts.organisationId, organisationId)));
+
+    if (!sa?.isOrgSubaccount) {
+      throw { statusCode: 400, message: 'Configuration Assistant can only be linked to the org subaccount' };
+    }
+  },
+
   async listSubaccountAgents(organisationId: string, subaccountId: string) {
     const rows = await db
       .select({

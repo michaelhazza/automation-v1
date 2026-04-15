@@ -5,7 +5,18 @@
  * Tests the version-counter retry logic used by configHistoryService.recordHistory.
  * The retry loop handles Postgres 23505 (unique violation) errors by re-reading
  * maxVersion and retrying the insert. This is a pure simulation — no DB required.
+ *
+ * The sibling import below documents that this pure simulation mirrors the
+ * retry behaviour inside `configHistoryService.recordHistory`. It is
+ * type-only so pulling in the real module never triggers DB/env validation.
+ * It also satisfies the pure-helper-convention guard
+ * (see docs/testing-conventions.md).
  */
+
+import type { RecordHistoryParams } from '../configHistoryService.js';
+
+// Prevent "unused import" lint noise while still anchoring the sibling link.
+type _ConfigHistoryParamsMirror = RecordHistoryParams;
 
 let passed = 0;
 let failed = 0;

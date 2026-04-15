@@ -9,7 +9,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { db } from '../../db/index.js';
+import { getOrgScopedDb } from '../orgScopedDb.js';
 import { subaccountOnboardingState } from '../../db/schema/subaccountOnboardingState.js';
 import type { SubaccountOnboardingStatus } from '../../db/schema/subaccountOnboardingState.js';
 import type { PlaybookRunStatus } from '../../db/schema/playbookRuns.js';
@@ -46,7 +46,11 @@ export async function upsertSubaccountOnboardingState(params: {
   const now = new Date();
 
   try {
-    await db
+    // Callers run inside an org-scoped ALS transaction (see
+    // server/lib/orgScopedDb.ts). Using the scoped handle satisfies the
+    // RLS contract — RLS fail-closes on queries issued outside the tx.
+    const tx = getOrgScopedDb('onboardingStateHelpers.upsertSubaccountOnboardingState');
+    await tx
       .insert(subaccountOnboardingState)
       .values({
         organisationId: params.organisationId,

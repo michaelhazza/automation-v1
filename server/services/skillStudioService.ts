@@ -162,10 +162,16 @@ export async function getSkillStudioContext(
       .limit(1);
     skillRow = rows[0];
   } else {
+    // Tenant isolation: non-system skills must be scoped by organisationId.
+    // Without this filter, a caller with a valid skillId from another org
+    // could read that skill's definition and version history.
+    if (!orgId) {
+      throw new Error('orgId is required for non-system skill studio context');
+    }
     const rows = await db
       .select({ id: skills.id, slug: skills.slug, name: skills.name, description: skills.description, definition: skills.definition, instructions: skills.instructions })
       .from(skills)
-      .where(eq(skills.id, skillId))
+      .where(and(eq(skills.id, skillId), eq(skills.organisationId, orgId)))
       .limit(1);
     skillRow = rows[0];
   }
@@ -296,17 +302,30 @@ export async function saveSkillVersion(
         updatedAt: new Date(),
       }).where(eq(systemSkills.id, skillId));
     } else if (scope === 'org') {
+      if (!orgId) {
+        throw new Error('orgId is required when saving an org-scoped skill version');
+      }
       await tx.update(skills).set({
         definition: payload.definition as Record<string, unknown>,
         instructions: payload.instructions ?? null,
         updatedAt: new Date(),
-      }).where(and(eq(skills.id, skillId), isNull(skills.subaccountId)));
+      }).where(and(
+        eq(skills.id, skillId),
+        eq(skills.organisationId, orgId),
+        isNull(skills.subaccountId),
+      ));
     } else {
+      // Subaccount scope — still tenant-scoped by organisationId. Without
+      // this filter, a caller with a skillId from another org's subaccount
+      // could overwrite that skill definition.
+      if (!orgId) {
+        throw new Error('orgId is required when saving a subaccount-scoped skill version');
+      }
       await tx.update(skills).set({
         definition: payload.definition as Record<string, unknown>,
         instructions: payload.instructions ?? null,
         updatedAt: new Date(),
-      }).where(eq(skills.id, skillId));
+      }).where(and(eq(skills.id, skillId), eq(skills.organisationId, orgId)));
     }
 
     return {

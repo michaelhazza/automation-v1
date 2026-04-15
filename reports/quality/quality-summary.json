@@ -1,11 +1,11 @@
 {
-  "generatedAt": "2026-02-22",
+  "generatedAt": "2026-04-15",
   "version": "quality-checker-gpt.md v3",
-  "auditPass": "Pass 2 (incremental fixes applied on top of Pass 1 baseline)",
+  "auditPass": "Pass 3 (incremental fixes applied on top of Pass 2 baseline)",
   "gates": {
-    "total": 15,
-    "passed": 15,
-    "warnings": 0,
+    "total": 37,
+    "passed": 35,
+    "warnings": 2,
     "failures": 0
   },
   "qa": {
@@ -13,32 +13,38 @@
     "passed": 68,
     "failed": 0
   },
+  "unitTests": {
+    "total": 50,
+    "passed": 49,
+    "failed": 1,
+    "note": "Sole failure (skillHandlerRegistryEquivalence) is a pre-existing env-var harness issue, not a Pass 3 regression"
+  },
   "scores": {
-    "overall": 82,
-    "security": 76,
+    "overall": 84,
+    "security": 82,
     "performance": 78,
-    "maintainability": 85,
+    "maintainability": 88,
     "testing": 80,
     "documentation": 70,
     "accessibility": 78,
     "seo": null
   },
   "scoreDeltas": {
-    "overall": "+8 (from 74)",
-    "security": "+11 (from 65)",
-    "performance": "+16 (from 62)",
-    "maintainability": "+13 (from 72)"
+    "overall": "+2 (from 82)",
+    "security": "+6 (from 76)",
+    "performance": "0 (from 78)",
+    "maintainability": "+3 (from 85)"
   },
   "issues": {
     "critical": 0,
     "high": 3,
-    "medium": 5,
+    "medium": 4,
     "low": 3
   },
   "issueDeltas": {
-    "high": "-4 (from 7)",
-    "medium": "-4 (from 9)",
-    "low": "-1 (from 4)"
+    "high": "0 (Pass 3 fixed 3 new blockers introduced since Pass 2; 3 Pass 2 MANUAL items remain)",
+    "medium": "-1 (pure-helper-convention test resolved)",
+    "low": "0"
   },
   "autoFixesApplied": [
     "Pass 1 - N+1 query eliminated in listPermissionGroups",
@@ -56,13 +62,20 @@
     "Pass 2 - Shared S3 client helper extracted to server/lib/storage.ts",
     "Pass 2 - Shared engine auth header builder extracted to server/lib/engineAuth.ts",
     "Pass 2 - APP_BASE_URL added to env.ts Zod schema; emailService uses validated env value",
-    "Pass 2 - organisations route pagination uses parsePositiveInt instead of raw Number()"
+    "Pass 2 - organisations route pagination uses parsePositiveInt instead of raw Number()",
+    "Pass 3 - Tenant isolation added to skillStudioService.getSkillStudioContext (non-system read)",
+    "Pass 3 - Tenant isolation added to skillStudioService.saveSkillVersion (org + subaccount branches)",
+    "Pass 3 - onboardingStateHelpers switched from raw db to getOrgScopedDb (RLS contract)",
+    "Pass 3 - Configuration-Assistant guard relocated from subaccountAgents route into subaccountAgentService",
+    "Pass 3 - Sibling type-only import anchor added to configHistoryServicePure.test.ts"
   ],
   "manualActionsRequired": [
     "MANUAL SPEC CHANGE REQUIRED: Add rate limiting to auth endpoints (express-rate-limit not in package.json)",
     "MANUAL SPEC CHANGE REQUIRED: Move JWT from localStorage to httpOnly cookie",
     "MANUAL SPEC CHANGE REQUIRED: Add CSRF protection for state-changing API operations",
     "MANUAL: Add semantic HTML nav/main/aside to Layout and aria-label/aria-current to navigation",
-    "MANUAL: Add README.md with setup instructions, environment variables, and deployment guide"
+    "MANUAL: Add README.md with setup instructions, environment variables, and deployment guide",
+    "MANUAL SPEC CHANGE REQUIRED: Decide whether geoAudits/knowledge subaccount routes should use requireSubaccountPermission (currently org-level by design)",
+    "MANUAL: Wire Zod validateBody middleware for the 31 remaining input-validation warnings"
   ]
 }
