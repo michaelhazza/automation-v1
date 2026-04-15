@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { diffWordsWithSpace } from 'diff';
 import api from '../../lib/api';
 import type { AnalysisResult, ProposedMergedContent } from './SkillAnalyzerWizard';
+import {
+  computeMergeConfidence,
+  warningLabel,
+  warningBadgeClass,
+  type MergeWarning,
+} from './mergeTypes';
 
 // ---------------------------------------------------------------------------
 // MergeReviewBlock — Phase 5 of skill-analyzer-v2
@@ -233,6 +239,17 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
   const [definitionError, setDefinitionError] = useState<string | null>(null);
   const [patchError, setPatchError] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [showRationale, setShowRationale] = useState(false);
+
+  const confidence = computeMergeConfidence(result.mergeWarnings);
+  const confidenceLabel = confidence >= 0.8 ? 'High confidence'
+    : confidence >= 0.5 ? 'Review carefully'
+    : 'Low confidence';
+  const confidenceClass = confidence >= 0.8
+    ? 'text-emerald-700 bg-emerald-50'
+    : confidence >= 0.5
+    ? 'text-amber-700 bg-amber-50'
+    : 'text-red-700 bg-red-50';
 
   // Reset local state when external merge changes (e.g. Reset endpoint).
   // Compare by JSON identity so edits don't get clobbered on every parent
@@ -376,14 +393,19 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
   return (
     <div className="mt-3 p-3 bg-white border border-slate-200 rounded-lg">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-slate-600">
-          Recommended changes
-          {result.userEditedMerge && (
-            <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5">
-              edited
-            </span>
-          )}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-medium text-slate-600">
+            Recommended changes
+            {result.userEditedMerge && (
+              <span className="ml-2 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5">
+                edited
+              </span>
+            )}
+          </p>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${confidenceClass}`}>
+            {confidenceLabel}
+          </span>
+        </div>
         <button
           type="button"
           onClick={handleReset}
@@ -395,6 +417,40 @@ export default function MergeReviewBlock({ result, candidate, jobId, onResultUpd
       </div>
 
       {patchError && <p className="mb-2 text-xs text-red-600">{patchError}</p>}
+
+      {/* Warning banner — Bugs 1, 2, 8, 10 (and post-checks 3, 4, 7) */}
+      {result.mergeWarnings && result.mergeWarnings.length > 0 && (
+        <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs">
+          <p className="font-semibold text-amber-800 mb-1.5">AI merge warnings</p>
+          {result.mergeWarnings.map((w: MergeWarning, i: number) => (
+            <div key={i} className="mb-1">
+              <span className={`mr-1.5 px-1 py-0.5 rounded text-[10px] font-medium ${warningBadgeClass(w.code)}`}>
+                {warningLabel(w.code)}
+              </span>
+              <span className="text-amber-900">{w.message}</span>
+              {w.detail && <div className="ml-1 text-slate-500 text-[10px]">{w.detail}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Merge rationale collapsible — Bug 6 */}
+      {result.mergeRationale && (
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={() => setShowRationale(v => !v)}
+            className="text-[11px] text-slate-500 hover:text-slate-700 flex items-center gap-1"
+          >
+            <span>{showRationale ? '▾' : '▸'}</span> Merge rationale
+          </button>
+          {showRationale && (
+            <p className="mt-1 text-xs text-slate-600 leading-relaxed pl-3 border-l border-slate-200">
+              {result.mergeRationale}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Diff legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-xs text-slate-400">

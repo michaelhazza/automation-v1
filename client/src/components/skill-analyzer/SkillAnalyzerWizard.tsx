@@ -4,6 +4,7 @@ import SkillAnalyzerImportStep from './SkillAnalyzerImportStep';
 import SkillAnalyzerProcessingStep from './SkillAnalyzerProcessingStep';
 import SkillAnalyzerResultsStep from './SkillAnalyzerResultsStep';
 import SkillAnalyzerExecuteStep from './SkillAnalyzerExecuteStep';
+import type { MergeWarning } from './mergeTypes';
 
 /** Pre-computed live snapshot of a system_skills row for the matched library
  *  skill on a partial-overlap result. Provided by the GET /jobs/:id endpoint
@@ -159,6 +160,12 @@ export interface AnalysisResult {
    *  product-marketing-context). These belong in Knowledge Management Agent,
    *  not as executable skills. */
   isContextFile?: boolean;
+  /** Post-processing validation warnings for PARTIAL_OVERLAP / IMPROVEMENT merges.
+   *  Null when no warnings were raised or classification is DUPLICATE / DISTINCT. */
+  mergeWarnings?: MergeWarning[] | null;
+  /** LLM-generated explanation of merge decisions. Read-only after job writes it.
+   *  Null for DUPLICATE / DISTINCT or when the LLM omitted the field. */
+  mergeRationale?: string | null;
 }
 
 type WizardStep = 'import' | 'processing' | 'results' | 'execute';

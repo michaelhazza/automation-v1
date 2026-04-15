@@ -294,6 +294,27 @@ export interface ProposedMerge {
   // Anthropic tool definition object — never a string.
   definition: object;
   instructions: string | null;
+  mergeRationale?: string;   // optional — omitted before storage, surfaced in UI
+}
+
+export type MergeWarningCode =
+  | 'REQUIRED_FIELD_DEMOTED'
+  | 'CAPABILITY_OVERLAP'
+  | 'SCOPE_EXPANSION'
+  | 'SCOPE_EXPANSION_CRITICAL'
+  | 'TABLE_ROWS_DROPPED'
+  | 'INVOCATION_LOST'
+  | 'HITL_LOST'
+  | 'OUTPUT_FORMAT_LOST'
+  | 'WARNINGS_TRUNCATED';
+
+export type MergeWarningSeverity = 'warning' | 'critical';
+
+export interface MergeWarning {
+  code: MergeWarningCode;
+  severity: MergeWarningSeverity;
+  message: string;
+  detail?: string;
 }
 
 /** Result returned by parseClassificationResponseWithMerge. The classification
@@ -330,14 +351,53 @@ difference matters most.
   references to external systems unless they are essential for the skill to
   function. A skill about ad copy generation should not inherit a video
   production section just because the incoming skill happened to include one.
+  Additionally: the merged instructions must not substantially exceed the length
+  of the richer source skill. If the merged output is more than 30% longer than
+  the richer source, you have likely imported out-of-scope content. Revisit and
+  trim.
+- **Invocation trigger preservation.** If either source skill opens with a block
+  that states when to invoke the skill — recognisable by phrases such as "Invoke
+  this skill when", "Use this skill when", "Call this skill when", "Trigger this
+  skill when", or any block whose primary purpose is listing conditions that cause
+  an agent to select this skill — the merged instructions must open with an
+  equivalent block. Merge the trigger conditions from both sources (removing
+  duplicates). Do not move this block into the body or omit it.
+- **Human review gate preservation.** Any instruction that requires a human to
+  approve, review, or confirm output before it is sent or acted on must be
+  preserved verbatim. These are identifiable by phrases such as "do not send
+  directly", "do not post without approval", "review before sending", "human
+  approval required", "present to user for confirmation", or any sentence that
+  explicitly prohibits the skill from taking an action without human sign-off.
+  These phrases must survive the merge unchanged. They may be consolidated if
+  both source skills contain equivalent gates, but neither may be softened or
+  removed.
+- **Tool reference preservation.** Any backtick-wrapped name that refers to
+  another skill (e.g., \`skill-name\`, \`tool-name\`) in either source skill
+  represents an explicit dependency. All such references must appear in the
+  merged output. If the reference appears in a sentence that is being rewritten,
+  rewrite the sentence to preserve the reference. Do not remove a tool reference
+  in the name of de-duplication unless the identical reference already exists
+  elsewhere in the merged output.
 
 ### Soft constraints (follow unless they conflict with hard constraints)
 
 - **You may lightly restructure or rewrite sections for clarity and flow** as
   long as no meaning or unique information is lost. Preserving clarity is more
   important than preserving exact sentence structure.
-- **You may reorder sections** so the merged instructions follow a logical
-  progression (context-gathering → how the skill works → execution → output).
+- **Section ordering.** Reorder sections so the merged instructions follow this
+  canonical sequence:
+  1. Invocation trigger / When to use (if present — must be first)
+  2. Context / Background / How the skill works
+  3. Step-by-step workflow / Execution
+  4. Examples (if present)
+  5. Output format / Response format / Template (if present — must be last before
+     Related Skills)
+  6. Related Skills / See Also (if present — always last)
+
+  Sections that do not fit cleanly into categories 2–4 should preserve their
+  order relative to the base skill. "Output format" is any section whose primary
+  content is a structural template or schema for the skill's response — it always
+  goes in position 5 regardless of where it appeared in the source skills.
 - **Voice** — normalise inserted content to match the base skill's register
   (imperative, second-person, etc.). Do not leave jarring style shifts at join
   points.
@@ -380,16 +440,34 @@ Before writing the JSON response, verify:
 - No section appears more than once (e.g. two platform specs tables)
 - No broken or half-merged sentences at any join point
 - No conflicting instructions remain (e.g. two different rules for the same scenario)
-- Section order follows a logical flow: context-gathering → how the skill works → execution → output format
+- Section order follows the canonical sequence: trigger → context → workflow → examples → output format → related skills.
+- If either source had an invocation trigger block, the merged instructions open with one.
+- All human-review-gate instructions from both sources are preserved verbatim.
+- Every backtick-wrapped tool/skill reference from both sources appears in the merged output.
+- The output format / template section (if present) is the last substantive section before Related Skills.
+- If the merged instructions are more than 30% longer than the richer source skill, trim out-of-scope content before returning.
 - Instructions read cleanly from start to finish as a single authored document
 - \`definition.input_schema\` is valid JSON with no duplicate keys
 - The response is complete — no trailing "..." or cut-off content
 If any issue is found, fix it before returning.
 
+### Merge rationale (required for PARTIAL_OVERLAP / IMPROVEMENT)
+
+After the self-check, write a \`mergeRationale\` string (2–5 sentences) that answers:
+1. Which skill became the base and why (the one with richer instructions, or the
+   incoming if it was substantially more comprehensive).
+2. What unique content was added from the non-base skill.
+3. What, if anything, was dropped during deduplication and the justification for
+   dropping it.
+
+This field is shown to the human reviewer as a summary of the AI's merge decisions.
+Write it for a reviewer who needs to quickly assess whether the merge is trustworthy,
+not for the AI's internal reasoning.
+
 For DUPLICATE and DISTINCT classifications, OMIT the \`proposedMerge\` field
 entirely (or set it to null) — there is nothing to merge.
 
-The proposedMerge object has exactly four fields:
+The proposedMerge object has exactly five fields:
 - \`name\` — string. Prefer the incoming skill's name/slug if it is more
   descriptive or better reflects the merged scope; otherwise keep the existing.
 - \`description\` — string. Prefer a trigger-style description (explaining WHEN
@@ -399,10 +477,11 @@ The proposedMerge object has exactly four fields:
   \`description\`, \`input_schema\`). NEVER a string. Merge rules:
     • \`name\` — match the chosen \`name\` field above (snake_case slug).
     • \`description\` — use the richer/more complete description.
-    • \`input_schema.required\` — keep all fields that are required in the
-      base. Never introduce new required fields from the non-base unless they
-      are required for ALL valid uses of the merged skill. When uncertain,
-      default to optional — it is always the safer choice.
+    • \`input_schema.required\` — preserve all required fields from **both**
+      source skills. You may not silently demote a required field to optional.
+      The merged required array must be a superset of the union of required
+      arrays from both skills. If dropping a field is genuinely necessary,
+      justify it in \`mergeRationale\`.
     • \`input_schema.properties\` — union both sets. For parameters that exist
       in both, use the more detailed \`description\`. For enum fields, union
       the enum values from both skills (e.g. if one supports google/meta and
@@ -411,6 +490,10 @@ The proposedMerge object has exactly four fields:
     • Preserve all file path references, tool names, and markdown links
       exactly as they appear in the source skill — do not alter or invent them.
 - \`instructions\` — string OR null
+- \`mergeRationale\` — string (2–5 sentences). Which skill became the base and
+  why. What unique content was added from the non-base. What, if anything, was
+  dropped during deduplication and the justification. Write for a human reviewer
+  who needs to quickly assess whether the merge is trustworthy.
 
 ## Output Format (PARTIAL_OVERLAP or IMPROVEMENT)
 
@@ -423,7 +506,8 @@ Respond with ONLY a JSON object in this exact format:
     "name": "...",
     "description": "...",
     "definition": { "name": "...", "description": "...", "input_schema": { ... } },
-    "instructions": "..."
+    "instructions": "...",
+    "mergeRationale": "..."
   }
 }
 
@@ -519,11 +603,11 @@ export function parseClassificationResponseWithMerge(
   const p = parsed as Record<string, unknown>;
   if (!isValidClassification(p.classification)) return null;
   // Normalise confidence: Sonnet occasionally returns a percentage integer (e.g. 85)
-  // instead of a decimal (0.85). Clamp to [0, 1] — values > 1 are treated as
-  // percentages and divided by 100.
+  // instead of a decimal (0.85). Only normalise when raw >= 2 (clearly a percentage
+  // integer) — values in (1, 2) are genuinely out of range and should return null.
   if (typeof p.confidence !== 'number') return null;
   const raw = p.confidence;
-  const confidence = raw > 1 ? raw / 100 : raw;
+  const confidence = raw >= 2 ? raw / 100 : raw;
   if (confidence < 0 || confidence > 1) return null;
   if (typeof p.reasoning !== 'string') return null;
 
@@ -532,7 +616,12 @@ export function parseClassificationResponseWithMerge(
   if (classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') {
     if (p.proposedMerge !== undefined && p.proposedMerge !== null) {
       if (isValidProposedMerge(p.proposedMerge)) {
-        proposedMerge = p.proposedMerge;
+        proposedMerge = {
+          ...p.proposedMerge,
+          mergeRationale: typeof p.proposedMerge.mergeRationale === 'string'
+            ? p.proposedMerge.mergeRationale
+            : undefined,
+        };
       }
       // Otherwise leave as null — null-fallback path on execute.
     }
@@ -544,6 +633,310 @@ export function parseClassificationResponseWithMerge(
     reasoning: p.reasoning,
     proposedMerge,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Merge Validation Helpers
+// ---------------------------------------------------------------------------
+
+/** Word count of skill instructions — used for scope expansion arithmetic only.
+ *  Do NOT use for base selection; use richnessScore for that. */
+function wordCount(text: string | null): number {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Richness score for base skill selection. Weights headings and code blocks
+ *  heavily over raw word count — structured skills are harder to reconstruct
+ *  if used as the non-base. */
+export function richnessScore(text: string | null): number {
+  if (!text) return 0;
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const headings = (text.match(/^#{1,4}\s/gm)?.length ?? 0) * 50;
+  const codeBlocks = (text.match(/```/g)?.length ?? 0) * 100;
+  return words + headings + codeBlocks;
+}
+
+const GENERIC_BIGRAMS = new Set([
+  'email marketing', 'content strategy', 'lead generation', 'social media',
+  'marketing strategy', 'brand voice', 'target audience', 'content creation',
+  'digital marketing', 'conversion rate',
+]);
+
+function isGenericBigram(bigram: string): boolean {
+  return GENERIC_BIGRAMS.has(bigram);
+}
+
+/** Extract non-trivial word bigrams from a short description text.
+ *  Stopwords and single-character tokens are excluded. Returns lowercase bigrams. */
+function extractDescriptionBigrams(text: string): Set<string> {
+  const STOPWORDS = new Set(['a','an','the','and','or','for','to','of','in',
+    'on','with','that','this','is','are','be','it','as','by','at','from']);
+  const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+  const bigrams = new Set<string>();
+  for (let i = 0; i < words.length - 1; i++) {
+    bigrams.add(`${words[i]} ${words[i+1]}`);
+  }
+  return bigrams;
+}
+
+// Leading whitespace is allowed: the block is detected even if the LLM adds
+// a blank line before it. Matches from the first invocation keyword through
+// the next blank line (or end of string).
+const INVOCATION_TRIGGER_RE = /^\s*(Invoke|Use|Call|Trigger)\s+this\s+skill\b.+?(?:\n\n|$)/is;
+
+/** Extract the opening invocation trigger block from skill instructions, if present.
+ *  Returns the trimmed block text, or null if no trigger block is found at the top. */
+export function extractInvocationBlock(text: string | null): string | null {
+  if (!text) return null;
+  const match = text.match(INVOCATION_TRIGGER_RE);
+  return match?.[0]?.trim() ?? null;
+}
+
+const HITL_PHRASES = [
+  /do not send (this|the|it)\b.*?directly/i,
+  /do not post without approval/i,
+  /review before sending/i,
+  /human approval required/i,
+  /present to (the )?user for (review|confirmation|approval)/i,
+  /requires? (human|manual) (review|approval|sign-?off)/i,
+];
+
+/** Returns true if the text contains any known HITL gate phrase. */
+export function containsHitlGate(text: string | null): boolean {
+  if (!text) return false;
+  return HITL_PHRASES.some(re => re.test(text));
+}
+
+/** Returns true if the text contains any approval/review intent signal,
+ *  regardless of exact phrasing. Used as fallback after containsHitlGate. */
+export function containsApprovalIntent(text: string | null): boolean {
+  if (!text) return false;
+  return /\b(approval|approvals|review|confirm\w*|sign-?off)\b/i.test(text);
+}
+
+const OUTPUT_FORMAT_HEADING_RE = /^#{1,4}\s+(output\s+format|response\s+format|format|template)\b/im;
+
+/** Returns true if the text contains an output format heading or a fenced code
+ *  block whose surrounding context references output/response/format/template. */
+export function hasOutputFormatBlock(text: string | null): boolean {
+  if (!text) return false;
+  if (OUTPUT_FORMAT_HEADING_RE.test(text)) return true;
+  const fenceRe = /```(?:json|yaml|markdown|text|html)?\s*\n[\s\S]{0,200}?\b(output|response|format|template|result)\b/i;
+  return fenceRe.test(text) || /\b(output|response|format|template|result)\b[\s\S]{0,100}?```/i.test(text);
+}
+
+interface ExtractedTable {
+  headerKey: string;   // pipe-separated header cells, lowercased and trimmed
+  rowCount: number;    // data rows only (header + separator excluded)
+}
+
+/** Extract markdown tables from text, keyed by their normalized header row.
+ *  headerKey is used for matching across source and merged text. */
+export function extractTables(text: string | null): ExtractedTable[] {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const tables: ExtractedTable[] = [];
+  let inTable = false;
+  let headerKey: string | null = null;
+  let rowCount = 0;
+  let lineIndex = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('|')) {
+      if (!inTable) {
+        inTable = true;
+        headerKey = trimmed.replace(/^\||\|$/g, '').split('|')
+          .map(c => c.trim().toLowerCase()).join('|');
+        rowCount = 0;
+        lineIndex = 0;
+      } else {
+        lineIndex++;
+        if (lineIndex === 1 && /^\|[\s\-:|]+\|/.test(trimmed)) continue;
+        rowCount++;
+      }
+    } else if (inTable) {
+      if (headerKey !== null) tables.push({ headerKey, rowCount });
+      inTable = false;
+      headerKey = null;
+      rowCount = 0;
+      lineIndex = 0;
+    }
+  }
+  if (inTable && headerKey !== null) tables.push({ headerKey, rowCount });
+  return tables;
+}
+
+const MAX_MERGE_WARNINGS = 10;
+
+/**
+ * Post-processing validator for LLM-generated merge output.
+ * Pure — no DB, no clock. Returns an array of structured warnings.
+ * An empty array means no issues were detected.
+ */
+export function validateMergeOutput(
+  base: { definition: object | null; instructions: string | null; invocationBlock?: string | null },
+  nonBase: { definition: object | null; instructions: string | null; invocationBlock?: string | null },
+  merged: ProposedMerge,
+  allLibraryNames: ReadonlySet<string>,
+  allLibrarySlugs: ReadonlySet<string>,
+  allLibrarySkills: ReadonlyArray<{ id: string | null; name: string; description: string }>,
+  excludedId: string | null,
+): MergeWarning[] {
+  const warnings: MergeWarning[] = [];
+
+  // --- Bug 1: Required field demotion ---
+  const baseRequired: string[] = (base.definition as Record<string, unknown> | null)?.input_schema
+    ? ((base.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
+    : [];
+  const nonBaseRequired: string[] = (nonBase.definition as Record<string, unknown> | null)?.input_schema
+    ? ((nonBase.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
+    : [];
+  const mergedRequired: string[] = (merged.definition as Record<string, unknown> | null)?.input_schema
+    ? ((merged.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
+    : [];
+
+  const allSourceRequired = [...new Set([...baseRequired, ...nonBaseRequired])];
+  const demoted = allSourceRequired.filter(f => !mergedRequired.includes(f));
+  if (demoted.length > 0) {
+    warnings.push({
+      code: 'REQUIRED_FIELD_DEMOTED',
+      severity: 'critical',
+      message: `${demoted.length} required field(s) from the source skills were made optional or removed.`,
+      detail: demoted.join(', '),
+    });
+  }
+
+  // --- Bug 2: Capability overlap (name collision fast-check first) ---
+  const mergedNameLower = merged.name.toLowerCase();
+  if (allLibraryNames.has(mergedNameLower) || allLibrarySlugs.has(mergedNameLower)) {
+    warnings.push({
+      code: 'CAPABILITY_OVERLAP',
+      severity: 'critical',
+      message: `The merged name "${merged.name}" already exists in the skill library.`,
+      detail: merged.name,
+    });
+  } else {
+    // Bigram overlap check
+    const mergedBigrams = extractDescriptionBigrams(merged.description);
+    for (const skill of allLibrarySkills) {
+      if (skill.id === excludedId) continue;
+      const otherBigrams = extractDescriptionBigrams(skill.description);
+      const overlap = [...mergedBigrams]
+        .filter(b => otherBigrams.has(b))
+        .filter(b => !isGenericBigram(b));
+      const denom = Math.min(mergedBigrams.size, otherBigrams.size);
+      const overlapRatio = denom > 0 ? overlap.length / denom : 0;
+      if (overlap.length >= 2 && overlapRatio > 0.2) {
+        warnings.push({
+          code: 'CAPABILITY_OVERLAP',
+          severity: 'warning',
+          message: `Merged skill may overlap in purpose with "${skill.name}".`,
+          detail: overlap.slice(0, 5).join(', '),
+        });
+      }
+    }
+  }
+
+  // --- Bug 8: Scope expansion ---
+  const baseWords = wordCount(base.instructions);
+  const nonBaseWords = wordCount(nonBase.instructions);
+  const richerSourceWords = Math.max(baseWords, nonBaseWords);
+  const mergedWords = wordCount(merged.instructions);
+  if (richerSourceWords > 0) {
+    const pct = Math.round((mergedWords / richerSourceWords - 1) * 100);
+    if (pct > 60) {
+      warnings.push({
+        code: 'SCOPE_EXPANSION_CRITICAL',
+        severity: 'critical',
+        message: `Merged instructions are ${pct}% longer than the richer source skill — likely out-of-scope content was imported.`,
+        detail: `richer source: ${richerSourceWords} words, merged: ${mergedWords} words`,
+      });
+    } else if (pct > 30) {
+      warnings.push({
+        code: 'SCOPE_EXPANSION',
+        severity: 'warning',
+        message: `Merged instructions are ${pct}% longer than the richer source skill. Review for scope creep.`,
+        detail: `richer source: ${richerSourceWords} words, merged: ${mergedWords} words`,
+      });
+    }
+  }
+
+  // --- Bug 10: Table completeness ---
+  const baseTables = extractTables(base.instructions);
+  const nonBaseTables = extractTables(nonBase.instructions);
+  const mergedTables = extractTables(merged.instructions);
+  const mergedByHeader = new Map(mergedTables.map(t => [t.headerKey, t.rowCount]));
+  const sourceLookup = new Map<string, number>();
+  for (const t of [...baseTables, ...nonBaseTables]) {
+    const existing = sourceLookup.get(t.headerKey) ?? 0;
+    if (t.rowCount > existing) sourceLookup.set(t.headerKey, t.rowCount);
+  }
+  for (const [headerKey, sourceRows] of sourceLookup) {
+    const mergedRows = mergedByHeader.get(headerKey) ?? 0;
+    if (mergedRows < sourceRows) {
+      warnings.push({
+        code: 'TABLE_ROWS_DROPPED',
+        severity: 'warning',
+        message: `Table "${headerKey}" has ${mergedRows} rows in the merge but ${sourceRows} in the source.`,
+        detail: `header: ${headerKey}, source rows: ${sourceRows}, merged rows: ${mergedRows}`,
+      });
+    }
+  }
+
+  // --- Bug 3 post-check: Invocation block preservation ---
+  const sourceHasInvocation = !!(base.invocationBlock || nonBase.invocationBlock);
+  if (sourceHasInvocation) {
+    let mergedHasInvocationAtTop = false;
+    if (merged.instructions) {
+      const triggerMatch = merged.instructions.match(INVOCATION_TRIGGER_RE);
+      mergedHasInvocationAtTop = triggerMatch !== null
+        && merged.instructions.trimStart().startsWith(triggerMatch[0].trimStart());
+    }
+    if (!mergedHasInvocationAtTop) {
+      warnings.push({
+        code: 'INVOCATION_LOST',
+        severity: 'critical',
+        message: 'One or both source skills had an invocation trigger block that is missing or not at the top of the merged output.',
+      });
+    }
+  }
+
+  // --- Bug 4 post-check: HITL gate preservation ---
+  const sourceHasHitl = containsHitlGate(base.instructions) || containsHitlGate(nonBase.instructions);
+  if (sourceHasHitl
+    && !containsHitlGate(merged.instructions)
+    && !containsApprovalIntent(merged.instructions)) {
+    warnings.push({
+      code: 'HITL_LOST',
+      severity: 'critical',
+      message: 'A human review gate instruction from a source skill is missing from the merged output.',
+    });
+  }
+
+  // --- Bug 7 post-check: Output format block preservation ---
+  const sourceHasFormat = hasOutputFormatBlock(base.instructions) || hasOutputFormatBlock(nonBase.instructions);
+  if (sourceHasFormat && !hasOutputFormatBlock(merged.instructions)) {
+    warnings.push({
+      code: 'OUTPUT_FORMAT_LOST',
+      severity: 'warning',
+      message: 'Source skill(s) had an output format or code block specification that is not present in the merged output.',
+    });
+  }
+
+  // Safety cap: prevent unbounded warning list from malformed input
+  if (warnings.length > MAX_MERGE_WARNINGS) {
+    warnings.splice(MAX_MERGE_WARNINGS - 1);
+    warnings.push({
+      code: 'WARNINGS_TRUNCATED',
+      severity: 'warning',
+      message: `Additional warnings were truncated (more than ${MAX_MERGE_WARNINGS} issues detected).`,
+    });
+  }
+
+  return warnings;
 }
 
 // ---------------------------------------------------------------------------
@@ -734,9 +1127,15 @@ export interface NonSkillFlags {
 /** Heuristically flag parsed skills that are not executable tools. Pure —
  *  no DB, no clock. Returns { false, false } for normal skills. */
 export function detectNonSkillFile(skill: ParsedSkill): NonSkillFlags {
-  // All executable skills have a tool definition (input_schema).
-  // Files without one are either docs or context files.
-  if (skill.definition !== null) {
+  // Only skip detection when the definition is a real Anthropic tool schema
+  // (requires input_schema). The parser's extractJsonBlock is greedy and picks
+  // up any JSON object in the body (config blocks, metadata, index entries),
+  // so definition !== null alone is not a reliable signal of an executable skill.
+  const hasRealDefinition =
+    skill.definition !== null &&
+    typeof (skill.definition as Record<string, unknown>).input_schema !== 'undefined';
+
+  if (hasRealDefinition) {
     return { isDocumentationFile: false, isContextFile: false };
   }
 
