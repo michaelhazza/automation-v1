@@ -3,6 +3,10 @@ import { useParams, Link } from 'react-router-dom';
 import api from '../lib/api';
 import Modal from '../components/Modal';
 import RecurrencePicker, { type RecurrenceValue } from '../components/RecurrencePicker';
+import SchedulePicker, {
+  type SchedulePickerValue,
+  schedulePickerValueToRrule,
+} from '../components/SchedulePicker';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { toast } from 'sonner';
 
@@ -47,6 +51,11 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...INITIAL_FORM });
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  // Spec §5.6 — default to the universal SchedulePicker; keep the legacy
+  // RecurrencePicker accessible via "Advanced recurrence" for the rare
+  // non-standard cadence the simple picker cannot express.
+  const [useSchedulePicker, setUseSchedulePicker] = useState(true);
+  const [scheduleValue, setScheduleValue] = useState<SchedulePickerValue | null>(null);
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -67,8 +76,18 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
       const payload: Record<string, unknown> = { ...form };
       if (!payload.endsAt) delete payload.endsAt;
       if (!payload.endsAfterRuns) delete payload.endsAfterRuns;
+      // When the simple picker is active, its value wins over the form's
+      // rrule/scheduleTime/timezone fields so the universal pattern is
+      // actually exercised end-to-end.
+      if (useSchedulePicker && scheduleValue) {
+        const bridged = schedulePickerValueToRrule(scheduleValue, form.timezone);
+        payload.rrule = bridged.rrule;
+        payload.scheduleTime = bridged.scheduleTime;
+        payload.timezone = bridged.timezone;
+        payload.runNow = scheduleValue.runNow;
+      }
       await api.post(`/api/subaccounts/${subaccountId}/scheduled-tasks`, payload);
-      setShowForm(false); setForm({ ...INITIAL_FORM }); await load();
+      setShowForm(false); setForm({ ...INITIAL_FORM }); setScheduleValue(null); await load();
     } catch { setError('Failed to create'); }
   }
 
@@ -161,28 +180,60 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
               </div>
             </div>
             <div>
-              <label className="block text-[13px] font-medium text-slate-700 mb-1.5">Recurrence</label>
-              <RecurrencePicker
-                value={{ rrule: form.rrule, endsAt: form.endsAt, endsAfterRuns: form.endsAfterRuns }}
-                onChange={(rv: RecurrenceValue) => setForm({ ...form, rrule: rv.rrule, endsAt: rv.endsAt ?? null, endsAfterRuns: rv.endsAfterRuns ?? null })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1">Time</label>
-                <input type="time" value={form.scheduleTime} onChange={(e) => setForm({ ...form, scheduleTime: e.target.value })} className={inputCls} />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[13px] font-medium text-slate-700">Schedule</label>
+                <button
+                  type="button"
+                  onClick={() => setUseSchedulePicker((v) => !v)}
+                  className="text-[12px] text-indigo-600 hover:text-indigo-700 cursor-pointer"
+                >
+                  {useSchedulePicker ? 'Advanced recurrence →' : '← Simple picker'}
+                </button>
               </div>
-              <div>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1">Timezone</label>
-                <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls}>
-                  <option value="UTC">UTC</option>
-                  <option value="Pacific/Auckland">NZ (Auckland)</option>
-                  <option value="Australia/Sydney">AU (Sydney)</option>
-                  <option value="America/New_York">US East</option>
-                  <option value="America/Los_Angeles">US West</option>
-                  <option value="Europe/London">UK (London)</option>
-                </select>
-              </div>
+              {useSchedulePicker ? (
+                <>
+                  <SchedulePicker
+                    value={scheduleValue}
+                    onChange={setScheduleValue}
+                    subaccountTimezone={form.timezone}
+                  />
+                  <div className="mt-3">
+                    <label className="block text-[13px] font-medium text-slate-700 mb-1">Timezone</label>
+                    <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls}>
+                      <option value="UTC">UTC</option>
+                      <option value="Pacific/Auckland">NZ (Auckland)</option>
+                      <option value="Australia/Sydney">AU (Sydney)</option>
+                      <option value="America/New_York">US East</option>
+                      <option value="America/Los_Angeles">US West</option>
+                      <option value="Europe/London">UK (London)</option>
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <RecurrencePicker
+                    value={{ rrule: form.rrule, endsAt: form.endsAt, endsAfterRuns: form.endsAfterRuns }}
+                    onChange={(rv: RecurrenceValue) => setForm({ ...form, rrule: rv.rrule, endsAt: rv.endsAt ?? null, endsAfterRuns: rv.endsAfterRuns ?? null })}
+                  />
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                      <label className="block text-[13px] font-medium text-slate-700 mb-1">Time</label>
+                      <input type="time" value={form.scheduleTime} onChange={(e) => setForm({ ...form, scheduleTime: e.target.value })} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-[13px] font-medium text-slate-700 mb-1">Timezone</label>
+                      <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} className={inputCls}>
+                        <option value="UTC">UTC</option>
+                        <option value="Pacific/Auckland">NZ (Auckland)</option>
+                        <option value="Australia/Sydney">AU (Sydney)</option>
+                        <option value="America/New_York">US East</option>
+                        <option value="America/Los_Angeles">US West</option>
+                        <option value="Europe/London">UK (London)</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={() => setShowForm(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium transition-colors cursor-pointer">Cancel</button>

@@ -976,6 +976,22 @@ export const playbookEngineService = {
           actionSlug: actionStep.actionSlug,
         });
 
+        // Replay interaction with runNow — spec §5.9.
+        // A replay must NOT enqueue a `runNow` immediate run, even if the
+        // original run's action_call passed `runNow: true`. Strip the flag
+        // before forwarding and emit a timeline event so the suppression
+        // is visible on the replayed run.
+        let dispatchedActionInputs: Record<string, unknown> = resolvedActionInputs;
+        if (run.replayMode && 'runNow' in resolvedActionInputs) {
+          const stripped = { ...resolvedActionInputs };
+          delete stripped.runNow;
+          dispatchedActionInputs = stripped;
+          await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:step:run_now_skipped_replay', {
+            stepRunId: sr.id,
+            stepId: step.id,
+          });
+        }
+
         // Execute synchronously via the action pipeline.
         try {
           const result = await executeActionCall({
@@ -985,7 +1001,7 @@ export const playbookEngineService = {
             playbookStepRunId: sr.id,
             playbookRunId: run.id,
             actionSlug: actionStep.actionSlug,
-            actionInputs: resolvedActionInputs,
+            actionInputs: dispatchedActionInputs,
             idempotencyKey,
             timeoutMs: step.timeoutSeconds ? step.timeoutSeconds * 1000 : undefined,
           });

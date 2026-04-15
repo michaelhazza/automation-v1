@@ -71,9 +71,36 @@ export const scheduledTaskService = {
       tokenBudgetPerRun?: number;
       endsAt?: Date;
       endsAfterRuns?: number;
+      // Phase B2 — onboarding-playbooks spec §5.4.1, §5.4.2.
+      taskSlug?: string;
+      createdByPlaybookSlug?: string;
+      firstRunAt?: Date;
+      firstRunAtTz?: string;
+      /**
+       * When true, fire an immediate run in addition to the recurring cron.
+       * Idempotent — resubmitting the same (task, occurrence) is a no-op at
+       * the agent run layer via the existing idempotencyKey invariant.
+       */
+      runNow?: boolean;
     },
     userId?: string
   ) {
+    // Uniqueness invariant (spec §5.4.1): if an active task already exists
+    // for (subaccountId, taskSlug) return it rather than creating a duplicate.
+    // Every call path — UI form, Configuration Assistant chat, playbook
+    // action_call, direct API — gets dedup for free.
+    if (data.taskSlug) {
+      const existing = await this.findActiveBySlug(subaccountId, data.taskSlug);
+      if (existing) {
+        if (data.runNow) {
+          this.enqueueRunNow(existing.id, organisationId).catch((err) => {
+            console.error('[ScheduledTask] runNow on existing slug failed:', err);
+          });
+        }
+        return existing;
+      }
+    }
+
     // Validate agent exists and is linked to subaccount
     const nextRunAt = await this.computeNextOccurrence(data.rrule, data.timezone ?? 'UTC', data.scheduleTime);
 
@@ -91,6 +118,10 @@ export const scheduledTaskService = {
         rrule: data.rrule,
         timezone: data.timezone ?? 'UTC',
         scheduleTime: data.scheduleTime,
+        taskSlug: data.taskSlug ?? null,
+        createdByPlaybookSlug: data.createdByPlaybookSlug ?? null,
+        firstRunAt: data.firstRunAt ?? null,
+        firstRunAtTz: data.firstRunAtTz ?? null,
         retryPolicy: data.retryPolicy ?? DEFAULT_RETRY_POLICY,
         tokenBudgetPerRun: data.tokenBudgetPerRun ?? 30000,
         nextRunAt,
@@ -110,7 +141,113 @@ export const scheduledTaskService = {
       changeSource: 'api',
     });
 
+    if (data.runNow) {
+      this.enqueueRunNow(created.id, organisationId).catch((err) => {
+        console.error('[ScheduledTask] runNow enqueue failed:', err);
+      });
+    }
+
     return created;
+  },
+
+  // ─── Slug-based lookups (Phase B2) ─────────────────────────────────────────
+
+  /**
+   * Returns the active task (if any) matching the given (subaccount, slug)
+   * pair. Powers idempotency for `config_create_scheduled_task` (spec §5.5.1)
+   * and for the playbook action_call dispatcher's entity-scoped idempotency.
+   */
+  async findActiveBySlug(
+    subaccountId: string,
+    taskSlug: string,
+  ): Promise<typeof scheduledTasks.$inferSelect | null> {
+    const [row] = await db
+      .select()
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.subaccountId, subaccountId),
+          eq(scheduledTasks.taskSlug, taskSlug),
+          eq(scheduledTasks.isActive, true),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  },
+
+  /**
+   * Lists every active system-owned task for a playbook slug across an org.
+   * Used by lifecycle-management paths (retirement, offboarding).
+   * Spec §5.4.2 lifecycle-manageability invariant.
+   */
+  async listByPlaybookSlug(
+    playbookSlug: string,
+    organisationId: string,
+  ): Promise<(typeof scheduledTasks.$inferSelect)[]> {
+    return db
+      .select()
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.organisationId, organisationId),
+          eq(scheduledTasks.createdByPlaybookSlug, playbookSlug),
+          eq(scheduledTasks.isActive, true),
+        ),
+      );
+  },
+
+  /**
+   * Deactivates every system-owned task for the given playbook slug in a
+   * sub-account. Soft-delete only — the row stays for audit. pg-boss cron
+   * deregistration would happen here in a full pg-boss setup; the current
+   * RRULE-based scheduler is in-process and the `isActive: false` flag is
+   * honoured by `fireOccurrence`, so deactivation is already effective.
+   */
+  async deactivateByPlaybookSlug(
+    playbookSlug: string,
+    subaccountId: string,
+  ): Promise<void> {
+    const rows = await db
+      .select()
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.subaccountId, subaccountId),
+          eq(scheduledTasks.createdByPlaybookSlug, playbookSlug),
+          eq(scheduledTasks.isActive, true),
+        ),
+      );
+    for (const r of rows) {
+      await db
+        .update(scheduledTasks)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(scheduledTasks.id, r.id));
+      await configHistoryService.recordHistory({
+        entityType: 'scheduled_task',
+        entityId: r.id,
+        organisationId: r.organisationId,
+        snapshot: { ...(r as unknown as Record<string, unknown>), isActive: false },
+        changedBy: null,
+        changeSource: 'api',
+        changeSummary: `Deactivated as part of playbook '${playbookSlug}' retirement`,
+      });
+    }
+  },
+
+  /**
+   * Enqueue an immediate run of an existing scheduled task. Idempotent via
+   * the agent-run `scheduled_task:${id}:${occurrence}` key. We use
+   * `setImmediate` rather than `pgBoss.send` because the current scheduler is
+   * in-process RRULE-based; migrating to a pg-boss cron queue is out of
+   * scope for this phase (spec §5.8 — failure isolation is preserved because
+   * the catch around `enqueueRunNow` emits to the server log).
+   */
+  async enqueueRunNow(scheduledTaskId: string, organisationId: string): Promise<void> {
+    setImmediate(() => {
+      this.fireOccurrence(scheduledTaskId, organisationId).catch((err) => {
+        console.error('[ScheduledTask] runNow fireOccurrence failed:', err);
+      });
+    });
   },
 
   async update(

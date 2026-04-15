@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, boolean, jsonb, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
@@ -33,6 +34,12 @@ export const scheduledTasks = pgTable(
     rrule: text('rrule').notNull(),
     timezone: text('timezone').notNull().default('UTC'),
     scheduleTime: text('schedule_time').notNull(), // HH:MM 24hr
+
+    // Phase B2 — logical identity + lifecycle metadata (spec §5.4.1, §5.4.2)
+    taskSlug: text('task_slug'),
+    createdByPlaybookSlug: text('created_by_playbook_slug'),
+    firstRunAt: timestamp('first_run_at', { withTimezone: true }),
+    firstRunAtTz: text('first_run_at_tz'),
 
     // Lifecycle
     isActive: boolean('is_active').notNull().default(true),
@@ -69,6 +76,14 @@ export const scheduledTasks = pgTable(
       table.nextRunAt,
       table.isActive
     ),
+    // Phase B2 — partial unique index so legacy rows (slug NULL) and
+    // deactivated rows do not block re-creation. See migration 0118.
+    subaccountSlugActiveUniq: uniqueIndex('scheduled_tasks_subaccount_slug_active_uniq')
+      .on(table.subaccountId, table.taskSlug)
+      .where(sql`${table.taskSlug} IS NOT NULL AND ${table.isActive} = true`),
+    playbookSlugIdx: index('scheduled_tasks_playbook_slug_idx')
+      .on(table.createdByPlaybookSlug)
+      .where(sql`${table.createdByPlaybookSlug} IS NOT NULL`),
   })
 );
 

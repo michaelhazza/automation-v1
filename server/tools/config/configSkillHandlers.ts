@@ -315,6 +315,24 @@ export async function executeConfigCreateScheduledTask(
   if (!title) return { success: false, error: 'title is required' };
   if (!subaccountId) return { success: false, error: 'subaccountId is required' };
 
+  // Strict idempotency (spec §5.5.1): if a `taskSlug` is supplied and an
+  // active task already exists for (subaccountId, taskSlug), return it
+  // as if we had just created it. Prevents playbook replay, double-click
+  // form submission, and auto-start races from minting duplicates. The
+  // service layer already enforces uniqueness, but we short-circuit here
+  // so the response shape remains `success: true` rather than surfacing
+  // a confusing "already exists" error.
+  const taskSlug = input.taskSlug ? String(input.taskSlug) : undefined;
+  if (taskSlug) {
+    const existing = await scheduledTaskService.findActiveBySlug(subaccountId, taskSlug);
+    if (existing) {
+      if (input.runNow === true) {
+        await scheduledTaskService.enqueueRunNow(existing.id, context.organisationId);
+      }
+      return { success: true, entityId: existing.id, title: existing.title };
+    }
+  }
+
   try {
     const task = await scheduledTaskService.create(context.organisationId, subaccountId, {
       title,
@@ -325,6 +343,13 @@ export async function executeConfigCreateScheduledTask(
       rrule: input.rrule ? String(input.rrule) : 'FREQ=WEEKLY;BYDAY=MO',
       timezone: input.timezone ? String(input.timezone) : undefined,
       scheduleTime: input.scheduleTime ? String(input.scheduleTime) : '09:00',
+      taskSlug,
+      createdByPlaybookSlug: input.createdByPlaybookSlug
+        ? String(input.createdByPlaybookSlug)
+        : undefined,
+      firstRunAt: input.firstRunAt ? new Date(String(input.firstRunAt)) : undefined,
+      firstRunAtTz: input.firstRunAtTz ? String(input.firstRunAtTz) : undefined,
+      runNow: input.runNow === true,
     });
 
     if (input.isActive === false) {
