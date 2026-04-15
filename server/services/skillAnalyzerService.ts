@@ -7,7 +7,7 @@ import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
@@ -251,6 +251,36 @@ export async function setResultAction(params: {
     throw { statusCode: 404, message: 'Job not found' };
   }
 
+  // Server-side blocking enforcement — prevents approving a merge with
+  // critical unresolved warnings via a direct API call.
+  if (action === 'approved') {
+    const resultRows = await db
+      .select({
+        classification: skillAnalyzerResults.classification,
+        mergeWarnings: skillAnalyzerResults.mergeWarnings,
+      })
+      .from(skillAnalyzerResults)
+      .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
+      .limit(1);
+
+    const resultRow = resultRows[0];
+    if (
+      resultRow &&
+      (resultRow.classification === 'PARTIAL_OVERLAP' || resultRow.classification === 'IMPROVEMENT')
+    ) {
+      // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
+      // scope creep and name collisions can be resolved by the reviewer editing the
+      // merged content. They are not safety gates like missing HITL gates or dropped
+      // required fields.
+      // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
+      const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
+      const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
+      if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
+        throw { statusCode: 422, message: 'Cannot approve: merge has critical warnings that must be resolved first.', errorCode: 'MERGE_CRITICAL_WARNINGS' };
+      }
+    }
+  }
+
   await db
     .update(skillAnalyzerResults)
     .set({
@@ -281,6 +311,41 @@ export async function bulkSetResultAction(params: {
 
   if (!jobRows[0]) {
     throw { statusCode: 404, message: 'Job not found' };
+  }
+
+  // Server-side blocking enforcement for bulk approval — mirrors setResultAction.
+  // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
+  // scope creep and name collisions can be resolved by the reviewer editing the
+  // merged content. They are not safety gates like missing HITL gates or dropped
+  // required fields.
+  if (action === 'approved' && resultIds.length > 0) {
+    // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
+    const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
+    const blockedRows = await db
+      .select({
+        id: skillAnalyzerResults.id,
+        classification: skillAnalyzerResults.classification,
+        mergeWarnings: skillAnalyzerResults.mergeWarnings,
+      })
+      .from(skillAnalyzerResults)
+      .where(and(
+        inArray(skillAnalyzerResults.id, resultIds),
+        eq(skillAnalyzerResults.jobId, jobId),
+      ));
+
+    const hasBlocked = blockedRows.some(row =>
+      (row.classification === 'PARTIAL_OVERLAP' || row.classification === 'IMPROVEMENT') &&
+      (row.mergeWarnings as MergeWarning[] | null)
+        ?.some(w => BLOCKING_CODES.has(w.code))
+    );
+
+    if (hasBlocked) {
+      throw {
+        statusCode: 422,
+        message: 'Cannot approve: one or more selected merges have critical warnings that must be resolved first.',
+        errorCode: 'MERGE_CRITICAL_WARNINGS',
+      };
+    }
   }
 
   await db
