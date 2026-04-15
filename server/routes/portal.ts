@@ -20,8 +20,12 @@ import {
   executions,
   executionPayloads,
   workflowEngines,
+  playbookRuns,
+  playbookTemplateVersions,
+  systemPlaybookTemplateVersions,
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc, gte, lte } from 'drizzle-orm';
+import { playbookRunService } from '../services/playbookRunService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 
@@ -462,6 +466,145 @@ router.get(
 
     res.json(stats);
   })
+);
+
+// ─── Portal: portal-visible playbook runs (spec §9.4) ────────────────────────
+
+/**
+ * GET /api/portal/:subaccountId/playbook-runs
+ *
+ * Returns runs where `isPortalVisible = true` for this subaccount, ordered by
+ * most-recently started.  Each entry includes the portalPresentation metadata
+ * from the locked template version's definition so the UI can render the card
+ * title and headline extraction path without a second round-trip.
+ */
+router.get(
+  '/api/portal/:subaccountId/playbook-runs',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId);
+
+    // Load visible runs newest-first.
+    const runs = await db
+      .select()
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.isPortalVisible, true),
+        ),
+      )
+      .orderBy(desc(playbookRuns.createdAt));
+
+    if (runs.length === 0) {
+      res.json({ runs: [] });
+      return;
+    }
+
+    // Load portalPresentation from each run's locked template version.
+    // We do it per-run rather than batched to keep the code simple; the list
+    // is expected to be short (most portals show 1–3 playbooks at a time).
+    const enriched = await Promise.all(
+      runs.map(async (run) => {
+        let portalPresentation: unknown = null;
+
+        // Try org template version first.
+        const [orgVer] = await db
+          .select({ definitionJson: playbookTemplateVersions.definitionJson })
+          .from(playbookTemplateVersions)
+          .where(eq(playbookTemplateVersions.id, run.templateVersionId));
+        if (orgVer) {
+          const def = orgVer.definitionJson as Record<string, unknown>;
+          portalPresentation = def?.portalPresentation ?? null;
+        } else {
+          // Fall back to system template version.
+          const [sysVer] = await db
+            .select({ definitionJson: systemPlaybookTemplateVersions.definitionJson })
+            .from(systemPlaybookTemplateVersions)
+            .where(eq(systemPlaybookTemplateVersions.id, run.templateVersionId));
+          if (sysVer) {
+            const def = sysVer.definitionJson as Record<string, unknown>;
+            portalPresentation = def?.portalPresentation ?? null;
+          }
+        }
+
+        return { ...run, portalPresentation };
+      }),
+    );
+
+    res.json({ runs: enriched });
+  }),
+);
+
+/**
+ * POST /api/portal/:subaccountId/playbook-runs/:runId/run-now
+ *
+ * Starts a fresh run of the same playbook template as `runId` (spec §9.4
+ * "Run now" button). Idempotent via the §10.5.1 DB-level unique guard.
+ * Returns the new runId (or the existing active runId if one is in flight).
+ */
+router.post(
+  '/api/portal/:subaccountId/playbook-runs/:runId/run-now',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, runId } = req.params;
+    await resolveSubaccount(subaccountId);
+
+    // Load the source run to extract orgId + templateVersionId.
+    const [sourceRun] = await db
+      .select()
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.id, runId),
+          eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.isPortalVisible, true),
+        ),
+      );
+    if (!sourceRun) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    // Determine whether this was a system or org template so we can pass the
+    // right identifier to startRun.
+    const [orgVer] = await db
+      .select({ templateId: playbookTemplateVersions.templateId })
+      .from(playbookTemplateVersions)
+      .where(eq(playbookTemplateVersions.id, sourceRun.templateVersionId));
+
+    let startResult: { runId: string; status: string };
+    if (orgVer) {
+      startResult = await playbookRunService.startRun({
+        organisationId: sourceRun.organisationId,
+        subaccountId,
+        templateId: orgVer.templateId,
+        initialInput: {},
+        startedByUserId: req.user!.id,
+        runMode: 'auto',
+        isPortalVisible: true,
+      });
+    } else {
+      if (!sourceRun.playbookSlug) {
+        res.status(422).json({ error: 'Cannot replay: playbookSlug not set on source run' });
+        return;
+      }
+      startResult = await playbookRunService.startRun({
+        organisationId: sourceRun.organisationId,
+        subaccountId,
+        systemTemplateSlug: sourceRun.playbookSlug,
+        initialInput: {},
+        startedByUserId: req.user!.id,
+        runMode: 'auto',
+        isPortalVisible: true,
+      });
+    }
+
+    res.status(201).json({ runId: startResult.runId });
+  }),
 );
 
 export default router;

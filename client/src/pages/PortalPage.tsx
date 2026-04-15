@@ -1,10 +1,12 @@
 /**
- * PortalPage — subaccount member's process browser.
+ * PortalPage — subaccount member's process browser + portal playbook cards (§9.4).
  */
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import api from '../lib/api';
 import { User } from '../lib/auth';
+import HelpHint from '../components/ui/HelpHint';
+import { toast } from 'sonner';
 
 interface PortalProcess {
   id: string;
@@ -19,11 +21,32 @@ interface PortalProcess {
 interface Category { id: string; name: string; colour: string | null; }
 interface SubaccountInfo { id: string; name: string; }
 
+// §9.4 portal run card types
+interface PortalPresentation {
+  cardTitle?: string;
+  headlineStepId?: string;
+  headlineOutputPath?: string;
+  detailRoute?: string;
+}
+interface PortalRun {
+  id: string;
+  playbookSlug: string | null;
+  status: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  portalPresentation: PortalPresentation | null;
+}
+
+const ACTIVE_STATUSES = new Set(['pending', 'running', 'awaiting_input', 'awaiting_approval']);
+
 export default function PortalPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [subaccount, setSubaccount] = useState<SubaccountInfo | null>(null);
   const [processes, setProcesses] = useState<PortalProcess[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [portalRuns, setPortalRuns] = useState<PortalRun[]>([]);
+  const [runningNow, setRunningNow] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -31,11 +54,40 @@ export default function PortalPage({ user: _user }: { user: User }) {
 
   useEffect(() => {
     if (!subaccountId) return;
-    api.get(`/api/portal/${subaccountId}/processes`)
-      .then(({ data }) => { setSubaccount(data.subaccount); setProcesses(data.processes ?? []); setCategories(data.categories ?? []); })
-      .catch((err) => { const e = err as { response?: { data?: { error?: string } } }; setError(e.response?.data?.error ?? 'Failed to load processes'); })
+    Promise.all([
+      api.get(`/api/portal/${subaccountId}/processes`),
+      api.get(`/api/portal/${subaccountId}/playbook-runs`).catch(() => ({ data: { runs: [] } })),
+    ])
+      .then(([processRes, runsRes]) => {
+        setSubaccount(processRes.data.subaccount);
+        setProcesses(processRes.data.processes ?? []);
+        setCategories(processRes.data.categories ?? []);
+        setPortalRuns(runsRes.data.runs ?? []);
+      })
+      .catch((err) => {
+        const e = err as { response?: { data?: { error?: string } } };
+        setError(e.response?.data?.error ?? 'Failed to load processes');
+      })
       .finally(() => setLoading(false));
   }, [subaccountId]);
+
+  const handleRunNow = async (run: PortalRun) => {
+    if (!subaccountId) return;
+    const alreadyActive = ACTIVE_STATUSES.has(run.status);
+    if (alreadyActive) return;
+    setRunningNow((prev) => new Set([...prev, run.id]));
+    try {
+      const { data } = await api.post<{ runId: string }>(
+        `/api/portal/${subaccountId}/playbook-runs/${run.id}/run-now`,
+      );
+      toast.success('Run started');
+      // Navigate to the new run
+      window.location.href = `/portal/${subaccountId}/runs/${data.runId}`;
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error ?? 'Failed to start run');
+      setRunningNow((prev) => { const next = new Set(prev); next.delete(run.id); return next; });
+    }
+  };
 
   const filtered = processes.filter((t) => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || (t.description ?? '').toLowerCase().includes(search.toLowerCase());
@@ -50,6 +102,70 @@ export default function PortalPage({ user: _user }: { user: User }) {
     <>
       <h1 className="text-[28px] font-bold text-slate-800 mb-1">{subaccount?.name ?? 'Portal'}</h1>
       <p className="text-slate-500 mb-7">Select a process to run an automation.</p>
+
+      {/* §9.4 Portal playbook run cards — one per isPortalVisible run */}
+      {portalRuns.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-[16px] font-semibold text-slate-800 m-0">Playbooks</h2>
+            <HelpHint text="These playbooks were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
+          </div>
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            {portalRuns.map((run) => {
+              const pp = run.portalPresentation;
+              const title = pp?.cardTitle ?? run.playbookSlug ?? 'Playbook run';
+              const isActive = ACTIVE_STATUSES.has(run.status);
+              const isRunningNow = runningNow.has(run.id);
+              const lastRunDate = run.completedAt ?? run.startedAt ?? run.createdAt;
+              return (
+                <div
+                  key={run.id}
+                  className="bg-white rounded-xl border border-slate-200 px-5 py-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="font-semibold text-slate-800 text-[15px]">{title}</div>
+                    <span
+                      className={`text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                        run.status === 'completed'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : run.status === 'failed' || run.status === 'cancelled'
+                            ? 'bg-red-50 text-red-700'
+                            : 'bg-indigo-50 text-indigo-700'
+                      }`}
+                    >
+                      {run.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div className="text-[12px] text-slate-500 mb-4">
+                    {run.status === 'completed' || run.status === 'completed_with_errors'
+                      ? `Completed ${new Date(lastRunDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                      : isActive
+                        ? 'In progress…'
+                        : `Last run ${new Date(lastRunDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`}
+                  </div>
+                  <div className="flex gap-2">
+                    <Link
+                      to={pp?.detailRoute ?? `/portal/${subaccountId}/runs/${run.id}`}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[13px] font-medium rounded-lg no-underline inline-block"
+                    >
+                      Open full brief →
+                    </Link>
+                    <button
+                      type="button"
+                      disabled={isActive || isRunningNow}
+                      onClick={() => handleRunNow(run)}
+                      title={isActive ? 'Already running' : 'Kick off immediately — scheduled runs are not affected'}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-[13px] font-semibold rounded-lg transition-colors"
+                    >
+                      {isRunningNow ? 'Starting…' : 'Run now'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-6">
         {/* Sidebar */}
