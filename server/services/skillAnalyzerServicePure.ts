@@ -451,6 +451,19 @@ Before writing the JSON response, verify:
 - The response is complete — no trailing "..." or cut-off content
 If any issue is found, fix it before returning.
 
+### Merge rationale (required for PARTIAL_OVERLAP / IMPROVEMENT)
+
+After the self-check, write a \`mergeRationale\` string (2–5 sentences) that answers:
+1. Which skill became the base and why (the one with richer instructions, or the
+   incoming if it was substantially more comprehensive).
+2. What unique content was added from the non-base skill.
+3. What, if anything, was dropped during deduplication and the justification for
+   dropping it.
+
+This field is shown to the human reviewer as a summary of the AI's merge decisions.
+Write it for a reviewer who needs to quickly assess whether the merge is trustworthy,
+not for the AI's internal reasoning.
+
 For DUPLICATE and DISTINCT classifications, OMIT the \`proposedMerge\` field
 entirely (or set it to null) — there is nothing to merge.
 
