@@ -11,6 +11,14 @@ export const modules = pgTable(
     allowedAgentSlugs: jsonb('allowed_agent_slugs').$type<string[] | null>(),
     allowAllAgents: boolean('allow_all_agents').notNull().default(false),
     sidebarConfig: jsonb('sidebar_config').$type<string[] | null>(),
+    // Phase F — onboarding-playbooks §10. Playbook slugs that should be
+    // offered (or auto-started) during onboarding for any sub-account that
+    // enables this module. Stored as text[] so Postgres array semantics
+    // (ANY, @>) drive the owed-list computation.
+    onboardingPlaybookSlugs: text('onboarding_playbook_slugs')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

@@ -81,11 +81,12 @@ export const workspaceMemoryEntries = pgTable(
     subaccountId: uuid('subaccount_id')
       .notNull()
       .references(() => subaccounts.id),
+    // Phase D1 (spec §7.2, §7.3) — nullable so manually-authored References
+    // (Tiptap) and Block→Reference demotion rows can live here without a
+    // source agent run. Migration 0118 drops the NOT NULL constraints.
     agentRunId: uuid('agent_run_id')
-      .notNull()
       .references(() => agentRuns.id),
     agentId: uuid('agent_id')
-      .notNull()
       .references(() => agents.id),
 
     content: text('content').notNull(),
@@ -115,6 +116,16 @@ export const workspaceMemoryEntries = pgTable(
     topic:  text('topic'),    // e.g. 'budget', 'campaign', 'pipeline', 'metrics'
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // §7 G6.2 / migration 0126 — soft-delete so "archive" on the Knowledge
+    // page is recoverable. All Reference list paths filter IS NULL.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    // §7 G6.4 / migration 0127 — back-link populated when a Reference is
+    // created via the Insights tab's Promote affordance. Null for
+    // References authored directly and for auto-captured insights. Self-
+    // referencing FK lives in the SQL migration; Drizzle treats this as a
+    // plain uuid because the ORM's builder does not support forward-
+    // references to the same table cleanly.
+    promotedFromEntryId: uuid('promoted_from_entry_id'),
   },
   (table) => ({
     // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB

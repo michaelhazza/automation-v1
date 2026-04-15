@@ -20,8 +20,13 @@ import {
   executions,
   executionPayloads,
   workflowEngines,
+  playbookRuns,
+  playbookTemplateVersions,
+  systemPlaybookTemplateVersions,
+  scheduledTasks,
 } from '../db/schema/index.js';
-import { eq, and, isNull, desc, gte, lte } from 'drizzle-orm';
+import { eq, and, isNull, desc, gte, lte, inArray } from 'drizzle-orm';
+import { playbookRunService } from '../services/playbookRunService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
 
@@ -462,6 +467,220 @@ router.get(
 
     res.json(stats);
   })
+);
+
+// ─── Portal: portal-visible playbook runs (spec §9.4) ────────────────────────
+
+/**
+ * GET /api/portal/:subaccountId/playbook-runs
+ *
+ * Returns runs where `isPortalVisible = true` for this subaccount, ordered by
+ * most-recently started.  Each entry includes the portalPresentation metadata
+ * from the locked template version's definition so the UI can render the card
+ * title and headline extraction path without a second round-trip.
+ */
+router.get(
+  '/api/portal/:subaccountId/playbook-runs',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    const sa = await resolveSubaccount(subaccountId);
+
+    // Load visible runs newest-first.
+    const runs = await db
+      .select()
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.organisationId, sa.organisationId),
+          eq(playbookRuns.isPortalVisible, true),
+        ),
+      )
+      .orderBy(desc(playbookRuns.createdAt));
+
+    if (runs.length === 0) {
+      res.json({ runs: [] });
+      return;
+    }
+
+    // Batch-load portalPresentation: one query per version table instead of
+    // one query per run (avoids N+1 when the portal has many visible runs).
+    const versionIds = runs.map((r) => r.templateVersionId);
+
+    const orgVersions = await db
+      .select({ id: playbookTemplateVersions.id, definitionJson: playbookTemplateVersions.definitionJson })
+      .from(playbookTemplateVersions)
+      .where(inArray(playbookTemplateVersions.id, versionIds));
+    const orgVersionMap = new Map(orgVersions.map((v) => [v.id, v.definitionJson]));
+
+    // For IDs not found in org versions, fall back to system template versions.
+    const missingIds = versionIds.filter((id) => !orgVersionMap.has(id));
+    const sysVersionMap = new Map<string, unknown>();
+    if (missingIds.length > 0) {
+      const sysVersions = await db
+        .select({ id: systemPlaybookTemplateVersions.id, definitionJson: systemPlaybookTemplateVersions.definitionJson })
+        .from(systemPlaybookTemplateVersions)
+        .where(inArray(systemPlaybookTemplateVersions.id, missingIds));
+      for (const v of sysVersions) sysVersionMap.set(v.id, v.definitionJson);
+    }
+
+    const enriched = runs.map((run) => {
+      const defJson = (orgVersionMap.get(run.templateVersionId) ?? sysVersionMap.get(run.templateVersionId)) as Record<string, unknown> | undefined;
+      return { ...run, portalPresentation: defJson?.portalPresentation ?? null };
+    });
+
+    res.json({ runs: enriched });
+  }),
+);
+
+// ─── Portal: Daily Brief card (spec §G10.4) ──────────────────────────────────
+
+/**
+ * GET /api/portal/:subaccountId/daily-brief-card
+ *
+ * Drives the dedicated "Daily Brief" hero card on the portal dashboard.
+ * Per spec §G10.4, the card shows iff the subaccount has BOTH a completed
+ * Daily Intelligence Brief run AND a currently-active scheduled task
+ * producing briefs. Returning { active: false } from either side keeps the
+ * card off the dashboard so stale schedules don't advertise a broken card.
+ *
+ * Response shape:
+ *   {
+ *     active: boolean,
+ *     latestRun: { id, completedAt } | null,
+ *     nextRunAt: string | null,
+ *     scheduledTaskId: string | null,
+ *   }
+ *
+ * The card itself is rendered by PortalPage — this endpoint is a pure
+ * aggregate so the client can light it up without running its own joins.
+ */
+router.get(
+  '/api/portal/:subaccountId/daily-brief-card',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    const sa = await resolveSubaccount(subaccountId);
+
+    const DAILY_BRIEF_SLUG = 'daily-intelligence-brief';
+
+    const [latestRun] = await db
+      .select({
+        id: playbookRuns.id,
+        completedAt: playbookRuns.completedAt,
+      })
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.organisationId, sa.organisationId),
+          eq(playbookRuns.playbookSlug, DAILY_BRIEF_SLUG),
+          eq(playbookRuns.status, 'completed'),
+        ),
+      )
+      .orderBy(desc(playbookRuns.completedAt))
+      .limit(1);
+
+    const [activeSchedule] = await db
+      .select({
+        id: scheduledTasks.id,
+        nextRunAt: scheduledTasks.nextRunAt,
+      })
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.subaccountId, subaccountId),
+          eq(scheduledTasks.createdByPlaybookSlug, DAILY_BRIEF_SLUG),
+          eq(scheduledTasks.isActive, true),
+        ),
+      )
+      .orderBy(desc(scheduledTasks.nextRunAt))
+      .limit(1);
+
+    const active = Boolean(latestRun && activeSchedule);
+
+    res.json({
+      active,
+      latestRun: latestRun
+        ? { id: latestRun.id, completedAt: latestRun.completedAt }
+        : null,
+      nextRunAt: activeSchedule?.nextRunAt ?? null,
+      scheduledTaskId: activeSchedule?.id ?? null,
+    });
+  }),
+);
+
+/**
+ * POST /api/portal/:subaccountId/playbook-runs/:runId/run-now
+ *
+ * Starts a fresh run of the same playbook template as `runId` (spec §9.4
+ * "Run now" button). Idempotent via the §10.5.1 DB-level unique guard.
+ * Returns the new runId (or the existing active runId if one is in flight).
+ */
+router.post(
+  '/api/portal/:subaccountId/playbook-runs/:runId/run-now',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, runId } = req.params;
+    const sa = await resolveSubaccount(subaccountId);
+
+    // Load the source run to extract orgId + templateVersionId.
+    const [sourceRun] = await db
+      .select()
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.id, runId),
+          eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.organisationId, sa.organisationId),
+          eq(playbookRuns.isPortalVisible, true),
+        ),
+      );
+    if (!sourceRun) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+
+    // Determine whether this was a system or org template so we can pass the
+    // right identifier to startRun.
+    const [orgVer] = await db
+      .select({ templateId: playbookTemplateVersions.templateId })
+      .from(playbookTemplateVersions)
+      .where(eq(playbookTemplateVersions.id, sourceRun.templateVersionId));
+
+    let startResult: { runId: string; status: string };
+    if (orgVer) {
+      startResult = await playbookRunService.startRun({
+        organisationId: sourceRun.organisationId,
+        subaccountId,
+        templateId: orgVer.templateId,
+        initialInput: {},
+        startedByUserId: req.user!.id,
+        runMode: 'auto',
+        isPortalVisible: true,
+      });
+    } else {
+      if (!sourceRun.playbookSlug) {
+        res.status(422).json({ error: 'Cannot replay: playbookSlug not set on source run' });
+        return;
+      }
+      startResult = await playbookRunService.startRun({
+        organisationId: sourceRun.organisationId,
+        subaccountId,
+        systemTemplateSlug: sourceRun.playbookSlug,
+        initialInput: {},
+        startedByUserId: req.user!.id,
+        runMode: 'auto',
+        isPortalVisible: true,
+      });
+    }
+
+    res.status(201).json({ runId: startResult.runId });
+  }),
 );
 
 export default router;

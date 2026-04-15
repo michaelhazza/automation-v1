@@ -150,3 +150,9 @@ export * from './configHistory.js';
 
 // Config Backups — point-in-time configuration snapshots for bulk restore (migration 0117)
 export * from './configBackups.js';
+
+// Portal Briefs — published playbook output for the portal card (migration 0123)
+export * from './portalBriefs.js';
+
+// Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)
+export * from './subaccountOnboardingState.js';

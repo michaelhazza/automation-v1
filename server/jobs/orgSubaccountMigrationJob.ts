@@ -240,7 +240,7 @@ async function migrateOrgMemories(): Promise<MigrationResult['memoryMigration']>
             lastAccessedAt: entry.lastAccessedAt,
             createdAt: entry.createdAt,
           }).onConflictDoNothing();
-          if (result.rowCount === 0) {
+          if ((result as unknown as { rowCount?: number }).rowCount === 0) {
             stats.entriesSkipped++;
           } else {
             stats.entriesMigrated++;

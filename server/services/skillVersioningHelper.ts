@@ -102,7 +102,7 @@ export const skillVersioningHelper = {
           FROM skill_versions
           WHERE COALESCE(system_skill_id, skill_id) = ${refId}`,
     );
-    const nextVersion = ((maxResult.rows?.[0] as any)?.max_version ?? 0) + 1;
+    const nextVersion = (((maxResult as unknown as Array<{ max_version?: number }>)?.[0])?.max_version ?? 0) + 1;
 
     // Step 3: Insert with ON CONFLICT guard for idempotency when key is provided
     if (params.idempotencyKey) {
@@ -125,7 +125,7 @@ export const skillVersioningHelper = {
             DO NOTHING
             RETURNING *`,
       );
-      const row = (result.rows?.[0] as SkillVersion | undefined) ?? null;
+      const row = ((result as unknown as Array<SkillVersion>)?.[0] ?? null) as SkillVersion | null;
       if (!row) {
         logger.info('skill_version_idempotent_skip', {
           idempotencyKey: params.idempotencyKey,

@@ -8,6 +8,8 @@ export const CONFIG_HISTORY_ENTITY_TYPES = new Set([
   'skill', 'policy_rule', 'permission_set', 'subaccount',
   'workspace_limits', 'org_budget', 'mcp_server_config',
   'agent_trigger', 'connector_config', 'integration_connection',
+  // Phase D1 — Unified Knowledge page promote/demote flow (spec §7.3).
+  'memory_block', 'reference_entry',
 ]);
 
 // ---------------------------------------------------------------------------

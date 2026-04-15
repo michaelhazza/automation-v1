@@ -1476,6 +1476,16 @@ export const SKILL_HANDLERS: Record<string, SkillHandler> = {
     const { executeConfigViewHistory } = await import('../tools/config/configSkillHandlers.js');
     return executeConfigViewHistory(input, context);
   },
+
+  // Phase G — portal / email skills (spec §11.6) — action_call only.
+  config_publish_playbook_output_to_portal: async (input, context) => {
+    const { executeConfigPublishPlaybookOutputToPortal } = await import('../tools/config/playbookSkillHandlers.js');
+    return executeWithActionAudit('config_publish_playbook_output_to_portal', input, context, () => executeConfigPublishPlaybookOutputToPortal(input, context));
+  },
+  config_send_playbook_email_digest: async (input, context) => {
+    const { executeConfigSendPlaybookEmailDigest } = await import('../tools/config/playbookSkillHandlers.js');
+    return executeWithActionAudit('config_send_playbook_email_digest', input, context, () => executeConfigSendPlaybookEmailDigest(input, context));
+  },
 };
 
 export const skillExecutor = {

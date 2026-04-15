@@ -15,6 +15,12 @@ const createMemoryBlockBody = z.object({
   subaccountId: z.string().uuid().optional(),
   ownerAgentId: z.string().uuid().optional(),
   isReadOnly: z.boolean().optional(),
+  /**
+   * Phase G / §7.4 / G7.1 — materialise read-only attachments for every
+   * currently-linked agent in the sub-account. Ignored when `subaccountId`
+   * is absent (org-scoped blocks have no sub-account agent roster).
+   */
+  autoAttach: z.boolean().optional(),
 });
 
 const updateMemoryBlockBody = z.object({
@@ -48,7 +54,7 @@ router.post(
   requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
   validateBody(createMemoryBlockBody, 'warn'),
   asyncHandler(async (req, res) => {
-    const { name, content, subaccountId, ownerAgentId, isReadOnly } = req.body;
+    const { name, content, subaccountId, ownerAgentId, isReadOnly, autoAttach } = req.body;
 
     const block = await memoryBlockService.createBlock({
       organisationId: req.orgId!,
@@ -57,6 +63,7 @@ router.post(
       content,
       ownerAgentId,
       isReadOnly,
+      autoAttach,
     });
 
     res.status(201).json(block);

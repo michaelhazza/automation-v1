@@ -63,6 +63,14 @@ export const playbookRuns = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
     error: text('error'),
     failedDueToStepId: text('failed_due_to_step_id'),
+    // Phase E — onboarding-playbooks-spec §9.2 / §9.3 / §9.4.
+    // Drives the portal card visibility toggle and the admin Onboarding tab.
+    isPortalVisible: boolean('is_portal_visible').notNull().default(false),
+    isOnboardingRun: boolean('is_onboarding_run').notNull().default(false),
+    // Denormalised slug (resolved from the locked template version) so the
+    // §9.3 Onboarding tab can filter runs by slug without joining through
+    // the template-version lineage.
+    playbookSlug: text('playbook_slug'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -102,7 +110,8 @@ export type PlaybookStepType =
   | 'user_input'
   | 'approval'
   | 'conditional'
-  | 'agent_decision';
+  | 'agent_decision'
+  | 'action_call';
 
 export type PlaybookStepRunStatus =
   | 'pending'

@@ -160,6 +160,37 @@ const CANONICAL_HANDLER_KEYS: readonly string[] = [
   'geo_llmstxt',
   'geo_compare',
   'generic_methodology',
+  // Phase A–G: Onboarding Playbooks config handlers
+  'config_create_agent',
+  'config_update_agent',
+  'config_activate_agent',
+  'config_link_agent',
+  'config_update_link',
+  'config_set_link_skills',
+  'config_set_link_instructions',
+  'config_set_link_schedule',
+  'config_set_link_limits',
+  'config_create_subaccount',
+  'config_create_scheduled_task',
+  'config_update_scheduled_task',
+  'config_attach_data_source',
+  'config_update_data_source',
+  'config_remove_data_source',
+  'config_restore_version',
+  'config_list_agents',
+  'config_list_subaccounts',
+  'config_list_links',
+  'config_list_scheduled_tasks',
+  'config_list_data_sources',
+  'config_list_system_skills',
+  'config_list_org_skills',
+  'config_get_agent_detail',
+  'config_get_link_detail',
+  'config_run_health_check',
+  'config_preview_plan',
+  'config_view_history',
+  'config_publish_playbook_output_to_portal',
+  'config_send_playbook_email_digest',
 ];
 
 // ---------------------------------------------------------------------------
@@ -195,11 +226,11 @@ test('SKILL_HANDLERS does not contain any unexpected keys', () => {
   }
 });
 
-test('SKILL_HANDLERS has exactly 114 keys', () => {
+test('SKILL_HANDLERS has exactly 144 keys', () => {
   const count = Object.keys(SKILL_HANDLERS).length;
-  if (count !== 114) {
+  if (count !== 144) {
     throw new Error(
-      `SKILL_HANDLERS has ${count} keys, expected 114. ` +
+      `SKILL_HANDLERS has ${count} keys, expected 144. ` +
       'If you intentionally added or removed a handler, update both this assertion AND CANONICAL_HANDLER_KEYS.',
     );
   }

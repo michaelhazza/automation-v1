@@ -1147,6 +1147,138 @@ Single canonicalisation path for URLs across the system (deduplication, comparis
 
 ---
 
+## Configuration Assistant
+
+A system-managed org-tier agent (`slug: configuration-assistant`, seeded by migration 0115) that turns natural-language requests into structured configuration changes — creating agents, linking them to subaccounts, setting skills and schedules, attaching data sources, and running health checks. It is the conversational front end to the `config_*` action registry; all mutations still flow through the same services the UI uses, so there is only one write path.
+
+### Execution shape
+
+- **Scope:** `org` — runs at org level, targets any subaccount by name lookup
+- **Agent loop:** standard `agentExecutionService` — no bespoke runner
+- **Model:** `claude-sonnet-4-6` (see migration seed); tokenBudget 60000, maxToolCalls 40
+- **Heartbeat:** disabled — invoked on demand from the Configuration Assistant page
+- **Master prompt:** not editable by org admins (`isSystemManaged: true`); only `additionalPrompt` overrides allowed
+
+### Tool surface (28 skills, all file-backed in `server/skills/config_*.md`)
+
+| Group | Count | Skills |
+|-------|-------|--------|
+| Mutation — agents & links | 9 | `config_create_agent`, `config_update_agent`, `config_activate_agent`, `config_link_agent`, `config_update_link`, `config_set_link_skills`, `config_set_link_instructions`, `config_set_link_schedule`, `config_set_link_limits` |
+| Mutation — subaccounts & tasks | 3 | `config_create_subaccount`, `config_create_scheduled_task`, `config_update_scheduled_task` |
+| Mutation — data sources | 3 | `config_attach_data_source`, `config_update_data_source`, `config_remove_data_source` |
+| Read | 9 | `config_list_agents`, `config_list_subaccounts`, `config_list_links`, `config_list_scheduled_tasks`, `config_list_data_sources`, `config_list_system_skills`, `config_list_org_skills`, `config_get_agent_detail`, `config_get_link_detail` |
+| Plan / validation | 2 | `config_preview_plan`, `config_run_health_check` |
+| History | 2 | `config_view_history`, `config_restore_version` |
+
+Handlers live in `server/tools/config/configSkillHandlers.ts`. Every mutation re-uses the canonical service (e.g. `config_link_agent` calls the same `subaccountAgentService.link()` the Companies UI calls).
+
+### Plan-approve-execute flow
+
+The assistant is constrained by its master prompt to a three-phase loop:
+
+1. **Discovery** — list / detail tools only. At most 5 clarification rounds; after that, propose a plan with `[needs confirmation]` markers rather than looping indefinitely.
+2. **Plan preview** — call `config_preview_plan` with the proposed step list. This returns a deterministic, human-readable diff; the UI blocks execution until the user clicks Approve.
+3. **Execute** — the same step list is replayed server-side one step at a time. Each step's handler computes an idempotency key and writes a `config_history` entry. Final step is always `config_run_health_check` (skipped if no mutations ran).
+
+### Idempotency key
+
+Each mutation step computes:
+
+```
+sha256(sessionId + ":" + stepNumber + ":" + entityType + ":" + entityId + ":" + canonicalJSON(normalizedParameters))
+```
+
+Stored on the `agentRuns` row's tool-call record. Replaying the same approved plan is a no-op; editing the plan mid-execution produces different keys and is rejected at the route layer.
+
+### Knowledge loading
+
+On session start the assistant eagerly loads `architecture.md` and `docs/capabilities.md` as context data sources, so it can answer questions like *"what is a subaccount?"* or *"what does a link override do?"* from the canonical documentation without drift. Keeping those two files accurate is part of the Configuration Assistant's correctness contract, not an optional nicety.
+
+### Explicitly out of scope
+
+The assistant must refuse and surface the right UI for:
+
+- User / permission management
+- Integration connections (OAuth, API keys) — handled in Connectors
+- Playbook authoring or execution
+- Skill Studio (custom skill creation / analysis)
+- Memory Blocks / Knowledge page curation
+- Agent triggers
+- Org budgets & workspace limits
+
+This list is enforced in the master prompt and each group has a dedicated UI.
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `migrations/0115_config_assistant_agent.sql` | System agent seed + module + subscription wiring |
+| `server/skills/config_*.md` | 28 skill definitions (master of truth for tool contracts) |
+| `server/tools/config/configSkillHandlers.ts` | Skill handler implementations |
+| `server/routes/subaccountAgents.ts` | Route that creates a Configuration Assistant session and executes approved plans |
+| `client/src/pages/ConfigAssistantPage.tsx` | Chat UI with plan preview + approve button |
+
+---
+
+## Config History & Config Backups
+
+Every mutation to a configurable entity writes a versioned snapshot so the whole platform has a single audit / rollback substrate. Used by the UI (undo), the Configuration Assistant (plan replay + restore), the Skill Analyzer (bulk rollback), and the Admin History view.
+
+### Tracked entity types (14)
+
+Defined in `CONFIG_HISTORY_ENTITY_TYPES` (`server/services/configHistoryService.ts`):
+
+```
+agent, subaccount_agent, scheduled_task, agent_data_source,
+skill, policy_rule, permission_set, subaccount,
+workspace_limits, org_budget, mcp_server_config,
+agent_trigger, connector_config, integration_connection
+```
+
+Adding a new configurable entity? Add its slug to `CONFIG_HISTORY_ENTITY_TYPES` **and** call `configHistoryService.record()` from the mutation service. The list is enforced — writes with an unknown `entityType` throw.
+
+### Schema (migrations 0114, 0116, 0117)
+
+| Table | Purpose |
+|-------|---------|
+| `config_history` (migration 0114, org-scope uniqueness tightened in 0116) | One row per (entity, version). JSONB `snapshot` of the entity post-change. `version` auto-increments per `(org, entityType, entityId)` via unique constraint + retry-on-conflict. `changeSource` ∈ `ui / api / config_agent / system_sync / restore`. Optional `sessionId` links rows written by one Configuration Assistant run. |
+| `config_backups` (migration 0117) | Point-in-time snapshot **sets** — bulk operations (Skill Analyzer apply, Configuration Assistant plan apply) write one `config_backups` row containing the pre-mutation state of every affected entity. `scope` ∈ `skill_analyzer / manual / config_agent`. `status` tracks `active / restored / expired`. |
+
+### Write path
+
+```
+mutation service → configHistoryService.record({entityType, entityId, snapshot, changedBy, changeSource, sessionId?})
+  ↓
+  1. acquire advisory lock on `${entityType}:${entityId}`
+  2. read current max(version) for (org, entityType, entityId)
+  3. diff previous snapshot → deterministic changeSummary (no LLM)
+  4. insert row at version+1; retry once on unique-constraint violation
+```
+
+Sensitive fields are redacted at the service layer before snapshotting — see `SENSITIVE_FIELDS` in `configHistoryService.ts` (access tokens, encrypted secrets, webhook secrets, api keys). System agents additionally redact master-prompt content for non-system admins on read.
+
+### Restore
+
+`configHistoryService.restore(entityType, entityId, targetVersion)` replays the target snapshot back onto the entity's canonical service, then writes a **new** history entry with `changeSource: 'restore'`. The old versions stay in the table — restore is forward-only, never destructive.
+
+### UI surfaces
+
+- **Config Session History** page (`/admin/config-history`) — browse every mutation grouped by Configuration Assistant session, with filter by entity type and user
+- Per-entity version list surfaced via `config_view_history` skill in the Configuration Assistant chat
+- Restore is available from the same page and from the chat via `config_restore_version`
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `server/db/schema/configHistory.ts` | `config_history` table |
+| `server/db/schema/configBackups.ts` | `config_backups` table |
+| `server/services/configHistoryService.ts` | `record()`, `restore()`, `list()`, change-summary generator, redaction |
+| `server/services/configBackupService.ts` | Bulk snapshot + restore used by Skill Analyzer and Configuration Assistant |
+| `client/src/pages/ConfigSessionHistoryPage.tsx` | Admin history browser grouped by session |
+
+---
+
 ## Playbooks (Multi-Step Automation)
 
 Playbooks automate longer-form, multi-step processes (e.g. "create a new event" — 15 steps producing landing page copy, email templates, social posts, etc.) as a reusable, versioned, distributable template. A Playbook is a **DAG of steps** — each step is a prompt, an agent call, a user-input form, an approval gate, or a conditional — executed against a subaccount with a growing shared context.
@@ -1195,8 +1327,12 @@ Playbook Run (playbookRuns)
 | `playbookRuns` | Run instances. `subaccountId`, `templateVersionId`, `status`, `contextJson`, `startedBy`, `startedAt`, `completedAt`. |
 | `playbookStepRuns` | Per-step execution records. `runId`, `stepId`, `status`, `inputJson`, `outputJson`, `agentRunId` (nullable link), `dependsOn[]`, `startedAt`, `completedAt`, `error`. |
 | `playbookStepReviews` | Human approval gate records for steps with `humanReviewRequired: true`. Links to `reviewItems`. |
+| `portalBriefs` | Published outputs surfaced on the sub-account portal card. Upserted by `config_publish_playbook_output_to_portal` on each run. Unique per `run_id`. Columns: `id`, `organisation_id`, `subaccount_id`, `run_id`, `playbook_slug`, `title`, `bullets text[]`, `detail_markdown`, `is_portal_visible`, `published_at`, `retracted_at`. (Migration 0123.) |
+| `subaccountOnboardingState` | Completion tracking per `(subaccount_id, playbook_slug)` for onboarding runs. Upserted on every terminal transition by the engine via `upsertSubaccountOnboardingState`. Status values: `in_progress`, `completed`, `failed`. Columns: `id`, `organisation_id`, `subaccount_id`, `playbook_slug`, `status`, `last_run_id`, `started_at`, `completed_at`. Unique on `(subaccount_id, playbook_slug)`. (Migration 0124.) |
 
 Soft deletes on templates (`deletedAt`). Runs are append-only history.
+
+`modules.onboarding_playbook_slugs` (`text[]`, added migration 0122) lists playbook slugs that should be started or offered during sub-account onboarding for any sub-account whose org holds an active subscription to that module. The union of slugs across all active modules drives the Onboarding tab. `subaccountOnboardingService.autoStartOwedOnboardingPlaybooks()` is called fire-and-forget on sub-account creation.
 
 ### Step definition shape (stored in `definitionJson`)
 
@@ -1204,17 +1340,28 @@ Soft deletes on templates (`deletedAt`). Runs are append-only history.
 interface PlaybookStep {
   id: string;                    // stable within template version
   name: string;
-  type: 'prompt' | 'agent_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision';
+  type: 'prompt' | 'agent_call' | 'action_call' | 'user_input' | 'approval' | 'conditional' | 'agent_decision';
   dependsOn: string[];           // ids of prior steps
+  sideEffectType: 'none' | 'idempotent' | 'reversible' | 'irreversible'; // mandatory on all steps
   humanReviewRequired?: boolean; // pause for edit/approve before downstream consumes output
   outputSchema: JSONSchema;      // zod-validated; downstream steps rely on shape
+  retryPolicy?: { maxAttempts: number };
 
-  // type-specific
+  // type: prompt / agent_call
   prompt?: string;                               // prompt with {{ templating }}
-  agentId?: string;                              // for type: agent_call — references org or system agent
-  formSchema?: JSONSchema;                       // for type: user_input — renders as form in UI
+  model?: string;                                // optional model override for type: prompt
+  agentRef?: { kind: 'system' | 'org'; slug: string }; // for type: agent_call
+  agentInputs?: Record<string, string>;          // map of paramName -> template expression
+
+  // type: action_call — invokes a skill handler from the actionCallAllowlist
+  actionSlug?: string;                           // must be in ACTION_CALL_ALLOWED_SLUGS
+  actionInputs?: Record<string, string>;         // template expressions resolved against run context
+  idempotencyScope?: 'run' | 'entity';           // 'entity' required for singleton-resource actions
+  entityKey?: string;                            // stable key for entity-scoped idempotency
+
+  // type: user_input
+  formSchema?: JSONSchema;                       // renders as form in UI
   condition?: string;                            // for type: conditional — JSONLogic expression
-  inputs?: Record<string, string>;               // map of paramName -> template expression
 
   // type: agent_decision
   decisionPrompt?: string;                       // the question the agent must answer (templated)
@@ -1224,8 +1371,27 @@ interface PlaybookStep {
 }
 
 interface PlaybookDefinition {
+  slug: string;
+  name: string;
+  version: number;
   steps: PlaybookStep[];
-  initialInputSchema: JSONSchema;  // what the user provides when kicking off the run
+  initialInputSchema: JSONSchema;   // what the user provides when kicking off the run
+
+  // Onboarding-playbooks spec (§10–§11)
+  autoStartOnOnboarding?: boolean;  // engine auto-starts this playbook in supervised mode for new sub-accounts
+  portalPresentation?: {            // drives the §9.4 portal card
+    cardTitle: string;
+    headlineStepId: string;         // step whose output provides the card headline
+    headlineOutputPath: string;     // dot-path into that step's outputSchema
+    detailRoute?: string;           // optional deep-link; run modal is the fallback
+  };
+  knowledgeBindings?: Array<{       // write step output back to Workspace Memory on completion
+    stepId: string;
+    outputPath: string;             // dot-path into the step's outputSchema
+    blockLabel: string;             // Memory Block label (1–80 chars)
+    mergeStrategy: 'replace' | 'merge' | 'append';
+    firstRunOnly?: boolean;         // only write on the first successful run per subaccount+slug
+  }>;
 }
 ```
 
@@ -1345,6 +1511,10 @@ Three layers, all required:
 | `/api/system/playbook-studio/simulate` | `playbookStudio.ts` | `simulate_run` tool — dry-run side-effect classification |
 | `/api/system/playbook-studio/estimate` | `playbookStudio.ts` | `estimate_cost` tool — optimistic/pessimistic cost bounds |
 | `/api/system/playbook-studio/render` | `playbookStudio.ts` | Deterministic file preview — what the save endpoint would commit |
+| `/api/subaccounts/:subaccountId/onboarding/owed` | `subaccountOnboarding.ts` | List playbooks owed by this sub-account's active modules (with latest run status) |
+| `/api/subaccounts/:subaccountId/onboarding/start` | `subaccountOnboarding.ts` | Start a specific owed onboarding playbook (idempotent — returns existing run if already active) |
+| `/api/portal/:subaccountId/playbook-runs` | `portal.ts` | List portal-visible playbook runs for the sub-account portal card |
+| `/api/portal/:subaccountId/playbook-runs/:runId/run-now` | `portal.ts` | Start a fresh run of the same template (portal-visible), requires `PLAYBOOK_RUNS_START` |
 
 All routes follow the standard conventions: `asyncHandler`, `authenticate`, `resolveSubaccount` where applicable, org scoping via `req.orgId`, no direct `db` access, service errors as `{ statusCode, message, errorCode }`.
 
@@ -1358,6 +1528,7 @@ All routes follow the standard conventions: `asyncHandler`, `authenticate`, `res
 | `playbookAgentRunHook` | Post-run hook that bridges `agent_call` step completion back into the engine tick |
 | `playbookStudioService` | Chat authoring back-end: sessions, `validate`/`simulate`/`estimate`/`render` tools, `saveAndOpenPr` trust boundary |
 | `playbookStudioGithub` | Real GitHub PR creation path used by `saveAndOpenPr` (deferred #5) |
+| `subaccountOnboardingService` | Resolves owed onboarding playbooks for a sub-account (`listOwedOnboardingPlaybooks`, `startOwedOnboardingPlaybook`, `autoStartOwedOnboardingPlaybooks`). Called fire-and-forget from sub-account creation. Idempotent via 23505 unique-violation catch on the partial unique index `(subaccount_id, playbook_slug) WHERE active_statuses`. |
 
 The templating/validator/renderer/hash primitives live under `server/lib/playbook/` (`templating.ts`, `validator.ts`, `renderer.ts`, `canonicalJson.ts`, `hash.ts`, `definePlaybook.ts`) so they can be imported by both the engine and the Studio tools without pulling in service layer state. They are pure and unit-tested (`server/lib/playbook/__tests__/playbook.test.ts`).
 

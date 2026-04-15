@@ -44,6 +44,7 @@ const SystemSkillsPage = lazy(() => import('./pages/SystemSkillsPage'));
 const SystemSkillEditPage = lazy(() => import('./pages/SystemSkillEditPage'));
 const OrgSettingsPage = lazy(() => import('./pages/OrgSettingsPage'));
 const WorkspaceMemoryPage = lazy(() => import('./pages/WorkspaceMemoryPage'));
+const SubaccountKnowledgePage = lazy(() => import('./pages/SubaccountKnowledgePage'));
 const ScheduledTasksPage = lazy(() => import('./pages/ScheduledTasksPage'));
 const ScheduledTaskDetailPage = lazy(() => import('./pages/ScheduledTaskDetailPage'));
 const SystemProcessesPage = lazy(() => import('./pages/SystemProcessesPage'));
@@ -53,6 +54,7 @@ const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
 const PlaybooksLibraryPage = lazy(() => import('./pages/PlaybooksLibraryPage'));
 const PlaybookRunDetailPage = lazy(() => import('./pages/PlaybookRunDetailPage'));
+const PlaybookRunPage = lazy(() => import('./pages/subaccount/PlaybookRunPage'));
 const PlaybookStudioPage = lazy(() => import('./pages/PlaybookStudioPage'));
 const RunTraceViewerPage = lazy(() => import('./pages/RunTraceViewerPage'));
 const ProjectDetailPage = lazy(() => import('./pages/ProjectDetailPage'));
@@ -156,6 +158,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Toaster position="bottom-right" richColors />
+      {/* HelpHint portal root (spec §6.3) — see client/src/components/ui/HelpHint.tsx */}
+      <div id="help-hint-portal" />
       <Routes>
         <Route path="/login" element={
           <Suspense fallback={<PageLoader />}>
@@ -207,6 +211,10 @@ export default function App() {
           <Route path="/inbox" element={<InboxPage user={user!} />} />
           <Route path="/playbooks" element={<PlaybooksLibraryPage user={user!} />} />
           <Route path="/playbook-runs/:runId" element={<PlaybookRunDetailPage user={user!} />} />
+          {/* §9.2 — subaccount-scoped run page (envelope endpoint + WS live). */}
+          <Route path="/sub/:subaccountId/runs/:runId" element={<PlaybookRunPage user={user!} />} />
+          {/* §9.4 — portal-scoped variant; same component, viewer-role aware. */}
+          <Route path="/portal/:subaccountId/runs/:runId" element={<PlaybookRunPage user={user!} />} />
 
           {/* Org admin routes — all authenticated users; API enforces permission-set checks */}
           <Route element={<OrgAdminGuard user={user} />}>
@@ -230,6 +238,8 @@ export default function App() {
             <Route path="/admin/subaccounts/:subaccountId/agents/:linkId/manage" element={<SubaccountAgentEditPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/workspace" element={<WorkspaceBoardPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/memory" element={<WorkspaceMemoryPage user={user!} />} />
+            {/* Unified Knowledge page (spec §7.2) — References + Memory Blocks in one place */}
+            <Route path="/admin/subaccounts/:subaccountId/knowledge" element={<SubaccountKnowledgePage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks" element={<ScheduledTasksPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/scheduled-tasks/:stId" element={<ScheduledTaskDetailPage user={user!} />} />
             <Route path="/admin/subaccounts/:subaccountId/review-queue" element={<ReviewQueuePage user={user!} />} />

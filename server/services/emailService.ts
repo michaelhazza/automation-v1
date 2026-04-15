@@ -221,6 +221,14 @@ export class EmailService {
     await this.send(to, subject, textBody, brandedHtml(subject, `${sourceName} is syncing again.`, bodyHtml));
   }
 
+  /**
+   * Generic email send — public so playbook skills (Phase G §11.6) can call it
+   * directly without coupling to a specific workflow type.
+   */
+  async sendGenericEmail(to: string, subject: string, text: string, html?: string): Promise<void> {
+    await this.send(to, subject, text, html);
+  }
+
   private async send(to: string, subject: string, text: string, html?: string): Promise<void> {
     if (env.EMAIL_PROVIDER === 'resend' && env.RESEND_API_KEY) {
       const { Resend } = await import('resend');

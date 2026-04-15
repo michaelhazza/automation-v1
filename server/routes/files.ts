@@ -59,7 +59,7 @@ router.post('/api/files/upload', authenticate, validateMultipart, asyncHandler(a
     return;
   }
 
-  const result = await fileService.uploadFile(executionId, req.user!.id, req.orgId, file);
+  const result = await fileService.uploadFile(executionId, req.user!.id, req.orgId!, file);
   res.status(201).json(result);
 }));
 

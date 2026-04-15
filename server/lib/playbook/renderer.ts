@@ -92,6 +92,27 @@ export function renderPlaybookFile(
     if (step.agentInputs !== undefined) {
       lines.push(`      agentInputs: ${JSON.stringify(step.agentInputs)},`);
     }
+    if (step.actionSlug !== undefined) {
+      lines.push(`      actionSlug: ${JSON.stringify(String(step.actionSlug))},`);
+    }
+    if (step.actionInputs !== undefined) {
+      lines.push(`      actionInputs: ${JSON.stringify(step.actionInputs)},`);
+    }
+    if (step.idempotencyScope !== undefined) {
+      lines.push(`      idempotencyScope: ${JSON.stringify(String(step.idempotencyScope))},`);
+    }
+    if (step.entityKey !== undefined) {
+      lines.push(`      entityKey: ${JSON.stringify(String(step.entityKey))},`);
+    }
+    if (step.firstRunOnly === true) {
+      lines.push('      firstRunOnly: true,');
+    }
+    if (step.final === true) {
+      lines.push('      final: true,');
+    }
+    if (step.referenceBinding !== undefined) {
+      lines.push(`      referenceBinding: ${JSON.stringify(step.referenceBinding)},`);
+    }
     if (step.decisionPrompt !== undefined) {
       lines.push(`      decisionPrompt: ${JSON.stringify(String(step.decisionPrompt))},`);
     }
@@ -129,6 +150,15 @@ export function renderPlaybookFile(
   lines.push('  ],');
   if (definition.maxParallelSteps !== undefined) {
     lines.push(`  maxParallelSteps: ${JSON.stringify(definition.maxParallelSteps)},`);
+  }
+  if (definition.knowledgeBindings !== undefined) {
+    lines.push(`  knowledgeBindings: ${JSON.stringify(definition.knowledgeBindings)},`);
+  }
+  if (definition.portalPresentation !== undefined) {
+    lines.push(`  portalPresentation: ${JSON.stringify(definition.portalPresentation)},`);
+  }
+  if (definition.autoStartOnOnboarding === true) {
+    lines.push('  autoStartOnOnboarding: true,');
   }
   lines.push('});');
   lines.push('');
