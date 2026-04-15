@@ -445,6 +445,7 @@ Before writing the JSON response, verify:
 - All human-review-gate instructions from both sources are preserved verbatim.
 - Every backtick-wrapped tool/skill reference from both sources appears in the merged output.
 - The output format / template section (if present) is the last substantive section before Related Skills.
+- If the merged instructions are more than 30% longer than the richer source skill, trim out-of-scope content before returning.
 - Instructions read cleanly from start to finish as a single authored document
 - \`definition.input_schema\` is valid JSON with no duplicate keys
 - The response is complete — no trailing "..." or cut-off content
