@@ -305,7 +305,8 @@ export type MergeWarningCode =
   | 'TABLE_ROWS_DROPPED'
   | 'INVOCATION_LOST'
   | 'HITL_LOST'
-  | 'OUTPUT_FORMAT_LOST';
+  | 'OUTPUT_FORMAT_LOST'
+  | 'WARNINGS_TRUNCATED';
 
 export type MergeWarningSeverity = 'warning' | 'critical';
 
@@ -620,7 +621,7 @@ function extractDescriptionBigrams(text: string): Set<string> {
 // Leading whitespace is allowed: the block is detected even if the LLM adds
 // a blank line before it. Matches from the first invocation keyword through
 // the next blank line (or end of string).
-const INVOCATION_TRIGGER_RE = /^\s*(Invoke|Use|Call|Trigger)\s+this\s+skill\b.+?(?:\n\n|\z)/ims;
+const INVOCATION_TRIGGER_RE = /^\s*(Invoke|Use|Call|Trigger)\s+this\s+skill\b.+?(?:\n\n|$)/ims;
 
 /** Extract the opening invocation trigger block from skill instructions, if present.
  *  Returns the trimmed block text, or null if no trigger block is found at the top. */
@@ -871,7 +872,7 @@ export function validateMergeOutput(
   if (warnings.length > MAX_MERGE_WARNINGS) {
     warnings.splice(MAX_MERGE_WARNINGS);
     warnings.push({
-      code: 'SCOPE_EXPANSION',
+      code: 'WARNINGS_TRUNCATED',
       severity: 'warning',
       message: `Additional warnings were truncated (more than ${MAX_MERGE_WARNINGS} issues detected).`,
     });
