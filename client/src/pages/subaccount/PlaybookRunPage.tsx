@@ -27,6 +27,7 @@ import api from '../../lib/api';
 import type { User } from '../../lib/auth';
 import { useSocketRoom, useSocketConnected } from '../../hooks/useSocket';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { HelpHint } from '../../components/ui/HelpHint';
 
 // ─── Types (mirror server shapes; avoid importing server code into client) ───
 
@@ -511,34 +512,43 @@ export default function PlaybookRunPage(_props: { user: User }) {
                 >
                   Replay run
                 </button>
-                <button
+                <div
                   role="menuitem"
-                  onClick={async () => {
-                    setKebabOpen(false);
-                    try {
-                      await api.patch(
-                        `/api/subaccounts/${subaccountId}/playbook-runs/${runId}/portal-visibility`,
-                        { isPortalVisible: !run.isPortalVisible },
-                      );
-                      toast.success(
-                        run.isPortalVisible
-                          ? 'Hidden from portal'
-                          : 'Published to portal',
-                      );
-                      await refresh();
-                    } catch (err) {
-                      toast.error(
-                        (err as { response?: { data?: { error?: string } } })
-                          ?.response?.data?.error ?? 'Failed to toggle portal visibility',
-                      );
-                    }
-                  }}
-                  className="block w-full text-left px-3 py-2 hover:bg-slate-50"
+                  className="flex items-center justify-between px-3 py-2 hover:bg-slate-50"
                 >
-                  {run.isPortalVisible
-                    ? 'Hide from portal'
-                    : 'Show on portal'}
-                </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setKebabOpen(false);
+                      try {
+                        await api.patch(
+                          `/api/subaccounts/${subaccountId}/playbook-runs/${runId}/portal-visibility`,
+                          { isPortalVisible: !run.isPortalVisible },
+                        );
+                        toast.success(
+                          run.isPortalVisible
+                            ? 'Hidden from portal'
+                            : 'Published to portal',
+                        );
+                        await refresh();
+                      } catch (err) {
+                        toast.error(
+                          (err as { response?: { data?: { error?: string } } })
+                            ?.response?.data?.error ?? 'Failed to toggle portal visibility',
+                        );
+                      }
+                    }}
+                    className="flex-1 text-left bg-transparent border-0 cursor-pointer text-[13px] text-slate-800 p-0"
+                  >
+                    {run.isPortalVisible ? 'Hide from portal' : 'Show on portal'}
+                  </button>
+                  {/* §G5.4 — HelpHint on the portal-visibility toggle, one
+                      of the three surfaces this spec creates. Explains what
+                      "portal-visible" means for end-client viewers. */}
+                  <HelpHint
+                    text="When on, this run appears on the sub-account portal so your client can watch progress, approve steps, and see results. Turn off to keep an internal-only run."
+                  />
+                </div>
                 {definition?.slug && (
                   <Link
                     role="menuitem"
