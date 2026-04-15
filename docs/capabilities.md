@@ -27,7 +27,7 @@ This document is written for external-ready, marketing- and sales-appropriate la
 2. **Named providers are permitted only in the Integrations Reference and Skills Reference** — factual product documentation for support, not marketing.
 3. **Marketing- and sales-ready terminology throughout customer-facing sections.** Write for end-users and agency owners, not engineers. Avoid internal service or library names.
 4. **Vendor-neutral positioning even under objection.** Generic category language holds in written collateral regardless of which provider is named in the question.
-5. **Model-agnostic is the north star.** Frame Syntheos as routing to the best model per task across every frontier and open-source LLM. Never imply a preferred provider in customer-facing copy.
+5. **Model-agnostic is the north star.** Frame Synthetos as routing to the best model per task across every frontier and open-source LLM. Never imply a preferred provider in customer-facing copy.
 
 ---
 
@@ -86,7 +86,7 @@ Automation OS enables organisations to:
 
 ## Positioning & Competitive Differentiation
 
-> **Read this before writing any marketing or sales content.** LLM providers and horizontal agent platforms are increasingly shipping overlapping primitives — agents, skills, scheduled runs, memory, team chat. The Syntheos pitch is **not** about having those. It is about what sits on top of them.
+> **Read this before writing any marketing or sales content.** LLM providers and horizontal agent platforms are increasingly shipping overlapping primitives — agents, skills, scheduled runs, memory, team chat. The Synthetos pitch is **not** about having those. It is about what sits on top of them.
 >
 > **Editorial reminder:** never name a specific LLM or AI provider (or their products) in this section. Use generic category language — *"LLM providers," "foundation model vendors," "hosted agent platforms," "shared team chat products," "scheduled-prompt tools," "agent SDKs."* See the Editorial Rules at the top of this document and `CLAUDE.md` for the full rule set.
 
@@ -94,17 +94,17 @@ Automation OS enables organisations to:
 
 LLM providers sell **primitives**: a model, an SDK, scheduled runs, hosted agents, a skills format, a team chat surface. They are capability providers.
 
-**Syntheos sells an operations system that happens to run agents.** That distinction is the whole commercial argument. If the pitch drifts toward "we have agents and skills and scheduling," the pitch loses — those are becoming commodities faster than anyone expected. Keep the pitch on the operations layer: multi-tenant isolation, approval workflows, agency economics, client-facing surfaces, vertical depth.
+**Synthetos sells an operations system that happens to run agents.** That distinction is the whole commercial argument. If the pitch drifts toward "we have agents and skills and scheduling," the pitch loses — those are becoming commodities faster than anyone expected. Keep the pitch on the operations layer: multi-tenant isolation, approval workflows, agency economics, client-facing surfaces, vertical depth.
 
 ### The one-sentence answer
 
-> LLM providers give you a model. Shared team chat products give you group conversations. Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms give you a single agent at a time. **Syntheos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, playbooks, margin tracking, and vertical skills.
+> LLM providers give you a model. Shared team chat products give you group conversations. Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms give you a single agent at a time. **Synthetos is the operations system an agency uses to run its business on top of all of that** — with multi-client isolation, white-label portals, approval workflows, playbooks, margin tracking, and vertical skills.
 
 ### Messaging north star
 
-> **"LLM providers sell capability. Syntheos sells the business."**
+> **"LLM providers sell capability. Synthetos sells the business."**
 
-Every feature brief, positioning slide, and marketing asset should pass this test: does it reinforce that Syntheos is the system of record for agency operations, with LLM providers as supply underneath? If the asset only describes agents, skills, or automation in the abstract, it is indistinguishable from a capability provider — rewrite it.
+Every feature brief, positioning slide, and marketing asset should pass this test: does it reinforce that Synthetos is the system of record for agency operations, with LLM providers as supply underneath? If the asset only describes agents, skills, or automation in the abstract, it is indistinguishable from a capability provider — rewrite it.
 
 ### Structural differentiators
 
@@ -112,40 +112,40 @@ These are the moats LLM providers and horizontal agent platforms structurally ca
 
 | Differentiator | Why it's structural |
 |---|---|
-| **Multi-tenant three-tier isolation** (System → Org → Subaccount) | LLM provider platforms assume a single buyer. Syntheos is built for agencies managing many clients with strict data, memory, skill, and billing isolation enforced at every layer. |
+| **Multi-tenant three-tier isolation** (System → Org → Subaccount) | LLM provider platforms assume a single buyer. Synthetos is built for agencies managing many clients with strict data, memory, skill, and billing isolation enforced at every layer. |
 | **Human-in-the-loop as a system** | 42+ review-gated actions, approve-with-edits, side-effect classification (irreversible steps never auto-retry), rejection as training signal, per-action gate overrides. Agencies cannot deploy unsupervised agents on client accounts. The review system **is** the product. |
-| **Playbook engine with multi-step approval gates** | Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms are single-agent. Syntheos runs multi-step workflows with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
+| **Playbook engine with multi-step approval gates** | Scheduled-prompt tools run one prompt on a cadence. Hosted agent platforms are single-agent. Synthetos runs multi-step workflows with parallel execution, templating between steps, cost simulation, versioning, and save-as-PR authoring. |
 | **Client portal and white-label surface** | LLM providers will not build this — their buyer is the producer, not the consumer of the producer's work. A permanent wedge for agencies serving end-clients. |
 | **Agency economics** | LLM usage ledger with full org → subaccount → run → skill cost attribution, org-level margin configuration, pre-reserved budgets, and cost circuit breakers. Agency P&L (revenue, per-client pricing, per-client margin reporting) is on the roadmap as a first-class surface. LLM providers sell tokens; they do not care what agencies bill. |
-| **Integration framework with managed connectors** | Generic integration protocols are just protocols. Syntheos is a managed integration product with pre-built OAuth flows for the tools agencies already use (CRM, ads, accounting, communication, support desks) — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
+| **Integration framework with managed connectors** | Generic integration protocols are just protocols. Synthetos is a managed integration product with pre-built OAuth flows for the tools agencies already use (CRM, ads, accounting, communication, support desks) — plus connection scoping (org-shared vs subaccount-specific), sync lifecycle (backfill → transition → live), credential rotation, and webhook verification. |
 | **Execution infrastructure maturity** | Idempotency on every run path, pre-reserved budgets with advisory locks, dead-letter queues, loop detection, crash-resume checkpoints, correlation IDs for tracing, workspace health detectors surfacing configuration drift. Table stakes for production agent fleets — absent from every "quickstart" agent platform. |
-| **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, financial transcript analysis. LLM providers ship primitives; Syntheos ships solutions. Verticals compound into pricing power. |
-| **Model-agnostic routing** | Per-skill routing across every frontier and open-source LLM. Building on any one provider's managed stack locks agencies to that provider's pricing and roadmap. Syntheos routes to the best model per task and insulates agencies from provider shifts. |
+| **Vertical depth** | GEO (AI search visibility), Churn Detection with composite health scoring, Portfolio Intelligence across clients, Campaign bid adjustments, financial transcript analysis. LLM providers ship primitives; Synthetos ships solutions. Verticals compound into pricing power. |
+| **Model-agnostic routing** | Per-skill routing across every frontier and open-source LLM. Building on any one provider's managed stack locks agencies to that provider's pricing and roadmap. Synthetos routes to the best model per task and insulates agencies from provider shifts. |
 
-### Objection handling — "Why Syntheos when I can just use the tools from my LLM provider?"
+### Objection handling — "Why Synthetos when I can just use the tools from my LLM provider?"
 
 | Objection | Response |
 |---|---|
-| *"I'll manage my clients in a shared team chat product."* | Shared team chat is built for internal teams sharing context — your clients would see each other's data. Syntheos enforces strict isolation at every layer so per-client data, memory, and configuration never cross. |
-| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Syntheos runs multi-step playbooks with human approvals, cost ceilings, retry policies, idempotent execution, and parallel step execution. Different product category. |
+| *"I'll manage my clients in a shared team chat product."* | Shared team chat is built for internal teams sharing context — your clients would see each other's data. Synthetos enforces strict isolation at every layer so per-client data, memory, and configuration never cross. |
+| *"I'll use a scheduled-prompt tool for scheduling."* | Scheduled-prompt tools run one prompt on a cadence. Synthetos runs multi-step playbooks with human approvals, cost ceilings, retry policies, idempotent execution, and parallel step execution. Different product category. |
 | *"Hosted agents are autonomous — perfect."* | Which is exactly why agencies can't put them on a client's CRM, ad account, or accounting system. 42+ review gates, approve-with-edits, and side-effect classification are not optional for regulated client work — they **are** the trust product agencies need. |
-| *"I'll build on an agent SDK directly."* | Great — Syntheos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering not spent on client work. |
+| *"I'll build on an agent SDK directly."* | Great — Synthetos uses LLM-provider primitives under the hood. But agencies still need multi-tenant isolation, approvals, client portals, playbooks, managed integrations, margin tracking, health monitoring, and a unified inbox. That is 18+ months of engineering not spent on client work. |
 | *"What if an LLM provider ships multi-tenant?"* | They won't — their buyer is not agencies. Even if one did, vertical skills, managed integrations, the client portal, and model-agnostic routing remain. The moat isn't any one feature; it's the operations system. |
-| *"What if a better model ships?"* | Syntheos routes to it per skill. No migration. Build on a single provider's managed stack and that question becomes a year-long project. |
-| *"We already use a commodity workflow automation tool."* | Those are stateless trigger-action chains. Syntheos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
+| *"What if a better model ships?"* | Synthetos routes to it per skill. No migration. Build on a single provider's managed stack and that question becomes a year-long project. |
+| *"We already use a commodity workflow automation tool."* | Those are stateless trigger-action chains. Synthetos is stateful, agent-driven, and designed around human approval gates for high-stakes actions (publishing, CRM writes, budget changes). |
 
-### What Syntheos is NOT trying to be
+### What Synthetos is NOT trying to be
 
 These are **explicit non-goals**. Competing on them is a losing fight against vendors with more capital and a different buyer.
 
 - **Not a better agent SDK.** LLM providers build the models and the SDKs; consuming them under the hood is cheaper than competing with them.
-- **Not a better general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Syntheos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
+- **Not a better general-purpose chat UI.** LLM-provider chat surfaces are excellent at what they do. The Synthetos chat surface exists for agent supervision and task context — not as a general-purpose LLM interface.
 - **Not a standalone IDE or developer platform.** The sandboxed dev mode inside IEE exists for organisation-level extensibility (custom apps or scripts that support bespoke processes) — not as a competitor to general-purpose coding assistants.
-- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Syntheos competes on "run agents responsibly across many clients with approval workflows."
+- **Not a commodity workflow automation tool.** Commodity workflow tools compete on "connect X to Y." Synthetos competes on "run agents responsibly across many clients with approval workflows."
 
 ### How to apply this in GTM content
 
-- **Lead with the operations system, not the agents.** The phrase "Syntheos is an agent platform" is a downgrade. "Syntheos is the operations system agencies run their business on" is the right frame.
+- **Lead with the operations system, not the agents.** The phrase "Synthetos is an agent platform" is a downgrade. "Synthetos is the operations system agencies run their business on" is the right frame.
 - **Show the client-facing surface early.** Screenshots of the client portal, review queue, and per-client P&L convert better than agent-chat screenshots — they look like a product competitors can't match.
 - **Use "agency" explicitly in headlines.** Horizontal positioning invites horizontal comparisons. "For agencies serving multiple clients" pre-filters for ICP and pre-loads the isolation / approval / portal story.
 - **Position LLM providers as supply, not threats.** *"Model-agnostic across every frontier and open-source LLM — we route to the best one per task."* This inoculates against "why not just use [provider]?" before it's asked, without naming any individual provider.

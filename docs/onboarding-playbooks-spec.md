@@ -18,7 +18,7 @@
 5. [Primitive — `SchedulePicker` + universal `runNow`](#5-primitive--schedulepicker--universal-runnow)
 6. [Primitive — `HelpHint`](#6-primitive--helphint)
 7. [Primitive — Unified Knowledge page + auto-attach policy](#7-primitive--unified-knowledge-page--auto-attach-policy)
-8. [Primitive — Playbook `knowledgeBinding`](#8-primitive--playbook-knowledgebinding)
+8. [Primitive — Playbook `knowledgeBindings[]` (Memory Block bindings)](#8-primitive--playbook-knowledgebindings-memory-block-bindings)
 9. [Primitive — Playbook run modal + onboarding tab + portal card](#9-primitive--playbook-run-modal--onboarding-tab--portal-card)
 10. [Primitive — `modules.onboardingPlaybookSlugs`](#10-primitive--modulesonboardingplaybookslugs)
 11. [System template — Daily Intelligence Brief](#11-system-template--daily-intelligence-brief)
@@ -98,7 +98,7 @@ Each goal is phrased as something a test, a gate script, or a scripted clickthro
 ### G4. `SchedulePicker` component
 
 - **G4.1** The component exposes interval (daily, weekly, monthly, quarterly, half-yearly, annually), first-run date, and optional time-of-day.
-- **G4.2** The component emits a canonical `{ interval, firstRunAt, cron }` object that the backend converts to a pg-boss cron string.
+- **G4.2** The component emits a `SchedulePickerValue` object (no cron string). Cron construction is performed server-side by `schedulePickerValueToCron()` — the component never emits or knows about cron expressions.
 - **G4.3** Invalid combinations (first-run-in-the-past, unsupported interval/day-of-week mixes) are blocked client-side with inline messages.
 
 ### G5. `HelpHint` primitive
@@ -122,12 +122,20 @@ Each goal is phrased as something a test, a gate script, or a scripted clickthro
 - **G7.2** When a new agent is linked to a subaccount, it inherits attachments for every Reference note in that subaccount that has `autoAttach: true`.
 - **G7.3** Attachments created via auto-attach can be individually detached and do not reappear.
 
-### G8. Playbook `knowledgeBinding`
+### G8. Playbook knowledge capture — `referenceBinding` and `knowledgeBindings`
 
-- **G8.1** A `user_input` step may declare `knowledgeBinding: { target: 'reference_note', name: string, autoAttach: boolean }` on a named form field.
+There are two distinct knowledge-capture mechanisms. They share a purpose (playbooks leave facts behind) but operate at different layers and write to different stores.
+
+**`referenceBinding` — step-level, writes to Reference notes (workspace_memory_entries)**
+
+- **G8.1** A `user_input` step may declare `referenceBinding: { target: 'reference_note', name: string, autoAttach: boolean }` on a named form field.
 - **G8.2** When that step completes, the form value is appended to the named Reference note (creating it if absent) with attribution to the run and timestamp.
-- **G8.3** The validator rejects `knowledgeBinding` on any step type other than `user_input`.
-- **G8.4** The validator rejects `knowledgeBinding` pointing at a field that is not present in the step's `formSchema`.
+- **G8.3** The validator rejects `referenceBinding` on any step type other than `user_input`.
+- **G8.4** The validator rejects `referenceBinding` pointing at a field that is not present in the step's `formSchema`.
+
+**`knowledgeBindings[]` — playbook-level, writes to Memory Blocks (memory_blocks)**
+
+Declared as a top-level array on `PlaybookDefinition`. Each entry maps a named step output to a Memory Block label. Evaluated at run completion by `finaliseRun()`. Full definition in §8.
 
 ### G9. Playbook run modal
 
@@ -208,7 +216,7 @@ The following are explicitly out of scope for this spec and must not be added du
 │  └─────────┘  └───────────────┘  └──────────────┘  └──────────────┘ │
 │       │                                │                                │
 │       │ (fields bound via              │ invokes config_* skill via    │
-│       │  knowledgeBinding write        │ skillExecutor → actionService │
+│       │  referenceBinding write        │ skillExecutor → actionService │
 │       │  to memory_blocks)             │  → configHistoryService       │
 │       ▼                                ▼                                │
 │  ┌─────────────────────┐      ┌─────────────────────────┐              │
@@ -229,21 +237,34 @@ The following are explicitly out of scope for this spec and must not be added du
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Data contracts at a glance
+### 3.2 Terminology — "knowledge", "References", "Memory Blocks"
+
+**Reference notes** (backed by `workspace_memory_entries`) are long-form, human-readable notes. They are retrieved on demand, typically via vector search or explicit lookup. They are the cold path: not loaded into every agent run.
+
+**Memory Blocks** (backed by `memory_blocks`) are short, stable facts loaded wholesale into every agent run as system context. They are the hot path: always present.
+
+**"Knowledge"** is the collective term for both. The Unified Knowledge page (§7) exposes both stores under one roof. When docs or UX copy say "knowledge", they mean the union. When code or spec language says "Memory Block" or "Reference note", they mean a specific store.
+
+### 3.3 Data contracts at a glance
 
 | Entity | New? | Change |
 |---|---|---|
 | `PlaybookStep.type` | modified | Add `'action_call'` literal |
 | `PlaybookStep.actionSlug` / `.actionInputs` | new fields | Populated on `action_call` steps |
-| `PlaybookStep.knowledgeBinding` | new field | Populated on `user_input` steps that should write to a Reference note |
+| `PlaybookStep.referenceBinding` | new field | Populated on `user_input` steps that should write form values to a Reference note (workspace_memory_entries) |
 | `ValidationRule` | extended | Add `action_slug_not_allowed`, `knowledge_binding_on_wrong_step_type`, `knowledge_binding_field_not_in_schema` |
 | `modules.onboarding_playbook_slugs` | new column | `jsonb` default `[]`, admin-editable |
 | `subaccount_onboarding_state` | new table | `(subaccountId, playbookSlug, status, lastRunId, completedAt)` |
 | `memory_blocks.auto_attach` | new column | `boolean` default `false`, drives inheritance on agent-link |
 | `memory_block_attachments.source` | new column | `'manual' \| 'auto_attach'` so we can tell inherited attachments from manual ones |
-| `scheduled_tasks` | no schema change | New argument `runNow` on creation service; cron unchanged |
+| `memory_blocks.confidence` | new column | `'low' \| 'normal'` — flags first-run LLM-generated blocks for human review |
+| `scheduled_tasks.created_by_playbook_slug` | new column | `text \| null` — set when created from a playbook `action_call`; enables lifecycle management |
+| `scheduled_tasks` | service change | New `runNow` arg, uniqueness invariant on `(subaccountId, taskSlug)`, `scheduled_task_run_now_failed` event emitted on enqueue failure |
+| `PlaybookStepRun.status` | extended | Add `'skipped'` literal for dependency-failure propagation |
+| `ActionCallStep.idempotencyScope` | new field | `'run' \| 'entity'` — overrides default run-scoped key for business-action-scoped deduplication |
+| `playbookRun.templateVersionId` | contract | Immutable after run creation — set at `startRun()` and never updated, even if the template is re-published mid-run. The engine always resolves the definition from the pinned version, not the current published version. |
 
-### 3.3 Execution pipeline for an `action_call` step
+### 3.4 Execution pipeline for an `action_call` step
 
 The existing engine already has infrastructure for replay, supervised-mode gating, idempotency, input-hash reuse, and HITL routing. `action_call` reuses all of it. The dispatch path:
 
@@ -279,7 +300,7 @@ engine.dispatchStep(step with type='action_call')
 
 Key property: **no code path bypasses `proposeAction`.** The same audit, gate, and idempotency guarantees the UI enjoys apply to playbook-driven mutations.
 
-### 3.4 Knowledge architecture
+### 3.5 Knowledge architecture
 
 Two stores, one UI.
 
@@ -295,7 +316,7 @@ Knowledge page (/subaccounts/:id/knowledge)
 │
 └── Tab: Memory Blocks          ──→ memory_blocks (subaccount-scoped rows)
       - Short, stable facts loaded into every agent run
-      - Toggle: autoAttach (default: true for blocks created via knowledgeBinding)
+      - Toggle: autoAttach (default: true for blocks created via knowledgeBindings[])
       - Attached to agents via memory_block_attachments (with .source column)
 ```
 
@@ -305,7 +326,7 @@ Auto-attach policy:
 - When a new agent is linked to the subaccount, the link service iterates `autoAttach: true` Reference notes in that subaccount and creates attachments.
 - Users can manually detach an auto-attached note; the `source: 'auto_attach'` marker prevents the system from re-creating the attachment.
 
-### 3.5 Universal run-now pattern
+### 3.6 Universal run-now pattern
 
 `SchedulePicker` emits `{ interval, firstRunAt, runNow: boolean }`. The scheduled-task creation service receives this alongside the normal cron payload:
 
@@ -314,17 +335,17 @@ Auto-attach policy:
 
 The pattern lives in `scheduledTaskService.create()` — every UI surface creating a task passes through the same service, so there is exactly one place to implement and test this behaviour.
 
-### 3.6 File inventory
+### 3.7 File inventory
 
 Files the build will create, modify, or delete. Drift between this list and reality is a spec-review blocker.
 
 | Action | Path | Purpose |
 |---|---|---|
 | create | `server/lib/playbook/actionCallAllowlist.ts` | Frozen list of the 28 `config_*` slugs callable from `action_call` |
-| modify | `server/lib/playbook/types.ts` | Add `'action_call'` to `StepType`; add `actionSlug`, `actionInputs`, `knowledgeBinding` fields; add new `ValidationRule` entries |
-| modify | `server/lib/playbook/validator.ts` | New `case 'action_call':` and `knowledgeBinding` validation |
+| modify | `server/lib/playbook/types.ts` | Add `'action_call'` to `StepType`; add `actionSlug`, `actionInputs`, `referenceBinding` (step-level) fields; add new `ValidationRule` entries |
+| modify | `server/lib/playbook/validator.ts` | New `case 'action_call':` and `referenceBinding` validation; playbook-level `knowledgeBindings[]` validation |
 | modify | `server/lib/playbook/renderer.ts` | Emit new fields |
-| modify | `server/services/playbookEngineService.ts` | New `case 'action_call':` in `dispatchStep`; knowledge-binding side effect on `user_input` completion |
+| modify | `server/services/playbookEngineService.ts` | New `case 'action_call':` in `dispatchStep`; `referenceBinding` side effect on `user_input` completion; `knowledgeBindings[]` evaluation in `finaliseRun()` |
 | create | `server/services/playbookActionCallExecutor.ts` | `executeActionCall()` thin helper — routes through proposeAction, returns status |
 | create | `server/services/__tests__/actionCallValidator.pure.test.ts` | Validator rules for `action_call` steps |
 | create | `server/services/__tests__/actionCallAllowlist.pure.test.ts` | Snapshot test over frozen allowlist set |
@@ -452,12 +473,29 @@ Added to `server/lib/playbook/validator.ts`:
 |---|---|---|
 | `missing_field` (existing) | `type='action_call'` && `!actionSlug` | `action_call step '<id>' must declare actionSlug` |
 | `action_slug_not_allowed` (new) | `actionSlug` not in `ACTION_CALL_ALLOWED_SLUGS` | `action_call step '<id>' references action '<slug>', which is not on the action_call allowlist. See server/lib/playbook/actionCallAllowlist.ts.` |
+| `entity_idempotency_required` (new) | `actionSlug` is in `SINGLETON_RESOURCE_ACTIONS` && `idempotencyScope !== 'entity'` | `action_call step '<id>' calls '<slug>' which creates a singleton resource. Set idempotencyScope: 'entity' and provide entityKey to prevent duplicate creation across runs.` |
+
+`SINGLETON_RESOURCE_ACTIONS` is a frozen set defined alongside the allowlist in `actionCallAllowlist.ts`. Initial members: `['config_create_scheduled_task']`. Future allowlisted actions that create resources with natural business-level uniqueness (e.g. a hypothetical `config_create_subaccount`) must be added here. This turns a soft convention into a hard validator invariant — a playbook that omits `idempotencyScope: 'entity'` on these actions cannot be published.
 
 Template reference collection: `actionInputs` values are scanned with `extractReferences()` and subject to the same `transitive_dep` and `unresolved_template_ref` rules as `agentInputs`.
 
-`sideEffectType` cross-check: if `actionSlug` is a read (`config_list_*`, `config_get_*`, `config_view_history`), `sideEffectType` must be `'none'` or `'idempotent'`. If `actionSlug` is a mutation, `sideEffectType` must be `'reversible'` or `'irreversible'`. This mismatch is surfaced as `missing_side_effect_type` for the read case (mismatched tightness) and as a new `action_side_effect_mismatch` rule for write-typed-as-none. **Open question:** is this cross-check worth the complexity or should we trust the author? See §15.
+`sideEffectType` cross-check: if `actionSlug` is a read (`config_list_*`, `config_get_*`, `config_view_history`), `sideEffectType` must be `'none'` or `'idempotent'`. If `actionSlug` is a mutation, `sideEffectType` must be `'reversible'` or `'irreversible'`. This mismatch is surfaced as `missing_side_effect_type` for the read case and as `action_side_effect_mismatch` for write-typed-as-none. **This cross-check is mandatory** — a mismatch blocks publish. Template publish (`publishOrgTemplate()`) and `startRun()` both reject definitions that fail this rule. The check is not optional because misclassified steps break retry safety and replay assumptions.
 
-Definition-time validation does NOT check `actionInputs` values against the action's `parameterSchema` because resolved values are only known at run time. Runtime validation happens when `skillExecutor.execute()` runs — the skill handlers already validate their inputs with Zod and return `{ success: false, error: ... }` on shape violations, which the engine turns into step failure.
+Definition-time validation does NOT check `actionInputs` values against the action's `parameterSchema` because resolved values are only known at run time.
+
+### 4.4.1 Dependency failure propagation
+
+When a step fails, the engine must explicitly propagate that failure to all downstream dependents rather than leaving them in `pending` indefinitely.
+
+**Rule:** If a step transitions to `failed`, every step that has a `dependsOn` relationship to it (direct or transitive) is immediately transitioned to `skipped` with reason `skipped_due_to_dependency_failure`. These steps MUST NOT execute.
+
+New step status value: `'skipped'` — added to the `PlaybookStepRunStatus` union. A skipped step:
+- Emits a `step_skipped` event with `{ reason: 'dependency_failure', failedStepId }`.
+- Is shown in the run modal step rail with a grey "Skipped" pill and the name of the failed parent step.
+- Does NOT count toward the `completed_with_errors` threshold — a run where all failures are dependency-cascades from a single root step is still `failed`, not `completed_with_errors`.
+- Is excluded from retry — retrying a skipped step is a no-op until the root step is retried first.
+
+This rule applies to `action_call`, `agent_call`, `prompt`, and `approval` steps. `user_input` steps can also be skipped if a preceding step they depend on fails, but they are never auto-retried. Runtime validation happens when `skillExecutor.execute()` runs — the skill handlers already validate their inputs with Zod and return `{ success: false, error: ... }` on shape violations, which the engine turns into step failure.
 
 ### 4.5 Engine dispatch
 
@@ -499,6 +537,12 @@ case 'action_call': {
   if (step.sideEffectType !== 'irreversible') {
     const reuse = await this.findReusableOutputForStep(run.id, step.id, dispatchInputHash);
     if (reuse) {
+      await runEventService.emit(run, {
+        code: 'idempotency_hit',
+        actionSlug: actionStep.actionSlug,
+        scope: actionStep.idempotencyScope ?? 'run',
+        key: `playbook:${run.id}:${step.id}`,  // or entity key if scope='entity'
+      });
       await this.completeStepRunInternal(sr, reuse.output, reuse.outputHash, `input_hash_reuse:from_attempt_${reuse.attempt}`);
       return;
     }
@@ -525,7 +569,14 @@ case 'action_call': {
       playbookStepRunId: sr.id,
       actionSlug: actionStep.actionSlug,
       actionInputs: resolvedActionInputs,
-      idempotencyKey: `playbook:${run.id}:${step.id}:${sr.attempt}`,
+      idempotencyKey: resolveIdempotencyKey(step, run, sr.attempt),
+      // resolveIdempotencyKey:
+      //   if step.idempotencyScope === 'entity' → use step.entityKey (e.g. `task:${subaccountId}:${taskSlug}`)
+      //   else (default 'run') → `playbook:${run.id}:${step.id}:${sr.attempt}`
+      //
+      // config_create_scheduled_task MUST use idempotencyScope: 'entity' with
+      // entityKey: `task:${subaccountId}:${taskSlug}` so cross-run replay and
+      // concurrent runs deduplicate against the same business object, not the run id.
     });
     // result: { success: true, output } | { success: false, error, reason }
     if (result.status === 'blocked') {
@@ -546,7 +597,13 @@ case 'action_call': {
     // approved + executed
     await this.completeStepRunInternal(sr, result.output, hashValue(result.output), 'action_call');
   } catch (err) {
-    await this.failStepRunInternal(sr, `action_call_error: ${err instanceof Error ? err.message : String(err)}`);
+    const reason = err instanceof ActionTimeoutError
+      ? 'action_timeout'
+      : `action_call_error: ${err instanceof Error ? err.message : String(err)}`;
+    await this.failStepRunInternal(sr, reason, {
+      failureType: err instanceof ActionTimeoutError ? 'external_error' : 'internal_error',
+      retryable: !(step.sideEffectType === 'irreversible'),
+    });
   }
   return;
 }
@@ -566,13 +623,39 @@ interface ActionCallExecuteArgs {
   actionSlug: string;
   actionInputs: Record<string, unknown>;
   idempotencyKey: string;
+  timeoutMs?: number;           // default 30_000 (30s)
 }
+
+// Timeout default is 30s. Exceeded → ActionTimeoutError → step fails with reason 'action_timeout'.
+// The engine wraps executeActionCall in a Promise.race against a timeout sentinel.
+// Callers may override for known-slow skills (e.g. email provider with retries) up to 120s.
+// Timeouts are classified as failureType: 'external_error', retryable: true (unless irreversible).
+
+// GLOBAL STEP TIMEOUT POLICY (applies to all step types, not just action_call):
+// Every step type has a default execution timeout. The engine enforces this at the
+// dispatchStep level, wrapping all step execution in a timeout Promise.race.
+//
+// | Step type    | Default timeout | Override max |
+// |--------------|----------------|--------------|
+// | action_call  | 30s            | 120s         |
+// | agent_call   | 30s            | 300s (LLM may be slow on long tasks) |
+// | prompt       | 30s            | 120s         |
+// | user_input   | no timeout     | n/a (awaits human response indefinitely) |
+// | approval     | no timeout     | n/a (awaits human response indefinitely) |
+//
+// Timeout → failureType: 'external_error', retryable: true (for all step types).
+// Override via step.timeoutMs in the definition. Values above the max are clamped.
 
 type ActionCallExecuteResult =
   | { status: 'approved_and_executed'; actionId: string; output: unknown }
   | { status: 'pending_approval'; actionId: string }
   | { status: 'blocked'; actionId: string; reason?: string }
   | { status: 'failed'; actionId: string; error: string };
+
+// Output size guard: if result.output serialises to > 200KB, the executor replaces it
+// with a truncated stub { _truncated: true, originalSize: N, preview: first 500 chars }
+// and emits a warning event 'action_output_truncated'. This prevents large payloads from
+// bloating playbookStepRuns.outputJson and downstream template resolution.
 ```
 
 ### 4.7 HITL resumption
@@ -607,6 +690,120 @@ Guidance baked into the validator's error messages and the spec:
 | `config_preview_plan`, `config_run_health_check` | `none` |
 
 None of the 28 slugs are strictly `irreversible`. If a future allowlisted slug is (e.g. a hypothetical `config_delete_organisation`), the author must set `irreversible` and `retryPolicy.maxAttempts: 1` or the existing `irreversible_with_retries` rule blocks publish.
+
+### 4.11 Retry policy per side-effect type
+
+Retry limits are enforced by the engine dispatcher, not left to playbook authors to set correctly. The defaults per `sideEffectType`:
+
+| `sideEffectType` | Default `maxAttempts` | Rationale |
+|---|---|---|
+| `none` / `idempotent` | 3 | Safe to retry — same-input re-execution has no additional side effects |
+| `reversible` | 2 | Safe to retry but may produce duplicate history entries; keep it short |
+| `irreversible` | 1 | No retry — e.g. sending an email twice is a product defect, not a recoverable error |
+
+Playbook authors may lower (but not raise) these defaults by setting `retryPolicy.maxAttempts` explicitly. All retries reuse the same idempotency key as the first attempt — this is an invariant, not a suggestion.
+
+**Backoff:** retries use exponential backoff starting at 1 second: attempt 1 → 1s delay, attempt 2 → 3s delay, attempt 3 → 9s delay (capped at 30s). This is enforced by the engine dispatcher via `setTimeout` before re-entering `dispatchStep` — not delegated to pg-boss or the skill handler.
+
+### 4.12 Run-level result semantics
+
+`playbookRun.status` is set by `finaliseRun()` after all steps reach a terminal state:
+
+```ts
+type PlaybookRunStatus =
+  | 'completed'           // all steps succeeded; all knowledgeBindings fired
+  | 'completed_with_errors' // at least one non-terminal step failed; earlier side-effects remain valid
+  | 'failed'              // run could not reach a usable end state
+```
+
+Rules:
+
+- **`completed`** — every step's `status = 'completed'`. All bindings fired successfully. Includes no-op runs (see below).
+- **`completed_with_errors`** — one or more steps failed, but at least one terminal step (a step declared `final: true`) completed. The run produced usable output; downstream systems (portal card, email digest) MUST treat it as degraded but valid output — they must not discard it.
+- **`failed`** — no terminal step completed, OR a required step failed before any output was produced.
+
+**No-op run definition.** A run where all steps complete successfully but zero mutations were executed, zero knowledge bindings applied, and zero external outputs persisted is still `completed` — not a special status. This is the correct and expected outcome when, for example, `config_create_scheduled_task` finds an existing task and returns early (idempotent return). The engine emits a `run_noop` event on `finaliseRun()` when it detects this condition (`sideEffectsCommitted: false` across all steps), giving analytics and debugging visibility without introducing a new terminal state.
+
+The distinction matters for the portal card and email digest. A `completed_with_errors` run that successfully executed `publish_portal` but failed `send_email` should still render the portal card. Callers must check the run's `status`, not assume that a non-`completed` run produced nothing.
+
+`completed_with_errors` is surfaced in the run modal as an amber status pill with a "Some steps failed — view details" expansion.
+
+**Terminal step canonical output rule.** Multiple steps can declare `final: true`, but exactly one may define the canonical output consumed by downstream systems (portal card, email digest). Rule: if multiple `final: true` steps succeed, the last one in DAG topological order wins. If none succeed, the run is `failed` regardless of how many non-terminal steps completed. This prevents ambiguous portal or email outputs when two terminal steps produce conflicting content.
+
+### 4.13 Event completeness invariant
+
+Every step state transition MUST emit a corresponding event. No silent transitions are permitted. The invariant:
+
+| Transition | Required event |
+|---|---|
+| `pending` → `running` | `step_started` |
+| `running` → `completed` | `step_completed` |
+| `running` → `failed` | `step_failed` (with `reason`, `failureType`, `retryable`) |
+| `pending` → `skipped` | `step_skipped` (with `reason: 'dependency_failure'`, `failedStepId`) |
+| `pending` → `awaiting_approval` | `step_awaiting_approval` |
+| `awaiting_approval` → `running` | `step_approved` |
+| `awaiting_approval` → `failed` | `step_rejected` |
+| `pending` → `skipped` (run cancelled) | `step_skipped` (with `reason: 'run_cancelled'`) |
+
+The engine dispatcher is responsible for emitting these events before returning from each transition. Missing events are a correctness bug — they break the run modal timeline, make replay non-deterministic, and prevent the UI from showing accurate step state.
+
+Additionally, `pending` → `skipped` with reason `run_cancelled` must be emitted for all steps that never started when a run is cancelled (see §4.14).
+
+### 4.14 Step execution ordering
+
+When multiple steps are simultaneously runnable (no unsatisfied `dependsOn` edges), the engine MUST execute them in a deterministic order: **topological order, then stable ascending sort by `step.id`**. This guarantees identical execution order across all runs of the same definition, making replay fully deterministic and preventing race conditions on shared resources (e.g. two steps both writing to the same Memory Block label).
+
+### 4.15 Step output immutability
+
+`playbookStepRuns.outputJson` is **immutable after the step transitions to `completed`**. No code path may update `outputJson` on a completed step run row. If a correction is needed (e.g. HITL approve-and-edit), the engine creates a new `playbookStepRun` row with an incremented `version` — it does not overwrite the prior row.
+
+This invariant exists because:
+- Replay reconstructs context from stored outputs; mutating them makes replay results diverge from the original.
+- The input hash `outputHash` is computed at completion time — a post-hoc mutation invalidates the hash.
+- The audit trail depends on outputs being append-only records.
+
+Enforcement: `completeStepRunInternal()` uses an `UPDATE ... WHERE id = ? AND status != 'completed'` guard. A zero-row update indicates the step was already completed and MUST be treated as a bug, not silently ignored.
+
+### 4.16 Global step output size cap
+
+Any step output used for template resolution must not exceed **200KB** when serialised to JSON. This applies to all step types (`action_call`, `agent_call`, `prompt`, `user_input`). Enforcement:
+
+- `completeStepRunInternal()` measures `JSON.stringify(output).length` before writing.
+- If `> 200KB`: the output is stored as-is (for audit), but a truncated stub replaces it in the run context fed to downstream template resolution:
+  ```ts
+  { _truncated: true, originalSize: N, preview: first500chars }
+  ```
+- A `step_output_truncated` warning event is emitted.
+- Downstream steps that depend on the truncated output will receive the stub; their own templating may fail with `unresolved_template_ref` if they reference a path that was lost. This is the correct failure mode — it surfaces the root cause rather than silently propagating a truncated value.
+
+### 4.17 Run cancellation propagation
+
+When a run is cancelled (via the run modal cancel action or API):
+
+1. The `playbookRuns.status` is set to `cancelled`.
+2. Any step currently in `running` status is **allowed to complete** — its result is written and the step transitions to `completed` or `failed` normally. The engine does not abort in-flight steps.
+3. No new steps are dispatched after the cancellation is recorded.
+4. All steps still in `pending` or `awaiting_approval` are immediately transitioned to `skipped` with reason `run_cancelled`. Each emits a `step_skipped` event per §4.13.
+5. `knowledgeBindings` do NOT fire on a cancelled run, even if all their source steps completed.
+
+The run modal reflects this with a grey "Cancelled" header pill and a "Some steps ran — view details" note when one or more steps completed before cancellation.
+
+### 4.18 `agent_call` output schema enforcement
+
+`agent_call` steps declare an `outputSchema` (Zod shape or `z.any()`). When `outputSchema` is not `z.any()`, the engine validates the agent's raw output against it before calling `completeStepRunInternal`:
+
+```ts
+const parsed = step.outputSchema.safeParse(agentOutput);
+if (!parsed.success) {
+  await this.failStepRunInternal(sr, `agent_output_schema_mismatch: ${parsed.error.message}`, {
+    failureType: 'validation_error',
+    retryable: false,  // schema mismatch is not transient
+  });
+  return;
+}
+```
+
+This aligns `agent_call` and `action_call` — both step types fail hard on bad output shape rather than letting malformed data propagate silently into downstream templating. Authors who cannot guarantee a stable output shape must declare `z.any()` explicitly.
 
 ---
 
@@ -660,11 +857,15 @@ New helper `server/lib/schedule/schedulePickerToCron.ts`:
 export function schedulePickerValueToCron(
   v: SchedulePickerValue,
   subaccountTimezone: string,
-): { cron: string; firstRunAt: Date } {
+): { cron: string; firstRunAt: Date; firstRunAtTz: string } {
   // pure translation — no I/O.
   // emits cron expressions compatible with pg-boss's node-cron parser.
+  // firstRunAt: UTC Date for pg-boss
+  // firstRunAtTz: the original IANA timezone label (e.g. 'America/New_York')
 }
 ```
+
+`scheduled_tasks` stores both `first_run_at` (UTC timestamp) and `first_run_at_tz` (text, IANA timezone label). Storing the original timezone prevents DST ambiguity when the task is later inspected, edited, or migrated — the UTC value alone is uninterpretable if the subaccount's timezone changes or if the stored time falls in a DST gap.
 
 Unit-tested exhaustively (every interval × DST boundary × end-of-month edge case). Pure function → file pattern `*.pure.ts` and `*.pure.test.ts`.
 
@@ -692,11 +893,80 @@ async create(args: CreateScheduledTaskArgs) {
 
 The singleton key guarantees idempotency — re-submitting the form or re-running the playbook's `action_call` with the same idempotency key cannot produce a second immediate run.
 
+### 5.4.1 Scheduled task uniqueness invariant
+
+`scheduledTaskService.create()` enforces uniqueness on `(subaccountId, taskSlug)` before inserting. If an active task with the same pair already exists, the service returns the existing task (upsert-or-return semantics) rather than creating a duplicate. This prevents playbook replay and concurrent form submissions from producing multiple cron jobs for the same logical task.
+
+The invariant is checked at the service layer, not only in the `config_create_scheduled_task` skill — every code path that calls `scheduledTaskService.create()` gets deduplication automatically.
+
+Callers that need to intentionally replace a task (e.g. the user changes the schedule) must call `scheduledTaskService.update()` explicitly, which deregisters the old cron and registers the new one atomically.
+
+### 5.4.2 `createdByPlaybookSlug` field
+
+`scheduled_tasks` gains a new nullable column:
+
+```sql
+ALTER TABLE scheduled_tasks
+  ADD COLUMN created_by_playbook_slug text DEFAULT NULL;
+```
+
+Set on insert when the creation originates from a playbook `action_call` step (forwarded via `config_create_scheduled_task`'s input schema). Null for all tasks created via UI or Configuration Assistant chat.
+
+This field enables deterministic lifecycle management: tasks where `created_by_playbook_slug IS NOT NULL` are considered system-owned and can be queried, audited, or cleaned up as a set.
+
+**Lifecycle manageability invariant.** `scheduledTaskService` MUST expose two methods for operating on system-owned tasks in bulk:
+
+```ts
+// List all active system-owned tasks for a given playbook slug across subaccounts
+listByPlaybookSlug(playbookSlug: string, orgId: string): Promise<ScheduledTask[]>
+
+// Deactivate (soft-delete) all system-owned tasks for a playbook slug in a subaccount
+deactivateByPlaybookSlug(playbookSlug: string, subaccountId: string): Promise<void>
+```
+
+These methods exist so that when a playbook template is retired or a subaccount offboards, system-owned tasks can be found and stopped without manual DB intervention. `deactivateByPlaybookSlug` deregisters the pg-boss cron as well as soft-deleting the row. Auto-cleanup on template removal is out of scope for v1 — but these methods make a future cleanup job trivially implementable.
+
+Added to the data contracts table (§3.2) and to migration `0119_modules_onboarding_playbook_slugs.sql`.
+
+### 5.4.3 `scheduledTaskService.update()` atomicity invariant
+
+Schedule updates must be atomic: either the old schedule continues or the new schedule replaces it. A partial failure that deregisters the old cron but fails to register the new one leaves the task invisible to pg-boss — no runs will ever fire.
+
+**Required implementation pattern:**
+
+1. Register the new cron with pg-boss first (addCronJob with the new expression).
+2. Only after successful registration, deregister the old cron (removeCronJob with the old key).
+3. If step 1 fails, abort — the old cron remains active and an error is returned.
+4. If step 2 fails, log and retry asynchronously — the task now has two cron registrations, which is safe (pg-boss deduplicates via key) but should be cleaned up.
+
+**Cron key determinism invariant.** All pg-boss cron keys must be derived deterministically from `taskId`: `cron-task:${task.id}`. Never use dynamic or random components. This guarantee means that even if a task ends up with two cron registrations (step 1 succeeded, step 2 failed), pg-boss will treat them as the same job and execute it exactly once. Implementation that uses non-deterministic keys (timestamps, random suffixes) breaks this guarantee and creates duplicate execution risk.
+
+**Never** deregister before registering. Wrap in a DB transaction where possible so the `scheduled_tasks` row update and the pg-boss calls are committed together (or rolled back together if the pg-boss calls fail).
+
 ### 5.5 `config_create_scheduled_task` pass-through
 
 The Configuration Assistant skill handler receives a new optional `runNow` field in its input schema. The handler forwards it to `scheduledTaskService.create()`. When `action_call` invokes the skill with `runNow: true`, the immediate job fires as part of the action's execution — no separate playbook step needed.
 
 This is the pattern: **`runNow` is a scheduled-task flag, not a playbook-engine flag.** Every path that creates a scheduled task (UI form, Configuration Assistant chat, `action_call` step, future `/api/scheduled-tasks` endpoint) accepts it uniformly.
+
+### 5.5.1 `config_create_scheduled_task` strict idempotency guarantee
+
+`config_create_scheduled_task` MUST be **strictly idempotent**: it must never throw or return an error when called with inputs that would create a duplicate of an existing active task. Instead it must always return the canonical existing task as if it had created it.
+
+This guarantee exists because:
+- A playbook may be replayed, retried, or accidentally triggered twice (e.g. auto-start race followed by manual start).
+- The entity-scoped idempotency key (§4.5 dispatch) deduplicates at the action pipeline level, but the skill handler is also called directly in non-playbook contexts.
+
+Implementation contract for the skill handler:
+
+```ts
+// config_create_scheduled_task handler
+const existing = await scheduledTaskService.findActiveBySlug(subaccountId, taskSlug);
+if (existing) return { taskId: existing.id, scheduleId: existing.scheduleId };  // idempotent return
+// ...else proceed with creation
+```
+
+This invariant eliminates the entire class of "duplicate scheduled task" bugs regardless of which idempotency layer catches the call first.
 
 ### 5.6 UI surfaces adopting `SchedulePicker` on initial build
 
@@ -718,10 +988,19 @@ If the recurring cron registers successfully but the `runNow` pg-boss send fails
 
 - The task is created (user sees it in the list).
 - The immediate run is absent.
+- The service emits a `scheduled_task_run_now_failed` event, stored on the task's event log (same table as other task events), with fields `{ taskId, error, attemptedAt }`. This persists across page reloads and makes the failure debuggable without relying on server logs.
 - The UI surfaces a non-blocking toast: "Your brief is scheduled — the first run didn't start automatically. Click Run now to retry."
 - Every task row has a persistent "Run now" button (triggers the same idempotent enqueue) so the recovery path is obvious.
 
 We do NOT roll back the task creation if the immediate enqueue fails. The recurring schedule is the contract; the immediate run is a convenience.
+
+### 5.9 Replay interaction with `runNow`
+
+Replay mode MUST NOT enqueue `runNow` jobs, even if the original run's `action_call` step passed `runNow: true` to `config_create_scheduled_task`.
+
+Rule: inside `executeActionCall()`, when `run.replayMode === true`, the resolver strips `runNow` from the resolved `actionInputs` before forwarding to `skillExecutor`. The skill handler never sees it. This is enforced in the executor, not left to playbook authors.
+
+The engine emits a `run_now_skipped_replay` event on the step when this stripping occurs, so the replay timeline makes the suppression visible. Without this rule, replaying a run that created a scheduled task would fire a second immediate brief — a confusing and potentially duplicated user-visible side effect.
 
 ---
 
@@ -900,7 +1179,7 @@ A core goal of onboarding is populating Memory Blocks without asking the user to
 
 **Mechanism A — Playbook outputs write to Memory Blocks.**
 
-Playbooks can declare a `knowledgeBinding` (§8) that maps a named step output to a specific block label. On run completion, the engine calls `memoryBlockService.upsertFromPlaybook({ subaccountId, label, content, sourceRunId })` for each bound output. Upsert semantics:
+Playbooks can declare `knowledgeBindings[]` (§8) that map named step outputs to specific Memory Block labels. On run completion, the engine calls `memoryBlockService.upsertFromPlaybook({ subaccountId, label, content, sourceRunId })` for each bound output. Upsert semantics:
 
 - If a block with that label exists for the sub-account, its content is replaced and `updatedAt` is bumped.
 - If no such block exists, it is created.
@@ -927,13 +1206,15 @@ Any Reference created via `action_call → config_create_workspace_memory_entry`
 
 ---
 
-## 8. Primitive — Playbook `knowledgeBinding`
+## 8. Primitive — Playbook `knowledgeBindings[]` (Memory Block bindings)
+
+> **Note on naming.** Two knowledge-capture mechanisms exist in this spec. `referenceBinding` (step-level, §G8) writes form field values from `user_input` steps to Reference notes (workspace_memory_entries). `knowledgeBindings[]` (this section, playbook-level) writes step outputs to Memory Blocks (memory_blocks). They are distinct: different layers, different shapes, different stores. This section covers only `knowledgeBindings[]`.
 
 ### 8.1 Why this is a primitive, not just a playbook field
 
 A playbook is only as useful as what it leaves behind. The Daily Intelligence Brief is the clearest case: the first run captures facts about the sub-account (brand voice, key products, competitors) that every subsequent run — and every unrelated agent run — benefits from reading. Without a declarative binding, the author would have to either (a) hand-write an `action_call` step per block, doubling step counts, or (b) fake it by writing to Workspace Memory Entries and relying on vector retrieval, which undermines the whole point of the hot-path block store.
 
-`knowledgeBinding` is the declarative shortcut: the author says "the output of this step should land in this block", the engine does the upsert.
+`knowledgeBindings[]` is the declarative shortcut: the author says "the output of this step should land in this block", the engine does the upsert.
 
 ### 8.2 Definition shape
 
@@ -950,7 +1231,9 @@ export interface PlaybookKnowledgeBinding {
   /**
    * How to combine this output with existing block content:
    *   - 'replace' — overwrite the block with the new content (default).
-   *   - 'append'  — append with a newline delimiter, trimming to 2000 chars.
+   *   - 'append'  — append with a newline delimiter. If the result exceeds 2000 chars,
+   *                  the combined value is truncated to 2000 chars from the end (newest content
+   *                  is preserved; oldest is dropped). Emits knowledge_binding_truncated event.
    *   - 'merge'   — JSON-aware merge; requires both sides to be JSON objects.
    */
   mergeStrategy?: 'replace' | 'append' | 'merge';
@@ -1012,6 +1295,12 @@ for (const binding of def.knowledgeBindings ?? []) {
     continue;
   }
 
+  const isFirstRun = binding.firstRunOnly && !(await playbookRunRepo.findPriorSuccessfulRun({
+    subaccountId: run.subaccountId,
+    playbookSlug: def.slug,
+    beforeRunId: run.id,
+  }));
+
   await memoryBlockService.upsertFromPlaybook({
     subaccountId: run.subaccountId,
     label: binding.blockLabel,
@@ -1019,11 +1308,18 @@ for (const binding of def.knowledgeBindings ?? []) {
     mergeStrategy: binding.mergeStrategy ?? 'replace',
     sourceRunId: run.id,
     actorAgentId: run._meta.resolvedAgents?.configurationAssistant ?? null,
+    confidence: isFirstRun ? 'low' : 'normal',  // first-run bindings are LLM-generated; flag for human review
   });
 }
 ```
 
 Key properties:
+
+- **`mergeStrategy: 'append'` truncation contract.** Truncation is applied after the append, not before. If `existing_content + '\n' + new_value` exceeds 2,000 characters, the combined string is truncated to 2,000 chars from the **end** (newest content is preserved; oldest is dropped). The executor emits a `knowledge_binding_truncated` event with `{ blockLabel, originalSize, finalSize: 2000 }` so the truncation is visible in the run modal timeline. This is not a step failure — the upsert succeeds with the truncated value.
+
+- **`mergeStrategy: 'merge'` fallback.** At runtime, before applying a `merge` strategy, the executor validates that both the existing block content and the new value are parseable JSON objects (not arrays, strings, or null). If either side fails this check, the strategy falls back to `'replace'` and emits a warning event `knowledge_binding_merge_fallback` with `{ bindingStepId, reason: 'non_object_side', side: 'existing' | 'new' }`. This prevents silent corruption from LLM-generated output that drifts schema across runs. The warning is visible in the run modal timeline and does not fail the step.
+
+- **First-run confidence flag.** When `binding.firstRunOnly` is true and this is the first successful run for the subaccount + slug, the created block receives `confidence: 'low'`. The Knowledge page renders a `HelpHint`-styled indicator on these blocks: "Created by onboarding run — review recommended." No approval gate is added; the flag is purely for visibility. On subsequent runs (where `firstRunOnly` prevents the binding from firing), the flag is not retroactively changed. A human editing the block via the Knowledge page clears the flag automatically (`confidence` resets to `'normal'` on any manual save).
 
 - Bindings are evaluated **after** the run has reached a terminal state — so a mid-run failure never partially-writes blocks.
 - A missing output path emits a warning event (visible in the run modal timeline) but does NOT fail the run. The author can see and fix it on the next version bump.
@@ -1083,7 +1379,7 @@ New contract pieces the modal depends on:
 
 1. **`GET /api/subaccounts/:id/playbook-runs/:runId/envelope`** — single round-trip fetch returning: run row, ordered step-run rows, per-step event timeline (last 100 per step, paginated on scroll), resolved template definition, resolved agent slugs, and the viewer's permission set for this run. Authored in `server/routes/playbookRuns.ts`.
 2. **`PATCH /api/subaccounts/:id/playbook-runs/:runId/portal-visibility`** — toggles the `isPortalVisible` boolean (see §9.4). Admin-only.
-3. **WebSocket room `playbook-run:${runId}`** — emits `step_updated`, `event_appended`, `run_status_changed` messages. Client listens via existing `useSocket` hook. No polling fallback — the envelope fetch on mount is the fallback.
+3. **WebSocket room `playbook-run:${runId}`** — emits `step_updated`, `event_appended`, `run_status_changed` messages. Client listens via existing `useSocket` hook. **Polling fallback:** when the WebSocket is disconnected and `run.status === 'running'`, the client silently re-fetches the envelope every 12 seconds. Polling stops immediately when the run reaches a terminal status (`completed`, `completed_with_errors`, `failed`, `cancelled`). This prevents the modal from becoming permanently stale if the WS drops mid-run without requiring a page refresh.
 
 Behaviour rules:
 
@@ -1151,7 +1447,7 @@ Contract:
   portalPresentation?: {
     cardTitle: string;                // "Daily Intelligence Brief"
     headlineStepId: string;           // Output of this step renders as the preview
-    headlineOutputPath: string;       // Path within that output (same grammar as knowledgeBinding)
+    headlineOutputPath: string;       // Path within that output (same grammar as knowledgeBindings[].outputPath)
     detailRoute?: string;             // Deep link within the portal; default is the run modal
   };
   ```
@@ -1159,6 +1455,29 @@ Contract:
 - **Run now** button on the card hits the universal `runNow` enqueue (§5) for the associated scheduled task. Idempotent. Disabled with tooltip "Already running" while a run is in flight.
 - **Portal visibility defaults:** `false` for all playbooks except those whose template's `portalPresentation` is set. Admin can override per-run via the run modal toggle (§9.2).
 - **Security:** the portal route resolver calls `resolveSubaccount(subaccountId, orgId)` with the portal user's `orgId`, then filters runs by `subaccountId` AND `isPortalVisible = true`. No cross-sub-account leakage.
+
+- **Portal vs email partial-success behaviour.** Portal and email are independent `action_call` steps. One can succeed while the other fails. The explicit rules:
+
+  | Outcome | Behaviour |
+  |---|---|
+  | `publish_portal` succeeds, `send_email` fails | Portal card renders latest brief. No email sent. Run is `completed_with_errors`. No retry of the portal step. |
+  | `send_email` succeeds, `publish_portal` fails | Email sent. Portal shows the previous brief (last successful `isPortalVisible = true` run). Run is `completed_with_errors`. |
+  | Both fail | No new visible output. Portal shows last successful brief. Run is `completed_with_errors` if any other terminal step succeeded, otherwise `failed`. |
+  | Both succeed | Normal. |
+
+  The portal card ALWAYS reflects the last **successful** `publish_portal` execution across all runs for the subaccount+playbook pair — never the latest run's status. The canonical query:
+
+  ```sql
+  SELECT * FROM portal_briefs
+  WHERE subaccount_id = :subaccountId
+    AND playbook_slug = :playbookSlug
+    AND is_portal_visible = true
+    AND retracted_at IS NULL
+  ORDER BY published_at DESC
+  LIMIT 1
+  ```
+
+  All five constraints are required. Omitting `playbook_slug` causes multiple playbooks' briefs to collide. Omitting `retracted_at IS NULL` surfaces admin-retracted briefs. Omitting the `ORDER BY` + `LIMIT 1` makes the query non-deterministic when multiple runs published successfully.
 
 ### 9.5 `HelpHint` placements on these surfaces
 
@@ -1243,6 +1562,24 @@ When a sub-account is created (or a new module is enabled on an existing sub-acc
 
 Rate-limit safety: the auto-start dispatcher runs inside a sub-account creation transaction but enqueues via pg-boss (outside the transaction, on commit) so failure to enqueue does not roll back sub-account creation. A failed enqueue logs a warning and leaves the slug as "Not started" — the admin can Start now manually. Same pattern as §5.8 failure isolation.
 
+### 10.5.1 Duplicate onboarding run guard
+
+Auto-start (§10.5) and manual "Start now" can race: both paths call `playbookRunService.startRun()` within a short window and produce duplicate in-progress runs for the same `(subaccountId, playbookSlug)`.
+
+**Rule:** `startRun()` enforces at-most-one active run per `(subaccountId, playbookSlug)`. Before inserting a new `playbookRuns` row, the service checks for an existing run whose `status` is in `{ 'pending', 'running', 'awaiting_review' }`. If one exists, `startRun()` returns that run instead of creating a new one (same idempotent-return pattern as the scheduled-task uniqueness invariant).
+
+This is enforced via a DB-level unique partial index:
+
+```sql
+CREATE UNIQUE INDEX playbook_runs_active_per_subaccount_slug
+  ON playbook_runs (subaccount_id, playbook_slug)
+  WHERE status IN ('pending', 'running', 'awaiting_review');
+```
+
+The index makes the constraint race-safe — concurrent inserts at the DB level produce a unique violation, which `startRun()` catches and converts to an existing-run lookup. The caller receives the existing run, not an error.
+
+The index is added to migration `0120_portal_briefs.sql` (alongside other `playbookRuns` schema additions).
+
 ### 10.6 Migration / backfill
 
 No backfill. Existing modules start with `onboarding_playbook_slugs = '{}'` and the agency fills them in as they adopt onboarding playbooks.
@@ -1267,7 +1604,7 @@ It is deliberately the **first** template we ship that exercises every primitive
 - `SchedulePicker` + `runNow` (§5) — the first run happens immediately; subsequent runs on cron.
 - `HelpHint` (§6) — onboarding form walks an admin through setup.
 - Unified Knowledge (§7) — the brief reads Memory Blocks as context.
-- `knowledgeBinding` (§8) — baseline facts captured in the first run are written back as blocks.
+- `knowledgeBindings[]` (§8) — baseline facts captured in the first run are written back as Memory Blocks.
 - Run modal + portal card (§9) — admin watches progress, sub-account user sees the output.
 - `modules.onboardingPlaybookSlugs` (§10) — the "reporting" module auto-offers this playbook on sub-account creation.
 
@@ -1406,13 +1743,13 @@ Build primitives bottom-up. Each phase ships behind a feature flag and is indepe
 2. Unit tests.
 3. Lint rule `scripts/verify-help-hint-length.mjs`, wired into `run-all-gates.sh`.
 
-**Phase D — Unified Knowledge page (§7) + `knowledgeBinding` (§8).**
+**Phase D — Unified Knowledge page (§7) + `knowledgeBindings[]` (§8).**
 
 1. Route + page shell with two tabs; read-only first (no mutations).
 2. Reference CRUD (mostly wiring to existing `workspaceMemoryEntries` service).
 3. Memory Block CRUD + `sourceReferenceId` migration.
 4. Promote / demote flow.
-5. `knowledgeBinding` type, validator rules, engine integration in `finaliseRun()`.
+5. `referenceBinding` type (step-level) + `knowledgeBindings[]` type (playbook-level), validator rules, engine integration in `finaliseRun()`.
 6. `memoryBlockService.upsertFromPlaybook()` with rate limit + HITL overwrite rule.
 7. Tests: promotion idempotency, bindings fire on success, bindings skip on replay, overwrite HITL.
 
@@ -1459,7 +1796,7 @@ Flags are removed phase-by-phase once each ships and bakes for at least one rele
 - Phase A must land before Phase G (template depends on `action_call`).
 - Phase B must land before Phase G (template depends on `SchedulePicker`).
 - Phase C is independent — can land in parallel with any phase.
-- Phase D must land before Phase G (template depends on `knowledgeBinding`).
+- Phase D must land before Phase G (template depends on `knowledgeBindings[]`).
 - Phase E must land before Phase G (template needs portal card + run modal to be useful).
 - Phase F can land in parallel with E; depends only on Phase G being imminent (the seeder references the `daily-intelligence-brief` slug).
 
@@ -1538,7 +1875,7 @@ Every phase is independently reversible because every phase ships behind a featu
 
 **Phase C — `HelpHint`.** No runtime dependency anywhere. Revert the component file; every caller's usage becomes a type error and is removed in the same revert PR. No data implications.
 
-**Phase D — Unified Knowledge + `knowledgeBinding`.** Flip `feature.unified_knowledge_page` off — the legacy pages remain. Bindings are additive on `playbookDefinition` — old definitions without `knowledgeBindings` keep working. New definitions with bindings silently skip the bindings when the flag is off (engine guard inside `finaliseRun()`). `sourceReferenceId` column stays NULL; no cleanup needed.
+**Phase D — Unified Knowledge + `knowledgeBindings[]`.** Flip `feature.unified_knowledge_page` off — the legacy pages remain. Bindings are additive on `playbookDefinition` — old definitions without `knowledgeBindings` keep working. New definitions with bindings silently skip the bindings when the flag is off (engine guard inside `finaliseRun()`). `sourceReferenceId` column stays NULL; no cleanup needed.
 
 **Phase E — Run modal + onboarding tab + portal card.** Flip `feature.playbook_run_modal_v2` off → existing run detail page serves. Flip `feature.onboarding_tab` off → tab disappears; no data deleted. Portal card is rendered only when the template has `portalPresentation` — removing the template removes the card.
 
