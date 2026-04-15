@@ -272,6 +272,7 @@ export async function setResultAction(params: {
       // scope creep and name collisions can be resolved by the reviewer editing the
       // merged content. They are not safety gates like missing HITL gates or dropped
       // required fields.
+      // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
       const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
       const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
       if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
@@ -318,6 +319,7 @@ export async function bulkSetResultAction(params: {
   // merged content. They are not safety gates like missing HITL gates or dropped
   // required fields.
   if (action === 'approved' && resultIds.length > 0) {
+    // MUST stay in sync with BLOCKING_WARNING_CODES in client/src/components/skill-analyzer/mergeTypes.ts
     const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
     const blockedRows = await db
       .select({
