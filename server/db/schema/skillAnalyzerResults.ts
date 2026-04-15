@@ -84,6 +84,14 @@ export const skillAnalyzerResults = pgTable(
     // Set true when the user edits any field in proposedMergedContent.
     userEditedMerge: boolean('user_edited_merge').notNull().default(false),
 
+    // LLM-generated merge rationale (Bug 6). Null for DUPLICATE/DISTINCT or
+    // when the LLM omits the field. Read-only after the job writes it.
+    mergeRationale: text('merge_rationale'),
+
+    // Structured warnings from the post-processing validator (Bugs 1,2,3,4,7,8,10).
+    // Null when no warnings raised or classification is DUPLICATE/DISTINCT.
+    mergeWarnings: jsonb('merge_warnings'),
+
     // User action
     actionTaken: text('action_taken')
       .$type<'approved' | 'rejected' | 'skipped'>(),
