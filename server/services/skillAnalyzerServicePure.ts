@@ -572,6 +572,315 @@ export function parseClassificationResponseWithMerge(
 }
 
 // ---------------------------------------------------------------------------
+// Merge Validation Helpers
+// ---------------------------------------------------------------------------
+
+/** Word count of skill instructions — used for scope expansion arithmetic only.
+ *  Do NOT use for base selection; use richnessScore for that. */
+function wordCount(text: string | null): number {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Richness score for base skill selection. Weights headings and code blocks
+ *  heavily over raw word count — structured skills are harder to reconstruct
+ *  if used as the non-base. */
+export function richnessScore(text: string | null): number {
+  if (!text) return 0;
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const headings = (text.match(/^#{1,4}\s/gm)?.length ?? 0) * 50;
+  const codeBlocks = (text.match(/```/g)?.length ?? 0) * 100;
+  return words + headings + codeBlocks;
+}
+
+const GENERIC_BIGRAMS = new Set([
+  'email marketing', 'content strategy', 'lead generation', 'social media',
+  'marketing strategy', 'brand voice', 'target audience', 'content creation',
+  'digital marketing', 'conversion rate',
+]);
+
+function isGenericBigram(bigram: string): boolean {
+  return GENERIC_BIGRAMS.has(bigram);
+}
+
+/** Extract non-trivial word bigrams from a short description text.
+ *  Stopwords and single-character tokens are excluded. Returns lowercase bigrams. */
+function extractDescriptionBigrams(text: string): Set<string> {
+  const STOPWORDS = new Set(['a','an','the','and','or','for','to','of','in',
+    'on','with','that','this','is','are','be','it','as','by','at','from']);
+  const words = text.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+  const bigrams = new Set<string>();
+  for (let i = 0; i < words.length - 1; i++) {
+    bigrams.add(`${words[i]} ${words[i+1]}`);
+  }
+  return bigrams;
+}
+
+// Leading whitespace is allowed: the block is detected even if the LLM adds
+// a blank line before it. Matches from the first invocation keyword through
+// the next blank line (or end of string).
+const INVOCATION_TRIGGER_RE = /^\s*(Invoke|Use|Call|Trigger)\s+this\s+skill\b.+?(?:\n\n|\z)/ims;
+
+/** Extract the opening invocation trigger block from skill instructions, if present.
+ *  Returns the trimmed block text, or null if no trigger block is found at the top. */
+export function extractInvocationBlock(text: string | null): string | null {
+  if (!text) return null;
+  const match = text.match(INVOCATION_TRIGGER_RE);
+  return match?.[0]?.trim() ?? null;
+}
+
+const HITL_PHRASES = [
+  /do not send (this|the|it)\b.*?directly/i,
+  /do not post without approval/i,
+  /review before sending/i,
+  /human approval required/i,
+  /present to (the )?user for (review|confirmation|approval)/i,
+  /requires? (human|manual) (review|approval|sign-?off)/i,
+];
+
+/** Returns true if the text contains any known HITL gate phrase. */
+export function containsHitlGate(text: string | null): boolean {
+  if (!text) return false;
+  return HITL_PHRASES.some(re => re.test(text));
+}
+
+/** Returns true if the text contains any approval/review intent signal,
+ *  regardless of exact phrasing. Used as fallback after containsHitlGate. */
+export function containsApprovalIntent(text: string | null): boolean {
+  if (!text) return false;
+  return /\b(approval|review|confirm|sign-?off)\b/i.test(text);
+}
+
+const OUTPUT_FORMAT_HEADING_RE = /^#{1,4}\s+(output\s+format|response\s+format|format|template)\b/im;
+
+/** Returns true if the text contains an output format heading or a fenced code
+ *  block whose surrounding context references output/response/format/template. */
+export function hasOutputFormatBlock(text: string | null): boolean {
+  if (!text) return false;
+  if (OUTPUT_FORMAT_HEADING_RE.test(text)) return true;
+  const fenceRe = /```(?:json|yaml|markdown|text|html)?\s*\n[\s\S]{0,200}?\b(output|response|format|template|result)\b/i;
+  return fenceRe.test(text) || /\b(output|response|format|template|result)\b[\s\S]{0,100}?```/i.test(text);
+}
+
+interface ExtractedTable {
+  headerKey: string;   // pipe-separated header cells, lowercased and trimmed
+  rowCount: number;    // data rows only (header + separator excluded)
+}
+
+/** Extract markdown tables from text, keyed by their normalized header row.
+ *  headerKey is used for matching across source and merged text. */
+export function extractTables(text: string | null): ExtractedTable[] {
+  if (!text) return [];
+  const lines = text.split('\n');
+  const tables: ExtractedTable[] = [];
+  let inTable = false;
+  let headerKey: string | null = null;
+  let rowCount = 0;
+  let lineIndex = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('|')) {
+      if (!inTable) {
+        inTable = true;
+        headerKey = trimmed.replace(/^\||\|$/g, '').split('|')
+          .map(c => c.trim().toLowerCase()).join('|');
+        rowCount = 0;
+        lineIndex = 0;
+      } else {
+        lineIndex++;
+        if (lineIndex === 1 && /^\|[\s\-:|]+\|/.test(trimmed)) continue;
+        rowCount++;
+      }
+    } else if (inTable) {
+      if (headerKey !== null) tables.push({ headerKey, rowCount });
+      inTable = false;
+      headerKey = null;
+      rowCount = 0;
+      lineIndex = 0;
+    }
+  }
+  if (inTable && headerKey !== null) tables.push({ headerKey, rowCount });
+  return tables;
+}
+
+const MAX_MERGE_WARNINGS = 10;
+
+/**
+ * Post-processing validator for LLM-generated merge output.
+ * Pure — no DB, no clock. Returns an array of structured warnings.
+ * An empty array means no issues were detected.
+ */
+export function validateMergeOutput(
+  base: { definition: object | null; instructions: string | null; invocationBlock?: string | null },
+  nonBase: { definition: object | null; instructions: string | null; invocationBlock?: string | null },
+  merged: ProposedMerge,
+  allLibraryNames: ReadonlySet<string>,
+  allLibrarySlugs: ReadonlySet<string>,
+  allLibrarySkills: ReadonlyArray<{ id: string | null; name: string; description: string }>,
+  excludedId: string | null,
+): MergeWarning[] {
+  const warnings: MergeWarning[] = [];
+
+  // --- Bug 1: Required field demotion ---
+  const baseRequired: string[] = (base.definition as Record<string, unknown> | null)?.input_schema
+    ? ((base.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
+    : [];
+  const nonBaseRequired: string[] = (nonBase.definition as Record<string, unknown> | null)?.input_schema
+    ? ((nonBase.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
+    : [];
+  const mergedRequired: string[] = (merged.definition as Record<string, unknown> | null)?.input_schema
+    ? ((merged.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
+    : [];
+
+  const demotedFromBase = baseRequired.filter(f => !mergedRequired.includes(f));
+  if (demotedFromBase.length > 0) {
+    warnings.push({
+      code: 'REQUIRED_FIELD_DEMOTED',
+      severity: 'critical',
+      message: `${demotedFromBase.length} required field(s) from the base skill were made optional or removed.`,
+      detail: demotedFromBase.join(', '),
+    });
+  }
+  const demotedFromNonBase = nonBaseRequired.filter(f => !mergedRequired.includes(f));
+  if (demotedFromNonBase.length > 0) {
+    warnings.push({
+      code: 'REQUIRED_FIELD_DEMOTED',
+      severity: 'critical',
+      message: `${demotedFromNonBase.length} required field(s) from the secondary skill were dropped.`,
+      detail: demotedFromNonBase.join(', '),
+    });
+  }
+
+  // --- Bug 2: Capability overlap (name collision fast-check first) ---
+  const mergedNameLower = merged.name.toLowerCase();
+  if (allLibraryNames.has(mergedNameLower) || allLibrarySlugs.has(mergedNameLower)) {
+    warnings.push({
+      code: 'CAPABILITY_OVERLAP',
+      severity: 'critical',
+      message: `The merged name "${merged.name}" already exists in the skill library.`,
+      detail: merged.name,
+    });
+  } else {
+    // Bigram overlap check
+    const mergedBigrams = extractDescriptionBigrams(merged.description);
+    for (const skill of allLibrarySkills) {
+      if (skill.id === excludedId) continue;
+      const otherBigrams = extractDescriptionBigrams(skill.description);
+      const overlap = [...mergedBigrams]
+        .filter(b => otherBigrams.has(b))
+        .filter(b => !isGenericBigram(b));
+      const denom = Math.min(mergedBigrams.size, otherBigrams.size);
+      const overlapRatio = denom > 0 ? overlap.length / denom : 0;
+      if (overlap.length >= 2 && overlapRatio > 0.2) {
+        warnings.push({
+          code: 'CAPABILITY_OVERLAP',
+          severity: 'warning',
+          message: `Merged skill may overlap in purpose with "${skill.name}".`,
+          detail: overlap.slice(0, 5).join(', '),
+        });
+      }
+    }
+  }
+
+  // --- Bug 8: Scope expansion ---
+  const baseWords = wordCount(base.instructions);
+  const nonBaseWords = wordCount(nonBase.instructions);
+  const richerSourceWords = Math.max(baseWords, nonBaseWords);
+  const mergedWords = wordCount(merged.instructions);
+  if (richerSourceWords > 0) {
+    const pct = Math.round((mergedWords / richerSourceWords - 1) * 100);
+    if (pct > 60) {
+      warnings.push({
+        code: 'SCOPE_EXPANSION_CRITICAL',
+        severity: 'critical',
+        message: `Merged instructions are ${pct}% longer than the richer source skill — likely out-of-scope content was imported.`,
+        detail: `richer source: ${richerSourceWords} words, merged: ${mergedWords} words`,
+      });
+    } else if (pct > 30) {
+      warnings.push({
+        code: 'SCOPE_EXPANSION',
+        severity: 'warning',
+        message: `Merged instructions are ${pct}% longer than the richer source skill. Review for scope creep.`,
+        detail: `richer source: ${richerSourceWords} words, merged: ${mergedWords} words`,
+      });
+    }
+  }
+
+  // --- Bug 10: Table completeness ---
+  const baseTables = extractTables(base.instructions);
+  const nonBaseTables = extractTables(nonBase.instructions);
+  const mergedTables = extractTables(merged.instructions);
+  const mergedByHeader = new Map(mergedTables.map(t => [t.headerKey, t.rowCount]));
+  const sourceLookup = new Map<string, number>();
+  for (const t of [...baseTables, ...nonBaseTables]) {
+    const existing = sourceLookup.get(t.headerKey) ?? 0;
+    if (t.rowCount > existing) sourceLookup.set(t.headerKey, t.rowCount);
+  }
+  for (const [headerKey, sourceRows] of sourceLookup) {
+    const mergedRows = mergedByHeader.get(headerKey) ?? 0;
+    if (mergedRows < sourceRows) {
+      warnings.push({
+        code: 'TABLE_ROWS_DROPPED',
+        severity: 'warning',
+        message: `Table "${headerKey}" has ${mergedRows} rows in the merge but ${sourceRows} in the source.`,
+        detail: `header: ${headerKey}, source rows: ${sourceRows}, merged rows: ${mergedRows}`,
+      });
+    }
+  }
+
+  // --- Bug 3 post-check: Invocation block preservation ---
+  const sourceHasInvocation = !!(base.invocationBlock || nonBase.invocationBlock);
+  if (sourceHasInvocation && merged.instructions) {
+    const triggerMatch = merged.instructions.match(INVOCATION_TRIGGER_RE);
+    const mergedHasInvocationAtTop = triggerMatch !== null
+      && merged.instructions.trimStart().startsWith(triggerMatch[0].trimStart());
+    if (!mergedHasInvocationAtTop) {
+      warnings.push({
+        code: 'INVOCATION_LOST',
+        severity: 'critical',
+        message: 'One or both source skills had an invocation trigger block that is missing or not at the top of the merged output.',
+      });
+    }
+  }
+
+  // --- Bug 4 post-check: HITL gate preservation ---
+  const sourceHasHitl = containsHitlGate(base.instructions) || containsHitlGate(nonBase.instructions);
+  if (sourceHasHitl
+    && !containsHitlGate(merged.instructions)
+    && !containsApprovalIntent(merged.instructions)) {
+    warnings.push({
+      code: 'HITL_LOST',
+      severity: 'critical',
+      message: 'A human review gate instruction from a source skill is missing from the merged output.',
+    });
+  }
+
+  // --- Bug 7 post-check: Output format block preservation ---
+  const sourceHasFormat = hasOutputFormatBlock(base.instructions) || hasOutputFormatBlock(nonBase.instructions);
+  if (sourceHasFormat && !hasOutputFormatBlock(merged.instructions)) {
+    warnings.push({
+      code: 'OUTPUT_FORMAT_LOST',
+      severity: 'warning',
+      message: 'Source skill(s) had an output format or code block specification that is not present in the merged output.',
+    });
+  }
+
+  // Safety cap: prevent unbounded warning list from malformed input
+  if (warnings.length > MAX_MERGE_WARNINGS) {
+    warnings.splice(MAX_MERGE_WARNINGS);
+    warnings.push({
+      code: 'SCOPE_EXPANSION',
+      severity: 'warning',
+      message: `Additional warnings were truncated (more than ${MAX_MERGE_WARNINGS} issues detected).`,
+    });
+  }
+
+  return warnings;
+}
+
+// ---------------------------------------------------------------------------
 // Diff Summary
 // ---------------------------------------------------------------------------
 
