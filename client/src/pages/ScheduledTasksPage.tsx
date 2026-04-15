@@ -56,6 +56,10 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
   // non-standard cadence the simple picker cannot express.
   const [useSchedulePicker, setUseSchedulePicker] = useState(true);
   const [scheduleValue, setScheduleValue] = useState<SchedulePickerValue | null>(null);
+  // §G4.3 — the simple picker blocks client-side on invalid combinations
+  // (past first-run, bad day-of-month, etc) and pushes validity here so
+  // Create stays disabled until the user fixes the inline error.
+  const [scheduleValid, setScheduleValid] = useState(true);
 
   useEffect(() => { load(); }, [subaccountId]);
 
@@ -196,6 +200,7 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
                     value={scheduleValue}
                     onChange={setScheduleValue}
                     subaccountTimezone={form.timezone}
+                    onValidityChange={setScheduleValid}
                   />
                   <div className="mt-3">
                     <label className="block text-[13px] font-medium text-slate-700 mb-1">Timezone</label>
@@ -237,7 +242,17 @@ export default function ScheduledTasksPage({ user: _user }: { user: { id: string
             </div>
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={() => setShowForm(false)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium transition-colors cursor-pointer">Cancel</button>
-              <button onClick={handleCreate} disabled={!form.title || !form.assignedAgentId} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold transition-colors cursor-pointer">Create</button>
+              <button
+                onClick={handleCreate}
+                disabled={
+                  !form.title ||
+                  !form.assignedAgentId ||
+                  (useSchedulePicker && !scheduleValid)
+                }
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold transition-colors cursor-pointer"
+              >
+                Create
+              </button>
             </div>
           </div>
         </Modal>

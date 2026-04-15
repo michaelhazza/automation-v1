@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { HelpHint } from './ui/HelpHint';
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,75 @@ export interface SchedulePickerProps {
   allowRunNow?: boolean;
   helpText?: string;
   disabled?: boolean;
+  /**
+   * Fires whenever the computed validity of the current value changes.
+   * Parents should gate their Save / Apply button on this so G4.3's
+   * "blocked client-side" contract holds even when the parent submits
+   * via its own form controls.
+   */
+  onValidityChange?: (valid: boolean) => void;
+}
+
+// §5/§G4.3 — client-side validation shape. Keys match the control they
+// should render beside; `_form` is a catch-all for cross-field issues.
+export interface SchedulePickerErrors {
+  firstRunAt?: string;
+  dayOfWeek?: string;
+  dayOfMonth?: string;
+  timeOfDay?: string;
+  _form?: string;
+}
+
+/**
+ * Validate a SchedulePickerValue. Returns a structured error map so the UI
+ * can render messages next to the offending control. Intentionally pure —
+ * exported so parents that need to gate their own submit buttons (or
+ * tests) can reuse the exact rules the component enforces.
+ */
+export function validateSchedulePickerValue(
+  v: SchedulePickerValue,
+  subaccountTimezone: string,
+): SchedulePickerErrors {
+  const errs: SchedulePickerErrors = {};
+  // First-run-in-the-past: compare the date portion against today in the
+  // subaccount tz. We intentionally ignore time-of-day here — cron
+  // scheduling semantics will roll forward to the next occurrence.
+  if (v.firstRunAt) {
+    const datePart = v.firstRunAt.slice(0, 10);
+    const today = todayInTz(subaccountTimezone);
+    if (datePart < today) {
+      errs.firstRunAt = 'First run must be today or later.';
+    }
+  } else {
+    errs.firstRunAt = 'First run date is required.';
+  }
+
+  // Interval / day-of-week / day-of-month consistency.
+  if (v.interval === 'weekly') {
+    if (v.dayOfWeek === undefined || v.dayOfWeek < 0 || v.dayOfWeek > 6) {
+      errs.dayOfWeek = 'Pick a day of the week.';
+    }
+  }
+  if (v.interval === 'monthly') {
+    if (v.dayOfMonth === undefined || v.dayOfMonth < 1 || v.dayOfMonth > 31) {
+      errs.dayOfMonth = 'Day of month must be between 1 and 31.';
+    }
+  }
+
+  // Time of day is optional for quarterly+, required for daily/weekly/monthly.
+  const needsTimeOfDay =
+    v.interval === 'daily' || v.interval === 'weekly' || v.interval === 'monthly';
+  if (needsTimeOfDay && v.timeOfDay && !/^\d{2}:\d{2}$/.test(v.timeOfDay)) {
+    errs.timeOfDay = 'Time must be HH:mm.';
+  }
+
+  return errs;
+}
+
+function hasErrors(errs: SchedulePickerErrors): boolean {
+  return Boolean(
+    errs.firstRunAt || errs.dayOfWeek || errs.dayOfMonth || errs.timeOfDay || errs._form,
+  );
 }
 
 const INTERVAL_LABELS: Record<SchedulePickerInterval, string> = {
@@ -110,7 +179,15 @@ function summarise(v: SchedulePickerValue, tz: string): string {
 }
 
 export function SchedulePicker(props: SchedulePickerProps) {
-  const { value, onChange, subaccountTimezone, allowRunNow = true, helpText, disabled } = props;
+  const {
+    value,
+    onChange,
+    subaccountTimezone,
+    allowRunNow = true,
+    helpText,
+    disabled,
+    onValidityChange,
+  } = props;
 
   // Seed a default exactly once if `value` arrives null — spec §5.7.
   const seeded = useRef(false);
@@ -124,6 +201,29 @@ export function SchedulePicker(props: SchedulePickerProps) {
     // swallow user edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, subaccountTimezone]);
+
+  // §G4.3 — compute errors every render so inline messages track edits
+  // immediately. Memoised so object identity is stable when inputs don't
+  // change, which keeps the onValidityChange effect below from firing
+  // on every unrelated re-render.
+  const errors = useMemo<SchedulePickerErrors>(
+    () => (value ? validateSchedulePickerValue(value, subaccountTimezone) : {}),
+    [value, subaccountTimezone],
+  );
+  const valid = value !== null && !hasErrors(errors);
+
+  // Notify parent whenever validity flips. Parents typically gate their
+  // Save button on this; doing the notify in an effect keeps the
+  // component render itself side-effect-free.
+  const lastNotifiedValid = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!onValidityChange) return;
+    if (value === null) return;
+    if (lastNotifiedValid.current !== valid) {
+      lastNotifiedValid.current = valid;
+      onValidityChange(valid);
+    }
+  }, [valid, value, onValidityChange]);
 
   if (value === null) {
     // One-frame render while default seeds.
@@ -211,6 +311,7 @@ export function SchedulePicker(props: SchedulePickerProps) {
               );
             })}
           </div>
+          {errors.dayOfWeek && <InlineError message={errors.dayOfWeek} />}
         </div>
       )}
 
@@ -226,12 +327,19 @@ export function SchedulePicker(props: SchedulePickerProps) {
             value={value.dayOfMonth ?? 1}
             onChange={(e) => patch({ dayOfMonth: Number(e.target.value) || 1 })}
             disabled={disabled}
-            className="w-24 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+            aria-invalid={Boolean(errors.dayOfMonth)}
+            className={`w-24 px-3 py-2 border rounded-lg text-sm bg-white ${
+              errors.dayOfMonth ? 'border-red-400' : 'border-slate-300'
+            }`}
           />
-          {(value.dayOfMonth ?? 0) > 28 && (
-            <div className="text-xs text-slate-500 mt-1">
-              Days 29–31 fall back to the 28th to avoid skipping short months.
-            </div>
+          {errors.dayOfMonth ? (
+            <InlineError message={errors.dayOfMonth} />
+          ) : (
+            (value.dayOfMonth ?? 0) > 28 && (
+              <div className="text-xs text-slate-500 mt-1">
+                Days 29–31 fall back to the 28th to avoid skipping short months.
+              </div>
+            )
           )}
         </div>
       )}
@@ -246,8 +354,12 @@ export function SchedulePicker(props: SchedulePickerProps) {
             value={value.timeOfDay ?? '09:00'}
             onChange={(e) => patch({ timeOfDay: e.target.value })}
             disabled={disabled}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+            aria-invalid={Boolean(errors.timeOfDay)}
+            className={`px-3 py-2 border rounded-lg text-sm bg-white ${
+              errors.timeOfDay ? 'border-red-400' : 'border-slate-300'
+            }`}
           />
+          {errors.timeOfDay && <InlineError message={errors.timeOfDay} />}
         </div>
       )}
 
@@ -264,11 +376,18 @@ export function SchedulePicker(props: SchedulePickerProps) {
             patch({ firstRunAt: `${e.target.value}T${tod}` });
           }}
           disabled={disabled}
-          className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+          aria-invalid={Boolean(errors.firstRunAt)}
+          className={`px-3 py-2 border rounded-lg text-sm bg-white ${
+            errors.firstRunAt ? 'border-red-400' : 'border-slate-300'
+          }`}
         />
-        <div className="text-xs text-slate-500 mt-1">
-          Times are in {subaccountTimezone}.
-        </div>
+        {errors.firstRunAt ? (
+          <InlineError message={errors.firstRunAt} />
+        ) : (
+          <div className="text-xs text-slate-500 mt-1">
+            Times are in {subaccountTimezone}.
+          </div>
+        )}
       </div>
 
       {/* 4. Run now */}
@@ -342,6 +461,15 @@ export function schedulePickerValueToRrule(
     case 'annually':
       return { rrule: 'FREQ=YEARLY;INTERVAL=1', scheduleTime: tod, timezone };
   }
+}
+
+function InlineError({ message }: { message: string }) {
+  return (
+    <div className="text-xs text-red-700 mt-1 flex items-start gap-1" role="alert">
+      <span aria-hidden="true">!</span>
+      <span>{message}</span>
+    </div>
+  );
 }
 
 export default SchedulePicker;
