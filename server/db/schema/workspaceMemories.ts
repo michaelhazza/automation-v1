@@ -81,11 +81,12 @@ export const workspaceMemoryEntries = pgTable(
     subaccountId: uuid('subaccount_id')
       .notNull()
       .references(() => subaccounts.id),
+    // Phase D1 (spec §7.2, §7.3) — nullable so manually-authored References
+    // (Tiptap) and Block→Reference demotion rows can live here without a
+    // source agent run. Migration 0118 drops the NOT NULL constraints.
     agentRunId: uuid('agent_run_id')
-      .notNull()
       .references(() => agentRuns.id),
     agentId: uuid('agent_id')
-      .notNull()
       .references(() => agents.id),
 
     content: text('content').notNull(),

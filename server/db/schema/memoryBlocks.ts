@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 import { subaccounts } from './subaccounts';
 import { agents } from './agents';
+import { workspaceMemoryEntries } from './workspaceMemories';
 
 // ---------------------------------------------------------------------------
 // Memory Blocks — shared named context blocks attached to multiple agents.
@@ -23,6 +24,11 @@ export const memoryBlocks = pgTable(
     ownerAgentId: uuid('owner_agent_id')
       .references(() => agents.id),
     isReadOnly: boolean('is_read_only').notNull().default(true),
+    // Phase D1 (spec §7.3) — provenance for a block that was promoted from
+    // a Reference note. ON DELETE SET NULL so deleting the Reference does
+    // not cascade the block.
+    sourceReferenceId: uuid('source_reference_id')
+      .references(() => workspaceMemoryEntries.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
