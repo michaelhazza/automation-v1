@@ -268,8 +268,10 @@ export async function setResultAction(params: {
       resultRow &&
       (resultRow.classification === 'PARTIAL_OVERLAP' || resultRow.classification === 'IMPROVEMENT')
     ) {
-      // SCOPE_EXPANSION_CRITICAL is intentionally excluded — scope creep can be edited
-      // by the reviewer, but is not a safety gate that must block approval.
+      // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
+      // scope creep and name collisions can be resolved by the reviewer editing the
+      // merged content. They are not safety gates like missing HITL gates or dropped
+      // required fields.
       const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
       const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
       if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
@@ -311,8 +313,10 @@ export async function bulkSetResultAction(params: {
   }
 
   // Server-side blocking enforcement for bulk approval — mirrors setResultAction.
-  // SCOPE_EXPANSION_CRITICAL is intentionally excluded — scope creep can be edited
-  // by the reviewer, but is not a safety gate that must block approval.
+  // SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
+  // scope creep and name collisions can be resolved by the reviewer editing the
+  // merged content. They are not safety gates like missing HITL gates or dropped
+  // required fields.
   if (action === 'approved' && resultIds.length > 0) {
     const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
     const blockedRows = await db

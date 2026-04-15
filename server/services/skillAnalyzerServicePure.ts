@@ -798,22 +798,14 @@ export function validateMergeOutput(
     ? ((merged.definition as Record<string, Record<string, unknown>>).input_schema?.required as string[] ?? [])
     : [];
 
-  const demotedFromBase = baseRequired.filter(f => !mergedRequired.includes(f));
-  if (demotedFromBase.length > 0) {
+  const allSourceRequired = [...new Set([...baseRequired, ...nonBaseRequired])];
+  const demoted = allSourceRequired.filter(f => !mergedRequired.includes(f));
+  if (demoted.length > 0) {
     warnings.push({
       code: 'REQUIRED_FIELD_DEMOTED',
       severity: 'critical',
-      message: `${demotedFromBase.length} required field(s) from the base skill were made optional or removed.`,
-      detail: demotedFromBase.join(', '),
-    });
-  }
-  const demotedFromNonBase = nonBaseRequired.filter(f => !mergedRequired.includes(f));
-  if (demotedFromNonBase.length > 0) {
-    warnings.push({
-      code: 'REQUIRED_FIELD_DEMOTED',
-      severity: 'critical',
-      message: `${demotedFromNonBase.length} required field(s) from the secondary skill were dropped.`,
-      detail: demotedFromNonBase.join(', '),
+      message: `${demoted.length} required field(s) from the source skills were made optional or removed.`,
+      detail: demoted.join(', '),
     });
   }
 
@@ -936,7 +928,7 @@ export function validateMergeOutput(
 
   // Safety cap: prevent unbounded warning list from malformed input
   if (warnings.length > MAX_MERGE_WARNINGS) {
-    warnings.splice(MAX_MERGE_WARNINGS);
+    warnings.splice(MAX_MERGE_WARNINGS - 1);
     warnings.push({
       code: 'WARNINGS_TRUNCATED',
       severity: 'warning',

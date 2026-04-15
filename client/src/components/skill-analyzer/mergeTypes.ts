@@ -25,8 +25,9 @@ export interface MergeWarning {
 }
 
 /** Merge warning codes that block approval until resolved.
- *  SCOPE_EXPANSION_CRITICAL is intentionally excluded: scope creep is a correctness
- *  issue that the reviewer can fix by editing the merge, but it is not a safety gate.
+ *  SCOPE_EXPANSION_CRITICAL and CAPABILITY_OVERLAP are intentionally excluded:
+ *  scope creep and name collisions can be resolved by the reviewer editing the
+ *  merged content — they are not safety gates.
  *  REQUIRED_FIELD_DEMOTED, INVOCATION_LOST, and HITL_LOST represent safety-critical
  *  regressions (broken API contracts, lost routing signals, removed human review gates)
  *  that must be fixed before approving. */

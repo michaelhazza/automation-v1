@@ -725,12 +725,23 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     // cards with no proposedMergedContent (LLM fallback path). The
     // executeApproved server-side path also enforces this, but the
     // client-side filter avoids surfacing the failure as a per-row error
-    // in the response.
+    // in the response. Also skip results with blocking merge warnings —
+    // those must be resolved before approval.
     let eligible = sectionResults;
-    let skippedCount = 0;
+    let skippedNone = 0;
+    let skippedCritical = 0;
     if ((classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') && action === 'approved') {
-      eligible = sectionResults.filter((r) => r.proposedMergedContent != null);
-      skippedCount = sectionResults.length - eligible.length;
+      eligible = sectionResults.filter((r) => {
+        if (!r.proposedMergedContent) return false;
+        if (r.mergeWarnings?.some((w) => BLOCKING_WARNING_CODES.has(w.code))) return false;
+        return true;
+      });
+      skippedNone = sectionResults.filter(
+        (r) => !r.proposedMergedContent,
+      ).length;
+      skippedCritical = sectionResults.filter(
+        (r) => r.proposedMergedContent != null && r.mergeWarnings?.some((w) => BLOCKING_WARNING_CODES.has(w.code)),
+      ).length;
     }
     if (eligible.length === 0) {
       setBulkInfo('No eligible rows for this bulk action.');
@@ -750,10 +761,11 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
             : r,
         ),
       );
-      if (skippedCount > 0) {
-        setBulkInfo(
-          `Approved ${eligible.length}, skipped ${skippedCount} (no merge proposal yet).`,
-        );
+      const skippedParts: string[] = [];
+      if (skippedNone > 0) skippedParts.push(`${skippedNone} (no merge proposal yet)`);
+      if (skippedCritical > 0) skippedParts.push(`${skippedCritical} (critical warnings must be resolved)`);
+      if (skippedParts.length > 0) {
+        setBulkInfo(`Approved ${eligible.length}, skipped ${skippedParts.join(', skipped ')}.`);
       }
     } catch (err) {
       const e = err as { response?: { data?: { error?: unknown } }; message?: string };
