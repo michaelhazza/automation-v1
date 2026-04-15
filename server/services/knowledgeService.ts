@@ -15,10 +15,10 @@
  *     soft-deletes the source block. Both entities log Config History.
  */
 
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import sanitizeHtml from 'sanitize-html';
 import { db } from '../db/index.js';
-import { memoryBlocks, workspaceMemoryEntries } from '../db/schema/index.js';
+import { agentRuns, agents, memoryBlocks, workspaceMemoryEntries } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
 
 /**
@@ -48,6 +48,183 @@ export function sanitizeReferenceHtml(html: string): string {
 }
 
 type ReferenceEntryType = 'observation' | 'decision' | 'preference' | 'issue' | 'pattern';
+
+// ---------------------------------------------------------------------------
+// §7 G6.1 / G6.3 — References vs Insights split
+//
+// Both live in workspace_memory_entries. A row is a Reference when it was
+// manually authored (agent_run_id IS NULL) or created by demoting a Memory
+// Block. It is an Insight when an agent run captured it automatically
+// (agent_run_id IS NOT NULL). The split lets the Knowledge page show three
+// tabs with different affordances: References (Tiptap edit), Insights
+// (filter + promote-to-reference), Memory Blocks (hot-path facts).
+// ---------------------------------------------------------------------------
+
+export async function listReferences(subaccountId: string, organisationId: string) {
+  return db
+    .select()
+    .from(workspaceMemoryEntries)
+    .where(
+      and(
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        eq(workspaceMemoryEntries.organisationId, organisationId),
+        isNull(workspaceMemoryEntries.agentRunId),
+        isNull(workspaceMemoryEntries.deletedAt),
+      ),
+    )
+    .orderBy(desc(workspaceMemoryEntries.createdAt))
+    .limit(500);
+}
+
+export interface InsightFilters {
+  domain?: string;
+  topic?: string;
+  entryType?: ReferenceEntryType;
+  taskSlug?: string;
+}
+
+export async function listInsights(
+  subaccountId: string,
+  organisationId: string,
+  filters: InsightFilters = {},
+) {
+  const conditions = [
+    eq(workspaceMemoryEntries.subaccountId, subaccountId),
+    eq(workspaceMemoryEntries.organisationId, organisationId),
+    isNotNull(workspaceMemoryEntries.agentRunId),
+    isNull(workspaceMemoryEntries.deletedAt),
+  ];
+  if (filters.domain) conditions.push(eq(workspaceMemoryEntries.domain, filters.domain));
+  if (filters.topic) conditions.push(eq(workspaceMemoryEntries.topic, filters.topic));
+  if (filters.entryType) conditions.push(eq(workspaceMemoryEntries.entryType, filters.entryType));
+  if (filters.taskSlug) conditions.push(eq(workspaceMemoryEntries.taskSlug, filters.taskSlug));
+
+  return db
+    .select({
+      id: workspaceMemoryEntries.id,
+      content: workspaceMemoryEntries.content,
+      entryType: workspaceMemoryEntries.entryType,
+      domain: workspaceMemoryEntries.domain,
+      topic: workspaceMemoryEntries.topic,
+      taskSlug: workspaceMemoryEntries.taskSlug,
+      qualityScore: workspaceMemoryEntries.qualityScore,
+      createdAt: workspaceMemoryEntries.createdAt,
+      agentRunId: workspaceMemoryEntries.agentRunId,
+      agentId: workspaceMemoryEntries.agentId,
+      agentName: agents.name,
+      runStatus: agentRuns.status,
+      runStartedAt: agentRuns.startedAt,
+    })
+    .from(workspaceMemoryEntries)
+    .leftJoin(agents, eq(agents.id, workspaceMemoryEntries.agentId))
+    .leftJoin(agentRuns, eq(agentRuns.id, workspaceMemoryEntries.agentRunId))
+    .where(and(...conditions))
+    .orderBy(desc(workspaceMemoryEntries.createdAt))
+    .limit(500);
+}
+
+/**
+ * Return the distinct facet values an Insight filter would offer for a
+ * given sub-account. The UI renders these as <select> options.
+ */
+export async function listInsightFacets(subaccountId: string, organisationId: string) {
+  const rows = await db
+    .select({
+      domain: workspaceMemoryEntries.domain,
+      topic: workspaceMemoryEntries.topic,
+      entryType: workspaceMemoryEntries.entryType,
+      taskSlug: workspaceMemoryEntries.taskSlug,
+    })
+    .from(workspaceMemoryEntries)
+    .where(
+      and(
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        eq(workspaceMemoryEntries.organisationId, organisationId),
+        isNotNull(workspaceMemoryEntries.agentRunId),
+        isNull(workspaceMemoryEntries.deletedAt),
+      ),
+    );
+  const uniq = (values: Array<string | null | undefined>) =>
+    [...new Set(values.filter((v): v is string => !!v))].sort();
+  return {
+    domains: uniq(rows.map((r) => r.domain)),
+    topics: uniq(rows.map((r) => r.topic)),
+    entryTypes: uniq(rows.map((r) => r.entryType)),
+    taskSlugs: uniq(rows.map((r) => r.taskSlug)),
+  };
+}
+
+export interface PromoteInsightParams {
+  insightId: string;
+  subaccountId: string;
+  organisationId: string;
+  actorUserId: string | null;
+}
+
+/**
+ * §7 G6.4 — promote an auto-captured Insight into a curated Reference
+ * note, preserving a back-link (`promoted_from_entry_id`) to the source
+ * row. The Reference is a new row (References have the agent_run_id =
+ * NULL shape) so that subsequent edits don't touch the immutable Insight.
+ */
+export async function promoteInsightToReference(
+  params: PromoteInsightParams,
+): Promise<{ referenceId: string }> {
+  const { insightId, subaccountId, organisationId, actorUserId } = params;
+
+  const [insight] = await db
+    .select()
+    .from(workspaceMemoryEntries)
+    .where(
+      and(
+        eq(workspaceMemoryEntries.id, insightId),
+        eq(workspaceMemoryEntries.organisationId, organisationId),
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        isNotNull(workspaceMemoryEntries.agentRunId),
+        isNull(workspaceMemoryEntries.deletedAt),
+      ),
+    );
+  if (!insight) {
+    throw { statusCode: 404, message: 'Insight not found' };
+  }
+
+  // The Reference is a fresh row — editing it later must not mutate the
+  // immutable Insight. Wrap the copied content in a <p> if it looked like
+  // plain text so the Tiptap editor renders it as a paragraph.
+  const content = /<[a-z][^>]*>/i.test(insight.content)
+    ? insight.content
+    : `<p>${insight.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`;
+
+  const [created] = await db
+    .insert(workspaceMemoryEntries)
+    .values({
+      organisationId,
+      subaccountId,
+      agentRunId: null,
+      agentId: null,
+      content: sanitizeReferenceHtml(content),
+      entryType: insight.entryType,
+      promotedFromEntryId: insight.id,
+    })
+    .returning({ id: workspaceMemoryEntries.id });
+
+  await configHistoryService.recordHistory({
+    entityType: 'reference_entry',
+    entityId: created.id,
+    organisationId,
+    snapshot: {
+      content,
+      subaccountId,
+      createdByInsightPromotion: true,
+      promotedFromEntryId: insight.id,
+    },
+    changedBy: actorUserId,
+    changeSource: 'ui',
+    changeSummary: `Created by promoting Insight ${insight.id}`,
+  });
+
+  return { referenceId: created.id };
+}
 
 export interface CreateReferenceParams {
   subaccountId: string;

@@ -12,6 +12,10 @@ import {
   updateReference,
   MEMORY_BLOCK_LABEL_MAX,
   MEMORY_BLOCK_CONTENT_MAX,
+  listReferences,
+  listInsights,
+  listInsightFacets,
+  promoteInsightToReference,
 } from '../services/knowledgeService.js';
 import * as memoryBlockService from '../services/memoryBlockService.js';
 import { workspaceMemoryService } from '../services/workspaceMemoryService.js';
@@ -42,6 +46,14 @@ const updateReferenceBody = z.object({
   content: z.string().min(1),
 });
 
+// §7 G6.3 — Insights list takes optional filter facets via query params.
+const insightFiltersSchema = z.object({
+  domain: z.string().trim().min(1).optional(),
+  topic: z.string().trim().min(1).optional(),
+  entryType: z.enum(['observation', 'decision', 'preference', 'issue', 'pattern']).optional(),
+  taskSlug: z.string().trim().min(1).optional(),
+});
+
 // ─── List: References + Memory Blocks in one call ──────────────────────────
 
 router.get(
@@ -52,15 +64,51 @@ router.get(
     const { subaccountId } = req.params;
     await resolveSubaccount(subaccountId, req.orgId!);
 
+    // §7 G6.1 — References and Memory Blocks are the two stable tabs. The
+    // Insights tab (G6.3) is fetched separately so filter state doesn't
+    // force a refetch of the other two lists.
     const [references, blocks] = await Promise.all([
-      workspaceMemoryService.listEntries(subaccountId, {
-        limit: 500,
-        organisationId: req.orgId!,
-      }),
+      listReferences(subaccountId, req.orgId!),
       memoryBlockService.listBlocks(req.orgId!, subaccountId),
     ]);
 
     res.json({ references, memoryBlocks: blocks });
+  }),
+);
+
+// ─── Insights tab (§7 G6.3) ────────────────────────────────────────────────
+
+router.get(
+  '/api/subaccounts/:subaccountId/knowledge/insights',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+
+    const filters = insightFiltersSchema.parse(req.query);
+    const [rows, facets] = await Promise.all([
+      listInsights(subaccountId, req.orgId!, filters),
+      listInsightFacets(subaccountId, req.orgId!),
+    ]);
+    res.json({ insights: rows, facets });
+  }),
+);
+
+router.post(
+  '/api/subaccounts/:subaccountId/knowledge/insights/:insightId/promote-to-reference',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_EDIT),
+  asyncHandler(async (req, res) => {
+    const { subaccountId, insightId } = req.params;
+    await resolveSubaccount(subaccountId, req.orgId!);
+    const result = await promoteInsightToReference({
+      insightId,
+      subaccountId,
+      organisationId: req.orgId!,
+      actorUserId: req.user?.id ?? null,
+    });
+    res.status(201).json(result);
   }),
 );
 
