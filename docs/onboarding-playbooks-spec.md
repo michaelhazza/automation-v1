@@ -51,8 +51,8 @@ We are deliberately not building a bespoke "Daily Brief" system. We are building
 | Playbook engine (`server/services/playbookEngineService.ts`, 6 step types, 5 run modes) | Host for the new step type and the new knowledge binding field. No changes to run modes, DAG, templating, or replay semantics. |
 | Configuration Assistant (28 `config_*` skills) | Canonical source of truth for "how to mutate org config safely." `action_call` reuses those handlers without spinning up an LLM loop. |
 | Config history / backups | All mutations written by `action_call` steps flow through the same `actionService.proposeAction` → `configHistoryService.record` path the UI uses. Zero new audit code. |
-| Memory blocks (`memory_blocks` / `memory_block_attachments`) | Host for the "Reference notes" tab on the Knowledge page. Auto-attach policy is new but the primitive exists. |
-| Workspace memory entries (`workspace_memory_entries`) | Host for the "Insights" tab on the Knowledge page. Already has `taskSlug`, `domain`, `topic`, quality scoring, embeddings. |
+| Memory blocks (`memory_blocks` / `memory_block_attachments`) | Host for the **Memory Blocks** tab on the Knowledge page. Auto-attach policy is new but the primitive exists. |
+| Workspace memory entries (`workspace_memory_entries`) | Host for the **References** tab on the Knowledge page. Already has `taskSlug`, `domain`, `topic`, quality scoring, embeddings. Long-form notes retrieved on demand. |
 | Client portal (`/portal`) | Host for the Daily Brief dashboard card. New card type; no new portal infrastructure. |
 | `scheduled_tasks` + pg-boss cron | Host for the Daily Brief's recurring execution. New `runNow` parameter on the creation path; cron wiring unchanged. |
 
@@ -110,7 +110,7 @@ Each goal is phrased as something a test, a gate script, or a scripted clickthro
 
 ### G6. Unified Knowledge page
 
-- **G6.1** `/subaccounts/:id/knowledge` renders two tabs: **Reference notes** (backed by `memory_blocks`) and **Insights** (backed by `workspace_memory_entries`).
+- **G6.1** `/subaccounts/:id/knowledge` renders two tabs: **References** (backed by `workspace_memory_entries`) and **Memory Blocks** (backed by `memory_blocks`).
 - **G6.2** Reference notes are created, edited, renamed, archived, and soft-deleted through the page. Tiptap is the editor.
 - **G6.3** Insights are filterable by domain, topic, entryType, and taskSlug; each row shows source agent run and quality score.
 - **G6.4** A promote-to-reference affordance converts a selected Insight into a new Reference note, preserving a back-link to the originating entry.
@@ -286,17 +286,17 @@ Two stores, one UI.
 ```
 Knowledge page (/subaccounts/:id/knowledge)
 │
-├── Tab: Reference notes       ──→ memory_blocks (subaccount-scoped rows)
-│     - Human-curated, Tiptap-edited
-│     - Toggle: autoAttach (default: true for notes created via knowledgeBinding)
-│     - Attached to agents via memory_block_attachments (with .source column)
+├── Tab: References            ──→ workspace_memory_entries (subaccount-scoped rows)
+│     - Long-form notes, typically Tiptap-edited
+│     - Agent-maintained or human-authored; retrieved on demand via memory_search
+│     - Select → "Promote to Memory Block" button
+│        → creates a new memory_blocks row with content = condensed entry content
+│        → writes a back-link in the Memory Block ("Promoted from Reference …")
 │
-└── Tab: Insights               ──→ workspace_memory_entries
-      - Agent-maintained, auto-captured during runs
-      - Filter by domain / topic / entryType / taskSlug
-      - Select → "Promote to Reference note" button
-         → creates a new memory_blocks row with content = entry.content
-         → writes a back-link in the Reference note ("Promoted from insight …")
+└── Tab: Memory Blocks          ──→ memory_blocks (subaccount-scoped rows)
+      - Short, stable facts loaded into every agent run
+      - Toggle: autoAttach (default: true for blocks created via knowledgeBinding)
+      - Attached to agents via memory_block_attachments (with .source column)
 ```
 
 Auto-attach policy:
@@ -325,22 +325,28 @@ Files the build will create, modify, or delete. Drift between this list and real
 | modify | `server/lib/playbook/validator.ts` | New `case 'action_call':` and `knowledgeBinding` validation |
 | modify | `server/lib/playbook/renderer.ts` | Emit new fields |
 | modify | `server/services/playbookEngineService.ts` | New `case 'action_call':` in `dispatchStep`; knowledge-binding side effect on `user_input` completion |
-| create | `server/services/__tests__/playbookActionCallPure.test.ts` | Validator + dispatch planning tests |
-| create | `server/services/__tests__/playbookKnowledgeBindingPure.test.ts` | Knowledge-binding validator tests |
+| create | `server/services/playbookActionCallExecutor.ts` | `executeActionCall()` thin helper — routes through proposeAction, returns status |
+| create | `server/services/__tests__/actionCallValidator.pure.test.ts` | Validator rules for `action_call` steps |
+| create | `server/services/__tests__/actionCallAllowlist.pure.test.ts` | Snapshot test over frozen allowlist set |
+| create | `server/services/__tests__/executeActionCall.pure.test.ts` | Contract tests for executeActionCall (mocks proposeAction) |
+| create | `server/services/__tests__/knowledgeBindingValidator.pure.test.ts` | Validator rules for `knowledgeBindings` |
+| create | `server/services/__tests__/knowledgeBindingRuntime.pure.test.ts` | finaliseRun() binding-evaluation behaviour |
 | modify | `server/services/scheduledTaskService.ts` | Accept `runNow` argument; enqueue immediate job |
 | modify | `server/services/subaccountAgentService.ts` | On link creation, inherit `autoAttach: true` Reference notes |
 | modify | `server/services/memoryBlocksService.ts` (or create if absent) | CRUD + promote-from-insight + auto-attach semantics |
-| create | `migrations/0118_action_call_plus_knowledge.sql` | `modules.onboarding_playbook_slugs`, `subaccount_onboarding_state`, `memory_blocks.auto_attach`, `memory_block_attachments.source` |
+| create | `migrations/0118_memory_block_source_reference.sql` | `memory_blocks.auto_attach`, `memory_block_attachments.source`, `memory_blocks.sourceReferenceId` FK (see §7.3) |
+| create | `migrations/0119_modules_onboarding_playbook_slugs.sql` | `modules.onboarding_playbook_slugs text[] NOT NULL DEFAULT '{}'`, `subaccount_onboarding_state` table (see §10.2) |
+| create | `migrations/0120_portal_briefs.sql` | `portal_briefs` table, `playbook_runs.is_portal_visible`, `playbook_runs.is_onboarding_run` (see §11.6) |
 | create | `server/playbooks/daily-intelligence-brief.playbook.ts` | System playbook definition |
 | create | `server/scripts/seedOnboardingModuleBindings.ts` (or inline migration) | Register the Daily Brief slug in the right module(s) |
 | create | `client/src/components/ui/HelpHint.tsx` | Hover help icon primitive |
 | create | `client/src/components/SchedulePicker.tsx` | Schedule picker + run-now checkbox |
-| create | `client/src/pages/KnowledgePage.tsx` | Unified Knowledge page (two tabs) |
+| create | `client/src/pages/subaccount/SubaccountKnowledgePage.tsx` | Unified Knowledge page (two tabs) |
 | create | `client/src/components/PlaybookRunModal.tsx` | Playbook run modal |
 | modify | `client/src/pages/AdminSubaccountDetailPage.tsx` | Add "Onboarding" tab |
-| modify | `client/src/pages/PortalDashboardPage.tsx` | Daily Brief card |
-| modify | `client/src/pages/AdminModulesPage.tsx` | `onboardingPlaybookSlugs` multi-select |
-| modify | `client/src/App.tsx` | Router entry for `KnowledgePage` |
+| modify | `client/src/pages/PortalPage.tsx` | Daily Brief card (route `/portal/:subaccountId`) |
+| modify | `client/src/pages/SystemModulesPage.tsx` | `onboardingPlaybookSlugs` multi-select |
+| modify | `client/src/App.tsx` | Router entry for `SubaccountKnowledgePage` (route: `/admin/subaccounts/:subaccountId/knowledge`) |
 | modify | `architecture.md` | Cross-reference onboarding flow (once shipped) |
 | modify | `docs/capabilities.md` | Surface Knowledge page + onboarding in customer-facing capabilities (once shipped) |
 
@@ -884,7 +890,7 @@ The key UX affordance is the ability to promote a Reference into a Memory Block 
   3. Does NOT delete the Reference — promotion is non-destructive.
 - Demotion is the inverse, via the Memory Blocks tab's overflow menu: **Demote to Reference**. Creates a Reference, deletes the Block, Config-History-logged on both entities.
 
-The `sourceReferenceId` column (nullable FK to `workspaceMemoryEntries`) is added in migration `0127_memory_block_source_reference.sql` (number to be confirmed at implementation time — check `migrations/` for next free slot). The FK uses `ON DELETE SET NULL` so deleting a Reference does not cascade.
+The `sourceReferenceId` column (nullable FK to `workspaceMemoryEntries`) is added in migration `0118_memory_block_source_reference.sql`. The FK uses `ON DELETE SET NULL` so deleting a Reference does not cascade.
 
 A `HelpHint` (§6) on the Promote action explains what promotion means in-context.
 
@@ -1123,7 +1129,7 @@ The tab is admin-only (gated by `subaccount.playbooks.manage` permission). Sub-a
 
 ### 9.4 Portal card (sub-account user)
 
-New card on the existing sub-account portal landing page (`client/src/pages/portal/PortalHome.tsx` — verify exact filename at implementation time). The card renders once per `playbookRun` where `isPortalVisible = true`.
+New card on the existing sub-account portal page (`client/src/pages/PortalPage.tsx`, route `/portal/:subaccountId`). The card renders once per `playbookRun` where `isPortalVisible = true`.
 
 ```
 ┌─ Daily Intelligence Brief ──────────────────────────────────────────────────┐
@@ -1180,7 +1186,7 @@ A sub-account is configured by its module set — each module represents a bundl
 
 ### 10.2 Schema change
 
-New column on `modules` table (migration `0128_modules_onboarding_playbook_slugs.sql`; verify next free slot at implementation time):
+New column on `modules` table (migration `0119_modules_onboarding_playbook_slugs.sql`):
 
 ```sql
 ALTER TABLE modules
@@ -1223,7 +1229,7 @@ startOwedOnboardingPlaybook(params: {
 
 ### 10.4 UI adoption
 
-- **Module admin page** (`client/src/pages/admin/ModulesAdminPage.tsx`, existing): each module row gains a "Onboarding playbooks" multi-select. Options are the published system + org playbook slugs visible to the org. `HelpHint`: "Sub-accounts that enable this module will be prompted to run these playbooks during setup."
+- **Module admin page** (`client/src/pages/SystemModulesPage.tsx`, existing, route `/system/modules`): each module row gains a "Onboarding playbooks" multi-select. Options are the published system + org playbook slugs visible to the org. `HelpHint`: "Sub-accounts that enable this module will be prompted to run these playbooks during setup."
 - **Subaccount Onboarding tab** (§9.3): reads `listOwedOnboardingPlaybooks()`.
 
 ### 10.5 Auto-start on sub-account creation
@@ -1334,7 +1340,7 @@ autoStartOnOnboarding: true,
 
 Two new actions ship with this playbook. Both are added to the `config_*` allowlist (§4.2) because they are Configuration Assistant surface-area actions:
 
-- **`config_publish_playbook_output_to_portal`** — inputs: `{ runId, title, bullets, detailMarkdown }`. Creates a row in `portalBriefs` (new table, migration `0129_portal_briefs.sql`) and sets the associated `playbookRuns.isPortalVisible = true`. Idempotency strategy: `upsert_by_run_id`. Gate level: `auto` (reversible — can be retracted by setting the portal row `retractedAt`).
+- **`config_publish_playbook_output_to_portal`** — inputs: `{ runId, title, bullets, detailMarkdown }`. Creates a row in `portalBriefs` (new table, migration `0120_portal_briefs.sql`) and sets the associated `playbookRuns.isPortalVisible = true`. Idempotency strategy: `upsert_by_run_id`. Gate level: `auto` (reversible — can be retracted by setting the portal row `retractedAt`).
 - **`config_send_playbook_email_digest`** — inputs: `{ runId, to: string[], subject, bodyMarkdown }`. Sends via the existing email provider adapter. Idempotency strategy: `dedupe_by_composite_key` over `(runId, to.sort().join(','))`. Gate level: `review` on first send, `auto` on subsequent re-enqueues of the same composite key. Audited through the same `proposeAction` pipeline (§4.7).
 
 Both skills live under `server/skills/playbookPortal.ts` and `server/skills/playbookEmail.ts` respectively and register in `server/config/actionRegistry.ts`. They are not callable from human-initiated Configuration Assistant sessions directly (add to `ACTIONS_NOT_AGENT_DIRECTLY_CALLABLE` set); only reachable via `action_call` from playbook steps. This narrows blast radius.
@@ -1382,7 +1388,7 @@ Build primitives bottom-up. Each phase ships behind a feature flag and is indepe
 1. Schema: add `'action_call'` to `StepType`, add `actionSlug` / `actionInputs` fields, new `ValidationRule` entries. Update `server/lib/playbook/types.ts`, `validator.ts`, `renderer.ts`.
 2. Allowlist file `server/lib/playbook/actionCallAllowlist.ts` with frozen 28-slug set (config_* only) + the two new skills from §11.6 (brings the set to 30 at the point §11 lands, not now).
 3. Engine dispatch case in `playbookRunService` — resolves Configuration Assistant agentId, calls `executeActionCall()` helper, routes through `proposeAction` → `skillExecutor.execute`.
-4. `executeActionCall()` helper in `server/services/playbook/executeActionCall.ts`.
+4. `executeActionCall()` helper in `server/services/playbookActionCallExecutor.ts`.
 5. HITL resumption path wired into existing `playbookStepReviewService`.
 6. Tests: pure validator tests, dispatch unit tests (mock `actionService.proposeAction`), replay tests.
 
@@ -1502,7 +1508,7 @@ Where DB state + cross-service interactions matter. Use the existing harness (`s
 
 New gates, all wired into `scripts/run-all-gates.sh`:
 
-- `scripts/verify-action-call-allowlist.sh` — fails if `actionCallAllowlist.ts` references a slug not in `actionRegistry.ts`.
+- `scripts/verify-action-call-allowlist.sh` — fails if `actionCallAllowlist.ts` references a mutation slug not in `actionRegistry.ts`, or a read slug not in `skillExecutor.ts`. (Read-only slugs live only in `skillExecutor.ts`; mutation slugs live only in `actionRegistry.ts` — both surfaces must be checked.)
 - `scripts/verify-help-hint-length.mjs` — fails if any `<HelpHint text="…" />` literal exceeds 280 chars (§6.8).
 - `scripts/verify-playbook-portal-presentation.mjs` — fails if a playbook declares `portalPresentation.headlineStepId` that doesn't exist in its `steps[]`.
 - `scripts/verify-onboarding-slugs.mjs` — fails if any `modules.onboarding_playbook_slugs` array contains a slug with no published template (data gate; runs against a seeded test DB).
@@ -1542,11 +1548,11 @@ Every phase is independently reversible because every phase ships behind a featu
 
 ### 14.3 Data migrations reversal
 
-| Migration                                       | Reversal plan                                                                  |
-|-------------------------------------------------|---------------------------------------------------------------------------------|
-| `0127_memory_block_source_reference.sql` (§7.3) | Column stays; nullable; ignored by old code. No reversal needed.                |
-| `0128_modules_onboarding_playbook_slugs.sql`    | Column stays; default `'{}'`; ignored by old code. No reversal needed.          |
-| `0129_portal_briefs.sql` (§11.6)                | Table stays; unread when `feature.daily_brief_template` is off.                 |
+| Migration                                        | Reversal plan                                                                  |
+|--------------------------------------------------|---------------------------------------------------------------------------------|
+| `0118_memory_block_source_reference.sql` (§7.3) | Column stays; nullable; ignored by old code. No reversal needed.                |
+| `0119_modules_onboarding_playbook_slugs.sql`    | Column stays; default `'{}'`; ignored by old code. No reversal needed.          |
+| `0120_portal_briefs.sql` (§11.6)                | Table stays; unread when `feature.daily_brief_template` is off.                 |
 
 We do not ship `DROP COLUMN` / `DROP TABLE` backout migrations because:
 

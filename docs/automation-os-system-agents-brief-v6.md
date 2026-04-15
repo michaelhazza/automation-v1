@@ -40,6 +40,7 @@
 25. [Appendix B — Skill Wiring Audit (v6.0)](#appendix-b--skill-wiring-audit-v60)
 26. [Appendix C — Source of Truth & Drift Protocol](#appendix-c--source-of-truth--drift-protocol)
 27. [Appendix D — Skill Visibility Rule](#appendix-d--skill-visibility-rule)
+28. [Appendix E — System-Level Contracts](#appendix-e--system-level-contracts)
 
 ---
 
@@ -247,6 +248,28 @@ The Orchestrator is the operational backbone of the agent network. It has visibi
 | `request_approval` | review | Escalate coordination decisions requiring human input |
 
 **Must not:** send external communications; write or propose code; modify integration credentials; approve or reject review items; take any action with financial consequences.
+
+### Execution limits
+
+| Limit | Value | Rationale |
+|-------|-------|-----------|
+| Max tasks created per run | 20 | Prevents task explosion on a single directive pass |
+| Max concurrent sub-agent spawns | 3 | Matches the `max 2-3 independent tracks` constraint in the wired skills table |
+| Min re-open window | 4 hours | Must not re-open a task closed within the current or previous run — prevents thrash loops where the same issue is repeatedly escalated |
+
+These are hard limits enforced at the prompt level. If the Orchestrator reaches any limit mid-run it must stop creating new work, write a summary of deferred items to `workspace_memories`, and surface them in the next scheduled run.
+
+### Task prioritisation
+
+The Orchestrator must apply a consistent priority model when deciding which issues to surface and which tasks to create. All task creation in a single run is ordered by three signals:
+
+| Signal | Priority | Examples |
+|--------|----------|---------|
+| Urgency | Highest | Data loss, production failures, HITL items blocked >24 hours |
+| Impact | Medium | Revenue-affecting anomalies, churn-risk spikes, stalled features blocking other agents |
+| Recency | Lowest | Items not addressed in the previous run |
+
+When the 20-task cap is reached, lower-priority items are deferred — not discarded — and documented in the deferred summary. The model does not need to be a formula: consistent application of this ordering is sufficient. **This prioritisation model is mandatory for all task creation decisions** — it is not guidance.
 
 **Outputs:** `orchestrator_directives` record written to DB each run and injected into all agent prompts; evening summary in `workspace_memories`; coordination tasks on the board; escalation flags for systemic failures.
 
@@ -793,9 +816,21 @@ Deliberately outside the business-team hierarchy because it crosses subaccount b
 
 > **Why this agent has a different skill set.** Every other agent in the roster is wired with the standard task-management bundle (`read_workspace` / `write_workspace` / `move_task` / `update_task` / `request_approval`). Portfolio Health Agent is intentionally NOT — it runs at `executionScope: org`, has `subaccountId: null` at run time, and the workspace and task primitives are subaccount-scoped. The runtime explicitly throws if `read_workspace` or `write_workspace` is invoked without a subaccount context. The org-level equivalents (`read_org_insights` / `write_org_insight`) exist precisely as the architectural workaround, and the agent uses those instead. If a future change unifies the workspace surface across subaccount and org scopes, the universal bundle can be added here.
 
+### Intervention execution loop
+
+When Portfolio Health detects an issue requiring action, the handoff path is:
+
+1. `write_org_insight` (auto) — records the finding and proposed intervention in org-level memory
+2. `trigger_account_intervention` (auto) — proposes the action to the HITL review queue; execution stops here
+3. Human approves → the approved intervention becomes visible to the Orchestrator on its next scheduled run via `read_workspace` (org-level directive)
+4. Orchestrator creates a task on the relevant subaccount board and assigns it to the appropriate business agent
+5. Business agent picks up the task via its normal run cycle
+
+**Portfolio Health proposes; it does not dispatch.** `trigger_account_intervention` exits at the HITL boundary — Portfolio Health has no authority to create tasks in the business-team hierarchy and no mechanism to invoke subaccount-scoped agents. All execution authority flows through the Orchestrator.
+
 **Must not:** write to individual subaccount workspace memory; invoke business-team agents directly; make interventions without HITL approval; expose cross-subaccount data to users without org-level permissions.
 
-**Outputs:** health scores per subaccount in org-level memory every 4 hours; anomaly flags and churn risk scores; portfolio intelligence briefings; intervention proposals routed through HITL review.
+**Outputs:** health scores per subaccount in org-level memory every 4 hours; anomaly flags and churn risk scores; portfolio intelligence briefings; intervention proposals routed through HITL review to the Orchestrator.
 
 ---
 
@@ -1100,6 +1135,122 @@ Skill names containing `read_` or `write_` are not automatically app-foundationa
 ### Why this matters
 
 Visibility is not cosmetic — it controls what org admins see in the skill-management UI. Exposing `read_workspace` or `create_task` as manageable skills would confuse org admins who cannot meaningfully configure them (they are prerequisites for every agent, not options). Hiding them keeps the org UI focused on the capabilities customers actually pay for. Conversely, hiding `draft_ad_copy` or `analyse_financials` would hide the agent's actual value. The classification rule enforces this separation mechanically so it cannot drift over time.
+
+---
+
+## Appendix E — System-Level Contracts
+
+These rules apply to every agent in the network without exception. They are architecture-level invariants, not conventions — a violation here is a correctness bug, not a style issue.
+
+---
+
+### E.1 Global Execution Result Contract
+
+Every agent run MUST produce a result that conforms to this schema:
+
+```typescript
+type AgentRunResult = {
+  status: 'success' | 'partial' | 'failed'
+  failureType?: 'dependency_failure' | 'validation_error' | 'external_error' | 'internal_error'
+  retryable: boolean
+  sideEffectsCommitted: boolean
+}
+```
+
+| Field | Notes |
+|-------|-------|
+| `status` | `partial` = run completed but not all intended work was done (e.g. hit task limit, one skill failed) |
+| `failureType` | **MUST** be present whenever `status !== 'success'`; used by the Orchestrator to decide retry vs escalation strategy |
+| `retryable` | `true` only if retrying from the same state is safe and likely to succeed |
+| `sideEffectsCommitted` | `true` if any write, send, or external call completed — a `partial` run with `sideEffectsCommitted: true` must never be blindly retried without idempotency checks |
+
+The Orchestrator reasons about the agent network using these values. An agent that returns no result or swallows a failure is uncoordinated by definition.
+
+**Partial execution with committed side effects**
+
+The combination `status: 'partial'` + `sideEffectsCommitted: true` is the most dangerous run state: some actions completed, some did not, and blind retries may produce duplicates or corrupt state. When this occurs:
+
+- The agent MUST explicitly record all completed actions in its run result before exiting, using this minimum structure:
+  ```typescript
+  completedActions: Array<{
+    skill: string    // skill slug
+    target: string   // entity acted on (task ID, CRM record ID, etc.)
+    outcome: 'success' | 'failed'
+  }>
+  ```
+- Automatic retry is prohibited; the Orchestrator must route the run to manual review
+- Resumption requires either idempotent replay (using a `task_linked` or `external_id` strategy) or explicit human direction
+
+**Retry policy**
+
+| Condition | Retry behaviour |
+|-----------|----------------|
+| `retryable: true`, `sideEffectsCommitted: false` | Retry within the same run (max 2 attempts), then defer to next scheduled run |
+| `retryable: true`, `sideEffectsCommitted: true` | Defer to next scheduled run only — same-run retry is unsafe |
+| `retryable: false` | No retry; escalate immediately |
+
+The 3-attempt cap is global across both same-run and cross-run retries combined. After 3 total attempts, escalation is mandatory: the agent creates a task with `priority: urgent`, attaches the full failure history, and exits. No further automatic retry occurs until a human clears the escalation task.
+
+---
+
+### E.2 Consistency Model
+
+All agent actions operate on **snapshot reads** and follow a **logical append-only write model**: history is preserved even when underlying storage performs in-place updates (e.g. `update_task` mutates a row but the previous state remains visible in the audit log). No agent assumes real-time consistency between its read phase and its write phase.
+
+Implications:
+- An agent reading the task board or workspace memory sees the state at run-start, not live state
+- Two agents may read the same task concurrently and propose conflicting updates; the task board resolves the immediate state by last-write-wins
+- **Conflicts must be visible:** a conflict is defined as two writes to the same field of the same entity within a single run window. When this occurs the conflict must be logged as a conflict event that the Orchestrator can read. Last-write-wins resolves state; the conflict log allows the Orchestrator to detect patterns (e.g. two agents repeatedly overwriting the same field) and intervene before they become systemic
+- An agent must not make correctness assumptions that require its read to still be fresh at write time (e.g. "I read budget = $500 so I can safely write budget = $450")
+
+This is intentional. Optimistic concurrency scales; distributed locking does not. Agents that need stronger guarantees must use the HITL gate to serialise the decision through a human.
+
+---
+
+### E.3 Memory vs Task Board Boundary
+
+| Layer | Purpose | Rule |
+|-------|---------|------|
+| **Task board** | Executable work items | All actionable work MUST exist as a task |
+| **Workspace memory** | Context, insights, derived state | Read-only input to reasoning — not a source of executable intent |
+
+An agent must not write a decision into `workspace_memories` and treat that memory entry as a work item. If something needs to happen, a task must exist for it on the board with an assigned agent, a status, and a clear deliverable. Agents that store intent in memory instead of tasks lose auditability, make coordination unreliable, and create invisible work that the Orchestrator cannot surface.
+
+The only legitimate writes to `workspace_memories` are: observations, computed insights, run summaries, and cross-agent context that downstream agents need as background — never instructions or pending actions.
+
+---
+
+### E.4 Idempotency Requirement
+
+All non-read skills must define an idempotency strategy. Three strategies are recognised:
+
+| Strategy | Meaning | Typical use |
+|----------|---------|-------------|
+| `task_linked` | Action is scoped to a single task run; re-running the same task is safe because the task ID is the deduplication key | Code patches, spec writes |
+| `external_id` | External system provides a natural unique key that prevents duplicate creation | CRM record updates, email thread replies |
+| `dedupe_window` | Action is safe to repeat after N hours have elapsed | Report delivery, social posts |
+
+Skills declared as `idempotencyStrategy: 'read_only'` in the action registry are exempt.
+
+A skill without a declared idempotency strategy is treated as **unguarded** — retries may produce duplicate emails, duplicate CRM writes, duplicate charges, or duplicate published content. Every new non-read skill must have `idempotencyStrategy` set in its `actionRegistry.ts` entry before it can be wired to an agent.
+
+---
+
+### E.5 Task Creation Idempotency
+
+Task creation is subject to the same idempotency requirement as skill invocations. The Orchestrator and Portfolio Health Agent are the primary task creators and both run on schedules — meaning the same condition can trigger task creation on multiple consecutive runs.
+
+**Invariant:** a new task must not be created if an open or in-progress task already exists with the same `(source, referenceId)` pair, or if an equivalent task was created within the default deduplication window.
+
+| Field | Meaning |
+|-------|---------|
+| `source` | The agent slug that created the task |
+| `referenceId` | A stable identifier for the underlying trigger (e.g. bug ID, anomaly key, memory block ID) |
+| Default dedup window | 4 hours — aligned with the Portfolio Health run interval |
+
+An agent that finds an existing open task matching its `(source, referenceId)` must update the existing task rather than create a new one. This prevents the Orchestrator from flooding the board with duplicate escalations across consecutive runs for the same underlying condition.
+
+After the dedup window expires, a new task may be created for a recurring issue even if a previous task existed — the window expiry signals that the prior instance was resolved or became stale.
 
 ---
 
