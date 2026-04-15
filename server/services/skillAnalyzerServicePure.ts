@@ -650,7 +650,7 @@ export function containsHitlGate(text: string | null): boolean {
  *  regardless of exact phrasing. Used as fallback after containsHitlGate. */
 export function containsApprovalIntent(text: string | null): boolean {
   if (!text) return false;
-  return /\b(approval|review|confirm|sign-?off)\b/i.test(text);
+  return /\b(approval|approvals|review|confirm\w*|sign-?off)\b/i.test(text);
 }
 
 const OUTPUT_FORMAT_HEADING_RE = /^#{1,4}\s+(output\s+format|response\s+format|format|template)\b/im;
