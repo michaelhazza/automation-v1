@@ -23,6 +23,7 @@ import {
   playbookRuns,
   playbookTemplateVersions,
   systemPlaybookTemplateVersions,
+  scheduledTasks,
 } from '../db/schema/index.js';
 import { eq, and, isNull, desc, gte, lte } from 'drizzle-orm';
 import { playbookRunService } from '../services/playbookRunService.js';
@@ -535,6 +536,83 @@ router.get(
     );
 
     res.json({ runs: enriched });
+  }),
+);
+
+// ─── Portal: Daily Brief card (spec §G10.4) ──────────────────────────────────
+
+/**
+ * GET /api/portal/:subaccountId/daily-brief-card
+ *
+ * Drives the dedicated "Daily Brief" hero card on the portal dashboard.
+ * Per spec §G10.4, the card shows iff the subaccount has BOTH a completed
+ * Daily Intelligence Brief run AND a currently-active scheduled task
+ * producing briefs. Returning { active: false } from either side keeps the
+ * card off the dashboard so stale schedules don't advertise a broken card.
+ *
+ * Response shape:
+ *   {
+ *     active: boolean,
+ *     latestRun: { id, completedAt } | null,
+ *     nextRunAt: string | null,
+ *     scheduledTaskId: string | null,
+ *   }
+ *
+ * The card itself is rendered by PortalPage — this endpoint is a pure
+ * aggregate so the client can light it up without running its own joins.
+ */
+router.get(
+  '/api/portal/:subaccountId/daily-brief-card',
+  authenticate,
+  requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
+  asyncHandler(async (req, res) => {
+    const { subaccountId } = req.params;
+    await resolveSubaccount(subaccountId);
+
+    const DAILY_BRIEF_SLUG = 'daily-intelligence-brief';
+
+    const [latestRun] = await db
+      .select({
+        id: playbookRuns.id,
+        completedAt: playbookRuns.completedAt,
+      })
+      .from(playbookRuns)
+      .where(
+        and(
+          eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.playbookSlug, DAILY_BRIEF_SLUG),
+          eq(playbookRuns.status, 'completed'),
+        ),
+      )
+      .orderBy(desc(playbookRuns.completedAt))
+      .limit(1);
+
+    const [activeSchedule] = await db
+      .select({
+        id: scheduledTasks.id,
+        nextRunAt: scheduledTasks.nextRunAt,
+      })
+      .from(scheduledTasks)
+      .where(
+        and(
+          eq(scheduledTasks.subaccountId, subaccountId),
+          eq(scheduledTasks.createdByPlaybookSlug, DAILY_BRIEF_SLUG),
+          eq(scheduledTasks.isActive, true),
+        ),
+      )
+      .orderBy(desc(scheduledTasks.nextRunAt))
+      .limit(1);
+
+    const active = Boolean(latestRun && activeSchedule);
+
+    res.json({
+      active,
+      latestRun: latestRun
+        ? { id: latestRun.id, completedAt: latestRun.completedAt }
+        : null,
+      nextRunAt: activeSchedule?.nextRunAt ?? null,
+      scheduledTaskId: activeSchedule?.id ?? null,
+    });
   }),
 );
 

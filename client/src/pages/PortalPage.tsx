@@ -40,12 +40,21 @@ interface PortalRun {
 
 const ACTIVE_STATUSES = new Set(['pending', 'running', 'awaiting_input', 'awaiting_approval']);
 
+// §G10.4 — Daily Brief hero card aggregate
+interface DailyBriefCard {
+  active: boolean;
+  latestRun: { id: string; completedAt: string | null } | null;
+  nextRunAt: string | null;
+  scheduledTaskId: string | null;
+}
+
 export default function PortalPage({ user: _user }: { user: User }) {
   const { subaccountId } = useParams<{ subaccountId: string }>();
   const [subaccount, setSubaccount] = useState<SubaccountInfo | null>(null);
   const [processes, setProcesses] = useState<PortalProcess[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [portalRuns, setPortalRuns] = useState<PortalRun[]>([]);
+  const [dailyBriefCard, setDailyBriefCard] = useState<DailyBriefCard | null>(null);
   const [runningNow, setRunningNow] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -57,12 +66,18 @@ export default function PortalPage({ user: _user }: { user: User }) {
     Promise.all([
       api.get(`/api/portal/${subaccountId}/processes`),
       api.get(`/api/portal/${subaccountId}/playbook-runs`).catch(() => ({ data: { runs: [] } })),
+      // §G10.4 — gated on completed-run + active-schedule server-side, so
+      // the client just reads `active` without running its own joins.
+      api
+        .get<DailyBriefCard>(`/api/portal/${subaccountId}/daily-brief-card`)
+        .catch(() => ({ data: null as DailyBriefCard | null })),
     ])
-      .then(([processRes, runsRes]) => {
+      .then(([processRes, runsRes, briefRes]) => {
         setSubaccount(processRes.data.subaccount);
         setProcesses(processRes.data.processes ?? []);
         setCategories(processRes.data.categories ?? []);
         setPortalRuns(runsRes.data.runs ?? []);
+        setDailyBriefCard(briefRes.data ?? null);
       })
       .catch((err) => {
         const e = err as { response?: { data?: { error?: string } } };
@@ -103,15 +118,62 @@ export default function PortalPage({ user: _user }: { user: User }) {
       <h1 className="text-[28px] font-bold text-slate-800 mb-1">{subaccount?.name ?? 'Portal'}</h1>
       <p className="text-slate-500 mb-7">Select a process to run an automation.</p>
 
-      {/* §9.4 Portal playbook run cards — one per isPortalVisible run */}
-      {portalRuns.length > 0 && (
+      {/* §G10.4 — Daily Brief hero card. Shown only when the subaccount
+          has a completed DIB run AND an active scheduled task producing
+          briefs. Server enforces both gates; the card stays hidden
+          otherwise so a stale/paused schedule never advertises a broken
+          card. */}
+      {dailyBriefCard?.active && dailyBriefCard.latestRun && (
+        <div className="mb-8 rounded-2xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white px-6 py-5 shadow-md">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-wider opacity-80">
+                Daily Intelligence Brief
+              </div>
+              <div className="text-[20px] font-bold mt-0.5">Today's brief is ready</div>
+              <div className="text-[13px] opacity-90 mt-1">
+                {dailyBriefCard.latestRun.completedAt
+                  ? `Delivered ${new Date(dailyBriefCard.latestRun.completedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                  : 'Latest brief completed'}
+                {dailyBriefCard.nextRunAt && (
+                  <>
+                    {' · '}Next run{' '}
+                    {new Date(dailyBriefCard.nextRunAt).toLocaleString('en-GB', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
+            <Link
+              to={`/portal/${subaccountId}/runs/${dailyBriefCard.latestRun.id}`}
+              className="px-4 py-2 bg-white text-indigo-700 text-[13px] font-semibold rounded-lg no-underline hover:bg-indigo-50 shrink-0"
+            >
+              Read latest brief →
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* §9.4 Portal playbook run cards — one per isPortalVisible run.
+          When the Daily Brief hero card is active we omit its run from
+          this list to avoid showing it twice. */}
+      {(() => {
+        const otherRuns = dailyBriefCard?.active
+          ? portalRuns.filter((r) => r.playbookSlug !== 'daily-intelligence-brief')
+          : portalRuns;
+        if (otherRuns.length === 0) return null;
+        return (
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-3">
             <h2 className="text-[16px] font-semibold text-slate-800 m-0">Playbooks</h2>
             <HelpHint text="These playbooks were run on behalf of your account. 'Run now' kicks off a fresh run immediately — your next scheduled run still happens on time." />
           </div>
           <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
-            {portalRuns.map((run) => {
+            {otherRuns.map((run) => {
               const pp = run.portalPresentation;
               const title = pp?.cardTitle ?? run.playbookSlug ?? 'Playbook run';
               const isActive = ACTIVE_STATUSES.has(run.status);
@@ -165,7 +227,8 @@ export default function PortalPage({ user: _user }: { user: User }) {
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <div className="flex gap-6">
         {/* Sidebar */}
