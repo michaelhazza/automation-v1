@@ -9,6 +9,7 @@ import type {
   AvailableSystemAgent,
   ParsedCandidate,
 } from './SkillAnalyzerWizard';
+import { BLOCKING_WARNING_CODES } from './mergeTypes';
 
 interface Props {
   job: AnalysisJob;
@@ -278,6 +279,9 @@ function ResultRow({
   const similarity = result.similarityScore != null ? Math.round(result.similarityScore * 100) : null;
   const isDistinct = result.classification === 'DISTINCT';
   const isDecided = result.actionTaken != null;
+  const hasBlockingWarning = result.mergeWarnings?.some(
+    w => BLOCKING_WARNING_CODES.has(w.code)
+  ) ?? false;
 
   async function setAction(action: 'approved' | 'rejected' | 'skipped') {
     setActionError(null);
@@ -439,7 +443,9 @@ function ResultRow({
             <button
               type="button"
               onClick={() => setAction('approved')}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+              disabled={hasBlockingWarning}
+              title={hasBlockingWarning ? 'Fix critical merge warnings before approving' : undefined}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Approve
             </button>
