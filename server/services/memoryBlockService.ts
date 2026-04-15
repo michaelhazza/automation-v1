@@ -17,10 +17,16 @@
  *   `detachBlock`, `listBlocks`.
  */
 
-import { eq, and, asc, isNull } from 'drizzle-orm';
+import { eq, and, asc, isNull, count } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { memoryBlocks, memoryBlockAttachments } from '../db/schema/index.js';
 import type { MemoryBlock } from '../db/schema/memoryBlocks.js';
+import {
+  decideUpsert,
+  MEMORY_BLOCKS_PER_RUN_MAX,
+  type MergeStrategy,
+  type BlockConfidence,
+} from './memoryBlockUpsertPure.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -260,6 +266,156 @@ export async function attachBlock(
 
   return row;
 }
+
+// ─── Phase D2 — playbook-driven upsert ───────────────────────────────────────
+
+export interface UpsertFromPlaybookParams {
+  organisationId: string;
+  subaccountId: string;
+  /** Memory Block label (matches the `name` column). */
+  label: string;
+  /** Pre-serialised content from the step output (caller applies `serialiseForBlock`). */
+  content: string;
+  mergeStrategy: MergeStrategy;
+  /** The playbookRun.id firing the binding. */
+  sourceRunId: string;
+  /** Slug of the playbook whose run is firing. */
+  playbookSlug: string;
+  /** The agent that owns the write (typically the Configuration Assistant). */
+  actorAgentId: string | null;
+  /** 'low' on firstRunOnly bindings, 'normal' otherwise. */
+  confidence: BlockConfidence;
+}
+
+export type UpsertFromPlaybookResult =
+  | { kind: 'created'; blockId: string; truncated: boolean }
+  | { kind: 'updated'; blockId: string; truncated: boolean; mergeFallback: boolean }
+  | { kind: 'skipped'; reason: 'hitl_overwrite'; blockId: string; previewContent: string }
+  | { kind: 'skipped'; reason: 'rate_limited' }
+  | { kind: 'skipped'; reason: 'empty_output' };
+
+/**
+ * Playbook-driven upsert. Called by `finaliseRun()` for each `knowledgeBinding`
+ * whose source step completed successfully. Applies:
+ *   - the 10-per-run rate limit (§7.5)
+ *   - the HITL overwrite rule against human-edited blocks (§7.5)
+ *   - the merge strategy with 2000-char truncation (§8.4)
+ *
+ * All three bits of decision logic live in `memoryBlockUpsertPure.ts` — this
+ * wrapper only fetches the existing row, counts prior writes for the run,
+ * and persists the decided outcome.
+ */
+export async function upsertFromPlaybook(
+  params: UpsertFromPlaybookParams,
+): Promise<UpsertFromPlaybookResult> {
+  const {
+    organisationId,
+    subaccountId,
+    label,
+    content,
+    mergeStrategy,
+    sourceRunId,
+    playbookSlug,
+    actorAgentId,
+    confidence,
+  } = params;
+
+  // Count how many blocks this run has already written — the per-run quota.
+  const [{ value: blocksUpsertedThisRun }] = await db
+    .select({ value: count() })
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.sourceRunId, sourceRunId),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+
+  // Look up the existing block by label within the sub-account.
+  const [existingRow] = await db
+    .select()
+    .from(memoryBlocks)
+    .where(
+      and(
+        eq(memoryBlocks.organisationId, organisationId),
+        eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.name, label),
+        isNull(memoryBlocks.deletedAt),
+      ),
+    );
+
+  const decision = decideUpsert({
+    existing: existingRow
+      ? {
+          id: existingRow.id,
+          content: existingRow.content,
+          lastEditedByAgentId: existingRow.lastEditedByAgentId,
+          lastWrittenByPlaybookSlug: existingRow.lastWrittenByPlaybookSlug,
+          sourceRunId: existingRow.sourceRunId,
+        }
+      : null,
+    label,
+    incomingContent: content,
+    mergeStrategy,
+    playbookSlug,
+    blocksUpsertedThisRun: Number(blocksUpsertedThisRun),
+  });
+
+  switch (decision.kind) {
+    case 'skip_empty':
+      return { kind: 'skipped', reason: 'empty_output' };
+    case 'skip_rate_limited':
+      return { kind: 'skipped', reason: 'rate_limited' };
+    case 'skip_hitl_overwrite':
+      return {
+        kind: 'skipped',
+        reason: 'hitl_overwrite',
+        blockId: existingRow!.id,
+        previewContent: decision.previewContent,
+      };
+    case 'create': {
+      const [created] = await db
+        .insert(memoryBlocks)
+        .values({
+          organisationId,
+          subaccountId,
+          name: label,
+          content: decision.content,
+          isReadOnly: false,
+          sourceRunId,
+          lastEditedByAgentId: actorAgentId,
+          lastWrittenByPlaybookSlug: playbookSlug,
+          confidence,
+        })
+        .returning({ id: memoryBlocks.id });
+      return { kind: 'created', blockId: created.id, truncated: decision.truncated };
+    }
+    case 'update': {
+      const [updated] = await db
+        .update(memoryBlocks)
+        .set({
+          content: decision.content,
+          sourceRunId,
+          lastEditedByAgentId: actorAgentId,
+          lastWrittenByPlaybookSlug: playbookSlug,
+          // Do not touch `confidence` on update — a previously-'low' block can
+          // remain 'low' until a human saves it manually. Spec §8.4 last bullet.
+          updatedAt: new Date(),
+        })
+        .where(eq(memoryBlocks.id, existingRow!.id))
+        .returning({ id: memoryBlocks.id });
+      return {
+        kind: 'updated',
+        blockId: updated.id,
+        truncated: decision.truncated,
+        mergeFallback: decision.mergeFallback,
+      };
+    }
+  }
+}
+
+/** Re-export the per-run quota for places that want to display it in UI. */
+export { MEMORY_BLOCKS_PER_RUN_MAX };
 
 export async function detachBlock(blockId: string, agentId: string, orgId: string): Promise<boolean> {
   // Verify the block belongs to the caller's org before detaching

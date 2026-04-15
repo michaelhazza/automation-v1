@@ -73,6 +73,44 @@ export async function updateReference(params: UpdateReferenceParams) {
   return updated ?? null;
 }
 
+export interface WriteReferenceFromBindingParams {
+  subaccountId: string;
+  organisationId: string;
+  /** The Reference note title — rendered as a leading `# name` heading. */
+  name: string;
+  /** The resolved form-field value being bound. */
+  value: string;
+  /** Optional entry type; defaults to `observation`. */
+  entryType?: ReferenceEntryType;
+}
+
+/**
+ * Append a Reference note created by a `referenceBinding` on a `user_input`
+ * step (spec §G8). References are append-only, so this always creates a
+ * new row. The note content takes the shape `# <name>\n\n<value>` so the
+ * Knowledge tab's first-line-as-title renderer picks up the supplied label.
+ */
+export async function writeReferenceFromBinding(params: WriteReferenceFromBindingParams) {
+  const { subaccountId, organisationId, name, value, entryType } = params;
+  const trimmedName = name.trim();
+  const trimmedValue = value.trim();
+  const content = trimmedName.length > 0
+    ? `# ${trimmedName}\n\n${trimmedValue}`
+    : trimmedValue;
+  const [created] = await db
+    .insert(workspaceMemoryEntries)
+    .values({
+      organisationId,
+      subaccountId,
+      agentRunId: null,
+      agentId: null,
+      content,
+      entryType: entryType ?? 'observation',
+    })
+    .returning({ id: workspaceMemoryEntries.id });
+  return created;
+}
+
 /** Max label length for a Memory Block, matching spec §7.3 (80 chars). */
 export const MEMORY_BLOCK_LABEL_MAX = 80;
 

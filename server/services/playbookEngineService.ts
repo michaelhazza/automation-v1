@@ -31,12 +31,14 @@
  *                              agentScheduleService.initialize()
  */
 
-import { eq, and, sql, isNull, lt, inArray } from 'drizzle-orm';
+import { eq, and, sql, isNull, lt, inArray, ne } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import {
   playbookRuns,
   playbookStepRuns,
+  playbookTemplates,
   playbookTemplateVersions,
+  systemPlaybookTemplates,
   systemPlaybookTemplateVersions,
   agents,
   systemAgents,
@@ -73,6 +75,9 @@ import {
   ActionTimeoutError,
 } from './playbookActionCallExecutor.js';
 import type { ActionCallStep } from '../lib/playbook/types.js';
+import { upsertFromPlaybook } from './memoryBlockService.js';
+import { getByPath, serialiseForBlock } from './memoryBlockUpsertPure.js';
+import { writeReferenceFromBinding } from './knowledgeService.js';
 
 const TICK_QUEUE = 'playbook-run-tick';
 const WATCHDOG_QUEUE = 'playbook-watchdog';
@@ -110,6 +115,255 @@ async function loadDefinitionForRun(run: PlaybookRun): Promise<PlaybookDefinitio
 
 function findStepInDefinition(def: PlaybookDefinition, stepId: string): PlaybookStep | undefined {
   return def.steps.find((s) => s.id === stepId);
+}
+
+/**
+ * Look up the playbook slug for a run by joining through either the org
+ * template-version lineage or the system template-version lineage. Returns
+ * null if neither side resolves — this happens when the template was
+ * hard-deleted out from under an in-flight run, which should be impossible
+ * in practice but worth guarding.
+ */
+async function resolvePlaybookSlugForRun(run: PlaybookRun): Promise<string | null> {
+  const [orgRow] = await db
+    .select({ slug: playbookTemplates.slug })
+    .from(playbookTemplateVersions)
+    .innerJoin(playbookTemplates, eq(playbookTemplateVersions.templateId, playbookTemplates.id))
+    .where(eq(playbookTemplateVersions.id, run.templateVersionId));
+  if (orgRow?.slug) return orgRow.slug;
+
+  const [sysRow] = await db
+    .select({ slug: systemPlaybookTemplates.slug })
+    .from(systemPlaybookTemplateVersions)
+    .innerJoin(
+      systemPlaybookTemplates,
+      eq(systemPlaybookTemplateVersions.systemTemplateId, systemPlaybookTemplates.id),
+    )
+    .where(eq(systemPlaybookTemplateVersions.id, run.templateVersionId));
+  return sysRow?.slug ?? null;
+}
+
+/**
+ * True iff a prior successful (`completed` or `completed_with_errors`) run of
+ * the same playbook slug has already landed on this sub-account. Drives the
+ * `firstRunOnly` gate on a `knowledgeBinding`.
+ *
+ * Implementation joins `playbook_runs → playbook_template_versions →
+ * playbook_templates` on the org side and the matching system tables on the
+ * system side, filtering by the resolved slug.
+ */
+async function hasPriorSuccessfulRunForSlug(
+  subaccountId: string,
+  slug: string,
+  excludeRunId: string,
+): Promise<boolean> {
+  const [orgHit] = await db
+    .select({ id: playbookRuns.id })
+    .from(playbookRuns)
+    .innerJoin(
+      playbookTemplateVersions,
+      eq(playbookRuns.templateVersionId, playbookTemplateVersions.id),
+    )
+    .innerJoin(playbookTemplates, eq(playbookTemplateVersions.templateId, playbookTemplates.id))
+    .where(
+      and(
+        eq(playbookRuns.subaccountId, subaccountId),
+        eq(playbookTemplates.slug, slug),
+        inArray(playbookRuns.status, ['completed', 'completed_with_errors']),
+        ne(playbookRuns.id, excludeRunId),
+      ),
+    )
+    .limit(1);
+  if (orgHit) return true;
+
+  const [sysHit] = await db
+    .select({ id: playbookRuns.id })
+    .from(playbookRuns)
+    .innerJoin(
+      systemPlaybookTemplateVersions,
+      eq(playbookRuns.templateVersionId, systemPlaybookTemplateVersions.id),
+    )
+    .innerJoin(
+      systemPlaybookTemplates,
+      eq(systemPlaybookTemplateVersions.systemTemplateId, systemPlaybookTemplates.id),
+    )
+    .where(
+      and(
+        eq(playbookRuns.subaccountId, subaccountId),
+        eq(systemPlaybookTemplates.slug, slug),
+        inArray(playbookRuns.status, ['completed', 'completed_with_errors']),
+        ne(playbookRuns.id, excludeRunId),
+      ),
+    )
+    .limit(1);
+  return !!sysHit;
+}
+
+/**
+ * Apply the run's `knowledgeBindings[]` on terminal completion. For each
+ * binding, the engine:
+ *   1. Resolves the source step's output via `getByPath`.
+ *   2. Serialises the resolved value for block storage.
+ *   3. Skips the binding on `firstRunOnly` + prior-run-exists (§8.2).
+ *   4. Delegates to `memoryBlockService.upsertFromPlaybook` which applies
+ *      the merge strategy, rate limit, HITL carve-out and writes.
+ *   5. Emits a structured event per outcome (missing_output, truncated,
+ *      merge_fallback, rate_limited, hitl_required, created, updated).
+ *
+ * Failures on individual bindings never block run completion — the engine
+ * logs and continues. All DB reads/writes happen against the main session
+ * (no advisory lock needed; we are already inside the terminal branch).
+ */
+async function finaliseRunKnowledgeBindings(
+  run: PlaybookRun,
+  def: PlaybookDefinition,
+  liveStepRuns: PlaybookStepRun[],
+): Promise<void> {
+  const bindings = def.knowledgeBindings ?? [];
+  if (bindings.length === 0) return;
+
+  const slug = await resolvePlaybookSlugForRun(run);
+  if (!slug) {
+    logger.warn('playbook_knowledge_binding_slug_missing', { runId: run.id });
+    return;
+  }
+
+  // Determine whether any `firstRunOnly` binding fires. We compute this
+  // lazily — the slug lookup is the only query we save.
+  let priorRunChecked = false;
+  let priorRunExists = false;
+  const ensurePriorRunChecked = async () => {
+    if (priorRunChecked) return;
+    priorRunExists = await hasPriorSuccessfulRunForSlug(run.subaccountId, slug, run.id);
+    priorRunChecked = true;
+  };
+
+  // Configuration Assistant owns provenance writes so the Knowledge page can
+  // show "last written by agent X" attribution. Falls back to null on
+  // system installs without a CA wired up.
+  const actorAgentId = await resolveConfigurationAssistantAgentId(run.organisationId);
+
+  for (const binding of bindings) {
+    // Re-look up the step run row each iteration — the caller already loaded
+    // them, so we avoid a round-trip.
+    const sr = liveStepRuns.find(
+      (row) => row.stepId === binding.stepId && row.status === 'completed',
+    );
+    if (!sr) {
+      await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:missing_output', {
+        stepId: binding.stepId,
+        blockLabel: binding.blockLabel,
+        reason: 'step_not_completed',
+      });
+      continue;
+    }
+
+    const value = getByPath(sr.outputJson, binding.outputPath);
+    if (value === undefined) {
+      await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:missing_output', {
+        stepId: binding.stepId,
+        blockLabel: binding.blockLabel,
+        outputPath: binding.outputPath,
+        reason: 'output_path_unresolved',
+      });
+      continue;
+    }
+
+    if (binding.firstRunOnly) {
+      await ensurePriorRunChecked();
+      if (priorRunExists) {
+        await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:first_run_only_skipped', {
+          stepId: binding.stepId,
+          blockLabel: binding.blockLabel,
+        });
+        continue;
+      }
+    }
+
+    const serialised = serialiseForBlock(value);
+
+    try {
+      const result = await upsertFromPlaybook({
+        organisationId: run.organisationId,
+        subaccountId: run.subaccountId,
+        label: binding.blockLabel,
+        content: serialised,
+        mergeStrategy: binding.mergeStrategy ?? 'replace',
+        sourceRunId: run.id,
+        playbookSlug: slug,
+        actorAgentId,
+        confidence: binding.firstRunOnly ? 'low' : 'normal',
+      });
+
+      switch (result.kind) {
+        case 'created':
+          await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:created', {
+            stepId: binding.stepId,
+            blockLabel: binding.blockLabel,
+            blockId: result.blockId,
+            truncated: result.truncated,
+          });
+          if (result.truncated) {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:truncated', {
+              stepId: binding.stepId,
+              blockLabel: binding.blockLabel,
+              blockId: result.blockId,
+            });
+          }
+          break;
+        case 'updated':
+          await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:updated', {
+            stepId: binding.stepId,
+            blockLabel: binding.blockLabel,
+            blockId: result.blockId,
+            truncated: result.truncated,
+            mergeFallback: result.mergeFallback,
+          });
+          if (result.truncated) {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:truncated', {
+              stepId: binding.stepId,
+              blockLabel: binding.blockLabel,
+              blockId: result.blockId,
+            });
+          }
+          if (result.mergeFallback) {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:merge_fallback', {
+              stepId: binding.stepId,
+              blockLabel: binding.blockLabel,
+              blockId: result.blockId,
+            });
+          }
+          break;
+        case 'skipped':
+          if (result.reason === 'hitl_overwrite') {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:hitl_required', {
+              stepId: binding.stepId,
+              blockLabel: binding.blockLabel,
+              blockId: result.blockId,
+              previewContent: result.previewContent,
+            });
+          } else if (result.reason === 'rate_limited') {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:rate_limited', {
+              stepId: binding.stepId,
+              blockLabel: binding.blockLabel,
+            });
+          } else if (result.reason === 'empty_output') {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:knowledge_binding:empty_output', {
+              stepId: binding.stepId,
+              blockLabel: binding.blockLabel,
+            });
+          }
+          break;
+      }
+    } catch (err) {
+      logger.error('playbook_knowledge_binding_error', {
+        runId: run.id,
+        stepId: binding.stepId,
+        blockLabel: binding.blockLabel,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 /**
@@ -513,6 +767,19 @@ export const playbookEngineService = {
         const finalStatus: PlaybookRun['status'] = anyContinueFailures
           ? 'completed_with_errors'
           : 'completed';
+
+        // §8 — fire knowledgeBindings[] BEFORE the terminal status write so
+        // any emitted events are ordered before the final run:status emit.
+        // A binding failure never blocks the completion transaction.
+        try {
+          await finaliseRunKnowledgeBindings(run, def, liveStepRuns);
+        } catch (err) {
+          logger.error('playbook_knowledge_bindings_finalise_failed', {
+            runId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+
         await db
           .update(playbookRuns)
           .set({ status: finalStatus, completedAt: new Date(), updatedAt: new Date() })
@@ -2122,6 +2389,50 @@ export const playbookEngineService = {
       output,
       via,
     });
+
+    // §G8 / §7.4 — `user_input` steps with a `referenceBinding` write the
+    // bound form field to a Reference note on the sub-account. The binding
+    // fires after the step is persisted but before the re-tick, so the
+    // Knowledge tab reflects the new note as soon as the step turns green.
+    try {
+      const def = await loadDefinitionForRun(run);
+      if (def) {
+        const step = findStepInDefinition(def, sr.stepId);
+        if (step?.type === 'user_input' && step.referenceBinding) {
+          const outputObj = (output ?? {}) as Record<string, unknown>;
+          const fieldValue = outputObj[step.referenceBinding.field];
+          if (fieldValue !== undefined && fieldValue !== null && `${fieldValue}`.trim().length > 0) {
+            const created = await writeReferenceFromBinding({
+              subaccountId: run.subaccountId,
+              organisationId: run.organisationId,
+              name: step.referenceBinding.name,
+              value: String(fieldValue),
+            });
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:reference_binding:created', {
+              stepRunId: sr.id,
+              stepId: sr.stepId,
+              referenceId: created.id,
+              name: step.referenceBinding.name,
+            });
+          } else {
+            await emitPlaybookEvent(run.id, run.subaccountId, 'playbook:reference_binding:missing_field', {
+              stepRunId: sr.id,
+              stepId: sr.stepId,
+              field: step.referenceBinding.field,
+              name: step.referenceBinding.name,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      // Reference binding failures never block step completion.
+      logger.error('playbook_reference_binding_error', {
+        runId: run.id,
+        stepRunId: sr.id,
+        stepId: sr.stepId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     await this.enqueueTick(run.id);
   },

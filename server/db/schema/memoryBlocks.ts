@@ -29,6 +29,20 @@ export const memoryBlocks = pgTable(
     // not cascade the block.
     sourceReferenceId: uuid('source_reference_id')
       .references(() => workspaceMemoryEntries.id, { onDelete: 'set null' }),
+    // Phase D2 (spec §8.4, §7.5) — knowledgeBindings[] provenance + safety.
+    // confidence: 'low' marks blocks first written by a firstRunOnly binding
+    // so the Knowledge page can surface "review recommended". Reset to
+    // 'normal' on any human save.
+    confidence: text('confidence').notNull().default('normal').$type<'low' | 'normal'>(),
+    // Backlink to the playbookRun that last wrote this block; drives the
+    // per-run rate limit (§7.5 — 10 blocks per run).
+    sourceRunId: uuid('source_run_id'),
+    // Null = last-edited by a human (Knowledge page). Non-null = last-edited
+    // by an agent/playbook. Drives the HITL overwrite rule (§7.5).
+    lastEditedByAgentId: uuid('last_edited_by_agent_id').references(() => agents.id),
+    // Slug of the playbook that last wrote this block. A playbook can freely
+    // rewrite its own blocks without tripping the HITL overwrite rule.
+    lastWrittenByPlaybookSlug: text('last_written_by_playbook_slug'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
