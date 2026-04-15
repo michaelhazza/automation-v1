@@ -156,6 +156,9 @@ export default function ConfigPlanPreview({ plan, onExecute, onCancel, executing
           {checked.size === plan.steps.length ? 'Uncheck all' : 'Check all'}
         </button>
         <div className="flex-1" />
+        {!executing && checked.size === 0 && (
+          <span className="text-[12px] text-slate-400">Select at least one step to execute</span>
+        )}
         <button
           type="button"
           onClick={onCancel}
