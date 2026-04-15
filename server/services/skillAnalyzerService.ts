@@ -7,7 +7,7 @@ import { withBackoff } from '../lib/withBackoff.js';
 import anthropicAdapter from './providers/anthropicAdapter.js';
 import { skillAnalyzerServicePure } from './skillAnalyzerServicePure.js';
 import type { ParsedSkill } from './skillParserServicePure.js';
-import type { LibrarySkillSummary, AgentRecommendation } from './skillAnalyzerServicePure.js';
+import type { LibrarySkillSummary, AgentRecommendation, MergeWarning } from './skillAnalyzerServicePure.js';
 import type { ClassifyState } from '../db/schema/skillAnalyzerJobs.js';
 
 /** Best-effort string extraction for thrown values. Services in this codebase
@@ -249,6 +249,31 @@ export async function setResultAction(params: {
 
   if (!jobRows[0]) {
     throw { statusCode: 404, message: 'Job not found' };
+  }
+
+  // Server-side blocking enforcement — prevents approving a merge with
+  // critical unresolved warnings via a direct API call.
+  if (action === 'approved') {
+    const resultRows = await db
+      .select({
+        classification: skillAnalyzerResults.classification,
+        mergeWarnings: skillAnalyzerResults.mergeWarnings,
+      })
+      .from(skillAnalyzerResults)
+      .where(and(eq(skillAnalyzerResults.id, resultId), eq(skillAnalyzerResults.jobId, jobId)))
+      .limit(1);
+
+    const resultRow = resultRows[0];
+    if (
+      resultRow &&
+      (resultRow.classification === 'PARTIAL_OVERLAP' || resultRow.classification === 'IMPROVEMENT')
+    ) {
+      const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
+      const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
+      if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
+        throw { statusCode: 422, message: 'Cannot approve: merge has critical warnings that must be resolved first.', errorCode: 'MERGE_CRITICAL_WARNINGS' };
+      }
+    }
   }
 
   await db
