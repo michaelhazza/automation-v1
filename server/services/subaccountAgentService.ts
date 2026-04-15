@@ -106,7 +106,7 @@ export const subaccountAgentService = {
       // auto-attach memory block in the sub-account. Best-effort: failures
       // here are logged but do not undo the link.
       try {
-        await materialiseAutoAttachForAgent(agentId, subaccountId);
+        await materialiseAutoAttachForAgent(agentId, subaccountId, organisationId);
       } catch (err) {
         logger.error('subaccount_agent_auto_attach_failed', {
           agentId,

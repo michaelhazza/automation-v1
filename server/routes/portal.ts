@@ -25,7 +25,7 @@ import {
   systemPlaybookTemplateVersions,
   scheduledTasks,
 } from '../db/schema/index.js';
-import { eq, and, isNull, desc, gte, lte } from 'drizzle-orm';
+import { eq, and, isNull, desc, gte, lte, inArray } from 'drizzle-orm';
 import { playbookRunService } from '../services/playbookRunService.js';
 import { queueService } from '../services/queueService.js';
 import { agentActivityService } from '../services/agentActivityService.js';
@@ -485,7 +485,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    await resolveSubaccount(subaccountId);
+    const sa = await resolveSubaccount(subaccountId);
 
     // Load visible runs newest-first.
     const runs = await db
@@ -494,6 +494,7 @@ router.get(
       .where(
         and(
           eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.organisationId, sa.organisationId),
           eq(playbookRuns.isPortalVisible, true),
         ),
       )
@@ -504,36 +505,31 @@ router.get(
       return;
     }
 
-    // Load portalPresentation from each run's locked template version.
-    // We do it per-run rather than batched to keep the code simple; the list
-    // is expected to be short (most portals show 1–3 playbooks at a time).
-    const enriched = await Promise.all(
-      runs.map(async (run) => {
-        let portalPresentation: unknown = null;
+    // Batch-load portalPresentation: one query per version table instead of
+    // one query per run (avoids N+1 when the portal has many visible runs).
+    const versionIds = runs.map((r) => r.templateVersionId);
 
-        // Try org template version first.
-        const [orgVer] = await db
-          .select({ definitionJson: playbookTemplateVersions.definitionJson })
-          .from(playbookTemplateVersions)
-          .where(eq(playbookTemplateVersions.id, run.templateVersionId));
-        if (orgVer) {
-          const def = orgVer.definitionJson as Record<string, unknown>;
-          portalPresentation = def?.portalPresentation ?? null;
-        } else {
-          // Fall back to system template version.
-          const [sysVer] = await db
-            .select({ definitionJson: systemPlaybookTemplateVersions.definitionJson })
-            .from(systemPlaybookTemplateVersions)
-            .where(eq(systemPlaybookTemplateVersions.id, run.templateVersionId));
-          if (sysVer) {
-            const def = sysVer.definitionJson as Record<string, unknown>;
-            portalPresentation = def?.portalPresentation ?? null;
-          }
-        }
+    const orgVersions = await db
+      .select({ id: playbookTemplateVersions.id, definitionJson: playbookTemplateVersions.definitionJson })
+      .from(playbookTemplateVersions)
+      .where(inArray(playbookTemplateVersions.id, versionIds));
+    const orgVersionMap = new Map(orgVersions.map((v) => [v.id, v.definitionJson]));
 
-        return { ...run, portalPresentation };
-      }),
-    );
+    // For IDs not found in org versions, fall back to system template versions.
+    const missingIds = versionIds.filter((id) => !orgVersionMap.has(id));
+    const sysVersionMap = new Map<string, unknown>();
+    if (missingIds.length > 0) {
+      const sysVersions = await db
+        .select({ id: systemPlaybookTemplateVersions.id, definitionJson: systemPlaybookTemplateVersions.definitionJson })
+        .from(systemPlaybookTemplateVersions)
+        .where(inArray(systemPlaybookTemplateVersions.id, missingIds));
+      for (const v of sysVersions) sysVersionMap.set(v.id, v.definitionJson);
+    }
+
+    const enriched = runs.map((run) => {
+      const defJson = (orgVersionMap.get(run.templateVersionId) ?? sysVersionMap.get(run.templateVersionId)) as Record<string, unknown> | undefined;
+      return { ...run, portalPresentation: defJson?.portalPresentation ?? null };
+    });
 
     res.json({ runs: enriched });
   }),
@@ -567,7 +563,7 @@ router.get(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_READ),
   asyncHandler(async (req, res) => {
     const { subaccountId } = req.params;
-    await resolveSubaccount(subaccountId);
+    const sa = await resolveSubaccount(subaccountId);
 
     const DAILY_BRIEF_SLUG = 'daily-intelligence-brief';
 
@@ -580,6 +576,7 @@ router.get(
       .where(
         and(
           eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.organisationId, sa.organisationId),
           eq(playbookRuns.playbookSlug, DAILY_BRIEF_SLUG),
           eq(playbookRuns.status, 'completed'),
         ),
@@ -629,7 +626,7 @@ router.post(
   requireSubaccountPermission(SUBACCOUNT_PERMISSIONS.PLAYBOOK_RUNS_START),
   asyncHandler(async (req, res) => {
     const { subaccountId, runId } = req.params;
-    await resolveSubaccount(subaccountId);
+    const sa = await resolveSubaccount(subaccountId);
 
     // Load the source run to extract orgId + templateVersionId.
     const [sourceRun] = await db
@@ -639,6 +636,7 @@ router.post(
         and(
           eq(playbookRuns.id, runId),
           eq(playbookRuns.subaccountId, subaccountId),
+          eq(playbookRuns.organisationId, sa.organisationId),
           eq(playbookRuns.isPortalVisible, true),
         ),
       );

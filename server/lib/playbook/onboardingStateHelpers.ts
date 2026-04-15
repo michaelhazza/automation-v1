@@ -9,7 +9,7 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { getOrgScopedDb } from '../orgScopedDb.js';
+import { db } from '../../db/index.js';
 import { subaccountOnboardingState } from '../../db/schema/subaccountOnboardingState.js';
 import type { SubaccountOnboardingStatus } from '../../db/schema/subaccountOnboardingState.js';
 import type { PlaybookRunStatus } from '../../db/schema/playbookRuns.js';
@@ -46,10 +46,7 @@ export async function upsertSubaccountOnboardingState(params: {
   const now = new Date();
 
   try {
-    const orgDb = getOrgScopedDb(
-      'onboardingStateHelpers.upsertSubaccountOnboardingState',
-    );
-    await orgDb
+    await db
       .insert(subaccountOnboardingState)
       .values({
         organisationId: params.organisationId,

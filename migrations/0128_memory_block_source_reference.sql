@@ -13,13 +13,12 @@
 -- with main's `0118_skill_analyzer_merge_quality.sql`. The feature branch
 -- originally claimed 0118 before the skill-analyzer work landed on main.
 -- Both files are independent, but keeping one number per migration avoids
--- future confusion. The `DELETE ... WHERE filename = '0118_...'` below
--- removes the old tracking row on dev DBs that already applied this file
--- under its former name; fresh DBs see a no-op.
+-- future confusion.
+--
+-- If your local dev DB already applied this file as 0118, manually clean up
+-- the stale tracking row before running migrations:
+--   DELETE FROM schema_migrations WHERE filename = '0118_memory_block_source_reference.sql';
 -- ---------------------------------------------------------------------------
-
-DELETE FROM schema_migrations
- WHERE filename = '0118_memory_block_source_reference.sql';
 
 ALTER TABLE memory_blocks
   ADD COLUMN IF NOT EXISTS source_reference_id uuid

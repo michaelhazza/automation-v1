@@ -103,6 +103,10 @@ function computePosition(
 
 export function HelpHint(props: HelpHintProps) {
   const { text, ariaLabel = 'More information', placement = 'top', clickOnly = false } = props;
+  // §G5.3 — runtime guard: truncate at 280 chars with an ellipsis.
+  // The lint gate (scripts/verify-help-hint-length.mjs) covers static strings;
+  // this handles dynamic or template-literal text that bypasses the gate.
+  const displayText = text.length > 280 ? text.slice(0, 279) + '…' : text;
 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -145,12 +149,23 @@ export function HelpHint(props: HelpHintProps) {
     closeTimerRef.current = window.setTimeout(() => setOpen(false), HOVER_CLOSE_MS);
   }, [clickOnly, clearTimers]);
 
+  const handleBlur = useCallback((e: React.FocusEvent) => {
+    // Don't close if focus is moving into the popover (e.g. user tabs to a
+    // link inside the tooltip content).
+    const next = e.relatedTarget as Node | null;
+    if (popoverRef.current?.contains(next)) return;
+    scheduleClose();
+  }, [scheduleClose]);
+
   // Measure + position on open, and on resize / scroll while open.
+  // Scroll listener uses capture=true so it fires for nested scroll containers
+  // too (e.g. modals, overflow-auto panels). The RAF throttle keeps it cheap.
   useEffect(() => {
     if (!open) {
       setPosition(null);
       return;
     }
+    let rafId: number | null = null;
     const place = () => {
       const trigger = triggerRef.current;
       const popover = popoverRef.current;
@@ -159,14 +174,22 @@ export function HelpHint(props: HelpHintProps) {
       const pRect = { width: popover.offsetWidth, height: popover.offsetHeight };
       setPosition(computePosition(tRect, pRect, placement));
     };
-    place();
-    window.addEventListener('scroll', place, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('scroll', place, true);
-      window.removeEventListener('resize', place);
+    const placeThrottled = () => {
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        place();
+      });
     };
-  }, [open, placement, text]);
+    place();
+    window.addEventListener('scroll', placeThrottled, true);
+    window.addEventListener('resize', placeThrottled);
+    return () => {
+      window.removeEventListener('scroll', placeThrottled, true);
+      window.removeEventListener('resize', placeThrottled);
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+    };
+  }, [open, placement]);
 
   // Dismissal: Escape always closes and returns focus to the trigger.
   // Outside click / tap always closes.
@@ -217,8 +240,8 @@ export function HelpHint(props: HelpHintProps) {
           e.stopPropagation();
           open ? doClose() : doOpen();
         }}
-        onFocus={doOpen}
-        onBlur={scheduleClose}
+        onFocus={() => { if (!clickOnly) doOpen(); }}
+        onBlur={handleBlur}
         onMouseEnter={scheduleOpen}
         onMouseLeave={scheduleClose}
         className="inline-flex items-center justify-center w-4 h-4 rounded-full text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 transition-colors cursor-help align-middle"
@@ -256,12 +279,12 @@ export function HelpHint(props: HelpHintProps) {
                 top: position?.top ?? -9999,
                 left: position?.left ?? -9999,
                 maxWidth: POPOVER_MAX_WIDTH,
-                maxHeight: '10rem',
+                maxHeight: '15rem',
                 visibility: position ? 'visible' : 'hidden',
               }}
               className="z-[2000] overflow-auto rounded-md bg-slate-900 text-slate-50 text-[12px] leading-[1.4] px-3 py-2 shadow-lg whitespace-pre-wrap break-words pointer-events-auto"
             >
-              {text}
+              {displayText}
             </div>,
             portalRoot,
           )

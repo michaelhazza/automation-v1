@@ -186,7 +186,7 @@ export async function createBlock(input: {
     .returning();
 
   if (autoAttach && input.subaccountId) {
-    await materialiseAutoAttachForBlock(created.id, input.subaccountId);
+    await materialiseAutoAttachForBlock(created.id, input.subaccountId, input.organisationId);
   }
 
   return created;
@@ -202,6 +202,7 @@ export async function createBlock(input: {
 export async function materialiseAutoAttachForBlock(
   blockId: string,
   subaccountId: string,
+  organisationId: string,
 ): Promise<void> {
   const links = await db
     .select({ agentId: subaccountAgents.agentId })
@@ -209,6 +210,7 @@ export async function materialiseAutoAttachForBlock(
     .where(
       and(
         eq(subaccountAgents.subaccountId, subaccountId),
+        eq(subaccountAgents.organisationId, organisationId),
         eq(subaccountAgents.isActive, true),
       ),
     );
@@ -236,6 +238,7 @@ export async function materialiseAutoAttachForBlock(
 export async function materialiseAutoAttachForAgent(
   agentId: string,
   subaccountId: string,
+  organisationId: string,
 ): Promise<void> {
   const blocks = await db
     .select({ id: memoryBlocks.id })
@@ -243,6 +246,7 @@ export async function materialiseAutoAttachForAgent(
     .where(
       and(
         eq(memoryBlocks.subaccountId, subaccountId),
+        eq(memoryBlocks.organisationId, organisationId),
         eq(memoryBlocks.autoAttach, true),
         isNull(memoryBlocks.deletedAt),
       ),
@@ -496,7 +500,7 @@ export async function upsertFromPlaybook(
         })
         .returning({ id: memoryBlocks.id });
       if (autoAttach) {
-        await materialiseAutoAttachForBlock(created.id, subaccountId);
+        await materialiseAutoAttachForBlock(created.id, subaccountId, organisationId);
       }
       return { kind: 'created', blockId: created.id, truncated: decision.truncated };
     }

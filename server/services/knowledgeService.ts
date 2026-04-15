@@ -408,7 +408,7 @@ export async function promoteReferenceToBlock(
   // cycling on startup.
   if (autoAttach) {
     const { materialiseAutoAttachForBlock } = await import('./memoryBlockService.js');
-    await materialiseAutoAttachForBlock(created.id, subaccountId);
+    await materialiseAutoAttachForBlock(created.id, subaccountId, organisationId);
   }
 
   await configHistoryService.recordHistory({
