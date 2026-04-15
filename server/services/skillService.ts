@@ -519,16 +519,16 @@ export const skillService = {
         tx,
       });
 
-      return row;
-    });
+      await configHistoryService.recordHistory({
+        entityType: 'skill',
+        entityId: row.id,
+        organisationId,
+        snapshot: { ...row, subaccountId } as unknown as Record<string, unknown>,
+        changedBy: userId ?? null,
+        changeSource: 'api',
+      }, tx);
 
-    await configHistoryService.recordHistory({
-      entityType: 'skill',
-      entityId: skill.id,
-      organisationId,
-      snapshot: { ...skill, subaccountId } as unknown as Record<string, unknown>,
-      changedBy: userId ?? null,
-      changeSource: 'api',
+      return row;
     });
 
     return skill;
@@ -543,27 +543,6 @@ export const skillService = {
     isActive: boolean;
     visibility: SkillVisibility;
   }>, userId?: string) {
-    const [existing] = await db
-      .select()
-      .from(skills)
-      .where(and(
-        eq(skills.id, id),
-        eq(skills.organisationId, organisationId),
-        eq(skills.subaccountId, subaccountId),
-        isNull(skills.deletedAt),
-      ));
-
-    if (!existing) throw { statusCode: 404, message: 'Skill not found' };
-
-    await configHistoryService.recordHistory({
-      entityType: 'skill',
-      entityId: id,
-      organisationId,
-      snapshot: existing as unknown as Record<string, unknown>,
-      changedBy: userId ?? null,
-      changeSource: 'api',
-    });
-
     if (data.visibility !== undefined) {
       if (!isSkillVisibility(data.visibility)) {
         throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
@@ -571,6 +550,29 @@ export const skillService = {
     }
 
     const updated = await db.transaction(async (tx) => {
+      // Read pre-mutation snapshot inside the transaction so history is atomic
+      // with the update — a rollback won't leave a phantom history entry.
+      const [existing] = await tx
+        .select()
+        .from(skills)
+        .where(and(
+          eq(skills.id, id),
+          eq(skills.organisationId, organisationId),
+          eq(skills.subaccountId, subaccountId),
+          isNull(skills.deletedAt),
+        ));
+
+      if (!existing) throw { statusCode: 404, message: 'Skill not found' };
+
+      await configHistoryService.recordHistory({
+        entityType: 'skill',
+        entityId: id,
+        organisationId,
+        snapshot: existing as unknown as Record<string, unknown>,
+        changedBy: userId ?? null,
+        changeSource: 'api',
+      }, tx);
+
       const update: Record<string, unknown> = { updatedAt: new Date() };
       if (data.name !== undefined) update.name = data.name;
       if (data.description !== undefined) update.description = data.description;

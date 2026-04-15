@@ -7,6 +7,7 @@ import {
 } from '../db/schema/index.js';
 import type { ConfigBackupEntity } from '../db/schema/configBackups.js';
 import { skillVersioningHelper } from './skillVersioningHelper.js';
+import { logger } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // Config Backup Service — create and restore point-in-time configuration
@@ -125,18 +126,28 @@ async function restoreSkillAnalyzerEntities(
         })
         .where(eq(systemSkills.id, entity.entityId));
 
-      await skillVersioningHelper.writeVersion({
-        systemSkillId: entity.entityId,
-        name: snapshot.name as string,
-        description: (snapshot.description as string) ?? null,
-        definition: snapshot.definition as object,
-        instructions: (snapshot.instructions as string) ?? null,
-        changeType: 'restore',
-        changeSummary: 'Reverted to backup snapshot',
-        authoredBy: null,
-        idempotencyKey: `restore:${backupId}:${entity.entityId}:revert`,
-        tx,
-      });
+      try {
+        await skillVersioningHelper.writeVersion({
+          systemSkillId: entity.entityId,
+          name: snapshot.name as string,
+          description: (snapshot.description as string) ?? null,
+          definition: snapshot.definition as object,
+          instructions: (snapshot.instructions as string) ?? null,
+          changeType: 'restore',
+          changeSummary: 'Reverted to backup snapshot',
+          authoredBy: null,
+          idempotencyKey: `restore:${backupId}:${entity.entityId}:revert`,
+          tx,
+        });
+      } catch (err) {
+        logger.error('[configBackup] Failed to write restore version', {
+          backupId,
+          entityId: entity.entityId,
+          idempotencyKey: `restore:${backupId}:${entity.entityId}:revert`,
+          error: String(err),
+        });
+        throw err;
+      }
 
       skillsReverted++;
     }
@@ -155,18 +166,28 @@ async function restoreSkillAnalyzerEntities(
         .set({ isActive: false, updatedAt: new Date() })
         .where(eq(systemSkills.id, skill.id));
 
-      await skillVersioningHelper.writeVersion({
-        systemSkillId: skill.id,
-        name: skill.name,
-        description: skill.description,
-        definition: skill.definition as object,
-        instructions: skill.instructions,
-        changeType: 'deactivate',
-        changeSummary: 'Deactivated during backup restore (created after backup)',
-        authoredBy: null,
-        idempotencyKey: `restore:${backupId}:${skill.id}:deactivate`,
-        tx,
-      });
+      try {
+        await skillVersioningHelper.writeVersion({
+          systemSkillId: skill.id,
+          name: skill.name,
+          description: skill.description,
+          definition: skill.definition as object,
+          instructions: skill.instructions,
+          changeType: 'deactivate',
+          changeSummary: 'Deactivated during backup restore (created after backup)',
+          authoredBy: null,
+          idempotencyKey: `restore:${backupId}:${skill.id}:deactivate`,
+          tx,
+        });
+      } catch (err) {
+        logger.error('[configBackup] Failed to write deactivate version', {
+          backupId,
+          entityId: skill.id,
+          idempotencyKey: `restore:${backupId}:${skill.id}:deactivate`,
+          error: String(err),
+        });
+        throw err;
+      }
 
       skillsDeactivated++;
     }

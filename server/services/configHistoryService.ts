@@ -1,5 +1,5 @@
 import { eq, and, desc, max, sql } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, type OrgScopedTx } from '../db/index.js';
 import { configHistory, agents } from '../db/schema/index.js';
 
 /** Canonical set of entity types tracked by config history. */
@@ -131,10 +131,62 @@ export const configHistoryService = {
    * Call this BEFORE applying mutations (pre-mutation snapshot) for updates/deletes,
    * or AFTER insert for creates (initial state snapshot).
    */
-  async recordHistory(params: RecordHistoryParams): Promise<void> {
+  async recordHistory(params: RecordHistoryParams, tx?: OrgScopedTx): Promise<void> {
     const snapshot = stripSensitiveFields(params.snapshot);
-    const MAX_RETRIES = 3;
 
+    if (tx) {
+      // Transactional path: use advisory lock to prevent version number races.
+      // pg_advisory_xact_lock is automatically released when the transaction ends.
+      const lockKey = `${params.entityType}:${params.entityId}`;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+
+      const [maxRow] = await tx
+        .select({ maxVersion: max(configHistory.version) })
+        .from(configHistory)
+        .where(and(
+          eq(configHistory.entityType, params.entityType),
+          eq(configHistory.entityId, params.entityId),
+          eq(configHistory.organisationId, params.organisationId),
+        ));
+
+      const nextVersion = (maxRow?.maxVersion ?? 0) + 1;
+
+      let changeSummary = params.changeSummary;
+      if (!changeSummary && nextVersion > 1) {
+        const [prev] = await tx
+          .select({ snapshot: configHistory.snapshot })
+          .from(configHistory)
+          .where(and(
+            eq(configHistory.entityType, params.entityType),
+            eq(configHistory.entityId, params.entityId),
+            eq(configHistory.organisationId, params.organisationId),
+            eq(configHistory.version, nextVersion - 1),
+          ));
+        changeSummary = generateChangeSummary(
+          params.entityType,
+          prev?.snapshot as Record<string, unknown> | null,
+          snapshot,
+        );
+      } else if (!changeSummary) {
+        changeSummary = 'Entity created';
+      }
+
+      await tx.insert(configHistory).values({
+        organisationId: params.organisationId,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        version: nextVersion,
+        snapshot,
+        changedBy: params.changedBy,
+        changeSource: params.changeSource,
+        sessionId: params.sessionId ?? null,
+        changeSummary,
+      });
+      return;
+    }
+
+    // Non-transactional path: existing retry loop (unchanged)
+    const MAX_RETRIES = 3;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       // Read current max version (scoped by org for correctness)
       const [maxRow] = await db
