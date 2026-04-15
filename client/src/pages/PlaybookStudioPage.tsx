@@ -26,6 +26,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../lib/api';
 import type { User } from '../lib/auth';
+import PlaybookRunModal from '../components/PlaybookRunModal';
 
 interface Session {
   id: string;
@@ -100,6 +101,9 @@ export default function PlaybookStudioPage(_props: { user: User }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [existingSlugs, setExistingSlugs] = useState<string[]>([]);
+  // Spec §9.1/§9.2 — "Run playbook" button on reference-playbook rows opens
+  // the four-step run modal. Null when the modal is closed.
+  const [runModalSlug, setRunModalSlug] = useState<string | null>(null);
 
   async function loadSessions() {
     try {
@@ -376,14 +380,25 @@ export default function PlaybookStudioPage(_props: { user: User }) {
             Reference playbooks
           </div>
           {existingSlugs.map((slug) => (
-            <button
+            <div
               key={slug}
-              onClick={() => loadReference(slug)}
-              className="w-full text-left px-3 py-1.5 text-xs hover:bg-white truncate"
-              title={`Load ${slug}.playbook.ts into editor`}
+              className="flex items-center gap-1 px-3 py-1 hover:bg-white"
             >
-              {slug}
-            </button>
+              <button
+                onClick={() => loadReference(slug)}
+                className="flex-1 text-left text-xs truncate bg-transparent border-0 cursor-pointer text-slate-700"
+                title={`Load ${slug}.playbook.ts into editor`}
+              >
+                {slug}
+              </button>
+              <button
+                onClick={() => setRunModalSlug(slug)}
+                className="px-2 py-0.5 text-[10px] font-semibold rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-200 cursor-pointer"
+                title={`Run ${slug} on a subaccount`}
+              >
+                Run
+              </button>
+            </div>
           ))}
         </div>
       </aside>
@@ -524,6 +539,13 @@ export default function PlaybookStudioPage(_props: { user: User }) {
           )}
         </div>
       </main>
+
+      {runModalSlug && (
+        <PlaybookRunModal
+          slug={runModalSlug}
+          onClose={() => setRunModalSlug(null)}
+        />
+      )}
     </div>
   );
 }
