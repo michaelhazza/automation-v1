@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- 0118_memory_block_source_reference.sql
+-- 0128_memory_block_source_reference.sql
 --
 -- Phase D1 of docs/onboarding-playbooks-spec.md (§7.3).
 --
@@ -8,7 +8,18 @@
 -- uses ON DELETE SET NULL so deleting the source Reference does NOT cascade
 -- into the block — promotion is non-destructive and the block continues to
 -- exist on its own once promoted.
+--
+-- Renumbered from 0118 → 0128 on 2026-04-15 to resolve a prefix collision
+-- with main's `0118_skill_analyzer_merge_quality.sql`. The feature branch
+-- originally claimed 0118 before the skill-analyzer work landed on main.
+-- Both files are independent, but keeping one number per migration avoids
+-- future confusion. The `DELETE ... WHERE filename = '0118_...'` below
+-- removes the old tracking row on dev DBs that already applied this file
+-- under its former name; fresh DBs see a no-op.
 -- ---------------------------------------------------------------------------
+
+DELETE FROM schema_migrations
+ WHERE filename = '0118_memory_block_source_reference.sql';
 
 ALTER TABLE memory_blocks
   ADD COLUMN IF NOT EXISTS source_reference_id uuid

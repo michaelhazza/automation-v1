@@ -355,7 +355,7 @@ Files the build will create, modify, or delete. Drift between this list and real
 | modify | `server/services/scheduledTaskService.ts` | Accept `runNow` argument; enqueue immediate job |
 | modify | `server/services/subaccountAgentService.ts` | On link creation, inherit `autoAttach: true` Reference notes |
 | modify | `server/services/memoryBlocksService.ts` (or create if absent) | CRUD + promote-from-insight + auto-attach semantics |
-| create | `migrations/0118_memory_block_source_reference.sql` | `memory_blocks.auto_attach`, `memory_block_attachments.source`, `memory_blocks.sourceReferenceId` FK (see §7.3) |
+| create | `migrations/0128_memory_block_source_reference.sql` | `memory_blocks.auto_attach`, `memory_block_attachments.source`, `memory_blocks.sourceReferenceId` FK (see §7.3) |
 | create | `migrations/0119_modules_onboarding_playbook_slugs.sql` | `scheduled_tasks.task_slug` + `created_by_playbook_slug` + `first_run_at`/`first_run_at_tz`, partial-unique and by-playbook-slug indexes (see §5.4.1 / §5.4.2) — repurposed from the original single-migration plan; modules column split into `0122` (see below) |
 | create | `migrations/0120_memory_block_playbook_fields.sql` | Playbook-owned memory-block columns used by `knowledgeBindings[]` finalisation (see §8) |
 | create | `migrations/0121_playbook_runs_portal_onboarding.sql` | `playbook_runs.is_portal_visible`, `playbook_runs.is_onboarding_run` (see §9, §11.6) |
@@ -1173,7 +1173,7 @@ The key UX affordance is the ability to promote a Reference into a Memory Block 
   3. Does NOT delete the Reference — promotion is non-destructive.
 - Demotion is the inverse, via the Memory Blocks tab's overflow menu: **Demote to Reference**. Creates a Reference, deletes the Block, Config-History-logged on both entities.
 
-The `sourceReferenceId` column (nullable FK to `workspaceMemoryEntries`) is added in migration `0118_memory_block_source_reference.sql`. The FK uses `ON DELETE SET NULL` so deleting a Reference does not cascade.
+The `sourceReferenceId` column (nullable FK to `workspaceMemoryEntries`) is added in migration `0128_memory_block_source_reference.sql`. The FK uses `ON DELETE SET NULL` so deleting a Reference does not cascade.
 
 A `HelpHint` (§6) on the Promote action explains what promotion means in-context.
 
@@ -1891,7 +1891,7 @@ Every phase is independently reversible because every phase ships behind a featu
 
 | Migration                                        | Reversal plan                                                                  |
 |--------------------------------------------------|---------------------------------------------------------------------------------|
-| `0118_memory_block_source_reference.sql` (§7.3)          | Column stays; nullable; ignored by old code. No reversal needed.                |
+| `0128_memory_block_source_reference.sql` (§7.3)          | Column stays; nullable; ignored by old code. No reversal needed.                |
 | `0119_modules_onboarding_playbook_slugs.sql` (§5.4.1/§5.4.2) | Scheduled-task columns stay; nullable + indexed by partial predicate, ignored by old code. No reversal needed. |
 | `0120_memory_block_playbook_fields.sql` (§8)             | Columns stay; nullable; ignored by old code. No reversal needed.                |
 | `0121_playbook_runs_portal_onboarding.sql` (§9, §11.6)   | Boolean columns stay; default `false`; ignored by old code. No reversal needed. |
