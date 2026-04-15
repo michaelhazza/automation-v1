@@ -289,23 +289,6 @@ export const skillService = {
     isActive: boolean;
     visibility: SkillVisibility;
   }>, userId?: string) {
-    const [existing] = await db
-      .select()
-      .from(skills)
-      .where(and(eq(skills.id, id), eq(skills.organisationId, organisationId), isNull(skills.deletedAt)));
-
-    if (!existing) throw { statusCode: 404, message: 'Skill not found' };
-    if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot modify built-in skills' };
-
-    await configHistoryService.recordHistory({
-      entityType: 'skill',
-      entityId: id,
-      organisationId,
-      snapshot: existing as unknown as Record<string, unknown>,
-      changedBy: userId ?? null,
-      changeSource: 'api',
-    });
-
     if (data.visibility !== undefined) {
       if (!isSkillVisibility(data.visibility)) {
         throw { statusCode: 400, message: 'visibility must be one of: none, basic, full' };
@@ -313,6 +296,30 @@ export const skillService = {
     }
 
     const updated = await db.transaction(async (tx) => {
+      // Read pre-mutation snapshot inside the transaction so history is atomic
+      // with the update — a rollback won't leave a phantom history entry.
+      const [existing] = await tx
+        .select()
+        .from(skills)
+        .where(and(
+          eq(skills.id, id),
+          eq(skills.organisationId, organisationId),
+          isNull(skills.subaccountId),
+          isNull(skills.deletedAt),
+        ));
+
+      if (!existing) throw { statusCode: 404, message: 'Skill not found' };
+      if (existing.skillType === 'built_in') throw { statusCode: 400, message: 'Cannot modify built-in skills' };
+
+      await configHistoryService.recordHistory({
+        entityType: 'skill',
+        entityId: id,
+        organisationId,
+        snapshot: existing as unknown as Record<string, unknown>,
+        changedBy: userId ?? null,
+        changeSource: 'api',
+      }, tx);
+
       const update: Record<string, unknown> = { updatedAt: new Date() };
       if (data.name !== undefined) update.name = data.name;
       if (data.description !== undefined) update.description = data.description;
@@ -321,7 +328,11 @@ export const skillService = {
       if (data.isActive !== undefined) update.isActive = data.isActive;
       if (data.visibility !== undefined) update.visibility = data.visibility;
 
-      const [row] = await tx.update(skills).set(update).where(and(eq(skills.id, id), eq(skills.organisationId, organisationId))).returning();
+      const [row] = await tx.update(skills).set(update).where(and(
+        eq(skills.id, id),
+        eq(skills.organisationId, organisationId),
+        isNull(skills.subaccountId),
+      )).returning();
 
       if (row) {
         await skillVersioningHelper.writeVersion({
