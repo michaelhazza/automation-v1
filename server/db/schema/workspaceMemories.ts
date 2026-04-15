@@ -116,6 +116,9 @@ export const workspaceMemoryEntries = pgTable(
     topic:  text('topic'),    // e.g. 'budget', 'campaign', 'pipeline', 'metrics'
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // §7 G6.2 / migration 0126 — soft-delete so "archive" on the Knowledge
+    // page is recoverable. All Reference list paths filter IS NULL.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => ({
     // M-11: HNSW vector index on workspace_memory_entries.embedding exists in DB

@@ -5,6 +5,39 @@ import api from '../lib/api';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { HelpHint } from '../components/ui/HelpHint';
+import RichTextEditor from '../components/RichTextEditor';
+
+/**
+ * Extract a plain-text title from Tiptap HTML / plain text. Used for table
+ * previews and the "Rename" affordance (first non-empty line = title).
+ */
+function referenceTitle(content: string): string {
+  const stripped = content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!stripped) return 'Untitled';
+  const firstLine = stripped.split('\n')[0];
+  return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+}
+
+function referencePreview(content: string): string {
+  const stripped = content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (stripped.length <= 200) return stripped;
+  return `${stripped.slice(0, 200)}…`;
+}
+
+/**
+ * Rename a Reference by replacing its first <h1> (or falling back to
+ * prepending one) with the new title. Used by the Rename modal so the
+ * first-line-as-title convention stays consistent across the UI.
+ */
+function renameReferenceHtml(currentHtml: string, newTitle: string): string {
+  const safe = newTitle.replace(/</g, '&lt;').replace(/>/g, '&gt;').trim();
+  if (!safe) return currentHtml;
+  const match = currentHtml.match(/^<h1[^>]*>.*?<\/h1>/i);
+  if (match) {
+    return currentHtml.replace(match[0], `<h1>${safe}</h1>`);
+  }
+  return `<h1>${safe}</h1>${currentHtml}`;
+}
 
 // ---------------------------------------------------------------------------
 // SubaccountKnowledgePage — Unified Knowledge page
@@ -67,9 +100,13 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
   const [editBlockLabel, setEditBlockLabel] = useState('');
   const [editBlockContent, setEditBlockContent] = useState('');
 
-  // Delete confirmation
-  const [deleteRefId, setDeleteRefId] = useState<string | null>(null);
+  // Archive (soft-delete) confirmation
+  const [archiveRefId, setArchiveRefId] = useState<string | null>(null);
   const [demoteBlockId, setDemoteBlockId] = useState<string | null>(null);
+
+  // Rename modal state
+  const [renameRef, setRenameRef] = useState<Reference | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
 
   useEffect(() => {
     if (!subaccountId) return;
@@ -107,8 +144,12 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
 
   function openPromote(ref: Reference) {
     setPromoteFrom(ref);
-    setPromoteLabel('');
-    setPromoteContent(ref.content.slice(0, REFERENCE_PROMOTE_PREVIEW_MAX));
+    setPromoteLabel(referenceTitle(ref.content));
+    // Memory Blocks are plain text (spec §7.3) — strip HTML from the source
+    // Reference before seeding the promote modal so the user edits a clean
+    // starting point.
+    const plain = ref.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    setPromoteContent(plain.slice(0, REFERENCE_PROMOTE_PREVIEW_MAX));
   }
 
   async function handlePromote() {
@@ -176,17 +217,36 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
     }
   }
 
-  async function handleDeleteReference() {
-    if (!deleteRefId) return;
+  async function handleArchiveReference() {
+    if (!archiveRefId) return;
     try {
       await api.delete(
-        `/api/subaccounts/${subaccountId}/knowledge/references/${deleteRefId}`,
+        `/api/subaccounts/${subaccountId}/knowledge/references/${archiveRefId}`,
       );
-      toast.success('Reference deleted');
-      setDeleteRefId(null);
+      toast.success('Reference archived');
+      setArchiveRefId(null);
       await load();
     } catch {
-      toast.error('Failed to delete Reference');
+      toast.error('Failed to archive Reference');
+    }
+  }
+
+  async function handleRenameReference() {
+    if (!renameRef) return;
+    const title = renameTitle.trim();
+    if (!title) return;
+    try {
+      const nextHtml = renameReferenceHtml(renameRef.content, title);
+      await api.patch(
+        `/api/subaccounts/${subaccountId}/knowledge/references/${renameRef.id}`,
+        { content: nextHtml },
+      );
+      toast.success('Reference renamed');
+      setRenameRef(null);
+      setRenameTitle('');
+      await load();
+    } catch {
+      toast.error('Failed to rename Reference');
     }
   }
 
@@ -312,7 +372,11 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
           items={filteredRefs}
           onPromote={openPromote}
           onEdit={(r) => openEditReference(r)}
-          onDelete={(id) => setDeleteRefId(id)}
+          onRename={(r) => {
+            setRenameRef(r);
+            setRenameTitle(referenceTitle(r.content));
+          }}
+          onArchive={(id) => setArchiveRefId(id)}
         />
       ) : (
         <BlocksTable
@@ -326,9 +390,9 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
       {promoteFrom && (
         <Modal title="Promote to Memory Block" onClose={() => setPromoteFrom(null)} maxWidth={560}>
           <div className="flex flex-col gap-3.5">
-            <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[12px] text-slate-600 max-h-32 overflow-auto whitespace-pre-wrap">
-              {promoteFrom.content.slice(0, 500)}
-              {promoteFrom.content.length > 500 ? '…' : ''}
+            <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-[12px] text-slate-600 max-h-32 overflow-auto">
+              {referencePreview(promoteFrom.content).slice(0, 500)}
+              {referencePreview(promoteFrom.content).length > 500 ? '…' : ''}
             </div>
             <div>
               <label className="block text-[13px] font-medium text-slate-700 mb-1 flex items-center gap-1">
@@ -380,7 +444,7 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
         </Modal>
       )}
 
-      {/* Reference create / edit modal */}
+      {/* Reference create / edit modal (Tiptap — spec §7 G6.2) */}
       {editRef && (
         <Modal
           title={editRef === 'new' ? 'New Reference' : 'Edit Reference'}
@@ -388,17 +452,17 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
             setEditRef(null);
             setEditRefContent('');
           }}
-          maxWidth={640}
+          maxWidth={720}
         >
           <div className="flex flex-col gap-3.5">
             <div>
               <label className="block text-[13px] font-medium text-slate-700 mb-1">Content *</label>
-              <textarea
+              <RichTextEditor
                 value={editRefContent}
-                onChange={(e) => setEditRefContent(e.target.value)}
-                rows={14}
-                className={`${inputCls} resize-vertical`}
+                onChange={setEditRefContent}
                 placeholder="Long-form notes, SOPs, brand docs, meeting summaries…"
+                minHeight={320}
+                autoFocus
               />
             </div>
             <div className="flex justify-end gap-2 mt-2">
@@ -413,10 +477,54 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
               </button>
               <button
                 onClick={handleSaveReference}
-                disabled={!editRefContent.trim()}
+                disabled={!editRefContent.replace(/<[^>]+>/g, '').trim()}
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Rename modal — edits the first H1 so the first-line-as-title
+          convention stays consistent across the UI. */}
+      {renameRef && (
+        <Modal
+          title="Rename Reference"
+          onClose={() => {
+            setRenameRef(null);
+            setRenameTitle('');
+          }}
+          maxWidth={480}
+        >
+          <div className="flex flex-col gap-3.5">
+            <div>
+              <label className="block text-[13px] font-medium text-slate-700 mb-1">Title *</label>
+              <input
+                value={renameTitle}
+                maxLength={120}
+                onChange={(e) => setRenameTitle(e.target.value)}
+                className={inputCls}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                onClick={() => {
+                  setRenameRef(null);
+                  setRenameTitle('');
+                }}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-lg text-[14px] font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRenameReference}
+                disabled={!renameTitle.trim()}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[14px] font-semibold cursor-pointer"
+              >
+                Rename
               </button>
             </div>
           </div>
@@ -483,13 +591,13 @@ export default function SubaccountKnowledgePage({ user: _user }: { user: { id: s
         </Modal>
       )}
 
-      {deleteRefId && (
+      {archiveRefId && (
         <ConfirmDialog
-          title="Delete Reference"
-          message="Are you sure? This cannot be undone."
-          confirmLabel="Delete"
-          onConfirm={handleDeleteReference}
-          onCancel={() => setDeleteRefId(null)}
+          title="Archive Reference"
+          message="The Reference is hidden from the Knowledge page and excluded from agent memory searches. It can be restored later."
+          confirmLabel="Archive"
+          onConfirm={handleArchiveReference}
+          onCancel={() => setArchiveRefId(null)}
         />
       )}
 
@@ -533,12 +641,14 @@ function ReferencesTable({
   items,
   onPromote,
   onEdit,
-  onDelete,
+  onRename,
+  onArchive,
 }: {
   items: Reference[];
   onPromote: (r: Reference) => void;
   onEdit: (r: Reference) => void;
-  onDelete: (id: string) => void;
+  onRename: (r: Reference) => void;
+  onArchive: (id: string) => void;
 }) {
   if (items.length === 0) {
     return (
@@ -553,7 +663,7 @@ function ReferencesTable({
       <table className="w-full border-collapse">
         <thead>
           <tr className="bg-slate-50 border-b border-slate-200">
-            {['Content', 'Type', 'Added', 'Actions'].map((h) => (
+            {['Title', 'Preview', 'Type', 'Added', 'Actions'].map((h) => (
               <th
                 key={h}
                 className="text-left px-3 py-2.5 text-[12px] font-semibold text-slate-500 uppercase tracking-wide"
@@ -566,15 +676,20 @@ function ReferencesTable({
         <tbody className="divide-y divide-slate-50">
           {items.map((item) => (
             <tr key={item.id} className="hover:bg-slate-50 transition-colors align-top">
-              <td className="px-3 py-3 text-[14px] text-slate-700 max-w-[640px]">
-                <div className="line-clamp-3 whitespace-pre-wrap">{item.content}</div>
+              <td className="px-3 py-3 text-[14px] font-medium text-slate-800 max-w-[220px]">
+                <div className="truncate" title={referenceTitle(item.content)}>
+                  {referenceTitle(item.content)}
+                </div>
+              </td>
+              <td className="px-3 py-3 text-[13px] text-slate-600 max-w-[480px]">
+                <div className="line-clamp-2">{referencePreview(item.content)}</div>
               </td>
               <td className="px-3 py-3 text-[13px] text-slate-500">{item.entryType}</td>
               <td className="px-3 py-3 text-[13px] text-slate-500">
                 {new Date(item.createdAt).toLocaleDateString()}
               </td>
               <td className="px-3 py-3">
-                <div className="flex gap-1.5">
+                <div className="flex gap-1.5 flex-wrap">
                   <button
                     onClick={() => onPromote(item)}
                     className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[12px] text-indigo-700 cursor-pointer transition-colors"
@@ -588,10 +703,16 @@ function ReferencesTable({
                     Edit
                   </button>
                   <button
-                    onClick={() => onDelete(item.id)}
-                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 border border-red-200 rounded text-[12px] text-red-600 cursor-pointer transition-colors"
+                    onClick={() => onRename(item)}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded text-[12px] text-slate-700 cursor-pointer transition-colors"
                   >
-                    Delete
+                    Rename
+                  </button>
+                  <button
+                    onClick={() => onArchive(item.id)}
+                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded text-[12px] text-amber-700 cursor-pointer transition-colors"
+                  >
+                    Archive
                   </button>
                 </div>
               </td>

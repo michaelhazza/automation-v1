@@ -16,9 +16,36 @@
  */
 
 import { and, eq, isNull } from 'drizzle-orm';
+import sanitizeHtml from 'sanitize-html';
 import { db } from '../db/index.js';
 import { memoryBlocks, workspaceMemoryEntries } from '../db/schema/index.js';
 import { configHistoryService } from './configHistoryService.js';
+
+/**
+ * Phase D1 / §7 G6.2 — sanitise Tiptap HTML before persisting a Reference
+ * note. Keeps the narrow set of tags Tiptap's StarterKit produces and
+ * strips everything else (scripts, handlers, iframes, styles, classes).
+ */
+const REFERENCE_HTML_MAX_BYTES = 64 * 1024; // 64KB — generous for long-form notes
+export function sanitizeReferenceHtml(html: string): string {
+  if (Buffer.byteLength(html, 'utf8') > REFERENCE_HTML_MAX_BYTES) {
+    throw { statusCode: 413, message: 'Reference content exceeds maximum size of 64KB' };
+  }
+  return sanitizeHtml(html, {
+    allowedTags: [
+      'p', 'br', 'strong', 'em', 'u', 's', 'code', 'pre', 'blockquote',
+      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'ul', 'ol', 'li', 'a', 'hr',
+    ],
+    allowedAttributes: {
+      a: ['href', 'target', 'rel'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    transformTags: {
+      a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer', target: '_blank' }),
+    },
+  });
+}
 
 type ReferenceEntryType = 'observation' | 'decision' | 'preference' | 'issue' | 'pattern';
 
@@ -33,6 +60,10 @@ export interface CreateReferenceParams {
  * Create a manually-authored Reference (spec §7.2). Routes must not touch the
  * DB directly — the RLS contract gate fails closed on raw `db` imports outside
  * server/services/**.
+ *
+ * Content is Tiptap HTML for UI-authored notes; the sanitiser strips anything
+ * outside the StarterKit allowlist. The service accepts plain text too — if
+ * the string contains no tags, sanitize-html returns it unchanged.
  */
 export async function createReference(params: CreateReferenceParams) {
   const { subaccountId, organisationId, content, entryType } = params;
@@ -43,7 +74,7 @@ export async function createReference(params: CreateReferenceParams) {
       subaccountId,
       agentRunId: null,
       agentId: null,
-      content,
+      content: sanitizeReferenceHtml(content),
       entryType: entryType ?? 'observation',
     })
     .returning();
@@ -61,12 +92,15 @@ export async function updateReference(params: UpdateReferenceParams) {
   const { referenceId, subaccountId, organisationId, content } = params;
   const [updated] = await db
     .update(workspaceMemoryEntries)
-    .set({ content })
+    .set({ content: sanitizeReferenceHtml(content) })
     .where(
       and(
         eq(workspaceMemoryEntries.id, referenceId),
         eq(workspaceMemoryEntries.organisationId, organisationId),
         eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        // §7 G6.2 — archived References are immutable from the edit path;
+        // restoring one requires a separate un-archive action.
+        isNull(workspaceMemoryEntries.deletedAt),
       ),
     )
     .returning();

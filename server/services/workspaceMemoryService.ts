@@ -230,12 +230,15 @@ async function _hybridRetrieve(params: HybridRetrieveParams): Promise<HybridResu
   const vectorLiteral = formatVectorLiteral(queryEmbedding);
   const overRetrieveLimit = topK * RRF_OVER_RETRIEVE_MULTIPLIER;
 
-  // Build scope filter
+  // Build scope filter.
+  // §7 G6.2 — always exclude archived Reference notes from semantic and
+  // full-text retrieval so "archive" on the Knowledge page immediately
+  // removes the note from the agent's memory_search results.
   const scopeFilter = includeOtherSubaccounts && orgId
-    ? sql`organisation_id = ${orgId}`
+    ? sql`organisation_id = ${orgId} AND deleted_at IS NULL`
     : orgId
-      ? sql`organisation_id = ${orgId} AND subaccount_id = ${subaccountId}`
-      : sql`subaccount_id = ${subaccountId}`;
+      ? sql`organisation_id = ${orgId} AND subaccount_id = ${subaccountId} AND deleted_at IS NULL`
+      : sql`subaccount_id = ${subaccountId} AND deleted_at IS NULL`;
 
   const taskFilter = taskSlug
     ? sql`AND (task_slug = ${taskSlug} OR task_slug IS NULL)`
@@ -575,7 +578,11 @@ export const workspaceMemoryService = {
     subaccountId: string,
     opts?: { limit?: number; offset?: number; includedInSummary?: boolean; organisationId?: string }
   ) {
-    const conditions = [eq(workspaceMemoryEntries.subaccountId, subaccountId)];
+    const conditions = [
+      eq(workspaceMemoryEntries.subaccountId, subaccountId),
+      // §7 G6.2 / migration 0126 — skip archived (soft-deleted) entries.
+      isNull(workspaceMemoryEntries.deletedAt),
+    ];
     if (opts?.organisationId) {
       conditions.push(eq(workspaceMemoryEntries.organisationId, opts.organisationId));
     }
@@ -608,13 +615,18 @@ export const workspaceMemoryService = {
   },
 
   async deleteEntry(entryId: string, organisationId: string, subaccountId: string) {
+    // §7 G6.2 — soft delete so "archive" / "delete" on the Knowledge page is
+    // recoverable via config history / DB restore. All list paths filter
+    // IS NULL, so a tombstoned row drops out of the UI immediately.
     const [deleted] = await db
-      .delete(workspaceMemoryEntries)
+      .update(workspaceMemoryEntries)
+      .set({ deletedAt: new Date() })
       .where(
         and(
           eq(workspaceMemoryEntries.id, entryId),
           eq(workspaceMemoryEntries.organisationId, organisationId),
-          eq(workspaceMemoryEntries.subaccountId, subaccountId)
+          eq(workspaceMemoryEntries.subaccountId, subaccountId),
+          isNull(workspaceMemoryEntries.deletedAt),
         )
       )
       .returning();
@@ -820,6 +832,9 @@ If there are no meaningful insights, respond with: { "entries": [] }`,
         and(
           eq(workspaceMemoryEntries.subaccountId, subaccountId),
           eq(workspaceMemoryEntries.includedInSummary, false),
+          // §7 G6.2 / migration 0126 — archived Reference notes must not
+          // feed the summary compiler.
+          isNull(workspaceMemoryEntries.deletedAt),
           sql`(${workspaceMemoryEntries.qualityScore} IS NULL OR ${workspaceMemoryEntries.qualityScore} >= ${memory.qualityThreshold})`
         )
       )
@@ -1006,6 +1021,9 @@ Respond with ONLY the two sections separated by ---BOARD_SUMMARY---.`,
         and(
           eq(workspaceMemoryEntries.id, entryId),
           eq(workspaceMemoryEntries.organisationId, orgId),
+          // §7 G6.2 — tombstoned Reference notes are hidden from all
+          // user-facing reads.
+          isNull(workspaceMemoryEntries.deletedAt),
         ),
       )
       .limit(1);
@@ -1416,13 +1434,19 @@ async function deduplicateEntries(
 ): Promise<DedupeEntry[]> {
   if (newEntries.length === 0) return [];
 
-  // Load recent candidate entries for comparison (top 20 by recency)
+  // Load recent candidate entries for comparison (top 20 by recency).
+  // §7 G6.2 — skip archived Reference notes so dedup does not re-surface
+  // content that the user intentionally removed from the workspace.
   const taskFilter = taskSlug
     ? and(
         eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        isNull(workspaceMemoryEntries.deletedAt),
         sql`(task_slug = ${taskSlug} OR task_slug IS NULL)`,
       )
-    : eq(workspaceMemoryEntries.subaccountId, subaccountId);
+    : and(
+        eq(workspaceMemoryEntries.subaccountId, subaccountId),
+        isNull(workspaceMemoryEntries.deletedAt),
+      );
 
   const candidates = await db
     .select({ id: workspaceMemoryEntries.id, content: workspaceMemoryEntries.content })
