@@ -268,6 +268,8 @@ export async function setResultAction(params: {
       resultRow &&
       (resultRow.classification === 'PARTIAL_OVERLAP' || resultRow.classification === 'IMPROVEMENT')
     ) {
+      // SCOPE_EXPANSION_CRITICAL is intentionally excluded — scope creep can be edited
+      // by the reviewer, but is not a safety gate that must block approval.
       const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
       const warnings = resultRow.mergeWarnings as MergeWarning[] | null;
       if (warnings?.some(w => BLOCKING_CODES.has(w.code))) {
@@ -306,6 +308,38 @@ export async function bulkSetResultAction(params: {
 
   if (!jobRows[0]) {
     throw { statusCode: 404, message: 'Job not found' };
+  }
+
+  // Server-side blocking enforcement for bulk approval — mirrors setResultAction.
+  // SCOPE_EXPANSION_CRITICAL is intentionally excluded — scope creep can be edited
+  // by the reviewer, but is not a safety gate that must block approval.
+  if (action === 'approved' && resultIds.length > 0) {
+    const BLOCKING_CODES = new Set(['REQUIRED_FIELD_DEMOTED', 'INVOCATION_LOST', 'HITL_LOST']);
+    const blockedRows = await db
+      .select({
+        id: skillAnalyzerResults.id,
+        classification: skillAnalyzerResults.classification,
+        mergeWarnings: skillAnalyzerResults.mergeWarnings,
+      })
+      .from(skillAnalyzerResults)
+      .where(and(
+        inArray(skillAnalyzerResults.id, resultIds),
+        eq(skillAnalyzerResults.jobId, jobId),
+      ));
+
+    const hasBlocked = blockedRows.some(row =>
+      (row.classification === 'PARTIAL_OVERLAP' || row.classification === 'IMPROVEMENT') &&
+      (row.mergeWarnings as MergeWarning[] | null)
+        ?.some(w => BLOCKING_CODES.has(w.code))
+    );
+
+    if (hasBlocked) {
+      throw {
+        statusCode: 422,
+        message: 'Cannot approve: one or more selected merges have critical warnings that must be resolved first.',
+        errorCode: 'MERGE_CRITICAL_WARNINGS',
+      };
+    }
   }
 
   await db

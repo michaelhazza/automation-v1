@@ -24,7 +24,12 @@ export interface MergeWarning {
   detail?: string;
 }
 
-/** Merge warning codes that block approval until resolved. */
+/** Merge warning codes that block approval until resolved.
+ *  SCOPE_EXPANSION_CRITICAL is intentionally excluded: scope creep is a correctness
+ *  issue that the reviewer can fix by editing the merge, but it is not a safety gate.
+ *  REQUIRED_FIELD_DEMOTED, INVOCATION_LOST, and HITL_LOST represent safety-critical
+ *  regressions (broken API contracts, lost routing signals, removed human review gates)
+ *  that must be fixed before approving. */
 export const BLOCKING_WARNING_CODES = new Set<MergeWarningCode>([
   'REQUIRED_FIELD_DEMOTED',
   'INVOCATION_LOST',

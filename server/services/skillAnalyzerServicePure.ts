@@ -684,7 +684,7 @@ function extractDescriptionBigrams(text: string): Set<string> {
 // Leading whitespace is allowed: the block is detected even if the LLM adds
 // a blank line before it. Matches from the first invocation keyword through
 // the next blank line (or end of string).
-const INVOCATION_TRIGGER_RE = /^\s*(Invoke|Use|Call|Trigger)\s+this\s+skill\b.+?(?:\n\n|$)/ims;
+const INVOCATION_TRIGGER_RE = /^\s*(Invoke|Use|Call|Trigger)\s+this\s+skill\b.+?(?:\n\n|$)/is;
 
 /** Extract the opening invocation trigger block from skill instructions, if present.
  *  Returns the trimmed block text, or null if no trigger block is found at the top. */
@@ -896,10 +896,13 @@ export function validateMergeOutput(
 
   // --- Bug 3 post-check: Invocation block preservation ---
   const sourceHasInvocation = !!(base.invocationBlock || nonBase.invocationBlock);
-  if (sourceHasInvocation && merged.instructions) {
-    const triggerMatch = merged.instructions.match(INVOCATION_TRIGGER_RE);
-    const mergedHasInvocationAtTop = triggerMatch !== null
-      && merged.instructions.trimStart().startsWith(triggerMatch[0].trimStart());
+  if (sourceHasInvocation) {
+    let mergedHasInvocationAtTop = false;
+    if (merged.instructions) {
+      const triggerMatch = merged.instructions.match(INVOCATION_TRIGGER_RE);
+      mergedHasInvocationAtTop = triggerMatch !== null
+        && merged.instructions.trimStart().startsWith(triggerMatch[0].trimStart());
+    }
     if (!mergedHasInvocationAtTop) {
       warnings.push({
         code: 'INVOCATION_LOST',

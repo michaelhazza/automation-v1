@@ -290,6 +290,36 @@ test('extractInvocationBlock: matches when block is not followed by blank line',
 });
 
 // ---------------------------------------------------------------------------
+// Bug 7: Output format preservation
+// ---------------------------------------------------------------------------
+
+test('OUTPUT_FORMAT_LOST: source has output format heading, merged omits it', () => {
+  const base = { definition: null, instructions: '## Output Format\n\nUse JSON like this: `{ "result": "..." }`' };
+  const nonBase = { definition: null, instructions: 'Do the thing.' };
+  const merged = cleanMerge({ instructions: 'Do the thing.' });
+  const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
+  assert(hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should detect missing output format section');
+  const w = result.find(w => w.code === 'OUTPUT_FORMAT_LOST');
+  assertEq(w!.severity, 'warning', 'OUTPUT_FORMAT_LOST should be warning severity');
+});
+
+test('no OUTPUT_FORMAT_LOST when merged preserves output format heading', () => {
+  const base = { definition: null, instructions: 'Do the thing.\n\n## Output Format\n\nReturn JSON.' };
+  const nonBase = { definition: null, instructions: 'Also help.' };
+  const merged = cleanMerge({ instructions: 'Do the thing.\n\n## Output Format\n\nReturn JSON.' });
+  const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
+  assert(!hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should not warn when output format is preserved');
+});
+
+test('no OUTPUT_FORMAT_LOST when neither source has output format block', () => {
+  const base = { definition: null, instructions: 'Do the thing.' };
+  const nonBase = { definition: null, instructions: 'Also help.' };
+  const merged = cleanMerge({ instructions: 'Do the thing merged.' });
+  const result = validateMergeOutput(base, nonBase, merged, emptyLibrary.names, emptyLibrary.slugs, emptyLibrary.skills, null);
+  assert(!hasCode(result, 'OUTPUT_FORMAT_LOST'), 'should not warn when no source had output format');
+});
+
+// ---------------------------------------------------------------------------
 // richnessScore
 // ---------------------------------------------------------------------------
 
