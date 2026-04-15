@@ -156,6 +156,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Toaster position="bottom-right" richColors />
+      {/* HelpHint portal root (spec §6.3) — see client/src/components/ui/HelpHint.tsx */}
+      <div id="help-hint-portal" />
       <Routes>
         <Route path="/login" element={
           <Suspense fallback={<PageLoader />}>

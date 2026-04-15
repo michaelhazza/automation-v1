@@ -16,7 +16,10 @@ run_gate() {
   echo ""
   echo "--- Running gate: $name ---"
   local code=0
-  bash "$script" || code=$?
+  case "$script" in
+    *.mjs|*.js) node "$script" || code=$? ;;
+    *)          bash "$script" || code=$? ;;
+  esac
   if [ $code -eq 0 ]; then
     echo "[PASS] $name"
     PASS_COUNT=$((PASS_COUNT + 1))
@@ -81,6 +84,9 @@ run_gate "$SCRIPT_DIR/verify-handoff-shape-versioned.sh"
 
 # ── Code quality gates ──
 run_gate "$SCRIPT_DIR/verify-no-silent-failures.sh"
+
+# ── Onboarding playbooks spec (docs/onboarding-playbooks-spec.md) gates ──
+run_gate "$SCRIPT_DIR/verify-help-hint-length.mjs"
 
 echo ""
 echo "=== Gate Results: $PASS_COUNT passed, $WARN_COUNT warnings, $FAIL_COUNT blocking failures ==="

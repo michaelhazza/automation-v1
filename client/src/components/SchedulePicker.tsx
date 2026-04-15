@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { HelpHint } from './ui/HelpHint';
 
 // ---------------------------------------------------------------------------
 // SchedulePicker — Universal recurrence picker
@@ -280,11 +281,10 @@ export function SchedulePicker(props: SchedulePickerProps) {
             disabled={disabled}
             className="mt-0.5 w-4 h-4 accent-indigo-500"
           />
-          <span>
-            Run now and keep the schedule
-            <span className="block text-xs text-slate-500 mt-0.5">
-              Kicks off the first run immediately after saving. The recurring
-              schedule continues as configured.
+          <span className="flex-1">
+            <span className="inline-flex items-center gap-1">
+              Run now and keep the schedule
+              <HelpHint text="Kicks off the first run immediately after saving. The recurring schedule continues as configured." />
             </span>
           </span>
         </label>
