@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import api from '../../lib/api';
 import Modal from '../Modal';
 import MergeReviewBlock from './MergeReviewBlock';
@@ -9,6 +9,7 @@ import type {
   AvailableSystemAgent,
   ParsedCandidate,
 } from './SkillAnalyzerWizard';
+import { BLOCKING_WARNING_CODES } from './mergeTypes';
 
 interface Props {
   job: AnalysisJob;
@@ -239,6 +240,8 @@ function ResultRow({
   onActionChange,
   onProposalsUpdated,
   onResultPatched,
+  expandVersion,
+  collapseVersion,
 }: {
   result: AnalysisResult;
   jobId: string;
@@ -247,16 +250,38 @@ function ResultRow({
   onActionChange: (resultId: string, action: 'approved' | 'rejected' | 'skipped' | null) => void;
   onProposalsUpdated: (resultId: string, proposals: AgentProposal[]) => void;
   onResultPatched: (next: AnalysisResult) => void;
+  expandVersion: number;
+  collapseVersion: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [showSkill, setShowSkill] = useState(false);
 
+  // Respond to section-level expand/collapse all signals without clobbering
+  // individual row toggles that happen after the signal fires.
+  const prevExpandVersion = useRef(expandVersion);
+  const prevCollapseVersion = useRef(collapseVersion);
+  useEffect(() => {
+    if (expandVersion !== prevExpandVersion.current) {
+      prevExpandVersion.current = expandVersion;
+      setExpanded(true);
+    }
+  }, [expandVersion]);
+  useEffect(() => {
+    if (collapseVersion !== prevCollapseVersion.current) {
+      prevCollapseVersion.current = collapseVersion;
+      setExpanded(false);
+    }
+  }, [collapseVersion]);
+
   const confidence = Math.round(result.confidence * 100);
   const similarity = result.similarityScore != null ? Math.round(result.similarityScore * 100) : null;
   const isDistinct = result.classification === 'DISTINCT';
   const isDecided = result.actionTaken != null;
+  const hasBlockingWarning = result.mergeWarnings?.some(
+    w => BLOCKING_WARNING_CODES.has(w.code)
+  ) ?? false;
 
   async function setAction(action: 'approved' | 'rejected' | 'skipped') {
     setActionError(null);
@@ -418,7 +443,9 @@ function ResultRow({
             <button
               type="button"
               onClick={() => setAction('approved')}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+              disabled={hasBlockingWarning}
+              title={hasBlockingWarning ? 'Fix critical merge warnings before approving' : undefined}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Approve
             </button>
@@ -501,6 +528,8 @@ function ResultSection({
   onProposalsUpdated,
   onResultPatched,
   onResultsReplaced,
+  expandSectionVersion,
+  collapseSectionVersion,
 }: {
   classification: Classification;
   results: AnalysisResult[];
@@ -512,8 +541,29 @@ function ResultSection({
   onProposalsUpdated: (resultId: string, proposals: AgentProposal[]) => void;
   onResultPatched: (next: AnalysisResult) => void;
   onResultsReplaced: (results: AnalysisResult[]) => void;
+  expandSectionVersion: number;
+  collapseSectionVersion: number;
 }) {
   const [open, setOpen] = useState(SECTION_CONFIG[classification].defaultOpen);
+  const [rowExpandVersion, setRowExpandVersion] = useState(0);
+  const [rowCollapseVersion, setRowCollapseVersion] = useState(0);
+
+  const prevExpandSectionVersion = useRef(expandSectionVersion);
+  const prevCollapseSectionVersion = useRef(collapseSectionVersion);
+  useEffect(() => {
+    if (expandSectionVersion !== prevExpandSectionVersion.current) {
+      prevExpandSectionVersion.current = expandSectionVersion;
+      setOpen(true);
+      setRowExpandVersion((v) => v + 1);
+    }
+  }, [expandSectionVersion]);
+  useEffect(() => {
+    if (collapseSectionVersion !== prevCollapseSectionVersion.current) {
+      prevCollapseSectionVersion.current = collapseSectionVersion;
+      setOpen(true); // keep section open but collapse its rows
+      setRowCollapseVersion((v) => v + 1);
+    }
+  }, [collapseSectionVersion]);
   const cfg = SECTION_CONFIG[classification];
   const failedResults = results.filter((r) => r.classificationFailed);
   const [bulkRetrying, setBulkRetrying] = useState(false);
@@ -591,6 +641,20 @@ function ResultSection({
               {bulkRetrying ? 'Retrying…' : `Retry failed (${failedResults.length})`}
             </button>
           )}
+          <button
+            className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+            onClick={(e) => { e.stopPropagation(); setRowExpandVersion((v) => v + 1); if (!open) setOpen(true); }}
+            title="Expand all rows in this section"
+          >
+            Expand all
+          </button>
+          <button
+            className="text-xs px-2 py-1 rounded border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+            onClick={(e) => { e.stopPropagation(); setRowCollapseVersion((v) => v + 1); }}
+            title="Collapse all rows in this section"
+          >
+            Collapse all
+          </button>
           <span className="text-xs text-slate-400">{open ? '▲' : '▼'}</span>
         </div>
       </div>
@@ -607,6 +671,8 @@ function ResultSection({
               onActionChange={onActionChange}
               onProposalsUpdated={onProposalsUpdated}
               onResultPatched={onResultPatched}
+              expandVersion={rowExpandVersion}
+              collapseVersion={rowCollapseVersion}
             />
           ))}
         </div>
@@ -623,6 +689,8 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
   const CLASSIFICATIONS: Classification[] = ['PARTIAL_OVERLAP', 'IMPROVEMENT', 'DISTINCT', 'DUPLICATE'];
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [bulkInfo, setBulkInfo] = useState<string | null>(null);
+  const [globalExpandVersion, setGlobalExpandVersion] = useState(0);
+  const [globalCollapseVersion, setGlobalCollapseVersion] = useState(0);
 
   const availableSystemAgents = job.availableSystemAgents ?? [];
   const parsedCandidates = job.parsedCandidates ?? [];
@@ -657,12 +725,23 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
     // cards with no proposedMergedContent (LLM fallback path). The
     // executeApproved server-side path also enforces this, but the
     // client-side filter avoids surfacing the failure as a per-row error
-    // in the response.
+    // in the response. Also skip results with blocking merge warnings —
+    // those must be resolved before approval.
     let eligible = sectionResults;
-    let skippedCount = 0;
+    let skippedNone = 0;
+    let skippedCritical = 0;
     if ((classification === 'PARTIAL_OVERLAP' || classification === 'IMPROVEMENT') && action === 'approved') {
-      eligible = sectionResults.filter((r) => r.proposedMergedContent != null);
-      skippedCount = sectionResults.length - eligible.length;
+      eligible = sectionResults.filter((r) => {
+        if (!r.proposedMergedContent) return false;
+        if (r.mergeWarnings?.some((w) => BLOCKING_WARNING_CODES.has(w.code))) return false;
+        return true;
+      });
+      skippedNone = sectionResults.filter(
+        (r) => !r.proposedMergedContent,
+      ).length;
+      skippedCritical = sectionResults.filter(
+        (r) => r.proposedMergedContent != null && r.mergeWarnings?.some((w) => BLOCKING_WARNING_CODES.has(w.code)),
+      ).length;
     }
     if (eligible.length === 0) {
       setBulkInfo('No eligible rows for this bulk action.');
@@ -682,10 +761,11 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
             : r,
         ),
       );
-      if (skippedCount > 0) {
-        setBulkInfo(
-          `Approved ${eligible.length}, skipped ${skippedCount} (no merge proposal yet).`,
-        );
+      const skippedParts: string[] = [];
+      if (skippedNone > 0) skippedParts.push(`${skippedNone} (no merge proposal yet)`);
+      if (skippedCritical > 0) skippedParts.push(`${skippedCritical} (critical warnings must be resolved)`);
+      if (skippedParts.length > 0) {
+        setBulkInfo(`Approved ${eligible.length}, skipped ${skippedParts.join(', skipped ')}.`);
       }
     } catch (err) {
       const e = err as { response?: { data?: { error?: unknown } }; message?: string };
@@ -725,7 +805,7 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
               );
             })}
           </div>
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
             <div className="h-1.5 w-48 bg-slate-100 rounded-full overflow-hidden">
               <div
                 className="h-full bg-slate-400 rounded-full transition-all"
@@ -733,6 +813,21 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
               />
             </div>
             <span className="text-xs text-slate-400">{reviewedCount} of {results.length} reviewed</span>
+            <span className="text-slate-200">·</span>
+            <button
+              type="button"
+              className="text-xs text-indigo-500 hover:text-indigo-700 underline-offset-2 hover:underline"
+              onClick={() => setGlobalExpandVersion((v) => v + 1)}
+            >
+              Expand all
+            </button>
+            <button
+              type="button"
+              className="text-xs text-indigo-500 hover:text-indigo-700 underline-offset-2 hover:underline"
+              onClick={() => setGlobalCollapseVersion((v) => v + 1)}
+            >
+              Collapse all
+            </button>
           </div>
         </div>
         <button
@@ -794,6 +889,8 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
           onProposalsUpdated={handleProposalsUpdated}
           onResultPatched={handleResultPatched}
           onResultsReplaced={onResultsUpdated}
+          expandSectionVersion={globalExpandVersion}
+          collapseSectionVersion={globalCollapseVersion}
         />
       ))}
 

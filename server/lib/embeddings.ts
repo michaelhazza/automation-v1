@@ -8,6 +8,7 @@ import { env } from './env.js';
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const EMBEDDING_DIMENSIONS = 1536;
 const OPENAI_EMBEDDINGS_URL = 'https://api.openai.com/v1/embeddings';
+const FETCH_TIMEOUT_MS = 30_000;
 
 /**
  * Generate an embedding vector for the given text.
@@ -29,6 +30,7 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
         model: EMBEDDING_MODEL,
         dimensions: EMBEDDING_DIMENSIONS,
       }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -78,6 +80,7 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][] | 
         model: EMBEDDING_MODEL,
         dimensions: EMBEDDING_DIMENSIONS,
       }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {

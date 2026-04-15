@@ -39,7 +39,11 @@ import { SKILL_CLASSIFY_TIMEOUT_MS } from '../config/limits.js';
 import type { skillAnalyzerResults } from '../db/schema/index.js';
 import {
   skillAnalyzerServicePure,
-  LibrarySkillSummary,
+  validateMergeOutput,
+  extractInvocationBlock,
+  richnessScore,
+  type LibrarySkillSummary,
+  type MergeWarning,
 } from '../services/skillAnalyzerServicePure.js';
 import {
   skillParserServicePure,
@@ -763,6 +767,59 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
 
           const diffSummary = skillAnalyzerServicePure.generateDiffSummary(candidate, matchedLib);
 
+          // --- Merge validation (Bugs 1–4, 7–10) ---
+          // Extract rationale before stripping it from the stored merge.
+          let mergeWarnings: MergeWarning[] = [];
+          let mergeRationale: string | null = null;
+          let storedMerge = finalResult.proposedMerge
+            ? { ...finalResult.proposedMerge, mergeRationale: undefined }
+            : null;
+
+          if (
+            finalResult.proposedMerge &&
+            (finalResult.classification === 'PARTIAL_OVERLAP' || finalResult.classification === 'IMPROVEMENT')
+          ) {
+            // Extract mergeRationale from parsed proposedMerge before stripping.
+            mergeRationale = finalResult.proposedMerge.mergeRationale ?? null;
+
+            // Determine base vs non-base using richnessScore — must match the
+            // prompt's Step 1 heuristic. Never use wordCount here.
+            const candidateScore = richnessScore(candidate.instructions);
+            const libraryScore = richnessScore(matchedLib.instructions);
+            const baseSkill = candidateScore >= libraryScore ? candidate : matchedLib;
+            const nonBaseSkill = candidateScore >= libraryScore ? matchedLib : candidate;
+
+            // Extract invocation blocks from both sources before validation.
+            const baseInvocation = extractInvocationBlock(baseSkill.instructions);
+            const nonBaseInvocation = extractInvocationBlock(nonBaseSkill.instructions);
+
+            // Build library exclusion sets (exclude the matched skill itself).
+            const excludedId = matchedLib.id ?? null;
+            const allLibraryNames = new Set(
+              librarySkills.filter(s => s.id !== excludedId).map(s => s.name.toLowerCase())
+            );
+            const allLibrarySlugs = new Set(
+              librarySkills.filter(s => s.id !== excludedId).map(s => s.slug.toLowerCase())
+            );
+
+            mergeWarnings = validateMergeOutput(
+              { definition: baseSkill.definition, instructions: baseSkill.instructions, invocationBlock: baseInvocation },
+              { definition: nonBaseSkill.definition, instructions: nonBaseSkill.instructions, invocationBlock: nonBaseInvocation },
+              storedMerge!,
+              allLibraryNames,
+              allLibrarySlugs,
+              librarySkills,
+              excludedId,
+            );
+
+            if (mergeWarnings.length > 0) {
+              console.info('[SkillAnalyzer] merge_warnings_summary', {
+                candidateSlug: candidate.slug,
+                codes: mergeWarnings.map(w => w.code),
+              });
+            }
+          }
+
           classifiedResults.push({
             candidateIndex: match.candidateIndex,
             candidate,
@@ -774,7 +831,7 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             librarySlug: matchedLib.slug,
             libraryName: matchedLib.name,
             diffSummary,
-            proposedMerge: finalResult.proposedMerge ?? null,
+            proposedMerge: storedMerge ?? null,
             classificationFailed,
             classificationFailureReason,
           });
@@ -796,8 +853,10 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
               similarityScore: match.similarity ?? undefined,
               classificationReasoning: finalResult.reasoning ?? undefined,
               diffSummary: diffSummary ?? undefined,
-              proposedMergedContent: finalResult.proposedMerge ?? undefined,
-              originalProposedMerge: finalResult.proposedMerge ?? undefined,
+              proposedMergedContent: storedMerge ?? undefined,
+              originalProposedMerge: storedMerge ?? undefined,
+              mergeWarnings: mergeWarnings.length > 0 ? mergeWarnings : null,
+              mergeRationale: mergeRationale,
               classificationFailed,
               classificationFailureReason: classificationFailureReason ?? null,
               isDocumentationFile: flags?.isDocumentationFile ?? false,
@@ -1078,6 +1137,12 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
             });
 
             // If Haiku's choice isn't in the top-3 cosine proposals, add it
+            // informational-only: do NOT mark it llmConfirmed or selected.
+            // A 0%-cosine agent picked by Haiku is a weak signal — cosine and
+            // LLM strongly disagree, so the skill likely has no good home yet.
+            // Leaving llmConfirmed=false ensures Stage 8b includes these skills
+            // in the cluster recommendation rather than falsely treating them as
+            // homed. The cosine-top proposal's selection is also preserved.
             if (
               !suggestion.noGoodMatch &&
               suggestion.suggestedAgentSlug &&
@@ -1090,10 +1155,15 @@ export async function processSkillAnalyzerJob(jobId: string): Promise<void> {
                   slugSnapshot: agent.slug,
                   nameSnapshot: agent.name,
                   score: 0,
-                  selected: true,
+                  selected: false,
                   llmReasoning: suggestion.reasoning,
-                  llmConfirmed: true,
+                  llmConfirmed: false,
                 });
+                // Restore selection on the highest-scoring cosine proposal since
+                // Haiku's out-of-top-K pick is not a confirmed home.
+                const topCosine = enriched.reduce((best, p) =>
+                  p.score > (best?.score ?? -1) ? p : best, enriched[0]);
+                if (topCosine) topCosine.selected = true;
               }
             }
 
