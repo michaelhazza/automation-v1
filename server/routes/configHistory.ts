@@ -10,6 +10,26 @@ const router = Router();
 const VALID_ENTITY_TYPES = CONFIG_HISTORY_ENTITY_TYPES;
 
 /**
+ * GET /api/org/config-history/session/:sessionId
+ * List all history records from a specific config agent session.
+ *
+ * MUST be declared before /:entityType/:entityId — otherwise Express matches
+ * "session" as the entityType param and rejects it as an invalid entity type.
+ */
+router.get(
+  '/api/org/config-history/session/:sessionId',
+  authenticate,
+  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
+  asyncHandler(async (req, res) => {
+    const orgId = req.orgId;
+    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
+
+    const records = await configHistoryService.listSessionHistory(req.params.sessionId, orgId);
+    res.json({ sessionId: req.params.sessionId, records });
+  })
+);
+
+/**
  * GET /api/org/config-history/:entityType/:entityId
  * List all versions of an entity, ordered by version DESC.
  */
@@ -61,23 +81,6 @@ router.get(
     }
 
     res.json(record);
-  })
-);
-
-/**
- * GET /api/org/config-history/session/:sessionId
- * List all history records from a specific config agent session.
- */
-router.get(
-  '/api/org/config-history/session/:sessionId',
-  authenticate,
-  requireOrgPermission(ORG_PERMISSIONS.AGENTS_VIEW),
-  asyncHandler(async (req, res) => {
-    const orgId = req.orgId;
-    if (!orgId) throw { statusCode: 400, message: 'Organisation context required' };
-
-    const records = await configHistoryService.listSessionHistory(req.params.sessionId, orgId);
-    res.json({ sessionId: req.params.sessionId, records });
   })
 );
 

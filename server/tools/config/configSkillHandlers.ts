@@ -10,6 +10,7 @@ import type { SkillExecutionContext } from '../../services/skillExecutor.js';
 import { agentService } from '../../services/agentService.js';
 import { subaccountAgentService } from '../../services/subaccountAgentService.js';
 import { scheduledTaskService } from '../../services/scheduledTaskService.js';
+import { agentScheduleService } from '../../services/agentScheduleService.js';
 import { systemSkillService } from '../../services/systemSkillService.js';
 import { skillService } from '../../services/skillService.js';
 import { configHistoryService } from '../../services/configHistoryService.js';
@@ -150,13 +151,14 @@ export async function executeConfigUpdateLink(
   for (const key of [
     'skillSlugs', 'customInstructions', 'tokenBudgetPerRun', 'maxToolCallsPerRun',
     'timeoutSeconds', 'maxCostPerRunCents', 'maxLlmCallsPerRun', 'heartbeatEnabled',
-    'heartbeatIntervalHours', 'heartbeatOffsetMinutes', 'scheduleCron', 'scheduleEnabled', 'isActive',
+    'heartbeatIntervalHours', 'heartbeatOffsetMinutes', 'isActive',
   ]) {
     if (input[key] !== undefined) patch[key] = input[key];
   }
 
   try {
     const result = await subaccountAgentService.updateLink(context.organisationId, linkId, patch as Parameters<typeof subaccountAgentService.updateLink>[2]);
+    // scheduleCron/scheduleEnabled require agentScheduleService to keep pg-boss in sync — handled by executeConfigSetLinkSchedule
     return { success: true, entityId: result.id };
   } catch (err) {
     const e = err as { message?: string };
@@ -210,13 +212,27 @@ export async function executeConfigSetLinkSchedule(
   const linkId = String(input.linkId ?? '');
   if (!linkId) return { success: false, error: 'linkId is required' };
 
-  const patch: Record<string, unknown> = {};
-  for (const key of ['heartbeatEnabled', 'heartbeatIntervalHours', 'heartbeatOffsetMinutes', 'scheduleCron', 'scheduleEnabled']) {
-    if (input[key] !== undefined) patch[key] = input[key];
-  }
-
   try {
-    const result = await subaccountAgentService.updateLink(context.organisationId, linkId, patch as Parameters<typeof subaccountAgentService.updateLink>[2]);
+    // Heartbeat fields (heartbeatEnabled, heartbeatIntervalHours, heartbeatOffsetMinutes) go through
+    // updateLink — they don't require pg-boss coordination.
+    const heartbeatPatch: Record<string, unknown> = {};
+    for (const key of ['heartbeatEnabled', 'heartbeatIntervalHours', 'heartbeatOffsetMinutes', 'isActive']) {
+      if (input[key] !== undefined) heartbeatPatch[key] = input[key];
+    }
+    let result: { id: string } | undefined;
+    if (Object.keys(heartbeatPatch).length > 0) {
+      result = await subaccountAgentService.updateLink(context.organisationId, linkId, heartbeatPatch as Parameters<typeof subaccountAgentService.updateLink>[2]);
+    }
+
+    // Cron schedule fields must go through agentScheduleService to keep pg-boss in sync.
+    const cronPatch: { scheduleCron?: string | null; scheduleEnabled?: boolean } = {};
+    if (input.scheduleCron !== undefined) cronPatch.scheduleCron = input.scheduleCron === null ? null : String(input.scheduleCron);
+    if (input.scheduleEnabled !== undefined) cronPatch.scheduleEnabled = Boolean(input.scheduleEnabled);
+    if (Object.keys(cronPatch).length > 0) {
+      result = await agentScheduleService.updateSchedule(linkId, cronPatch);
+    }
+
+    if (!result) return { success: false, error: 'No schedule fields provided' };
     return { success: true, entityId: result.id };
   } catch (err) {
     const e = err as { message?: string };
@@ -781,6 +797,10 @@ export async function executeConfigRestoreVersion(
         timezone: snapshot.timezone as string,
         scheduleTime: snapshot.scheduleTime as string,
       });
+      // Restore activation state — scheduledTaskService.update does not touch isActive
+      if (snapshot.isActive !== undefined) {
+        await scheduledTaskService.toggleActive(entityId, context.organisationId, Boolean(snapshot.isActive));
+      }
     } else {
       return { success: false, error: `Restore not supported for entity type: ${entityType}` };
     }
