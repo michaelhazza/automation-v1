@@ -397,6 +397,33 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// PATCH /api/system/skill-analyser/jobs/:jobId/proposed-agents
+// Confirm or reject a proposed new agent. §11 Fix 5
+// ---------------------------------------------------------------------------
+
+router.patch(
+  '/api/system/skill-analyser/jobs/:jobId/proposed-agents',
+  asyncHandler(async (req, res) => {
+    const { jobId } = req.params;
+    const orgId = req.orgId!;
+    const body = (req.body ?? {}) as { proposedAgentIndex?: number; action?: string };
+    if (typeof body.proposedAgentIndex !== 'number') {
+      return res.status(400).json({ error: 'proposedAgentIndex is required (number).' });
+    }
+    if (body.action !== 'confirm' && body.action !== 'reject') {
+      return res.status(400).json({ error: 'action must be "confirm" or "reject".' });
+    }
+    await skillAnalyzerService.updateProposedAgent({
+      jobId,
+      organisationId: orgId,
+      proposedAgentIndex: body.proposedAgentIndex,
+      action: body.action,
+    });
+    return res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // PATCH /api/system/skill-analyser/jobs/:jobId/results/:resultId/resolve-warning
 // Record reviewer decision on a merge warning. §11.2
 // ---------------------------------------------------------------------------

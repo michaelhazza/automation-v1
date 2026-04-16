@@ -394,6 +394,45 @@ export async function bulkSetResultAction(params: {
 }
 
 // ---------------------------------------------------------------------------
+// Proposed new agents — v2 Fix 5 (confirm/reject)
+// ---------------------------------------------------------------------------
+
+export async function updateProposedAgent(params: {
+  jobId: string;
+  organisationId: string;
+  proposedAgentIndex: number;
+  action: 'confirm' | 'reject';
+}): Promise<void> {
+  const { jobId, organisationId, proposedAgentIndex, action } = params;
+
+  const jobRows = await db
+    .select()
+    .from(skillAnalyzerJobs)
+    .where(and(eq(skillAnalyzerJobs.id, jobId), eq(skillAnalyzerJobs.organisationId, organisationId)))
+    .limit(1);
+  const job = jobRows[0];
+  if (!job) throw { statusCode: 404, message: 'Job not found' };
+
+  const current = Array.isArray(job.proposedNewAgents) ? (job.proposedNewAgents as Array<Record<string, unknown>>) : [];
+  if (current.length === 0 || !current[proposedAgentIndex]) {
+    throw { statusCode: 404, message: `Proposed agent index ${proposedAgentIndex} not found` };
+  }
+
+  const next = current.map((entry, i) => {
+    if (i !== proposedAgentIndex) return entry;
+    if (action === 'confirm') {
+      return { ...entry, status: 'confirmed', confirmedAt: new Date().toISOString() };
+    }
+    return { ...entry, status: 'rejected', rejectedAt: new Date().toISOString() };
+  });
+
+  await db
+    .update(skillAnalyzerJobs)
+    .set({ proposedNewAgents: next })
+    .where(eq(skillAnalyzerJobs.id, jobId));
+}
+
+// ---------------------------------------------------------------------------
 // Warning resolution — v2 §11.2
 // ---------------------------------------------------------------------------
 
@@ -1070,6 +1109,65 @@ export async function executeApproved(params: {
       .where(eq(skillAnalyzerResults.id, resultId));
   };
 
+  // v2 Fix 5 Phase 1: soft-create any confirmed proposed new agents.
+  // Runs OUTSIDE per-result transactions so agents exist before any skill
+  // attachment. Idempotent via slug lookup — re-runs reuse existing drafts.
+  // Map: proposedAgentIndex → agentId for retro-injected proposals.
+  const proposedAgentIdByIndex = new Map<number, string>();
+  // Track which proposed agents got at least one skill attached; these get
+  // promoted to 'active' at the end.
+  const proposedAgentsSeeded = new Set<number>();
+  try {
+    const jobRows = await db
+      .select({ proposedNewAgents: skillAnalyzerJobs.proposedNewAgents })
+      .from(skillAnalyzerJobs)
+      .where(eq(skillAnalyzerJobs.id, params.jobId))
+      .limit(1);
+    const proposedNewAgents = Array.isArray(jobRows[0]?.proposedNewAgents)
+      ? (jobRows[0]!.proposedNewAgents as Array<Record<string, unknown>>)
+      : [];
+    for (const entry of proposedNewAgents) {
+      if (entry?.status !== 'confirmed') continue;
+      const slug = typeof entry.slug === 'string' ? entry.slug : null;
+      const name = typeof entry.name === 'string' ? entry.name : null;
+      const idx = typeof entry.proposedAgentIndex === 'number' ? entry.proposedAgentIndex : null;
+      if (!slug || !name || idx === null) continue;
+
+      // Idempotency: reuse existing agent if slug already exists (e.g., a
+      // prior Execute attempt partially succeeded).
+      let agentId: string;
+      try {
+        const existing = await systemAgentService.listAgents();
+        const found = existing.find(a => a.slug === slug);
+        if (found) {
+          agentId = found.id;
+        } else {
+          const created = await systemAgentService.createAgent({
+            name,
+            description: typeof entry.description === 'string' ? entry.description : '',
+            masterPrompt: typeof entry.reasoning === 'string' ? entry.reasoning : name,
+          });
+          // New agents default to status='draft' via the schema default;
+          // promoted to 'active' in Phase 3 after attachment succeeds.
+          agentId = created.id;
+        }
+      } catch (err) {
+        logger.warn('[skillAnalyzer] proposed agent soft-create failed; skipping', {
+          jobId: params.jobId,
+          proposedAgentIndex: idx,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
+      proposedAgentIdByIndex.set(idx, agentId);
+    }
+  } catch (err) {
+    logger.warn('[skillAnalyzer] proposed agents phase skipped', {
+      jobId: params.jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   for (const result of approved) {
     const candidate = parsedCandidates[result.candidateIndex] as {
       name: string;
@@ -1270,24 +1368,45 @@ export async function executeApproved(params: {
           // edge case "system agent is deleted between analysis and
           // execute").
           const proposals = (result.agentProposals as Array<{
-            systemAgentId: string;
+            systemAgentId: string | null;
             slugSnapshot: string;
             nameSnapshot: string;
             score: number;
             selected: boolean;
+            isProposedNewAgent?: boolean;
+            proposedAgentIndex?: number;
           }> | null) ?? [];
 
           for (const proposal of proposals) {
             if (!proposal.selected) continue;
 
+            // v2 Fix 5: resolve proposed-new-agent entries to the freshly
+            // soft-created agent ID. If the reviewer didn't confirm the
+            // proposal, skip (Phase 1 didn't create an agent for it).
+            let resolvedAgentId = proposal.systemAgentId;
+            if (proposal.isProposedNewAgent) {
+              const idx = proposal.proposedAgentIndex ?? 0;
+              const newAgentId = proposedAgentIdByIndex.get(idx);
+              if (!newAgentId) {
+                logger.warn('[skillAnalyzer] proposed-new-agent not created; skipping attach', {
+                  resultId: result.id,
+                  proposedAgentIndex: idx,
+                });
+                continue;
+              }
+              resolvedAgentId = newAgentId;
+              proposedAgentsSeeded.add(idx);
+            }
+            if (!resolvedAgentId) continue;
+
             let agent;
             try {
-              agent = await systemAgentService.getAgent(proposal.systemAgentId, { tx });
+              agent = await systemAgentService.getAgent(resolvedAgentId, { tx });
             } catch {
               // 404 — agent was deleted between analysis and execute.
               logger.warn('[skillAnalyzer] agent attach skipped — missing', {
                 resultId: result.id,
-                systemAgentId: proposal.systemAgentId,
+                systemAgentId: resolvedAgentId,
                 outcome: 'skipped-missing',
               });
               continue;
@@ -1300,20 +1419,20 @@ export async function executeApproved(params: {
               // Already attached — idempotent no-op.
               logger.info('[skillAnalyzer] agent attach already-present', {
                 resultId: result.id,
-                systemAgentId: proposal.systemAgentId,
+                systemAgentId: resolvedAgentId,
                 outcome: 'already-present',
               });
               continue;
             }
             const nextSlugs = [...currentSlugs, created.slug];
             await systemAgentService.updateAgent(
-              proposal.systemAgentId,
+              resolvedAgentId,
               { defaultSystemSkillSlugs: nextSlugs },
               { tx },
             );
             logger.info('[skillAnalyzer] agent attach succeeded', {
               resultId: result.id,
-              systemAgentId: proposal.systemAgentId,
+              systemAgentId: resolvedAgentId,
               outcome: 'attached',
             });
           }
@@ -1347,7 +1466,35 @@ export async function executeApproved(params: {
     }
   }
 
-  return { created, updated, failed, errors, backupId };
+  // v2 Fix 5 Phase 3: promote proposed agents whose skills succeeded from
+  // 'draft' to 'active'. Drafts whose skills all failed stay as drafts and
+  // appear in pendingDraftAgents[] for admin review.
+  const pendingDraftAgents: Array<{ agentId: string; slug: string; name: string }> = [];
+  for (const [idx, agentId] of proposedAgentIdByIndex) {
+    try {
+      const agent = await systemAgentService.getAgent(agentId);
+      if (proposedAgentsSeeded.has(idx) && agent.status === 'draft') {
+        await systemAgentService.updateAgent(agentId, { status: 'active' });
+        logger.info('[skillAnalyzer] proposed agent promoted to active', {
+          jobId: params.jobId,
+          agentId,
+          proposedAgentIndex: idx,
+        });
+      } else if (agent.status === 'draft') {
+        // No skills attached — leave as draft for admin review.
+        pendingDraftAgents.push({ agentId, slug: agent.slug, name: agent.name });
+      }
+    } catch (err) {
+      logger.warn('[skillAnalyzer] proposed agent promotion check failed', {
+        jobId: params.jobId,
+        agentId,
+        proposedAgentIndex: idx,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { created, updated, failed, errors, backupId, pendingDraftAgents };
 }
 
 /** Update job progress (used by the job handler). */
@@ -1498,17 +1645,77 @@ export async function updateJobAgentRecommendation(
     throw new Error('updateJobAgentRecommendation: skillSlugs must be an array if present');
   }
 
+  // v2 Fix 5: also write the proposedNewAgents array. Single-agent case today;
+  // shape supports N entries per job.
+  const proposedNewAgents = recommendation.shouldCreateAgent
+    ? [{
+        proposedAgentIndex: 0,
+        slug: recommendation.agentSlug ?? slugifyName(recommendation.agentName ?? 'proposed-agent'),
+        name: recommendation.agentName ?? 'Proposed Agent',
+        description: recommendation.agentDescription ?? recommendation.reasoning,
+        reasoning: recommendation.reasoning,
+        skillSlugs: Array.isArray(recommendation.skillSlugs) ? recommendation.skillSlugs : [],
+        status: 'proposed' as const,
+      }]
+    : [];
+
   // Idempotency: only write if the column is still null (first run wins on retry).
   const updated = await db
     .update(skillAnalyzerJobs)
-    .set({ agentRecommendation: recommendation })
+    .set({
+      agentRecommendation: recommendation,
+      proposedNewAgents,
+    })
     .where(and(eq(skillAnalyzerJobs.id, jobId), isNull(skillAnalyzerJobs.agentRecommendation)))
     .returning({ id: skillAnalyzerJobs.id });
 
   if (updated.length === 0) {
     // Row was skipped — recommendation already written on a previous run.
     logger.info('skill_analyzer_agent_recommendation_already_exists', { jobId });
+    return;
   }
+
+  // Retro-inject synthetic proposed-new-agent entries into affected
+  // DISTINCT results' agentProposals so per-skill assignment panels can
+  // show the proposed agent. Only runs when a new agent was suggested.
+  if (recommendation.shouldCreateAgent && Array.isArray(recommendation.skillSlugs) && recommendation.skillSlugs.length > 0) {
+    const slugSet = recommendation.skillSlugs.map(s => s.toLowerCase());
+    const affectedRows = await db
+      .select({ id: skillAnalyzerResults.id, candidateSlug: skillAnalyzerResults.candidateSlug, agentProposals: skillAnalyzerResults.agentProposals })
+      .from(skillAnalyzerResults)
+      .where(and(
+        eq(skillAnalyzerResults.jobId, jobId),
+        eq(skillAnalyzerResults.classification, 'DISTINCT'),
+      ));
+    const proposed = proposedNewAgents[0];
+    for (const row of affectedRows) {
+      if (!slugSet.includes(row.candidateSlug.toLowerCase())) continue;
+      const existing = Array.isArray(row.agentProposals) ? row.agentProposals as Array<Record<string, unknown>> : [];
+      // Skip if we've already injected this proposal on a previous run.
+      if (existing.some(p => p?.isProposedNewAgent === true && p?.proposedAgentIndex === proposed.proposedAgentIndex)) {
+        continue;
+      }
+      const synthetic = {
+        systemAgentId: null,
+        slugSnapshot: proposed.slug,
+        nameSnapshot: proposed.name,
+        score: 1.0,
+        selected: true,
+        isProposedNewAgent: true,
+        proposedAgentIndex: proposed.proposedAgentIndex,
+      };
+      // Place the proposed agent at the top so the UI ranks it first.
+      const nextProposals = [synthetic, ...existing];
+      await db
+        .update(skillAnalyzerResults)
+        .set({ agentProposals: nextProposals })
+        .where(eq(skillAnalyzerResults.id, row.id));
+    }
+  }
+}
+
+function slugifyName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -1739,6 +1946,7 @@ export const skillAnalyzerService = {
   setResultAction,
   bulkSetResultAction,
   updateAgentProposal,
+  updateProposedAgent,
   patchMergeFields,
   resetMergeToOriginal,
   resolveWarning,

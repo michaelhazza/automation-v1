@@ -24,11 +24,21 @@ export interface MatchedSkillContent {
  *  agent-propose pipeline stage. systemAgentId is the stable identity key —
  *  slug and name are display-only snapshots captured at analysis time. */
 export interface AgentProposal {
-  systemAgentId: string;
+  /** null for a proposed-new-agent entry retro-injected by Stage 8b. The
+   *  Execute step resolves this via proposedAgentIndex → newly created agent. */
+  systemAgentId: string | null;
   slugSnapshot: string;
   nameSnapshot: string;
   score: number;
   selected: boolean;
+  /** v2 Fix 5: true when this proposal was retro-injected from a cluster-
+   *  recommended new agent. UI renders a "Proposed (not yet created)" badge. */
+  isProposedNewAgent?: boolean;
+  /** v2 Fix 5: index into AnalysisJob.proposedNewAgents. */
+  proposedAgentIndex?: number;
+  /** Stage 7b enrichment — present when Haiku confirmed a top proposal. */
+  llmReasoning?: string;
+  llmConfirmed?: boolean;
 }
 
 /** LLM-generated merge proposal for PARTIAL_OVERLAP / IMPROVEMENT results.
@@ -97,6 +107,20 @@ export interface AnalysisJob {
     reasoning: string;
     skillSlugs?: string[];
   } | null;
+  /** v2 Fix 5: plural proposed-new-agents array. Each entry carries status
+   *  so the UI can render Confirm/Reject controls and surface the agent in
+   *  per-skill assignment panels via retro-injected agentProposals. */
+  proposedNewAgents?: Array<{
+    proposedAgentIndex: number;
+    slug: string;
+    name: string;
+    description: string;
+    reasoning: string;
+    skillSlugs: string[];
+    status: 'proposed' | 'confirmed' | 'rejected';
+    confirmedAt?: string;
+    rejectedAt?: string;
+  }> | null;
 }
 
 export interface AnalysisResult {

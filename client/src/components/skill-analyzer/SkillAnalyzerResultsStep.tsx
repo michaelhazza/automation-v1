@@ -176,10 +176,12 @@ function AgentChipBlock({
       <div className="flex flex-wrap gap-1.5 mb-2">
         {proposals.map((proposal) => (
           <span
-            key={proposal.systemAgentId}
+            key={proposal.systemAgentId ?? `proposed:${proposal.proposedAgentIndex ?? 0}`}
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full border transition-colors ${
               proposal.selected
-                ? 'bg-emerald-600 border-emerald-600 text-white'
+                ? proposal.isProposedNewAgent
+                  ? 'bg-indigo-600 border-indigo-600 text-white'
+                  : 'bg-emerald-600 border-emerald-600 text-white'
                 : 'bg-slate-100 border-slate-200 text-slate-500'
             }`}
           >
@@ -190,7 +192,14 @@ function AgentChipBlock({
               aria-label={proposal.selected ? 'Deselect' : 'Select'}
             >
               <span className="font-medium">{proposal.nameSnapshot}</span>
-              <span className={`text-[10px] ${proposal.selected ? 'opacity-80' : 'opacity-60'}`}>{Math.round(proposal.score * 100)}%</span>
+              {proposal.isProposedNewAgent && (
+                <span className="text-[9px] font-normal px-1 py-[1px] rounded bg-indigo-200 text-indigo-900">
+                  Proposed (not yet created)
+                </span>
+              )}
+              {!proposal.isProposedNewAgent && (
+                <span className={`text-[10px] ${proposal.selected ? 'opacity-80' : 'opacity-60'}`}>{Math.round(proposal.score * 100)}%</span>
+              )}
             </button>
             <button
               type="button"
@@ -853,30 +862,9 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
         </div>
       )}
 
-      {/* Agent cluster recommendation banner */}
+      {/* Agent cluster recommendation banner — v2 Fix 5: Confirm/Reject */}
       {job.agentRecommendation?.shouldCreateAgent && (
-        <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-indigo-900 mb-0.5">
-                New agent suggested: {job.agentRecommendation.agentName}
-              </p>
-              {job.agentRecommendation.agentDescription && (
-                <p className="text-xs text-indigo-700 mb-2">{job.agentRecommendation.agentDescription}</p>
-              )}
-              <p className="text-xs text-indigo-600 italic">{job.agentRecommendation.reasoning}</p>
-              {job.agentRecommendation.skillSlugs && job.agentRecommendation.skillSlugs.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {job.agentRecommendation.skillSlugs.map((slug) => (
-                    <span key={slug} className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-mono">
-                      {slug}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <ProposedAgentBanner jobId={job.id} job={job} />
       )}
 
       {/* Result sections */}
@@ -900,6 +888,104 @@ export default function SkillAnalyzerResultsStep({ job, results, onResultsUpdate
 
       {results.length === 0 && (
         <div className="text-center py-12 text-slate-400 text-sm">No results to display.</div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ProposedAgentBanner — v2 Fix 5
+// Shows the cluster-recommended new agent with Confirm / Reject buttons.
+// Once confirmed, the agent appears as a top-ranked chip in each affected
+// skill's AgentChipBlock (via the retro-injected agentProposals entry).
+// ---------------------------------------------------------------------------
+
+function ProposedAgentBanner({ jobId, job }: { jobId: string; job: AnalysisJob }) {
+  const [status, setStatus] = useState<'proposed' | 'confirmed' | 'rejected'>(() => {
+    const first = job.proposedNewAgents?.[0];
+    return (first?.status as 'proposed' | 'confirmed' | 'rejected') ?? 'proposed';
+  });
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handle(action: 'confirm' | 'reject') {
+    setPending(true);
+    setError(null);
+    try {
+      await api.patch(`/api/system/skill-analyser/jobs/${jobId}/proposed-agents`, {
+        proposedAgentIndex: 0,
+        action,
+      });
+      setStatus(action === 'confirm' ? 'confirmed' : 'rejected');
+    } catch (err) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string };
+      setError(e?.response?.data?.error ?? e?.message ?? 'Failed to update proposed agent.');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const rec = job.agentRecommendation!;
+
+  return (
+    <div
+      className={`p-4 rounded-xl border ${
+        status === 'confirmed'
+          ? 'bg-emerald-50 border-emerald-200'
+          : status === 'rejected'
+          ? 'bg-slate-50 border-slate-200'
+          : 'bg-indigo-50 border-indigo-200'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-slate-900 mb-0.5">
+            {status === 'confirmed' && '✓ '}
+            {status === 'rejected' && '✗ '}
+            New agent suggested: {rec.agentName}
+            {status === 'confirmed' && <span className="ml-2 text-[10px] font-normal px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900">Confirmed</span>}
+            {status === 'rejected' && <span className="ml-2 text-[10px] font-normal px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">Rejected</span>}
+          </p>
+          {rec.agentDescription && (
+            <p className="text-xs text-slate-700 mb-2">{rec.agentDescription}</p>
+          )}
+          <p className="text-xs text-slate-600 italic">{rec.reasoning}</p>
+          {rec.skillSlugs && rec.skillSlugs.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-2">
+              {rec.skillSlugs.map((slug) => (
+                <span key={slug} className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+                  {slug}
+                </span>
+              ))}
+            </div>
+          )}
+          {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+        </div>
+        {status === 'proposed' && (
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => handle('confirm')}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => handle('reject')}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-300 bg-white text-slate-600 hover:border-red-300 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Reject
+            </button>
+          </div>
+        )}
+      </div>
+      {status === 'confirmed' && (
+        <p className="mt-2 text-[11px] text-emerald-800">
+          This agent will be created with status=&quot;draft&quot; during Execute. Skills in the list above will attach to it; the draft is promoted to active when at least one skill attaches successfully.
+        </p>
       )}
     </div>
   );
