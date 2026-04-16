@@ -8,6 +8,7 @@ import { subaccountAgentService } from '../services/subaccountAgentService.js';
 import { agentExecutionService } from '../services/agentExecutionService.js';
 import { ORG_PERMISSIONS } from '../lib/permissions.js';
 import { checkTestRunRateLimit } from '../lib/testRunRateLimit.js';
+import { deriveTestRunIdempotencyKey } from '../lib/testRunIdempotency.js';
 import type { SkillTier } from '../lib/skillVisibility.js';
 
 const router = Router();
@@ -191,6 +192,13 @@ router.post('/api/org/skills/:skillId/test-run',
     };
     if (prompt) triggerContext.prompt = prompt;
     if (inputJson) triggerContext.inputJson = inputJson;
+    const derivedIdempotencyKey = deriveTestRunIdempotencyKey({
+      userId: req.user!.id,
+      targetType: 'org-skill',
+      targetId: skill.id,
+      input: { prompt: prompt ?? null, inputJson: inputJson ?? null },
+      clientKeyHint: idempotencyKey,
+    });
     const result = await agentExecutionService.executeRun({
       agentId: saLink.agentId,
       organisationId: req.orgId!,
@@ -204,7 +212,7 @@ router.post('/api/org/skills/:skillId/test-run',
       userId: req.user!.id,
       triggerContext,
       allowedToolSlugs: [skill.slug],
-      ...(idempotencyKey ? { idempotencyKey } : {}),
+      idempotencyKey: derivedIdempotencyKey,
     });
     res.status(201).json(result);
   })
