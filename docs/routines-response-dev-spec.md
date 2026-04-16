@@ -38,7 +38,7 @@ This spec translates the audit response to Anthropic's Routines launch into impl
 - A **refreshed positioning section** in `docs/capabilities.md` that names the scheduled-prompt / hosted-routine product category as a distinct competitor class and ships net-new objection-handling copy tuned to it — Feature 4
 - A **strategic stance update** in `CLAUDE.md` that reaffirms the non-goal "Automation OS does not compete with LLM-provider primitives" — Feature 5
 
-**North-star acceptance test:** An agency owner running a live demo can (a) open the Scheduled Runs Calendar and show the client "here is everything my agents will do for you next week"; (b) edit an agent's additional prompt, click Run Now on the same page, and watch the test run stream through the inline panel; (c) paste an n8n workflow JSON into the config assistant, receive a validated playbook draft, review it in Playbook Studio, and save it via the existing PR flow — all without leaving the product.
+**North-star acceptance test:** An agency owner running a live demo can (a) open the Scheduled Runs Calendar and show the client "here is everything my agents will do for you next week"; (b) edit an agent's additional prompt, click Run Now on the same page, and watch the test run stream through the inline panel; (c) paste an n8n workflow JSON into the Playbook Studio chat, receive a validated playbook draft, review it in Playbook Studio, and save it via the existing PR flow — all without leaving the product.
 
 **Build order rationale:** Feature 4 (positioning refresh) and Feature 5 (strategic stance) are doc-only and ship first, in the same commit as this spec, so all subsequent work is done under the updated narrative frame. Feature 1 (calendar) is independent of the other builds and has the clearest ROI on demos — ship second. Feature 2 (inline Run Now) reuses the existing run-trace streaming infrastructure and is the highest authoring-velocity win — ship third. Feature 3 (n8n import) is the most speculative of the three builds (marketing wedge, not core workflow) and ships last, gated on Feature 1 and 2 shipping cleanly.
 
@@ -54,12 +54,12 @@ This spec translates the audit response to Anthropic's Routines launch into impl
 
 - **Not** a repositioning. The audit confirmed the strategic frame in `CLAUDE.md` and `docs/capabilities.md` ("LLM providers sell capability; Synthetos sells the business") is correct. Routines is a reason to **sharpen** the pitch, not soften it.
 - **Not** a chase for every Routines primitive. We deliberately skip things like a public skill marketplace or a general-purpose chat UI — explicit non-goals in `capabilities.md`.
-- **Not** a rewrite of the run or schedule data model. All three features reuse existing tables (`agent_runs`, `scheduled_tasks`, `agents.cron`, `heartbeatEnabled`) and existing services (`agentScheduleService`, `scheduledTaskService`, `agentExecutionService`). No schema migrations are required for Features 1 and 2; Feature 3 adds one skill definition and at most one optional import-audit table.
+- **Not** a rewrite of the run or schedule data model. The three user-facing build features (1, 2, 3) reuse existing tables (`agent_runs`, `scheduled_tasks`, `agents.cron`, `heartbeatEnabled`) and existing services (`agentScheduleService`, `scheduledTaskService`, `agentExecutionService`). No schema migrations are required for Features 1, 3, 4, and 5; Feature 2 adds one column to `agent_runs` and one new `agent_test_fixtures` table (see §9).
 
 **Design constraints:**
 
 - Every new surface respects the three-tier isolation model (System → Org → Subaccount). Calendar views are scoped by subaccount by default with an org-wide roll-up for org admins; no cross-org visibility ever.
-- Every new run-creation path threads `idempotencyKey` per existing conventions (`server/db/schema/agentRuns.ts`).
+- Every new production run-creation path threads `idempotencyKey` per existing conventions (`server/db/schema/agentRuns.ts`). Test-run paths (Feature 2) use an intentionally unique-per-call key format and are exempt from deduplication — see §4.6.
 - Every new UI component uses the column-header sort/filter pattern per `CLAUDE.md` (tables) and respects `/api/my-permissions`.
 - No autonomous-agent language in any copy. Prefer "supervised," "approved," "reviewed."
 
@@ -77,10 +77,10 @@ The calendar pulls from four existing schedule surfaces. No new scheduling primi
 
 | Source | Table(s) | Projection function (new) |
 |---|---|---|
-| Heartbeat agents | `agents.heartbeatEnabled`, `heartbeatIntervalHours`, `heartbeatOffsetMinutes`; per-link overrides on `subaccount_agents` | `projectHeartbeatOccurrences(agent, link, windowStart, windowEnd)` |
-| Cron agents | `agents.cron`, `agents.cronTimezone`; per-link overrides on `subaccount_agents` | `projectCronOccurrences(agent, link, windowStart, windowEnd)` |
-| Recurring playbooks | `playbook_runs` with recurring schedule; `playbooks.schedule` JSON | `projectPlaybookOccurrences(playbook, link, windowStart, windowEnd)` |
-| Scheduled tasks | `scheduled_tasks.cronExpression`, `scheduled_tasks.timezone`, `scheduled_tasks.isActive` | `projectScheduledTaskOccurrences(task, windowStart, windowEnd)` |
+| Heartbeat agents | `agents.heartbeatEnabled`, `heartbeatIntervalHours`, `heartbeatOffsetMinutes`; per-link overrides on `subaccount_agents` (link-level values take precedence over agent-level defaults when set) | `projectHeartbeatOccurrences(agent, link, windowStart, windowEnd)` |
+| Cron agents | `agents.cron`, `agents.cronTimezone`; per-link overrides on `subaccount_agents` (link-level cron/timezone take precedence over agent-level defaults when set) | `projectCronOccurrences(agent, link, windowStart, windowEnd)` |
+| Recurring playbooks | `scheduled_tasks WHERE createdByPlaybookSlug IS NOT NULL` | `projectPlaybookOccurrences(scheduledTask, windowStart, windowEnd)` |
+| Scheduled tasks | `scheduled_tasks WHERE createdByPlaybookSlug IS NULL` (`rrule`, `scheduleTime`, `timezone`, `isActive`) | `projectScheduledTaskOccurrences(task, windowStart, windowEnd)` |
 
 **Projection is read-only and stateless.** No rows are written to predict a run. Occurrences are materialised in memory, merged, sorted, and returned to the client.
 
@@ -91,6 +91,8 @@ New endpoint, new service, no new tables.
 **Route:** `GET /api/subaccounts/:subaccountId/schedule-calendar?start=ISO&end=ISO` (subaccount-scoped)
 
 **Route:** `GET /api/org/schedule-calendar?start=ISO&end=ISO&subaccountId=?` (org-wide roll-up, filterable)
+
+**Request validation:** `start` and `end` are ISO 8601 strings with timezone offset (UTC or explicit offset). `start` must be before `end`. Maximum window: 30 days (matching §3.1 UI maximum). Requests with invalid ISO, `start >= end`, or span > 30 days return `400 Bad Request`. Requests with a valid window that contains no occurrences return `200` with an empty `occurrences` array (not 404).
 
 **Service:** `server/services/scheduleCalendarService.ts` + `scheduleCalendarServicePure.ts` for the projection math (pure, unit-testable, no DB access in the pure half).
 
@@ -106,9 +108,9 @@ type ScheduleOccurrence = {
   subaccountName: string;
   agentId?: string;
   agentName?: string;
-  runType: 'scheduled' | 'triggered' | 'manual';
-  estimatedTokens?: number; // from agent's historical avg
-  estimatedCost?: number; // from agent's historical avg, USD
+  runType: 'scheduled'; // always 'scheduled' — these are projected future occurrences, not yet-run events
+  estimatedTokens: number | null; // from agent's last-10-run avg; null for playbook/scheduled_task sources with no direct agent
+  estimatedCost: number | null; // from agent's last-10-run avg, USD; null for same
   scopeTag: 'system' | 'org' | 'subaccount';
 };
 
@@ -116,9 +118,32 @@ type ScheduleCalendarResponse = {
   windowStart: string;
   windowEnd: string;
   occurrences: ScheduleOccurrence[]; // sorted ascending
-  totals: { count: number; estimatedTokens: number; estimatedCost: number };
+  totals: { count: number; estimatedTokens: number; estimatedCost: number }; // null estimatedTokens/Cost per occurrence treated as 0 in aggregation
 };
 ```
+
+**Files introduced by Feature 1:**
+
+| Asset | Path | Purpose |
+|---|---|---|
+| Service (pure) | `server/services/scheduleCalendarServicePure.ts` | Stateless projection functions for heartbeat, cron, playbook, and scheduled-task occurrences |
+| Service | `server/services/scheduleCalendarService.ts` | Wraps pure layer with org-scoped DB reads |
+| Route | `server/routes/scheduleCalendar.ts` | Mounts both calendar endpoints |
+| Component | `client/src/components/ScheduleCalendar.tsx` | Calendar grid renderer (week / month / day / list views) |
+| Page | `client/src/pages/ScheduleCalendarPage.tsx` | Org-wide calendar page |
+| Page | `client/src/pages/SubaccountScheduleCalendarPage.tsx` | Subaccount-scoped calendar page |
+| Portal card | `client/src/components/portal/UpcomingWorkCard.tsx` | Compact 7-day strip on client portal landing |
+
+Existing files modified by Feature 1:
+
+| File | Change |
+|---|---|
+| `server/routes/index.ts` | Mount `scheduleCalendar` route |
+| `client/src/App.tsx` | Register calendar page routes via existing lazy-load pattern |
+| Sidebar navigation component (path confirmed at implementation time) | Add "Schedule" nav entry under "Operations" section — org admin only |
+| Subaccount detail tab navigation component (path confirmed at implementation time) | Add calendar tab to subaccount detail page |
+| `server/lib/permissions.ts` | Add `subaccount.schedule.view_calendar` under `SUBACCOUNT_PERMISSIONS` |
+| `server/services/permissionSeedService.ts` | Include `subaccount.schedule.view_calendar` in `client_user` permission set template |
 
 ### 3.4 Client surface
 
@@ -138,9 +163,14 @@ type ScheduleCalendarResponse = {
 
 **Routing:** Registered in `client/src/App.tsx` via existing lazy-load pattern. Nav entry added to the primary sidebar under "Operations" — org admin only. Subaccount version surfaces under the subaccount detail page tabs.
 
-**Permission:** Gated by `org.agents.view` (org page) and `subaccount.workspace.view` (subaccount page). Portal exposure gated by a new permission `subaccount.schedule.view_calendar` (default granted to `client_user` permission set to make "here's what I'm doing for you next week" a client-portal win).
+**Permission:** The permission model per surface:
+- Org-wide calendar page (`ScheduleCalendarPage`): gated by `org.agents.view` — org admin only.
+- Subaccount calendar page (`SubaccountScheduleCalendarPage`): gated by `subaccount.workspace.view` — org admins and subaccount users with standard workspace access.
+- Portal card (`UpcomingWorkCard`) and portal-entry path to the subaccount calendar: gated by the new `subaccount.schedule.view_calendar` permission — granted by default to the `client_user` permission set so clients can see upcoming work without general `subaccount.workspace.view` access.
 
-### 3.5 Client portal surface (stretch)
+`subaccount.schedule.view_calendar` is therefore the portal-specific grant; `subaccount.workspace.view` gates the main page. `client_user` has `subaccount.schedule.view_calendar` but NOT `subaccount.workspace.view` — they reach the calendar only via the portal card path. The new permission key must be added to `server/lib/permissions.ts` under `SUBACCOUNT_PERMISSIONS` and seeded in `server/services/permissionSeedService.ts` for the `client_user` template.
+
+### 3.5 Client portal surface
 
 **Portal card:** `client/src/components/portal/UpcomingWorkCard.tsx` — compact 7-day horizontal strip on the client portal landing, showing the next 5 scheduled items with agent name and ETA. Clicking navigates to the full subaccount calendar. This is the demoable wedge: the client sees *what the agency is doing for them next week*, a surface a Routines dashboard cannot produce by design.
 
@@ -151,15 +181,17 @@ type ScheduleCalendarResponse = {
 3. Mount routes in `server/routes/scheduleCalendar.ts` + `server/routes/index.ts`.
 4. Build `<ScheduleCalendar>` grid component with week view first; month and day come after week renders correctly.
 5. Add two pages + nav entries + portal card.
-6. Backfill estimated-cost calculation by reading last 10 runs per agent from `agent_runs`.
+6. Backfill estimated-cost calculation by reading last 10 non-test runs per agent from `agent_runs` (`WHERE is_test_run = false`) to avoid skewing estimates with short test-prompt costs. Note: the `is_test_run` column is added by Feature 2's migration (Commit 3); this step must run after that migration has been applied. In Commit 2 (Feature 1 only), all existing rows have `is_test_run = false` by default, so the filter is safe to write in service code and will become effective once Feature 2's column lands.
 
 ### 3.7 Verification
 
 - Unit tests on pure projection (cron edge cases, DST, offset, interval > 24h, missing cron expression)
 - Integration test: seed a subaccount with heartbeat + cron + playbook + scheduled task, hit both endpoints, assert merged occurrence count and ordering
-- E2E: open the calendar page, pick a date range, assert at least one occurrence renders with correct agent name
-- Permission test: `client_user` can see subaccount calendar but not org calendar; denied requests return 403
+- Integration test: hit the calendar endpoint with an invalid/out-of-range date window (e.g. span > 30 days, or `start >= end`), assert `400 Bad Request`
+- Integration test: hit the calendar endpoint with a valid window that contains no scheduled occurrences, assert `200` with an empty `occurrences` array and correct `windowStart`/`windowEnd` in response
+- Permission test: `client_user` with `subaccount.schedule.view_calendar` can access the portal card and its navigation path to the subaccount calendar; `client_user` without `subaccount.workspace.view` cannot access the main subaccount calendar page directly; org calendar returns 403 for all subaccount-tier users; denied requests return 403
 - Demo rehearsal: agency owner demos the portal card to a prospect — the prospect should say "I can see what you're doing for me next week" without prompting
+- UI verification: see §10.3 demo rehearsal.
 
 ### 3.8 Out of scope
 
@@ -179,19 +211,21 @@ Collapse the authoring feedback loop. Today, an admin editing an agent's additio
 
 Applies to two authoring surfaces:
 
-- **Agent edit** — `SystemAgentEditPage.tsx`, `AdminAgentEditPage.tsx`, `SubaccountAgentEditPage.tsx`
+- **Agent edit** — `AdminAgentEditPage.tsx`, `SubaccountAgentEditPage.tsx` (org and subaccount authoring pages only)
 - **Skill edit** — Skill Studio (`SkillStudioPage.tsx`) — inline test surface already partially exists (`skill_simulate`), but gets a unified panel to match the agent surface
 
 Out of scope: playbook editor (Playbook Studio already has `playbook_simulate` + cost-estimate surfaces that serve this purpose).
+
+Note: Skill test runs also create `agent_runs` rows (via the `skill_simulate` path, which wraps agent execution internally); `is_test_run` applies uniformly to both agent and skill test runs.
 
 ### 4.3 UX contract
 
 On each authoring page, a right-hand **Test panel** (collapsible, defaults collapsed on first visit, remembers state in `localStorage`):
 
-- **Input block** — free-text prompt (optional), selectable test-input fixtures stored per agent/skill, a "dry-run" toggle that forces `runType: 'manual'` and sets `testRun: true` on the agent_run row
+- **Input block** — free-text prompt (optional), selectable test-input fixtures stored per agent/skill (the fixture picker shows subaccount-level fixtures for the current subaccount only — subaccount users cannot see org-level fixtures (where `subaccount_id IS NULL`) or other subaccounts' fixtures, per §4.4 access matrix; org admins see all fixtures within their `organisation_id`), a "This is a test run" indicator (always on; this panel is exclusively a test surface — for production manual runs, use the agent detail page) that forces `runType: 'manual'` and sets `isTestRun: true` on the agent_run row (note: test runs DO consume tokens — they are flagged so aggregate views exclude them by default, per §4.7)
 - **Run button** — disabled unless the form is clean (or explicitly saved). Disabled tooltip: "Save your changes first."
-- **Streaming trace** — reuses the `<RunTrace>` component extracted from `RunTraceViewerPage.tsx` (see §4.5 — the component is refactored to be embeddable)
-- **Token/cost meter** — live updating from the same WebSocket stream that feeds run history; turns amber at 80% of budget, red at 100%
+- **Streaming trace** — reuses the `<RunTraceView>` component extracted from `RunTraceViewerPage.tsx` (see §4.5 — the component is refactored to be embeddable)
+- **Token/cost meter** — live updating from the same WebSocket stream that feeds run history; turns amber at 80% of the agent's per-run token budget ceiling (`agents.tokenBudget` or the org-level default from `server/config/limits.ts`), red at 100% (see §4.7 — test runs inherit the agent's existing per-run token budget ceiling)
 - **Actions bar** — "Open in full viewer" (deep link to `RunTraceViewerPage`), "Cancel run," "Save input as fixture"
 
 ### 4.4 Data model additions
@@ -220,7 +254,9 @@ CREATE TABLE agent_test_fixtures (
 CREATE INDEX agent_test_fixtures_target_idx ON agent_test_fixtures (organisation_id, scope, target_id) WHERE deleted_at IS NULL;
 ```
 
-RLS policy identical to other org-scoped tables (`rlsProtectedTables.ts` entry + policy migration).
+Note: `target_id` carries no FK constraint — it is a polymorphic reference (agent id when `scope='agent'`, skill id when `scope='skill'`). Referential integrity is enforced at the application layer in `agentTestFixturesService`.
+
+**Access matrix:** Org admins can read/write all fixtures within their `organisation_id`. Subaccount users (including roles at the subaccount tier) can read/write only fixtures where `subaccount_id` matches their own subaccount — they cannot see org-level fixtures (where `subaccount_id IS NULL`) or fixtures belonging to other subaccounts. `client_user` is excluded (no access). Enforced via `assertScope()` in `agentTestFixturesService`. Mirrors the pattern on `agent_runs` and other subaccount-scoped tables. RLS policy entry required in `rlsProtectedTables.ts` plus a policy migration.
 
 ### 4.5 Component refactor
 
@@ -232,29 +268,68 @@ The existing `RunTraceViewerPage.tsx` contains the full trace rendering logic. E
 
 This is a structural improvement that benefits the existing run viewer and is a prerequisite for the test panel — do it first.
 
+**Files introduced by Feature 2:**
+
+| Asset | Path | Purpose |
+|---|---|---|
+| Component (extracted) | `client/src/components/runs/RunTraceView.tsx` | Pure presentational trace renderer; extracted from RunTraceViewerPage |
+| Component (new) | `client/src/components/runs/TestPanel.tsx` | Test panel shell: input block, fixture picker, actions bar, wraps RunTraceView |
+| Route | `server/routes/agentTestFixtures.ts` | CRUD endpoints for test-input fixtures |
+| Service | `server/services/agentTestFixturesService.ts` | Business logic: fixture CRUD, `assertScope()` enforcement, polymorphic referential integrity checks |
+| Schema | `server/db/schema/agentTestFixtures.ts` | Drizzle schema for `agent_test_fixtures` table |
+
+Existing files modified (not new):
+
+| File | Change |
+|---|---|
+| `server/services/agentExecutionService.ts` | Honour `isTestRun`; skip cost attribution |
+| `server/routes/subaccountAgents.ts` | New `POST .../test-run` endpoint |
+| `server/routes/skills.ts`, `subaccountSkills.ts` | New `POST .../test-run` endpoints |
+| `server/db/schema/agentRuns.ts` | Add `is_test_run` column |
+| `server/config/rlsProtectedTables.ts` | Register `agent_test_fixtures` |
+| `client/src/pages/AdminAgentEditPage.tsx`, `SubaccountAgentEditPage.tsx` (2 files) | Mount `<TestPanel>` |
+| `client/src/pages/SkillStudioPage.tsx` | Mount `<TestPanel>` |
+| `client/src/pages/RunTraceViewerPage.tsx` | Refactor to thin wrapper |
+| `server/config/limits.ts` | Add `TEST_RUN_RATE_LIMIT_PER_HOUR` constant (default 10) |
+| `server/routes/index.ts` | Mount `agentTestFixtures` router |
+| `server/routes/subaccountAgents.ts` | Also: add `WHERE is_test_run = false` default filter to `GET .../agent-runs` list endpoint (§4.7) |
+| `server/routes/llmUsage.ts` | Add `WHERE is_test_run = false` default filter to `GET /api/subaccounts/:id/llm-usage` and `GET /api/org/llm-usage` (§4.7) |
+| `server/services/reportingService.ts` | Add `WHERE is_test_run = false` to Agency P&L aggregation queries (§4.7; not overridable) |
+
 ### 4.6 Backend changes
 
 Minimal — existing run-creation paths already support manual runs. Changes:
 
 - `server/services/agentExecutionService.ts` — honour `isTestRun` on the run creation input; persist to the new column; skip cost attribution aggregation if `isTestRun === true`
-- `server/routes/agents.ts` — new endpoint `POST /api/subaccounts/:subaccountId/agents/:linkId/test-run` that wraps the existing run creation with `isTestRun: true` and a short-circuit idempotency key format (`test:{linkId}:{userId}:{epochSeconds}`)
-- `server/routes/skills.ts` + `subaccountSkills.ts` — matching `POST .../skills/:slug/test-run` endpoints that delegate to `skill_simulate` + the new test-run path
+- `server/routes/subaccountAgents.ts` — new endpoint `POST /api/subaccounts/:subaccountId/agents/:linkId/test-run` that wraps the existing run creation with `isTestRun: true` and an intentionally unique-per-call idempotency key format (`test:{linkId}:{userId}:{epochMilliseconds}`). Note: test-run keys are unique by design (each button press is a distinct test run, not a deduplicated operation); this departs from the general §2 idempotency convention, which applies to production run-creation paths only. Subaccount-scoped agent endpoints live in `subaccountAgents.ts` per `architecture.md` route conventions.
+- `server/routes/skills.ts` — new endpoint `POST /api/org/skills/:slug/test-run` (org-admin callable); `server/routes/subaccountSkills.ts` — new endpoint `POST /api/subaccounts/:subaccountId/skills/:slug/test-run` (subaccount-scoped); both delegate to `skill_simulate` + the new test-run path
 - `server/routes/agentTestFixtures.ts` — full CRUD for test fixtures (org- and subaccount-scoped)
 
 ### 4.7 Permission and cost guardrails
 
 - Test runs **do** consume tokens and **do** get written to the LLM usage ledger. They are simply flagged so aggregate views can exclude them by default.
 - Test runs inherit the agent's existing per-run token budget ceiling. No separate limit.
-- Test runs are rate-limited per user (default 10 per hour, configurable in `server/config/limits.ts`). Prevents accidental infinite loops during authoring.
+- Test runs are rate-limited per user (default 10 per hour, configurable in `server/config/limits.ts` as `TEST_RUN_RATE_LIMIT_PER_HOUR`). Enforced in the `POST .../test-run` route handler via an in-memory sliding-window counter keyed on `userId`, checked before delegating to `agentExecutionService`. Prevents accidental infinite loops during authoring.
 - Test runs on **system agents** are disallowed from the org surface (system agent editing is a platform concern; system admins have a separate surface).
+
+**Enforcement points for `is_test_run` default exclusion** — the following endpoints and aggregates must apply `WHERE is_test_run = false` by default; a `?includeTestRuns=true` query param overrides the filter where noted:
+
+| Endpoint / query | Exclusion default | Override param |
+|---|---|---|
+| `GET /api/subaccounts/:id/agent-runs` (run history list) | exclude test runs | `includeTestRuns=true` |
+| `GET /api/subaccounts/:id/llm-usage` (usage explorer) | exclude test runs | `includeTestRuns=true` |
+| `GET /api/org/llm-usage` (org usage roll-up) | exclude test runs | `includeTestRuns=true` |
+| Agency P&L aggregation in `reportingService.ts` | exclude test runs | not overridable |
+| `GET /api/subaccounts/:id/agent-runs/:runId` (individual run detail) | included (test badge shown) | N/A — always visible |
 
 ### 4.8 Verification
 
-- Extract `RunTraceView` — existing `RunTraceViewerPage` still renders identically (golden-file snapshot test if useful)
+- Extract `RunTraceView` — verify existing `RunTraceViewerPage` still renders identically by running the app
 - Unit tests on new endpoint error shapes (missing body, over budget, over rate limit)
-- Integration: save an agent, hit test-run, assert `is_test_run=true` on the resulting row and that it's excluded from the default LLM usage aggregate
-- E2E: load SystemAgentEditPage, type a test prompt, click Run, assert streaming updates render in the side panel
+- Integration: save an agent, hit `POST .../test-run`, assert the response includes a run id, assert the persisted row has `is_test_run=true`, and assert the row is excluded from the default LLM usage aggregate endpoint response
+- Integration: exhaust the per-user rate limit by hitting `POST .../test-run` 11 times in rapid succession, assert 429 on the 11th request (rate-limit window: 10 per hour per user, per §4.7)
 - Regression: existing run-history, trace viewer, and LLM usage explorer are unaffected (all guarded with the `is_test_run` filter)
+- UI verification: see §10.3 demo rehearsal.
 
 ### 4.9 Out of scope
 
@@ -284,7 +359,7 @@ One new skill, one new service, no new UI pages (reuse Playbook Studio).
 | Tool handler | `server/tools/internal/importN8nWorkflow.ts` | Binds the skill to the parser; returns draft definition + mapping report |
 | Registry entry | `server/config/actionRegistry.ts` | `import_n8n_workflow` registered with `sideEffectClass: 'none'`, `idempotencyStrategy: 'read_only'` |
 
-No database schema additions are required. The output flows through the existing Playbook Studio session model (`playbook_studio_sessions`), which already tracks candidate definitions pending human save.
+No database schema additions are required. The output flows through the existing Playbook Studio session model (`playbook_studio_sessions`), which already tracks candidate definitions pending human save. Note: `sideEffectClass: 'none'` refers to external side-effects (HTTP calls, credential writes, external-system mutations) — updating the Studio session's candidate state is internal session management, consistent with how other Studio skills (`playbook_validate`, `playbook_simulate`) are registered. The draft playbook definition uses the same step-type primitives accepted by `playbook_validate` (`action_call`, `conditional`, `user_input`, `prompt`, `schedule`, etc.) — no new step-type schema additions are required.
 
 ### 5.4 Parsing strategy
 
@@ -312,17 +387,19 @@ type N8nIR = {
 
 **Node-type mapping table** (`server/services/n8nImportServicePure.ts` constant):
 
-| n8n node type | Playbook step type | Notes |
-|---|---|---|
-| `scheduleTrigger` | playbook `schedule` config | Converts cron to our cron format; timezone preserved |
-| `webhookTrigger` | playbook trigger: `webhook` | Webhook path mounted under our existing `/api/webhooks/...` convention |
-| `manualTrigger` | playbook trigger: `manual` | |
-| `httpRequest` | `action_call` (step type) → `fetch_url` skill or generic HTTP action | URL + method preserved; auth mapped to connection scoping |
-| `gmail`, `slack`, `hubspot`, `github`, `ghl` | `action_call` → matching managed connector | Credentials mapped from n8n credential ID to a Synthetos connection (subaccount-scoped by default) |
-| `if`, `switch` | `conditional` step | Expression converted from n8n's JS expression syntax to our expression language (simple cases only; complex → flagged) |
-| `set`, `itemLists.splitOut` | Inlined into downstream step templating | |
-| `openai`, `anthropic` | `prompt` step with model-agnostic routing | Model selection preserved in a comment; actual routing deferred to Synthetos's per-skill resolver |
-| Unknown node type | Emitted as a `user_input` step with a TODO comment | The admin resolves before saving |
+The mapping table uses the exact `type` string from the n8n export JSON (fully qualified, e.g. `n8n-nodes-base.httpRequest`). The parser normalises each node's `type` field to a canonical short key by stripping the `n8n-nodes-base.` and `n8n-nodes-langchain.` prefixes before lookup. The short keys used in this table are the post-normalisation values.
+
+| n8n node type (short key after normalisation) | Full n8n type string (example) | Playbook step type | Notes |
+|---|---|---|---|
+| `scheduleTrigger` | `n8n-nodes-base.scheduleTrigger` | playbook `schedule` config | Converts cron to our cron format; timezone preserved |
+| `webhook` | `n8n-nodes-base.webhook` | playbook trigger: `webhook` | Webhook path defined as placeholder in draft; real path allocated only on save via `playbook_propose_save` |
+| `manualTrigger` | `n8n-nodes-base.manualTrigger` | playbook trigger: `manual` | |
+| `httpRequest` | `n8n-nodes-base.httpRequest` | `action_call` (step type) → `fetch_url` skill or generic HTTP action | URL + method preserved; auth mapped to connection scoping |
+| `gmail`, `slack`, `hubspot`, `github`, `ghl` | `n8n-nodes-base.gmail`, etc. | `action_call` → matching managed connector | Credentials mapped from n8n credential ID to a Synthetos connection (subaccount-scoped by default) |
+| `if`, `switch` | `n8n-nodes-base.if`, `n8n-nodes-base.switch` | `conditional` step | Expression converted from n8n's JS expression syntax to our expression language (simple cases only; complex → flagged) |
+| `set`, `splitOut` | `n8n-nodes-base.set`, `n8n-nodes-base.splitOut` | Inlined into downstream step templating | |
+| `openAi`, `lmAnthropicClaude` | `n8n-nodes-langchain.openAi`, `n8n-nodes-langchain.lmAnthropicClaude` | `prompt` step with model-agnostic routing | Model selection preserved in a comment; actual routing deferred to Synthetos's per-skill resolver |
+| (any other short key) | — | Emitted as a `user_input` step with a TODO comment | The admin resolves before saving |
 
 **What we deliberately do not map:**
 
@@ -342,15 +419,16 @@ The admin then iterates with the existing Studio skills (`playbook_validate`, `p
 
 - **No credentials are migrated.** The parser identifies credential *references* in the n8n export but never imports tokens. Admin re-authenticates via Synthetos's existing OAuth flows; the mapping report surfaces a checklist of required connections.
 - **No autonomous save.** The skill never calls `playbook_propose_save`; the admin must review and explicitly invoke it. This matches the existing Studio pattern and prevents drive-by conversions of workflows the admin hasn't fully understood.
-- **Side-effect class inference.** Every mapped step is tagged with a conservative default side-effect class (write-class nodes default to `review`, read-class nodes default to `auto`). The admin can downgrade gates after validation.
+- **Side-effect class inference.** Every mapped step is tagged with a conservative default side-effect class using the `sideEffectClass` field on the playbook step object (write-class nodes default to `'review'`, read-class nodes default to `'auto'`) — the same field consumed by the existing `playbook_validate` step schema. Written by `n8nImportServicePure.ts` during node-to-step mapping. The admin can downgrade gates after validation via the existing Playbook Studio interface.
 - **Import size cap.** Workflows over 100 nodes are rejected with a clear error pointing at the manual-conversion path. Keeps LLM cost bounded and prevents pathological imports.
 
 ### 5.7 Verification
 
 - Unit tests on `n8nImportServicePure.ts` covering: schedule trigger, webhook trigger, if/switch branching, unknown node flagging, function-node rejection, credential reference extraction, 100-node cap
-- Integration: provide a real n8n export (Hacker News scraper from the reference transcript as a golden input), assert generated playbook passes `playbook_validate`
-- E2E: admin pastes a workflow JSON in Studio chat, receives a mapping report + candidate definition, clicks through simulate, cost-estimate, save-and-PR
+- Integration: invoke the `import_n8n_workflow` skill via the existing skill simulation path (`skill_simulate` with slug `import_n8n_workflow`), supplying a real n8n export (Hacker News scraper from the reference transcript as the golden input); assert the response contains a draft playbook definition and a mapping report, and assert the draft passes `playbook_validate`
+- Integration: POST a workflow exceeding 100 nodes, assert a 400 error response with the expected message
 - Regression: existing Studio flow is untouched for playbooks authored from scratch
+- UI verification: see §10.3 demo rehearsal.
 
 ### 5.8 Marketing rollout
 
@@ -372,9 +450,9 @@ This feature has outsized marketing leverage. Plan for a one-shot content asset 
 
 ### 6.1 Goal
 
-Absorb **scheduled-prompt / hosted-routine products** into the positioning framework as a distinct competitor class with its own objection-handling row. Add a new Replaces / Consolidates entry for scheduled-routine products. Introduce net-new sales/marketing copy that converts the three shipped features (calendar, inline test, n8n import) into explicit advantages. Do not name any specific LLM provider anywhere in customer-facing sections, per `CLAUDE.md` editorial rule 1.
+Absorb **scheduled-prompt / hosted-routine products** into the positioning framework as a distinct competitor class with its own objection-handling row. Add a new Replaces / Consolidates entry for scheduled-routine products. Introduce net-new sales/marketing copy that anticipates the three planned build features (calendar, inline test, n8n import) as concrete advantages — this copy lands in Commit 1 and is written in anticipation of Features 1–3 shipping in subsequent commits. Do not name any specific LLM provider anywhere in customer-facing sections, per `CLAUDE.md` editorial rule 1.
 
-### 6.2 Scope of edits (all landing in the same commit as this spec)
+### 6.2 Scope of edits (all landing in Commit 1 — the docs-only commit, per §8 build order)
 
 | Section | Edit |
 |---|---|
@@ -382,7 +460,7 @@ Absorb **scheduled-prompt / hosted-routine products** into the positioning frame
 | Objection handling table | Add new row: *"I'll use a hosted routines product from my LLM provider."* — response uses generic category language and reinforces the operations-layer frame |
 | Objection handling table | Sharpen existing *"I'll use a scheduled-prompt tool for scheduling"* row — include calendar, approval gates, three-tier isolation, and multi-client surface as concrete proof points |
 | Replaces / Consolidates | Rename existing *"Scheduled-prompt tools"* row to *"Scheduled-prompt and hosted-routine tools"* and extend the "with" column to reference the new calendar surface |
-| Product Capabilities → AI Agent System | Add bullets for the new calendar, inline test, and per-agent test-fixture surfaces |
+| Product Capabilities → AI Agent System | Add bullets for the new calendar, inline test, and per-agent/per-skill test-fixture surfaces |
 | Product Capabilities → Playbook Engine | Add bullet for the n8n import migration wedge |
 | How to apply this in GTM content | Add a bullet on the portfolio-calendar client-facing demo moment |
 | Changelog | Add 2026-04-16 entry citing this spec |
@@ -398,7 +476,7 @@ Absorb **scheduled-prompt / hosted-routine products** into the positioning frame
 
 - `docs/capabilities.md` passes all five editorial rules from `CLAUDE.md` (reviewable by eye — no named providers in customer-facing sections)
 - Every GTM asset referenced in §6.2 is reviewable by the sales and marketing team without further edits required (self-contained, no internal jargon)
-- The refresh ships in the same commit as this spec so the codebase always tells a coherent story
+- The refresh ships in Commit 1 (the docs-only commit per §8 build order) so the codebase always tells a coherent story
 
 ---
 
@@ -408,7 +486,7 @@ Absorb **scheduled-prompt / hosted-routine products** into the positioning frame
 
 Codify the non-goal *"Automation OS does not compete with LLM-provider primitives"* in a durable place so future sessions, PRs, and marketing work do not drift the pitch toward "we have agents and skills and scheduling too." The audit confirmed the existing frame is correct; what's missing is a **named reference** future agents can anchor on when the next primitive ships.
 
-### 7.2 Edit (doc-only, same commit as this spec)
+### 7.2 Edit (doc-only, Commit 1 — the docs-only commit per §8 build order)
 
 Update `CLAUDE.md` under an existing or new section — recommended location: directly below the existing "Core Principles" section as a new subsection titled **"Non-goals: what Automation OS is not"**.
 
@@ -429,7 +507,7 @@ Feature 4 updates the externally-visible positioning (`docs/capabilities.md`). F
 ### 7.4 Acceptance
 
 - `CLAUDE.md` contains the new non-goals section
-- The in-flight spec pointer in `CLAUDE.md` is updated to reference this spec while it is being implemented
+- The in-flight spec pointer in `CLAUDE.md` §"Current focus" is updated to reference this spec as part of Commit 1 (same commit as Features 4 and 5), and kept current until Features 1–3 are merged (per the end note in §8)
 - No other internal docs (`architecture.md`, `tasks/todo.md`) need changes at spec time — downstream doc updates happen when the three build features land per `CLAUDE.md` rule 11 ("docs stay in sync with code")
 
 ---
@@ -476,8 +554,12 @@ Sequence numbers allocated against current migration count (confirm the next fre
 
 | Migration | Feature | Table(s) | Notes |
 |---|---|---|---|
-| `NNNN_agent_test_fixtures.sql` | Feature 2 | `agent_test_fixtures` (new) | RLS policy added; entry in `server/config/rlsProtectedTables.ts` |
-| `NNNN_agent_runs_is_test_run.sql` | Feature 2 | `agent_runs` (column) | Add `is_test_run boolean NOT NULL DEFAULT false`; backfill is implicit (existing rows get false) |
+| `NNNN_agent_test_fixtures.sql` | Feature 2 | `agent_test_fixtures` (new) | RLS policy added; entry in `server/config/rlsProtectedTables.ts`; create Drizzle schema `server/db/schema/agentTestFixtures.ts` |
+| `NNNN_agent_runs_is_test_run.sql` | Feature 2 | `agent_runs` (column) | Add `is_test_run boolean NOT NULL DEFAULT false`; backfill is implicit (existing rows get false); update Drizzle schema `server/db/schema/agentRuns.ts` |
+
+**Code-only changes required for Feature 1 (no DB migration):**
+
+- Add `subaccount.schedule.view_calendar` to `server/lib/permissions.ts` (`SUBACCOUNT_PERMISSIONS`) and update `server/services/permissionSeedService.ts` default permission set templates to include it for `client_user`
 
 **No migrations required for:**
 
@@ -507,7 +589,7 @@ Sequence numbers allocated against current migration count (confirm the next fre
 
 ### 10.3 End-to-end demo rehearsal
 
-Run the full north-star demo script (per §1) against staging before declaring the spec complete:
+Run the full north-star demo script (per §1) against the local development environment before declaring the spec complete:
 
 1. Open the Scheduled Runs Calendar as an org admin; confirm at least one subaccount has events in the next 7 days
 2. Open the client portal as `client_user`; confirm the "Upcoming Work" card renders
@@ -529,8 +611,8 @@ Tracked here so the implementer is not surprised and reviewers can see what was 
 
 - **Historical overlay on the calendar** — overlay `agent_runs` on the same week/month grid. Deferred until the projection endpoint ships and adoption is measured.
 - **Drag-to-reschedule on the calendar** — deferred indefinitely; existing cron/heartbeat editors are the single source of truth.
-- **"Compare with previous version" in the inline test panel** — a diff view between current edit and last saved. Valuable follow-up; not v1.
-- **Make.com and Zapier importers** — same architectural shape as n8n. Gated on n8n converter hit-rate data.
+- **"Compare with previous version" in the inline test panel** — a diff view between current edit and last saved. Deferred — valuable follow-up, not v1.
+- **Make.com and Zapier importers** — same architectural shape as n8n. Deferred — gated on n8n converter hit-rate data.
 - **Public skill marketplace** — explicit non-goal per §7.2. Not deferred — cancelled.
 - **General-purpose chat UI** — explicit non-goal per §7.2. Not deferred — cancelled.
 - **Bidirectional export (playbook → n8n)** — explicit non-goal per §5.9. Not deferred — cancelled.
@@ -538,4 +620,4 @@ Tracked here so the implementer is not surprised and reviewers can see what was 
 
 ---
 
-*End of spec. Once Features 4 and 5 land in the same commit as this document, the in-flight pointer in `CLAUDE.md` §"Current focus" should be updated to `routines-response-dev-spec.md` until the three build features complete.*
+*End of spec. The in-flight pointer update in `CLAUDE.md` §"Current focus" is part of Commit 1 (together with Features 4 and 5), per §7.4 acceptance. It remains set to `routines-response-dev-spec.md` until Features 1–3 are merged.*
