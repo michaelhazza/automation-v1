@@ -47,6 +47,27 @@ export const subaccounts = pgTable(
     clarificationRoutingConfig: jsonb('clarification_routing_config')
       .$type<ClarificationRoutingConfig | null>(),
 
+    // ── Phase 4 — portal features toggle grid (migration 0132, §6.3) ─────
+    // Per-client feature-level toggles. Only consulted when portalMode is
+    // 'collaborative'. Empty object is valid — portalGate falls back to
+    // registry defaults (all ON).
+    portalFeatures: jsonb('portal_features')
+      .notNull()
+      .default({})
+      .$type<Partial<{
+        dropZone: boolean;
+        clarificationRouting: boolean;
+        taskRequests: boolean;
+        memoryInspector: boolean;
+        healthDigest: boolean;
+      }>>(),
+
+    // ── Phase 4 — client upload trust state (migration 0133, §5.5) ──────
+    clientUploadTrustState: jsonb('client_upload_trust_state')
+      .notNull()
+      .default({ approvedCount: 0, trustedAt: null, resetAt: null })
+      .$type<{ approvedCount: number; trustedAt: string | null; resetAt: string | null }>(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

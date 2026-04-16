@@ -192,6 +192,20 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0147_trust_calibration_state.sql',
     rationale: 'Per-agent trust counter — auto-thresholds and validation history must stay tenant-isolated to prevent gaming across orgs.',
   },
+  // 0141 — Memory & Briefings Phase 4: drop-zone upload audit
+  {
+    tableName: 'drop_zone_upload_audit',
+    schemaFile: 'dropZoneUploadAudit.ts',
+    policyMigration: '0141_drop_zone_upload_audit.sql',
+    rationale: 'Append-only upload history with file hashes + destination payloads — must stay tenant-isolated for compliance and trust-state recomputation.',
+  },
+  // 0142 — Memory & Briefings Phase 4: onboarding bundle configs
+  {
+    tableName: 'onboarding_bundle_configs',
+    schemaFile: 'onboardingBundleConfigs.ts',
+    policyMigration: '0142_onboarding_bundle_configs.sql',
+    rationale: 'Per-org onboarding bundle manifest — must stay tenant-isolated to prevent cross-org bundle leak.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

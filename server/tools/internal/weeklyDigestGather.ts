@@ -149,12 +149,19 @@ export async function executeWeeklyDigestGather(
       ),
     );
 
-  // ── 5. memoryHealth — Phase 3 stub; replaced by S14 data in Phase 4 ────
+  // ── 5. memoryHealth — Phase 4 S14 live data ───────────────────────────
+  const { getMemoryHealthForSubaccount } = await import(
+    '../../services/memoryHealthDataService.js'
+  );
+  const health = await getMemoryHealthForSubaccount(subaccountId, organisationId, windowDays);
   const memoryHealth = {
-    conflictsResolved: null,
-    entriesPruned: null,
-    coverageGaps: null,
-    stub: true,
+    conflictsResolved: health.conflictsAutoResolved,
+    entriesPruned: health.entriesPruned,
+    coverageGaps: health.coverageGaps,
+    newEntriesTop3: health.newEntries.top3,
+    blockProposalsPending: health.blockProposalsPending,
+    beliefsUpdated: health.beliefsUpdated,
+    stub: false,
   };
 
   // ── 6. nextWeekPreview ──────────────────────────────────────────────────

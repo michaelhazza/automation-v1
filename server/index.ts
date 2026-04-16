@@ -127,6 +127,11 @@ import memoryReviewQueueRouter from './routes/memoryReviewQueue.js';
 import subaccountOnboardingFlowRouter from './routes/subaccountOnboardingFlow.js';
 // Memory & Briefings Phase 3 — config documents route (S21)
 import configDocumentsRouter from './routes/configDocuments.js';
+// Memory & Briefings Phase 4 — portal config + drop zone + inspector + rollup
+import subaccountPortalConfigRouter from './routes/subaccountPortalConfig.js';
+import dropZoneRouter from './routes/dropZone.js';
+import memoryInspectorRouter from './routes/memoryInspector.js';
+import portfolioRollupRouter from './routes/portfolioRollup.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -244,6 +249,10 @@ app.use(clarificationsRouter);
 app.use(memoryReviewQueueRouter);
 app.use(subaccountOnboardingFlowRouter);
 app.use(configDocumentsRouter);
+app.use(subaccountPortalConfigRouter);
+app.use(dropZoneRouter);
+app.use(memoryInspectorRouter);
+app.use(portfolioRollupRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);

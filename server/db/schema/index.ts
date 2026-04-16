@@ -165,3 +165,9 @@ export * from './memoryCitationScores.js';
 
 // Memory & Briefings spec Phase 2 — trust calibration (migration 0147)
 export * from './trustCalibrationState.js';
+
+// Memory & Briefings spec Phase 4 — drop-zone upload audit (migration 0141)
+export * from './dropZoneUploadAudit.js';
+
+// Memory & Briefings spec Phase 4 — onboarding bundle configs (migration 0142)
+export * from './onboardingBundleConfigs.js';

@@ -686,6 +686,44 @@ export const queueService = {
         }
       });
 
+      // Memory & Briefings Phase 4 — weekly memory-block synthesis (S11)
+      await (boss as any).work('maintenance:memory-block-synthesis', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryBlockSynthesisSweep } = await import('../jobs/memoryBlockSynthesisJob.js');
+          await withTimeout(runMemoryBlockSynthesisSweep().then(() => undefined), 900_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-block-synthesis', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 4 — portfolio briefing + digest rollups (S23)
+      await (boss as any).work('maintenance:portfolio-briefing', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runPortfolioRollupSweep } = await import('../jobs/portfolioRollupJob.js');
+          await withTimeout(runPortfolioRollupSweep({ kind: 'briefing' }).then(() => undefined), 900_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:portfolio-briefing', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      await (boss as any).work('maintenance:portfolio-digest', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runPortfolioRollupSweep } = await import('../jobs/portfolioRollupJob.js');
+          await withTimeout(runPortfolioRollupSweep({ kind: 'digest' }).then(() => undefined), 900_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:portfolio-digest', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -820,6 +858,11 @@ export const queueService = {
       await boss.schedule('maintenance:clarification-timeout-sweep', '*/2 * * * *', {});
       // Memory & Briefings Phase 2 — weekly quality adjust (S4, Sun 05:45)
       await boss.schedule('maintenance:memory-entry-quality-adjust', '45 5 * * 0', {});
+      // Memory & Briefings Phase 4 — weekly memory-block synthesis (Sun 06:00)
+      await boss.schedule('maintenance:memory-block-synthesis', '0 6 * * 0', {});
+      // Memory & Briefings Phase 4 — portfolio briefing (Mon 08:00) + digest (Fri 18:00)
+      await boss.schedule('maintenance:portfolio-briefing', '0 8 * * 1', {});
+      await boss.schedule('maintenance:portfolio-digest', '0 18 * * 5', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

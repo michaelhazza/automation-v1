@@ -94,3 +94,49 @@ export function resolveAllPortalFeatures(
     healthDigest:         canRenderPortalFeature(portalMode, 'healthDigest', portalFeatures),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4: live subaccount-bound helper — reads the subaccount row and applies
+// the pure gate. The single authoritative server-side check.
+// ---------------------------------------------------------------------------
+
+/**
+ * Subaccount-bound portal gate — reads `portalMode` + `portalFeatures` from
+ * the `subaccounts` row and applies `canRenderPortalFeature`.
+ *
+ * Invariant: routes that serve portal-scoped data MUST call this helper. A
+ * feature that returns false here is not accessible via any code path.
+ */
+export async function canRenderPortalFeatureForSubaccount(
+  subaccountId: string,
+  organisationId: string,
+  featureKey: PortalFeatureKey,
+): Promise<boolean> {
+  // Dynamic import to keep the pure entry point of portalGate free of DB deps
+  const { db } = await import('../db/index.js');
+  const { subaccounts } = await import('../db/schema/index.js');
+  const { eq, and, isNull } = await import('drizzle-orm');
+
+  const [sa] = await db
+    .select({
+      portalMode: subaccounts.portalMode,
+      portalFeatures: subaccounts.portalFeatures,
+    })
+    .from(subaccounts)
+    .where(
+      and(
+        eq(subaccounts.id, subaccountId),
+        eq(subaccounts.organisationId, organisationId),
+        isNull(subaccounts.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!sa) return false; // subaccount not found → fail-closed
+
+  return canRenderPortalFeature(
+    (sa.portalMode as PortalMode) ?? 'hidden',
+    featureKey,
+    (sa.portalFeatures as Record<string, boolean> | null | undefined) ?? undefined,
+  );
+}
