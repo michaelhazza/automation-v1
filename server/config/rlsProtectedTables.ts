@@ -178,6 +178,13 @@ export const RLS_PROTECTED_TABLES: ReadonlyArray<RlsProtectedTable> = [
     policyMigration: '0108_scraping_engine.sql',
     rationale: 'Per-org scraping cache — cached page content with tenant isolation.',
   },
+  // 0139 — Memory & Briefings Phase 1: HITL review queue
+  {
+    tableName: 'memory_review_queue',
+    schemaFile: 'memoryReviewQueue.ts',
+    policyMigration: '0139_memory_review_queue.sql',
+    rationale: 'Per-org HITL review queue — belief conflicts and block proposals contain workspace intelligence that must not leak across tenants.',
+  },
 ];
 
 /** Convenience set for fast membership checks in the CI gate. */

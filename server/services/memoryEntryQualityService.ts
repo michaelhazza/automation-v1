@@ -1,0 +1,181 @@
+/**
+ * memoryEntryQualityService — sole owner of qualityScore mutations
+ *
+ * This service is the ONLY path through which `workspace_memory_entries.quality_score`
+ * is mutated post-write (spec §4.4 invariant). The nightly decay job and the
+ * weekly quality-adjustment job (Phase 2 S4) both call into this service.
+ * No other service may import a qualityScore-writing method.
+ *
+ * Exports:
+ *   applyDecay(subaccountId)  — apply nightly decay to all entries
+ *   pruneLowQuality(subaccountId) — soft-delete entries below PRUNE_THRESHOLD
+ *
+ * Both are called by `memoryEntryDecayJob` in sequence: decay first, then
+ * prune (so a freshly-decayed entry can fall below threshold in the same tick).
+ *
+ * Spec: docs/memory-and-briefings-spec.md §4.1 (S1)
+ */
+
+import { eq, and, isNull, lt, inArray } from 'drizzle-orm';
+import { db } from '../db/index.js';
+import { workspaceMemoryEntries } from '../db/schema/index.js';
+import { computeDecayFactor, isPruneEligible } from './memoryEntryQualityServicePure.js';
+import { REINDEX_THRESHOLD } from '../config/limits.js';
+
+// ---------------------------------------------------------------------------
+// applyDecay
+// ---------------------------------------------------------------------------
+
+export interface DecaySummary {
+  subaccountId: string;
+  processed: number;
+  decayed: number;
+  durationMs: number;
+}
+
+/**
+ * Iterate all non-deleted entries for the subaccount, compute the decay
+ * factor for each, and write the new qualityScore back.
+ *
+ * Processes entries in batches of 100 to bound memory usage. Returns a
+ * summary for observability.
+ *
+ * Throws `{ statusCode: 500, message, errorCode: 'DECAY_FAILED' }` if the
+ * batch fails (callers can catch and log, then continue to the next subaccount).
+ */
+export async function applyDecay(subaccountId: string): Promise<DecaySummary> {
+  const started = Date.now();
+  const now = new Date();
+  let processed = 0;
+  let decayed = 0;
+
+  try {
+    // Fetch all active entries with quality scoring data
+    const entries = await db
+      .select({
+        id: workspaceMemoryEntries.id,
+        qualityScore: workspaceMemoryEntries.qualityScore,
+        lastAccessedAt: workspaceMemoryEntries.lastAccessedAt,
+      })
+      .from(workspaceMemoryEntries)
+      .where(
+        and(
+          eq(workspaceMemoryEntries.subaccountId, subaccountId),
+          isNull(workspaceMemoryEntries.deletedAt),
+        ),
+      );
+
+    // Process in batches of 100
+    const BATCH_SIZE = 100;
+    for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+      const batch = entries.slice(i, i + BATCH_SIZE);
+
+      for (const entry of batch) {
+        const currentScore = entry.qualityScore ?? 0.5;
+        const factor = computeDecayFactor({
+          qualityScore: currentScore,
+          lastAccessedAt: entry.lastAccessedAt,
+          now,
+        });
+
+        if (factor < 1.0) {
+          const newScore = Math.max(0, currentScore * factor);
+          await db
+            .update(workspaceMemoryEntries)
+            .set({ qualityScore: newScore })
+            .where(eq(workspaceMemoryEntries.id, entry.id));
+          decayed += 1;
+        }
+        processed += 1;
+      }
+    }
+  } catch (err) {
+    throw {
+      statusCode: 500,
+      message: `Decay failed for subaccount ${subaccountId}: ${err instanceof Error ? err.message : String(err)}`,
+      errorCode: 'DECAY_FAILED',
+    };
+  }
+
+  return {
+    subaccountId,
+    processed,
+    decayed,
+    durationMs: Date.now() - started,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// pruneLowQuality
+// ---------------------------------------------------------------------------
+
+export interface PruneSummary {
+  subaccountId: string;
+  pruned: number;
+  reindexTriggered: boolean;
+  durationMs: number;
+}
+
+/**
+ * Soft-delete entries that meet ALL pruning conditions (score below threshold
+ * AND older than PRUNE_AGE_DAYS). Returns a summary indicating whether the
+ * HNSW reindex job should be enqueued.
+ *
+ * Throws `{ statusCode: 500, message, errorCode: 'DECAY_FAILED' }` on failure.
+ */
+export async function pruneLowQuality(subaccountId: string): Promise<PruneSummary> {
+  const started = Date.now();
+  const now = new Date();
+
+  try {
+    // Fetch candidates: score below threshold, not yet deleted
+    const candidates = await db
+      .select({
+        id: workspaceMemoryEntries.id,
+        qualityScore: workspaceMemoryEntries.qualityScore,
+        createdAt: workspaceMemoryEntries.createdAt,
+      })
+      .from(workspaceMemoryEntries)
+      .where(
+        and(
+          eq(workspaceMemoryEntries.subaccountId, subaccountId),
+          isNull(workspaceMemoryEntries.deletedAt),
+          // Pre-filter: only rows with low score (index assist)
+          lt(workspaceMemoryEntries.qualityScore, 0.3),
+        ),
+      );
+
+    const toDelete: string[] = [];
+    for (const entry of candidates) {
+      if (
+        isPruneEligible({
+          qualityScore: entry.qualityScore ?? 0,
+          createdAt: entry.createdAt,
+          now,
+        })
+      ) {
+        toDelete.push(entry.id);
+      }
+    }
+
+    if (toDelete.length > 0) {
+      await db
+        .update(workspaceMemoryEntries)
+        .set({ deletedAt: now })
+        .where(inArray(workspaceMemoryEntries.id, toDelete));
+    }
+
+    return {
+      subaccountId,
+      pruned: toDelete.length,
+      reindexTriggered: toDelete.length >= REINDEX_THRESHOLD,
+      durationMs: Date.now() - started,
+    };
+  } catch (err) {
+    throw {
+      statusCode: 500,
+      message: `Prune failed for subaccount ${subaccountId}: ${err instanceof Error ? err.message : String(err)}`,
+      errorCode: 'DECAY_FAILED',
+    };
+  }
+}

@@ -31,6 +31,7 @@ import {
   validateKeyAliases,
   type BeliefRecord,
 } from './agentBeliefServicePure.js';
+import { checkAndResolveConflicts } from './beliefConflictService.js';
 
 // Validate alias map at import time
 const aliasError = validateKeyAliases(KEY_ALIASES);
@@ -146,6 +147,8 @@ export const agentBeliefService = {
       const subject = typeof item.subject === 'string' ? item.subject : null;
       const confidence = typeof item.confidence === 'number' ? Math.max(0, Math.min(1, item.confidence)) : 0.7;
       const confidenceReason = typeof item.confidence_reason === 'string' ? item.confidence_reason : null;
+      // Memory & Briefings Phase 1 (§4.3 S3): entity key for cross-agent conflict detection
+      const entityKey = typeof item.entity_key === 'string' && item.entity_key.trim() ? item.entity_key.trim() : null;
 
       const existingBelief = existingByKey.get(key);
 
@@ -188,6 +191,7 @@ export const agentBeliefService = {
             evidenceCount: 1,
             source: 'agent',
             confidenceReason,
+            entityKey,
             createdAt: now,
             updatedAt: now,
           }).onConflictDoUpdate({
@@ -199,10 +203,44 @@ export const agentBeliefService = {
               sourceRunId: runId,
               evidenceCount: 1,
               confidenceReason,
+              ...(entityKey ? { entityKey } : {}),
               updatedAt: now,
             },
           });
           adds++;
+          // Memory & Briefings Phase 1 (§4.3 S3): conflict check on entityKey
+          if (entityKey) {
+            const [written] = await db
+              .select({ id: agentBeliefs.id, confidence: agentBeliefs.confidence })
+              .from(agentBeliefs)
+              .where(
+                and(
+                  eq(agentBeliefs.organisationId, orgId),
+                  eq(agentBeliefs.subaccountId, subaccountId),
+                  eq(agentBeliefs.agentId, agentId),
+                  eq(agentBeliefs.beliefKey, key),
+                  isNull(agentBeliefs.deletedAt),
+                  isNull(agentBeliefs.supersededBy),
+                ),
+              )
+              .limit(1);
+            if (written) {
+              checkAndResolveConflicts({
+                newBelief: {
+                  id: written.id,
+                  organisationId: orgId,
+                  subaccountId,
+                  agentId,
+                  entityKey,
+                  value,
+                  confidence: written.confidence,
+                },
+                activeRunId: runId,
+              }).catch((err) =>
+                logger.warn('belief_conflict_check_failed', { beliefKey: key, runId, error: String(err) }),
+              );
+            }
+          }
         } else if (effectiveAction === 'update') {
           const cappedConfidence = Math.min(existingBelief!.confidence, confidence, BELIEFS_UPDATE_CONFIDENCE_CAP);
           const result = await db.update(agentBeliefs)

@@ -2,6 +2,18 @@ import { pgTable, uuid, text, boolean, jsonb, timestamp, index, uniqueIndex } fr
 import { sql } from 'drizzle-orm';
 import { organisations } from './organisations';
 
+// Memory & Briefings spec — portal mode tier enum (migration 0131, §6.2)
+export type PortalMode = 'hidden' | 'transparency' | 'collaborative';
+
+// Memory & Briefings spec — clarification routing config shape (migration 0134, §5.4)
+// Null at the column level means "use fallback chain defaults".
+export interface ClarificationRoutingConfig {
+  /** Explicit user ID to route clarifications to. Overrides the fallback chain. */
+  primaryUserId?: string;
+  /** Route client-domain questions through the portal when in collaborative mode. */
+  routeClientQuestionsToPortal?: boolean;
+}
+
 export const subaccounts = pgTable(
   'subaccounts',
   {
@@ -24,6 +36,16 @@ export const subaccounts = pgTable(
     // One per org (enforced by partial unique index). Cannot be soft-deleted
     // or have status changed away from 'active' (enforced by DB CHECK constraints).
     isOrgSubaccount: boolean('is_org_subaccount').notNull().default(false),
+
+    // ── Memory & Briefings — portal mode (migration 0131, §6.2) ─────
+    // Controls which client-portal features are visible to client contacts.
+    // Default 'hidden' = portal exists but no memory/clarification surfaces shown.
+    portalMode: text('portal_mode').notNull().default('hidden').$type<PortalMode>(),
+
+    // ── Memory & Briefings — clarification routing (migration 0134, §5.4) ──
+    // Null = use default fallback chain (subaccount_manager → agency_owner).
+    clarificationRoutingConfig: jsonb('clarification_routing_config')
+      .$type<ClarificationRoutingConfig | null>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

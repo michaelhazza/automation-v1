@@ -117,6 +117,8 @@ import clientpulseReportsRouter from './routes/clientpulseReports.js';
 import ghlRouter from './routes/ghl.js';
 import geoAuditsRouter from './routes/geoAudits.js';
 import { subdomainResolution } from './middleware/subdomainResolution.js';
+// Memory & Briefings Phase 1 — delivery channels route (S22)
+import deliveryChannelsRouter from './routes/deliveryChannels.js';
 
 // ── Process-level exception handlers ─────────────────────────────────────────
 // Catch unhandled errors so the process doesn't die silently without logging.
@@ -229,6 +231,7 @@ app.use(skillsRouter);
 app.use(agentRunsRouter);
 app.use(memoryBlocksRouter);
 app.use(workspaceMemoryRouter);
+app.use(deliveryChannelsRouter);
 app.use(knowledgeRouter);
 app.use(agentTriggersRouter);
 app.use(scheduledTasksRouter);

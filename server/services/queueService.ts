@@ -620,6 +620,33 @@ export const queueService = {
         }
       });
 
+      // Memory & Briefings Phase 1 — nightly memory entry quality decay + prune (S1)
+      await (boss as any).work('maintenance:memory-entry-decay', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryEntryDecay } = await import('../jobs/memoryEntryDecayJob.js');
+          const queueSend = (queue: string, data: object) => boss.send(queue, data);
+          await withTimeout(runMemoryEntryDecay(queueSend).then(() => undefined), 570_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'maintenance:memory-entry-decay', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
+      // Memory & Briefings Phase 1 — one-shot HNSW reindex after large prune (S1)
+      await (boss as any).work('memory-hnsw-reindex', { teamSize: 1, teamConcurrency: 1 }, async (job: any) => {
+        try {
+          const { runMemoryHnswReindex } = await import('../jobs/memoryHnswReindexJob.js');
+          await withTimeout(runMemoryHnswReindex(job.data), 300_000);
+        } catch (err) {
+          if (isTimeoutError(err)) {
+            logger.error('job_timeout', { queue: 'memory-hnsw-reindex', jobId: job.id });
+          }
+          throw err;
+        }
+      });
+
       // Agent Intelligence Phase 2D — agent briefing update (event-driven)
       await (boss as any).work('agent-briefing-update', { teamSize: 2, teamConcurrency: 1 }, async (job: any) => {
         try {
@@ -748,6 +775,8 @@ export const queueService = {
       await boss.schedule('regression-replay-tick', '0 4 * * 0', {}); // 4am every Sunday
       await boss.schedule('priority-feed-cleanup', '0 5 * * *', {}); // 5am daily
       await boss.schedule('maintenance:memory-dedup', '30 4 * * *', {}); // 4:30am daily
+      // Memory & Briefings Phase 1 — nightly quality decay + prune (5:30am daily)
+      await boss.schedule('maintenance:memory-entry-decay', '30 5 * * *', {});
 
       // ClientPulse — trial expiry check (6am daily)
       await boss.schedule('subscription-trial-check', '0 6 * * *', {});

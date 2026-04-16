@@ -115,6 +115,42 @@ export type TaskPriority = typeof VALID_PRIORITIES[number];
 
 // ── Sub-agent spawning ──────────────────────────────────────────────────────
 
+// ── Memory & Briefings Phase 1 — §4.1 (S1), §4.2 (S2), §4.3 (S3) ──────────
+
+/** Memory entry quality decay rate per day (S1) */
+export const DECAY_RATE = 0.05;
+
+/** Entries not accessed within this many days begin accumulating decay (S1) */
+export const DECAY_WINDOW_DAYS = 90;
+
+/** Entries with qualityScore below this threshold are eligible for pruning (S1) */
+export const PRUNE_THRESHOLD = 0.15;
+
+/** Entries must also be older than this many days to be pruned (S1) */
+export const PRUNE_AGE_DAYS = 180;
+
+/** Prune count above which the HNSW reindex job is triggered (S1) */
+export const REINDEX_THRESHOLD = 500;
+
+/**
+ * Entries accessed within this many minutes receive a recency boost during
+ * RRF fusion — ranking-time only; never written back to qualityScore. (S2)
+ */
+export const RECENCY_BOOST_WINDOW = 60;
+
+/**
+ * Additive weight applied to the RRF combined_score for recently-accessed
+ * entries. Non-persistent: computed at retrieval time only. (S2)
+ */
+export const RECENCY_BOOST_WEIGHT = 0.15;
+
+/**
+ * Minimum belief confidence gap between two conflicting beliefs for the
+ * higher-confidence belief to auto-supersede the lower. Below this gap,
+ * the conflict is queued for human review. (S3)
+ */
+export const CONFLICT_CONFIDENCE_GAP = 0.2;
+
 /** Maximum number of sub-agents per spawn call */
 export const MAX_SUB_AGENTS = 3;
 

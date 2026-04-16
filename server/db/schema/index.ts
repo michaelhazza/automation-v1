@@ -156,3 +156,6 @@ export * from './portalBriefs.js';
 
 // Subaccount Onboarding State — completion tracking per (subaccount, slug) (migration 0124)
 export * from './subaccountOnboardingState.js';
+
+// Memory & Briefings spec Phase 1 — HITL review queue (migration 0139)
+export * from './memoryReviewQueue.js';
